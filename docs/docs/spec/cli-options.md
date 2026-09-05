@@ -994,6 +994,33 @@ The spawn always creates the pane without stealing focus (tmux
 default output, `pane` renders `(pending)` until the pane id is patched onto
 the placement.
 
+#### Shared spawn preparation and deadlines {#creation-deadlines}
+
+Planned lifecycle refactoring groups the existing arguments into
+`MemberCreateOptions` and `FleetCreateOptions`; flags, defaults, output, and
+validation precedence stay unchanged. Fleet and member preconditions remain
+separate. Shared preparation resolves the prompt, validates the backend, and
+prepares cwd, the forwarded environment, and the identity-independent argv
+before the fleet transaction (or member registration). Only identity-dependent
+prompt/argv rendering and pane spawn remain after ids are allocated.
+
+Fleet creation still commits the fleet, Director, monitor, and placement in
+one transaction. Its spawn callback gets one **30-second monotonic deadline**;
+each Herdr list/split/run/layout/resize or tmux split/layout subprocess uses
+the time remaining on that deadline, never a fresh 30 seconds. The shared
+member spawn path uses the same budget. Known-pane compensation has a separate
+**5-second budget**, so timeout recovery can run after the spawn budget is
+exhausted. See [backend deadlines](multiplexer-backends.md#spawn-deadlines).
+
+The existing SQLite busy timeout remains 5 seconds. The spawn deadline does
+not promise that DB lock waits, rollback, process creation, or OS termination
+will finish within 30 seconds. Preserve the
+[compensation order](#creation-failure-compensation), including closing the
+fleet invocation's actual DB handle before CLI pane cleanup after broker
+failure. An id-known Herdr run timeout triggers backend kill before rollback;
+a split timeout without an id reports unknown cleanup and never guesses a
+pane. Keep the primary timeout and append any cleanup errors.
+
 #### Creation failure compensation {#creation-failure-compensation}
 
 Member creation registers a pending placement, renders the prompt, creates a
@@ -1193,6 +1220,13 @@ carriage-return-defragmented
 string; `--ansi` hashes the ANSI-preserving string. No normalization occurs
 after the selected mode, and capture content is never stored in SQLite.
 
+The planned shared `CaptureSnapshot::from_raw(raw, ansi, now)` supplies this
+content, timestamp, and lowercase SHA256 hex for both member capture and
+monitor scan. It hashes the final selected content's UTF-8 bytes, including
+Unicode and empty captures. Existing line validation/windowing and timestamp
+format stay unchanged. Text member capture prints content without adding a
+newline; JSON retains its existing fields and ordering.
+
 ## `cafleet monitor` — Supervision Scheduler {#cafleet-monitor}
 
 `cafleet monitor` is a two-form command. The bare positional form runs the
@@ -1244,6 +1278,24 @@ monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)
 | `1` | Unknown fleet |
 | `1` | Multiplexer unreachable |
 | `2` | Usage errors |
+
+#### Monitor resource cleanup {#monitor-resource-cleanup}
+
+Planned `MonitorLease` ownership begins immediately after a successful runtime
+claim. Each successful SIGTERM/SIGINT registration retains its own handle.
+Registration failure (including the second handler), startup write or flush
+failure, tick failure, normal stop, and owner displacement all release the
+registered handles and attempt the ownership-checked runtime clear. Startup
+still writes the exact line above after handler installation and before the
+first tick; a flush failure is an error rather than a successful startup.
+
+`clear_monitor_runtime(fleet_id, pid)` clears only that owner, preserving a
+replacement PID and the existing wake ledger. If work and clear both fail,
+retain the primary error/exit category and append the clear diagnostic. If
+only clear fails, return that error. SIGKILL or a crash cannot run cleanup;
+existing stale-owner reclaim remains the recovery path. Signal tests use
+per-call injected registration handles and a stop flag, without changing
+process-global signal handlers.
 
 ### `cafleet monitor scan` {#cafleet-monitor-scan}
 
@@ -1315,6 +1367,11 @@ mirroring [`member capture`](#member-capture)'s keys plus `name` / `kind` /
   "error": null
 }
 ```
+
+The planned shared capture path retains typed scan results until the output
+branch. Only the text presenter builds the section headings; JSON presentation
+does not construct or discard them. Both modes preserve the current roster
+order, raw member names, line count, error annotations, and success timestamps.
 
 On an annotated entry `content`, `captured_at`, and `content_sha256` are
 `null`; `error` carries the exact annotation string from text mode;

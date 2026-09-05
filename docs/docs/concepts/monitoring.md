@@ -180,6 +180,17 @@ died silently reads as stale. Both the per-tick heartbeat and the on-exit
 clear are ownership-checked — a displaced loop's next heartbeat matches zero
 rows and it self-terminates.
 
+## Runtime cleanup
+
+The [planned resource cleanup](../spec/cli-options.md#monitor-resource-cleanup)
+keeps a lease immediately after claim, unregisters every installed signal
+handle, and attempts owner-checked clear on startup failure, tick failure,
+normal stop, or replacement by another PID. A failed startup write or flush
+cannot establish a healthy running loop. Cleanup preserves the primary error
+and reports an additional clear failure; a clear failure alone is an error.
+A replacement owner's row survives, and crash recovery continues to use stale
+reclaim.
+
 ## Lifecycle
 
 **Spawn.** `cafleet fleet create` spawns the monitor member as part of the

@@ -103,6 +103,41 @@ Creation compensation uses `kill_pane`, because `send_exit` submits a command
 to the pane and does not guarantee shell or pane termination. Normal
 `member delete` and notification keystrokes keep their existing behavior.
 
+## Shared spawn deadlines {#spawn-deadlines}
+
+Planned bounded creation uses one monotonic 30-second deadline for the entire
+spawn callback. Herdr list, split, layout/resize, and run, and tmux split and
+layout, receive only the remaining duration. Preparation that does not need
+allocated ids happens before the transaction; do not restart the deadline at
+each subprocess. Fractional remaining time must not be rounded up into a new
+whole-second budget. Timeout handling uses the existing runner's pipe draining,
+child kill, and reap behavior.
+
+Ordinary failures of best-effort layout/resize remain nonfatal, but a timeout
+or exhausted deadline fails creation. Check the deadline again before pane
+ownership is transferred. A timed command reports its actual remaining seconds,
+including fractional seconds without unnecessary trailing zeroes. Expiry before
+a command starts reports `<backend> spawn deadline exceeded: <argv>`; expiry
+before ownership transfer reports `<backend> spawn deadline exceeded`.
+
+A known-pane compensation operation gets a separate five-second budget. Keep
+backend ownership until successful spawn return, and retain the
+[creation failure order](cli-options.md#creation-failure-compensation): a
+Herdr run timeout with a known id attempts backend close before DB rollback;
+a split timeout before an id is confirmed reports `PaneCleanup::Unknown` and
+performs no guessed close. After ownership transfer, CLI compensation follows
+DB failure handling. A failed close keeps the primary error and does not
+prevent remaining DB compensation or cause a duplicate pane kill.
+
+Bounded compensation spends that budget directly on `herdr pane close <id>` or
+`tmux kill-pane -t <id>`, without a preliminary pane lookup or a subsequent
+layout repair. Existing missing-pane tolerance still applies. Ordinary delete
+operations retain their current lookup, close, and rebalance behavior.
+
+The 30-second budget covers callback subprocess work; it is not an end-to-end
+wall-clock promise for database waits or an unresponsive OS. SQLite's existing
+five-second busy timeout remains independent.
+
 ## Subprocess output and deadlines
 
 The shared subprocess runner captures stdout and stderr without truncation.

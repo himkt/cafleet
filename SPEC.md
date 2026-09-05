@@ -1717,6 +1717,14 @@ Director's first ordinary
 
 ##### `monitor scan`
 
+Planned shared capture uses `CaptureSnapshot::from_raw(raw, ansi, now)` for both
+member capture and scan. ANSI false applies the existing strip/CR normalization;
+true uses raw content. Hash the final string's UTF-8 bytes to lowercase SHA256
+hex, retaining the existing timestamp format and line-input/windowing contract.
+Text member capture adds no newline. Scan carries typed success/error results;
+only its text presenter builds headings, and JSON keeps the exact existing
+key order and error-null behavior. No capture content is stored in SQLite.
+
 `cafleet monitor scan FLEET_ID [--lines N] [--ansi] [--json]` — capture the
 Director's pane plus every active member's pane once, print, exit. No loop
 runs, no `monitor_runtime` row is claimed, and the command performs no DB
@@ -2494,6 +2502,35 @@ sequence — it does NOT fragment into a second submit. Esc-first matrix:
 `send_poll_trigger` **YES**, `send_inline_preview` **YES**, `send_wake_trigger`
 **YES**, `send_exit` **YES**, and both `send_prompt` forms **YES**.
 
+#### Shared creation preparation and deadlines (planned)
+
+Group current CLI arguments into `MemberCreateOptions` and `FleetCreateOptions`
+without merging their distinct validation ladders. Resolve prompt/backend and
+prepare cwd, forwarded environment, and identity-independent argv before the
+fleet transaction or member registration. Leave only id-dependent prompt/argv
+rendering and pane spawn after identity allocation. Fleet bootstrap remains a
+single fleet/Director/monitor/placement commit; do not publish partial fleets.
+
+The fleet callback and shared member spawn path each receive one 30-second
+monotonic deadline. Every Herdr list/split/layout/resize/run and tmux split/layout
+call consumes its remaining duration, with no resetting or whole-second
+round-up. Known-pane compensation has a separate 5-second budget. Preserve
+backend kill before rollback for id-known run timeout, Unknown/no guessed kill
+for split timeout before id confirmation, and rollback/actual DB close before
+CLI kill after callback success. Preserve the primary error and continue other
+compensation when close fails; ownership transfer still prevents duplicate kill.
+The existing SQLite busy timeout stays 5 seconds. DB waits, rollback, process
+creation and OS termination are not guaranteed to finish within 30 seconds.
+
+Keep ordinary best-effort layout/resize failures nonfatal, but treat timeout
+or exhausted deadline as creation failure, including a final check before
+ownership transfer. Bounded cleanup directly closes the known pane within its
+separate five seconds, skipping lookup and cosmetic rebalance; ordinary delete
+retains its existing behavior. Use actual fractional remaining durations for
+the runner and timeout diagnostics, without rounding up. Pre-command expiry
+reports `<backend> spawn deadline exceeded: <argv>`; pre-transfer expiry reports
+`<backend> spawn deadline exceeded`.
+
 #### Subprocess core, timeout, and pane-gone tolerance
 
 The subprocess runner invokes tmux as an argv list (no shell), treats a non-zero
@@ -2859,6 +2896,20 @@ no cleanup — the row's heartbeat goes stale and the broker's later liveness ch
 reports it dead. `cafleet fleet delete` also ends a still-running loop — its
 next tick sees the soft-deleted fleet and self-terminates via step 2 of
 `monitor_tick`.
+
+#### Monitor resource ownership (planned)
+
+The driver owns `MonitorLease` immediately after successful claim, before signal
+registration. Retain each successful registration handle, installing SIGTERM
+then SIGINT before writing and flushing the existing startup line. A failure
+registering either handler, writing/flushing startup, or running a tick must
+unregister all retained handles and attempt conditional clear. Normal stop and
+owner displacement use the same cleanup. Clear only `(fleet_id, pid)`, retaining
+a replacement owner and the existing wake ledger. Preserve a primary work
+error and its exit category if clear also fails, appending the clear diagnostic;
+return clear's error when work succeeded. Hard kill/crash still recover via
+stale reclaim. Inject signal registration, clock, and stop flag per invocation
+for tests; never mutate global signals or clocks to test these paths.
 
 #### Interruptible sleep & signals
 
