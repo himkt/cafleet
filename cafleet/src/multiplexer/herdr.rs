@@ -383,27 +383,6 @@ impl HerdrMultiplexer {
 
     /// Esc first: the wake targets the monitor member's own pane, which can
     /// be parked on a permission prompt.
-    // Temporary JSON entry point for unchanged backend tests.
-    #[cfg(test)]
-    pub fn send_wake_trigger(
-        &self,
-        target_pane_id: &str,
-        fleet_id: i64,
-        members: &[Value],
-        director: &Value,
-    ) -> Result<bool, MultiplexerError> {
-        let members = members
-            .iter()
-            .map(WakeEntry::from_legacy)
-            .collect::<Result<Vec<_>, _>>()?;
-        self.send_wake_entries(
-            target_pane_id,
-            fleet_id,
-            &members,
-            &WakeEntry::from_legacy(director)?,
-        )
-    }
-
     pub fn send_wake_entries(
         &self,
         target_pane_id: &str,

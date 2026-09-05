@@ -6,9 +6,6 @@
 use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
 
-#[cfg(test)]
-use serde_json::Value;
-
 use super::{
     CommandRunner, ESC_SETTLE_DELAY, MultiplexerContext, MultiplexerError, RunError, SUBMIT_DELAY,
     WakeEntry, build_wake_payload_from_entries,
@@ -230,27 +227,6 @@ impl TmuxMultiplexer {
              — then resume your work if something was still running."
         );
         self.best_effort_send(target_pane_id, &payload, true)
-    }
-
-    // Temporary JSON entry point for unchanged backend tests.
-    #[cfg(test)]
-    pub fn send_wake_trigger(
-        &self,
-        target_pane_id: &str,
-        fleet_id: i64,
-        members: &[Value],
-        director: &Value,
-    ) -> Result<bool, MultiplexerError> {
-        let members = members
-            .iter()
-            .map(WakeEntry::from_legacy)
-            .collect::<Result<Vec<_>, _>>()?;
-        self.send_wake_entries(
-            target_pane_id,
-            fleet_id,
-            &members,
-            &WakeEntry::from_legacy(director)?,
-        )
     }
 
     pub fn send_wake_entries(

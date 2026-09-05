@@ -3,7 +3,6 @@
 //! see [`super::test_support`] for the API.
 
 use rusqlite::{Connection, OptionalExtension, params};
-use serde_json::Value;
 
 use super::members::db_err;
 use super::records::{
@@ -11,7 +10,6 @@ use super::records::{
 };
 use crate::error::CafleetError;
 use crate::output::truncate_text;
-use crate::presentation;
 use crate::time::{format_utc, now_utc};
 
 /// The broker-side half of the inline-preview overlap point (SPEC §4): the
@@ -26,18 +24,6 @@ pub trait InlinePreviewSender {
         ts: &str,
         text: &str,
     ) -> Result<(), String>;
-}
-
-/// The unicast send outcome (SPEC §6.2): the unchanged
-/// `{message, notification_sent}` payload plus the retained raw error of an
-/// attempted, failed pane notification. `notification_error` is caller
-/// metadata — it never enters the payload JSON.
-// Temporary compatibility payload for tests awaiting typed migration.
-#[allow(dead_code)]
-#[derive(Debug)]
-pub struct SendMessageOutcome {
-    pub(crate) payload: Value,
-    pub(crate) notification_error: Option<String>,
 }
 
 /// Read one full typed-column message row in the pinned key order.
@@ -100,26 +86,6 @@ fn pane_of(conn: &Connection, member_id: i64) -> Result<Option<String>, CafleetE
 
 fn preview_text(text: &str, max_text_len: usize) -> String {
     truncate_text(Some(text), max_text_len).expect("Some input yields Some")
-}
-
-pub fn send_message(
-    conn: &mut Connection,
-    notifier: &dyn InlinePreviewSender,
-    max_text_len: usize,
-    from_member_id: i64,
-    to: &str,
-    text: &str,
-) -> Result<SendMessageOutcome, CafleetError> {
-    let outcome = send_message_record(conn, notifier, max_text_len, from_member_id, to, text)?;
-    let payload = presentation::send_outcome(&outcome);
-    let notification_error = match outcome.notification {
-        NotificationAttempt::Failed { error } => Some(error),
-        _ => None,
-    };
-    Ok(SendMessageOutcome {
-        payload,
-        notification_error,
-    })
 }
 
 pub fn send_message_record(
@@ -188,17 +154,6 @@ pub fn send_message_record(
         message,
         notification,
     })
-}
-
-pub fn broadcast_message(
-    conn: &mut Connection,
-    notifier: &dyn InlinePreviewSender,
-    max_text_len: usize,
-    from_member_id: i64,
-    text: &str,
-) -> Result<Vec<Value>, CafleetError> {
-    broadcast_message_record(conn, notifier, max_text_len, from_member_id, text)
-        .map(|outcome| vec![presentation::broadcast_outcome(&outcome)])
 }
 
 pub fn broadcast_message_record(
@@ -274,11 +229,6 @@ pub fn broadcast_message_record(
     })
 }
 
-pub fn poll_messages(conn: &Connection, member_id: i64) -> Result<Vec<Value>, CafleetError> {
-    poll_message_records(conn, member_id)
-        .map(|rows| rows.iter().map(presentation::message).collect())
-}
-
 pub fn poll_message_records(
     conn: &Connection,
     member_id: i64,
@@ -301,10 +251,6 @@ pub fn poll_message_records(
         .collect::<Result<Vec<_>, _>>()
         .map_err(db_err)?;
     Ok(rows)
-}
-
-pub fn ack_message(conn: &mut Connection, message_id: i64) -> Result<Value, CafleetError> {
-    ack_message_record(conn, message_id).map(|row| presentation::message_envelope(&row))
 }
 
 pub fn ack_message_record(

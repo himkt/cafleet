@@ -1,15 +1,13 @@
-//! Read-only message queries — inbox / sent / timeline / `get_message`
+//! Read-only message queries — inbox / sent / timeline / `get_message_record`
 //! visibility rule (SPEC §6.2 *Queries*). The colocated tests pin the
 //! contract; see [`super::test_support`] for the API.
 
 use rusqlite::{Connection, params};
-use serde_json::Value;
 
 use super::members::db_err;
 use super::messaging::{map_message_row, message_row};
 use super::records::MessageRecord;
 use crate::error::CafleetError;
-use crate::presentation;
 
 fn message_list(
     conn: &Connection,
@@ -30,10 +28,6 @@ const MESSAGE_COLUMNS: &str = "message_id, owner_member_id, from_member_id, to_m
 
 /// Every delivery the member received, acked rows included; summaries are the
 /// sender's bookkeeping, never a delivery.
-pub fn list_inbox(conn: &Connection, member_id: i64) -> Result<Vec<Value>, CafleetError> {
-    list_inbox_records(conn, member_id).map(|rows| rows.iter().map(presentation::message).collect())
-}
-
 pub fn list_inbox_records(
     conn: &Connection,
     member_id: i64,
@@ -51,10 +45,6 @@ pub fn list_inbox_records(
 
 /// Every delivery the member sent (broadcast fan-out deliveries included; the
 /// summary row is excluded).
-pub fn list_sent(conn: &Connection, member_id: i64) -> Result<Vec<Value>, CafleetError> {
-    list_sent_records(conn, member_id).map(|rows| rows.iter().map(presentation::message).collect())
-}
-
 pub fn list_sent_records(
     conn: &Connection,
     member_id: i64,
@@ -72,15 +62,6 @@ pub fn list_sent_records(
 
 /// The fleet's deliveries (scoped via the owning member's fleet), newest first,
 /// hard-capped at `limit`.
-pub fn list_timeline(
-    conn: &Connection,
-    fleet_id: i64,
-    limit: usize,
-) -> Result<Vec<Value>, CafleetError> {
-    list_timeline_records(conn, fleet_id, limit)
-        .map(|rows| rows.iter().map(presentation::message).collect())
-}
-
 pub fn list_timeline_records(
     conn: &Connection,
     fleet_id: i64,
@@ -100,10 +81,6 @@ pub fn list_timeline_records(
 
 /// Fetch one message by id — the fleet is derived from the message row;
 /// existence is the only guard (SPEC §6.2).
-pub fn get_message(conn: &Connection, message_id: i64) -> Result<Value, CafleetError> {
-    get_message_record(conn, message_id).map(|row| presentation::message_envelope(&row))
-}
-
 pub fn get_message_record(
     conn: &Connection,
     message_id: i64,

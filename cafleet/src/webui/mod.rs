@@ -151,25 +151,6 @@ fn formatted_message_records(
         .collect()
 }
 
-// Temporary test compatibility; production consumers pass typed records.
-#[cfg(test)]
-fn formatted_messages(conn: &Connection, rows: &[Value]) -> Result<Vec<Value>, CafleetError> {
-    let records = rows
-        .iter()
-        .map(|row| {
-            let id =
-                row["message_id"]
-                    .as_i64()
-                    .ok_or_else(|| CafleetError::InvalidStoredValue {
-                        field: "message_id".into(),
-                        value: row["message_id"].to_string(),
-                    })?;
-            broker::get_message_record(conn, id)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    formatted_message_records(conn, &records)
-}
-
 async fn list_fleets(State(state): State<AppState>) -> Response {
     run_blocking(state, |conn| match broker::list_fleets(conn) {
         Ok(fleets) => json_response(StatusCode::OK, &Value::Array(fleets)),

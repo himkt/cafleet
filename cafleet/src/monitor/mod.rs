@@ -9,8 +9,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
-#[cfg(test)]
-use serde_json::Value;
 
 use crate::broker;
 pub use crate::broker::{MONITOR_STALE_FACTOR, MONITOR_STALE_FLOOR_SECONDS};
@@ -25,38 +23,12 @@ pub const DEFAULT_TICK_SECONDS: i64 = 5;
 pub trait MonitorMux {
     fn list_pane_ids(&self) -> Result<BTreeSet<String>, MultiplexerError>;
 
-    #[cfg(not(test))]
     fn send_wake_entries(
         &self,
         target_pane_id: &str,
         fleet_id: i64,
         members: &[WakeEntry<'_>],
         director: &WakeEntry<'_>,
-    ) -> Result<bool, MultiplexerError>;
-
-    // Temporary bridge for the existing FakeMux; real backends override it.
-    #[cfg(test)]
-    fn send_wake_entries(
-        &self,
-        target_pane_id: &str,
-        fleet_id: i64,
-        members: &[WakeEntry<'_>],
-        director: &WakeEntry<'_>,
-    ) -> Result<bool, MultiplexerError> {
-        let members = members
-            .iter()
-            .map(WakeEntry::legacy_value)
-            .collect::<Vec<_>>();
-        self.send_wake_trigger(target_pane_id, fleet_id, &members, &director.legacy_value())
-    }
-
-    #[cfg(test)]
-    fn send_wake_trigger(
-        &self,
-        target_pane_id: &str,
-        fleet_id: i64,
-        members: &[Value],
-        director: &Value,
     ) -> Result<bool, MultiplexerError>;
 }
 
@@ -73,27 +45,6 @@ impl<M: Multiplexer> MonitorMux for M {
         director: &WakeEntry<'_>,
     ) -> Result<bool, MultiplexerError> {
         Multiplexer::send_wake_entries(self, target_pane_id, fleet_id, members, director)
-    }
-
-    #[cfg(test)]
-    fn send_wake_trigger(
-        &self,
-        target_pane_id: &str,
-        fleet_id: i64,
-        members: &[Value],
-        director: &Value,
-    ) -> Result<bool, MultiplexerError> {
-        let members = members
-            .iter()
-            .map(WakeEntry::from_legacy)
-            .collect::<Result<Vec<_>, _>>()?;
-        Multiplexer::send_wake_entries(
-            self,
-            target_pane_id,
-            fleet_id,
-            &members,
-            &WakeEntry::from_legacy(director)?,
-        )
     }
 }
 

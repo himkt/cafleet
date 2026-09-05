@@ -54,7 +54,7 @@ pub fn format_indexed_list(
 }
 
 /// `<id> <name> <status>` — the only text form; the detailed view is the
-/// broker `get_member` dict, emitted by `--json` (SPEC §6.4).
+/// member JSON presenter output, emitted by `--json` (SPEC §6.4).
 pub fn format_member_detail(member: &Value) -> String {
     format!(
         "{} {} {}",

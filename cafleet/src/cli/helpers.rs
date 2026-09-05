@@ -12,8 +12,6 @@ use crate::config::Settings;
 use crate::config_dir::{claude_config_dir, codex_home, opencode_preset_base};
 use crate::error::CafleetError;
 use crate::output::format_json;
-#[cfg(test)]
-use crate::runtime::RuntimeNotifier as CliNotifier;
 pub use crate::runtime::resolve_mux;
 use crate::runtime::system::read_stdin;
 

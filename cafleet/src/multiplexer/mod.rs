@@ -11,9 +11,6 @@ pub mod tmux;
 
 use std::fmt;
 
-#[cfg(test)]
-use serde_json::Value;
-
 use crate::coding_agent::coding_agent;
 
 pub use herdr::HerdrMultiplexer;
@@ -178,33 +175,6 @@ pub struct WakeEntry<'a> {
     pub pending_count: i64,
 }
 
-// Temporary adapters for unchanged tests; removed after Tester migration.
-#[cfg(test)]
-impl<'a> WakeEntry<'a> {
-    pub(crate) fn from_legacy(value: &'a Value) -> Result<Self, MultiplexerError> {
-        let number = |field| {
-            value[field]
-                .as_i64()
-                .ok_or_else(|| MultiplexerError::new(format!("invalid wake field '{field}'")))
-        };
-        Ok(Self {
-            member_id: number("member_id")?,
-            name: value["name"].as_str().unwrap_or(""),
-            coding_agent: value["coding_agent"].as_str().unwrap_or(""),
-            pending_count: number("pending_count")?,
-        })
-    }
-
-    pub(crate) fn legacy_value(&self) -> Value {
-        serde_json::json!({
-            "member_id": self.member_id,
-            "name": self.name,
-            "coding_agent": self.coding_agent,
-            "pending_count": self.pending_count,
-        })
-    }
-}
-
 /// Render one wake descriptor; an unregistered coding agent aborts the wake.
 fn wake_entry(member: &WakeEntry<'_>) -> Result<String, MultiplexerError> {
     let agent = member.coding_agent;
@@ -220,20 +190,6 @@ fn wake_entry(member: &WakeEntry<'_>) -> Result<String, MultiplexerError> {
         sanitize_wake_field(member.name),
         member.pending_count
     ))
-}
-
-// Temporary JSON entry point for the existing payload assertions.
-#[cfg(test)]
-pub fn build_wake_payload(
-    fleet_id: i64,
-    members: &[Value],
-    director: &Value,
-) -> Result<String, MultiplexerError> {
-    let members = members
-        .iter()
-        .map(WakeEntry::from_legacy)
-        .collect::<Result<Vec<_>, _>>()?;
-    build_wake_payload_from_entries(fleet_id, &members, &WakeEntry::from_legacy(director)?)
 }
 
 /// Build the byte-identical tmux/herdr pure-trigger wake payload (SPEC §6.5):

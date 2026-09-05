@@ -12,7 +12,6 @@ use super::records::{
     MemberActivity, MemberKind, MemberRecord, MemberStatus, Placement, RegisteredMember,
 };
 use crate::error::CafleetError;
-use crate::presentation;
 use crate::time::{format_utc, now_utc, parse_lenient};
 
 #[derive(Debug, Clone)]
@@ -62,38 +61,12 @@ fn member_kind(is_director: bool, is_monitor: bool) -> MemberKind {
 const IS_MONITOR_COLUMN: &str =
     "COALESCE(json_extract(m.member_card_json, '$.cafleet.kind')='monitor', 0)";
 
-#[cfg(test)]
-pub(crate) fn card_skills(card_json: &str) -> Value {
-    Value::Array(skills_from_card(card_json))
-}
-
 fn skills_from_card(card_json: &str) -> Vec<Value> {
     let card: Value = serde_json::from_str(card_json).unwrap_or(Value::Null);
     match card.get("skills") {
         Some(Value::Array(skills)) => skills.clone(),
         _ => Vec::new(),
     }
-}
-
-pub fn register_member(
-    conn: &mut Connection,
-    fleet_id: i64,
-    name: &str,
-    description: &str,
-    skills: &[Value],
-    placement: Option<&NewPlacement>,
-    monitor: bool,
-) -> Result<Value, CafleetError> {
-    register_member_record(
-        conn,
-        fleet_id,
-        name,
-        description,
-        skills,
-        placement,
-        monitor,
-    )
-    .map(|row| presentation::registered_member(&row))
 }
 
 pub fn register_member_record(
@@ -186,14 +159,6 @@ pub fn register_member_record(
         name: name.into(),
         registered_at: now,
     })
-}
-
-pub fn get_member(
-    conn: &Connection,
-    member_id: i64,
-    fleet_id: i64,
-) -> Result<Option<Value>, CafleetError> {
-    get_member_record(conn, member_id, fleet_id).map(|row| row.as_ref().map(presentation::member))
 }
 
 pub fn get_member_record(
@@ -297,15 +262,6 @@ pub fn deregister_member(conn: &mut Connection, member_id: i64) -> Result<bool, 
     .map_err(db_err)?;
     tx.commit().map_err(db_err)?;
     Ok(true)
-}
-
-pub fn update_placement_pane_id(
-    conn: &mut Connection,
-    member_id: i64,
-    pane_id: &str,
-) -> Result<Option<Value>, CafleetError> {
-    update_placement_record(conn, member_id, pane_id)
-        .map(|row| row.as_ref().map(presentation::placement))
 }
 
 pub fn update_placement_record(
@@ -439,13 +395,6 @@ pub fn list_member_records(
     Ok(rows)
 }
 
-pub fn list_members(conn: &Connection, fleet_id: i64) -> Result<Vec<Value>, CafleetError> {
-    Ok(list_member_records(conn, fleet_id)?
-        .iter()
-        .map(presentation::member_activity)
-        .collect())
-}
-
 pub fn list_roster_records(
     conn: &Connection,
     fleet_id: i64,
@@ -455,19 +404,6 @@ pub fn list_roster_records(
         .into_iter()
         .map(|row| row.member)
         .collect())
-}
-
-pub fn list_roster(
-    conn: &Connection,
-    fleet_id: i64,
-    include_message_holders: bool,
-) -> Result<Vec<Value>, CafleetError> {
-    Ok(
-        list_roster_records(conn, fleet_id, include_message_holders)?
-            .iter()
-            .map(presentation::roster_member)
-            .collect(),
-    )
 }
 
 #[cfg(test)]

@@ -6,12 +6,10 @@
 
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
-use serde_json::Value;
 
 use super::members::db_err;
 use super::records::{MonitorMember, MonitorRuntime, MonitorRuntimeView, WakeTarget};
 use crate::error::CafleetError;
-use crate::presentation;
 use crate::time::parse_lenient;
 
 const PENDING_COUNT_SUBQUERY: &str = "(SELECT COUNT(*) FROM messages \
@@ -106,14 +104,6 @@ const NOT_MONITOR_PREDICATE: &str =
 /// member with a placement (a pending pane still makes the roster), ordered
 /// by `member_id` — the order the wake payload's entries render in. The
 /// monitor member receives the wake and is never a roster entry.
-pub fn list_fleet_wake_targets(
-    conn: &Connection,
-    fleet_id: i64,
-) -> Result<Vec<Value>, CafleetError> {
-    list_fleet_wake_target_records(conn, fleet_id)
-        .map(|rows| rows.iter().map(presentation::wake_target).collect())
-}
-
 pub fn list_fleet_wake_target_records(
     conn: &Connection,
     fleet_id: i64,
@@ -149,10 +139,6 @@ pub fn list_fleet_wake_target_records(
 /// segment — the same field grammar as a roster entry. A live fleet always
 /// records its Director with a placement, so a missing row is a loud error,
 /// not a skip.
-pub fn fleet_wake_director(conn: &Connection, fleet_id: i64) -> Result<Value, CafleetError> {
-    fleet_wake_director_record(conn, fleet_id).map(|rows| presentation::wake_target(&rows))
-}
-
 pub fn fleet_wake_director_record(
     conn: &Connection,
     fleet_id: i64,
@@ -315,14 +301,6 @@ pub fn read_monitor_runtime_record(
     runtime_row(conn, fleet_id)
 }
 
-pub fn read_monitor_runtime(
-    conn: &Connection,
-    fleet_id: i64,
-) -> Result<Option<Value>, CafleetError> {
-    read_monitor_runtime_record(conn, fleet_id)
-        .map(|row| row.as_ref().map(presentation::monitor_runtime))
-}
-
 pub fn monitor_is_live(
     conn: &Connection,
     fleet_id: i64,
@@ -333,14 +311,6 @@ pub fn monitor_is_live(
 
 /// The flat runtime keys of `GET /api/monitor` (SPEC §6.8): a stale or absent
 /// slot never leaks a lingering pid, start time, or tick timestamp.
-pub fn monitor_runtime_payload(
-    conn: &Connection,
-    fleet_id: i64,
-    now: DateTime<Utc>,
-) -> Result<Value, CafleetError> {
-    monitor_runtime_view(conn, fleet_id, now).map(|row| presentation::monitor_runtime_view(&row))
-}
-
 pub fn monitor_runtime_view(
     conn: &Connection,
     fleet_id: i64,
@@ -377,15 +347,6 @@ pub fn monitor_runtime_view(
 /// The per-member rows of `GET /api/monitor` (SPEC §6.8): one dict per
 /// wake-roster member (non-Director, non-monitor), ages integer-truncated
 /// against the supplied `now`.
-pub fn monitor_members_payload(
-    conn: &Connection,
-    fleet_id: i64,
-    now: DateTime<Utc>,
-) -> Result<Vec<Value>, CafleetError> {
-    monitor_member_records(conn, fleet_id, now)
-        .map(|rows| rows.iter().map(presentation::monitor_member).collect())
-}
-
 pub fn monitor_member_records(
     conn: &Connection,
     fleet_id: i64,
