@@ -6,16 +6,23 @@ use rusqlite::Connection;
 use clap::Subcommand;
 use serde_json::Value;
 
-use super::creation::{CreationHooks, NoopCreationHooks, PaneGuard};
+use super::creation::{
+    CreationHooks, FleetCreateOptions, NoopCreationHooks, PaneGuard, PreparedSpawn,
+    SpawnPreparation,
+};
 use super::helpers::{emit, resolve_body, resolve_mux};
 use crate::broker;
 use crate::coding_agent::{SpawnProbe, coding_agent};
 use crate::config::Settings;
 use crate::error::CafleetError;
-use crate::multiplexer::{Multiplexer, MultiplexerError};
+use crate::multiplexer::MultiplexerError;
+use crate::multiplexer::spawn::{
+    Deadline, PaneSpawnRequest, SpawnExecution, SpawnMultiplexer, SystemClock,
+};
 use crate::output::format_fleet_create;
 use crate::runtime::system::SystemProbe;
-use crate::spawn_prompt::substitute_spawn_placeholders;
+use crate::runtime::system::SystemRunner;
+use std::time::Duration;
 
 const MONITOR_NAME: &str = "monitor";
 const MONITOR_DESCRIPTION: &str = "Monitor member for this fleet";
@@ -117,56 +124,46 @@ fn create(
     monitor_model: Option<&str>,
     json: bool,
 ) -> Result<(), CafleetError> {
-    let fleet = create_with_connection(
+    let fleet = create_with_options(
         slot,
-        name,
-        agent_name,
-        monitor_file,
-        monitor_model,
+        &FleetCreateOptions {
+            name,
+            agent_name,
+            monitor_file,
+            monitor_model,
+        },
         || resolve_mux(settings),
         &SystemProbe,
+        &SpawnPreparation {
+            cwd: &std::env::current_dir,
+            env: &|key| std::env::var(key).ok(),
+        },
+        &SpawnExecution {
+            clock: &SystemClock,
+            runner: &SystemRunner,
+        },
         &NoopCreationHooks,
     )?;
     emit(json, &fleet, || format_fleet_create(&fleet));
     Ok(())
 }
 
-#[cfg(test)]
-#[allow(clippy::too_many_arguments)]
-fn create_with_dependencies<M: Multiplexer>(
-    settings: &Settings,
-    name: &str,
-    agent_name: &str,
-    monitor_file: &str,
-    monitor_model: Option<&str>,
+pub(crate) fn create_with_options<M: SpawnMultiplexer>(
+    slot: &mut Option<Connection>,
+    options: &FleetCreateOptions<'_>,
     resolve_mux: impl FnOnce() -> Result<M, MultiplexerError>,
     probe: &dyn SpawnProbe,
+    preparation: &SpawnPreparation<'_>,
+    execution: &SpawnExecution<'_>,
     hooks: &dyn CreationHooks,
 ) -> Result<Value, CafleetError> {
-    let mut slot = Some(crate::db::connect(&settings.database_url)?);
-    create_with_connection(
-        &mut slot,
+    let FleetCreateOptions {
         name,
         agent_name,
         monitor_file,
         monitor_model,
-        resolve_mux,
-        probe,
-        hooks,
-    )
-}
+    } = *options;
 
-#[allow(clippy::too_many_arguments)]
-fn create_with_connection<M: Multiplexer>(
-    slot: &mut Option<Connection>,
-    name: &str,
-    agent_name: &str,
-    monitor_file: &str,
-    monitor_model: Option<&str>,
-    resolve_mux: impl FnOnce() -> Result<M, MultiplexerError>,
-    probe: &dyn SpawnProbe,
-    hooks: &dyn CreationHooks,
-) -> Result<Value, CafleetError> {
     let inside_session = || {
         CafleetError::App(
             "cafleet fleet create must be run inside a tmux or herdr session".to_string(),
@@ -183,9 +180,19 @@ fn create_with_connection<M: Multiplexer>(
     backend.validate_model(monitor_model)?;
     backend.ensure_available(probe)?;
 
+    let plan = PreparedSpawn::prepare(
+        prompt_body,
+        backend,
+        MONITOR_NAME,
+        monitor_model,
+        None,
+        mux.name(),
+        preparation,
+    )?;
     let conn = slot
         .as_mut()
         .ok_or_else(|| CafleetError::App("database connection is closed".into()))?;
+    hooks.prepared(conn, &plan);
     let mut spawned_pane: Option<PaneGuard<'_>> = None;
     let bootstrap = broker::fleets::create_fleet_with_hooks(
         conn,
@@ -198,22 +205,32 @@ fn create_with_connection<M: Multiplexer>(
         MONITOR_NAME,
         MONITOR_DESCRIPTION,
         |fleet_id, director_id, monitor_id| {
-            let rendered = substitute_spawn_placeholders(
-                &prompt_body,
-                fleet_id,
-                monitor_id,
-                director_id,
-                agent_name,
-            )?;
-            let argv = backend.build_spawn_argv(&rendered, MONITOR_NAME, monitor_model, None);
-            let mut env = Vec::new();
-            if let Ok(url) = std::env::var("CAFLEET_DATABASE_URL") {
-                env.push(("CAFLEET_DATABASE_URL".to_string(), url));
-            }
+            let deadline = Deadline::after(execution.clock, Duration::from_secs(30));
+            let argv = plan.render(fleet_id, monitor_id, director_id)?;
             let pane_id = mux
-                .split_window(&context, &env, &argv)
+                .split_prepared(
+                    &PaneSpawnRequest {
+                        reference: &context,
+                        env: &plan.env,
+                        command: &argv,
+                        cwd: plan.cwd.as_deref(),
+                    },
+                    &deadline,
+                    execution,
+                )
                 .map_err(|error| CafleetError::App(format!("tmux split-window failed: {error}")))?;
-            spawned_pane = Some(PaneGuard::new(&mux, pane_id.clone(), hooks));
+            spawned_pane = Some(PaneGuard::with_kill(
+                pane_id.clone(),
+                Box::new(|id| {
+                    mux.kill_pane_with_deadline(
+                        id,
+                        true,
+                        &Deadline::after(execution.clock, Duration::from_secs(5)),
+                        execution,
+                    )
+                }),
+                hooks,
+            ));
             Ok(pane_id)
         },
         hooks,

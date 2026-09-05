@@ -996,7 +996,7 @@ the placement.
 
 #### Shared spawn preparation and deadlines {#creation-deadlines}
 
-Planned lifecycle refactoring groups the existing arguments into
+Shared lifecycle preparation groups the existing arguments into
 `MemberCreateOptions` and `FleetCreateOptions`; flags, defaults, output, and
 validation precedence stay unchanged. Fleet and member preconditions remain
 separate. Shared preparation resolves the prompt, validates the backend, and
@@ -1220,7 +1220,7 @@ carriage-return-defragmented
 string; `--ansi` hashes the ANSI-preserving string. No normalization occurs
 after the selected mode, and capture content is never stored in SQLite.
 
-The planned shared `CaptureSnapshot::from_raw(raw, ansi, now)` supplies this
+The shared `CaptureSnapshot::from_raw(raw, ansi, now)` supplies this
 content, timestamp, and lowercase SHA256 hex for both member capture and
 monitor scan. It hashes the final selected content's UTF-8 bytes, including
 Unicode and empty captures. Existing line validation/windowing and timestamp
@@ -1281,7 +1281,7 @@ monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)
 
 #### Monitor resource cleanup {#monitor-resource-cleanup}
 
-Planned `MonitorLease` ownership begins immediately after a successful runtime
+`MonitorLease` ownership begins immediately after a successful runtime
 claim. Each successful SIGTERM/SIGINT registration retains its own handle.
 Registration failure (including the second handler), startup write or flush
 failure, tick failure, normal stop, and owner displacement all release the
@@ -1368,7 +1368,7 @@ mirroring [`member capture`](#member-capture)'s keys plus `name` / `kind` /
 }
 ```
 
-The planned shared capture path retains typed scan results until the output
+The shared capture path retains typed scan results until the output
 branch. Only the text presenter builds the section headings; JSON presentation
 does not construct or discard them. Both modes preserve the current roster
 order, raw member names, line count, error annotations, and success timestamps.

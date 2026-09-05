@@ -5,21 +5,28 @@
 use clap::{Args, Subcommand};
 use rusqlite::Connection;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 
-use super::creation::{CreationHooks, NoopCreationHooks, PaneGuard, RegistrationGuard};
+use super::creation::{
+    CreationHooks, MemberCreateOptions, NoopCreationHooks, PaneGuard, PreparedSpawn,
+    RegistrationGuard, SpawnPreparation,
+};
 use super::helpers::{emit, resolve_body, resolve_mux};
 use crate::broker::records::MemberRecord;
 use crate::broker::{self, NewPlacement};
+use crate::capture::{CaptureSnapshot, MemberCapture, write_member_capture};
 use crate::coding_agent::{SpawnProbe, coding_agent};
 use crate::config::Settings;
 use crate::error::CafleetError;
+use crate::multiplexer::spawn::{
+    Deadline, PaneSpawnRequest, SpawnExecution, SpawnMultiplexer, SystemClock,
+};
 use crate::multiplexer::{Multiplexer, MultiplexerError};
-use crate::output::{format_member, format_member_detail, format_member_list, strip_ansi};
+use crate::output::{format_member, format_member_detail, format_member_list};
 use crate::presentation;
 use crate::runtime::system::SystemProbe;
-use crate::spawn_prompt::substitute_spawn_placeholders;
-use crate::time::{format_utc, now_utc};
+use crate::runtime::system::SystemRunner;
+use crate::time::now_utc;
+use std::time::Duration;
 
 #[derive(Args)]
 #[group(required = true, multiple = false)]
@@ -270,43 +277,45 @@ fn create(
     body: &PromptArgs,
     json: bool,
 ) -> Result<(), CafleetError> {
-    let result = create_with_connection(
+    let result = create_with_options(
         conn,
-        fleet_id,
-        name,
-        description,
-        explicit_agent,
-        model,
-        effort,
-        monitor,
-        body,
+        &MemberCreateOptions {
+            fleet_id,
+            name,
+            description,
+            explicit_agent,
+            model,
+            effort,
+            monitor,
+            prompt: body.prompt.as_deref(),
+            file: body.file.as_deref(),
+        },
         || resolve_mux(settings),
         &SystemProbe,
+        &SpawnPreparation {
+            cwd: &std::env::current_dir,
+            env: &|key| std::env::var(key).ok(),
+        },
+        &SpawnExecution {
+            clock: &SystemClock,
+            runner: &SystemRunner,
+        },
         &NoopCreationHooks,
     )?;
     emit(json, &result, || format_member(&result));
     Ok(())
 }
 
-#[cfg(test)]
-#[allow(clippy::too_many_arguments)]
-fn create_with_dependencies<M: Multiplexer>(
-    settings: &Settings,
-    fleet_id: i64,
-    name: &str,
-    description: &str,
-    explicit_agent: Option<&str>,
-    model: Option<&str>,
-    effort: Option<&str>,
-    monitor: bool,
-    body: &PromptArgs,
+pub(crate) fn create_with_options<M: SpawnMultiplexer>(
+    conn: &mut Connection,
+    options: &MemberCreateOptions<'_>,
     resolve_mux: impl FnOnce() -> Result<M, MultiplexerError>,
     probe: &dyn SpawnProbe,
+    preparation: &SpawnPreparation<'_>,
+    execution: &SpawnExecution<'_>,
     hooks: &dyn CreationHooks,
 ) -> Result<Value, CafleetError> {
-    let mut conn = crate::db::connect(&settings.database_url)?;
-    create_with_connection(
-        &mut conn,
+    let MemberCreateOptions {
         fleet_id,
         name,
         description,
@@ -314,28 +323,10 @@ fn create_with_dependencies<M: Multiplexer>(
         model,
         effort,
         monitor,
-        body,
-        resolve_mux,
-        probe,
-        hooks,
-    )
-}
+        prompt,
+        file,
+    } = *options;
 
-#[allow(clippy::too_many_arguments)]
-fn create_with_connection<M: Multiplexer>(
-    conn: &mut Connection,
-    fleet_id: i64,
-    name: &str,
-    description: &str,
-    explicit_agent: Option<&str>,
-    model: Option<&str>,
-    effort: Option<&str>,
-    monitor: bool,
-    body: &PromptArgs,
-    resolve_mux: impl FnOnce() -> Result<M, MultiplexerError>,
-    probe: &dyn SpawnProbe,
-    hooks: &dyn CreationHooks,
-) -> Result<Value, CafleetError> {
     // 1. Auto-resolve the Director from the fleet row, first thing.
     let fleet = broker::fleets::fetch_fleet(conn, fleet_id)?
         .ok_or_else(|| CafleetError::Usage(format!("Fleet '{fleet_id}' not found.")))?;
@@ -373,7 +364,7 @@ fn create_with_connection<M: Multiplexer>(
 
     // 4. Resolve the body before any side effect; substitution is deferred
     //    until the new member id exists.
-    let prompt_body = resolve_body(body.prompt.as_deref(), body.file.as_deref(), "--file")?;
+    let prompt_body = resolve_body(prompt, file, "--file")?;
 
     // 5. Preconditions.
     let mux = resolve_mux().map_err(|e| CafleetError::App(e.to_string()))?;
@@ -383,6 +374,17 @@ fn create_with_connection<M: Multiplexer>(
     let context = mux
         .context_discovery()
         .map_err(|e| CafleetError::App(e.to_string()))?;
+
+    let plan = PreparedSpawn::prepare(
+        prompt_body,
+        backend,
+        name,
+        model,
+        effort,
+        mux.name(),
+        preparation,
+    )?;
+    hooks.prepared(conn, &plan);
 
     // 6. Register the member with a pending placement, threading the
     //    monitor role into its card marker.
@@ -411,39 +413,40 @@ fn create_with_connection<M: Multiplexer>(
     let member_id = registered.member_id;
     let mut registration = RegistrationGuard::new(conn, member_id, hooks);
 
-    // 7. Substitute the identity placeholders; on failure deregister and
-    //    re-raise the original error unwrapped.
-    let rendered = match substitute_spawn_placeholders(
-        &prompt_body,
-        fleet_id,
-        member_id,
-        director_id,
-        &agent_name,
-    ) {
-        Ok(rendered) => rendered,
-        Err(original) => {
-            return Err(registration.rollback(original));
-        }
+    let deadline = Deadline::after(execution.clock, Duration::from_secs(30));
+    let argv = match plan.render(fleet_id, member_id, director_id) {
+        Ok(argv) => argv,
+        Err(original) => return Err(registration.rollback(original)),
     };
-
-    // 8-9. Build the spawn argv and split the pane, forwarding only
-    //      CAFLEET_DATABASE_URL.
-    let argv = backend.build_spawn_argv(&rendered, name, model, effort);
-    let mut env = Vec::new();
-    if let Ok(url) = std::env::var("CAFLEET_DATABASE_URL") {
-        env.push(("CAFLEET_DATABASE_URL".to_string(), url));
-    }
-    let pane_id = match mux.split_window(&context, &env, &argv) {
+    let pane_id = match mux.split_prepared(
+        &PaneSpawnRequest {
+            reference: &context,
+            env: &plan.env,
+            command: &argv,
+            cwd: plan.cwd.as_deref(),
+        },
+        &deadline,
+        execution,
+    ) {
         Ok(pane_id) => pane_id,
         Err(error) => {
-            // Failed splits remain backend-owned: metadata reports attempted
-            // cleanup or an unknown ID. No CLI pane guard exists to re-kill.
             return Err(registration.rollback(CafleetError::App(format!(
                 "tmux split-window failed: {error}"
             ))));
         }
     };
-    let mut pane = PaneGuard::new(&mux, pane_id.clone(), hooks);
+    let mut pane = PaneGuard::with_kill(
+        pane_id.clone(),
+        Box::new(|id| {
+            mux.kill_pane_with_deadline(
+                id,
+                true,
+                &Deadline::after(execution.clock, Duration::from_secs(5)),
+                execution,
+            )
+        }),
+        hooks,
+    );
 
     // 10. A failed placement patch compensates the pane before registration.
     let patched = broker::update_placement_record(registration.connection(), member_id, &pane_id);
@@ -630,7 +633,26 @@ fn capture(
     ansi: bool,
     json: bool,
 ) -> Result<(), CafleetError> {
-    let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
+    let capture = capture_with_dependencies(
+        conn,
+        member_id,
+        lines,
+        ansi,
+        || resolve_mux(settings),
+        &now_utc,
+    )?;
+    write_member_capture(&mut std::io::stdout(), &capture, json)
+}
+
+pub(crate) fn capture_with_dependencies<M: Multiplexer>(
+    conn: &Connection,
+    member_id: i64,
+    lines: i64,
+    ansi: bool,
+    resolve_mux: impl FnOnce() -> Result<M, MultiplexerError>,
+    now: &dyn Fn() -> chrono::DateTime<chrono::Utc>,
+) -> Result<MemberCapture, CafleetError> {
+    let mux = resolve_mux().map_err(|e| CafleetError::App(e.to_string()))?;
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
 
@@ -639,24 +661,12 @@ fn capture(
     let raw = mux
         .capture_pane(&pane_id, lines)
         .map_err(|e| CafleetError::App(format!("capture failed: {e}")))?;
-    let content = if ansi { raw } else { strip_ansi(&raw) };
-    let captured_at = format_utc(now_utc());
-    let digest = Sha256::digest(content.as_bytes());
-    let content_sha256: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
-    let payload = json!({
-        "member_id": member_id,
-        "pane_id": pane_id,
-        "lines": lines,
-        "content": content,
-        "captured_at": captured_at,
-        "content_sha256": content_sha256,
-    });
-    if json {
-        emit(true, &payload, String::new);
-    } else {
-        print!("{content}");
-    }
-    Ok(())
+    Ok(MemberCapture {
+        member_id,
+        pane_id,
+        lines,
+        snapshot: CaptureSnapshot::from_raw(&raw, ansi, now()),
+    })
 }
 
 #[cfg(test)]

@@ -200,6 +200,104 @@ fn interruptible_sleep(seconds: u64, stop: &AtomicBool) {
 /// The foreground driver: atomically claim the runtime slot, install the
 /// SIGTERM/SIGINT stop flag, print the startup line, then tick until stopped
 /// or displaced; the exit path is an ownership-checked clear.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MonitorSignal {
+    Terminate,
+    Interrupt,
+}
+
+pub(crate) trait MonitorSignalHandle {
+    fn unregister(self: Box<Self>) -> bool;
+}
+
+type RegisterSignal<'a> =
+    dyn Fn(MonitorSignal, Arc<AtomicBool>) -> std::io::Result<Box<dyn MonitorSignalHandle>> + 'a;
+pub(crate) struct MonitorLoopHooks<'a> {
+    pub pid: i64,
+    pub stop: Arc<AtomicBool>,
+    pub now: &'a dyn Fn() -> DateTime<Utc>,
+    pub register: &'a RegisterSignal<'a>,
+    pub sleep: &'a dyn Fn(u64, &AtomicBool),
+    pub observe: &'a dyn for<'event> Fn(MonitorEvent<'event>),
+}
+
+// The standard observer is a no-op; injected observers inspect these facts.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) enum MonitorEvent<'a> {
+    Claimed {
+        conn: &'a Connection,
+    },
+    SignalRegistered {
+        signal: MonitorSignal,
+    },
+    SignalUnregistered {
+        signal: MonitorSignal,
+        removed: bool,
+    },
+    StartupWriteFinished {
+        result: &'a std::io::Result<()>,
+    },
+    StartupFlushFinished {
+        result: &'a std::io::Result<()>,
+    },
+    TickFinished {
+        conn: &'a Connection,
+        result: &'a Result<TickResult, CafleetError>,
+    },
+    ClearFinished {
+        conn: &'a Connection,
+        result: &'a Result<(), CafleetError>,
+    },
+}
+
+struct SystemSignalHandle(signal_hook::SigId);
+impl MonitorSignalHandle for SystemSignalHandle {
+    fn unregister(self: Box<Self>) -> bool {
+        signal_hook::low_level::unregister(self.0)
+    }
+}
+
+struct MonitorLease<'a, 'h> {
+    conn: &'a mut Connection,
+    fleet_id: i64,
+    hooks: &'h MonitorLoopHooks<'h>,
+    handles: Vec<(MonitorSignal, Box<dyn MonitorSignalHandle>)>,
+    armed: bool,
+}
+impl MonitorLease<'_, '_> {
+    fn cleanup(&mut self) -> Result<(), CafleetError> {
+        if !self.armed {
+            return Ok(());
+        }
+        self.armed = false;
+        for (signal, handle) in self.handles.drain(..) {
+            let removed = handle.unregister();
+            (self.hooks.observe)(MonitorEvent::SignalUnregistered { signal, removed });
+        }
+        let result = broker::clear_monitor_runtime(self.conn, self.fleet_id, self.hooks.pid);
+        (self.hooks.observe)(MonitorEvent::ClearFinished {
+            conn: self.conn,
+            result: &result,
+        });
+        result
+    }
+    fn finish(mut self, outcome: Result<(), CafleetError>) -> Result<(), CafleetError> {
+        match (outcome, self.cleanup()) {
+            (Err(primary), Err(cleanup)) => Err(primary.with_cleanup(format!(
+                "cleanup failed for monitor runtime (fleet {}, pid {}): {cleanup}",
+                self.fleet_id, self.hooks.pid
+            ))),
+            (Err(primary), Ok(())) => Err(primary),
+            (Ok(()), cleanup) => cleanup,
+        }
+    }
+}
+impl Drop for MonitorLease<'_, '_> {
+    fn drop(&mut self) {
+        let _ = self.cleanup();
+    }
+}
+
 pub fn run_monitor_loop(
     conn: &mut Connection,
     mux: &dyn MonitorMux,
@@ -208,44 +306,101 @@ pub fn run_monitor_loop(
     tick_seconds: i64,
     wake_interval: i64,
 ) -> Result<(), CafleetError> {
-    let pid = i64::from(std::process::id());
-    let now = format_utc(now_utc());
-    if !broker::claim_monitor_runtime(conn, fleet_id, pid, tick_seconds, wake_interval, &now)? {
+    let register = |signal, stop| -> std::io::Result<Box<dyn MonitorSignalHandle>> {
+        let signal = match signal {
+            MonitorSignal::Terminate => signal_hook::consts::SIGTERM,
+            MonitorSignal::Interrupt => signal_hook::consts::SIGINT,
+        };
+        Ok(Box::new(SystemSignalHandle(signal_hook::flag::register(
+            signal, stop,
+        )?)))
+    };
+    run_monitor_loop_with_hooks(
+        conn,
+        mux,
+        out,
+        fleet_id,
+        tick_seconds,
+        wake_interval,
+        &MonitorLoopHooks {
+            pid: i64::from(std::process::id()),
+            stop: Arc::new(AtomicBool::new(false)),
+            now: &now_utc,
+            register: &register,
+            sleep: &interruptible_sleep,
+            observe: &|_| {},
+        },
+    )
+}
+
+pub(crate) fn run_monitor_loop_with_hooks(
+    conn: &mut Connection,
+    mux: &dyn MonitorMux,
+    out: &mut dyn Write,
+    fleet_id: i64,
+    tick_seconds: i64,
+    wake_interval: i64,
+    hooks: &MonitorLoopHooks<'_>,
+) -> Result<(), CafleetError> {
+    let pid = hooks.pid;
+    if !broker::claim_monitor_runtime(
+        conn,
+        fleet_id,
+        pid,
+        tick_seconds,
+        wake_interval,
+        &format_utc((hooks.now)()),
+    )? {
         return Err(CafleetError::App(format!(
             "monitor already running for fleet {fleet_id}"
         )));
     }
-
-    let stop = Arc::new(AtomicBool::new(false));
-    for signal in [signal_hook::consts::SIGTERM, signal_hook::consts::SIGINT] {
-        signal_hook::flag::register(signal, Arc::clone(&stop))
-            .map_err(|e| CafleetError::App(format!("cannot install the signal handler: {e}")))?;
-    }
-
-    writeln!(
-        out,
-        "monitor loop started (fleet {fleet_id}, tick {tick_seconds}s, pid {pid})"
-    )
-    .map_err(|e| CafleetError::App(format!("stdout write failed: {e}")))?;
-    out.flush().ok();
-
-    let outcome = loop {
-        if stop.load(Ordering::Relaxed) {
-            break Ok(());
-        }
-        match monitor_tick(conn, mux, out, fleet_id, pid, now_utc()) {
-            Ok(TickResult::Continue) => {}
-            Ok(TickResult::Stop) => break Ok(()),
-            Err(error) => break Err(error),
-        }
-        out.flush().ok();
-        interruptible_sleep(
-            u64::try_from(tick_seconds).expect("tick_seconds is positive"),
-            &stop,
-        );
+    let mut lease = MonitorLease {
+        conn,
+        fleet_id,
+        hooks,
+        handles: Vec::new(),
+        armed: true,
     };
-    broker::clear_monitor_runtime(conn, fleet_id, pid)?;
-    outcome
+    (hooks.observe)(MonitorEvent::Claimed { conn: lease.conn });
+    let outcome = (|| {
+        for signal in [MonitorSignal::Terminate, MonitorSignal::Interrupt] {
+            let handle = (hooks.register)(signal, Arc::clone(&hooks.stop)).map_err(|e| {
+                CafleetError::App(format!("cannot install the signal handler: {e}"))
+            })?;
+            lease.handles.push((signal, handle));
+            (hooks.observe)(MonitorEvent::SignalRegistered { signal });
+        }
+        let result = writeln!(
+            out,
+            "monitor loop started (fleet {fleet_id}, tick {tick_seconds}s, pid {pid})"
+        );
+        (hooks.observe)(MonitorEvent::StartupWriteFinished { result: &result });
+        result.map_err(|e| CafleetError::App(format!("stdout write failed: {e}")))?;
+        let result = out.flush();
+        (hooks.observe)(MonitorEvent::StartupFlushFinished { result: &result });
+        result.map_err(|e| CafleetError::App(format!("stdout flush failed: {e}")))?;
+        loop {
+            if hooks.stop.load(Ordering::Relaxed) {
+                return Ok(());
+            }
+            let result = monitor_tick(lease.conn, mux, out, fleet_id, pid, (hooks.now)());
+            (hooks.observe)(MonitorEvent::TickFinished {
+                conn: lease.conn,
+                result: &result,
+            });
+            match result? {
+                TickResult::Stop => return Ok(()),
+                TickResult::Continue => {}
+            }
+            out.flush().ok();
+            (hooks.sleep)(
+                u64::try_from(tick_seconds).expect("tick_seconds is positive"),
+                &hooks.stop,
+            );
+        }
+    })();
+    lease.finish(outcome)
 }
 
 #[cfg(test)]

@@ -182,7 +182,7 @@ rows and it self-terminates.
 
 ## Runtime cleanup
 
-The [planned resource cleanup](../spec/cli-options.md#monitor-resource-cleanup)
+The [resource cleanup](../spec/cli-options.md#monitor-resource-cleanup)
 keeps a lease immediately after claim, unregisters every installed signal
 handle, and attempts owner-checked clear on startup failure, tick failure,
 normal stop, or replacement by another PID. A failed startup write or flush

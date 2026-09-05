@@ -1717,7 +1717,7 @@ Director's first ordinary
 
 ##### `monitor scan`
 
-Planned shared capture uses `CaptureSnapshot::from_raw(raw, ansi, now)` for both
+Shared capture uses `CaptureSnapshot::from_raw(raw, ansi, now)` for both
 member capture and scan. ANSI false applies the existing strip/CR normalization;
 true uses raw content. Hash the final string's UTF-8 bytes to lowercase SHA256
 hex, retaining the existing timestamp format and line-input/windowing contract.
@@ -2502,7 +2502,7 @@ sequence — it does NOT fragment into a second submit. Esc-first matrix:
 `send_poll_trigger` **YES**, `send_inline_preview` **YES**, `send_wake_trigger`
 **YES**, `send_exit` **YES**, and both `send_prompt` forms **YES**.
 
-#### Shared creation preparation and deadlines (planned)
+#### Shared creation preparation and deadlines
 
 Group current CLI arguments into `MemberCreateOptions` and `FleetCreateOptions`
 without merging their distinct validation ladders. Resolve prompt/backend and
@@ -2538,8 +2538,9 @@ exit as a failure, and returns stdout on success. Failure-message intents:
 binary-not-found → `tmux binary not found: <detail>`; timeout → `tmux command
 timed out after <timeout>s: <space-joined argv>`; non-zero exit → `tmux command
 failed: <space-joined argv>\nstderr: <trimmed stderr>`. A **per-call timeout** of
-`5`s is passed only by `list_pane_ids` and the three keystroke helpers; every
-other call is unbounded. **Pane-gone tolerance:** the tolerant runner swallows a
+`5`s is passed by `list_pane_ids` and the three keystroke helpers. Creation
+uses the shared deadline above, with an independent five-second compensation
+budget; other legacy calls remain unbounded. **Pane-gone tolerance:** the tolerant runner swallows a
 tmux error only when **both** `ignore_missing` is true **and** the message text
 (case-insensitive) contains `"can't find pane"` or `"no such pane"`; any other
 failure re-raises even under `ignore_missing`. Whatever error shape a port uses
@@ -2897,7 +2898,7 @@ reports it dead. `cafleet fleet delete` also ends a still-running loop — its
 next tick sees the soft-deleted fleet and self-terminates via step 2 of
 `monitor_tick`.
 
-#### Monitor resource ownership (planned)
+#### Monitor resource ownership
 
 The driver owns `MonitorLease` immediately after successful claim, before signal
 registration. Retain each successful registration handle, installing SIGTERM

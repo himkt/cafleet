@@ -6,8 +6,90 @@ pub(crate) mod test_support;
 use rusqlite::Connection;
 
 use crate::broker::{self, fleets::BootstrapHooks};
+use crate::coding_agent::CodingAgent;
 use crate::error::CafleetError;
+#[cfg(test)]
 use crate::multiplexer::Multiplexer;
+use crate::multiplexer::MultiplexerError;
+use std::path::PathBuf;
+
+pub(crate) struct MemberCreateOptions<'a> {
+    pub fleet_id: i64,
+    pub name: &'a str,
+    pub description: &'a str,
+    pub explicit_agent: Option<&'a str>,
+    pub model: Option<&'a str>,
+    pub effort: Option<&'a str>,
+    pub monitor: bool,
+    pub prompt: Option<&'a str>,
+    pub file: Option<&'a str>,
+}
+pub(crate) struct FleetCreateOptions<'a> {
+    pub name: &'a str,
+    pub agent_name: &'a str,
+    pub monitor_file: &'a str,
+    pub monitor_model: Option<&'a str>,
+}
+pub(crate) struct SpawnPreparation<'a> {
+    pub cwd: &'a dyn Fn() -> std::io::Result<PathBuf>,
+    pub env: crate::config_dir::EnvLookup<'a>,
+}
+pub(crate) struct PreparedSpawn {
+    pub prompt_template: String,
+    pub argv_prefix: Vec<String>,
+    pub coding_agent: String,
+    pub env: Vec<(String, String)>,
+    pub cwd: Option<PathBuf>,
+}
+impl PreparedSpawn {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn prepare(
+        prompt_template: String,
+        backend: &dyn CodingAgent,
+        name: &str,
+        model: Option<&str>,
+        effort: Option<&str>,
+        mux_name: &str,
+        preparation: &SpawnPreparation<'_>,
+    ) -> Result<Self, CafleetError> {
+        let cwd = if mux_name == "herdr" {
+            Some((preparation.cwd)().map_err(|error| CafleetError::App(
+            format!("tmux split-window failed: cannot resolve the working directory for pane spawn: {error}")))?)
+        } else {
+            None
+        };
+        let env = (preparation.env)("CAFLEET_DATABASE_URL")
+            .map(|url| vec![("CAFLEET_DATABASE_URL".into(), url)])
+            .unwrap_or_default();
+        let mut argv_prefix = backend.build_spawn_argv("", name, model, effort);
+        debug_assert_eq!(argv_prefix.last().map(String::as_str), Some(""));
+        argv_prefix.pop();
+        Ok(Self {
+            prompt_template,
+            argv_prefix,
+            coding_agent: backend.name().into(),
+            env,
+            cwd,
+        })
+    }
+    pub(crate) fn render(
+        &self,
+        fleet_id: i64,
+        member_id: i64,
+        director_id: i64,
+    ) -> Result<Vec<String>, CafleetError> {
+        let rendered = crate::spawn_prompt::substitute_spawn_placeholders(
+            &self.prompt_template,
+            fleet_id,
+            member_id,
+            director_id,
+            &self.coding_agent,
+        )?;
+        let mut argv = self.argv_prefix.clone();
+        argv.push(rendered);
+        Ok(argv)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum GuardResource {
@@ -31,6 +113,7 @@ pub(crate) enum CleanupEvent {
 }
 
 pub(crate) trait CreationHooks: BootstrapHooks {
+    fn prepared(&self, _conn: &Connection, _plan: &PreparedSpawn) {}
     fn observe_cleanup(&self, _event: CleanupEvent) {}
 }
 
@@ -38,20 +121,30 @@ pub(crate) struct NoopCreationHooks;
 impl BootstrapHooks for NoopCreationHooks {}
 impl CreationHooks for NoopCreationHooks {}
 
+type PaneKill<'a> = dyn Fn(&str) -> Result<(), MultiplexerError> + 'a;
+
 pub(crate) struct PaneGuard<'a> {
-    mux: &'a dyn Multiplexer,
+    kill: Box<PaneKill<'a>>,
     pane_id: Option<String>,
     hooks: &'a dyn CreationHooks,
 }
 
 impl<'a> PaneGuard<'a> {
+    #[cfg(test)]
     pub(crate) fn new(
         mux: &'a dyn Multiplexer,
         pane_id: String,
         hooks: &'a dyn CreationHooks,
     ) -> Self {
+        Self::with_kill(pane_id, Box::new(move |id| mux.kill_pane(id, true)), hooks)
+    }
+    pub(crate) fn with_kill(
+        pane_id: String,
+        kill: Box<PaneKill<'a>>,
+        hooks: &'a dyn CreationHooks,
+    ) -> Self {
         Self {
-            mux,
+            kill,
             pane_id: Some(pane_id),
             hooks,
         }
@@ -67,11 +160,7 @@ impl<'a> PaneGuard<'a> {
 
     fn cleanup(&mut self) -> Option<String> {
         let pane_id = self.pane_id.take()?;
-        let error = self
-            .mux
-            .kill_pane(&pane_id, true)
-            .err()
-            .map(|error| error.to_string());
+        let error = (self.kill)(&pane_id).err().map(|error| error.to_string());
         self.hooks.observe_cleanup(CleanupEvent::PaneKillFinished {
             pane_id: pane_id.clone(),
             error: error.clone(),

@@ -1,5 +1,6 @@
 pub mod assets;
 pub mod broker;
+pub(crate) mod capture;
 pub mod cli;
 pub mod coding_agent;
 pub mod config;
@@ -22,3 +23,12 @@ mod step6_contract_tests;
 
 #[cfg(test)]
 mod step7_contract_tests;
+
+#[cfg(test)]
+mod step8_capture_tests;
+
+#[cfg(test)]
+mod step8_monitor_tests;
+
+#[cfg(test)]
+mod step8_spawn_tests;

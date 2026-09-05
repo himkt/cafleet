@@ -105,7 +105,7 @@ to the pane and does not guarantee shell or pane termination. Normal
 
 ## Shared spawn deadlines {#spawn-deadlines}
 
-Planned bounded creation uses one monotonic 30-second deadline for the entire
+Bounded creation uses one monotonic 30-second deadline for the entire
 spawn callback. Herdr list, split, layout/resize, and run, and tmux split and
 layout, receive only the remaining duration. Preparation that does not need
 allocated ids happens before the transaction; do not restart the deadline at

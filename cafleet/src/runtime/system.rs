@@ -45,41 +45,59 @@ impl CommandRunner for SystemRunner {
     }
 
     fn run(&self, argv: &[String], timeout_secs: Option<u64>) -> Result<String, RunError> {
-        let (program, args) = argv.split_first().expect("argv carries the program");
-        let spawned = Command::new(program)
-            .args(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn();
-        let child = match spawned {
-            Ok(child) => child,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return Err(RunError::BinaryNotFound(e.to_string()));
-            }
-            Err(e) => {
-                return Err(RunError::Failed {
-                    stderr: e.to_string(),
-                });
-            }
-        };
-        if let Some(secs) = timeout_secs {
-            return run_timed(child, Duration::from_secs(secs), &mut SystemProcessHooks);
-        }
-        let output = child.wait_with_output().map_err(|e| RunError::Failed {
-            stderr: e.to_string(),
-        })?;
-        if output.status.success() {
-            Ok(String::from_utf8_lossy(&output.stdout).to_string())
-        } else {
-            Err(RunError::Failed {
-                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-            })
-        }
+        run_process(argv, timeout_secs.map(Duration::from_secs))
     }
 
     fn sleep(&self, seconds: f64) {
         std::thread::sleep(Duration::from_secs_f64(seconds));
+    }
+}
+
+impl crate::multiplexer::spawn::TimedCommandRunner for SystemRunner {
+    fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError> {
+        if timeout.is_zero() {
+            return Err(RunError::Timeout);
+        }
+        run_process(argv, Some(timeout))
+    }
+}
+
+fn run_process(argv: &[String], timeout: Option<Duration>) -> Result<String, RunError> {
+    let started = Instant::now();
+    let (program, args) = argv.split_first().expect("argv carries the program");
+    let spawned = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+    let child = match spawned {
+        Ok(child) => child,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(RunError::BinaryNotFound(e.to_string()));
+        }
+        Err(e) => {
+            return Err(RunError::Failed {
+                stderr: e.to_string(),
+            });
+        }
+    };
+    if let Some(timeout) = timeout {
+        return run_timed(
+            child,
+            timeout.saturating_sub(started.elapsed()),
+            &mut SystemProcessHooks,
+        );
+    }
+    let output = child.wait_with_output().map_err(|e| RunError::Failed {
+        stderr: e.to_string(),
+    })?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        Err(RunError::Failed {
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        })
     }
 }
 
@@ -366,6 +384,13 @@ pub fn read_stdin() -> std::io::Result<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    mod step8_duration_tests {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/step8_duration_tests.rs"
+        ));
+    }
+
     use super::*;
     use nix::errno::Errno;
     use nix::sys::wait::{WaitPidFlag, waitpid};

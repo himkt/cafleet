@@ -147,3 +147,42 @@ pub fn monitor_member(row: &MonitorMember) -> Value {
     json!({"member_id":row.member_id,"name":row.name,"pending_count":row.pending_count,
         "oldest_pending_ts":row.oldest_pending_ts,"oldest_pending_age_seconds":row.oldest_pending_age_seconds})
 }
+pub(crate) fn member_capture(capture: &crate::capture::MemberCapture) -> Value {
+    let snapshot = &capture.snapshot;
+    json!({"member_id":capture.member_id,"pane_id":capture.pane_id,"lines":capture.lines,
+        "content":snapshot.content,"captured_at":snapshot.captured_at,"content_sha256":snapshot.content_sha256})
+}
+
+pub(crate) fn scan_json(entries: &[crate::capture::ScanEntry]) -> Value {
+    Value::Array(entries.iter().map(|entry| {
+        let snapshot = entry.outcome.as_ref().ok();
+        json!({"member_id":entry.member_id,"name":entry.name,"kind":entry.kind.as_str(),
+            "coding_agent":entry.coding_agent,"pane_id":entry.pane_id,"lines":entry.lines,
+            "content":snapshot.map(|s| &s.content),"captured_at":snapshot.map(|s| &s.captured_at),
+            "content_sha256":snapshot.map(|s| &s.content_sha256),"error":entry.outcome.as_ref().err()})
+    }).collect())
+}
+
+pub(crate) fn scan_text(entries: &[crate::capture::ScanEntry]) -> String {
+    entries
+        .iter()
+        .map(|entry| {
+            let pane = entry.pane_id.as_deref().unwrap_or("—");
+            let (stamp, body) = match &entry.outcome {
+                Ok(snapshot) => (
+                    format!("; captured_at={}", snapshot.captured_at),
+                    snapshot.content.as_str(),
+                ),
+                Err(error) => (String::new(), error.as_str()),
+            };
+            format!(
+                "=== {} ({}; kind={}; coding_agent={}; pane={pane}{stamp}) ===\n{body}",
+                entry.member_id,
+                entry.name,
+                entry.kind.as_str(),
+                entry.coding_agent
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}

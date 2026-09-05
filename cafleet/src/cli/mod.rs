@@ -3,13 +3,13 @@
 //! the per-group handlers. Orchestration glue only — it wires broker /
 //! multiplexer / output / coding-agent.
 
-mod creation;
+pub(crate) mod creation;
 mod doctor;
-mod fleet;
+pub(crate) mod fleet;
 pub(crate) mod helpers;
-mod member;
+pub(crate) mod member;
 mod message;
-mod monitor;
+pub(crate) mod monitor;
 mod server;
 mod setup;
 

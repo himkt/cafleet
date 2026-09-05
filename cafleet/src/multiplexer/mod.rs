@@ -5,6 +5,7 @@
 //! expected API is catalogued in [`test_support`].
 
 pub mod herdr;
+pub(crate) mod spawn;
 #[cfg(test)]
 pub mod test_support;
 pub mod tmux;
@@ -42,6 +43,7 @@ pub enum PaneCleanup {
 pub struct MultiplexerError {
     message: String,
     pane_cleanup: Option<PaneCleanup>,
+    timed_out: bool,
 }
 
 impl MultiplexerError {
@@ -49,7 +51,16 @@ impl MultiplexerError {
         Self {
             message: message.into(),
             pane_cleanup: None,
+            timed_out: false,
         }
+    }
+
+    pub(crate) fn with_timeout(mut self) -> Self {
+        self.timed_out = true;
+        self
+    }
+    pub(crate) fn is_timeout(&self) -> bool {
+        self.timed_out
     }
 
     pub fn pane_cleanup(&self) -> Option<&PaneCleanup> {
@@ -370,6 +381,107 @@ impl Multiplexer for AnyMultiplexer {
         dispatch!(self, mux => mux.agent_status(target_pane_id))
     }
 }
+
+// Concrete backends expose the same operations as the selected backend.
+macro_rules! implement_backend {
+    ($backend:ident) => {
+        impl Multiplexer for $backend {
+            fn name(&self) -> &'static str {
+                $backend::name(self)
+            }
+
+            fn ensure_available(&self) -> Result<(), MultiplexerError> {
+                $backend::ensure_available(self)
+            }
+
+            fn context_discovery(&self) -> Result<MultiplexerContext, MultiplexerError> {
+                $backend::context_discovery(self)
+            }
+
+            fn split_window(
+                &self,
+                reference: &MultiplexerContext,
+                env: &[(String, String)],
+                command: &[String],
+            ) -> Result<String, MultiplexerError> {
+                $backend::split_window(self, reference, env, command)
+            }
+
+            fn send_exit(
+                &self,
+                target_pane_id: &str,
+                ignore_missing: bool,
+            ) -> Result<(), MultiplexerError> {
+                $backend::send_exit(self, target_pane_id, ignore_missing)
+            }
+
+            fn send_poll_trigger(&self, target_pane_id: &str, member_id: i64) -> bool {
+                $backend::send_poll_trigger(self, target_pane_id, member_id)
+            }
+
+            fn send_wake_entries(
+                &self,
+                target_pane_id: &str,
+                fleet_id: i64,
+                members: &[WakeEntry<'_>],
+                director: &WakeEntry<'_>,
+            ) -> Result<bool, MultiplexerError> {
+                $backend::send_wake_entries(self, target_pane_id, fleet_id, members, director)
+            }
+
+            fn send_inline_preview(
+                &self,
+                target_pane_id: &str,
+                message_id: i64,
+                sender_id: i64,
+                ts: &str,
+                text: &str,
+            ) -> Result<(), MultiplexerError> {
+                $backend::send_inline_preview(self, target_pane_id, message_id, sender_id, ts, text)
+            }
+
+            fn send_prompt(
+                &self,
+                target_pane_id: &str,
+                text: &str,
+                shell: bool,
+            ) -> Result<(), MultiplexerError> {
+                $backend::send_prompt(self, target_pane_id, text, shell)
+            }
+
+            fn capture_pane(
+                &self,
+                target_pane_id: &str,
+                lines: i64,
+            ) -> Result<String, MultiplexerError> {
+                $backend::capture_pane(self, target_pane_id, lines)
+            }
+
+            fn list_pane_ids(
+                &self,
+            ) -> Result<std::collections::BTreeSet<String>, MultiplexerError> {
+                $backend::list_pane_ids(self)
+            }
+
+            fn kill_pane(
+                &self,
+                target_pane_id: &str,
+                ignore_missing: bool,
+            ) -> Result<(), MultiplexerError> {
+                $backend::kill_pane(self, target_pane_id, ignore_missing)
+            }
+
+            fn agent_status(
+                &self,
+                target_pane_id: &str,
+            ) -> Result<Option<String>, MultiplexerError> {
+                $backend::agent_status(self, target_pane_id)
+            }
+        }
+    };
+}
+implement_backend!(TmuxMultiplexer);
+implement_backend!(HerdrMultiplexer);
 
 /// Resolve the backend per the SPEC precedence and construct it over the
 /// given runner and environment snapshot.
