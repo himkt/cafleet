@@ -12,7 +12,7 @@ fn plain_setup_installs_and_records_all_three_agents_on_a_fresh_database() {
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let out = stdout(&output);
     assert!(
-        out.contains("applied migrations to head (7)."),
+        out.contains("applied migrations to head (8)."),
         "fresh DB reports the created-and-migrated line, got: {out}"
     );
     for (agent, skills_dir) in [
@@ -64,7 +64,7 @@ fn plain_setup_installs_and_records_all_three_agents_on_a_fresh_database() {
     let again = cli.run(&["setup"]);
     assert_eq!(code(&again), 0);
     assert!(
-        stdout(&again).contains("Already at head (7); nothing to do."),
+        stdout(&again).contains("Already at head (8); nothing to do."),
         "got: {}",
         stdout(&again)
     );
@@ -379,7 +379,7 @@ fn an_invalid_variable_fails_the_assets_half_with_the_pinned_error() {
         "got: {combined}"
     );
     assert!(
-        combined.contains("applied migrations to head (7)."),
+        combined.contains("applied migrations to head (8)."),
         "the db half is unaffected: {combined}"
     );
 }
@@ -412,7 +412,7 @@ fn plain_setup_fails_the_assets_half_on_an_invalid_config_path_variable() {
         "plain setup resolves all three identity paths: {combined}"
     );
     assert!(
-        combined.contains("applied migrations to head (7)."),
+        combined.contains("applied migrations to head (8)."),
         "the db half is unaffected: {combined}"
     );
 }
@@ -748,7 +748,7 @@ fn doctor_reports_a_newer_schema_than_the_cli() {
     let output = cli.run(&["doctor"]);
     assert_eq!(code(&output), 1);
     assert!(
-        stdout(&output).contains("schema 99 is newer than this CLI (head 7) — upgrade cafleet"),
+        stdout(&output).contains("schema 99 is newer than this CLI (head 8) — upgrade cafleet"),
         "got: {}",
         stdout(&output)
     );

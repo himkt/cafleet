@@ -139,11 +139,11 @@ mod tests {
     }
 
     #[test]
-    fn migrate_reaches_head_version_7_and_is_idempotent() {
+    fn migrate_reaches_head_version_8_and_is_idempotent() {
         let dir = TempDir::new().unwrap();
         let mut conn = connect(&temp_db_url(&dir)).unwrap();
-        assert_eq!(migrate_to_head(&mut conn).unwrap(), 7);
-        assert_eq!(migrate_to_head(&mut conn).unwrap(), 7);
+        assert_eq!(migrate_to_head(&mut conn).unwrap(), 8);
+        assert_eq!(migrate_to_head(&mut conn).unwrap(), 8);
     }
 
     #[test]
@@ -187,7 +187,7 @@ mod tests {
     }
 
     #[test]
-    fn the_three_head_indexes_exist_and_nothing_more() {
+    fn the_four_head_indexes_exist_and_nothing_more() {
         let dir = TempDir::new().unwrap();
         let conn = migrated_conn(&dir);
         let placeholders = APP_TABLES.map(|t| format!("'{t}'")).join(",");
@@ -204,6 +204,7 @@ mod tests {
             .collect();
         let expected: BTreeSet<String> = [
             "idx_members_fleet_status",
+            "idx_members_one_active_monitor_per_fleet",
             "idx_messages_owner_member_status_ts",
             "idx_messages_from_member_status_ts",
         ]
@@ -359,18 +360,23 @@ mod tests {
             .unwrap()
             .map(Result::unwrap)
             .collect();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8]);
     }
 
     // The chain guard reads the refinery-embedded listing, not the filesystem:
     // `migration_chain()` returns the `(version, name)` pairs of the embedded
     // runner's migrations, sorted ascending.
     #[test]
-    fn migration_chain_is_contiguous_from_1_with_exactly_one_baseline_and_head_7() {
+    fn migration_chain_is_contiguous_from_1_with_exactly_one_baseline_and_head_8() {
         let chain = migration_chain();
         let versions: Vec<u32> = chain.iter().map(|(version, _)| *version).collect();
         let contiguous: Vec<u32> = (1..=versions.len() as u32).collect();
         assert_eq!(versions, contiguous, "chain must be contiguous from 1");
+        assert_eq!(
+            chain.iter().filter(|(_, name)| name == "baseline").count(),
+            1,
+            "the chain must contain exactly one baseline"
+        );
         assert_eq!(
             chain
                 .first()
@@ -386,8 +392,8 @@ mod tests {
             chain
                 .last()
                 .map(|(version, name)| (*version, name.as_str())),
-            Some((7, "monitor_wake_request")),
-            "expected head is V7__monitor_wake_request"
+            Some((8, "unique_active_monitor")),
+            "expected head is V8__unique_active_monitor"
         );
     }
 }
