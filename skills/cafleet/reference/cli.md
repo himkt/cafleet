@@ -128,7 +128,7 @@ Soft-deletes the fleet in one transaction (stamps `deleted_at`, deregisters ever
 
 0. **Verify pane env** (Director): run `cafleet doctor` — the canonical pane-identity probe, before `cafleet fleet create` and any `cafleet member create`. It renders the three-section diagnosis (multiplexer, database, coding agents) and exits non-zero on any rendered issue; a non-zero exit aborts the spawn protocol.
 
-1. **Create a fleet** (if none exists) — one atomic command creates the fleet, the root Director, and the monitor member (registration and pane); any failure rolls everything back:
+1. **Create a fleet** (if none exists) — one command creates the fleet, root Director, and monitor member using a DB transaction and owned-pane compensation. A failed or unconfirmed cleanup is reported; inspect that diagnostic before retrying:
    ```bash
    cafleet fleet create --name "my-project" --coding-agent <backend> \
      --monitor-file <abs path to monitor prompt> --monitor-model <model>

@@ -493,8 +493,9 @@ missing-required-argument error naming the flag.
 
 **Must be run inside a tmux or herdr session** — outside one it exits 1 with
 `Error: cafleet fleet create must be run inside a tmux or herdr session` and
-writes nothing. One invocation atomically creates the fleet, its root
-Director, and its monitor member — registration **and** pane spawn. The
+writes nothing. One invocation creates the fleet, its root Director, and its
+monitor member in a single DB transaction, with owned-pane compensation
+for a failed bootstrap. The
 Director and monitor identities are hardcoded (Director:
 `name="Director"`, `description="Root Director for this fleet"`; monitor:
 `name="monitor"`, `description="Monitor member for this fleet"`); there are
@@ -517,15 +518,23 @@ The command runs a single-transaction ladder — see
    (same substitution and error strings as
    [`member create`](#member-create)).
 6. Spawn the monitor pane (detached split, `CAFLEET_DATABASE_URL` as the
-   only forwarded environment variable).
+   only forwarded environment variable). On successful `split_window`,
+   immediately transfer pane ownership to the CLI guard and return the id
+   from the callback, without intervening fallible work.
 7. Insert the monitor placement row (same session/window context as the
-   Director), then commit.
+   Director), then commit. Disarm all creation guards before calling the
+   existing text/JSON output path.
 
-**Any failure rolls back the whole transaction** — no fleet row, no
-Director row, no monitor row, no placement rows. A failure after a
-successful pane spawn (placement insert or commit) also kills the spawned
-pane. The command is retryable as-is. Error strings are in
-[Error Messages](#error-messages).
+A bootstrap failure attempts rollback of the whole DB transaction. For a
+Herdr run failure inside the callback, the backend tries to kill the known
+pane before the callback returns an error and the broker rolls back. For
+placement insert or commit failure after a successful callback, the broker
+closes its transaction first; then the CLI kills its owned pane. Successful
+rollback leaves no fleet, Director, monitor, or placement rows. A failed
+cleanup is reported with the primary error; the command does not claim a
+complete rollback or unconditional retryability when cleanup is uncertain.
+The [creation failure contract](#creation-failure-compensation) specifies all
+orders and diagnostics. Error strings are in [Error Messages](#error-messages).
 
 Once its pane boots, the monitor member sends `ready`, launches the
 `cafleet monitor` wake loop, and sends `monitor live` (see
@@ -937,13 +946,61 @@ substituting exactly four placeholders:
 Identity reaches the spawned member as literals rendered into its prompt; the
 only environment variable forwarded into the pane is `CAFLEET_DATABASE_URL`.
 A literal brace must be doubled (`{{` / `}}`); an unknown placeholder or
-malformed brace expression exits 2 and rolls back the just-registered member
+malformed brace expression exits 2 and attempts to deregister the just-registered
+member; any cleanup failure is reported after the primary error
 (see [Error Messages](#error-messages)).
 
 The spawn always creates the pane without stealing focus (tmux
 `split-window -d`): the Director's pane and active window stay active. In the
 default output, `pane` renders `(pending)` until the pane id is patched onto
 the placement.
+
+#### Creation failure compensation {#creation-failure-compensation}
+
+Member creation registers a pending placement, renders the prompt, creates a
+pane, and patches its id. The CLI owns a registration guard after successful
+registration and acquires a pane guard only when `split_window` succeeds.
+The backend owns the pane before that return; see
+[pane ownership](multiplexer-backends.md#pane-creation-ownership).
+
+| Failure point | Compensation order | DB result when compensation succeeds |
+|---|---|---|
+| Member registration | Broker rolls back registration; no pane guard exists | No new member or placement |
+| Member placeholder expansion | CLI deregisters; no pane was created | Member becomes deregistered and placement is removed |
+| Member Herdr run after split returned an id | Backend tries pane kill, returns the error, then CLI deregisters | Member deregistered and placement removed |
+| Member placement update error or missing row | After handling the failed SQL, CLI kills pane, then deregisters | Member deregistered and placement removed |
+| Fleet callback before pane creation | Broker rolls back bootstrap; no pane guard exists | No added fleet, Director, monitor, or placement |
+| Fleet callback Herdr run failure/timeout with known id | Backend tries pane kill, callback returns error, then broker rolls back bootstrap | No added bootstrap rows |
+| Fleet placement insert/commit after callback success | CLI holds the transferred guard; broker rolls back and closes its transaction, then CLI kills pane | No added bootstrap rows |
+| Fleet callback fails/times out before obtaining an id | Backend reports unknown pane compensation, then broker rolls back; no guessed pane kill | No added bootstrap rows; pane state unconfirmed |
+
+Continue remaining compensation even if an earlier cleanup fails. A backend
+`PaneCleanup::Attempted` result is never killed again by the CLI. A failed
+split with no confirmed id reports that the pane id is unknown and cleanup
+is unconfirmed, including for member creation; it does not infer which other
+pane should be closed. Creation rollback uses `kill_pane(id, true)` rather
+than `send_exit`.
+
+Keep the primary cause and its exit category. Member split failures retain
+the primary reason `tmux split-window failed: <error>`; placement errors retain
+`placement update failed: <error>` or `placement row vanished before pane-id
+patch`. Placeholder failures retain their usage error and exit 2. Append
+applicable cleanup diagnostics after the primary error, on stderr:
+
+- `cleanup failed for pane <id>: <detail>`
+- `cleanup failed for member <id>: <detail>`
+- `cleanup failed for fleet <id> transaction: <detail>`
+
+Report transaction rollback failures explicitly. Existing rollback-success
+suffixes may describe confirmed compensation; they must not claim success or
+complete rollback when cleanup failed or pane compensation is unconfirmed.
+Guards disarm through explicit `finish`/`rollback`, preventing repeated kill
+or deregistration; `Drop` handles only remaining unhandled ownership. Once a
+member placement is confirmed or fleet commit succeeds, disarm all creation
+guards before the existing `emit` call. Successful text/JSON output keeps its
+shape, ordering, and nulls. No new stdout-failure exit or diagnostic contract
+is introduced. Normal `member delete` behavior and persisted-message
+notification failures remain unchanged.
 
 ### `member delete` {#member-delete}
 
@@ -1247,8 +1304,8 @@ failed capture. `lines` always echoes the requested depth.
 | `fleet create` | `--monitor-file` resolution failure (empty, missing, unreadable, or non-UTF-8 file, or the empty-stdin variant via `-`) | The `--file` rejection strings with the flag label `--monitor-file` (e.g. `Error: --monitor-file <path>: file is empty.`) | 1 | The message names the flag the user typed; nothing written |
 | `fleet create` | Invalid `--monitor-model` for the `--coding-agent` backend | The `member create` `--model` validation string, verbatim | 2 | Nothing written — see [Model selection](coding-agent-backends.md#model-selection) |
 | `fleet create` | The `--coding-agent` binary missing from `PATH` | `Error: binary <name> not found on PATH` | 1 | Nothing written |
-| `fleet create` | `tmux split-window` fails during the monitor pane spawn | `Error: tmux split-window failed: <detail>. Rolled back fleet creation.` | 1 | Transaction rolled back — no rows persisted |
-| `fleet create` | Placement insert or commit fails after a successful pane spawn | The underlying error | 1 | Transaction unwound and the spawned pane killed; no rows persisted |
+| `fleet create` | Split fails during the monitor pane spawn | `Error: tmux split-window failed: <detail>` followed by the applicable rollback result/cleanup diagnostics | 1 | The primary reason is retained; rollback-success suffix requires confirmed compensation — see [creation failure compensation](#creation-failure-compensation) |
+| `fleet create` | Placement insert or commit fails after a successful pane spawn | The underlying error followed by applicable cleanup diagnostics | 1 | Broker attempts rollback and closes the transaction before the CLI attempts pane kill; successful rollback leaves no bootstrap rows |
 | `fleet show` / `fleet delete` | Unknown `FLEET_ID` | `Error: fleet 'X' not found.` | 1 | — |
 | `member create` | Unknown `--fleet-id` | `Error: Fleet '<fleet-id>' not found.` | 2 | Director auto-discovery runs first thing |
 | `member create` | Into a soft-deleted fleet | `Error: fleet X is deleted` | 1 | — |
@@ -1282,8 +1339,8 @@ failed capture. `lines` always echoes the requested depth.
 | `member create` | `--effort` with a level unknown to the claude backend | `Error: --effort for the claude backend must be one of low, medium, high, xhigh, max (got '<value>').` | 2 | Fires before any side effect |
 | `member create` | `--coding-agent codex --effort` with an unknown level | `Error: --effort for the codex backend must be one of minimal, low, medium, high, xhigh (got '<value>').` | 2 | Fires before any side effect |
 | `member create` | `--coding-agent opencode --effort` with any value | `Error: opencode does not support reasoning effort.` | 2 | Fires before any side effect |
-| `member create` / `fleet create` | An unknown `{placeholder}` in the prompt | `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}. Double literal braces ({{, }}) to keep them as text.` | 2 | `member create` rolls back the just-registered member; `fleet create` unwinds the whole bootstrap transaction |
-| `member create` / `fleet create` | A malformed brace expression in the prompt | `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` | 2 | `member create` rolls back the just-registered member; `fleet create` unwinds the whole bootstrap transaction |
+| `member create` / `fleet create` | An unknown `{placeholder}` in the prompt | `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}. Double literal braces ({{, }}) to keep them as text.` | 2 | `member create` attempts deregistration; `fleet create` attempts bootstrap transaction rollback; cleanup failures follow the primary error |
+| `member create` / `fleet create` | A malformed brace expression in the prompt | `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` | 2 | `member create` attempts deregistration; `fleet create` attempts bootstrap transaction rollback; cleanup failures follow the primary error |
 | `member create` | `--coding-agent` omitted and the spawning Director not found in the fleet | `Error: cannot resolve the member's coding agent: Director <director-id> not found in fleet <fleet-id>. Re-run with an explicit --coding-agent.` | 1 | Nothing spawned |
 | `member create` | `--coding-agent` omitted and the spawning Director has no placement row | `Error: cannot resolve the member's coding agent: Director <director-id> has no placement row recording its backend. Re-run with an explicit --coding-agent.` | 1 | Nothing spawned |
 | `monitor` (loop form) | The fleet already has a live monitor | `Error: monitor already running for fleet <id>` | 1 | — |

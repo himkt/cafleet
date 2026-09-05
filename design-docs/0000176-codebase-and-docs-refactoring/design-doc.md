@@ -1,7 +1,7 @@
 # コード・ドキュメントの簡素化と障害時の整合性改善
 
 **Status**: In Progress
-**Progress**: 2/36 tasks complete
+**Progress**: 5/36 tasks complete
 **Last Updated**: 2026-09-05
 
 ## Overview
@@ -394,9 +394,11 @@ miseの`--nocapture`例は現行toolchainでargv到達を検証して更新す�
 
 ### Step 2: monitor登録のDB制約を追加する
 
-- [ ] §3のschema/エラー/旧版による回復手順をdocs・SPECへ反映し、一意index migrationと事前診断を追加する。 <!-- completed: -->
-- [ ] transaction内の重複判定と型付き競合エラーを導入し、2接続の決定的interleavingで敗者の副作用0を検証する。 <!-- completed: -->
-- [ ] migrationのgrouped rollback、旧データ重複、再実行、behind-schemaとassets半分を考慮した回復fixtureを検証しchain guardを更新する。 <!-- completed: -->
+検証証跡: [旧版CLIによる隔離DB/assets回復と実証範囲](.verification/step2-20260905T0835/report.md)。
+
+- [x] §3のschema/エラー/旧版による回復手順をdocs・SPECへ反映し、一意index migrationと事前診断を追加する。 <!-- completed: 2026-09-05T17:25 -->
+- [x] transaction内の重複判定と型付き競合エラーを導入し、2接続の決定的interleavingで敗者の副作用0を検証する。 <!-- completed: 2026-09-05T17:25 -->
+- [x] migrationのgrouped rollback、旧データ重複、再実行、behind-schemaとassets半分を考慮した回復fixtureを検証しchain guardを更新する。 <!-- completed: 2026-09-05T17:46 -->
 
 ### Step 3: pane作成の所有権と補償を統一する
 

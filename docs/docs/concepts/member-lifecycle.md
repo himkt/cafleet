@@ -16,12 +16,18 @@ Director from the fleet row itself, so a member can never be another member's
 Director by construction. The team model is a single flat tier; there is no
 team nesting.
 
-## Atomic create flow
+## Create flow and compensation {#atomic-create-flow}
 
-`cafleet member create` is atomic: it registers the member with a
-pending placement (no pane id yet), spawns the member pane in the Director's
-own window, then patches the placement row with the real pane id. If the
-spawn or the patch fails, the registration is rolled back. The pending window
+`cafleet member create` registers a pending placement (no pane id yet),
+spawns the member pane in the Director's own window, then patches the placement
+row with the real pane id. It compensates failures across the DB and
+multiplexer: a known owned pane is killed and the registration is deregistered,
+removing the placement. A backend run failure is compensated by the backend
+before the CLI deregisters; a patch failure is compensated by the CLI.
+Cleanup failures preserve the original error and identify the failed cleanup.
+If a split response did not reveal a pane id, pane cleanup remains unconfirmed;
+CAFleet does not guess which pane to close. See the
+[creation failure contract](../spec/cli-options.md#creation-failure-compensation). The pending window
 is ping-tolerant: `cafleet member ping` against a member whose placement has
 no pane yet skips the keystroke and succeeds — the member polls its inbox on
 spawn, so there is nothing a ping would add. The new pane is

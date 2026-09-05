@@ -205,7 +205,7 @@ Edges (who depends on whom):
    placeholders (§6.3) → `build_spawn_argv` (§6.7) →
    multiplexer `split_window` (§6.5), forwarding `CAFLEET_DATABASE_URL` (when
    set) into the new pane's environment (§7.1) → broker
-   `update_placement_pane_id`. A rollback ladder deregisters the member on any
+   `update_placement_pane_id`. A rollback ladder attempts deregistration on any
    post-register failure.
 3. **Monitor loop ↔ broker monitor DB ops.** The loop (§6.6) owns the
    OS-facing half (signal handling, sleep, the single keystroke); all DB
@@ -508,9 +508,8 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
 #### Fleets
 
 - **`create_fleet(name, director_context, coding_agent, spawn_monitor)`** —
-  atomically bootstraps a fleet, its root Director, and its monitor member
-  (registration **and** pane) in one
-  write_session. Order: stamp `created_at`; insert the fleet with
+  bootstraps the fleet, root Director, and monitor rows in one write_session,
+  with owned-pane compensation across the DB/multiplexer boundary. Order: stamp `created_at`; insert the fleet with
   `director_member_id = NULL`; insert the Director member row (`name="Director"`,
   `description="Root Director for this fleet"`, `status="active"`, card
   `{name, description, skills:[]}` with **no** `cafleet.kind`); insert the
@@ -523,11 +522,19 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
   fleet's `director_member_id`; invoke the caller-supplied `spawn_monitor`
   callback with the three allocated ids (`fleet_id`, `director_member_id`,
   the monitor's `member_id`) — the CLI's callback performs the prompt
-  substitution and the pane split and returns the pane id; insert the
+  substitution and pane split, transfers the successful split's pane ownership
+  immediately to its CLI guard, and returns the id without intervening fallible
+  work; insert the
   monitor placement row with the returned pane id (same session/window
   context as the Director; `coding_agent` = the fleet's coding agent);
-  commit. A callback error unwinds the whole transaction — no fleet,
-  Director, monitor, or placement rows persist. The transaction holds
+  commit. A callback error triggers explicit transaction rollback; on success,
+  no fleet, Director, monitor, or placement rows persist. Report rollback
+  failure as a secondary diagnostic and do not claim full cancellation.
+  A Herdr run failure with known id closes the pane in the backend before the
+  callback error reaches the broker. A placement-insert/commit failure after
+  callback success closes the DB transaction before the CLI kills its owned
+  pane (§6.3 *Creation ownership and compensation*); no new broker API forces
+  pane-first compensation in this case. The transaction holds
   SQLite's write lock across the callback's subprocess call, backstopped by
   the connection's `busy_timeout=5000` PRAGMA. Returns
   `{fleet_id, name, created_at, director:{…}, monitor:{…}}`.
@@ -1197,24 +1204,31 @@ subcommands take the shared `--json` flag and emit JSON when it is set.
   backend exactly as `member create --model`; omitted → the backend's own
   default model), `--json` (shared). Omitting any required flag → clap's
   native missing-required-argument error naming the flag, exit 2.
-  One invocation atomically creates the fleet, the root Director, and the
-  monitor member (registration + pane). Ladder: (1) multiplexer
+  One invocation creates fleet/Director/monitor rows transactionally and
+  compensates an owned pane on failure. Ladder: (1) multiplexer
   preconditions — on a `MultiplexerError` → application error `cafleet
   fleet create must be run inside a tmux or herdr session` (exit 1, no DB
   writes); (2) resolve the monitor prompt body from `--monitor-file`;
   (3) backend checks before any write — backend lookup, `validate_model`
   on `--monitor-model`, `ensure_available`; (4) broker `create_fleet`
   (§6.2) with a callback that substitutes the four identity placeholders
-  (substitution errors → the two `member create` strings verbatim, exit 2,
-  transaction rolled back) and spawns the monitor pane detached
+  (substitution errors → the two `member create` primary strings, exit 2,
+  transaction rollback attempted with any failure reported) and spawns the monitor pane detached
   (`display_name="monitor"`, the `--monitor-model` value, no effort,
   `CAFLEET_DATABASE_URL` as the only forwarded environment variable;
-  `split_window` failure → application error `tmux split-window failed:
-  <detail>. Rolled back fleet creation.`, exit 1). Any failure leaves no
-  rows; a placement-insert or commit failure after a successful split also
-  kills the spawned pane (the callback records the pane id into a
-  caller-held capture the error path consults). The command is retryable
-  as-is.
+  `split_window` failure → application error with primary reason
+  `tmux split-window failed: <detail>`, exit 1). On split success the callback
+  immediately arms the CLI pane guard and returns the id. Herdr run failure
+  inside the callback is compensated backend-side before DB rollback;
+  placement-insert/commit failure after callback success rolls back and
+  closes the DB transaction first, then kills the CLI-owned pane. Cleanup
+  diagnostics follow the primary reason; `Rolled back fleet creation.` is
+  a confirmed-compensation suffix, never an unconditional failure claim.
+  If the pane id was not obtained, report unknown/unconfirmed pane cleanup
+  and never guess a pane to kill. After commit success, disarm every creation
+  guard before the existing text/JSON `emit` boundary. Full failure ordering
+  and rollback-failure reporting are in § *Creation ownership and compensation*.
+
 - **list** — `--json` (shared). Empty → `No fleets found.`; else a header plus
   one formatted row per fleet (five columns: FLEET_ID / DIRECTOR / NAME / MEMBERS
   left-padded 40 / 40 / 20 / 8, then a trailing unpadded CREATED_AT; nullable
@@ -1304,10 +1318,13 @@ is derived from the member row.
   check pane presence (`member delete` tolerates a pending
   placement). Callers re-fetch by the canonical
   member id.
-- **Deregister-with-warning** — best-effort deregister; on failure print a
-  `WARNING: rollback deregister failed …` line to **stderr**, do not raise.
-- **Rollback-register** — deregister-with-warning, then raise an application
-  error `<reason>. Rolled back registration of <new_member_id>.`.
+- **Registration compensation** — an owned registration guard attempts
+  deregistration and placement removal. Preserve the primary error's category
+  and message; report failure as `cleanup failed for member <id>: <detail>`
+  after it on stderr. A `Rolled back registration of <new_member_id>.` suffix
+  describes confirmed compensation only, never a failed or unconfirmed
+  cleanup. Explicit `finish`/`rollback` disarms the guard, so it does not
+  deregister twice; see § *Creation ownership and compensation*.
 - **Resolve-coding-agent** — explicit `--coding-agent` wins; else (flag
   omitted) inherit the Director's placement coding agent, with three
   error surfaces (Director fetch failure / not found / no placement), each
@@ -1385,24 +1402,80 @@ for the fleet's single root Director bootstrapped by `fleet create` — no
    step 6) / `{director_member_id}` (the auto-resolved Director) /
    `{coding_agent}`. An unknown-placeholder or
    malformed-brace error is a usage error (exit 2); on it,
-   **deregister-with-warning, then re-raise the original error unwrapped** —
-   preserving both the exact message and its exit code.
+   use the registration guard to deregister and remove placement, then
+   return the original usage error and exit 2, appending any cleanup failure
+   after the original cause. No pane guard exists yet.
 8. **Build the spawn argv** from the backend (the rendered prompt from step 7,
    display name, model, effort).
 9. **Split the pane** — split the window to obtain the pane id. The only
    forwarded env var is `CAFLEET_DATABASE_URL` (when set); identity travels in
-   the rendered prompt (step 7), not the environment. tmux error →
-   rollback-register, reason `tmux split-window failed: <error>`.
-10. **Patch the pane id** — record it on the placement. On exception: best-effort
-    send `/exit` (tolerating a missing pane), then rollback-register, reason
-    `placement update failed: <error>`. If the placement row vanished: same
-    best-effort `/exit`, then rollback-register, reason `placement row vanished
-    before pane-id patch`.
-11. **Emit** — attach the placement view; emit JSON (the complete result) or
-    the compact spawned-member text formatter (`format_member`, §6.4).
+   the rendered prompt (step 7), not the environment. The backend owns the
+   pane until successful return, then immediately transfers it to the CLI
+   pane guard. A split failure retains the primary reason
+   `tmux split-window failed: <error>` and compensates the registration; the
+   CLI never repeats a backend's recorded pane-cleanup attempt.
+10. **Patch the pane id** — record it on the placement. On exception, handle
+    the failed SQL, then kill the owned pane and deregister, preserving primary
+    reason `placement update failed: <error>`. If the placement vanished, use
+    the same compensation order with reason `placement row vanished before
+    pane-id patch`. Use `kill_pane(id, true)`, not `send_exit`.
+11. **Emit** — once the placement is confirmed, disarm all creation guards,
+    attach the placement view, then use the existing JSON (complete result)
+    or compact spawned-member text formatter (`format_member`, §6.4).
 
-The ladder contract: any post-register failure deregisters the member so no
-orphan row survives; the best-effort cleanup never masks the original error.
+#### Creation ownership and compensation
+
+`split_window` owns the new pane until success. Herdr arms its pane guard
+immediately after extracting the id from the split response and attempts
+`kill_pane(id, true)` if the subsequent run fails. Preserve the run error and
+id even if closing the pane fails. On success, transfer ownership immediately
+to the CLI guard; a fleet callback returns the id without another fallible
+operation between transfer and return. The broker knows no pane operations.
+
+| Failure point | Guard ownership and compensation order | DB result on successful compensation |
+|---|---|---|
+| Member registration | Broker rolls back registration; no pane guard | No added member/placement |
+| Member placeholder expansion | CLI registration guard deregisters; no pane exists | Member deregistered, placement removed |
+| Member Herdr run with known id | Backend pane guard tries kill, returns error, then CLI registration guard deregisters | Member deregistered, placement removed |
+| Member placement update error or missing row | Handle failed SQL, then CLI pane guard kills, then registration guard deregisters | Member deregistered, placement removed |
+| Fleet callback before pane creation | No pane guard; broker rolls back bootstrap | No added fleet/Director/monitor/placement |
+| Fleet callback Herdr run failure/timeout with known id | Backend guard tries kill, callback returns error, then broker rolls back bootstrap | No added bootstrap rows |
+| Fleet placement insert/commit after callback success | CLI holds transferred pane guard; broker rolls back and closes transaction, then CLI kills | No added bootstrap rows |
+| Fleet callback failure/timeout before id acquisition | Backend reports unconfirmed pane compensation, then broker rolls back; no guessed pane kill | No added bootstrap rows; pane state unconfirmed |
+
+A backend error records `PaneCleanup::Attempted { pane_id, error: Option<_> }`
+when it attempted compensation, whether the close succeeded (`None`) or failed
+(`Some`). The CLI performs remaining DB compensation without a second kill.
+`PaneCleanup::Unknown` means the split response did not establish a pane id;
+report that the id is unknown and cleanup is unconfirmed, and never close an
+inferred alternative pane. This also applies to member split failures.
+A failure before issuing a split has no created-pane ownership to compensate.
+
+Each earlier cleanup failure must still allow later compensation to run in
+the table's order. Keep the primary error first and preserve its exit category;
+append applicable secondary diagnostics on stderr:
+
+- `cleanup failed for pane <id>: <detail>`
+- `cleanup failed for member <id>: <detail>`
+- `cleanup failed for fleet <id> transaction: <detail>`
+
+Rollback failures leave DB state uncertain and must be reported explicitly.
+Do not claim success or complete rollback when compensation failed or a pane
+is unconfirmed; existing rollback-success suffixes require confirmed cleanup.
+Creation rollback does not use `send_exit`, which cannot guarantee shell/pane
+termination. Guard `finish`/`rollback` disarms ownership, even after a handled
+cleanup failure; `Drop` is only the final defense for unhandled ownership.
+This prevents double kill/deregistration. On confirmed member placement or
+successful fleet commit, disarm all creation guards before `emit`. Preserve
+normal text/JSON keys, order, nulls, and output streams; do not introduce a new
+stdout-failure exit-code or diagnostic contract. Existing `member delete`,
+notification keystrokes, and persisted-message notification failure reporting
+remain unchanged.
+
+Failure fixtures observe the ordering at the backend/CLI/transaction
+boundaries, including list → split/id → run failure → close, close and
+rollback failures, missing placement, commit failure, unknown ids, and success
+without any kill. No DB/pane atomicity is claimed for failed compensation.
 
 #### `member delete`
 
@@ -2105,9 +2178,13 @@ the deterministic escape hatch.
 `Multiplexer.split_window(*, reference: MultiplexerContext, env, command) -> str`
 takes the full reference context rather than a bare window id: tmux splits a
 *window* and uses `reference.window_id`; herdr splits a *pane* and uses
-`reference.pane_id`. The sole call site — the `member create` spawn
-orchestration (§6.3) — already holds the
-Director's `MultiplexerContext` and passes it directly.
+`reference.pane_id`. The `member create` and `fleet create` orchestrators
+(§6.3) hold the Director's `MultiplexerContext` and pass it directly. The
+backend owns a created pane until successful return; the CLI takes ownership
+then. Failed creation carries `PaneCleanup::Attempted` or
+`PaneCleanup::Unknown` metadata when applicable, per §6.3 *Creation ownership
+and compensation*. A missing/invalid id is an unconfirmed cleanup, not a
+license to infer another target.
 
 #### `TmuxMultiplexer` method surface
 
@@ -2346,7 +2423,13 @@ Each method's herdr realization:
   The argv `command` is rendered to a single properly-quoted string with
   `shlex.join` before the `pane run` because `pane run` submits one text line into
   the pane's shell (a genuine semantic difference from the tmux exec-argv path —
-  otherwise an argument containing spaces would be re-split).
+  otherwise an argument containing spaces would be re-split). Immediately
+  after extracting `<new_id>` from the split response, arm the backend pane
+  guard. A later run failure tries `kill_pane(new_id, true)` and returns the
+  run error with id and `PaneCleanup::Attempted` metadata; close failure adds
+  its diagnostic without replacing the run error. Return success only after
+  transferring pane ownership to the caller. A split failure before obtaining
+  an id returns unknown/unconfirmed compensation and never guesses a pane.
 - **`_equalize_tab_column(anchor_pane_id)`** — herdr has no single reflow command,
   so after appending a member `split_window` rebalances the right column to equal
   heights arithmetically. It reads the tab geometry of the tab containing
@@ -3198,7 +3281,8 @@ UTF-8 (no ASCII escaping).
 
 - The monitor loop emits one heartbeat line per delivered wake to **stdout**
   (`{iso} tick -> wake monitor {monitor_member_id} ({N} members)`).
-- `member create` rollback diagnostics go to **stderr**. Preserve the stream
+- Creation rollback diagnostics go to **stderr**, following the primary cause.
+  Preserve the stream
   choice (stdout vs. stderr) — it is part of the observable contract.
 
 ### 7.5 Time discipline

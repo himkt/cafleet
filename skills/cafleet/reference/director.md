@@ -6,7 +6,7 @@ Members do NOT need to read this file. Member-side flows (poll / send / ack / re
 
 ## Member Create
 
-Register a new member and spawn a coding-agent pane in the Director's own tmux window. The command auto-resolves the Director from the fleet row, atomically registers the member, creates a placement row, renders the spawn prompt, spawns the pane, and patches the placement with the real pane ID.
+Register a new member and spawn a coding-agent pane in the Director's own tmux window. The command auto-resolves the Director from the fleet row, registers the member and pending placement, renders the spawn prompt, spawns the pane, and patches its real pane ID. Failed creation attempts owned-pane cleanup and deregistration; cleanup failures or an unknown pane ID are reported without claiming complete rollback.
 
 ```bash
 cafleet member create --fleet-id <fleet-id> \
@@ -52,9 +52,9 @@ Model availability, reviewed capability classes, standard token prices, and the 
 
 The routing rule above accepts any `<provider-id>/<model-id>` for the `opencode` backend, including direct-provider forms such as `anthropic/claude-sonnet-4-6` or `openai/gpt-5.5`.
 
-**Identity substitution (`str.format`)**: the four-placeholder `str.format` render, the brace-doubling rule, and the two error strings with their hint are canonical in the cafleet [`SKILL.md`](../SKILL.md) § *Spawned-member identity via `str.format` substitution*. Director-side delta: both errors (exit 2) roll back the just-registered member.
+**Identity substitution (`str.format`)**: the four-placeholder `str.format` render, the brace-doubling rule, and the two error strings with their hint are canonical in the cafleet [`SKILL.md`](../SKILL.md) § *Spawned-member identity via `str.format` substitution*. Director-side delta: both errors (exit 2) attempt to deregister the just-registered member and report any cleanup failure after the primary error.
 
-**Spawn prompt size limit**: cafleet passes the prompt to `tmux split-window` as one positional argument, so a large inline prompt fails with `tmux command failed: command too long` (and rolls back the registration) past a few KB. Use `--file` for every templated identity block + role-file-by-path prompt; the inline positional `PROMPT` stays first-class for trivial one-line ad-hoc spawns.
+**Spawn prompt size limit**: cafleet passes the prompt to `tmux split-window` as one positional argument, so a large inline prompt fails with `tmux command failed: command too long` (and attempts deregistration, reporting any cleanup failure) past a few KB. Use `--file` for every templated identity block + role-file-by-path prompt; the inline positional `PROMPT` stays first-class for trivial one-line ad-hoc spawns.
 
 **Long or multi-line message bodies**: the same `ARG_MAX` cliff applies to `message send` / `message broadcast` — pass such bodies via `--file`, per [`reference/supervision.md`](supervision.md) § Communication Model.
 
@@ -115,7 +115,7 @@ Per-role delta slots (each consuming skill's spawn section fills these):
 
 **Backtick caveat (harness-dependent)**: some environments (including this project) run a Bash-validator hook that rejects any backtick in a `Bash` invocation. When in play, strip backticks from spawn-prompt bodies (plain text instead of code spans); path-by-reference keeps the body short enough that this is easy.
 
-**Pane discovery**: discover a member's pane via `cafleet member list` (the `pane_id` column is ground truth for all backends). Pane title: {pane_title}. The spawn is atomic — a `split-window` or placement-patch failure rolls back the registration (and exits the pane on a patch failure) — and uses `-d` so the Director keeps focus. See [`member-lifecycle.md`](../../../docs/docs/concepts/member-lifecycle.md).
+**Pane discovery**: discover a member's pane via `cafleet member list` (the `pane_id` column is ground truth for all backends). Pane title: {pane_title}. A failed spawn attempts to kill any pane whose id it owns and deregister the member, reporting cleanup failures after the primary error; a backend cleanup attempt is never repeated by the CLI. An unknown pane id leaves pane cleanup unconfirmed. Creation uses `-d` so the Director keeps focus. See [`member-lifecycle.md`](../../../docs/docs/concepts/member-lifecycle.md).
 
 ## Model selection before member create
 

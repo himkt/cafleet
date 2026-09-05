@@ -29,9 +29,14 @@ placement), the `director_member_id` back-reference, and the monitor member
 placement) in one all-or-nothing transaction — which is why
 `director_member_id` is DB-nullable despite the post-bootstrap NOT NULL
 invariant. The pane spawn happens **inside** the transaction, between the
-monitor registration and its placement insert, so any failure (spawn
-included) unwinds every row; a pane spawned before a placement-insert or
-commit failure is killed by the CLI error path. The connection holds
+monitor registration and its placement insert. A failure attempts to roll
+back every added row; rollback failure is explicitly reported rather than
+claimed as complete cancellation. A Herdr run failure is compensated by the
+backend before the callback error causes DB rollback. After a successful
+callback, placement-insert or commit failure closes the broker transaction
+before the CLI kills its owned pane. A split failure with no confirmed id
+leaves pane compensation unconfirmed. See the
+[creation failure order](cli-options.md#creation-failure-compensation). The connection holds
 SQLite's write lock across the pane-spawn subprocess call, so a concurrent
 cafleet writer on the shared database blocks for the duration of the
 multiplexer call, backstopped by the connection's `busy_timeout=5000`
