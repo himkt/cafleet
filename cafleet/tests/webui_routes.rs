@@ -1286,3 +1286,294 @@ async fn compatibility_stopped_monitor_wire_distinguishes_no_row_null_zero_and_p
         }
     }
 }
+
+mod history_limit_regressions {
+    use super::*;
+    use rusqlite::params;
+
+    const INVALID_LIMIT: &str = r#"{"detail":"limit must be an integer between 1 and 1000"}"#;
+
+    fn fixture(count: usize) -> (TempDir, String, rusqlite::Connection, i64, i64, i64) {
+        let dir = tempfile::Builder::new()
+            .prefix(".history-http-")
+            .tempdir_in(env!("CARGO_MANIFEST_DIR"))
+            .unwrap();
+        let (url, mut conn) = migrated(&dir);
+        let (fleet, sender, owner, _) = seeded_fleet(&mut conn);
+        let tx = conn.transaction().unwrap();
+        for id in 1..=count as i64 {
+            tx.execute("INSERT INTO messages(message_id,owner_member_id,from_member_id,to_member_id,type,created_at,status_state,status_timestamp,origin_message_id,text) VALUES (?1,?2,?3,?2,'unicast','2026-01-01T00:00:00Z','input_required','2026-01-02T00:00:00Z',NULL,'body')", params![id,owner,sender]).unwrap();
+        }
+        // This newer summary must be excluded before any limit is applied.
+        tx.execute("INSERT INTO messages(message_id,owner_member_id,from_member_id,to_member_id,type,created_at,status_state,status_timestamp,origin_message_id,text) VALUES (20000,?1,?2,NULL,'broadcast_summary','2026-02-01T00:00:00Z','completed','2026-02-01T00:00:00Z',20000,'summary')", params![owner,sender]).unwrap();
+        tx.commit().unwrap();
+        (dir, url, conn, fleet, sender, owner)
+    }
+
+    fn ids(body: &str) -> Vec<i64> {
+        parsed(body)["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["message_id"].as_i64().unwrap())
+            .collect()
+    }
+
+    async fn get(
+        url: &str,
+        fleet: i64,
+        member: i64,
+        endpoint: &str,
+        query: &str,
+    ) -> (StatusCode, String) {
+        call(
+            app(url),
+            "GET",
+            &format!("/api/members/{member}/{endpoint}{query}"),
+            Some(&fleet.to_string()),
+            None,
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn history_inbox_applies_each_supported_boundary_limit_to_delivery_rows() {
+        bounded_endpoint("inbox").await;
+    }
+
+    #[tokio::test]
+    async fn history_sent_applies_each_supported_boundary_limit_to_delivery_rows() {
+        bounded_endpoint("sent").await;
+    }
+
+    async fn bounded_endpoint(endpoint: &str) {
+        let (_dir, url, _conn, fleet, sender, owner) = fixture(1205);
+        let subject = if endpoint == "inbox" { owner } else { sender };
+        for limit in [1, 200, 201, 1000] {
+            let (status, body) =
+                get(&url, fleet, subject, endpoint, &format!("?limit={limit}")).await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            assert_eq!(ids(&body).len(), limit, "limit={limit}");
+            assert_eq!(
+                ids(&body),
+                (1..=1205).rev().take(limit).collect::<Vec<_>>(),
+                "limit={limit}"
+            );
+            assert_eq!(keys(&parsed(&body)), vec!["messages"]);
+        }
+    }
+
+    #[tokio::test]
+    async fn history_201_limit_handles_empty_200_201_and_large_histories() {
+        for count in [0, 200, 201, 1205] {
+            let (_dir, url, _conn, fleet, sender, owner) = fixture(count);
+            for (endpoint, subject) in [("inbox", owner), ("sent", sender)] {
+                let (status, body) = get(&url, fleet, subject, endpoint, "?limit=201").await;
+                assert_eq!(status, StatusCode::OK, "{body}");
+                assert_eq!(
+                    ids(&body).len(),
+                    count.min(201),
+                    "{endpoint}, count={count}"
+                );
+                assert_eq!(
+                    ids(&body),
+                    (1..=count as i64).rev().take(201).collect::<Vec<_>>(),
+                    "{endpoint}, count={count}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn history_omitted_limit_remains_unbounded_and_unknown_queries_are_ignored() {
+        let (_dir, url, _conn, fleet, sender, owner) = fixture(1205);
+        for (endpoint, subject) in [("inbox", owner), ("sent", sender)] {
+            for query in ["", "?unused=1&unused=2", "?LIMIT=1&other=limit%3D1"] {
+                let (status, body) = get(&url, fleet, subject, endpoint, query).await;
+                assert_eq!(status, StatusCode::OK, "{body}");
+                assert_eq!(ids(&body), (1..=1205).rev().collect::<Vec<_>>());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn history_rejects_non_ascii_non_integer_out_of_range_and_overflow_limits() {
+        let (_dir, url, _conn, fleet, sender, owner) = fixture(0);
+        for (endpoint, subject) in [("inbox", owner), ("sent", sender)] {
+            for raw in [
+                "",
+                "0",
+                "000",
+                "-1",
+                "+1",
+                "%2B1",
+                "1.0",
+                "1e2",
+                "abc",
+                "%201",
+                "1%20",
+                "%091",
+                "%EF%BC%91",
+                "%D9%A1",
+                "1001",
+                "18446744073709551616",
+                "999999999999999999999999999999999999999999",
+            ] {
+                let (status, body) =
+                    get(&url, fleet, subject, endpoint, &format!("?limit={raw}")).await;
+                assert_eq!(
+                    status,
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "{endpoint} limit={raw}: {body}"
+                );
+                assert_eq!(body, INVALID_LIMIT);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn history_rejects_duplicate_limit_keys_after_form_decoding() {
+        let (_dir, url, _conn, fleet, sender, owner) = fixture(0);
+        for (endpoint, subject) in [("inbox", owner), ("sent", sender)] {
+            for query in [
+                "?limit=1&limit=2",
+                "?limit=1&limit=1",
+                "?limit=1&%6cimit=2",
+                "?l%69mit=1&limit=2",
+                "?limit=&limit=2",
+            ] {
+                let (status, body) = get(&url, fleet, subject, endpoint, query).await;
+                assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{query}: {body}");
+                assert_eq!(body, INVALID_LIMIT);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn history_accepts_decoded_ascii_digits_and_leading_zeroes() {
+        let (_dir, url, _conn, fleet, sender, owner) = fixture(3);
+        for (endpoint, subject) in [("inbox", owner), ("sent", sender)] {
+            for query in [
+                "?limit=001",
+                "?limit=%30%30%31",
+                "?%6cimit=1",
+                "?unused=0&limit=1&unused=2",
+            ] {
+                let (status, body) = get(&url, fleet, subject, endpoint, query).await;
+                assert_eq!(status, StatusCode::OK, "{query}: {body}");
+                assert_eq!(ids(&body), vec![3]);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn history_validation_keeps_path_header_fleet_member_then_limit_order() {
+        let (_dir, url, mut conn, fleet, sender, owner) = fixture(0);
+        let (other_fleet, _, _, _) = seeded_fleet(&mut conn);
+        for (endpoint, subject) in [("inbox", owner), ("sent", sender)] {
+            let (status, body) = call(
+                app(&url),
+                "GET",
+                &format!("/api/members/not-an-id/{endpoint}?limit=0"),
+                None,
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST);
+            assert!(body.contains("Invalid URL"), "Path extraction wins: {body}");
+            for (header, expected) in [
+                (None, "X-Fleet-Id header required"),
+                (Some(""), "X-Fleet-Id header required"),
+                (Some("abc"), "X-Fleet-Id must be an integer"),
+            ] {
+                let (status, body) = call(
+                    app(&url),
+                    "GET",
+                    &format!("/api/members/{subject}/{endpoint}?limit=0"),
+                    header,
+                    None,
+                )
+                .await;
+                assert_eq!(status, StatusCode::BAD_REQUEST);
+                assert_eq!(parsed(&body), json!({"detail":expected}));
+            }
+            for (header, member, detail) in [
+                (999999, 999999, "Fleet not found"),
+                (fleet, 999999, "Member not found"),
+                (other_fleet, subject, "Member not found"),
+            ] {
+                let (status, body) = get(&url, header, member, endpoint, "?limit=0").await;
+                assert_eq!(status, StatusCode::NOT_FOUND);
+                assert_eq!(parsed(&body), json!({"detail":detail}));
+            }
+            let (status, body) = get(&url, fleet, subject, endpoint, "?limit=0").await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(body, INVALID_LIMIT);
+        }
+    }
+
+    #[tokio::test]
+    async fn history_deregistered_members_keep_scoped_history() {
+        let (_dir, url, mut conn, fleet, sender, owner) = fixture(3);
+        let historical_sender = broker::register_member_record(
+            &mut conn,
+            fleet,
+            "historical sender",
+            "",
+            &[],
+            None,
+            false,
+        )
+        .unwrap()
+        .member_id;
+        conn.execute(
+            "UPDATE messages SET from_member_id=?1 WHERE from_member_id=?2",
+            rusqlite::params![historical_sender, sender],
+        )
+        .unwrap();
+        broker::deregister_member(&mut conn, owner).unwrap();
+        broker::deregister_member(&mut conn, historical_sender).unwrap();
+        for (endpoint, subject) in [("inbox", owner), ("sent", historical_sender)] {
+            let (status, body) = get(&url, fleet, subject, endpoint, "?limit=1").await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            assert_eq!(ids(&body), vec![3]);
+        }
+    }
+
+    #[tokio::test]
+    async fn history_status_order_ties_and_exact_wire_are_preserved() {
+        let (_dir, url, conn, fleet, sender, owner) = fixture(3);
+        conn.execute("UPDATE messages SET created_at='2020-01-01T00:00:00Z',status_timestamp='2026-01-03T00:00:00Z',status_state='completed' WHERE message_id=1",[]).unwrap();
+        for (endpoint, subject) in [("inbox", owner), ("sent", sender)] {
+            let (status, body) = get(&url, fleet, subject, endpoint, "?limit=3").await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            assert_eq!(ids(&body), vec![1, 3, 2]);
+            let expected = json!({"message_id":1,"from_member_id":sender,"from_member_name":"Director","to_member_id":owner,"to_member_name":"worker","type":"unicast","status":"completed","created_at":"2020-01-01T00:00:00Z","status_timestamp":"2026-01-03T00:00:00Z","origin_message_id":null,"body":"body"});
+            let payload = parsed(&body);
+            assert_eq!(keys(&payload), vec!["messages"]);
+            assert_eq!(
+                cafleet::output::format_json(&payload["messages"][0]),
+                cafleet::output::format_json(&expected)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn history_sql_errors_remain_500_after_valid_limit() {
+        let (_dir, url, conn, fleet, sender, owner) = fixture(0);
+        conn.execute_batch("DROP TABLE messages").unwrap();
+        for (endpoint, subject) in [("inbox", owner), ("sent", sender)] {
+            let (status, body) = get(&url, fleet, subject, endpoint, "?limit=1").await;
+            assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+            assert!(
+                parsed(&body)["detail"]
+                    .as_str()
+                    .unwrap()
+                    .contains("database error")
+            );
+            let (status, body) = get(&url, fleet, subject, endpoint, "?limit=0").await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(body, INVALID_LIMIT);
+        }
+    }
+}

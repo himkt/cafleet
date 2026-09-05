@@ -611,3 +611,32 @@ mod integrity_regressions {
         );
     }
 }
+
+#[cfg(test)]
+mod step7_unbounded_compatibility {
+    use super::*;
+    use crate::broker::test_support as common;
+
+    #[test]
+    fn history_existing_two_argument_apis_remain_unbounded_beyond_1000_deliveries() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate_to_head(&mut conn).unwrap();
+        let (fleet, sender) = common::create_fleet(&mut conn, "history");
+        let owner = common::register(&mut conn, fleet, "owner", None);
+        let tx = conn.transaction().unwrap();
+        for id in 1..=1205 {
+            tx.execute("INSERT INTO messages(message_id,owner_member_id,from_member_id,to_member_id,type,created_at,status_state,status_timestamp,origin_message_id,text) VALUES (?1,?2,?3,?2,'unicast','raw-created','input_required','same-status',NULL,'body')",params![id,owner,sender]).unwrap();
+        }
+        tx.commit().unwrap();
+        for rows in [
+            list_inbox_records(&conn, owner).unwrap(),
+            list_sent_records(&conn, sender).unwrap(),
+        ] {
+            assert_eq!(rows.len(), 1205);
+            assert_eq!(
+                rows.iter().map(|row| row.message_id).collect::<Vec<_>>(),
+                (1..=1205).rev().collect::<Vec<_>>()
+            );
+        }
+    }
+}
