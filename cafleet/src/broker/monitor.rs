@@ -6,10 +6,12 @@
 
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use super::members::db_err;
+use super::records::{MonitorMember, MonitorRuntime, MonitorRuntimeView, WakeTarget};
 use crate::error::CafleetError;
+use crate::presentation;
 use crate::time::parse_lenient;
 
 const PENDING_COUNT_SUBQUERY: &str = "(SELECT COUNT(*) FROM messages \
@@ -47,24 +49,15 @@ fn heartbeat_fresh(last_tick_at: Option<&str>, tick_seconds: i64, now: DateTime<
     (now - parsed).num_seconds() <= stale_after_seconds(tick_seconds)
 }
 
-struct RuntimeRow {
-    pid: Option<i64>,
-    started_at: Option<String>,
-    last_tick_at: Option<String>,
-    tick_seconds: i64,
-    wake_interval_seconds: Option<i64>,
-    last_wake_at: Option<String>,
-    wake_requested_at: Option<String>,
-}
-
-fn runtime_row(conn: &Connection, fleet_id: i64) -> Result<Option<RuntimeRow>, CafleetError> {
+fn runtime_row(conn: &Connection, fleet_id: i64) -> Result<Option<MonitorRuntime>, CafleetError> {
     conn.query_row(
         "SELECT pid, started_at, last_tick_at, tick_seconds, wake_interval_seconds, last_wake_at, \
                 wake_requested_at \
          FROM monitor_runtime WHERE fleet_id=?1",
         [fleet_id],
         |row| {
-            Ok(RuntimeRow {
+            Ok(MonitorRuntime {
+                fleet_id,
                 pid: row.get(0)?,
                 started_at: row.get(1)?,
                 last_tick_at: row.get(2)?,
@@ -79,7 +72,7 @@ fn runtime_row(conn: &Connection, fleet_id: i64) -> Result<Option<RuntimeRow>, C
     .map_err(db_err)
 }
 
-fn runtime_live(row: &RuntimeRow, now: DateTime<Utc>) -> bool {
+fn runtime_live(row: &MonitorRuntime, now: DateTime<Utc>) -> bool {
     match row.pid {
         None => false,
         Some(pid) => {
@@ -117,6 +110,14 @@ pub fn list_fleet_wake_targets(
     conn: &Connection,
     fleet_id: i64,
 ) -> Result<Vec<Value>, CafleetError> {
+    list_fleet_wake_target_records(conn, fleet_id)
+        .map(|rows| rows.iter().map(presentation::wake_target).collect())
+}
+
+pub fn list_fleet_wake_target_records(
+    conn: &Connection,
+    fleet_id: i64,
+) -> Result<Vec<WakeTarget>, CafleetError> {
     let mut stmt = conn
         .prepare(&format!(
             "SELECT m.member_id, m.name, p.coding_agent, {PENDING_COUNT_SUBQUERY} \
@@ -131,12 +132,12 @@ pub fn list_fleet_wake_targets(
         .map_err(db_err)?;
     let rows = stmt
         .query_map([fleet_id], |row| {
-            Ok(json!({
-                "member_id": row.get::<_, i64>(0)?,
-                "name": row.get::<_, String>(1)?,
-                "coding_agent": row.get::<_, String>(2)?,
-                "pending_count": row.get::<_, i64>(3)?,
-            }))
+            Ok(WakeTarget {
+                member_id: row.get(0)?,
+                name: row.get(1)?,
+                coding_agent: row.get(2)?,
+                pending_count: row.get(3)?,
+            })
         })
         .map_err(db_err)?
         .collect::<Result<Vec<_>, _>>()
@@ -149,6 +150,13 @@ pub fn list_fleet_wake_targets(
 /// records its Director with a placement, so a missing row is a loud error,
 /// not a skip.
 pub fn fleet_wake_director(conn: &Connection, fleet_id: i64) -> Result<Value, CafleetError> {
+    fleet_wake_director_record(conn, fleet_id).map(|rows| presentation::wake_target(&rows))
+}
+
+pub fn fleet_wake_director_record(
+    conn: &Connection,
+    fleet_id: i64,
+) -> Result<WakeTarget, CafleetError> {
     conn.query_row(
         &format!(
             "SELECT m.member_id, m.name, p.coding_agent, {PENDING_COUNT_SUBQUERY} \
@@ -159,12 +167,12 @@ pub fn fleet_wake_director(conn: &Connection, fleet_id: i64) -> Result<Value, Ca
         ),
         [fleet_id],
         |row| {
-            Ok(json!({
-                "member_id": row.get::<_, i64>(0)?,
-                "name": row.get::<_, String>(1)?,
-                "coding_agent": row.get::<_, String>(2)?,
-                "pending_count": row.get::<_, i64>(3)?,
-            }))
+            Ok(WakeTarget {
+                member_id: row.get(0)?,
+                name: row.get(1)?,
+                coding_agent: row.get(2)?,
+                pending_count: row.get(3)?,
+            })
         },
     )
     .optional()
@@ -300,22 +308,19 @@ pub fn clear_monitor_runtime(
     Ok(())
 }
 
+pub fn read_monitor_runtime_record(
+    conn: &Connection,
+    fleet_id: i64,
+) -> Result<Option<MonitorRuntime>, CafleetError> {
+    runtime_row(conn, fleet_id)
+}
+
 pub fn read_monitor_runtime(
     conn: &Connection,
     fleet_id: i64,
 ) -> Result<Option<Value>, CafleetError> {
-    Ok(runtime_row(conn, fleet_id)?.map(|row| {
-        json!({
-            "fleet_id": fleet_id,
-            "pid": row.pid,
-            "started_at": row.started_at,
-            "last_tick_at": row.last_tick_at,
-            "tick_seconds": row.tick_seconds,
-            "wake_interval_seconds": row.wake_interval_seconds,
-            "last_wake_at": row.last_wake_at,
-            "wake_requested_at": row.wake_requested_at,
-        })
-    }))
+    read_monitor_runtime_record(conn, fleet_id)
+        .map(|row| row.as_ref().map(presentation::monitor_runtime))
 }
 
 pub fn monitor_is_live(
@@ -333,44 +338,40 @@ pub fn monitor_runtime_payload(
     fleet_id: i64,
     now: DateTime<Utc>,
 ) -> Result<Value, CafleetError> {
+    monitor_runtime_view(conn, fleet_id, now).map(|row| presentation::monitor_runtime_view(&row))
+}
+
+pub fn monitor_runtime_view(
+    conn: &Connection,
+    fleet_id: i64,
+    now: DateTime<Utc>,
+) -> Result<MonitorRuntimeView, CafleetError> {
     let row = runtime_row(conn, fleet_id)?;
-    let (running, tick_seconds, wake_interval_seconds) = match &row {
-        None => (false, Value::Null, Value::Null),
-        Some(row) => (
-            runtime_live(row, now),
-            json!(row.tick_seconds),
-            json!(row.wake_interval_seconds),
-        ),
+    let mut view = MonitorRuntimeView {
+        running: false,
+        pid: None,
+        tick_seconds: row.as_ref().map(|row| row.tick_seconds),
+        wake_interval_seconds: row.as_ref().and_then(|row| row.wake_interval_seconds),
+        last_tick_at: None,
+        last_tick_age_seconds: None,
+        started_at: None,
+        last_wake_at: None,
+        last_wake_age_seconds: None,
     };
-    if !running {
-        return Ok(json!({
-            "running": false,
-            "pid": Value::Null,
-            "tick_seconds": tick_seconds,
-            "wake_interval_seconds": wake_interval_seconds,
-            "last_tick_at": Value::Null,
-            "last_tick_age_seconds": Value::Null,
-            "started_at": Value::Null,
-            "last_wake_at": Value::Null,
-            "last_wake_age_seconds": Value::Null,
-        }));
+    if let Some(row) = row.filter(|row| runtime_live(row, now)) {
+        let age = |ts: Option<&str>| -> Option<i64> {
+            let parsed = parse_lenient(ts?).ok()?;
+            Some((now - parsed).num_seconds())
+        };
+        view.running = true;
+        view.pid = row.pid;
+        view.last_tick_age_seconds = age(row.last_tick_at.as_deref());
+        view.last_wake_age_seconds = age(row.last_wake_at.as_deref());
+        view.last_tick_at = row.last_tick_at;
+        view.started_at = row.started_at;
+        view.last_wake_at = row.last_wake_at;
     }
-    let row = row.expect("a running slot has a row");
-    let age = |ts: Option<&str>| -> Option<i64> {
-        let parsed = parse_lenient(ts?).ok()?;
-        Some((now - parsed).num_seconds())
-    };
-    Ok(json!({
-        "running": true,
-        "pid": row.pid,
-        "tick_seconds": row.tick_seconds,
-        "wake_interval_seconds": row.wake_interval_seconds,
-        "last_tick_at": row.last_tick_at,
-        "last_tick_age_seconds": age(row.last_tick_at.as_deref()),
-        "started_at": row.started_at,
-        "last_wake_at": row.last_wake_at,
-        "last_wake_age_seconds": age(row.last_wake_at.as_deref()),
-    }))
+    Ok(view)
 }
 
 /// The per-member rows of `GET /api/monitor` (SPEC §6.8): one dict per
@@ -381,6 +382,15 @@ pub fn monitor_members_payload(
     fleet_id: i64,
     now: DateTime<Utc>,
 ) -> Result<Vec<Value>, CafleetError> {
+    monitor_member_records(conn, fleet_id, now)
+        .map(|rows| rows.iter().map(presentation::monitor_member).collect())
+}
+
+pub fn monitor_member_records(
+    conn: &Connection,
+    fleet_id: i64,
+    now: DateTime<Utc>,
+) -> Result<Vec<MonitorMember>, CafleetError> {
     let age = |ts: Option<&str>| -> Option<i64> {
         let parsed = parse_lenient(ts?).ok()?;
         Some((now - parsed).num_seconds())
@@ -412,15 +422,15 @@ pub fn monitor_members_payload(
         .map_err(db_err)?;
     Ok(rows
         .into_iter()
-        .map(|(member_id, name, pending_count, oldest_pending_ts)| {
-            json!({
-                "member_id": member_id,
-                "name": name,
-                "pending_count": pending_count,
-                "oldest_pending_ts": oldest_pending_ts,
-                "oldest_pending_age_seconds": age(oldest_pending_ts.as_deref()),
-            })
-        })
+        .map(
+            |(member_id, name, pending_count, oldest_pending_ts)| MonitorMember {
+                member_id,
+                name,
+                pending_count,
+                oldest_pending_age_seconds: age(oldest_pending_ts.as_deref()),
+                oldest_pending_ts,
+            },
+        )
         .collect())
 }
 

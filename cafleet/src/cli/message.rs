@@ -6,11 +6,14 @@
 use clap::{Args, Subcommand};
 use serde_json::Value;
 
-use super::helpers::{CliNotifier, connect, resolve_body};
+use super::helpers::{connect, resolve_body};
 use crate::broker;
+use crate::broker::records::NotificationAttempt;
 use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::output::{format_indexed_list, format_message, truncate_message_text};
+use crate::presentation;
+use crate::runtime::RuntimeNotifier;
 
 #[derive(Args)]
 #[group(required = true, multiple = false)]
@@ -105,8 +108,8 @@ pub fn run(settings: &Settings, command: MessageCommand) -> Result<(), CafleetEr
         } => {
             let text = resolve_body(body.text.as_deref(), body.file.as_deref(), "--file")?;
             let mut conn = connect(settings)?;
-            let notifier = CliNotifier::new(settings);
-            let outcome = broker::send_message(
+            let notifier = RuntimeNotifier::new(settings);
+            let outcome = broker::send_message_record(
                 &mut conn,
                 &notifier,
                 settings.max_text_len,
@@ -114,10 +117,8 @@ pub fn run(settings: &Settings, command: MessageCommand) -> Result<(), CafleetEr
                 &to_member_id.to_string(),
                 &text,
             )?;
-            if let Some(raw) = outcome.notification_error {
-                let message_id = outcome.payload["message"]["message_id"]
-                    .as_i64()
-                    .expect("the send payload carries the message id");
+            if let NotificationAttempt::Failed { error: raw } = &outcome.notification {
+                let message_id = outcome.message.message_id;
                 return Err(CafleetError::App(format!(
                     "Message {message_id} was persisted, but pane notification failed: {raw}. \
                      Do not resend this message. Recover the recipient pane, then run \
@@ -125,9 +126,12 @@ pub fn run(settings: &Settings, command: MessageCommand) -> Result<(), CafleetEr
                      'cafleet message poll {to_member_id}'."
                 )));
             }
-            emit_result(settings, outcome.payload, json, |result| {
-                format!("Message sent.\n{}", format_message(result))
-            });
+            emit_result(
+                settings,
+                presentation::send_outcome(&outcome),
+                json,
+                |result| format!("Message sent.\n{}", format_message(result)),
+            );
             Ok(())
         }
         MessageCommand::Broadcast {
@@ -137,28 +141,33 @@ pub fn run(settings: &Settings, command: MessageCommand) -> Result<(), CafleetEr
         } => {
             let text = resolve_body(body.text.as_deref(), body.file.as_deref(), "--file")?;
             let mut conn = connect(settings)?;
-            let notifier = CliNotifier::new(settings);
-            let result = broker::broadcast_message(
+            let notifier = RuntimeNotifier::new(settings);
+            let result = broker::broadcast_message_record(
                 &mut conn,
                 &notifier,
                 settings.max_text_len,
                 from_member_id,
                 &text,
             )?;
-            emit_result(settings, Value::Array(result), json, |result| {
-                let envelope = &result[0];
-                format!(
-                    "broadcast id={} recipients={} delivered={}",
-                    envelope["message"]["message_id"],
-                    envelope["recipients"],
-                    envelope["delivered"],
-                )
-            });
+            emit_result(
+                settings,
+                Value::Array(vec![presentation::broadcast_outcome(&result)]),
+                json,
+                |_| {
+                    format!(
+                        "broadcast id={} recipients={} delivered={}",
+                        result.message.message_id, result.recipients, result.delivered,
+                    )
+                },
+            );
             Ok(())
         }
         MessageCommand::Poll { member_id, json } => {
             let conn = connect(settings)?;
-            let result = broker::poll_messages(&conn, member_id)?;
+            let result = broker::poll_message_records(&conn, member_id)?
+                .iter()
+                .map(presentation::message)
+                .collect();
             emit_result(settings, Value::Array(result), json, |result| {
                 let items = result.as_array().expect("poll returns a list");
                 format_indexed_list(items, format_message, "No messages found.")
@@ -167,7 +176,8 @@ pub fn run(settings: &Settings, command: MessageCommand) -> Result<(), CafleetEr
         }
         MessageCommand::Ack { message_id, json } => {
             let mut conn = connect(settings)?;
-            let result = broker::ack_message(&mut conn, message_id)?;
+            let result =
+                presentation::message_envelope(&broker::ack_message_record(&mut conn, message_id)?);
             emit_result(settings, result, json, |result| {
                 format!("Message acknowledged.\n{}", format_message(result))
             });
@@ -175,7 +185,8 @@ pub fn run(settings: &Settings, command: MessageCommand) -> Result<(), CafleetEr
         }
         MessageCommand::Show { message_id, json } => {
             let conn = connect(settings)?;
-            let result = broker::get_message(&conn, message_id)?;
+            let result =
+                presentation::message_envelope(&broker::get_message_record(&conn, message_id)?);
             emit_result(settings, result, json, format_message);
             Ok(())
         }

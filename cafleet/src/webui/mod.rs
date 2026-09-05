@@ -16,10 +16,10 @@ use rusqlite::Connection;
 use serde_json::{Value, json};
 
 use crate::broker;
-use crate::cli::helpers::CliNotifier;
 use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::output::format_json;
+use crate::runtime::RuntimeNotifier;
 use crate::time::{format_utc, now_utc};
 
 const RESERVED_PREFIXES: [&str; 2] = ["ui", "api"];
@@ -109,7 +109,7 @@ fn fleet_header(headers: &HeaderMap) -> Result<i64, Box<Response>> {
 }
 
 fn require_fleet(conn: &Connection, fleet_id: i64) -> Result<(), Box<Response>> {
-    match broker::get_fleet(conn, fleet_id) {
+    match broker::fleets::fetch_fleet(conn, fleet_id) {
         Ok(Some(_)) => Ok(()),
         Ok(None) => Err(Box::new(detail(StatusCode::NOT_FOUND, "Fleet not found"))),
         Err(error) => Err(Box::new(broker_500(error))),
@@ -118,46 +118,56 @@ fn require_fleet(conn: &Connection, fleet_id: i64) -> Result<(), Box<Response>> 
 
 /// The `FormattedMessage` projection: names resolved by one bulk lookup with
 /// direct keyed access — a missing id is a hard 500, never a silent fallback.
-fn formatted_messages(conn: &Connection, rows: &[Value]) -> Result<Vec<Value>, CafleetError> {
-    let mut ids: BTreeSet<i64> = BTreeSet::new();
+fn formatted_message_records(
+    conn: &Connection,
+    rows: &[broker::records::MessageRecord],
+) -> Result<Vec<Value>, CafleetError> {
+    let mut ids = BTreeSet::new();
     for row in rows {
-        ids.insert(
-            row["from_member_id"]
-                .as_i64()
-                .expect("rows carry the sender"),
-        );
-        if let Some(to) = row["to_member_id"].as_i64() {
-            ids.insert(to);
-        }
+        ids.insert(row.from_member_id);
+        ids.extend(row.to_member_id);
     }
-    let ids: Vec<i64> = ids.into_iter().collect();
-    let names = broker::get_member_names(conn, &ids)?;
-    let name_of = |id: i64| -> Value {
-        json!(
-            names
-                .get(&id)
-                .unwrap_or_else(|| panic!("member {id} has a name row"))
-        )
+    let names = broker::get_member_names(conn, &ids.into_iter().collect::<Vec<_>>())?;
+    let name_of = |id: i64| {
+        names
+            .get(&id)
+            .ok_or_else(|| CafleetError::InvalidStoredValue {
+                field: "message member name".into(),
+                value: id.to_string(),
+            })
     };
-    Ok(rows
+    rows.iter()
+        .map(|row| {
+            let from_name = name_of(row.from_member_id)?;
+            let to_name = row.to_member_id.map(name_of).transpose()?;
+            Ok(json!({
+                "message_id":row.message_id,"from_member_id":row.from_member_id,
+                "from_member_name":from_name,"to_member_id":row.to_member_id,
+                "to_member_name":to_name,"type":row.kind.as_str(),"status":row.status.as_str(),
+                "created_at":row.created_at,"status_timestamp":row.status_timestamp,
+                "origin_message_id":row.origin_message_id,"body":row.text,
+            }))
+        })
+        .collect()
+}
+
+// Temporary test compatibility; production consumers pass typed records.
+#[cfg(test)]
+fn formatted_messages(conn: &Connection, rows: &[Value]) -> Result<Vec<Value>, CafleetError> {
+    let records = rows
         .iter()
         .map(|row| {
-            let to_name = row["to_member_id"].as_i64().map(name_of);
-            json!({
-                "message_id": row["message_id"],
-                "from_member_id": row["from_member_id"],
-                "from_member_name": name_of(row["from_member_id"].as_i64().expect("sender id")),
-                "to_member_id": row["to_member_id"],
-                "to_member_name": to_name,
-                "type": row["type"],
-                "status": row["status_state"],
-                "created_at": row["created_at"],
-                "status_timestamp": row["status_timestamp"],
-                "origin_message_id": row["origin_message_id"],
-                "body": row["text"],
-            })
+            let id =
+                row["message_id"]
+                    .as_i64()
+                    .ok_or_else(|| CafleetError::InvalidStoredValue {
+                        field: "message_id".into(),
+                        value: row["message_id"].to_string(),
+                    })?;
+            broker::get_message_record(conn, id)
         })
-        .collect())
+        .collect::<Result<Vec<_>, _>>()?;
+    formatted_message_records(conn, &records)
 }
 
 async fn list_fleets(State(state): State<AppState>) -> Response {
@@ -177,8 +187,8 @@ async fn roster(State(state): State<AppState>, headers: HeaderMap) -> Response {
         if let Err(response) = require_fleet(conn, fleet_id) {
             return *response;
         }
-        match broker::list_roster(conn, fleet_id, true) {
-            Ok(members) => json_response(StatusCode::OK, &json!({"members": members})),
+        match broker::list_roster_records(conn, fleet_id, true) {
+            Ok(members) => json_response(StatusCode::OK, &json!({"members": members.iter().map(crate::presentation::roster_member).collect::<Vec<_>>()})),
             Err(error) => broker_500(error),
         }
     })
@@ -195,12 +205,15 @@ async fn monitor(State(state): State<AppState>, headers: HeaderMap) -> Response 
             return *response;
         }
         let now = now_utc();
-        let mut payload = match broker::monitor_runtime_payload(conn, fleet_id, now) {
-            Ok(payload) => payload,
+        let mut payload = match broker::monitor_runtime_view(conn, fleet_id, now) {
+            Ok(payload) => crate::presentation::monitor_runtime_view(&payload),
             Err(error) => return broker_500(error),
         };
-        let members = match broker::monitor_members_payload(conn, fleet_id, now) {
-            Ok(members) => members,
+        let members = match broker::monitor_member_records(conn, fleet_id, now) {
+            Ok(members) => members
+                .iter()
+                .map(crate::presentation::monitor_member)
+                .collect(),
             Err(error) => return broker_500(error),
         };
         payload["members"] = Value::Array(members);
@@ -298,15 +311,15 @@ async fn member_messages(state: AppState, fleet_id: i64, member_id: i64, sent: b
             Err(error) => return broker_500(error),
         }
         let rows = if sent {
-            broker::list_sent(conn, member_id)
+            broker::list_sent_records(conn, member_id)
         } else {
-            broker::list_inbox(conn, member_id)
+            broker::list_inbox_records(conn, member_id)
         };
         let rows = match rows {
             Ok(rows) => rows,
             Err(error) => return broker_500(error),
         };
-        match formatted_messages(conn, &rows) {
+        match formatted_message_records(conn, &rows) {
             Ok(messages) => json_response(StatusCode::OK, &json!({"messages": messages})),
             Err(error) => broker_500(error),
         }
@@ -345,11 +358,11 @@ async fn timeline(State(state): State<AppState>, headers: HeaderMap) -> Response
         if let Err(response) = require_fleet(conn, fleet_id) {
             return *response;
         }
-        let rows = match broker::list_timeline(conn, fleet_id, 200) {
+        let rows = match broker::list_timeline_records(conn, fleet_id, 200) {
             Ok(rows) => rows,
             Err(error) => return broker_500(error),
         };
-        match formatted_messages(conn, &rows) {
+        match formatted_message_records(conn, &rows) {
             Ok(messages) => json_response(StatusCode::OK, &json!({"messages": messages})),
             Err(error) => broker_500(error),
         }
@@ -400,7 +413,7 @@ async fn send(State(state): State<AppState>, headers: HeaderMap, body: Bytes) ->
         if let Err(response) = require_fleet(conn, fleet_id) {
             return *response;
         }
-        match broker::get_member(conn, from, fleet_id) {
+        match broker::get_member_record(conn, from, fleet_id) {
             Ok(Some(_)) => {}
             Ok(None) => return detail(StatusCode::BAD_REQUEST, "from_member not in fleet"),
             Err(error) => return broker_500(error),
@@ -409,22 +422,27 @@ async fn send(State(state): State<AppState>, headers: HeaderMap, body: Bytes) ->
             Ok(settings) => settings,
             Err(error) => return broker_500(error),
         };
-        let notifier = CliNotifier::new(&settings);
+        let notifier = RuntimeNotifier::new(&settings);
         let message = match recipient {
             SendRecipient::Broadcast => {
-                match broker::broadcast_message(conn, &notifier, settings.max_text_len, from, &text)
-                {
-                    Ok(result) => result[0]["message"].clone(),
+                match broker::broadcast_message_record(
+                    conn,
+                    &notifier,
+                    settings.max_text_len,
+                    from,
+                    &text,
+                ) {
+                    Ok(result) => result.message,
                     Err(error) => return broker_500(error),
                 }
             }
             SendRecipient::Member(to) => {
-                match broker::get_member(conn, to, fleet_id) {
+                match broker::get_member_record(conn, to, fleet_id) {
                     Ok(Some(_)) => {}
                     Ok(None) => return detail(StatusCode::NOT_FOUND, "Member not found"),
                     Err(error) => return broker_500(error),
                 }
-                match broker::send_message(
+                match broker::send_message_record(
                     conn,
                     &notifier,
                     settings.max_text_len,
@@ -434,7 +452,7 @@ async fn send(State(state): State<AppState>, headers: HeaderMap, body: Bytes) ->
                 ) {
                     // Persistence alone decides the response; the outcome's
                     // notification_error is intentionally ignored (SPEC §6.8).
-                    Ok(outcome) => outcome.payload["message"].clone(),
+                    Ok(outcome) => outcome.message,
                     Err(error) => return broker_500(error),
                 }
             }
@@ -442,8 +460,8 @@ async fn send(State(state): State<AppState>, headers: HeaderMap, body: Bytes) ->
         json_response(
             StatusCode::OK,
             &json!({
-                "message_id": message["message_id"],
-                "status": message["status_state"],
+                "message_id": message.message_id,
+                "status": message.status.as_str(),
             }),
         )
     })

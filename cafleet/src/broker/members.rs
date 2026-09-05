@@ -8,7 +8,11 @@ use std::collections::BTreeMap;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde_json::{Value, json};
 
+use super::records::{
+    MemberActivity, MemberKind, MemberRecord, MemberStatus, Placement, RegisteredMember,
+};
 use crate::error::CafleetError;
+use crate::presentation;
 use crate::time::{format_utc, now_utc, parse_lenient};
 
 #[derive(Debug, Clone)]
@@ -21,6 +25,11 @@ pub struct NewPlacement {
 }
 
 pub(crate) fn db_err(e: rusqlite::Error) -> CafleetError {
+    if let rusqlite::Error::FromSqlConversionFailure(_, _, source) = &e
+        && let Some(error) = source.downcast_ref::<CafleetError>()
+    {
+        return error.clone();
+    }
     CafleetError::App(format!("database error: {e}"))
 }
 
@@ -40,43 +49,30 @@ pub(crate) fn member_card(
 /// The three-value derivation over the SQL-supplied `is_director` flag plus
 /// the member card's `$.cafleet.kind` marker (SPEC §5.4); `director` wins, so
 /// a root Director can never read as `monitor` regardless of its card.
-pub(crate) fn derive_member_kind(is_director: bool, is_monitor: bool) -> &'static str {
+fn member_kind(is_director: bool, is_monitor: bool) -> MemberKind {
     if is_director {
-        "director"
+        MemberKind::Director
     } else if is_monitor {
-        "monitor"
+        MemberKind::Monitor
     } else {
-        "member"
+        MemberKind::Member
     }
 }
 
 const IS_MONITOR_COLUMN: &str =
     "COALESCE(json_extract(m.member_card_json, '$.cafleet.kind')='monitor', 0)";
 
+#[cfg(test)]
 pub(crate) fn card_skills(card_json: &str) -> Value {
-    let card: Value = serde_json::from_str(card_json).unwrap_or(Value::Null);
-    match card.get("skills") {
-        Some(Value::Array(skills)) => Value::Array(skills.clone()),
-        _ => json!([]),
-    }
+    Value::Array(skills_from_card(card_json))
 }
 
-pub(crate) fn placement_value(
-    backend: &str,
-    mux_session: &str,
-    mux_window_id: &str,
-    mux_pane_id: Option<&str>,
-    coding_agent: &str,
-    created_at: &str,
-) -> Value {
-    json!({
-        "backend": backend,
-        "mux_session": mux_session,
-        "mux_window_id": mux_window_id,
-        "mux_pane_id": mux_pane_id,
-        "coding_agent": coding_agent,
-        "created_at": created_at,
-    })
+fn skills_from_card(card_json: &str) -> Vec<Value> {
+    let card: Value = serde_json::from_str(card_json).unwrap_or(Value::Null);
+    match card.get("skills") {
+        Some(Value::Array(skills)) => skills.clone(),
+        _ => Vec::new(),
+    }
 }
 
 pub fn register_member(
@@ -88,6 +84,27 @@ pub fn register_member(
     placement: Option<&NewPlacement>,
     monitor: bool,
 ) -> Result<Value, CafleetError> {
+    register_member_record(
+        conn,
+        fleet_id,
+        name,
+        description,
+        skills,
+        placement,
+        monitor,
+    )
+    .map(|row| presentation::registered_member(&row))
+}
+
+pub fn register_member_record(
+    conn: &mut Connection,
+    fleet_id: i64,
+    name: &str,
+    description: &str,
+    skills: &[Value],
+    placement: Option<&NewPlacement>,
+    monitor: bool,
+) -> Result<RegisteredMember, CafleetError> {
     let fleet = super::fleets::fetch_fleet(conn, fleet_id)?
         .ok_or_else(|| CafleetError::Usage(format!("Fleet '{fleet_id}' not found.")))?;
     if fleet.deleted_at.is_some() {
@@ -164,7 +181,11 @@ pub fn register_member(
         .map_err(db_err)?;
     }
     tx.commit().map_err(db_err)?;
-    Ok(json!({"member_id": member_id, "name": name, "registered_at": now}))
+    Ok(RegisteredMember {
+        member_id,
+        name: name.into(),
+        registered_at: now,
+    })
 }
 
 pub fn get_member(
@@ -172,6 +193,14 @@ pub fn get_member(
     member_id: i64,
     fleet_id: i64,
 ) -> Result<Option<Value>, CafleetError> {
+    get_member_record(conn, member_id, fleet_id).map(|row| row.as_ref().map(presentation::member))
+}
+
+pub fn get_member_record(
+    conn: &Connection,
+    member_id: i64,
+    fleet_id: i64,
+) -> Result<Option<MemberRecord>, CafleetError> {
     let row = conn
         .query_row(
             &format!(
@@ -185,72 +214,23 @@ pub fn get_member(
             ),
             params![member_id, fleet_id],
             |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, bool>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, Option<String>>(7)?,
-                    row.get::<_, Option<String>>(8)?,
-                    row.get::<_, Option<String>>(9)?,
-                    row.get::<_, Option<String>>(10)?,
-                    row.get::<_, Option<String>>(11)?,
-                    row.get::<_, bool>(12)?,
-                ))
+                let backend: Option<String> = row.get(6)?;
+                Ok(MemberRecord {
+                    member_id,
+                    fleet_id,
+                    name: row.get(0)?,
+                    description: row.get(1)?,
+                    status: row.get(2)?,
+                    registered_at: row.get(3)?,
+                    kind: member_kind(row.get(5)?, row.get(12)?),
+                    skills: skills_from_card(&row.get::<_, String>(4)?),
+                    placement: backend.map(|_| Placement::from_row(row, 6)).transpose()?,
+                })
             },
         )
         .optional()
         .map_err(db_err)?;
-    Ok(row.map(
-        |(
-            name,
-            description,
-            status,
-            registered_at,
-            card,
-            is_director,
-            backend,
-            session,
-            window,
-            pane,
-            agent,
-            created,
-            is_monitor,
-        )| {
-            let placement = match backend {
-                None => Value::Null,
-                Some(backend) => placement_value(
-                    &backend,
-                    session
-                        .as_deref()
-                        .expect("placement row carries mux_session"),
-                    window
-                        .as_deref()
-                        .expect("placement row carries mux_window_id"),
-                    pane.as_deref(),
-                    agent
-                        .as_deref()
-                        .expect("placement row carries coding_agent"),
-                    created
-                        .as_deref()
-                        .expect("placement row carries created_at"),
-                ),
-            };
-            json!({
-                "member_id": member_id,
-                "name": name,
-                "description": description,
-                "status": status,
-                "registered_at": registered_at,
-                "kind": derive_member_kind(is_director, is_monitor),
-                "skills": card_skills(&card),
-                "placement": placement,
-            })
-        },
-    ))
+    Ok(row)
 }
 
 /// The fleet's single `status='active'` member whose card carries the
@@ -324,6 +304,15 @@ pub fn update_placement_pane_id(
     member_id: i64,
     pane_id: &str,
 ) -> Result<Option<Value>, CafleetError> {
+    update_placement_record(conn, member_id, pane_id)
+        .map(|row| row.as_ref().map(presentation::placement))
+}
+
+pub fn update_placement_record(
+    conn: &mut Connection,
+    member_id: i64,
+    pane_id: &str,
+) -> Result<Option<Placement>, CafleetError> {
     let changed = conn
         .execute(
             "UPDATE member_placements SET mux_pane_id=?1 WHERE member_id=?2",
@@ -337,16 +326,7 @@ pub fn update_placement_pane_id(
         "SELECT backend, mux_session, mux_window_id, mux_pane_id, coding_agent, created_at \
          FROM member_placements WHERE member_id=?1",
         [member_id],
-        |row| {
-            Ok(placement_value(
-                &row.get::<_, String>(0)?,
-                &row.get::<_, String>(1)?,
-                &row.get::<_, String>(2)?,
-                row.get::<_, Option<String>>(3)?.as_deref(),
-                &row.get::<_, String>(4)?,
-                &row.get::<_, String>(5)?,
-            ))
-        },
+        |row| Placement::from_row(row, 0),
     )
     .optional()
     .map_err(db_err)
@@ -386,25 +366,11 @@ pub fn get_member_names(
     Ok(names)
 }
 
-struct RosterRow {
-    member_id: i64,
-    name: String,
-    status: String,
-    is_director: bool,
-    is_monitor: bool,
-    placement: Option<Value>,
-    last_sent: Option<String>,
-    last_recv: Option<String>,
-    last_ack: Option<String>,
-    description: String,
-    registered_at: String,
-}
-
 fn roster_rows(
     conn: &Connection,
     fleet_id: i64,
     include_message_holders: bool,
-) -> Result<Vec<RosterRow>, CafleetError> {
+) -> Result<Vec<MemberActivity>, CafleetError> {
     let mut stmt = conn
         .prepare(&format!(
             "SELECT m.member_id, m.name, m.status, \
@@ -418,7 +384,7 @@ fn roster_rows(
                     (SELECT MAX(status_timestamp) FROM messages \
                      WHERE owner_member_id=m.member_id AND type='unicast' \
                        AND status_state='completed'), \
-                    m.description, m.registered_at, {IS_MONITOR_COLUMN} \
+                    m.description, m.registered_at, {IS_MONITOR_COLUMN}, m.member_card_json \
              FROM members m LEFT JOIN member_placements p ON p.member_id=m.member_id \
              WHERE m.fleet_id=?1 AND (m.status='active' OR (?2 AND EXISTS( \
                    SELECT 1 FROM messages WHERE owner_member_id=m.member_id))) \
@@ -428,29 +394,22 @@ fn roster_rows(
     let rows = stmt
         .query_map(params![fleet_id, include_message_holders], |row| {
             let backend: Option<String> = row.get(4)?;
-            let placement = match backend {
-                None => None,
-                Some(backend) => Some(placement_value(
-                    &backend,
-                    &row.get::<_, String>(5)?,
-                    &row.get::<_, String>(6)?,
-                    row.get::<_, Option<String>>(7)?.as_deref(),
-                    &row.get::<_, String>(8)?,
-                    &row.get::<_, String>(9)?,
-                )),
-            };
-            Ok(RosterRow {
-                member_id: row.get(0)?,
-                name: row.get(1)?,
-                status: row.get(2)?,
-                is_director: row.get(3)?,
-                is_monitor: row.get(15)?,
-                placement,
+            Ok(MemberActivity {
+                member: MemberRecord {
+                    member_id: row.get(0)?,
+                    fleet_id,
+                    name: row.get(1)?,
+                    status: row.get::<_, MemberStatus>(2)?,
+                    kind: member_kind(row.get(3)?, row.get(15)?),
+                    placement: backend.map(|_| Placement::from_row(row, 4)).transpose()?,
+                    description: row.get(13)?,
+                    registered_at: row.get(14)?,
+                    skills: skills_from_card(&row.get::<_, String>(16)?),
+                },
                 last_sent: row.get(10)?,
                 last_recv: row.get(11)?,
                 last_ack: row.get(12)?,
-                description: row.get(13)?,
-                registered_at: row.get(14)?,
+                idle: None,
             })
         })
         .map_err(db_err)?
@@ -459,7 +418,7 @@ fn roster_rows(
     Ok(rows)
 }
 
-fn idle_seconds(row: &RosterRow, now: chrono::DateTime<chrono::Utc>) -> Option<i64> {
+fn idle_seconds(row: &MemberActivity, now: chrono::DateTime<chrono::Utc>) -> Option<i64> {
     let latest = [&row.last_sent, &row.last_recv, &row.last_ack]
         .into_iter()
         .flatten()
@@ -468,23 +427,33 @@ fn idle_seconds(row: &RosterRow, now: chrono::DateTime<chrono::Utc>) -> Option<i
     Some((now - parsed).num_seconds())
 }
 
-pub fn list_members(conn: &Connection, fleet_id: i64) -> Result<Vec<Value>, CafleetError> {
+pub fn list_member_records(
+    conn: &Connection,
+    fleet_id: i64,
+) -> Result<Vec<MemberActivity>, CafleetError> {
     let now = now_utc();
-    Ok(roster_rows(conn, fleet_id, false)?
+    let mut rows = roster_rows(conn, fleet_id, false)?;
+    for row in &mut rows {
+        row.idle = idle_seconds(row, now);
+    }
+    Ok(rows)
+}
+
+pub fn list_members(conn: &Connection, fleet_id: i64) -> Result<Vec<Value>, CafleetError> {
+    Ok(list_member_records(conn, fleet_id)?
+        .iter()
+        .map(presentation::member_activity)
+        .collect())
+}
+
+pub fn list_roster_records(
+    conn: &Connection,
+    fleet_id: i64,
+    include_message_holders: bool,
+) -> Result<Vec<MemberRecord>, CafleetError> {
+    Ok(roster_rows(conn, fleet_id, include_message_holders)?
         .into_iter()
-        .map(|row| {
-            let idle = idle_seconds(&row, now);
-            json!({
-                "member_id": row.member_id,
-                "name": row.name,
-                "kind": derive_member_kind(row.is_director, row.is_monitor),
-                "placement": row.placement.clone().unwrap_or(Value::Null),
-                "last_sent": row.last_sent,
-                "last_recv": row.last_recv,
-                "last_ack": row.last_ack,
-                "idle": idle,
-            })
-        })
+        .map(|row| row.member)
         .collect())
 }
 
@@ -493,20 +462,12 @@ pub fn list_roster(
     fleet_id: i64,
     include_message_holders: bool,
 ) -> Result<Vec<Value>, CafleetError> {
-    Ok(roster_rows(conn, fleet_id, include_message_holders)?
-        .into_iter()
-        .map(|row| {
-            json!({
-                "member_id": row.member_id,
-                "name": row.name,
-                "description": row.description,
-                "status": row.status,
-                "registered_at": row.registered_at,
-                "kind": derive_member_kind(row.is_director, row.is_monitor),
-                "placement": row.placement.clone().unwrap_or(Value::Null),
-            })
-        })
-        .collect())
+    Ok(
+        list_roster_records(conn, fleet_id, include_message_holders)?
+            .iter()
+            .map(presentation::roster_member)
+            .collect(),
+    )
 }
 
 #[cfg(test)]

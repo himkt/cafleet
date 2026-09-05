@@ -11,6 +11,7 @@ pub mod tmux;
 
 use std::fmt;
 
+#[cfg(test)]
 use serde_json::Value;
 
 use crate::coding_agent::coding_agent;
@@ -167,33 +168,82 @@ pub fn sanitize_wake_field(value: &str) -> String {
         .replace('|', "│")
 }
 
-/// Render one wake descriptor — a roster entry or the Director — in the
-/// shared field grammar; an unregistered coding agent aborts the wake.
-fn wake_entry(member: &Value) -> Result<String, MultiplexerError> {
-    let agent = member["coding_agent"].as_str().unwrap_or("");
+/// Transport-facing wake descriptor. The monitor maps broker records into
+/// these borrowed fields; backends have no dependency on broker records.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WakeEntry<'a> {
+    pub member_id: i64,
+    pub name: &'a str,
+    pub coding_agent: &'a str,
+    pub pending_count: i64,
+}
+
+// Temporary adapters for unchanged tests; removed after Tester migration.
+#[cfg(test)]
+impl<'a> WakeEntry<'a> {
+    pub(crate) fn from_legacy(value: &'a Value) -> Result<Self, MultiplexerError> {
+        let number = |field| {
+            value[field]
+                .as_i64()
+                .ok_or_else(|| MultiplexerError::new(format!("invalid wake field '{field}'")))
+        };
+        Ok(Self {
+            member_id: number("member_id")?,
+            name: value["name"].as_str().unwrap_or(""),
+            coding_agent: value["coding_agent"].as_str().unwrap_or(""),
+            pending_count: number("pending_count")?,
+        })
+    }
+
+    pub(crate) fn legacy_value(&self) -> Value {
+        serde_json::json!({
+            "member_id": self.member_id,
+            "name": self.name,
+            "coding_agent": self.coding_agent,
+            "pending_count": self.pending_count,
+        })
+    }
+}
+
+/// Render one wake descriptor; an unregistered coding agent aborts the wake.
+fn wake_entry(member: &WakeEntry<'_>) -> Result<String, MultiplexerError> {
+    let agent = member.coding_agent;
     if coding_agent(agent).is_none() {
         return Err(MultiplexerError::new(format!(
             "member {} has invalid coding_agent '{agent}'",
-            member["member_id"]
+            member.member_id
         )));
     }
-    let name = member["name"].as_str().unwrap_or("");
     Ok(format!(
         "{} ({}; coding_agent={agent}; unacked={})",
-        member["member_id"],
-        sanitize_wake_field(name),
-        member["pending_count"]
+        member.member_id,
+        sanitize_wake_field(member.name),
+        member.pending_count
     ))
+}
+
+// Temporary JSON entry point for the existing payload assertions.
+#[cfg(test)]
+pub fn build_wake_payload(
+    fleet_id: i64,
+    members: &[Value],
+    director: &Value,
+) -> Result<String, MultiplexerError> {
+    let members = members
+        .iter()
+        .map(WakeEntry::from_legacy)
+        .collect::<Result<Vec<_>, _>>()?;
+    build_wake_payload_from_entries(fleet_id, &members, &WakeEntry::from_legacy(director)?)
 }
 
 /// Build the byte-identical tmux/herdr pure-trigger wake payload (SPEC §6.5):
 /// the roster entries, the trailing `Director:` segment, and the two fixed
 /// protocol sentences. A roster member or Director with an unregistered
 /// coding agent aborts the wake.
-pub fn build_wake_payload(
+pub fn build_wake_payload_from_entries(
     fleet_id: i64,
-    members: &[Value],
-    director: &Value,
+    members: &[WakeEntry<'_>],
+    director: &WakeEntry<'_>,
 ) -> Result<String, MultiplexerError> {
     let entries = members
         .iter()
@@ -237,12 +287,12 @@ pub trait Multiplexer {
     fn send_exit(&self, target_pane_id: &str, ignore_missing: bool)
     -> Result<(), MultiplexerError>;
     fn send_poll_trigger(&self, target_pane_id: &str, member_id: i64) -> bool;
-    fn send_wake_trigger(
+    fn send_wake_entries(
         &self,
         target_pane_id: &str,
         fleet_id: i64,
-        members: &[Value],
-        director: &Value,
+        members: &[WakeEntry<'_>],
+        director: &WakeEntry<'_>,
     ) -> Result<bool, MultiplexerError>;
     fn send_inline_preview(
         &self,
@@ -314,14 +364,14 @@ impl Multiplexer for AnyMultiplexer {
         dispatch!(self, mux => mux.send_poll_trigger(target_pane_id, member_id))
     }
 
-    fn send_wake_trigger(
+    fn send_wake_entries(
         &self,
         target_pane_id: &str,
         fleet_id: i64,
-        members: &[Value],
-        director: &Value,
+        members: &[WakeEntry<'_>],
+        director: &WakeEntry<'_>,
     ) -> Result<bool, MultiplexerError> {
-        dispatch!(self, mux => mux.send_wake_trigger(target_pane_id, fleet_id, members, director))
+        dispatch!(self, mux => mux.send_wake_entries(target_pane_id, fleet_id, members, director))
     }
 
     fn send_inline_preview(

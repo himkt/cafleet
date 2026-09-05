@@ -3,18 +3,19 @@
 //! JSON-vs-text emit fork.
 
 use std::path::PathBuf;
-use std::rc::Rc;
 
 use rusqlite::Connection;
 use serde_json::Value;
 
-use super::system::{SystemRunner, read_stdin};
-use crate::broker::{InlinePreviewSender, asset_installs_table_exists, list_asset_installs};
+use crate::broker::{asset_installs_table_exists, list_asset_installs};
 use crate::config::Settings;
 use crate::config_dir::{claude_config_dir, codex_home, opencode_preset_base};
 use crate::error::CafleetError;
-use crate::multiplexer::{AnyMultiplexer, Multiplexer, MultiplexerError, resolve_multiplexer};
 use crate::output::format_json;
+#[cfg(test)]
+use crate::runtime::RuntimeNotifier as CliNotifier;
+pub use crate::runtime::resolve_mux;
+use crate::runtime::system::read_stdin;
 
 pub fn connect(settings: &Settings) -> Result<Connection, CafleetError> {
     crate::db::connect(&settings.database_url)
@@ -172,54 +173,6 @@ pub fn resolve_body(
         }
         (Some(_), Some(_)) | (None, None) => {
             unreachable!("clap's required argument group supplies exactly one body source")
-        }
-    }
-}
-
-/// The environment snapshot the backends read presence variables from.
-fn env_snapshot() -> std::collections::HashMap<String, String> {
-    std::env::vars().collect()
-}
-
-pub fn resolve_mux(settings: &Settings) -> Result<AnyMultiplexer, MultiplexerError> {
-    resolve_multiplexer(
-        settings.multiplexer.as_deref(),
-        env_snapshot(),
-        Rc::new(SystemRunner),
-    )
-}
-
-/// The broker-side preview notifier. Construction is infallible even though
-/// it runs before `broker::send_message`: a multiplexer-resolution failure is
-/// retained as its raw string and exposed only from an attempted
-/// `send_inline_preview`, so it can never preempt the insert or fail an
-/// intentional skip (SPEC §6.2).
-pub struct CliNotifier {
-    mux: Result<AnyMultiplexer, String>,
-}
-
-impl CliNotifier {
-    pub fn new(settings: &Settings) -> Self {
-        CliNotifier {
-            mux: resolve_mux(settings).map_err(|error| error.to_string()),
-        }
-    }
-}
-
-impl InlinePreviewSender for CliNotifier {
-    fn send_inline_preview(
-        &self,
-        target_pane_id: &str,
-        message_id: i64,
-        sender_id: i64,
-        ts: &str,
-        text: &str,
-    ) -> Result<(), String> {
-        match &self.mux {
-            Ok(mux) => mux
-                .send_inline_preview(target_pane_id, message_id, sender_id, ts, text)
-                .map_err(|error| error.to_string()),
-            Err(retained) => Err(retained.clone()),
         }
     }
 }

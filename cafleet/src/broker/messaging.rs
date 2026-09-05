@@ -3,11 +3,15 @@
 //! see [`super::test_support`] for the API.
 
 use rusqlite::{Connection, OptionalExtension, params};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use super::members::db_err;
+use super::records::{
+    BroadcastOutcome, MemberStatus, MessageRecord, MessageStatus, NotificationAttempt, SendOutcome,
+};
 use crate::error::CafleetError;
 use crate::output::truncate_text;
+use crate::presentation;
 use crate::time::{format_utc, now_utc};
 
 /// The broker-side half of the inline-preview overlap point (SPEC §4): the
@@ -28,6 +32,8 @@ pub trait InlinePreviewSender {
 /// `{message, notification_sent}` payload plus the retained raw error of an
 /// attempted, failed pane notification. `notification_error` is caller
 /// metadata — it never enters the payload JSON.
+// Temporary compatibility payload for tests awaiting typed migration.
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct SendMessageOutcome {
     pub(crate) payload: Value,
@@ -38,7 +44,7 @@ pub struct SendMessageOutcome {
 pub(crate) fn message_row(
     conn: &Connection,
     message_id: i64,
-) -> Result<Option<Value>, CafleetError> {
+) -> Result<Option<MessageRecord>, CafleetError> {
     conn.query_row(
         "SELECT message_id, owner_member_id, from_member_id, to_member_id, type, \
                 created_at, status_state, status_timestamp, origin_message_id, text \
@@ -50,23 +56,28 @@ pub(crate) fn message_row(
     .map_err(db_err)
 }
 
-pub(crate) fn map_message_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
-    Ok(json!({
-        "message_id": row.get::<_, i64>(0)?,
-        "owner_member_id": row.get::<_, i64>(1)?,
-        "from_member_id": row.get::<_, i64>(2)?,
-        "to_member_id": row.get::<_, Option<i64>>(3)?,
-        "type": row.get::<_, String>(4)?,
-        "created_at": row.get::<_, String>(5)?,
-        "status_state": row.get::<_, String>(6)?,
-        "status_timestamp": row.get::<_, String>(7)?,
-        "origin_message_id": row.get::<_, Option<i64>>(8)?,
-        "text": row.get::<_, String>(9)?,
-    }))
+pub(crate) fn map_message_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageRecord> {
+    Ok(MessageRecord {
+        message_id: row.get(0)?,
+        owner_member_id: row.get(1)?,
+        from_member_id: row.get(2)?,
+        to_member_id: row.get(3)?,
+        kind: row.get(4)?,
+        created_at: row.get(5)?,
+        status: row.get(6)?,
+        status_timestamp: row.get(7)?,
+        origin_message_id: row.get(8)?,
+        text: row.get(9)?,
+    })
 }
 
-/// The sender's fleet, derived from the sender row (SPEC §6.2): no
-/// caller-supplied fleet exists.
+fn required_message_row(conn: &Connection, message_id: i64) -> Result<MessageRecord, CafleetError> {
+    message_row(conn, message_id)?.ok_or_else(|| CafleetError::InvalidStoredValue {
+        field: "messages.message_id".into(),
+        value: message_id.to_string(),
+    })
+}
+
 fn sender_fleet(conn: &Connection, from_member_id: i64) -> Result<i64, CafleetError> {
     super::members::active_member_fleet(conn, from_member_id)?.ok_or_else(|| {
         CafleetError::Value(format!(
@@ -99,11 +110,31 @@ pub fn send_message(
     to: &str,
     text: &str,
 ) -> Result<SendMessageOutcome, CafleetError> {
+    let outcome = send_message_record(conn, notifier, max_text_len, from_member_id, to, text)?;
+    let payload = presentation::send_outcome(&outcome);
+    let notification_error = match outcome.notification {
+        NotificationAttempt::Failed { error } => Some(error),
+        _ => None,
+    };
+    Ok(SendMessageOutcome {
+        payload,
+        notification_error,
+    })
+}
+
+pub fn send_message_record(
+    conn: &mut Connection,
+    notifier: &dyn InlinePreviewSender,
+    max_text_len: usize,
+    from_member_id: i64,
+    to: &str,
+    text: &str,
+) -> Result<SendOutcome, CafleetError> {
     let fleet_id = sender_fleet(conn, from_member_id)?;
     let to_id: i64 = to
         .parse()
         .map_err(|_| CafleetError::Value(format!("Invalid destination format: {to}")))?;
-    let recipient: Option<(i64, String)> = conn
+    let recipient: Option<(i64, MemberStatus)> = conn
         .query_row(
             "SELECT fleet_id, status FROM members WHERE member_id=?1",
             [to_id],
@@ -116,7 +147,7 @@ pub fn send_message(
             "Destination member not found: {to_id}"
         )));
     };
-    if recipient_status != "active" {
+    if recipient_status != MemberStatus::Active {
         return Err(CafleetError::Value(format!(
             "Destination member not found: {to_id}"
         )));
@@ -137,8 +168,7 @@ pub fn send_message(
     .map_err(db_err)?;
     let message_id = conn.last_insert_rowid();
 
-    let mut notification_sent = false;
-    let mut notification_error = None;
+    let mut notification = NotificationAttempt::Skipped;
     if to_id != from_member_id
         && let Some(pane) = pane_of(conn, to_id)?
     {
@@ -149,14 +179,14 @@ pub fn send_message(
             &now,
             &preview_text(text, max_text_len),
         ) {
-            Ok(()) => notification_sent = true,
-            Err(raw) => notification_error = Some(raw),
+            Ok(()) => notification = NotificationAttempt::Sent,
+            Err(error) => notification = NotificationAttempt::Failed { error },
         }
     }
-    let message = message_row(conn, message_id)?.expect("the just-inserted message exists");
-    Ok(SendMessageOutcome {
-        payload: json!({"message": message, "notification_sent": notification_sent}),
-        notification_error,
+    let message = required_message_row(conn, message_id)?;
+    Ok(SendOutcome {
+        message,
+        notification,
     })
 }
 
@@ -167,6 +197,17 @@ pub fn broadcast_message(
     from_member_id: i64,
     text: &str,
 ) -> Result<Vec<Value>, CafleetError> {
+    broadcast_message_record(conn, notifier, max_text_len, from_member_id, text)
+        .map(|outcome| vec![presentation::broadcast_outcome(&outcome)])
+}
+
+pub fn broadcast_message_record(
+    conn: &mut Connection,
+    notifier: &dyn InlinePreviewSender,
+    max_text_len: usize,
+    from_member_id: i64,
+    text: &str,
+) -> Result<BroadcastOutcome, CafleetError> {
     let fleet_id = sender_fleet(conn, from_member_id)?;
     let mut stmt = conn
         .prepare(
@@ -225,15 +266,23 @@ pub fn broadcast_message(
             delivered += 1;
         }
     }
-    let summary = message_row(conn, summary_id)?.expect("the just-inserted summary exists");
-    Ok(vec![json!({
-        "message": summary,
-        "recipients": recipients.len(),
-        "delivered": delivered,
-    })])
+    let message = required_message_row(conn, summary_id)?;
+    Ok(BroadcastOutcome {
+        message,
+        recipients: recipients.len(),
+        delivered,
+    })
 }
 
 pub fn poll_messages(conn: &Connection, member_id: i64) -> Result<Vec<Value>, CafleetError> {
+    poll_message_records(conn, member_id)
+        .map(|rows| rows.iter().map(presentation::message).collect())
+}
+
+pub fn poll_message_records(
+    conn: &Connection,
+    member_id: i64,
+) -> Result<Vec<MessageRecord>, CafleetError> {
     if super::members::active_member_fleet(conn, member_id)?.is_none() {
         return Err(CafleetError::Value(format!("Member {member_id} not found")));
     }
@@ -255,7 +304,14 @@ pub fn poll_messages(conn: &Connection, member_id: i64) -> Result<Vec<Value>, Ca
 }
 
 pub fn ack_message(conn: &mut Connection, message_id: i64) -> Result<Value, CafleetError> {
-    let row: Option<String> = conn
+    ack_message_record(conn, message_id).map(|row| presentation::message_envelope(&row))
+}
+
+pub fn ack_message_record(
+    conn: &mut Connection,
+    message_id: i64,
+) -> Result<MessageRecord, CafleetError> {
+    let row: Option<MessageStatus> = conn
         .query_row(
             "SELECT status_state FROM messages WHERE message_id=?1",
             [message_id],
@@ -268,9 +324,10 @@ pub fn ack_message(conn: &mut Connection, message_id: i64) -> Result<Value, Cafl
             "Message {message_id} not found"
         )));
     };
-    if status != "input_required" {
+    if status != MessageStatus::InputRequired {
         return Err(CafleetError::Value(format!(
-            "Cannot ACK message in state {status}"
+            "Cannot ACK message in state {}",
+            status.as_str()
         )));
     }
     let now = format_utc(now_utc());
@@ -279,8 +336,7 @@ pub fn ack_message(conn: &mut Connection, message_id: i64) -> Result<Value, Cafl
         params![now, message_id],
     )
     .map_err(db_err)?;
-    let message = message_row(conn, message_id)?.expect("the just-acked message exists");
-    Ok(json!({"message": message}))
+    required_message_row(conn, message_id)
 }
 
 #[cfg(test)]

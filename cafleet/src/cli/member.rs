@@ -9,13 +9,15 @@ use sha2::{Digest, Sha256};
 
 use super::creation::{CreationHooks, NoopCreationHooks, PaneGuard, RegistrationGuard};
 use super::helpers::{connect, emit, resolve_body, resolve_mux};
-use super::system::SystemProbe;
+use crate::broker::records::MemberRecord;
 use crate::broker::{self, NewPlacement};
 use crate::coding_agent::{SpawnProbe, coding_agent};
 use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::multiplexer::{Multiplexer, MultiplexerError};
 use crate::output::{format_member, format_member_detail, format_member_list, strip_ansi};
+use crate::presentation;
+use crate::runtime::system::SystemProbe;
 use crate::spawn_prompt::substitute_spawn_placeholders;
 use crate::time::{format_utc, now_utc};
 
@@ -131,10 +133,15 @@ pub enum MemberCommand {
     },
 }
 
-fn require_pane(member: &Value, member_id: i64, action: &str) -> Result<String, CafleetError> {
-    member["placement"]["mux_pane_id"]
-        .as_str()
-        .map(str::to_string)
+fn require_pane(
+    member: &MemberRecord,
+    member_id: i64,
+    action: &str,
+) -> Result<String, CafleetError> {
+    member
+        .placement
+        .as_ref()
+        .and_then(|placement| placement.mux_pane_id.clone())
         .ok_or_else(|| {
             CafleetError::App(format!(
                 "member {member_id} has no pane yet (pending placement) — nothing to {action}."
@@ -148,12 +155,12 @@ fn load_member(
     conn: &Connection,
     member_id: i64,
     tolerate_missing_placement: bool,
-) -> Result<Value, CafleetError> {
+) -> Result<MemberRecord, CafleetError> {
     let fleet_id = broker::active_member_fleet(conn, member_id)?
         .ok_or_else(|| CafleetError::App(format!("Member {member_id} not found")))?;
-    let member = broker::get_member(conn, member_id, fleet_id)?
+    let member = broker::get_member_record(conn, member_id, fleet_id)?
         .ok_or_else(|| CafleetError::App(format!("Member {member_id} not found")))?;
-    if member["placement"].is_null() && !tolerate_missing_placement {
+    if member.placement.is_none() && !tolerate_missing_placement {
         return Err(CafleetError::App(format!(
             "member {member_id} has no placement row; it was not spawned via \
              `cafleet member create`."
@@ -179,7 +186,7 @@ fn resolve_coding_agent(
              Re-run with an explicit --coding-agent."
         ))
     };
-    let director = match broker::get_member(conn, director_id, fleet_id) {
+    let director = match broker::get_member_record(conn, director_id, fleet_id) {
         Ok(Some(director)) => director,
         Ok(None) => {
             return Err(unresolved(format!(
@@ -193,7 +200,7 @@ fn resolve_coding_agent(
             )));
         }
     };
-    match director["placement"]["coding_agent"].as_str() {
+    match director.placement.as_ref().map(|p| p.coding_agent.as_str()) {
         Some(agent) => Ok(agent.to_string()),
         None => Err(unresolved(format!(
             "Director (member {director_id}) has no placement."
@@ -293,12 +300,12 @@ fn create_with_dependencies<M: Multiplexer>(
     let mut conn = connect(settings)?;
 
     // 1. Auto-resolve the Director from the fleet row, first thing.
-    let fleet = broker::get_fleet(&conn, fleet_id)?
+    let fleet = broker::fleets::fetch_fleet(&conn, fleet_id)?
         .ok_or_else(|| CafleetError::Usage(format!("Fleet '{fleet_id}' not found.")))?;
-    if !fleet["deleted_at"].is_null() {
+    if fleet.deleted_at.is_some() {
         return Err(CafleetError::App(format!("fleet {fleet_id} is deleted")));
     }
-    let Some(director_id) = fleet["director_member_id"].as_i64() else {
+    let Some(director_id) = fleet.director_member_id else {
         return Err(CafleetError::App(format!(
             "fleet {fleet_id} has no root Director recorded; re-create the fleet \
              with 'cafleet fleet create'."
@@ -349,7 +356,7 @@ fn create_with_dependencies<M: Multiplexer>(
         mux_pane_id: None,
         coding_agent: agent_name.clone(),
     };
-    let registered = broker::register_member(
+    let registered = broker::register_member_record(
         &mut conn,
         fleet_id,
         name,
@@ -364,9 +371,7 @@ fn create_with_dependencies<M: Multiplexer>(
         | CafleetError::ActiveMonitorExists { .. } => error,
         other => CafleetError::App(format!("register failed: {}", other.message())),
     })?;
-    let member_id = registered["member_id"]
-        .as_i64()
-        .expect("registration returns the new member id");
+    let member_id = registered.member_id;
     let mut registration = RegistrationGuard::new(&mut conn, member_id, hooks);
 
     // 7. Substitute the identity placeholders; on failure deregister and
@@ -404,7 +409,7 @@ fn create_with_dependencies<M: Multiplexer>(
     let mut pane = PaneGuard::new(&mux, pane_id.clone(), hooks);
 
     // 10. A failed placement patch compensates the pane before registration.
-    let patched = broker::update_placement_pane_id(registration.connection(), member_id, &pane_id);
+    let patched = broker::update_placement_record(registration.connection(), member_id, &pane_id);
     let placement_view = match patched {
         Ok(Some(placement)) => placement,
         outcome => {
@@ -425,8 +430,8 @@ fn create_with_dependencies<M: Multiplexer>(
     let result = json!({
         "member_id": member_id,
         "name": name,
-        "registered_at": registered["registered_at"],
-        "placement": placement_view,
+        "registered_at": registered.registered_at,
+        "placement": presentation::placement(&placement_view),
     });
     Ok(result)
 }
@@ -437,19 +442,20 @@ fn delete(settings: &Settings, member_id: i64, json: bool) -> Result<(), Cafleet
     // Root-Director guard, before any pane mutation.
     let fleet_id = broker::active_member_fleet(&conn, member_id)?
         .ok_or_else(|| CafleetError::App(format!("Member {member_id} not found")))?;
-    let fleet = broker::get_fleet(&conn, fleet_id)?
+    let fleet = broker::fleets::fetch_fleet(&conn, fleet_id)?
         .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;
-    if fleet["director_member_id"].as_i64() == Some(member_id) {
+    if fleet.director_member_id == Some(member_id) {
         return Err(CafleetError::App(
             "cannot deregister the root Director; use 'cafleet fleet delete' instead".to_string(),
         ));
     }
 
     let member = load_member(&conn, member_id, true)?;
-    let pane = member["placement"]["mux_pane_id"]
-        .as_str()
-        .map(str::to_string);
-    let pane_status = if member["placement"].is_null() {
+    let pane = member
+        .placement
+        .as_ref()
+        .and_then(|p| p.mux_pane_id.clone());
+    let pane_status = if member.placement.is_none() {
         "(no placement)".to_string()
     } else if let Some(pane_id) = &pane {
         let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
@@ -479,13 +485,17 @@ fn delete(settings: &Settings, member_id: i64, json: bool) -> Result<(), Cafleet
 fn show(settings: &Settings, member_id: i64, json: bool) -> Result<(), CafleetError> {
     let conn = connect(settings)?;
     let member = load_member(&conn, member_id, true)?;
-    emit(json, &member, || format_member_detail(&member));
+    let value = presentation::member(&member);
+    emit(json, &value, || format_member_detail(&value));
     Ok(())
 }
 
 fn list(settings: &Settings, fleet_id: i64, json: bool) -> Result<(), CafleetError> {
     let conn = connect(settings)?;
-    let members = broker::list_members(&conn, fleet_id)?;
+    let members: Vec<Value> = broker::list_member_records(&conn, fleet_id)?
+        .iter()
+        .map(presentation::member_activity)
+        .collect();
     emit(json, &Value::Array(members.clone()), || {
         format_member_list(&members)
     });
@@ -517,7 +527,7 @@ fn prompt(
     mux.send_prompt(&pane_id, trimmed, shell)
         .map_err(|e| CafleetError::App(format!("send failed: {e}")))?;
 
-    let name = member["name"].as_str().expect("members carry a name");
+    let name = member.name.as_str();
     let result = json!({
         "member_id": member_id,
         "pane_id": pane_id,
@@ -537,8 +547,11 @@ fn ping(settings: &Settings, member_id: i64, json: bool) -> Result<(), CafleetEr
         .map_err(|e| CafleetError::App(e.to_string()))?;
     let conn = connect(settings)?;
     let member = load_member(&conn, member_id, false)?;
-    let name = member["name"].as_str().expect("members carry a name");
-    let pane = member["placement"]["mux_pane_id"].as_str();
+    let name = member.name.as_str();
+    let pane = member
+        .placement
+        .as_ref()
+        .and_then(|p| p.mux_pane_id.as_deref());
 
     let Some(pane_id) = pane else {
         // The pending-placement skip path: no keystroke, exit 0.

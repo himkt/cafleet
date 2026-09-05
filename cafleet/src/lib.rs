@@ -10,6 +10,8 @@ pub mod error;
 pub mod monitor;
 pub mod multiplexer;
 pub mod output;
+pub mod presentation;
+pub mod runtime;
 pub mod spawn_prompt;
 pub mod time;
 pub mod webui;

@@ -12,7 +12,6 @@ mod message;
 mod monitor;
 mod server;
 mod setup;
-mod system;
 
 use clap::{Parser, Subcommand};
 

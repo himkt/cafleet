@@ -6,13 +6,13 @@ use serde_json::Value;
 
 use super::creation::{CreationHooks, NoopCreationHooks, PaneGuard};
 use super::helpers::{connect, emit, resolve_body, resolve_mux};
-use super::system::SystemProbe;
 use crate::broker;
 use crate::coding_agent::{SpawnProbe, coding_agent};
 use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::multiplexer::{Multiplexer, MultiplexerError};
 use crate::output::format_fleet_create;
+use crate::runtime::system::SystemProbe;
 use crate::spawn_prompt::substitute_spawn_placeholders;
 
 const MONITOR_NAME: &str = "monitor";

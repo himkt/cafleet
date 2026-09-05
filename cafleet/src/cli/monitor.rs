@@ -52,9 +52,12 @@ enum MonitorCommand {
     },
 }
 
-fn require_live_fleet(conn: &rusqlite::Connection, fleet_id: i64) -> Result<Value, CafleetError> {
-    match broker::get_fleet(conn, fleet_id)? {
-        Some(fleet) if fleet["deleted_at"].is_null() => Ok(fleet),
+fn require_live_fleet(
+    conn: &rusqlite::Connection,
+    fleet_id: i64,
+) -> Result<broker::fleets::FleetRow, CafleetError> {
+    match broker::fleets::fetch_fleet(conn, fleet_id)? {
+        Some(fleet) if fleet.deleted_at.is_none() => Ok(fleet),
         _ => Err(CafleetError::App(format!("fleet {fleet_id} not found"))),
     }
 }
@@ -119,32 +122,38 @@ fn scan(
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
 
-    let director_member_id = fleet["director_member_id"].as_i64();
-    let members = broker::list_members(&conn, fleet_id)?;
-    let mut roster: Vec<&Value> = members
+    let director_member_id = fleet.director_member_id;
+    let members = broker::list_member_records(&conn, fleet_id)?
+        .into_iter()
+        .map(|row| row.member)
+        .collect::<Vec<_>>();
+    let mut roster: Vec<_> = members
         .iter()
-        .filter(|member| member["member_id"].as_i64() == director_member_id)
+        .filter(|member| Some(member.member_id) == director_member_id)
         .collect();
-    let mut rest: Vec<&Value> = members
+    let mut rest: Vec<_> = members
         .iter()
-        .filter(|member| {
-            member["member_id"].as_i64() != director_member_id && !member["placement"].is_null()
-        })
+        .filter(|member| Some(member.member_id) != director_member_id && member.placement.is_some())
         .collect();
-    rest.sort_by_key(|member| member["member_id"].as_i64());
+    rest.sort_by_key(|member| Some(member.member_id));
     roster.extend(rest);
 
     let mut sections = Vec::new();
     let mut entries = Vec::new();
     for member in roster {
-        let member_id = &member["member_id"];
-        let name = member["name"].as_str().expect("member rows carry a name");
-        let kind = member["kind"].as_str().expect("member rows carry a kind");
-        let placement = &member["placement"];
-        let coding_agent = placement["coding_agent"]
-            .as_str()
-            .expect("roster entries own a placement row recording coding_agent");
-        let pane_id = placement["mux_pane_id"].as_str();
+        let member_id = member.member_id;
+        let name = &member.name;
+        let kind = member.kind.as_str();
+        let placement =
+            member
+                .placement
+                .as_ref()
+                .ok_or_else(|| CafleetError::InvalidStoredValue {
+                    field: "member placement".into(),
+                    value: member_id.to_string(),
+                })?;
+        let coding_agent = &placement.coding_agent;
+        let pane_id = placement.mux_pane_id.as_deref();
 
         let outcome = match pane_id {
             None => Err("pane not available (pending placement)".to_string()),

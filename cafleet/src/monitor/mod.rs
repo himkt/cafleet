@@ -1,46 +1,6 @@
-//! Monitor heartbeat loop (SPEC §6.6) — the pure `wake_due` check, the
-//! per-tick scan `monitor_tick` (ownership-checked heartbeat, fleet liveness,
-//! the fleet-level wake into the monitor member's pane, the `woke`-gated
-//! ledger write), and the foreground driver. The colocated tests pin the
-//! contract.
-//!
-//! Expected public API:
-//!
-//! ```text
-//! pub const DEFAULT_TICK_SECONDS: i64 = 5;
-//! // Runtime-staleness tunables re-exported from their single broker home:
-//! pub use crate::broker::{MONITOR_STALE_FACTOR /* 3 */,
-//!     MONITOR_STALE_FLOOR_SECONDS /* 15 */};
-//!
-//! // What the tick consumes from the resolved backend.
-//! pub trait MonitorMux {
-//!     fn list_pane_ids(&self) -> Result<BTreeSet<String>, MultiplexerError>;
-//!     fn send_wake_trigger(&self, target_pane_id: &str, fleet_id: i64,
-//!         members: &[Value], director: &Value)
-//!         -> Result<bool, MultiplexerError>;
-//! }
-//!
-//! pub enum TickResult { Continue, Stop }
-//!
-//! // Pure due-check for the fleet-level wake: a present last_wake_at always
-//! // wins as the baseline (unparsable → immediately due); a NULL last_wake_at
-//! // falls back to started_at (NULL or unparsable → immediately due).
-//! pub fn wake_due(last_wake_at: Option<&str>, started_at: Option<&str>,
-//!     wake_interval: i64, now: DateTime<Utc>) -> bool;
-//!
-//! // No interval parameter: each pass re-reads wake_interval_seconds from
-//! // the fleet's runtime row, so an external update changes the cadence
-//! // within one tick.
-//! pub fn monitor_tick(conn: &mut Connection, mux: &dyn MonitorMux,
-//!     out: &mut dyn std::io::Write, fleet_id: i64, pid: i64,
-//!     now: DateTime<Utc>) -> Result<TickResult, CafleetError>;
-//!
-//! // wake_interval is used only to stamp the claim; the ticks read the
-//! // stored value.
-//! pub fn run_monitor_loop(conn: &mut Connection, mux: &dyn MonitorMux,
-//!     out: &mut dyn std::io::Write, fleet_id: i64, tick_seconds: i64,
-//!     wake_interval: i64) -> Result<(), CafleetError>;
-//! ```
+//! Monitor heartbeat loop (SPEC §6.6): ownership-checked heartbeat, fleet
+//! liveness, typed wake descriptors, and the delivery-gated ledger write.
+//! Runtime staleness constants are re-exported from their broker home.
 
 use std::collections::BTreeSet;
 use std::io::Write;
@@ -49,12 +9,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
+#[cfg(test)]
 use serde_json::Value;
 
 use crate::broker;
 pub use crate::broker::{MONITOR_STALE_FACTOR, MONITOR_STALE_FLOOR_SECONDS};
 use crate::error::CafleetError;
-use crate::multiplexer::{Multiplexer, MultiplexerError};
+use crate::multiplexer::{Multiplexer, MultiplexerError, WakeEntry};
 use crate::time::{format_utc, now_utc, parse_lenient};
 
 pub const DEFAULT_TICK_SECONDS: i64 = 5;
@@ -63,6 +24,33 @@ pub const DEFAULT_TICK_SECONDS: i64 = 5;
 /// single monitor-wake keystroke.
 pub trait MonitorMux {
     fn list_pane_ids(&self) -> Result<BTreeSet<String>, MultiplexerError>;
+
+    #[cfg(not(test))]
+    fn send_wake_entries(
+        &self,
+        target_pane_id: &str,
+        fleet_id: i64,
+        members: &[WakeEntry<'_>],
+        director: &WakeEntry<'_>,
+    ) -> Result<bool, MultiplexerError>;
+
+    // Temporary bridge for the existing FakeMux; real backends override it.
+    #[cfg(test)]
+    fn send_wake_entries(
+        &self,
+        target_pane_id: &str,
+        fleet_id: i64,
+        members: &[WakeEntry<'_>],
+        director: &WakeEntry<'_>,
+    ) -> Result<bool, MultiplexerError> {
+        let members = members
+            .iter()
+            .map(WakeEntry::legacy_value)
+            .collect::<Vec<_>>();
+        self.send_wake_trigger(target_pane_id, fleet_id, &members, &director.legacy_value())
+    }
+
+    #[cfg(test)]
     fn send_wake_trigger(
         &self,
         target_pane_id: &str,
@@ -77,6 +65,17 @@ impl<M: Multiplexer> MonitorMux for M {
         Multiplexer::list_pane_ids(self)
     }
 
+    fn send_wake_entries(
+        &self,
+        target_pane_id: &str,
+        fleet_id: i64,
+        members: &[WakeEntry<'_>],
+        director: &WakeEntry<'_>,
+    ) -> Result<bool, MultiplexerError> {
+        Multiplexer::send_wake_entries(self, target_pane_id, fleet_id, members, director)
+    }
+
+    #[cfg(test)]
     fn send_wake_trigger(
         &self,
         target_pane_id: &str,
@@ -84,7 +83,26 @@ impl<M: Multiplexer> MonitorMux for M {
         members: &[Value],
         director: &Value,
     ) -> Result<bool, MultiplexerError> {
-        Multiplexer::send_wake_trigger(self, target_pane_id, fleet_id, members, director)
+        let members = members
+            .iter()
+            .map(WakeEntry::from_legacy)
+            .collect::<Result<Vec<_>, _>>()?;
+        Multiplexer::send_wake_entries(
+            self,
+            target_pane_id,
+            fleet_id,
+            &members,
+            &WakeEntry::from_legacy(director)?,
+        )
+    }
+}
+
+fn wake_descriptor(target: &broker::records::WakeTarget) -> WakeEntry<'_> {
+    WakeEntry {
+        member_id: target.member_id,
+        name: &target.name,
+        coding_agent: &target.coding_agent,
+        pending_count: target.pending_count,
     }
 }
 
@@ -134,30 +152,36 @@ pub fn monitor_tick(
     if !broker::heartbeat_monitor_runtime(conn, fleet_id, pid, &iso)? {
         return Ok(TickResult::Stop);
     }
-    let fleet = broker::get_fleet(conn, fleet_id)?;
+    let fleet = broker::fleets::fetch_fleet(conn, fleet_id)?;
     let live = match fleet {
-        Some(ref fleet) => fleet["deleted_at"].is_null(),
+        Some(ref fleet) => fleet.deleted_at.is_none(),
         None => false,
     };
     if !live {
         return Ok(TickResult::Stop);
     }
 
-    let runtime = broker::read_monitor_runtime(conn, fleet_id)?
-        .expect("the heartbeat just matched this fleet's runtime row");
-    let wake_interval = runtime["wake_interval_seconds"]
-        .as_i64()
-        .expect("the owning loop stamped the interval at claim");
-    // A pending operator request bypasses both schedule gates — a disabled
-    // interval and a not-yet-due wake alike.
-    let forced = !runtime["wake_requested_at"].is_null();
+    let runtime = broker::read_monitor_runtime_record(conn, fleet_id)?.ok_or_else(|| {
+        CafleetError::InvalidStoredValue {
+            field: "monitor_runtime.fleet_id".into(),
+            value: fleet_id.to_string(),
+        }
+    })?;
+    let wake_interval =
+        runtime
+            .wake_interval_seconds
+            .ok_or_else(|| CafleetError::InvalidStoredValue {
+                field: "claimed monitor wake_interval_seconds".into(),
+                value: "null".into(),
+            })?;
+    let forced = runtime.wake_requested_at.is_some();
     if !forced {
         if wake_interval == 0 {
             return Ok(TickResult::Continue);
         }
         if !wake_due(
-            runtime["last_wake_at"].as_str(),
-            runtime["started_at"].as_str(),
+            runtime.last_wake_at.as_deref(),
+            runtime.started_at.as_deref(),
             wake_interval,
             now,
         ) {
@@ -171,10 +195,11 @@ pub fn monitor_tick(
     let Some(monitor_id) = broker::active_monitor_member_id(conn, fleet_id)? else {
         return Ok(TickResult::Continue);
     };
-    let monitor = broker::get_member(conn, monitor_id, fleet_id)?;
+    let monitor = broker::get_member_record(conn, monitor_id, fleet_id)?;
     let monitor_pane = monitor
         .as_ref()
-        .and_then(|member| member["placement"]["mux_pane_id"].as_str());
+        .and_then(|member| member.placement.as_ref())
+        .and_then(|placement| placement.mux_pane_id.as_deref());
     let Some(monitor_pane) = monitor_pane else {
         return Ok(TickResult::Continue);
     };
@@ -183,10 +208,16 @@ pub fn monitor_tick(
         return Ok(TickResult::Continue);
     }
 
-    let roster = broker::list_fleet_wake_targets(conn, fleet_id)?;
-    let director = broker::fleet_wake_director(conn, fleet_id)?;
+    let roster = broker::list_fleet_wake_target_records(conn, fleet_id)?;
+    let director = broker::fleet_wake_director_record(conn, fleet_id)?;
+    let entries = roster.iter().map(wake_descriptor).collect::<Vec<_>>();
     let woke = mux
-        .send_wake_trigger(monitor_pane, fleet_id, &roster, &director)
+        .send_wake_entries(
+            monitor_pane,
+            fleet_id,
+            &entries,
+            &wake_descriptor(&director),
+        )
         .map_err(mux_err)?;
     if woke {
         broker::record_monitor_wake(conn, fleet_id, &iso)?;
