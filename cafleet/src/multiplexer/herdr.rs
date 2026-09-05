@@ -9,8 +9,8 @@ use std::rc::Rc;
 use serde_json::Value;
 
 use super::{
-    CommandRunner, ESC_SETTLE_DELAY, MultiplexerContext, MultiplexerError, RunError, SUBMIT_DELAY,
-    build_wake_payload,
+    CommandRunner, ESC_SETTLE_DELAY, MultiplexerContext, MultiplexerError, PaneCleanup,
+    PaneOwnership, RunError, SUBMIT_DELAY, build_wake_payload,
 };
 
 const PANE_NOT_FOUND: &str = "pane_not_found";
@@ -217,17 +217,19 @@ impl HerdrMultiplexer {
         }
         let new_pane_id = match column.iter().max() {
             None => self.split_pane(&reference.pane_id, "right", &cwd, env)?,
-            Some(target) => {
-                let pane = self.split_pane(target, "down", &cwd, env)?;
-                let _ = self.resize_tab_column(&reference.pane_id);
-                pane
-            }
+            Some(target) => self.split_pane(target, "down", &cwd, env)?,
         };
-        self.run(
+        let mut pane = PaneOwnership::new(new_pane_id.clone(), |id: &str| self.kill_pane(id, true));
+        if !column.is_empty() {
+            let _ = self.resize_tab_column(&reference.pane_id);
+        }
+        if let Err(error) = self.run(
             &herdr_argv(&["herdr", "pane", "run", &new_pane_id, &shlex_join(command)]),
             None,
-        )?;
-        Ok(new_pane_id)
+        ) {
+            return Err(error.with_pane_cleanup(pane.rollback()));
+        }
+        Ok(pane.finish())
     }
 
     fn split_pane(
@@ -252,8 +254,18 @@ impl HerdrMultiplexer {
             args.push("--env".to_string());
             args.push(format!("{key}={value}"));
         }
-        let result = self.run_json(&args, None)?;
-        Ok(str_field(&result["pane"], "pane split", "pane_id")?.to_string())
+        let result = self
+            .run_json(&args, None)
+            .map_err(|error| error.with_pane_cleanup(PaneCleanup::Unknown))?;
+        let id = str_field(&result["pane"], "pane split", "pane_id")
+            .map_err(|error| error.with_pane_cleanup(PaneCleanup::Unknown))?;
+        if id.trim().is_empty() {
+            return Err(
+                MultiplexerError::new("herdr pane split returned an empty pane ID")
+                    .with_pane_cleanup(PaneCleanup::Unknown),
+            );
+        }
+        Ok(id.to_string())
     }
 
     fn read_tab_layout(

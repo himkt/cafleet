@@ -190,7 +190,18 @@ impl TmuxMultiplexer {
             args.push(format!("{key}={value}"));
         }
         args.extend(command.iter().cloned());
-        let pane_id = self.run(&args, None)?.trim().to_string();
+        let pane_id = self
+            .run(&args, None)
+            .map_err(|error| error.with_pane_cleanup(super::PaneCleanup::Unknown))?
+            .trim()
+            .to_string();
+        if pane_id.is_empty() {
+            return Err(
+                MultiplexerError::new("tmux split-window returned an empty pane ID")
+                    .with_pane_cleanup(super::PaneCleanup::Unknown),
+            );
+        }
+        let pane = super::PaneOwnership::new(pane_id, |id: &str| self.kill_pane(id, true));
         let _ = self.run(
             &tmux_argv(&[
                 "tmux",
@@ -201,7 +212,7 @@ impl TmuxMultiplexer {
             ]),
             None,
         );
-        Ok(pane_id)
+        Ok(pane.finish())
     }
 
     pub fn send_exit(

@@ -7,13 +7,14 @@ use rusqlite::Connection;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+use super::creation::{CreationHooks, NoopCreationHooks, PaneGuard, RegistrationGuard};
 use super::helpers::{connect, emit, resolve_body, resolve_mux};
 use super::system::SystemProbe;
 use crate::broker::{self, NewPlacement};
-use crate::coding_agent::coding_agent;
+use crate::coding_agent::{SpawnProbe, coding_agent};
 use crate::config::Settings;
 use crate::error::CafleetError;
-use crate::multiplexer::Multiplexer;
+use crate::multiplexer::{Multiplexer, MultiplexerError};
 use crate::output::{format_member, format_member_detail, format_member_list, strip_ansi};
 use crate::spawn_prompt::substitute_spawn_placeholders;
 use crate::time::{format_utc, now_utc};
@@ -161,22 +162,6 @@ fn load_member(
     Ok(member)
 }
 
-fn deregister_with_warning(conn: &mut Connection, member_id: i64) {
-    if let Err(error) = broker::deregister_member(conn, member_id) {
-        eprintln!(
-            "WARNING: rollback deregister failed for member {member_id}: {}",
-            error.message()
-        );
-    }
-}
-
-fn rollback_register(conn: &mut Connection, member_id: i64, reason: String) -> CafleetError {
-    deregister_with_warning(conn, member_id);
-    CafleetError::App(format!(
-        "{reason}. Rolled back registration of {member_id}."
-    ))
-}
-
 /// Resolve the effective coding agent: an explicit flag wins; otherwise
 /// inherit the Director's placement backend.
 fn resolve_coding_agent(
@@ -272,6 +257,39 @@ fn create(
     body: &PromptArgs,
     json: bool,
 ) -> Result<(), CafleetError> {
+    let result = create_with_dependencies(
+        settings,
+        fleet_id,
+        name,
+        description,
+        explicit_agent,
+        model,
+        effort,
+        monitor,
+        body,
+        || resolve_mux(settings),
+        &SystemProbe,
+        &NoopCreationHooks,
+    )?;
+    emit(json, &result, || format_member(&result));
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_with_dependencies<M: Multiplexer>(
+    settings: &Settings,
+    fleet_id: i64,
+    name: &str,
+    description: &str,
+    explicit_agent: Option<&str>,
+    model: Option<&str>,
+    effort: Option<&str>,
+    monitor: bool,
+    body: &PromptArgs,
+    resolve_mux: impl FnOnce() -> Result<M, MultiplexerError>,
+    probe: &dyn SpawnProbe,
+    hooks: &dyn CreationHooks,
+) -> Result<Value, CafleetError> {
     let mut conn = connect(settings)?;
 
     // 1. Auto-resolve the Director from the fleet row, first thing.
@@ -295,7 +313,7 @@ fn create(
     backend.validate_effort(effort)?;
 
     // 3. Monitor-role guards, one-per-fleet first, before any registration
-    //    or pane effect (`register_member` itself is guard-free).
+    //    or pane effect (the broker also enforces monitor uniqueness).
     let active_monitor = broker::active_monitor_member_id(&conn, fleet_id)?;
     if monitor {
         if let Some(existing) = active_monitor {
@@ -314,10 +332,10 @@ fn create(
     let prompt_body = resolve_body(body.prompt.as_deref(), body.file.as_deref(), "--file")?;
 
     // 5. Preconditions.
-    let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
+    let mux = resolve_mux().map_err(|e| CafleetError::App(e.to_string()))?;
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
-    backend.ensure_available(&SystemProbe)?;
+    backend.ensure_available(probe)?;
     let context = mux
         .context_discovery()
         .map_err(|e| CafleetError::App(e.to_string()))?;
@@ -349,6 +367,7 @@ fn create(
     let member_id = registered["member_id"]
         .as_i64()
         .expect("registration returns the new member id");
+    let mut registration = RegistrationGuard::new(&mut conn, member_id, hooks);
 
     // 7. Substitute the identity placeholders; on failure deregister and
     //    re-raise the original error unwrapped.
@@ -361,8 +380,7 @@ fn create(
     ) {
         Ok(rendered) => rendered,
         Err(original) => {
-            deregister_with_warning(&mut conn, member_id);
-            return Err(original);
+            return Err(registration.rollback(original));
         }
     };
 
@@ -376,34 +394,32 @@ fn create(
     let pane_id = match mux.split_window(&context, &env, &argv) {
         Ok(pane_id) => pane_id,
         Err(error) => {
-            return Err(rollback_register(
-                &mut conn,
-                member_id,
-                format!("tmux split-window failed: {error}"),
-            ));
+            // Failed splits remain backend-owned: metadata reports attempted
+            // cleanup or an unknown ID. No CLI pane guard exists to re-kill.
+            return Err(registration.rollback(CafleetError::App(format!(
+                "tmux split-window failed: {error}"
+            ))));
         }
     };
+    let mut pane = PaneGuard::new(&mux, pane_id.clone(), hooks);
 
-    // 10. Patch the pane id onto the placement.
-    let patched = match broker::update_placement_pane_id(&mut conn, member_id, &pane_id) {
-        Ok(patched) => patched,
-        Err(error) => {
-            let _ = mux.send_exit(&pane_id, true);
-            return Err(rollback_register(
-                &mut conn,
-                member_id,
-                format!("placement update failed: {}", error.message()),
-            ));
+    // 10. A failed placement patch compensates the pane before registration.
+    let patched = broker::update_placement_pane_id(registration.connection(), member_id, &pane_id);
+    let placement_view = match patched {
+        Ok(Some(placement)) => placement,
+        outcome => {
+            let primary = match outcome {
+                Err(error) => {
+                    CafleetError::App(format!("placement update failed: {}", error.message()))
+                }
+                _ => CafleetError::App("placement row vanished before pane-id patch".into()),
+            };
+            let primary = pane.rollback(primary);
+            return Err(registration.rollback(primary));
         }
     };
-    let Some(placement_view) = patched else {
-        let _ = mux.send_exit(&pane_id, true);
-        return Err(rollback_register(
-            &mut conn,
-            member_id,
-            "placement row vanished before pane-id patch".to_string(),
-        ));
-    };
+    pane.finish();
+    registration.finish();
 
     // 11. Emit with the placement view attached.
     let result = json!({
@@ -412,8 +428,7 @@ fn create(
         "registered_at": registered["registered_at"],
         "placement": placement_view,
     });
-    emit(json, &result, || format_member(&result));
-    Ok(())
+    Ok(result)
 }
 
 fn delete(settings: &Settings, member_id: i64, json: bool) -> Result<(), CafleetError> {

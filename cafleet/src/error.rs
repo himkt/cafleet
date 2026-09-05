@@ -14,6 +14,16 @@ pub enum CafleetError {
 }
 
 impl CafleetError {
+    /// Append a compensation diagnostic without changing the primary exit category.
+    pub(crate) fn with_cleanup(self, diagnostic: impl std::fmt::Display) -> Self {
+        let message = format!("{self}\n{diagnostic}");
+        match self {
+            Self::Usage(_) => Self::Usage(message),
+            Self::Value(_) => Self::Value(message),
+            Self::App(_) | Self::ActiveMonitorExists { .. } => Self::App(message),
+        }
+    }
+
     pub fn exit_code(&self) -> i32 {
         match self {
             CafleetError::Usage(_) => 2,

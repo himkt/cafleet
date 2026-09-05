@@ -43,13 +43,34 @@ pub(crate) fn fetch_fleet(
     .map_err(db_err)
 }
 
-/// Atomic fleet + Director + monitor bootstrap: fleet row → Director member +
-/// placement → `director_member_id` backfill → monitor member with its card
-/// marker → `spawn_monitor` callback (invoked with the three allocated ids,
-/// returning the monitor's pane id) → monitor placement → commit. Any
-/// failure — the callback's included — unwinds the whole transaction, so
-/// nothing persists and the call is retryable as-is. The write lock is held
-/// across the callback (backstopped by the `busy_timeout` PRAGMA).
+/// Per-call transaction observations. Events report real operation results;
+/// `after_rollback` can add a diagnostic only after successful recovery.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BootstrapEvent {
+    Begun,
+    CommitFinished {
+        fleet_id: i64,
+        error: Option<String>,
+    },
+    RollbackFinished {
+        fleet_id: Option<i64>,
+        error: Option<String>,
+        autocommit: bool,
+    },
+}
+
+pub(crate) trait BootstrapHooks {
+    fn observe(&self, _event: BootstrapEvent) {}
+    fn after_rollback(&self, _fleet_id: Option<i64>) -> Result<(), CafleetError> {
+        Ok(())
+    }
+}
+
+struct NoopBootstrapHooks;
+impl BootstrapHooks for NoopBootstrapHooks {}
+
+/// Bootstrap DB rows in one transaction around the caller's monitor spawn.
+/// Failures explicitly attempt rollback and preserve any recovery diagnostic.
 #[allow(clippy::too_many_arguments)]
 pub fn create_fleet(
     conn: &mut Connection,
@@ -63,17 +84,50 @@ pub fn create_fleet(
     monitor_description: &str,
     spawn_monitor: impl FnOnce(i64, i64, i64) -> Result<String, CafleetError>,
 ) -> Result<Value, CafleetError> {
+    create_fleet_with_hooks(
+        conn,
+        name,
+        mux_session,
+        mux_window_id,
+        mux_pane_id,
+        coding_agent,
+        backend,
+        monitor_name,
+        monitor_description,
+        spawn_monitor,
+        &NoopBootstrapHooks,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn create_fleet_with_hooks(
+    conn: &mut Connection,
+    name: Option<&str>,
+    mux_session: &str,
+    mux_window_id: &str,
+    mux_pane_id: &str,
+    coding_agent: &str,
+    backend: &str,
+    monitor_name: &str,
+    monitor_description: &str,
+    spawn_monitor: impl FnOnce(i64, i64, i64) -> Result<String, CafleetError>,
+    hooks: &dyn BootstrapHooks,
+) -> Result<Value, CafleetError> {
     let now = format_utc(now_utc());
     let director_card = member_card(DIRECTOR_NAME, DIRECTOR_DESCRIPTION, &[], false);
     let monitor_card = member_card(monitor_name, monitor_description, &[], true);
-    let tx = conn.transaction().map_err(db_err)?;
-    tx.execute(
-        "INSERT INTO fleets (name, created_at) VALUES (?1, ?2)",
-        params![name, now],
-    )
-    .map_err(db_err)?;
-    let fleet_id = tx.last_insert_rowid();
-    tx.execute(
+    let mut tx = conn.transaction().map_err(db_err)?;
+    hooks.observe(BootstrapEvent::Begun);
+    let mut allocated_fleet_id = None;
+    let result: Result<Value, CafleetError> = (|| {
+        tx.execute(
+            "INSERT INTO fleets (name, created_at) VALUES (?1, ?2)",
+            params![name, now],
+        )
+        .map_err(db_err)?;
+        let fleet_id = tx.last_insert_rowid();
+        allocated_fleet_id = Some(fleet_id);
+        tx.execute(
         "INSERT INTO members (fleet_id, name, description, status, registered_at, member_card_json) \
          VALUES (?1, ?2, ?3, 'active', ?4, ?5)",
         params![
@@ -85,84 +139,126 @@ pub fn create_fleet(
         ],
     )
     .map_err(db_err)?;
-    let director_id = tx.last_insert_rowid();
-    tx.execute(
-        "INSERT INTO member_placements \
+        let director_id = tx.last_insert_rowid();
+        tx.execute(
+            "INSERT INTO member_placements \
          (member_id, mux_session, mux_window_id, mux_pane_id, backend, coding_agent, created_at) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![
-            director_id,
-            mux_session,
-            mux_window_id,
-            mux_pane_id,
-            backend,
-            coding_agent,
-            now
-        ],
-    )
-    .map_err(db_err)?;
-    tx.execute(
-        "UPDATE fleets SET director_member_id=?1 WHERE fleet_id=?2",
-        params![director_id, fleet_id],
-    )
-    .map_err(db_err)?;
-    tx.execute(
+            params![
+                director_id,
+                mux_session,
+                mux_window_id,
+                mux_pane_id,
+                backend,
+                coding_agent,
+                now
+            ],
+        )
+        .map_err(db_err)?;
+        tx.execute(
+            "UPDATE fleets SET director_member_id=?1 WHERE fleet_id=?2",
+            params![director_id, fleet_id],
+        )
+        .map_err(db_err)?;
+        tx.execute(
         "INSERT INTO members (fleet_id, name, description, status, registered_at, member_card_json) \
          VALUES (?1, ?2, ?3, 'active', ?4, ?5)",
         params![fleet_id, monitor_name, monitor_description, now, monitor_card],
     )
     .map_err(db_err)?;
-    let monitor_id = tx.last_insert_rowid();
-    let monitor_pane_id = spawn_monitor(fleet_id, director_id, monitor_id)?;
-    tx.execute(
-        "INSERT INTO member_placements \
+        let monitor_id = tx.last_insert_rowid();
+        let monitor_pane_id = spawn_monitor(fleet_id, director_id, monitor_id)?;
+        tx.execute(
+            "INSERT INTO member_placements \
          (member_id, mux_session, mux_window_id, mux_pane_id, backend, coding_agent, created_at) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![
-            monitor_id,
-            mux_session,
-            mux_window_id,
-            monitor_pane_id,
-            backend,
-            coding_agent,
-            now
-        ],
-    )
-    .map_err(db_err)?;
-    tx.commit().map_err(db_err)?;
-    Ok(json!({
-        "fleet_id": fleet_id,
-        "name": name,
-        "created_at": now,
-        "director": {
-            "member_id": director_id,
-            "name": DIRECTOR_NAME,
-            "description": DIRECTOR_DESCRIPTION,
-            "registered_at": now,
-            "placement": {
-                "backend": backend,
-                "mux_session": mux_session,
-                "mux_window_id": mux_window_id,
-                "mux_pane_id": mux_pane_id,
-                "coding_agent": coding_agent,
-                "created_at": now,
+            params![
+                monitor_id,
+                mux_session,
+                mux_window_id,
+                monitor_pane_id,
+                backend,
+                coding_agent,
+                now
+            ],
+        )
+        .map_err(db_err)?;
+        let commit = tx.execute_batch("COMMIT").map_err(db_err);
+        hooks.observe(BootstrapEvent::CommitFinished {
+            fleet_id,
+            error: commit.as_ref().err().map(ToString::to_string),
+        });
+        commit?;
+        Ok(json!({
+            "fleet_id": fleet_id,
+            "name": name,
+            "created_at": now,
+            "director": {
+                "member_id": director_id,
+                "name": DIRECTOR_NAME,
+                "description": DIRECTOR_DESCRIPTION,
+                "registered_at": now,
+                "placement": {
+                    "backend": backend,
+                    "mux_session": mux_session,
+                    "mux_window_id": mux_window_id,
+                    "mux_pane_id": mux_pane_id,
+                    "coding_agent": coding_agent,
+                    "created_at": now,
+                },
             },
-        },
-        "monitor": {
-            "member_id": monitor_id,
-            "name": monitor_name,
-            "description": monitor_description,
-            "registered_at": now,
-            "placement": {
-                "backend": backend,
-                "mux_session": mux_session,
-                "mux_window_id": mux_window_id,
-                "mux_pane_id": monitor_pane_id,
-                "coding_agent": coding_agent,
-                "created_at": now,
+            "monitor": {
+                "member_id": monitor_id,
+                "name": monitor_name,
+                "description": monitor_description,
+                "registered_at": now,
+                "placement": {
+                    "backend": backend,
+                    "mux_session": mux_session,
+                    "mux_window_id": mux_window_id,
+                    "mux_pane_id": monitor_pane_id,
+                    "coding_agent": coding_agent,
+                    "created_at": now,
+                },
             },
-        },
-    }))
+        }))
+    })();
+    match result {
+        Ok(value) => {
+            tx.set_drop_behavior(rusqlite::DropBehavior::Ignore);
+            Ok(value)
+        }
+        Err(mut primary) => {
+            // SQLite may already have rolled back (e.g. RAISE(ROLLBACK)).
+            let rollback = if tx.is_autocommit() {
+                Ok(())
+            } else {
+                tx.execute_batch("ROLLBACK").map_err(db_err)
+            };
+            tx.set_drop_behavior(rusqlite::DropBehavior::Ignore);
+            drop(tx);
+            let autocommit = conn.is_autocommit();
+            hooks.observe(BootstrapEvent::RollbackFinished {
+                fleet_id: allocated_fleet_id,
+                error: rollback.as_ref().err().map(ToString::to_string),
+                autocommit,
+            });
+            let cleanup = match rollback {
+                Ok(()) if autocommit => hooks.after_rollback(allocated_fleet_id),
+                Ok(()) => Err(CafleetError::App(
+                    "transaction remains open after rollback".into(),
+                )),
+                Err(error) => Err(error),
+            };
+            if let Err(error) = cleanup {
+                let id = allocated_fleet_id.map_or_else(|| "unknown".into(), |id| id.to_string());
+                primary = primary.with_cleanup(format!(
+                    "cleanup failed for fleet {id} transaction: {error}"
+                ));
+            }
+            Err(primary)
+        }
+    }
 }
 
 pub fn list_fleets(conn: &Connection) -> Result<Vec<Value>, CafleetError> {

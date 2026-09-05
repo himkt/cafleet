@@ -4,13 +4,14 @@
 use clap::Subcommand;
 use serde_json::Value;
 
+use super::creation::{CreationHooks, NoopCreationHooks, PaneGuard};
 use super::helpers::{connect, emit, resolve_body, resolve_mux};
 use super::system::SystemProbe;
 use crate::broker;
-use crate::coding_agent::coding_agent;
+use crate::coding_agent::{SpawnProbe, coding_agent};
 use crate::config::Settings;
 use crate::error::CafleetError;
-use crate::multiplexer::Multiplexer;
+use crate::multiplexer::{Multiplexer, MultiplexerError};
 use crate::output::format_fleet_create;
 use crate::spawn_prompt::substitute_spawn_placeholders;
 
@@ -89,7 +90,7 @@ pub fn run(settings: &Settings, command: FleetCommand) -> Result<(), CafleetErro
 /// preconditions → monitor prompt resolution → backend checks → the broker's
 /// single transaction, whose spawn callback substitutes the identity
 /// placeholders and splits the monitor pane. A post-spawn failure kills the
-/// recorded pane; nothing persists on any failure.
+/// recorded pane after DB rollback. Cleanup failures remain in the diagnostic.
 fn create(
     settings: &Settings,
     name: &str,
@@ -98,12 +99,37 @@ fn create(
     monitor_model: Option<&str>,
     json: bool,
 ) -> Result<(), CafleetError> {
+    let fleet = create_with_dependencies(
+        settings,
+        name,
+        agent_name,
+        monitor_file,
+        monitor_model,
+        || resolve_mux(settings),
+        &SystemProbe,
+        &NoopCreationHooks,
+    )?;
+    emit(json, &fleet, || format_fleet_create(&fleet));
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_with_dependencies<M: Multiplexer>(
+    settings: &Settings,
+    name: &str,
+    agent_name: &str,
+    monitor_file: &str,
+    monitor_model: Option<&str>,
+    resolve_mux: impl FnOnce() -> Result<M, MultiplexerError>,
+    probe: &dyn SpawnProbe,
+    hooks: &dyn CreationHooks,
+) -> Result<Value, CafleetError> {
     let inside_session = || {
         CafleetError::App(
             "cafleet fleet create must be run inside a tmux or herdr session".to_string(),
         )
     };
-    let mux = resolve_mux(settings).map_err(|_| inside_session())?;
+    let mux = resolve_mux().map_err(|_| inside_session())?;
     mux.ensure_available().map_err(|_| inside_session())?;
     let context = mux.context_discovery().map_err(|_| inside_session())?;
 
@@ -112,11 +138,11 @@ fn create(
     let backend = coding_agent(agent_name)
         .unwrap_or_else(|| panic!("'{agent_name}' is a registry-validated backend"));
     backend.validate_model(monitor_model)?;
-    backend.ensure_available(&SystemProbe)?;
+    backend.ensure_available(probe)?;
 
     let mut conn = connect(settings)?;
-    let mut spawned_pane: Option<String> = None;
-    let bootstrap = broker::create_fleet(
+    let mut spawned_pane: Option<PaneGuard<'_>> = None;
+    let bootstrap = broker::fleets::create_fleet_with_hooks(
         &mut conn,
         Some(name),
         &context.session,
@@ -139,26 +165,30 @@ fn create(
             if let Ok(url) = std::env::var("CAFLEET_DATABASE_URL") {
                 env.push(("CAFLEET_DATABASE_URL".to_string(), url));
             }
-            let pane_id = mux.split_window(&context, &env, &argv).map_err(|error| {
-                CafleetError::App(format!(
-                    "tmux split-window failed: {error}. Rolled back fleet creation."
-                ))
-            })?;
-            spawned_pane = Some(pane_id.clone());
+            let pane_id = mux
+                .split_window(&context, &env, &argv)
+                .map_err(|error| CafleetError::App(format!("tmux split-window failed: {error}")))?;
+            spawned_pane = Some(PaneGuard::new(&mux, pane_id.clone(), hooks));
             Ok(pane_id)
         },
+        hooks,
     );
     let fleet = match bootstrap {
         Ok(fleet) => fleet,
         Err(error) => {
-            if let Some(pane_id) = &spawned_pane {
-                let _ = mux.send_exit(pane_id, true);
-            }
-            return Err(error);
+            // The broker has ended its transaction scope. Close our DB handle
+            // before external cleanup, including when explicit rollback failed.
+            drop(conn);
+            return Err(match &mut spawned_pane {
+                Some(pane) => pane.rollback(error),
+                None => error,
+            });
         }
     };
-    emit(json, &fleet, || format_fleet_create(&fleet));
-    Ok(())
+    if let Some(pane) = &mut spawned_pane {
+        pane.finish();
+    }
+    Ok(fleet)
 }
 
 fn list(settings: &Settings, json: bool) -> Result<(), CafleetError> {

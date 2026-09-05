@@ -29,20 +29,88 @@ pub struct MultiplexerContext {
     pub pane_id: String,
 }
 
-/// A terminal-multiplexer backend failure; `Display` renders the backend
-/// message.
+/// The outcome of backend-owned pane compensation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaneCleanup {
+    Attempted {
+        pane_id: String,
+        error: Option<String>,
+    },
+    Unknown,
+}
+
+/// A backend failure with optional pane ownership information.
 #[derive(Debug)]
-pub struct MultiplexerError(String);
+pub struct MultiplexerError {
+    message: String,
+    pane_cleanup: Option<PaneCleanup>,
+}
 
 impl MultiplexerError {
     pub(crate) fn new(message: impl Into<String>) -> Self {
-        MultiplexerError(message.into())
+        Self {
+            message: message.into(),
+            pane_cleanup: None,
+        }
+    }
+
+    pub fn pane_cleanup(&self) -> Option<&PaneCleanup> {
+        self.pane_cleanup.as_ref()
+    }
+
+    pub(crate) fn with_pane_cleanup(mut self, cleanup: PaneCleanup) -> Self {
+        self.pane_cleanup = Some(cleanup);
+        self
     }
 }
 
 impl fmt::Display for MultiplexerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.message)?;
+        match &self.pane_cleanup {
+            Some(PaneCleanup::Attempted {
+                pane_id,
+                error: Some(error),
+            }) => write!(f, "\ncleanup failed for pane {pane_id}: {error}"),
+            Some(PaneCleanup::Unknown) => {
+                f.write_str("\npane ID unknown; pane cleanup unconfirmed")
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
+/// Owns a known pane until transfer or an explicit cleanup attempt. Drop is
+/// only a last resort for unwinding before either operation.
+pub(crate) struct PaneOwnership<F: Fn(&str) -> Result<(), MultiplexerError>> {
+    pane_id: Option<String>,
+    kill: F,
+}
+
+impl<F: Fn(&str) -> Result<(), MultiplexerError>> PaneOwnership<F> {
+    pub(crate) fn new(pane_id: String, kill: F) -> Self {
+        Self {
+            pane_id: Some(pane_id),
+            kill,
+        }
+    }
+
+    pub(crate) fn rollback(&mut self) -> PaneCleanup {
+        let pane_id = self.pane_id.take().expect("pane is still owned");
+        let error = (self.kill)(&pane_id).err().map(|error| error.to_string());
+        PaneCleanup::Attempted { pane_id, error }
+    }
+
+    pub(crate) fn finish(mut self) -> String {
+        self.pane_id.take().expect("pane is still owned")
+    }
+}
+
+impl<F: Fn(&str) -> Result<(), MultiplexerError>> Drop for PaneOwnership<F> {
+    fn drop(&mut self) {
+        if let Some(pane_id) = self.pane_id.take() {
+            let _ = (self.kill)(&pane_id);
+        }
     }
 }
 
