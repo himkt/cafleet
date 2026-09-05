@@ -1454,4 +1454,167 @@ mod tests {
         let mux = HerdrMultiplexer::new(runner, herdr_env());
         assert!(mux.agent_status("w1:p2").is_err());
     }
+
+    fn queue_first_member_split(runner: &FakeRunner) {
+        runner.respond(Ok(herdr_envelope(json!({
+            "panes": [{"pane_id": "w1:p1", "tab_id": "w1:t1", "workspace_id": "w1"}]
+        }))));
+        runner.respond(Ok(herdr_envelope(json!({"pane": {"pane_id": "w1:p9"}}))));
+    }
+
+    #[test]
+    fn creation_run_failure_closes_the_known_pane_exactly_once() {
+        let runner = FakeRunner::with_binary("herdr");
+        queue_first_member_split(&runner);
+        runner.respond(Err(RunError::Failed {
+            stderr: "primary run failure".into(),
+        }));
+        runner.respond(Err(RunError::Failed {
+            stderr: "optional layout lookup failed".into(),
+        }));
+        runner.respond(Ok(String::new()));
+        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+        let error = mux
+            .split_window(&reference(), &[], &argv(&["claude"]))
+            .unwrap_err();
+        assert!(error.to_string().contains("primary run failure"), "{error}");
+        drop(mux);
+        let calls = runner.run_argvs();
+        assert_eq!(
+            calls
+                .iter()
+                .map(|args| args[2].as_str())
+                .collect::<Vec<_>>(),
+            ["list", "split", "run", "get", "close"]
+        );
+        assert_eq!(
+            calls.last().unwrap(),
+            &argv(&["herdr", "pane", "close", "w1:p9"])
+        );
+        assert!(
+            !calls
+                .iter()
+                .any(|args| args.iter().any(|arg| arg == "/exit"))
+        );
+    }
+
+    #[test]
+    fn creation_close_failure_retains_run_error_and_pane_id_without_retry() {
+        let runner = FakeRunner::with_binary("herdr");
+        queue_first_member_split(&runner);
+        runner.respond(Err(RunError::Failed {
+            stderr: "primary run failure".into(),
+        }));
+        runner.respond(Err(RunError::Failed {
+            stderr: "optional layout lookup failed".into(),
+        }));
+        runner.respond(Err(RunError::Failed {
+            stderr: "secondary close failure".into(),
+        }));
+        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+        let error = mux
+            .split_window(&reference(), &[], &argv(&["claude"]))
+            .unwrap_err();
+        let detail = error.to_string();
+        assert!(
+            detail.contains("cleanup failed for pane w1:p9:"),
+            "{detail}"
+        );
+        assert!(
+            detail.find("primary run failure").unwrap()
+                < detail.find("secondary close failure").unwrap()
+        );
+        drop(mux);
+        assert_eq!(
+            runner
+                .run_argvs()
+                .iter()
+                .filter(|args| args[2] == "close")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn creation_malformed_split_reports_unknown_compensation_and_never_guesses_a_pane() {
+        for response in ["not-json".to_string(), herdr_envelope(json!({"pane": {}}))] {
+            let runner = FakeRunner::with_binary("herdr");
+            runner.respond(Ok(herdr_envelope(json!({"panes": []}))));
+            runner.respond(Ok(response));
+            let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+            let error = mux
+                .split_window(&reference(), &[], &argv(&["claude"]))
+                .unwrap_err();
+            let detail = error.to_string().to_lowercase();
+            assert!(
+                detail.contains("unknown") && detail.contains("unconfirmed"),
+                "{detail}"
+            );
+            drop(mux);
+            assert_eq!(
+                runner
+                    .run_argvs()
+                    .iter()
+                    .map(|args| args[2].as_str())
+                    .collect::<Vec<_>>(),
+                ["list", "split"]
+            );
+        }
+    }
+
+    #[test]
+    fn creation_failed_split_retains_primary_and_reports_unconfirmed_compensation() {
+        let runner = FakeRunner::with_binary("herdr");
+        runner.respond(Ok(herdr_envelope(json!({"panes": []}))));
+        runner.respond(Err(RunError::Failed {
+            stderr: "split transport failed".into(),
+        }));
+        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+        let error = mux
+            .split_window(&reference(), &[], &argv(&["claude"]))
+            .unwrap_err();
+        let detail = error.to_string().to_lowercase();
+        assert!(detail.contains("split transport failed"), "{detail}");
+        assert!(
+            detail.contains("unknown") && detail.contains("unconfirmed"),
+            "{detail}"
+        );
+        assert_eq!(runner.run_argvs().len(), 2);
+    }
+
+    #[test]
+    fn creation_list_failure_does_not_split_or_close_any_pane() {
+        let runner = FakeRunner::with_binary("herdr");
+        runner.respond(Err(RunError::Failed {
+            stderr: "list failed".into(),
+        }));
+        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+        let error = mux
+            .split_window(&reference(), &[], &argv(&["claude"]))
+            .unwrap_err();
+        assert!(error.to_string().contains("list failed"));
+        assert_eq!(runner.run_argvs(), vec![argv(&["herdr", "pane", "list"])]);
+    }
+
+    #[test]
+    fn creation_success_transfers_ownership_without_closing_the_pane_on_drop() {
+        let runner = FakeRunner::with_binary("herdr");
+        queue_first_member_split(&runner);
+        runner.respond(Ok(String::new()));
+        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+        assert_eq!(
+            mux.split_window(&reference(), &[], &argv(&["claude"]))
+                .unwrap(),
+            "w1:p9"
+        );
+        drop(mux);
+        assert_eq!(
+            runner
+                .run_argvs()
+                .iter()
+                .map(|args| args[2].as_str())
+                .collect::<Vec<_>>(),
+            ["list", "split", "run"]
+        );
+    }
 }
