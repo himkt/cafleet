@@ -7,6 +7,38 @@ mod common;
 use common::{Cli, code, stderr, stdout, write_file};
 
 #[test]
+fn step8_capture_mux_guard_precedes_unknown_member_lookup() {
+    let mut cli = Cli::new();
+    cli.with_fleet();
+    cli.set_env("CAFLEET_MULTIPLEXER", "invalid-step8-backend");
+    let output = cli.run(&["member", "capture", "999"]);
+    assert_eq!(code(&output), 1);
+    assert!(stderr(&output).contains("invalid-step8-backend"));
+    assert!(!stderr(&output).contains("member 999 not found"));
+}
+
+#[test]
+fn step8_scan_live_fleet_guard_precedes_invalid_mux_resolution() {
+    let mut cli = Cli::new();
+    let (fleet, _) = cli.with_fleet();
+    cli.set_env("CAFLEET_MULTIPLEXER", "invalid-step8-backend");
+    for id in [999, fleet] {
+        if id == fleet {
+            cli.sqlite()
+                .execute(
+                    "UPDATE fleets SET deleted_at='2026-09-06T00:00:00Z' WHERE fleet_id=?1",
+                    [fleet],
+                )
+                .unwrap();
+        }
+        let output = cli.run(&["monitor", "scan", &id.to_string()]);
+        assert_eq!(code(&output), 1);
+        assert!(stderr(&output).contains(&format!("fleet {id} not found")));
+        assert!(!stderr(&output).contains("invalid-step8-backend"));
+    }
+}
+
+#[test]
 fn member_create_spawns_patches_the_pane_and_substitutes_identity() {
     let cli = Cli::new();
     let (fleet_id, _) = cli.with_fleet();
