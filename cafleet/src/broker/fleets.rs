@@ -590,6 +590,30 @@ mod tests {
     }
 
     #[test]
+    fn step6_fleet_timestamp_ties_use_descending_id_after_primary_time_order() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate_to_head(&mut conn).unwrap();
+        let (first, _) = create_fleet(&mut conn, "first");
+        let (second, _) = create_fleet(&mut conn, "second");
+        let (third, _) = create_fleet(&mut conn, "third");
+        conn.execute("UPDATE fleets SET created_at='2026-01-01T00:00:00Z'", [])
+            .unwrap();
+        conn.execute(
+            "UPDATE fleets SET created_at='2026-01-02T00:00:00Z' WHERE fleet_id=?1",
+            [first],
+        )
+        .unwrap();
+        assert_eq!(
+            broker::list_fleets(&conn)
+                .unwrap()
+                .iter()
+                .map(|r| r["fleet_id"].as_i64().unwrap())
+                .collect::<Vec<_>>(),
+            vec![first, third, second]
+        );
+    }
+
+    #[test]
     fn get_fleet_returns_none_for_a_missing_id() {
         let dir = TempDir::new().unwrap();
         let conn = migrated_conn(&dir);

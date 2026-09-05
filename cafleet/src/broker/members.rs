@@ -1080,3 +1080,224 @@ mod compatibility_regressions {
         );
     }
 }
+
+#[cfg(test)]
+mod step6_behavior_regressions {
+    use super::*;
+    use crate::broker::{self, test_support as common};
+
+    fn memory_fleet() -> (Connection, i64, i64) {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate_to_head(&mut conn).unwrap();
+        let (fleet, director) = common::create_fleet(&mut conn, "query");
+        (conn, fleet, director)
+    }
+
+    fn activity(sent: Option<&str>, received: Option<&str>, ack: Option<&str>) -> MemberActivity {
+        MemberActivity {
+            member: MemberRecord {
+                member_id: 1,
+                fleet_id: 1,
+                name: "worker".into(),
+                description: String::new(),
+                registered_at: String::new(),
+                status: MemberStatus::Active,
+                kind: MemberKind::Member,
+                skills: vec![],
+                placement: None,
+            },
+            last_sent: sent.map(str::to_owned),
+            last_recv: received.map(str::to_owned),
+            last_ack: ack.map(str::to_owned),
+            idle: None,
+        }
+    }
+
+    #[test]
+    fn step6_idle_clamps_future_activity_to_zero() {
+        let now = parse_lenient("2026-01-01T00:00:00Z").unwrap();
+        for row in [
+            activity(Some("2026-01-01T00:01:00Z"), None, None),
+            activity(None, Some("2026-01-01T00:01:00Z"), None),
+            activity(None, None, Some("2026-01-01T00:01:00Z")),
+        ] {
+            assert_eq!(idle_seconds(&row, now), Some(0));
+        }
+    }
+
+    #[test]
+    fn step6_idle_null_and_invalid_maximum_do_not_fall_back_to_older_valid_times() {
+        let now = parse_lenient("2026-01-01T00:00:00Z").unwrap();
+        assert_eq!(idle_seconds(&activity(None, None, None), now), None);
+        for row in [
+            activity(Some("z-invalid"), Some("2025-12-31T23:59:50Z"), None),
+            activity(None, Some("z-invalid"), Some("2025-12-31T23:59:50Z")),
+        ] {
+            assert_eq!(idle_seconds(&row, now), None);
+        }
+    }
+
+    #[test]
+    fn step6_idle_selects_raw_lexicographic_maximum_before_parsing_offsets() {
+        let now = parse_lenient("2026-01-01T00:00:00Z").unwrap();
+        let row = activity(
+            Some("2026-01-01T08:00:00+09:00"),
+            Some("2025-12-31T23:59:50Z"),
+            None,
+        );
+        assert_eq!(idle_seconds(&row, now), Some(3600));
+    }
+
+    #[test]
+    fn step6_idle_preserves_fractional_second_truncation() {
+        let now = parse_lenient("2026-01-01T00:00:01.900000+00:00").unwrap();
+        let row = activity(Some("2026-01-01T00:00:00.950000+00:00"), None, None);
+        assert_eq!(idle_seconds(&row, now), Some(0));
+        let row = activity(None, None, Some("2025-12-31T23:59:59.950000+00:00"));
+        assert_eq!(idle_seconds(&row, now), Some(1));
+    }
+
+    #[test]
+    fn step6_name_lookup_boundaries_return_sorted_unique_known_and_deregistered_ids() {
+        let (conn, fleet, _) = memory_fleet();
+        for id in 10000..11001_i64 {
+            conn.execute("INSERT INTO members(member_id,fleet_id,name,description,status,registered_at,member_card_json) VALUES (?1,?2,?3,'','deregistered','2026-01-01T00:00:00Z','{}')", params![id,fleet,format!("member-{id}")]).unwrap();
+        }
+        for count in [0, 1, 500, 501, 1001] {
+            let ids: Vec<i64> = (10000..10000 + count).rev().collect();
+            let repeated: Vec<i64> = ids.iter().copied().cycle().take(ids.len() * 4).collect();
+            let names = broker::get_member_names(&conn, &repeated).unwrap();
+            assert_eq!(
+                names.keys().copied().collect::<Vec<_>>(),
+                (10000..10000 + count).collect::<Vec<_>>()
+            );
+            for (id, name) in names {
+                assert_eq!(name, format!("member-{id}"));
+            }
+        }
+        let names = broker::get_member_names(&conn, &[10000, i64::MAX, -1, 10000]).unwrap();
+        assert_eq!(
+            names.into_iter().collect::<Vec<_>>(),
+            vec![(10000, "member-10000".into())]
+        );
+    }
+
+    #[test]
+    fn step6_roster_includes_only_owner_history_and_preserves_role_placement_and_id_order() {
+        let (mut conn, fleet, director) = memory_fleet();
+        let owner = common::register(&mut conn, fleet, "owner", Some("%2"));
+        let sender = common::register(&mut conn, fleet, "sender only", Some("%3"));
+        let pending = common::register(&mut conn, fleet, "pending", None);
+        common::send(
+            &mut conn,
+            &common::FakeNotifier::succeeding(),
+            sender,
+            owner,
+            "history",
+        );
+        broker::deregister_member(&mut conn, owner).unwrap();
+        broker::deregister_member(&mut conn, sender).unwrap();
+        let rows = broker::list_roster_records(&conn, fleet, true).unwrap();
+        assert_eq!(
+            rows.iter().map(|r| r.member_id).collect::<Vec<_>>(),
+            vec![
+                director,
+                common::bootstrap_monitor(&conn, fleet),
+                owner,
+                pending
+            ]
+        );
+        assert_eq!(rows[0].kind, MemberKind::Director);
+        assert_eq!(rows[1].kind, MemberKind::Monitor);
+        assert_eq!(rows[2].status, MemberStatus::Deregistered);
+        assert_eq!(rows[2].placement, None);
+        assert_eq!(rows[3].kind, MemberKind::Member);
+        assert_eq!(rows[3].placement.as_ref().unwrap().mux_pane_id, None);
+        assert!(
+            broker::list_roster_records(&conn, fleet, false)
+                .unwrap()
+                .iter()
+                .all(|r| r.member_id != owner && r.member_id != sender)
+        );
+    }
+
+    #[test]
+    fn step6_activity_uses_owner_delivery_times_and_only_ack_status_time() {
+        let (mut conn, fleet, director) = memory_fleet();
+        let member = common::register(&mut conn, fleet, "worker", None);
+        let sent = broker::send_message_record(
+            &mut conn,
+            &common::FakeNotifier::succeeding(),
+            common::MAX_TEXT_LEN,
+            director,
+            &member.to_string(),
+            "work",
+        )
+        .unwrap()
+        .message;
+        let created = "2020-01-01T00:00:00Z";
+        conn.execute(
+            "UPDATE messages SET created_at=?1,status_timestamp=?1 WHERE message_id=?2",
+            params![created, sent.message_id],
+        )
+        .unwrap();
+        // Read fixture deliberately separates owner from the recipient column.
+        conn.execute(
+            "UPDATE messages SET to_member_id=?1 WHERE message_id=?2",
+            params![director, sent.message_id],
+        )
+        .unwrap();
+        let before = broker::list_member_records(&conn, fleet)
+            .unwrap()
+            .into_iter()
+            .find(|r| r.member.member_id == member)
+            .unwrap();
+        assert_eq!(before.last_recv.as_deref(), Some(created));
+        assert_eq!(before.last_ack, None);
+        let ack = broker::ack_message_record(&mut conn, sent.message_id).unwrap();
+        let after = broker::list_member_records(&conn, fleet)
+            .unwrap()
+            .into_iter()
+            .find(|r| r.member.member_id == member)
+            .unwrap();
+        assert_eq!(ack.created_at, created);
+        assert_eq!(after.last_recv, before.last_recv);
+        assert_eq!(after.last_sent, None);
+        assert_eq!(after.last_ack, Some(ack.status_timestamp));
+        let director_row = broker::list_member_records(&conn, fleet)
+            .unwrap()
+            .into_iter()
+            .find(|r| r.member.member_id == director)
+            .unwrap();
+        assert_eq!(director_row.last_sent.as_deref(), Some(created));
+        assert_eq!(director_row.last_recv, None);
+        assert_eq!(director_row.last_ack, None);
+    }
+
+    #[test]
+    fn step6_broadcast_summary_counts_as_sent_but_never_received_or_acknowledged() {
+        let (mut conn, fleet, director) = memory_fleet();
+        let broadcast = broker::broadcast_message_record(
+            &mut conn,
+            &common::FakeNotifier::succeeding(),
+            common::MAX_TEXT_LEN,
+            director,
+            "broadcast",
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE messages SET created_at='2020-01-01T00:00:00Z' WHERE type='unicast'",
+            [],
+        )
+        .unwrap();
+        conn.execute("UPDATE messages SET created_at='2021-01-01T00:00:00Z',status_timestamp='2022-01-01T00:00:00Z' WHERE message_id=?1", [broadcast.message.message_id]).unwrap();
+        let row = broker::list_member_records(&conn, fleet)
+            .unwrap()
+            .into_iter()
+            .find(|r| r.member.member_id == director)
+            .unwrap();
+        assert_eq!(row.last_sent.as_deref(), Some("2021-01-01T00:00:00Z"));
+        assert_eq!(row.last_recv, None);
+        assert_eq!(row.last_ack, None);
+    }
+}
