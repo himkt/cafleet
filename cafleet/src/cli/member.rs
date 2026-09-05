@@ -680,3 +680,230 @@ mod tests {
         assert_eq!(err.kind(), clap::error::ErrorKind::InvalidValue);
     }
 }
+
+#[cfg(test)]
+mod creation_regressions {
+    use super::*;
+    use crate::cli::creation::test_support::Fixture;
+    use crate::coding_agent::test_support::FakeProbe;
+    use crate::multiplexer::{AnyMultiplexer, RunError};
+
+    fn create(f: &Fixture, mux: AnyMultiplexer, prompt: &str) -> Result<Value, CafleetError> {
+        create_with_dependencies(
+            &f.settings,
+            1,
+            "worker",
+            "fixture",
+            None,
+            None,
+            None,
+            false,
+            &PromptArgs {
+                prompt: Some(prompt.into()),
+                file: None,
+            },
+            || Ok(mux),
+            &FakeProbe::with_binary("claude", f.dir.path()),
+            f,
+        )
+    }
+
+    #[test]
+    fn registration_failure_has_no_pane_or_registration_guard_to_compensate() {
+        let f = Fixture::new(true);
+        f.sql("CREATE TRIGGER fail_register BEFORE INSERT ON members BEGIN SELECT RAISE(ABORT, 'registration failed'); END;");
+        let error = create(&f, f.mux(None, false, false), "prompt").unwrap_err();
+        assert_eq!(error.exit_code(), 1);
+        assert!(error.to_string().contains("registration failed"));
+        assert_eq!(f.timeline(), ["current:ok"]);
+        assert_eq!(f.count("members"), 2);
+        assert_eq!(f.count("member_placements"), 2);
+    }
+
+    #[test]
+    fn placeholder_failure_only_deregisters_and_keeps_usage_class_on_cleanup_failure() {
+        for fail_cleanup in [false, true] {
+            let f = Fixture::new(true);
+            if fail_cleanup {
+                f.sql("CREATE TRIGGER fail_deregister BEFORE UPDATE OF status ON members BEGIN SELECT RAISE(ABORT, 'deregister failed'); END;");
+            }
+            let error = create(&f, f.mux(None, false, false), "{unknown}").unwrap_err();
+            assert!(matches!(error, CafleetError::Usage(_)));
+            assert_eq!(error.exit_code(), 2);
+            assert!(
+                error
+                    .to_string()
+                    .starts_with("Unknown placeholder 'unknown'")
+            );
+            assert_eq!(
+                f.timeline(),
+                [
+                    "current:ok",
+                    if fail_cleanup {
+                        "deregister:error"
+                    } else {
+                        "deregister:ok"
+                    },
+                    "disarm:registration"
+                ]
+            );
+            if fail_cleanup {
+                assert!(error.to_string().contains("cleanup failed for member 3:"));
+                assert_eq!(f.count("member_placements"), 3);
+            } else {
+                f.assert_deregistered();
+            }
+        }
+    }
+
+    #[test]
+    fn backend_run_error_closes_before_deregister_even_when_close_fails() {
+        let failure = RunError::Failed {
+            stderr: "primary run failure".into(),
+        };
+        for close_fails in [false, true] {
+            let f = Fixture::new(true);
+            let error = create(
+                &f,
+                f.mux(Some(("run", failure.clone())), close_fails, false),
+                "prompt",
+            )
+            .unwrap_err();
+            assert!(matches!(error, CafleetError::App(_)));
+            assert_eq!(error.exit_code(), 1);
+            assert_eq!(
+                f.timeline(),
+                [
+                    "current:ok",
+                    "list:ok",
+                    "split:ok",
+                    "run:error",
+                    "get:error",
+                    "write-lock:true",
+                    if close_fails {
+                        "close:error"
+                    } else {
+                        "close:ok"
+                    },
+                    "deregister:ok",
+                    "disarm:registration"
+                ]
+            );
+            assert_eq!(
+                error
+                    .to_string()
+                    .matches("cleanup failed for pane w1:p9:")
+                    .count(),
+                usize::from(close_fails)
+            );
+            f.assert_deregistered();
+        }
+    }
+
+    #[test]
+    fn placement_error_or_missing_row_kills_before_deregister_despite_cleanup_errors() {
+        for missing in [false, true] {
+            for (close_fails, deregister_fails) in [(false, false), (true, false), (true, true)] {
+                let f = Fixture::new(true);
+                f.sql(if missing {
+                    "CREATE TRIGGER fail_patch BEFORE UPDATE OF mux_pane_id ON member_placements BEGIN DELETE FROM member_placements WHERE member_id=NEW.member_id; SELECT RAISE(IGNORE); END;"
+                } else {
+                    "CREATE TRIGGER fail_patch BEFORE UPDATE OF mux_pane_id ON member_placements BEGIN SELECT RAISE(ABORT, 'primary placement failure'); END;"
+                });
+                if deregister_fails {
+                    f.sql("CREATE TRIGGER fail_deregister BEFORE UPDATE OF status ON members BEGIN SELECT RAISE(ABORT, 'secondary deregister failure'); END;");
+                }
+                let error = create(&f, f.mux(None, close_fails, false), "prompt").unwrap_err();
+                assert_eq!(error.exit_code(), 1);
+                let detail = error.to_string();
+                assert!(
+                    detail.contains(if missing {
+                        "placement row vanished"
+                    } else {
+                        "primary placement failure"
+                    }),
+                    "{detail}"
+                );
+                assert_eq!(
+                    f.timeline(),
+                    [
+                        "current:ok",
+                        "list:ok",
+                        "split:ok",
+                        "run:ok",
+                        "get:error",
+                        "write-lock:true",
+                        if close_fails {
+                            "close:error"
+                        } else {
+                            "close:ok"
+                        },
+                        if close_fails {
+                            "cli-kill:error"
+                        } else {
+                            "cli-kill:ok"
+                        },
+                        "disarm:pane",
+                        if deregister_fails {
+                            "deregister:error"
+                        } else {
+                            "deregister:ok"
+                        },
+                        "disarm:registration"
+                    ]
+                );
+                if deregister_fails {
+                    assert!(
+                        detail.find("cleanup failed for pane w1:p9:").unwrap()
+                            < detail.find("cleanup failed for member 3:").unwrap()
+                    );
+                    assert!(!detail.contains("Rolled back"));
+                } else {
+                    f.assert_deregistered();
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn split_with_unknown_id_deregisters_without_guessed_kill() {
+        let f = Fixture::new(true);
+        let error = create(&f, f.mux(None, false, true), "prompt").unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("pane ID unknown; pane cleanup unconfirmed")
+        );
+        assert_eq!(
+            f.timeline(),
+            [
+                "current:ok",
+                "list:ok",
+                "split:ok",
+                "deregister:ok",
+                "disarm:registration"
+            ]
+        );
+        f.assert_deregistered();
+    }
+
+    #[test]
+    fn successful_creation_disarms_both_guards_before_returning_output_value() {
+        let f = Fixture::new(true);
+        let value = create(&f, f.mux(None, false, false), "prompt").unwrap();
+        assert_eq!(value["member_id"], 3);
+        assert_eq!(value["placement"]["mux_pane_id"], "w1:p9");
+        assert_eq!(
+            f.timeline(),
+            [
+                "current:ok",
+                "list:ok",
+                "split:ok",
+                "run:ok",
+                "disarm:pane",
+                "disarm:registration"
+            ]
+        );
+        assert_eq!(f.count("member_placements"), 3);
+    }
+}

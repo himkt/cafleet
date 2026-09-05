@@ -642,6 +642,7 @@ fn right_column(panes: &[Value]) -> Result<Vec<Value>, MultiplexerError> {
 
 #[cfg(test)]
 mod tests {
+    use crate::multiplexer::PaneCleanup;
     use serde_json::json;
 
     use crate::multiplexer::test_support::{
@@ -1490,6 +1491,9 @@ mod tests {
             .split_window(&reference(), &[], &argv(&["claude"]))
             .unwrap_err();
         assert!(error.to_string().contains("primary run failure"), "{error}");
+        assert!(
+            matches!(error.pane_cleanup(), Some(PaneCleanup::Attempted { pane_id, error: None }) if pane_id == "w1:p9")
+        );
         drop(mux);
         let calls = runner.run_argvs();
         assert_eq!(
@@ -1527,6 +1531,9 @@ mod tests {
         let error = mux
             .split_window(&reference(), &[], &argv(&["claude"]))
             .unwrap_err();
+        assert!(
+            matches!(error.pane_cleanup(), Some(PaneCleanup::Attempted { pane_id, error: Some(detail) }) if pane_id == "w1:p9" && detail.contains("secondary close failure"))
+        );
         let detail = error.to_string();
         assert!(
             detail.contains("cleanup failed for pane w1:p9:"),
@@ -1557,6 +1564,7 @@ mod tests {
             let error = mux
                 .split_window(&reference(), &[], &argv(&["claude"]))
                 .unwrap_err();
+            assert!(matches!(error.pane_cleanup(), Some(PaneCleanup::Unknown)));
             let detail = error.to_string().to_lowercase();
             assert!(
                 detail.contains("unknown") && detail.contains("unconfirmed"),
@@ -1585,6 +1593,7 @@ mod tests {
         let error = mux
             .split_window(&reference(), &[], &argv(&["claude"]))
             .unwrap_err();
+        assert!(matches!(error.pane_cleanup(), Some(PaneCleanup::Unknown)));
         let detail = error.to_string().to_lowercase();
         assert!(detail.contains("split transport failed"), "{detail}");
         assert!(
@@ -1605,6 +1614,7 @@ mod tests {
             .split_window(&reference(), &[], &argv(&["claude"]))
             .unwrap_err();
         assert!(error.to_string().contains("list failed"));
+        assert!(error.pane_cleanup().is_none());
         assert_eq!(runner.run_argvs(), vec![argv(&["herdr", "pane", "list"])]);
     }
 

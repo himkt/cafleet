@@ -341,3 +341,296 @@ mod tests {
         assert_eq!(monitor_model.as_deref(), Some("haiku"));
     }
 }
+
+#[cfg(test)]
+mod creation_regressions {
+    use super::*;
+    use crate::broker::fleets::BootstrapEvent;
+    use crate::cli::creation::test_support::{Event, Fixture};
+    use crate::coding_agent::test_support::FakeProbe;
+    use crate::multiplexer::{AnyMultiplexer, RunError};
+
+    fn create(f: &Fixture, mux: AnyMultiplexer, prompt: &str) -> Result<Value, CafleetError> {
+        let path = f.dir.path().join("monitor.md");
+        std::fs::write(&path, prompt).unwrap();
+        create_with_dependencies(
+            &f.settings,
+            "fixture",
+            "claude",
+            path.to_str().unwrap(),
+            None,
+            || Ok(mux),
+            &FakeProbe::with_binary("claude", f.dir.path()),
+            f,
+        )
+    }
+
+    #[test]
+    fn callback_placeholder_failure_rolls_back_and_preserves_usage_with_synthetic_diagnostic() {
+        for diagnostic in [false, true] {
+            let mut f = Fixture::new(false);
+            f.diagnostic = diagnostic;
+            let error = create(&f, f.mux(None, false, false), "{unknown}").unwrap_err();
+            assert!(matches!(error, CafleetError::Usage(_)));
+            assert_eq!(error.exit_code(), 2);
+            assert!(
+                error
+                    .to_string()
+                    .starts_with("Unknown placeholder 'unknown'")
+            );
+            assert_eq!(
+                error.to_string().contains(
+                    "cleanup failed for fleet 1 transaction: synthetic rollback diagnostic"
+                ),
+                diagnostic
+            );
+            assert_eq!(
+                f.timeline(),
+                ["current:ok", "begin", "rollback:ok", "after-real-rollback"]
+            );
+            f.assert_empty_bootstrap();
+        }
+    }
+
+    #[test]
+    fn backend_close_precedes_real_rollback_on_callback_run_failure() {
+        let failure = RunError::Failed {
+            stderr: "primary run failure".into(),
+        };
+        for close_fails in [false, true] {
+            let f = Fixture::new(false);
+            let error = create(
+                &f,
+                f.mux(Some(("run", failure.clone())), close_fails, false),
+                "prompt",
+            )
+            .unwrap_err();
+            assert!(matches!(error, CafleetError::App(_)));
+            assert_eq!(error.exit_code(), 1);
+            assert_eq!(
+                f.timeline(),
+                [
+                    "current:ok",
+                    "begin",
+                    "list:ok",
+                    "split:ok",
+                    "run:error",
+                    "get:error",
+                    "write-lock:false",
+                    if close_fails {
+                        "close:error"
+                    } else {
+                        "close:ok"
+                    },
+                    "rollback:ok",
+                    "after-real-rollback"
+                ]
+            );
+            assert_eq!(
+                error
+                    .to_string()
+                    .matches("cleanup failed for pane w1:p9:")
+                    .count(),
+                usize::from(close_fails)
+            );
+            f.assert_empty_bootstrap();
+        }
+    }
+
+    #[test]
+    fn unknown_split_or_transport_failure_rolls_back_without_guessed_close() {
+        for failed_split in [false, true] {
+            let f = Fixture::new(false);
+            let failure = failed_split.then_some((
+                "split",
+                RunError::Failed {
+                    stderr: "split transport failed".into(),
+                },
+            ));
+            let error = create(&f, f.mux(failure, false, true), "prompt").unwrap_err();
+            assert_eq!(error.exit_code(), 1);
+            assert!(
+                error
+                    .to_string()
+                    .contains("pane ID unknown; pane cleanup unconfirmed")
+            );
+            assert_eq!(
+                f.timeline(),
+                [
+                    "current:ok",
+                    "begin",
+                    "list:ok",
+                    if failed_split {
+                        "split:error"
+                    } else {
+                        "split:ok"
+                    },
+                    "rollback:ok",
+                    "after-real-rollback"
+                ]
+            );
+            f.assert_empty_bootstrap();
+        }
+    }
+
+    #[test]
+    fn placement_insert_failure_releases_db_lock_before_cli_pane_cleanup() {
+        for rollback_in_sqlite in [false, true] {
+            for close_fails in [false, true] {
+                let f = Fixture::new(false);
+                let action = if rollback_in_sqlite {
+                    "ROLLBACK"
+                } else {
+                    "ABORT"
+                };
+                f.sql(&format!("CREATE TRIGGER fail_insert BEFORE INSERT ON member_placements WHEN NEW.member_id=2 BEGIN SELECT RAISE({action}, 'primary placement failure'); END;"));
+                let error = create(&f, f.mux(None, close_fails, false), "prompt").unwrap_err();
+                assert_eq!(error.exit_code(), 1);
+                assert!(error.to_string().contains("primary placement failure"));
+                assert_eq!(
+                    f.timeline(),
+                    [
+                        "current:ok",
+                        "begin",
+                        "list:ok",
+                        "split:ok",
+                        "run:ok",
+                        "rollback:ok",
+                        "after-real-rollback",
+                        "get:error",
+                        "write-lock:true",
+                        if close_fails {
+                            "close:error"
+                        } else {
+                            "close:ok"
+                        },
+                        if close_fails {
+                            "cli-kill:error"
+                        } else {
+                            "cli-kill:ok"
+                        },
+                        "disarm:pane"
+                    ]
+                );
+                f.assert_empty_bootstrap();
+            }
+        }
+    }
+
+    #[test]
+    fn commit_failure_rolls_back_before_cli_kill_even_with_synthetic_rollback_diagnostic() {
+        for diagnostic in [false, true] {
+            for close_fails in [false, true] {
+                let mut f = Fixture::new(false);
+                f.diagnostic = diagnostic;
+                f.sql("CREATE TABLE compensation_parent(id INTEGER PRIMARY KEY);
+                    CREATE TABLE compensation_child(id INTEGER REFERENCES compensation_parent(id) DEFERRABLE INITIALLY DEFERRED);
+                    CREATE TRIGGER defer_commit_failure AFTER INSERT ON member_placements WHEN NEW.member_id=2
+                    BEGIN INSERT INTO compensation_child VALUES (999); END;");
+                let error = create(&f, f.mux(None, close_fails, false), "prompt").unwrap_err();
+                assert_eq!(error.exit_code(), 1);
+                let detail = error.to_string();
+                assert!(
+                    detail.starts_with("database error: FOREIGN KEY constraint failed"),
+                    "{detail}"
+                );
+                assert_eq!(
+                    f.timeline(),
+                    [
+                        "current:ok",
+                        "begin",
+                        "list:ok",
+                        "split:ok",
+                        "run:ok",
+                        "commit:error",
+                        "rollback:ok",
+                        "after-real-rollback",
+                        "get:error",
+                        "write-lock:true",
+                        if close_fails {
+                            "close:error"
+                        } else {
+                            "close:ok"
+                        },
+                        if close_fails {
+                            "cli-kill:error"
+                        } else {
+                            "cli-kill:ok"
+                        },
+                        "disarm:pane"
+                    ]
+                );
+                assert_eq!(
+                    detail
+                        .matches(
+                            "cleanup failed for fleet 1 transaction: synthetic rollback diagnostic"
+                        )
+                        .count(),
+                    usize::from(diagnostic)
+                );
+                assert_eq!(
+                    detail.matches("cleanup failed for pane w1:p9:").count(),
+                    usize::from(close_fails)
+                );
+                if diagnostic && close_fails {
+                    assert!(
+                        detail.find("synthetic rollback diagnostic").unwrap()
+                            < detail.find("cleanup failed for pane w1:p9:").unwrap()
+                    );
+                }
+                assert!(!detail.contains("Rolled back"));
+                f.assert_empty_bootstrap();
+                assert_eq!(f.count("compensation_child"), 0);
+            }
+        }
+    }
+
+    #[test]
+    fn failure_before_fleet_id_allocation_does_not_invent_an_id_in_cleanup_diagnostic() {
+        let mut f = Fixture::new(false);
+        f.diagnostic = true;
+        f.sql("CREATE TRIGGER fail_fleet BEFORE INSERT ON fleets BEGIN SELECT RAISE(ABORT, 'primary fleet insert failure'); END;");
+        let error = create(&f, f.mux(None, false, false), "prompt").unwrap_err();
+        assert_eq!(error.exit_code(), 1);
+        assert_eq!(
+            error.to_string(),
+            "database error: primary fleet insert failure\ncleanup failed for fleet unknown transaction: synthetic rollback diagnostic"
+        );
+        assert_eq!(
+            f.timeline(),
+            ["current:ok", "begin", "rollback:ok", "after-real-rollback"]
+        );
+        assert!(
+            f.events
+                .borrow()
+                .contains(&Event::Bootstrap(BootstrapEvent::RollbackFinished {
+                    fleet_id: None,
+                    error: None,
+                    autocommit: true
+                }))
+        );
+        f.assert_empty_bootstrap();
+    }
+
+    #[test]
+    fn commit_success_disarms_pane_before_the_caller_can_emit_output() {
+        let f = Fixture::new(false);
+        let value = create(&f, f.mux(None, false, false), "prompt").unwrap();
+        assert_eq!(value["monitor"]["placement"]["mux_pane_id"], "w1:p9");
+        assert_eq!(
+            f.timeline(),
+            [
+                "current:ok",
+                "begin",
+                "list:ok",
+                "split:ok",
+                "run:ok",
+                "commit:ok",
+                "disarm:pane"
+            ]
+        );
+        assert_eq!(f.count("fleets"), 1);
+        assert_eq!(f.count("members"), 2);
+        assert_eq!(f.count("member_placements"), 2);
+    }
+}

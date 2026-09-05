@@ -1071,4 +1071,33 @@ mod tests {
         assert_eq!(mux.agent_status("%5").unwrap(), None);
         assert!(runner.events().is_empty(), "no native state to query");
     }
+    #[test]
+    fn creation_unknown_id_failure_never_guesses_or_closes_a_pane() {
+        for response in [
+            Ok("   \n".into()),
+            Err(RunError::Failed {
+                stderr: "split failed".into(),
+            }),
+        ] {
+            let runner = FakeRunner::with_binary("tmux");
+            runner.respond(response);
+            let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
+            let error = mux
+                .split_window(&reference(), &[], &argv(&["claude"]))
+                .unwrap_err();
+            assert!(matches!(
+                error.pane_cleanup(),
+                Some(crate::multiplexer::PaneCleanup::Unknown)
+            ));
+            assert!(
+                error
+                    .to_string()
+                    .contains("pane ID unknown; pane cleanup unconfirmed")
+            );
+            drop(mux);
+            let calls = runner.run_argvs();
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0][1], "split-window");
+        }
+    }
 }

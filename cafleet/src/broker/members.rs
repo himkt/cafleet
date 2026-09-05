@@ -631,6 +631,13 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(member["placement"], Value::Null);
+        let ts = member["registered_at"].as_str().unwrap();
+        assert_eq!(
+            format_json(&member),
+            format!(
+                r#"{{"member_id":{member_id},"name":"ghost","description":"d","status":"active","registered_at":"{ts}","kind":"member","skills":[],"placement":null}}"#
+            )
+        );
     }
 
     #[test]
