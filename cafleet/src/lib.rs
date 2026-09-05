@@ -19,3 +19,6 @@ pub mod webui;
 
 #[cfg(test)]
 mod step6_contract_tests;
+
+#[cfg(test)]
+mod step7_contract_tests;

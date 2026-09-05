@@ -1,3 +1,4 @@
+import { HISTORY_FETCH_LIMIT } from "./history";
 import type {
   MembersResponse,
   TimelineResponse,
@@ -50,11 +51,11 @@ export async function fetchTimeline(): Promise<TimelineResponse> {
 }
 
 export async function fetchInbox(memberId: number): Promise<TimelineResponse> {
-  return request<TimelineResponse>(`/members/${memberId}/inbox`);
+  return request<TimelineResponse>(`/members/${memberId}/inbox?limit=${HISTORY_FETCH_LIMIT}`);
 }
 
 export async function fetchSent(memberId: number): Promise<TimelineResponse> {
-  return request<TimelineResponse>(`/members/${memberId}/sent`);
+  return request<TimelineResponse>(`/members/${memberId}/sent?limit=${HISTORY_FETCH_LIMIT}`);
 }
 
 export async function sendMessage(

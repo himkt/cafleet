@@ -285,14 +285,14 @@ The three message endpoints compare as follows (this table owns their row-select
 
 | Endpoint | Rows returned | Excluded | Ordering | Row cap |
 |---|---|---|---|---|
-| `GET /api/members/{member_id}/inbox` | Messages where `owner_member_id = member_id` | `type == "broadcast_summary"` | `status_timestamp DESC, message_id DESC` (newest status update first; id breaks ties) | planned optional SQL `limit` of 1–1000; omitted means unbounded |
-| `GET /api/members/{member_id}/sent` | Messages where `from_member_id = member_id` | `type == "broadcast_summary"` | `status_timestamp DESC, message_id DESC` (newest status update first; id breaks ties) | planned optional SQL `limit` of 1–1000; omitted means unbounded |
+| `GET /api/members/{member_id}/inbox` | Messages where `owner_member_id = member_id` | `type == "broadcast_summary"` | `status_timestamp DESC, message_id DESC` (newest status update first; id breaks ties) | optional SQL `limit` of 1–1000; omitted means unbounded |
+| `GET /api/members/{member_id}/sent` | Messages where `from_member_id = member_id` | `type == "broadcast_summary"` | `status_timestamp DESC, message_id DESC` (newest status update first; id breaks ties) | optional SQL `limit` of 1–1000; omitted means unbounded |
 | `GET /api/timeline` | `type == "unicast"` deliveries, scoped through the owning member join | All non-delivery rows, including `broadcast_summary` | `status_timestamp DESC, message_id DESC` (newest status update first; id breaks ties) | SQL limit of 200 delivery rows, applied after filtering; may split a broadcast group; no pagination |
 
 #### Member history limits
 
-The following optional-limit contract is planned; the current implementation
-still returns unbounded history. It applies to both inbox and sent.
+Both inbox and sent accept an optional limit. Omitting it returns unbounded
+history.
 
 **Request**: `X-Fleet-Id: <fleet_id>` header and optional `?limit=201`.
 
@@ -320,7 +320,7 @@ and may split a broadcast. The response remains `{"messages":[...]}` with the
 same row keys, order, and nulls; there is no cursor, `has_more`, or total field.
 CLI retrieval remains unchanged.
 
-The planned WebUI change requests `?limit=201` for each tab and displays the
+The WebUI requests `?limit=201` for each tab and displays the
 first 200 deliveries. It shows `Showing the 200 most recent messages` only when
 there is a 201st delivery; empty results and results of exactly 200 have no
 omission footer. “Most recent” follows status updates, even though each row
@@ -363,7 +363,7 @@ Returns messages sent by the member (see the comparison table above). Consumed b
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
-Same response format and [planned limit contract](#member-history-limits) as inbox.
+Same response format and [limit contract](#member-history-limits) as inbox.
 
 ### GET /api/timeline — Unified Fleet Timeline
 

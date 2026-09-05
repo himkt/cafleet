@@ -14,50 +14,118 @@ fn message_list(
     sql: &str,
     params: impl rusqlite::Params,
 ) -> Result<Vec<MessageRecord>, CafleetError> {
+    message_list_observed(conn, sql, params, &|_| {})
+}
+
+fn message_list_observed(
+    conn: &Connection,
+    sql: &str,
+    params: impl rusqlite::Params,
+    observe: &dyn Fn(&rusqlite::Statement<'_>),
+) -> Result<Vec<MessageRecord>, CafleetError> {
     let mut stmt = conn.prepare(sql).map_err(db_err)?;
     let rows = stmt
         .query_map(params, map_message_row)
         .map_err(db_err)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(db_err)?;
+    observe(&stmt);
     Ok(rows)
 }
 
 const MESSAGE_COLUMNS: &str = "message_id, owner_member_id, from_member_id, to_member_id, \
      type, created_at, status_state, status_timestamp, origin_message_id, text";
 
+pub(crate) const HISTORY_LIMIT_ERROR: &str = "limit must be an integer between 1 and 1000";
+
+/// An optional SQL row bound; the default preserves complete member history.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HistoryOptions {
+    pub limit: Option<usize>,
+}
+
+impl HistoryOptions {
+    pub(crate) fn validate(self) -> Result<Self, CafleetError> {
+        if self.limit.is_some_and(|limit| !(1..=1000).contains(&limit)) {
+            return Err(CafleetError::Value(HISTORY_LIMIT_ERROR.to_string()));
+        }
+        Ok(self)
+    }
+}
+
 /// Every delivery the member received, acked rows included; summaries are the
-/// sender's bookkeeping, never a delivery.
+/// sender's bookkeeping, never a delivery. This entry point stays unbounded.
 pub fn list_inbox_records(
     conn: &Connection,
     member_id: i64,
 ) -> Result<Vec<MessageRecord>, CafleetError> {
-    message_list(
-        conn,
-        &format!(
-            "SELECT {MESSAGE_COLUMNS} FROM messages \
-             WHERE owner_member_id=?1 AND type='unicast' \
-             ORDER BY status_timestamp DESC, message_id DESC"
-        ),
-        [member_id],
-    )
+    list_inbox_records_with_options(conn, member_id, HistoryOptions::default())
 }
 
-/// Every delivery the member sent (broadcast fan-out deliveries included; the
-/// summary row is excluded).
+/// Every sent delivery, including broadcast fan-out but excluding summaries.
+/// This entry point stays unbounded.
 pub fn list_sent_records(
     conn: &Connection,
     member_id: i64,
 ) -> Result<Vec<MessageRecord>, CafleetError> {
-    message_list(
-        conn,
-        &format!(
-            "SELECT {MESSAGE_COLUMNS} FROM messages \
-             WHERE from_member_id=?1 AND type='unicast' \
-             ORDER BY status_timestamp DESC, message_id DESC"
-        ),
-        [member_id],
-    )
+    list_sent_records_with_options(conn, member_id, HistoryOptions::default())
+}
+
+pub fn list_inbox_records_with_options(
+    conn: &Connection,
+    member_id: i64,
+    options: HistoryOptions,
+) -> Result<Vec<MessageRecord>, CafleetError> {
+    list_inbox_records_observed(conn, member_id, options, &|_| {})
+}
+
+pub fn list_sent_records_with_options(
+    conn: &Connection,
+    member_id: i64,
+    options: HistoryOptions,
+) -> Result<Vec<MessageRecord>, CafleetError> {
+    list_sent_records_observed(conn, member_id, options, &|_| {})
+}
+
+pub(crate) fn list_inbox_records_observed(
+    conn: &Connection,
+    member_id: i64,
+    options: HistoryOptions,
+    observe: &dyn Fn(&rusqlite::Statement<'_>),
+) -> Result<Vec<MessageRecord>, CafleetError> {
+    history_records(conn, "owner_member_id", member_id, options, observe)
+}
+
+pub(crate) fn list_sent_records_observed(
+    conn: &Connection,
+    member_id: i64,
+    options: HistoryOptions,
+    observe: &dyn Fn(&rusqlite::Statement<'_>),
+) -> Result<Vec<MessageRecord>, CafleetError> {
+    history_records(conn, "from_member_id", member_id, options, observe)
+}
+
+fn history_records(
+    conn: &Connection,
+    member_column: &str,
+    member_id: i64,
+    options: HistoryOptions,
+    observe: &dyn Fn(&rusqlite::Statement<'_>),
+) -> Result<Vec<MessageRecord>, CafleetError> {
+    let options = options.validate()?;
+    // The column is selected only by the two fixed entry points above.
+    let mut sql = format!(
+        "SELECT {MESSAGE_COLUMNS} FROM messages \
+         WHERE {member_column}=?1 AND type='unicast' \
+         ORDER BY status_timestamp DESC, message_id DESC"
+    );
+    match options.limit {
+        Some(limit) => {
+            sql.push_str(" LIMIT ?2");
+            message_list_observed(conn, &sql, params![member_id, limit as i64], observe)
+        }
+        None => message_list_observed(conn, &sql, [member_id], observe),
+    }
 }
 
 /// The fleet's deliveries (scoped via the owning member's fleet), newest first,

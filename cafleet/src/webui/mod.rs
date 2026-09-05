@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 
 use axum::Router;
 use axum::body::Bytes;
-use axum::extract::{Path, State};
+use axum::extract::{Path, RawQuery, State};
 use axum::http::{HeaderMap, StatusCode, Uri, header};
 use axum::response::Response;
 use axum::routing::{get, post};
@@ -281,7 +281,29 @@ async fn post_monitor_wake(State(state): State<AppState>, headers: HeaderMap) ->
     .await
 }
 
-async fn member_messages(state: AppState, fleet_id: i64, member_id: i64, sent: bool) -> Response {
+fn history_options(raw_query: Option<&str>) -> Result<broker::HistoryOptions, CafleetError> {
+    let invalid = || CafleetError::Value(broker::HISTORY_LIMIT_ERROR.to_string());
+    let mut options = broker::HistoryOptions::default();
+    for (key, value) in form_urlencoded::parse(raw_query.unwrap_or_default().as_bytes()) {
+        if key != "limit" {
+            continue;
+        }
+        if options.limit.is_some() || value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit())
+        {
+            return Err(invalid());
+        }
+        options.limit = Some(value.parse().map_err(|_| invalid())?);
+    }
+    options.validate()
+}
+
+async fn member_messages(
+    state: AppState,
+    fleet_id: i64,
+    member_id: i64,
+    sent: bool,
+    raw_query: Option<String>,
+) -> Response {
     run_blocking(state, move |conn| {
         if let Err(response) = require_fleet(conn, fleet_id) {
             return *response;
@@ -291,10 +313,15 @@ async fn member_messages(state: AppState, fleet_id: i64, member_id: i64, sent: b
             Ok(false) => return detail(StatusCode::NOT_FOUND, "Member not found"),
             Err(error) => return broker_500(error),
         }
+        // Query validation follows the existing fleet and membership guards.
+        let options = match history_options(raw_query.as_deref()) {
+            Ok(options) => options,
+            Err(error) => return detail(StatusCode::UNPROCESSABLE_ENTITY, &error.message()),
+        };
         let rows = if sent {
-            broker::list_sent_records(conn, member_id)
+            broker::list_sent_records_with_options(conn, member_id, options)
         } else {
-            broker::list_inbox_records(conn, member_id)
+            broker::list_inbox_records_with_options(conn, member_id, options)
         };
         let rows = match rows {
             Ok(rows) => rows,
@@ -312,9 +339,10 @@ async fn inbox(
     State(state): State<AppState>,
     Path(member_id): Path<i64>,
     headers: HeaderMap,
+    RawQuery(raw_query): RawQuery,
 ) -> Response {
     match fleet_header(&headers) {
-        Ok(fleet_id) => member_messages(state, fleet_id, member_id, false).await,
+        Ok(fleet_id) => member_messages(state, fleet_id, member_id, false, raw_query).await,
         Err(response) => *response,
     }
 }
@@ -323,9 +351,10 @@ async fn sent(
     State(state): State<AppState>,
     Path(member_id): Path<i64>,
     headers: HeaderMap,
+    RawQuery(raw_query): RawQuery,
 ) -> Response {
     match fleet_header(&headers) {
-        Ok(fleet_id) => member_messages(state, fleet_id, member_id, true).await,
+        Ok(fleet_id) => member_messages(state, fleet_id, member_id, true, raw_query).await,
         Err(response) => *response,
     }
 }

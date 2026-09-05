@@ -89,7 +89,7 @@ as SQL whitespace are not the contract.
 
 ## Member history query limits
 
-The [planned history limit contract](spec/webui-api.md#member-history-limits)
+The [history limit contract](spec/webui-api.md#member-history-limits)
 keeps unbounded broker/HTTP callers compatible and bounds the WebUI's inbox
 and sent requests at 201 rows for a 200-row display. Keep limits in bound SQL
 parameters after the delivery filter and deterministic status/id ordering;

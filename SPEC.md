@@ -814,7 +814,7 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
   state, `broadcast_summary` excluded, ordered `status_timestamp DESC, message_id DESC`.
 - **`list_sent(member_id)`** — all messages where `from_member_id = member_id`, any
   state, `broadcast_summary` excluded, ordered `status_timestamp DESC, message_id DESC`.
-  Both history queries retain their unbounded entry points. The planned
+  Both history queries retain their unbounded entry points. The
   options entry points accept `HistoryOptions { limit: Option<usize> }`:
   `None` omits SQL `LIMIT`; a supplied limit is bound in SQL after the delivery
   filter and ordering, never implemented by fetching everything and truncating.
@@ -3250,7 +3250,7 @@ same `{"detail": <string>}` shape (a single human-readable string).
   ]}` over the member's inbox.
 - **`GET /api/members/{member_id}/sent`** — fleet-scoped. Same as inbox over sent
   messages; same `404` detail `Member not found`.
-  Planned optional query for **both** history routes: `limit`, a decimal integer
+  Optional query for **both** history routes: `limit`, a decimal integer
   from **1 through 1000**. Empty, zero, negative, fractional, nonnumeric,
   overflowing, or repeated values return `422` with exactly
   `{"detail":"limit must be an integer between 1 and 1000"}`. Unknown query
@@ -3268,7 +3268,7 @@ same `{"detail": <string>}` shape (a single human-readable string).
   not creation time. Apply the bound limit to delivery rows, so a broadcast may
   be partial. Preserve the `messages` envelope, row keys/order/nulls, and add no
   cursor, `has_more`, or total count.
-  The planned WebUI change requests `?limit=201` on both routes, shows the first
+  The WebUI requests `?limit=201` on both routes, shows the first
   200 deliveries per tab, and shows its existing omission footer only when a
   201st delivery was returned. At 200 or fewer it shows no omission footer.
   This bounds explicit-limit responses and WebUI reads, not unbounded HTTP

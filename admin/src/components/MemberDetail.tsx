@@ -3,13 +3,13 @@ import { Inbox, X } from "lucide-react";
 import { Tabs } from "radix-ui";
 import type { Member, TimelineMessage } from "../types";
 import { fetchInbox, fetchSent } from "../api";
+import { HISTORY_ROW_CAP, selectHistory } from "../history";
+import type { HistoryWindow } from "../history";
 import { useRefreshKeyLoad } from "../hooks/useRefreshKeyLoad";
 import { formatDateTime } from "../format";
 import MemberAvatar from "./MemberAvatar";
 import EmptyState from "./EmptyState";
 import Skeleton from "./Skeleton";
-
-const ROW_CAP = 200;
 
 const STATUS_CHIPS: Record<
   TimelineMessage["status"],
@@ -31,15 +31,16 @@ function StatusChip({ status }: { status: TimelineMessage["status"] }) {
 }
 
 function MessageList({
-  rows,
+  history,
   direction,
   loading,
 }: {
-  rows: TimelineMessage[];
+  history: HistoryWindow;
   direction: "inbox" | "sent";
   loading: boolean;
 }) {
-  if (loading && rows.length === 0) {
+  const { visible, truncated } = history;
+  if (loading && visible.length === 0) {
     return (
       <div className="px-4 py-3">
         {[0, 1, 2].map((i) => (
@@ -52,12 +53,9 @@ function MessageList({
     );
   }
 
-  if (rows.length === 0) {
+  if (visible.length === 0) {
     return <EmptyState icon={Inbox} title="No messages" />;
   }
-
-  const truncated = rows.length > ROW_CAP;
-  const visible = rows.slice(0, ROW_CAP);
 
   return (
     <div className="divide-y divide-border">
@@ -81,7 +79,7 @@ function MessageList({
       ))}
       {truncated && (
         <p className="px-4 py-3 text-center text-xs text-text-faint">
-          Showing the {ROW_CAP} most recent messages
+          Showing the {HISTORY_ROW_CAP} most recent messages
         </p>
       )}
     </div>
@@ -102,8 +100,8 @@ export default function MemberDetail({
   refreshKey,
   onClose,
 }: MemberDetailProps) {
-  const [inbox, setInbox] = useState<TimelineMessage[]>([]);
-  const [sent, setSent] = useState<TimelineMessage[]>([]);
+  const [inbox, setInbox] = useState<HistoryWindow>(() => selectHistory([]));
+  const [sent, setSent] = useState<HistoryWindow>(() => selectHistory([]));
   const [loading, setLoading] = useState(true);
 
   // The panel is keyed by member_id at its call site, so switching members
@@ -119,14 +117,8 @@ export default function MemberDetail({
         fetchInbox(member.member_id),
         fetchSent(member.member_id),
       ]);
-      // The endpoints are unbounded; keep ROW_CAP + 1 rows so the
-      // "Showing the 200 most recent" footer still knows about the overflow.
-      setInbox(inboxData.messages
-        .filter((row) => row.type === "unicast")
-        .slice(0, ROW_CAP + 1));
-      setSent(sentData.messages
-        .filter((row) => row.type === "unicast")
-        .slice(0, ROW_CAP + 1));
+      setInbox(selectHistory(inboxData.messages));
+      setSent(selectHistory(sentData.messages));
     } catch {
       /* swallow — keep last-known lists; next bump re-attempts */
     } finally {
@@ -195,10 +187,10 @@ export default function MemberDetail({
           </Tabs.Trigger>
         </Tabs.List>
         <Tabs.Content value="inbox" className="min-h-0 flex-1 overflow-y-auto">
-          <MessageList rows={inbox} direction="inbox" loading={loading} />
+          <MessageList history={inbox} direction="inbox" loading={loading} />
         </Tabs.Content>
         <Tabs.Content value="sent" className="min-h-0 flex-1 overflow-y-auto">
-          <MessageList rows={sent} direction="sent" loading={loading} />
+          <MessageList history={sent} direction="sent" loading={loading} />
         </Tabs.Content>
       </Tabs.Root>
     </aside>

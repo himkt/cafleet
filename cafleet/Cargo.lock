@@ -173,6 +173,7 @@ dependencies = [
  "axum",
  "chrono",
  "clap",
+ "form_urlencoded",
  "nix",
  "refinery",
  "regex",
