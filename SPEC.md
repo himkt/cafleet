@@ -557,12 +557,12 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
   skills: skills or []}`, adding `cafleet: {kind: "monitor"}` only when
   `monitor` is true — an ordinary registration's card carries no kind
   marker. The `placement` dict carries no director id — the fleet row is the
-  single source of the Director identity. **`register_member` is guard-free
-  with respect to the monitor role**: the one-per-fleet and monitor-first
-  guards (§6.3 `member create`) are evaluated entirely CLI-side, before
-  `register_member` is ever called, so a direct broker caller (as in the
-  broker's own test suite) may register a `monitor=True` or an ordinary
-  member into any fleet state without the CLI's guard checks re-running.
+  single source of the Director identity. Registration uses an `IMMEDIATE`
+  transaction to serialize writers. Monitor uniqueness is enforced both by
+  an in-transaction recheck and the partial unique index (§8), including for
+  direct broker callers. The monitor-first policy for ordinary pane creation
+  remains CLI-side: ordinary broker registration does not require an active
+  monitor.
   Inside the transaction:
   - **Root-Director invariant guard** (only when `placement` is given): the
     fleet's `director_member_id` must reference an active member of the fleet;
@@ -570,6 +570,16 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
     {id}) is not active.` — a loud invariant failure, not a usage error, since
     the value is not user input. Nested teams stay impossible by
     construction: no caller supplies a director id.
+  - When `monitor` is true, check `active_monitor_member_id` inside the
+    transaction before inserting the member or placement. A conflicting row
+    raises `ActiveMonitorExists { fleet_id, member_id }`, identifying the
+    existing monitor. A unique-constraint violation is converted to this
+    variant only for `idx_members_one_active_monitor_per_fleet`; unrelated
+    SQL errors retain their original classification. The CLI maps the variant
+    to application error (exit 1) `fleet {fleet_id} already has an active
+    monitor member (member {member_id})`, without `register failed:`. A losing
+    registration adds no member or placement and cannot proceed to pane
+    creation, including when two CLI prechecks both saw an empty slot.
   - Insert the member row; if `placement` given, insert it. There is no
     per-member monitor enrollment — supervision cadence lives entirely on the
     fleet-scoped `monitor_runtime` row (§6.2 *Monitor — runtime claim /
@@ -577,8 +587,10 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
     the only per-member monitor state.
 - **`active_monitor_member_id(fleet_id)`** — the fleet's single active member
   whose card carries the monitor marker (`json_extract(member_card_json,
-  '$.cafleet.kind') = 'monitor'`), or `None`. Consumed by the CLI's two
-  `member create` monitor-role guards (§6.3) and by the monitor loop's
+  '$.cafleet.kind') = 'monitor'` and `status = 'active'`), or `None`. This
+  predicate exactly matches the unique index (§8). Consumed by registration's
+  transaction check, the CLI's two `member create` monitor-role guards (§6.3),
+  and the monitor loop's
   pane resolution (§6.6).
 - **`get_member(member_id, fleet_id)`** — **active only**. Returns `{member_id,
   name, description, status, registered_at, kind, skills, placement}` where
@@ -868,6 +880,7 @@ HTTP status). The exit-code policy is
 | `register_member` | usage | `Fleet '{fleet_id}' not found.` |
 | `register_member` | usage | `fleet {fleet_id} is deleted` |
 | `register_member` | application | `fleet {fleet_id}'s root Director (member {id}) is not active.` |
+| `register_member` | `ActiveMonitorExists`, mapped to application | `fleet {fleet_id} already has an active monitor member (member {member_id})` |
 | `deregister_member` | application | `cannot deregister the root Director; use 'cafleet fleet delete' instead` |
 | `delete_fleet` | application | `fleet '{fleet_id}' not found.` |
 | `send_message` | value | `Invalid destination format: {to}` |
@@ -1339,9 +1352,8 @@ for the fleet's single root Director bootstrapped by `fleet create` — no
 2. **Model and effort validation** — validate `--model`, then `--effort`
    (`validate_model` then `validate_effort`); a failure → usage error (exit 2)
    with the backend's message, **before any registration or tmux side effect**.
-3. **Monitor-role guards** — evaluated CLI-side (`register_member` itself is
-   guard-free, §6.2), before any registration or pane effect, one-per-fleet
-   guard first: `--role monitor` into a fleet that already has an active
+3. **Monitor-role guards** — evaluated CLI-side for early diagnostics,
+   before any registration or pane effect, one-per-fleet guard first: `--role monitor` into a fleet that already has an active
    monitor member (via the broker's `active_monitor_member_id`, §6.2) →
    application error `fleet <fleet-id> already has an active monitor member
    (member <member-id>)`; no `--role` (an ordinary member) into a fleet with
@@ -1361,9 +1373,12 @@ for the fleet's single root Director bootstrapped by `fleet create` — no
    window id, an unset pane id, and the coding agent (no director id — the
    fleet row is the single source), passing `--role`'s presence through as
    `register_member`'s `monitor` boolean (§6.2) so a monitor registration's
-   card carries the `$.cafleet.kind == "monitor"` marker. Re-raise an
-   application error verbatim
-   (preserves the root-Director invariant guard); wrap any other exception as
+   card carries the `$.cafleet.kind == "monitor"` marker. Registration's
+   `IMMEDIATE` transaction rechecks the active monitor, and the DB unique
+   index backstops all writers (§6.2). Map `ActiveMonitorExists` to the same
+   one-per-fleet application error as step 3, with no member, placement, or
+   pane added by the losing registration. Re-raise an application error
+   verbatim (preserves the root-Director invariant guard); wrap any other exception as
    `register failed: <error>`. Capture the new member id.
 7. **Substitute placeholders** (below) — run `str.format` over the resolved body
    (step 4), substituting `{fleet_id}` / `{member_id}` (the new member id from
@@ -1637,8 +1652,11 @@ first, then assets):
   (§8): force a sync SQLite URL, create the DB file's parent directory, and
   apply the bundled migrations up to the head revision (idempotent). On an
   application error, print `db half failed: <message>` and record the
-  failure. If the db half failed, the assets half fails its schema pre-flight and
-  both halves are reported failed.
+  failure. The assets half still runs after a DB-half failure. Its pre-flight
+  fails if `asset_installs` is missing, but an old database with that table can
+  accept assets updates even when duplicate monitors prevent migration.
+  Report only the halves that actually failed; the DB failure still makes
+  the overall command exit 1.
 - **Assets half** — installs, from the data embedded in the binary at build
   time (§7.6) with **no network access**, each selected agent's skills plus
   its bundled preset (where one exists) at the directories resolved per
@@ -3275,7 +3293,17 @@ defaults, FK rules, AUTOINCREMENT, and the create-order quirk are in §6.1.
 - `idx_messages_owner_member_status_ts` on `messages(owner_member_id, status_timestamp)`
 - `idx_messages_from_member_status_ts` on `messages(from_member_id, status_timestamp)`
 
-**The migration chain.** Head is **`V7`**, contiguous from 1 with exactly one
+**Partial unique index, at head:**
+
+- `idx_members_one_active_monitor_per_fleet` on `members(fleet_id)` where
+  `status = 'active' AND json_extract(member_card_json, '$.cafleet.kind') = 'monitor'`.
+  This is the `active_monitor_member_id` predicate. It applies to INSERT and
+  UPDATE of status, card, or fleet id. Ordinary members and deregistered
+  monitors are excluded, and fleets are independent. Root Director card
+  generation omits the monitor marker; Director-first display-kind resolution
+  (§5.4) is unchanged and does not override this index predicate.
+
+**The migration chain.** Head is **`V8`**, contiguous from 1 with exactly one
 baseline:
 
 1. `V1__baseline.sql` — the baseline, creating the schema in this order:
@@ -3349,6 +3377,15 @@ baseline:
        wake_requested_at TEXT
    );
    ```
+8. `V8__unique_active_monitor.sql` — adds the partial unique index:
+   ```sql
+   CREATE UNIQUE INDEX idx_members_one_active_monitor_per_fleet
+   ON members(fleet_id)
+   WHERE status = 'active'
+     AND json_extract(member_card_json, '$.cafleet.kind') = 'monitor';
+   ```
+   Existing duplicate active monitors make this DDL fail. No survivor is
+   selected automatically, and existing migration files remain unchanged.
 
 There are no CHECK constraints. Future schema changes are hand-written
 numbered files `V<N>__<slug>.sql` appended to the chain; the chain stays
@@ -3368,12 +3405,38 @@ unversioned database.`; a recorded version greater than the embedded chain's
 head → the **ahead-of-head refusal**, application error `DB schema is at
 version <M> which is unknown to this version of cafleet. Refusing to downgrade
 automatically.`; (5) already at head (recorded version == head) → print
-`Already at head (<N>); nothing to do.` and stop; (6) otherwise apply the
-pending migrations to head and print `Created <db_file> and applied migrations
+`Already at head (<N>); nothing to do.` and stop; (6) before applying pending
+migrations, if `members` exists, query duplicate fleets using the partial
+index's exact predicate, with fleet ids and member ids in ascending order.
+A duplicate fails the DB half with
+`active monitor duplicates prevent migration: fleet <id>: members <ids>; ...`.
+Preserve all member/placement rows, panes, and schema history: diagnosis makes
+no changes and does not choose a survivor. A new database without `members`
+skips this check; (7) apply all pending migrations in refinery's grouped
+transaction. If index creation fails (including a duplicate introduced after
+step 6), roll back the entire pending group and its ledger writes. Re-query
+for duplicates after failure: if that succeeds and finds duplicates, report
+the same diagnostic; otherwise preserve the original migration error. On
+success print `Created <db_file> and applied migrations
 to head (<N>).` when no version was recorded before the run (a fresh or
 table-less DB), else `Upgraded from <M> to <N>.`. `<M>` / `<N>` are the
-integer migration versions (the head is `7`). The driver's
+integer migration versions (the head is `8`). The driver's
 connection is closed when the command finishes (success or failure).
+
+**Duplicate-monitor recovery.** Stop new registrations against the affected
+DB and let the operator choose which listed monitor to retain. Run the
+preceding release that supports the old schema from a separate binary path,
+with the same `CAFLEET_DATABASE_URL` and backend configuration directories.
+The new binary's `member delete` cannot repair a behind-head database because
+its schema guard rejects it. Because `setup`'s halves run independently, a
+failed new DB migration may already have installed and recorded newer assets.
+In that case, first run the old binary's `setup` for the same backend(s) to
+restore assets compatible with the old binary. Then run the old binary's
+`member delete <surplus-id>`, one isolated invocation per surplus monitor.
+These commands can run against the still-old schema. After resolving the
+duplicates, rerun the new binary's `setup`; once the upgrade succeeds, the
+old binary cannot automatically downgrade the database. The human-facing
+procedure is in [Storage](docs/docs/concepts/storage.md#duplicate-monitor-recovery).
 
 ---
 

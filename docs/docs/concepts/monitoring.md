@@ -14,7 +14,11 @@ timer. The monitor member alone owns the execution handle and liveness checks;
 the Director reacts only to broker signals and never launches or polls the
 execution. Hosting mechanics differ by backend, while the heartbeat semantics
 are identical. One monitor loop per fleet; deleting the monitor member kills
-its pane and the loop process with it.
+its pane and the loop process with it. Separately, the database enforces one
+active monitor member per fleet, including concurrent registrations. A
+monitor's pane dying does not itself deregister the member: deregister the
+old member before re-spawning it. Existing duplicate records block migration
+and require [duplicate-monitor recovery](storage.md#duplicate-monitor-recovery).
 
 ## Heartbeat, classification, facilitation
 

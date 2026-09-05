@@ -13,8 +13,11 @@ directory), expanded once at config load time. Override with the
 [CLI options](../spec/cli-options.md) for the full `CAFLEET_*` variable set.
 
 **Concurrency**: `PRAGMA busy_timeout=5000` lets SQLite retry for up to 5 s
-before returning `SQLITE_BUSY`; contention is low because CLI operations are
-short single-statement transactions and concurrent polling is read-only.
+before returning `SQLITE_BUSY`. Member registration uses an `IMMEDIATE`
+transaction to serialize writers, including the active-monitor recheck and
+member/placement inserts. Polling is read-only. Fleet bootstrap holds its
+write transaction across pane creation; its lock can therefore last for the
+multiplexer call.
 
 ## Relational model
 
@@ -35,6 +38,7 @@ re-run after every upgrade.
 |---|---|
 | Behind the bundled head | Migrates in place to the bundled head revision |
 | Already at the bundled head | Nothing to apply |
+| Pending migration with duplicate active monitors | Refuses with the conflicting fleet and member ids; preserves existing rows and schema history |
 | Ahead of the bundled head | Refuses to auto-downgrade |
 | Unversioned, with tables it does not recognize | Refuses |
 
@@ -42,6 +46,40 @@ Every non-setup command checks the schema version before running and fails
 with guidance naming `cafleet setup` — never a raw SQLite error; `doctor`
 reports instead of blocking. The exact rules and error strings are in
 [CLI options](../spec/cli-options.md#schema-version-guard).
+
+Pending migrations run together in one grouped transaction. A failed index
+creation rolls back the entire pending group, including its schema-history
+entries. Before migrating, after refusing unversioned or newer schemas,
+`setup` checks existing members for duplicate active monitors using the
+[index predicate](../spec/data-model.md#members). A fresh database without a
+members table skips this check. It reports conflicting fleets and their
+member ids in ascending order:
+
+```text
+active monitor duplicates prevent migration: fleet <id>: members <ids>; ...
+```
+
+No member or pane is selected or removed automatically. If a writer introduces
+a duplicate after the diagnostic, index creation still rejects it. Following
+a migration failure, a successful recheck that finds duplicates reports the
+same diagnostic; otherwise the original migration error is retained.
+
+### Recovering duplicate active monitors {#duplicate-monitor-recovery}
+
+1. Stop new registrations against the affected database. Choose the monitor
+   to retain from the reported ids.
+2. Use the preceding release that supports the old schema, from a separate
+   binary path, with the same `CAFLEET_DATABASE_URL` and backend configuration
+   directories. The new binary's `member delete` is blocked by its
+   behind-schema guard.
+3. The failed new `setup` may have successfully updated assets: its DB and
+   assets halves run independently. If so, use the old binary's `setup` for
+   the same backend(s) to restore assets compatible with that binary. Then
+   use the old binary's `member delete <surplus-id>`, one isolated invocation
+   per surplus monitor. The database still has the old schema, so these old
+   commands can pass its schema guard.
+4. Run the new binary's `setup` again. After the schema upgrade succeeds,
+   automatic downgrade to the old schema is refused.
 
 ## Assets-install recording
 

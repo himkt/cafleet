@@ -44,8 +44,28 @@ Active query paths filter `status='active'`. A member's `kind` (`director` /
 `director_member_id` back-reference plus the member card: a monitor-member
 registration writes the application-level marker
 `"cafleet": {"kind": "monitor"}` into `member_card_json`, while the Director
-and ordinary members write no `$.cafleet` object. The marker is plain JSON —
-no schema migration backs it, and no dedicated column exists.
+and ordinary members write no `$.cafleet` object. The marker remains plain JSON with no dedicated column. Schema V8 adds a
+partial unique index enforcing at most one active monitor per fleet:
+
+```sql
+CREATE UNIQUE INDEX idx_members_one_active_monitor_per_fleet
+ON members(fleet_id)
+WHERE status = 'active'
+  AND json_extract(member_card_json, '$.cafleet.kind') = 'monitor';
+```
+
+The predicate is the same one used by the active-monitor lookup. It applies
+to inserts and updates of status, card, or fleet id. Ordinary members and
+deregistered monitors are outside the constraint; different fleets are
+independent. Root Director cards continue to omit the monitor marker, and
+read-time kind resolution still gives the Director back-reference priority.
+Registration takes an `IMMEDIATE` transaction and rechecks the monitor slot
+inside it, before inserting either a member or placement. The CLI's early
+check preserves validation order; the DB constraint also protects direct
+broker callers and concurrent registrations. A conflict retains the existing
+CLI error and exit 1, without creating a losing member, placement, or pane.
+See [duplicate-monitor recovery](../concepts/storage.md#duplicate-monitor-recovery)
+for migration of databases that already contain conflicting rows.
 
 ### `messages`
 

@@ -271,6 +271,19 @@ The command runs two halves, in order:
     | At head | No-op | `Already at head (<N>); nothing to do.` |
     | Tables present but no `refinery_schema_history` | Refused | `DB has existing tables but no refinery_schema_history. Refusing to migrate an unversioned database.` |
     | Version unknown to this CLI version | Refused | `DB schema is at version <M> which is unknown to this version of cafleet. Refusing to downgrade automatically.` |
+    | Pending migration with duplicate active monitors | Refused; DB rows, schema history, and panes preserved | `active monitor duplicates prevent migration: fleet <id>: members <ids>; ...` |
+
+   The unversioned and newer-schema refusals retain precedence. Before applying
+   pending migrations, check existing members using the active-monitor index
+   predicate; a new DB without members skips the diagnostic. Conflicting fleet
+   ids and member ids are ascending. Pending migrations use one grouped
+   transaction, so a failure rolls back every pending schema/history change.
+   The index also rejects a duplicate introduced after the diagnostic. If a
+   recheck after migration failure finds duplicates, use the same diagnostic;
+   otherwise retain the original migration error. The DB half never manipulates
+   panes or chooses which monitor survives. Recovery uses the prior compatible
+   binary and may require restoring its assets first; see
+   [duplicate-monitor recovery](../concepts/storage.md#duplicate-monitor-recovery).
 
 2. **assets half** — installs, from the data embedded in the binary at build
    time with no network access, each selected agent's two skill directories
@@ -297,7 +310,7 @@ halves joined by `' and '`.
 
 | Half | Trigger | Message | Effect |
 |---|---|---|---|
-| db | Either refusal state in the table above | The refusal message, as `db half failed: <msg>` | Exit 1 |
+| db | Any refusal state in the table above | The refusal message, as `db half failed: <msg>` | Exit 1 |
 | assets | The `asset_installs` table is missing as the half starts | `the database schema is missing or outdated; run 'cafleet setup' first` | Exit 1 |
 | assets | A resolved agent's config-path variable fails validation | `<VAR> must be an absolute path (got '<value>')` | Exit 1 |
 | assets | A skills install fails for a target | `failed to install skills into <skills_dir>: <error>` | Aborts the loop; rows recorded before the failure remain |
@@ -305,7 +318,9 @@ halves joined by `' and '`.
 
 The assets-half pre-flight can fire only after a db-half failure or an
 externally broken schema — the db half always runs first within the same
-command.
+command. A DB-half failure does not automatically fail or skip the assets
+half: if `asset_installs` remains usable, assets can be updated and recorded
+even when duplicate monitors prevent the schema upgrade.
 
 ### Config-dir resolution {#config-dir-resolution}
 
@@ -886,6 +901,22 @@ one root Director by construction, so no override flag exists.
 | `--file PATH` | one of | Path to a UTF-8 file whose contents are the spawn prompt (`-` = stdin). Inline prompts beyond a few KB exceed the multiplexer argv ceiling — use `--file` for long prompts. |
 | `--json` | no | Output as JSON |
 
+#### Concurrent monitor registration
+
+The CLI's one-per-fleet check remains before the monitor-first check and before
+registration or pane creation, preserving the existing validation order.
+Registration also opens an `IMMEDIATE` DB transaction and checks the active
+monitor slot inside it. The partial unique index enforces the same predicate
+for all writers, including direct broker calls and status/card/fleet updates.
+Only a conflict with that constraint maps to the typed
+`ActiveMonitorExists { fleet_id, member_id }` error; the CLI renders the
+existing `Error: fleet <fleet-id> already has an active monitor member
+(member <member-id>)`, exit 1, without the `register failed:` prefix.
+Other SQL failures keep their existing classification. The losing registration
+adds no member or placement and never creates a pane. Ordinary broker
+registration retains its existing behavior; requiring an active monitor
+before creating an ordinary pane remains the CLI's monitor-first policy.
+
 #### Spawn command per backend
 
 The per-backend spawn argv and auto-approval flags live in
@@ -1207,6 +1238,7 @@ failed capture. `lines` always echoes the requested depth.
 | (any fleet-scoped command) | No agent has an `asset_installs` row at its currently-resolved path | `Error: no assets install is recorded at the resolved paths; run 'cafleet setup' to install` | 1 | See [Stale-assets guard](#stale-assets-guard) |
 | (any fleet-scoped command) | An `asset_installs` row at a resolved path differs from the runtime CLI version | `Error: stale assets detected (<agent>=<recorded>[, ...]; CLI <runtime>); run 'cafleet setup' to reinstall` | 1 | See [Stale-assets guard](#stale-assets-guard) |
 | `member create` | `--coding-agent opencode` with no agent preset at the resolved preset path | `Error: opencode agent preset not found at <preset>; run 'cafleet setup --coding-agent opencode' first` | 1 | `<preset>` is the resolved `<preset base>/agents/cafleet.md` — see [Config-dir resolution](#config-dir-resolution) |
+| `setup` | Existing duplicate active monitors prevent a pending migration | `active monitor duplicates prevent migration: fleet <id>: members <ids>; ...` | 1 | DB-half failure; see [duplicate-monitor recovery](../concepts/storage.md#duplicate-monitor-recovery) |
 | `setup` | The `asset_installs` table is missing as the assets half starts | `the database schema is missing or outdated; run 'cafleet setup' first` | 1 | An assets-half failure, after a db-half failure or an externally broken schema |
 | (any subject-taking command) | Missing positional subject id | The parser's native missing-required-argument error naming the positional | 2 | — |
 | (any id argument) | A non-integer id | The parser's native invalid-value error | 2 | — |
@@ -1222,7 +1254,7 @@ failed capture. `lines` always echoes the requested depth.
 | `member create` | Into a soft-deleted fleet | `Error: fleet X is deleted` | 1 | — |
 | `member create` | The fleet row has no `director_member_id` recorded | `Error: fleet <fleet-id> has no root Director recorded; re-create the fleet with 'cafleet fleet create'.` | 1 | Mid-bootstrap corruption |
 | `member create` | With a placement, when the fleet's root Director is not an active member | `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` | 1 | The `register_member` invariant guard |
-| `member create` | `--role monitor` when the fleet already has an active monitor member | `Error: fleet <fleet-id> already has an active monitor member (member <member-id>)` | 1 | The one-per-fleet guard; evaluated before the monitor-first guard, before any registration or pane effect |
+| `member create` | `--role monitor` when the fleet already has an active monitor member | `Error: fleet <fleet-id> already has an active monitor member (member <member-id>)` | 1 | The early check precedes the monitor-first guard; an in-transaction conflict returns the same error with no losing member, placement, or pane |
 | `member create` | Without `--role` when the fleet has no active monitor member | `Error: fleet <fleet-id> has no active monitor member; spawn one with --role monitor first` | 1 | The monitor-first placement guard, before any registration or pane effect — satisfied by the `fleet create` bootstrap; it fires only after a monitor death with no re-spawn |
 | `member delete` | Against the root Director's id | `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` | 1 | — |
 | `message poll` | An unknown or inactive `MEMBER_ID` | `Error: Member <member-id> not found` | 1 | — |
