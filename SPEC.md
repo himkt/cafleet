@@ -742,9 +742,13 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
   state, `broadcast_summary` excluded, ordered `status_timestamp DESC`.
 - **`list_sent(member_id)`** — all messages where `from_member_id = member_id`, any
   state, `broadcast_summary` excluded, ordered `status_timestamp DESC`.
-- **`list_timeline(fleet_id, limit=200)`** — messages joined to their **sender's**
-  member row, filtered to the sender's `fleet_id`, `broadcast_summary` excluded,
-  ordered `status_timestamp DESC`, capped at `limit`.
+- **`list_timeline(fleet_id, limit=200)`** — delivery rows (`g.type = 'unicast'`)
+  joined to their **owning member's** row through `owner_member_id`, filtered to
+  that member's `fleet_id`. SQL orders by `status_timestamp DESC, message_id DESC`
+  and applies `LIMIT` after the delivery filter. The cap counts delivery rows,
+  so it can cut through a broadcast group. Summary rows remain stored and
+  available through `get_message` / `message show` and broadcast results; their
+  initial `completed` state is not a recipient ACK.
 - **`get_message(message_id)`** — single-message lookup; the fleet is
   **derived from the message row** — existence is the only guard. Load;
   absent → value error `Message {message_id} not found`.
@@ -3103,9 +3107,11 @@ same `{"detail": <string>}` shape (a single human-readable string).
   ]}` over the member's inbox.
 - **`GET /api/members/{member_id}/sent`** — fleet-scoped. Same as inbox over sent
   messages; same `404` detail `Member not found`.
-- **`GET /api/timeline`** — fleet-scoped, no per-member check. `{"messages": […]}`
-  over the fleet's messages, hard-capped at the **200** most recent
-  (`status_timestamp DESC`).
+- **`GET /api/timeline`** — fleet-scoped through the owning member, no per-member
+  check. `{"messages": […]}` contains only `unicast` delivery rows, hard-capped
+  in SQL at **200** rows ordered by `status_timestamp DESC, message_id DESC`.
+  No pagination or group-level limit is introduced. Summary rows neither occupy
+  this cap nor count as ACKs; response fields and wrapping stay unchanged.
 - **`POST /api/messages/send`** — fleet-scoped. Body `{from_member_id: int,
   to_member_id: int | "*", text: string}`. `to_member_id` deserializes as **either
   a JSON integer or the exact JSON string `"*"`** (broadcast); anything else
@@ -3130,6 +3136,35 @@ single bulk lookup over the union of all `from_member_id`/`to_member_id` values,
 using **direct keyed access** — a missing id is a hard failure (→ 500), never a
 silent fallback. `status` is the renamed `status_state`; `body` the renamed
 `text`; `type` the raw row type. Empty input → empty array.
+
+The TypeScript wire model uses `type` to distinguish `unicast` deliveries
+(non-null recipient id/name) from `broadcast_summary` rows (null recipient
+id/name). Inbox, sent, and timeline consumers accept delivery rows. This models
+the existing wire fields; it does not add a discriminator to the HTTP response.
+
+##### Timeline grouping and ACK display
+
+The frontend's pure `groupMessages` helper in `timeline.ts` excludes summary
+rows defensively before grouping, even if one appears in its input. A delivery
+with `origin_message_id === null` is a standalone unicast; non-null ids group
+broadcast deliveries by their shared summary id. Use an explicit null check,
+not a truthiness check.
+
+SQL selects recent status updates; the UI then sorts the returned entries
+ascending by creation time for newest-at-bottom rendering. A unicast uses its
+`created_at`; a broadcast uses the minimum `created_at` among its returned
+delivery rows. An ACK changes `status_timestamp`, not `created_at`.
+
+Recipient counts and ReactionBar ACK indicators cover only returned delivery
+rows. Each `completed` delivery contributes one ACK at its `status_timestamp`;
+a summary's initial `completed` state contributes none. Two pending deliveries
+plus their summary therefore yield two recipients and zero ACKs, then one and
+two ACKs as the deliveries are acknowledged. Empty or summary-only input yields
+no entries. A broadcast cut by the 200-row cap is a partial group: the UI must
+explain that counts and ACKs refer to the displayed deliveries and must not
+claim a whole-broadcast completion rate. It does not fetch omitted recipients
+or raise the cap to complete a group.
+
 
 #### `cafleet server` launcher
 

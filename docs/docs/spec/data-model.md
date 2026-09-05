@@ -74,8 +74,9 @@ for migration of databases that already contain conflicting rows.
 
 ### `messages`
 
-One row per delivery: a unicast row, a broadcast delivery row, or a broadcast
-summary row (see [Broadcast grouping](#broadcast-grouping)). `from_member_id`,
+One row per unicast delivery, plus a separate summary row for each broadcast.
+Broadcast deliveries also have type `unicast`; their summary has type
+`broadcast_summary` (see [Broadcast grouping](#broadcast-grouping)). `from_member_id`,
 `to_member_id`, and `origin_message_id` are deliberately not foreign keys —
 historical messages may outlive their sender. `status_timestamp` is updated on
 every state change and drives `ORDER BY DESC` listing. The rendered envelope is specified in
@@ -159,8 +160,17 @@ one `broadcast_summary` message — grouped by `origin_message_id`:
 
 Because ids are DB-assigned, the summary row is inserted first with a
 temporarily `NULL` `origin_message_id`, then self-linked before the delivery rows
-are inserted. The grouping predicate `origin_message_id IS NOT NULL` cleanly
-partitions the timeline into standalone unicasts vs broadcast groups. The
-per-recipient ACK time is read from the `completed` delivery row's
+are inserted. The timeline first selects only `type = 'unicast'` delivery rows,
+then groups non-null `origin_message_id` values into broadcasts; a null origin
+identifies a standalone unicast. Summary rows remain in the database and in
+`message show` / broadcast results, but do not count as recipients or ACKs.
+
+The per-recipient ACK time is read from the `completed` delivery row's
 `status_timestamp`, which is valid because a delivery message makes exactly one
-state transition over its lifetime.
+state transition over its lifetime. A summary is already `completed` when
+created, without any recipient having acknowledged it.
+
+The timeline's 200-row limit can return only part of a broadcast. Its recipient
+and ACK counts describe the returned deliveries, not the entire broadcast.
+See [timeline selection and grouping](webui-api.md#get-apitimeline--unified-fleet-timeline)
+for SQL ordering and the separate UI creation-time ordering.

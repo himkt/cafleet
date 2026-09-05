@@ -26,6 +26,14 @@ The first load lands on a fleet picker. Selecting a fleet opens the unified
 timeline: a sidebar of the fleet's members, a center timeline of unicast and
 broadcast messages, and a bottom input.
 
+The timeline shows up to 200 deliveries selected by their latest status update,
+then arranged by creation time. Broadcast recipient counts and `[ack]` badges
+cover the deliveries shown. A large or older broadcast may appear only in part,
+so these counts do not establish whether all of its recipients have acknowledged
+it. Broadcast summary records do not add recipients or ACK badges.
+See [timeline grouping](../spec/webui-api.md#get-apitimeline--unified-fleet-timeline)
+for the selection and counting rules.
+
 ## Send as the root Director
 
 The bottom input parses `@<member> text` for unicast and `@all text` for
