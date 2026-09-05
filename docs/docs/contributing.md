@@ -109,19 +109,31 @@ refresh and error behavior.
 ## Frontend resource tests
 
 The [planned resource lifecycle](spec/webui-api.md#frontend-resource-lifecycle)
-uses the existing Vitest runner, with jsdom and React Testing Library for real
-component/hook tests. Keep pure `.test.ts` suites in the Node environment;
-DOM suites use `.test.tsx` and an explicit jsdom environment. Resolve compatible
-dev-dependency versions and update the lockfile when implementation starts.
+uses the existing Vitest Node environment and `.test.ts` suites. No DOM testing
+dependencies are added. The React hook subscribes to the same production
+resource object that the Node tests exercise; do not create a test-only
+controller or simulate React lifecycle behavior in a replacement implementation.
 
-Use controlled promises and fake timers to verify reversed fleet/member
-responses, unmount cancellation, retry after initial failure, retained data
-with refresh errors, coalesced refreshes, five-second polling, and one roster
-load per mount. Observe real client URLs, headers and AbortSignals through a
-mocked fetch; render the real App/components/hooks rather than a substitute
-controller. Keep Step 7's 201-row requests and history display tests while
-migrating them to explicit fleet clients. These checks require no browser,
-server or fetch-library replacement.
+Test real client URLs, fixed fleet headers, bodies and AbortSignals with a
+mocked fetch. Keep the 201-row history request and display-window tests during
+the client migration. Test the shared route/ID parser directly, including
+invalid lexical forms and safe-integer bounds.
+
+Controlled promises exercise the production resource's initial and repeated
+start, subscription/unsubscription, stable snapshots, independent instances,
+retry, retained data after refresh errors, abort, stop/restart generations and
+one pending refresh. Include transports that ignore abort, synchronous throws,
+and late resolve/reject/finally paths. Construction and subscription alone must
+not fetch; obsolete attempts must not publish or unlock a newer request.
+
+Node tests do not execute React rendering, clicking, navigation or unmount.
+Review the component wiring and use TypeScript, lint and build checks for
+keyed resource replacement, cleanup calling stop, a single roster load owner,
+five-second polling, manual/post-send refresh, error/Retry display, and
+suppression of old mutation callbacks or cross-fleet drafts/recipients.
+These checks do not establish DOM or browser behavior as tested. The UI
+requirements remain in force; this validation scope uses neither a browser,
+a server, nor a fetch-library replacement.
 
 ## Tech stack
 
