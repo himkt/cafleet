@@ -16,6 +16,40 @@ path.
 | `design-docs/` | Numbered design documents (`NNNNNNN-<slug>/design-doc.md`). |
 | `docs/` | The rspress documentation-site project (standalone pnpm package `cafleet-docs`): `rspress.config.ts` and the operator-facing pages in its nested `docs/` content root. |
 
+## Rust boundaries and compatibility
+
+When changing the broker, decode SQL rows into typed records once and construct
+wire JSON in CLI or HTTP presenters. Move consumers in order: member,
+placement, message, then monitor; remove a temporary JSON compatibility adapter
+once its consumers use the typed interface. The record fields and nullable
+states are defined in [Data model](spec/data-model.md#typed-broker-records).
+
+Keep concrete process execution and notifications in `runtime/`:
+
+```text
+CLI / HTTP → runtime adapters → broker notification traits
+                             → multiplexer / coding-agent interfaces
+CLI / HTTP → broker records → CLI / HTTP presenters
+```
+
+`SystemRunner`, `SystemProbe`, and the concrete notifier adapter live below the
+CLI. The broker owns notification policy and its trait, while the runtime
+adapter performs the transport call. The broker does not start subprocesses
+or import HTTP/CLI handlers; HTTP handlers do not import CLI helpers. Continue
+using injectable runners, probes, and notification traits in tests.
+
+Treat the internal type migration as an implementation change. Preserve JSON
+key order, names, nulls, envelopes, text output, exit codes, and guard order.
+Introduce domain error variants only when a caller must branch, and translate
+them at each CLI/HTTP boundary using that operation's existing contract. A
+missing required message name becomes an HTTP 500 integrity error rather than
+a panic or invented name; see [response compatibility](spec/webui-api.md#response-compatibility).
+
+Preserve the distinction between durable delivery and notification. Typed
+outcomes retain the stored message id, notification attempt, and raw transport
+diagnostic. A failed preview does not roll back or resend the message; keep the
+[CLI partial-failure output and recovery instructions](spec/cli-options.md#message-send-partial-failure).
+
 ## Tech stack
 
 | Concern | Technology | Notes |

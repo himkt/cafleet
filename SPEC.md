@@ -94,7 +94,7 @@ broker from blocking tasks.
 
 The rationale for the split:
 
-- CLI invocations stay runtime-free — no async runtime spin-up for a one-shot
+- CLI invocations stay free of an async runtime — no async runtime spin-up for a one-shot
   command like `cafleet message send`.
 - SQLite's per-connection write lock serializes monitor claims without async
   complication.
@@ -123,7 +123,8 @@ cafleet
 ├── multiplexer     Multiplexer interface, tmux + herdr backends, resolver, keystrokes
 ├── coding-agent    coding-agent interface + claude/codex/opencode
 ├── output          render + formatter layers
-├── broker          data-access layer
+├── broker          typed data-access layer and notification traits
+├── runtime         concrete process/probe/notifier adapters
 ├── monitor         heartbeat loop
 ├── webui           server half: HTTP app, /api router, SPA fallback
 └── cli             command tree + handlers; the cafleet entry point
@@ -137,59 +138,52 @@ it.
 
 ## 4. Architecture & module dependency graph
 
-The ASCII diagram below is an at-a-glance sketch; the **edge list that follows it
-is the authoritative dependency contract**. Where the diagram's arrows are hard
-to trace, defer to the edge list.
+The diagram shows the process and notification boundary; the edge list defines
+the remaining dependencies. Arrows point from callers to their dependencies.
 
-```
-                 config  ◄─────────────────────┐ (leaf; CAFLEET_* settings)
-                  ▲   ▲   ▲                     │
-        ┌─────────┘   │   └──────────┐          │
-       db          output          webui        │
-        ▲             ▲              ▲   │       │
-        │             │              │   └──► broker
-        │             │              │          ▲
-   multiplexer    coding-agent       │          │ (db + multiplexer + config)
-        ▲   ▲          ▲             │          │
-        │   └──────────┼─────────┐   │          │
-        │           monitor ─────┘───┼──────────┤ (broker + multiplexer)
-        │              ▲             │          │
-        └────────────  cli  ─────────┴──────────┘
-                 (broker, output, multiplexer,
-                  coding-agent, monitor, config,
-                  db, webui)  → cafleet entry point
+```text
+CLI / HTTP presenters ─────────────► broker ──► db
+        │                              ▲
+        ▼                              │ notification traits
+     runtime adapters ─────────────────┘
+        │
+        ├──► multiplexer ──► injected CommandRunner
+        └──► coding-agent ─► injected SpawnProbe
 ```
 
 Edges (who depends on whom):
 
 - **config** — leaf. No internal deps.
-- **db** — depends on `config` (reads `settings.database_url`). Owns the
-  connection factory and the embedded migration chain.
-- **output** — depends on `config` (reads `settings.max_text_len`). Pure
-  string/structure transforms otherwise.
-- **multiplexer** — leaf (process invocation only). Truncation for inline
-  previews is done by the *broker* before calling `send_inline_preview`, so the
-  multiplexer needs no config.
-- **coding-agent** — leaf (process/PATH checks + the opencode preset-existence
-  check).
-- **broker** — depends on `db` (models + connection), `multiplexer`
-  (`MultiplexerContext` argument to `create_fleet`; `send_inline_preview` for
-  inline previews), and `config` (`max_text_len` for preview truncation).
-- **monitor** — depends on `broker` (monitor DB ops + `get_fleet`) and
-  `multiplexer` (`list_pane_ids`, `send_wake_trigger`).
-- **webui** — depends on `broker` and `config`. Treats broker results as
-  pass-through payloads (renaming two keys, dropping two).
-- **cli** — depends on all of the above; it is the orchestration glue that
-  wires broker ↔ multiplexer ↔ coding-agent ↔ output, and embeds `webui` for
-  `cafleet server`.
+- **db** — depends on `config` for the database URL. Owns the connection
+  factory and embedded migration chain.
+- **output** — pure string/structure transforms, using configuration-derived
+  text limits where required.
+- **multiplexer / coding-agent** — backend protocols, using injectable runner
+  and probe interfaces. Inline-preview truncation remains broker-side.
+- **broker** — depends on DB/domain types and pure formatting helpers. It owns
+  the notification trait and policy, not a concrete multiplexer or process
+  launcher. It neither starts subprocesses nor imports HTTP or CLI handlers.
+  The existing monitor liveness semantics, including the signal-0 probe, stay
+  unchanged by this boundary refactor.
+- **runtime** — owns `SystemRunner`, `SystemProbe`, and the concrete notifier
+  adapter. It implements the broker's notification trait using multiplexer and
+  coding-agent interfaces, and may consume configuration. It imports neither
+  CLI handlers nor HTTP handlers.
+- **monitor** — uses broker monitor operations and injected multiplexer
+  operations for pane discovery and wake delivery.
+- **webui** — uses broker types, runtime adapters, and configuration. HTTP
+  presenters construct the existing wire payloads; webui never imports cli.
+- **cli** — composes broker, runtime adapters, output, multiplexer,
+  coding-agent, monitor, config, db, and webui for the single `cafleet` entry
+  point. CLI presenters retain their existing output and error contracts.
 
 **Reconciled overlap points** (specced once, here, then referenced):
 
-1. **Broker ↔ multiplexer inline preview.** The broker's `_try_notify_recipient`
+1. **Broker → runtime notifier → multiplexer inline preview.** The broker's `_try_notify_recipient`
    (§6.2) looks up the recipient's `mux_pane_id`, skips self-sends and
    paneless recipients, **truncates** `text` to `settings.max_text_len` with a
-   `…` suffix, then calls `send_inline_preview` (§6.5) which keystrokes the
-   2-line `[cafleet msg …]` payload Esc-first. The multiplexer call returns a
+   `…` suffix, then calls its notification trait. The runtime adapter delegates to
+   `send_inline_preview` (§6.5), which keystrokes the 2-line `[cafleet msg …]` payload Esc-first. The multiplexer call returns a
    result carrying the **raw backend error** on failure (§6.5); the broker
    never rolls back the persisted message on a failed keystroke and never
    retries it. The unicast CLI surfaces an attempted-and-failed notification
@@ -319,6 +313,23 @@ The unified shapes:
 | `wake_interval_seconds` | optional integer | nullable; the live mirror of the running loop's wake interval — stamped at every claim/reclaim, re-read per tick, overwritten by `PATCH /api/monitor`, preserved by the runtime clear; `NULL` only in rows that predate the column and were never re-claimed |
 | `wake_requested_at` | optional string | nullable; the UTC ISO timestamp of the latest pending forced-wake request (`POST /api/monitor/wake`) — `NULL` when none is pending; repeat requests overwrite the timestamp (coalesce into a single wake); cleared by a delivered wake (`record_monitor_wake`) and by the reclaim reset in `claim_monitor_runtime` |
 
+A missing row is distinct from any nullable field on an existing row.
+`pid = NULL` means no claim; claim records the loop's direct pid and clear
+removes it. Do not reinterpret pid zero as a new missing-value sentinel; keep
+the existing process probe. `started_at = NULL` means no claim start time.
+`last_tick_at = NULL` or an unparseable value is not a fresh heartbeat. Clear
+nulls pid/start/tick, but preserves `last_wake_at`, `wake_requested_at`, and the
+intervals. A null `last_wake_at` falls back to `started_at` for cadence.
+
+`tick_seconds` has DB default 5; zero is invalid CLI input, not a disable flag.
+`wake_interval_seconds = NULL` is the legacy V5-column state before a later
+claim, distinct from zero (scheduled wakes disabled; forced wake still allowed)
+and positive seconds. Claim/reclaim always records a non-null wake interval.
+Keep raw nullable storage fields separate from the stopped-monitor HTTP
+projection, which hides process timestamps but preserves stored intervals
+(§6.8). Do not normalize legacy null intervals into zero.
+
+
 **AssetInstalls** (composite TEXT PK `(coding_agent, path)`, not autoincrement, not FK-linked)
 
 | Field | Type | Notes |
@@ -368,14 +379,57 @@ the recipient — e.g. the WebUI's name resolution over message endpoints
 Model `to_member_id` as an **optional/nullable integer**; there is no `0`
 sentinel.
 
-### 5.6 Result shapes vs. typed entities
+### 5.6 Typed records and wire presenters
 
-How the broker-result boundary is modeled — typed entities (as in §5.2)
-for broker results, versus a generic JSON/value type for the output render
-walkers (which must handle heterogeneous nested shapes and conditional key
-emission) — is an implementation choice and is not part of the contract. The
-contract for which fields may be absent is the optional-vs-required field-access
-tables in §6.4.
+Decode SQL columns into small Rust records once. Move consumers in the order
+member → placement → message → monitor; eliminate JSON field indexing and
+reparsing between these internal consumers. A temporary compatibility adapter
+may remain during one migration stage, but remove it when all its consumers
+use the typed interface. Do not introduce a generic repository framework.
+
+| Record | Fields and constraints |
+|---|---|
+| `MemberRecord` | `member_id`, `fleet_id`: `i64`; `name`, `description`, `registered_at`: `String`; `status: MemberStatus`, `kind: MemberKind`; `skills: Vec<Value>`; `placement: Option<Placement>` |
+| `Placement` | `backend`, `mux_session`, `mux_window_id`, `coding_agent`, `created_at`: `String`; `mux_pane_id: Option<String>` |
+| `MessageRecord` | `message_id`, `owner_member_id`, `from_member_id`: `i64`; `to_member_id`, `origin_message_id`: `Option<i64>`; `kind: MessageKind`, `status: MessageStatus`; `created_at`, `status_timestamp`, `text`: `String` |
+| `MonitorRuntime` | `fleet_id`, `tick_seconds`: `i64`; `pid`, `wake_interval_seconds`: `Option<i64>`; `started_at`, `last_tick_at`, `last_wake_at`, `wake_requested_at`: `Option<String>` |
+
+Free-form skill elements may remain `Value`. SQL records and required fields
+must not travel as generic JSON internally; `Value` remains appropriate at the
+CLI/HTTP output boundary. A missing placement and a placement with a pending
+(null) pane id are distinct states. A missing runtime row is
+`Option<MonitorRuntime>::None`, not a synthetic row with id zero.
+
+Unknown stored enum values become `InvalidStoredValue` errors, not panics or
+invented defaults. Preserve the existing skills-extraction fallback: malformed
+card JSON, absent skills, or a non-array skills value yields an empty skills
+array. Do not alter timestamp parsing or formatting solely to introduce types.
+
+Presenters construct JSON explicitly in each operation's existing key order
+(`serde_json` uses `preserve_order`). Preserve names, nulls versus absent keys,
+scalar types, list order, envelopes, compact JSON, and text formatting. Rust
+field names or enum variant names must not leak into the wire. Message CLI
+fields remain `message_id, owner_member_id, from_member_id, to_member_id, type,
+created_at, status_state, status_timestamp, origin_message_id, text`; HTTP uses
+the projection in §6.8. Summary recipient ids/names stay null, never zero or an
+invented label.
+
+Introduce domain variants only where callers need to branch, including
+`ActiveMonitorExists`, `MemberNotFound`, `FleetNotFound`, and
+`InvalidStoredValue`. CLI adapters retain the operation's existing
+Usage/App/Value classification, exit code, diagnostic text, and validation
+order. HTTP adapters retain endpoint-specific status/detail mappings. Invalid
+stored values or missing required sender/recipient names are integrity failures
+(HTTP 500 with `{"detail": <string>}`, CLI application failure), not fabricated
+successful rows; a missing name must not escape as a panic. Do not replace an
+existing endpoint's validation precedence with a global error mapping.
+
+Typed send outcomes retain the persisted message id, `NotificationAttempt`,
+and the raw transport diagnostic as caller metadata. They do not add error
+fields to successful wire payloads. A failed attempted preview never rolls
+back or resends the message: preserve the exit-1 CLI partial-failure result and
+its recovery instruction, broadcast's delivered count, and HTTP's persisted
+send response (§6.2/§6.3/§6.8).
 
 ---
 
@@ -473,8 +527,10 @@ module that reads/writes the operational tables (fleets, members, placements,
 messages, monitor schedule/runtime, message queries). Owns
 transaction boundaries, the member-kind predicates, soft-delete + cascade, the
 message status lifecycle, and the monitor single-instance claim/heartbeat/clear. It
-performs no OS side effects except one attempted inline-preview keystroke
-during message delivery (§6.5) and one process-liveness probe (signal-0).
+delegates attempted inline-preview delivery through its notification trait;
+the runtime adapter owns the concrete multiplexer call (§4). The broker does
+not start subprocesses or depend on HTTP/CLI handlers. Its existing
+process-liveness probe (signal-0) retains the monitor claim semantics.
 
 #### Session semantics
 
@@ -3133,8 +3189,8 @@ same `{"detail": <string>}` shape (a single human-readable string).
 from_member_id, from_member_name, to_member_id, to_member_name, type, status,
 created_at, status_timestamp, origin_message_id, body}`. Names are resolved by a
 single bulk lookup over the union of all `from_member_id`/`to_member_id` values,
-using **direct keyed access** — a missing id is a hard failure (→ 500), never a
-silent fallback. `status` is the renamed `status_state`; `body` the renamed
+using checked keyed lookup — a missing required id/name returns an integrity
+error (→ 500 with a detail string), never a panic or a silent fallback. `status` is the renamed `status_state`; `body` the renamed
 `text`; `type` the raw row type. Empty input → empty array.
 
 The TypeScript wire model uses `type` to distinguish `unicast` deliveries

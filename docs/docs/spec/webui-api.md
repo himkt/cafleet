@@ -19,6 +19,34 @@ These fleet-scoping errors apply to **every** fleet-scoped endpoint:
 
 No server-side session cookies. The SPA stores the active fleet_id client-side via hash-based routing and sends it in the X-Fleet-Id header on each request.
 
+## Response compatibility
+
+Typed broker records are internal. HTTP presenters retain each endpoint's
+existing key names and order, nulls versus omitted fields, scalar types, list
+order, and response envelope. Rust enum names or struct layouts do not become
+wire fields. Timestamps retain their existing formatting and parsing rules.
+The CLI keeps its separate text/JSON formatting, exit codes, diagnostics, and
+validation order.
+
+Message presenters still rename `status_state` to `status` and `text` to `body`,
+and resolve names for non-null member ids. They emit keys in this order:
+`message_id`, `from_member_id`, `from_member_name`, `to_member_id`,
+`to_member_name`, `type`, `status`, `created_at`, `status_timestamp`,
+`origin_message_id`, `body`. A summary's recipient id and name remain null.
+
+| Condition | Boundary behavior |
+|---|---|
+| Missing fleet/member or active-monitor conflict | Map the domain error using the operation's existing status/detail or CLI error; retain its validation order. |
+| Invalid stored enum or missing required sender/recipient name | Return an integrity failure as HTTP 500 with `{"detail": <string>}`; do not panic, substitute a fabricated name, or return a successful partial row. |
+| Persisted message whose pane notification fails | Preserve the successful HTTP send response; CLI unicast retains its exit-1 partial-failure result and recovery instruction, while broadcast retains its delivered count. |
+
+Concrete process/probe/notifier adapters belong to `runtime/`; HTTP handlers
+use them without importing CLI helpers. This move preserves the notification
+attempt, durable message id, and raw transport diagnostic. A failed preview
+never rolls back or resends the message. See
+[CLI partial-failure recovery](cli-options.md#message-send-partial-failure) and
+[typed records](data-model.md#typed-broker-records).
+
 ## Endpoints
 
 | Method | Path | Returns | X-Fleet-Id required |
@@ -149,6 +177,16 @@ the runtime fields take these values:
 | `last_wake_age_seconds` | `null` | `null` |
 | `tick_seconds` | `null` | **preserved** — the cadence the monitor last ran at |
 | `wake_interval_seconds` | `null` | **preserved** — the wake interval the monitor last ran at; `null` when the row predates the column and was never re-stamped |
+
+This is a presenter projection, not a serialization of the stored
+`MonitorRuntime` record. Stored null, zero, and a positive wake interval remain
+distinct: zero disables scheduled wakes but still allows forced wake, while a
+legacy null interval remains null until claimed. A normal clear retains the
+stored `last_wake_at` and pending `wake_requested_at` even though stopped-process
+timestamps are hidden here; the request field is not added to this response.
+The complete field lifecycle is in the
+[data model](data-model.md#monitor_runtime).
+
 
 Launching the loop is CLI-only (`cafleet monitor`), and the monitor member owns
 it as a long-lived execution resolved by its backend. It has no `POST`/`DELETE` counterpart

@@ -94,23 +94,22 @@ value.
 
 `monitor_runtime` is the one-row-per-fleet loop pid/heartbeat table:
 
-| Column | Meaning | Written / cleared by |
+| Field | Rust type | Meaning and lifecycle |
 |---|---|---|
-| `pid`, `started_at` | The single-instance claim | Stamped at every `cafleet monitor` start (claim and reclaim); cleared by a clean stop |
-| `last_tick_at` | The liveness heartbeat (UTC ISO) | Rewritten by the running loop on every tick |
-| `tick_seconds` | The loop's scan-tick cadence | Stamped at every start; preserved across a loop stop |
-| `last_wake_at` | Nullable UTC ISO timestamp of the last successfully delivered wake, durable across loop restarts | Stamped by a delivered wake — scheduled or forced |
-| `wake_interval_seconds` | Nullable live mirror of the running loop's wake interval, re-read by the loop on every tick | Stamped with the startup-resolved value at every start; overwritten by `PATCH /api/monitor`; preserved across a loop stop |
-| `wake_requested_at` | Nullable UTC ISO timestamp of the latest pending forced-wake request (`POST /api/monitor/wake`); `NULL` when none is pending | Set by `POST /api/monitor/wake`; cleared by a delivered wake or a new loop instance's reclaim |
+| `fleet_id` | `i64` | Non-null fleet key; an absent row is `None`, not an id-zero row. |
+| `pid` | `Option<i64>` | Null means no claim; claim stores the direct loop pid and normal clear nulls it. Preserve the existing process probe's handling of zero. |
+| `started_at` | `Option<String>` | Null means no claim start time; claim/reclaim stamps it and normal clear nulls it. |
+| `last_tick_at` | `Option<String>` | Null or an unparseable timestamp is not a fresh heartbeat. Claim/tick updates it and normal clear nulls it. |
+| `last_wake_at` | `Option<String>` | Null means no successful wake is recorded; cadence then falls back to `started_at`. Successful scheduled/forced delivery updates it, and clear/reclaim preserve it. |
+| `wake_requested_at` | `Option<String>` | Null means no forced-wake request; repeated requests overwrite/coalesce. Successful delivery or reclaim clears it; normal clear alone preserves it. |
+| `tick_seconds` | `i64` | Non-null tick cadence, DB default 5; CLI rejects zero rather than treating it as disabled. Normal clear preserves it. |
+| `wake_interval_seconds` | `Option<i64>` | Null is the legacy state before a row has been claimed since V5 added the column; zero disables scheduled wakes while permitting forced wake. Positive values are seconds; claim/reclaim/PATCH stamps the value and normal clear preserves it. |
 
-Repeat forced-wake requests overwrite `wake_requested_at`, coalescing into a
-single wake. Exactly two writes clear it: a delivered wake — scheduled or
-forced — stamps `last_wake_at` and clears the request in the same write, and
-a new loop instance's reclaim resets it, so a pending request never survives
-into a later loop instance. The durable `last_wake_at` lets an immediate
-restart honor the remaining wake cadence. `wake_interval_seconds` is `NULL`
-only in rows that predate the column and have not been re-claimed since — a
-running loop's row is always stamped. The cadence semantics are defined in
+A claimed loop always has a non-null wake interval. Do not normalize the legacy
+null interval into zero or treat a stopped HTTP response as the stored row:
+[the monitor response](webui-api.md#get-apimonitor--fleet-monitor-runtime) hides
+process timestamps when stopped but preserves stored intervals. The cadence
+rules are defined in
 [Monitoring](../concepts/monitoring.md#cadence-and-tick-precision).
 
 ### `asset_installs`
@@ -126,6 +125,33 @@ one, by the primary key) is **current**; every other row of that agent is
 row feeds the stale-assets guard and the `cafleet doctor` setup column, while
 superseded rows surface only as informational doctor footnotes (see
 [CLI options](cli-options.md#stale-assets-guard)).
+
+## Typed broker records
+
+The broker decodes database columns into Rust records once. CLI and HTTP
+presenters construct the existing output; these internal types do not change
+the database schema or wire keys.
+
+| Record | Fields |
+|---|---|
+| `MemberRecord` | `member_id`, `fleet_id`: `i64`; `name`, `description`, `registered_at`: `String`; `status: MemberStatus`, `kind: MemberKind`; `skills: Vec<Value>`; `placement: Option<Placement>` |
+| `Placement` | `backend`, `mux_session`, `mux_window_id`, `coding_agent`, `created_at`: `String`; `mux_pane_id: Option<String>` |
+| `MessageRecord` | `message_id`, `owner_member_id`, `from_member_id`: `i64`; `to_member_id`, `origin_message_id`: `Option<i64>`; `kind: MessageKind`, `status: MessageStatus`; `created_at`, `status_timestamp`, `text`: `String` |
+| `MonitorRuntime` | The fields and nullable states in the `monitor_runtime` table above; row absence is `Option<MonitorRuntime>::None`. |
+
+A missing placement differs from an existing placement whose pane id is still
+null. A summary's null recipient differs from any actual member id. Preserve
+those distinctions, timestamp strings, and the existing parse/format rules.
+Only free-form skill elements remain generic `Value` inside these records;
+JSON values at the output boundary remain appropriate.
+
+When extracting skills, preserve the existing empty-array fallback for malformed
+card JSON, missing skills, or a non-array skills value. Unknown stored enum
+values instead return `InvalidStoredValue`; do not panic or invent a valid
+status/kind. CLI/HTTP adapters map domain failures to their existing error
+categories and response shapes. See
+[response compatibility](webui-api.md#response-compatibility) and
+[contributor boundaries](../contributing.md#rust-boundaries-and-compatibility).
 
 ## Foreign key enforcement
 
