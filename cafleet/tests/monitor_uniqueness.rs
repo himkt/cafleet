@@ -204,6 +204,11 @@ fn stale_prechecks_on_two_connections_cannot_register_two_monitors() {
     let before = records(&a);
     let error =
         broker::register_member(&mut b, 1, "loser", "", &[], Some(&placement()), true).unwrap_err();
+    assert!(matches!(
+        &error,
+        cafleet::error::CafleetError::ActiveMonitorExists { fleet_id: 1, member_id }
+            if *member_id == id
+    ));
     assert_eq!(error.exit_code(), 1);
     assert_eq!(
         error.to_string(),
@@ -235,6 +240,10 @@ fn an_unrelated_unique_constraint_is_not_reported_as_an_existing_monitor() {
             .contains("UNIQUE constraint failed: members.name"),
         "{error}"
     );
+    assert!(!matches!(
+        error,
+        cafleet::error::CafleetError::ActiveMonitorExists { .. }
+    ));
     assert!(!error.to_string().contains("already has an active monitor"));
     assert_eq!(records(&conn), before);
 }

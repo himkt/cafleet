@@ -68,4 +68,16 @@ mod tests {
         assert_eq!(CafleetError::Usage("u".to_string()).message(), "u");
         assert_eq!(CafleetError::App("a".to_string()).message(), "a");
     }
+
+    #[test]
+    fn active_monitor_conflict_preserves_message_display_and_exit_code() {
+        let error = CafleetError::ActiveMonitorExists {
+            fleet_id: 17,
+            member_id: 42,
+        };
+        let expected = "fleet 17 already has an active monitor member (member 42)";
+        assert_eq!(error.message(), expected);
+        assert_eq!(error.to_string(), expected);
+        assert_eq!(error.exit_code(), 1);
+    }
 }

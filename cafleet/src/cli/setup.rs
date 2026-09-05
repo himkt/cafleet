@@ -226,3 +226,259 @@ fn assets_half(settings: &Settings, selected: &[String]) -> Result<(), CafleetEr
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::types::Value;
+    use std::cell::Cell;
+    use tempfile::TempDir;
+
+    mod embedded {
+        refinery::embed_migrations!("migrations");
+    }
+
+    struct Fixture {
+        _dir: TempDir,
+        settings: Settings,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let dir = tempfile::Builder::new()
+                .prefix(".setup-race-")
+                .tempdir_in(env!("CARGO_MANIFEST_DIR"))
+                .unwrap();
+            let url = format!("sqlite:///{}", dir.path().join("fixture.db").display());
+            let settings =
+                Settings::from_lookup(|name| (name == "CAFLEET_DATABASE_URL").then(|| url.clone()))
+                    .unwrap();
+            Self {
+                _dir: dir,
+                settings,
+            }
+        }
+
+        fn connect(&self) -> Connection {
+            crate::db::connect(&self.settings.database_url).unwrap()
+        }
+
+        fn seed_version(&self, version: i32) -> Connection {
+            let mut conn = self.connect();
+            embedded::migrations::runner()
+                .set_target(refinery::Target::Version(version))
+                .run(&mut conn)
+                .unwrap();
+            conn
+        }
+    }
+
+    fn rows(conn: &Connection, sql: &str) -> Vec<Vec<Value>> {
+        let mut statement = conn.prepare(sql).unwrap();
+        let count = statement.column_count();
+        statement
+            .query_map([], |row| (0..count).map(|i| row.get(i)).collect())
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    }
+
+    fn snapshot(conn: &Connection) -> Vec<Vec<Vec<Value>>> {
+        let mut data = vec![rows(
+            conn,
+            "SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name",
+        )];
+        for table in [
+            "refinery_schema_history",
+            "fleets",
+            "members",
+            "member_placements",
+            "messages",
+            "monitor_runtime",
+            "asset_installs",
+            "sqlite_sequence",
+        ] {
+            data.push(rows(conn, &format!("SELECT * FROM {table} ORDER BY 1")));
+        }
+        data
+    }
+
+    fn seed_clean_monitors(conn: &Connection) {
+        conn.execute_batch(
+            "INSERT INTO fleets(fleet_id, name, created_at) VALUES (20, 'twenty', 'fixture'), (3, 'three', 'fixture');
+             INSERT INTO members(member_id, fleet_id, name, description, status, registered_at, member_card_json) VALUES
+                (30, 20, 'm30', '', 'active', 'fixture', '{\"cafleet\":{\"kind\":\"monitor\"}}'),
+                (2, 3, 'm2', '', 'active', 'fixture', '{\"cafleet\":{\"kind\":\"monitor\"}}');"
+        ).unwrap();
+    }
+
+    fn insert_competing_monitors(conn: &Connection) {
+        conn.execute_batch(
+            "INSERT INTO members(member_id, fleet_id, name, description, status, registered_at, member_card_json) VALUES
+                (90, 20, 'm90', '', 'active', 'fixture', '{\"cafleet\":{\"kind\":\"monitor\"}}'),
+                (8, 3, 'm8', '', 'active', 'fixture', '{\"cafleet\":{\"kind\":\"monitor\"}}');"
+        ).unwrap();
+    }
+
+    const DUPLICATES: &str = "active monitor duplicates prevent migration: fleet 3: members 2, 8; fleet 20: members 30, 90";
+
+    #[test]
+    fn setup_rediagnoses_competing_commit_and_preserves_pending_schema_and_data() {
+        for version in [5, 7] {
+            let fixture = Fixture::new();
+            let observer = fixture.seed_version(version);
+            seed_clean_monitors(&observer);
+            assert!(duplicate_monitor_diagnostic(&observer).unwrap().is_none());
+            let mut after_competing_commit = None;
+            let mut calls = 0;
+            let error = db_half_with_after_diagnosis(&fixture.settings, || {
+                calls += 1;
+                let writer = fixture.connect();
+                insert_competing_monitors(&writer);
+                assert!(writer.is_autocommit());
+                after_competing_commit = Some(snapshot(&writer));
+            })
+            .unwrap_err();
+            assert_eq!(calls, 1);
+            assert_eq!(error.message(), DUPLICATES);
+            assert_eq!(error.exit_code(), 1);
+            assert_eq!(snapshot(&observer), after_competing_commit.unwrap());
+            assert_eq!(recorded_version(&observer).unwrap(), Some(version as u32));
+        }
+    }
+
+    #[test]
+    fn setup_skips_callback_and_duplicate_query_for_unversioned_database() {
+        let fixture = Fixture::new();
+        let conn = fixture.connect();
+        conn.execute_batch("CREATE TABLE members (deliberately_invalid TEXT)")
+            .unwrap();
+        let called = Cell::new(false);
+        let error =
+            db_half_with_after_diagnosis(&fixture.settings, || called.set(true)).unwrap_err();
+        assert!(!called.get());
+        assert!(
+            error
+                .message()
+                .contains("Refusing to migrate an unversioned database")
+        );
+        assert_eq!(recorded_version(&conn).unwrap(), None);
+    }
+
+    #[test]
+    fn setup_skips_callback_and_duplicate_diagnosis_for_ahead_schema() {
+        let fixture = Fixture::new();
+        let conn = fixture.seed_version(7);
+        seed_clean_monitors(&conn);
+        insert_competing_monitors(&conn);
+        conn.execute_batch(
+            "INSERT INTO refinery_schema_history VALUES(99, 'future', 'fixture', '0')",
+        )
+        .unwrap();
+        let before = snapshot(&conn);
+        let called = Cell::new(false);
+        let error =
+            db_half_with_after_diagnosis(&fixture.settings, || called.set(true)).unwrap_err();
+        assert!(!called.get());
+        assert!(error.message().contains("version 99 which is unknown"));
+        assert!(!error.message().contains("duplicates"));
+        assert_eq!(snapshot(&conn), before);
+    }
+
+    #[test]
+    fn setup_skips_callback_for_head_schema_and_preserves_everything() {
+        let fixture = Fixture::new();
+        let conn = fixture.seed_version(8);
+        seed_clean_monitors(&conn);
+        let before = snapshot(&conn);
+        let called = Cell::new(false);
+        db_half_with_after_diagnosis(&fixture.settings, || called.set(true)).unwrap();
+        assert!(!called.get());
+        assert_eq!(snapshot(&conn), before);
+    }
+
+    #[test]
+    fn setup_skips_callback_when_duplicates_exist_before_migration() {
+        let fixture = Fixture::new();
+        let conn = fixture.seed_version(7);
+        seed_clean_monitors(&conn);
+        insert_competing_monitors(&conn);
+        let before = snapshot(&conn);
+        let called = Cell::new(false);
+        let error =
+            db_half_with_after_diagnosis(&fixture.settings, || called.set(true)).unwrap_err();
+        assert!(!called.get());
+        assert_eq!(error.message(), DUPLICATES);
+        assert_eq!(snapshot(&conn), before);
+    }
+
+    #[test]
+    fn setup_calls_callback_once_for_clean_pending_migrations() {
+        let fixture = Fixture::new();
+        let conn = fixture.seed_version(7);
+        seed_clean_monitors(&conn);
+        let members = rows(&conn, "SELECT * FROM members ORDER BY member_id");
+        let mut calls = 0;
+        db_half_with_after_diagnosis(&fixture.settings, || calls += 1).unwrap();
+        assert_eq!(calls, 1);
+        assert_eq!(recorded_version(&conn).unwrap(), Some(8));
+        assert_eq!(
+            rows(&conn, "SELECT * FROM members ORDER BY member_id"),
+            members
+        );
+    }
+
+    #[test]
+    fn setup_migrates_a_fresh_database_without_requiring_a_members_table() {
+        let fixture = Fixture::new();
+        let mut calls = 0;
+        db_half_with_after_diagnosis(&fixture.settings, || calls += 1).unwrap();
+        assert_eq!(calls, 1);
+        assert_eq!(recorded_version(&fixture.connect()).unwrap(), Some(8));
+    }
+
+    #[test]
+    fn setup_preserves_unrelated_migration_error_after_clean_rediagnosis() {
+        let fixture = Fixture::new();
+        let observer = fixture.seed_version(5);
+        seed_clean_monitors(&observer);
+        let mut after_interference = None;
+        let error = db_half_with_after_diagnosis(&fixture.settings, || {
+            let writer = fixture.connect();
+            writer
+                .execute_batch(
+                    "CREATE TABLE idx_members_one_active_monitor_per_fleet (fixture TEXT)",
+                )
+                .unwrap();
+            after_interference = Some(snapshot(&writer));
+        })
+        .unwrap_err();
+        assert!(error.message().starts_with("migration failed:"));
+        assert!(
+            error
+                .message()
+                .contains("idx_members_one_active_monitor_per_fleet")
+        );
+        assert!(!error.message().contains("duplicates"));
+        assert_eq!(snapshot(&observer), after_interference.unwrap());
+    }
+
+    #[test]
+    fn setup_preserves_original_migration_error_when_rediagnosis_also_fails() {
+        let fixture = Fixture::new();
+        let observer = fixture.seed_version(7);
+        let mut after_interference = None;
+        let error = db_half_with_after_diagnosis(&fixture.settings, || {
+            let writer = fixture.connect();
+            writer
+                .execute_batch("ALTER TABLE members RENAME COLUMN member_card_json TO broken_card")
+                .unwrap();
+            after_interference = Some(snapshot(&writer));
+        })
+        .unwrap_err();
+        assert!(error.message().starts_with("migration failed:"), "{error}");
+        assert!(error.message().contains("member_card_json"), "{error}");
+        assert!(duplicate_monitor_diagnostic(&observer).is_err());
+        assert_eq!(snapshot(&observer), after_interference.unwrap());
+    }
+}
