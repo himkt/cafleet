@@ -178,7 +178,12 @@ fn member_create_split_failure_rolls_back_the_registration() {
     assert_eq!(code(&output), 1);
     let err = stderr(&output);
     assert!(err.contains("tmux split-window failed:"), "got: {err}");
-    assert!(err.contains("Rolled back registration of 3."), "got: {err}");
+    assert!(err.contains("forced failure"), "got: {err}");
+    assert!(
+        err.contains("unknown") && err.contains("unconfirmed"),
+        "got: {err}"
+    );
+    assert!(!err.contains("Rolled back registration"), "got: {err}");
 
     let members: i64 = cli
         .sqlite()
@@ -189,6 +194,22 @@ fn member_create_split_failure_rolls_back_the_registration() {
         )
         .unwrap();
     assert_eq!(members, 2, "no orphan row survives the ladder");
+    let placement_count: i64 = cli
+        .sqlite()
+        .query_row(
+            "SELECT COUNT(*) FROM member_placements WHERE member_id=3",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(placement_count, 0);
+    assert!(
+        !cli.shim_calls()
+            .iter()
+            .any(|line| line.starts_with("send-keys") || line.starts_with("kill-pane")),
+        "a failed split with no confirmed id must not guess a pane: {:?}",
+        cli.shim_calls()
+    );
 }
 
 #[test]

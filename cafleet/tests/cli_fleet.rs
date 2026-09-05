@@ -313,7 +313,7 @@ fn fleet_create_substitution_failure_rolls_back_everything() {
 }
 
 #[test]
-fn fleet_create_split_failure_rolls_back_everything_and_is_retryable() {
+fn fleet_create_split_failure_rolls_back_rows_and_allows_fixture_retry() {
     let mut cli = Cli::new();
     cli.ready();
     cli.fail_subcommand = Some("split-window".to_string());
@@ -335,13 +335,18 @@ fn fleet_create_split_failure_rolls_back_everything_and_is_retryable() {
         err.contains("Error: tmux split-window failed:"),
         "got: {err}"
     );
-    assert!(err.contains("Rolled back fleet creation."), "got: {err}");
+    assert!(err.contains("forced failure"), "got: {err}");
+    assert!(
+        err.contains("unknown") && err.contains("unconfirmed"),
+        "got: {err}"
+    );
+    assert!(!err.contains("Rolled back fleet creation"), "got: {err}");
     assert_no_rows_persisted(&cli);
     assert!(
         !cli.shim_calls()
             .iter()
             .any(|line| line.starts_with("send-keys") || line.starts_with("kill-pane")),
-        "a pre-spawn failure has no pane to kill, got: {:?}",
+        "a failed split with no confirmed id must not guess a pane: {:?}",
         cli.shim_calls()
     );
 
