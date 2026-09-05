@@ -34,6 +34,23 @@ it. Broadcast summary records do not add recipients or ACK badges.
 See [timeline grouping](../spec/webui-api.md#get-apitimeline--unified-fleet-timeline)
 for the selection and counting rules.
 
+## Loading and retrying {#loading-and-retrying}
+
+The planned loading update keeps the fleet and member selection in the page
+URL, so direct links and browser Back/Forward select the same view. Switching
+fleets clears the previous fleet's names, recipients, and message draft.
+
+The dashboard refreshes every five seconds, even in a hidden tab. **Refresh**
+and a successful send also request an update. A slow refresh keeps the current
+view; repeated requests during that refresh produce one follow-up update.
+
+An initial load failure shows an error with **Retry**, instead of claiming
+there are no messages. If an update fails after data has loaded, the last
+successful data stays visible with an update-failed notice and **Retry**.
+A connection failure keeps the selected URL. An invalid, missing, or deleted
+fleet returns to the fleet picker. Changing views cancels old reads so their
+late results cannot overwrite the new view.
+
 ## Send as the root Director
 
 The bottom input parses `@<member> text` for unicast and `@all text` for

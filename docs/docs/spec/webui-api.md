@@ -19,6 +19,66 @@ These fleet-scoping errors apply to **every** fleet-scoped endpoint:
 
 No server-side session cookies. The SPA stores the active fleet_id client-side via hash-based routing and sends it in the X-Fleet-Id header on each request.
 
+## Fleet selection and asynchronous reads {#frontend-resource-lifecycle}
+
+The following client lifecycle is planned for the WebUI refactoring; HTTP
+endpoints and response shapes remain the contracts below.
+
+The hash route is the sole source of the selected fleet:
+`#/fleets`, `#/fleets/<fleet-id>/members`, and
+`#/fleets/<fleet-id>/members/<member-id>`. Selection changes the route only.
+Route ids must be nonempty ASCII decimal digits representing positive safe
+integers; leading zeroes are accepted, but signs, whitespace, exponents, and
+overflow are not. Invalid member ids return to their fleet dashboard; invalid
+fleet ids or unknown paths return to the picker. Match the whole route.
+A client created with `createFleetClient(fleetId)` captures that fleet id for
+every scoped read and mutation. `listFleets` is unscoped and never attaches
+`X-Fleet-Id`. There is no mutable global selected-fleet header.
+
+| Owner | Reads and identity |
+|---|---|
+| App | Resolve the route and confirm the fleet against the fleet list; no roster prefetch. |
+| Fleet picker | Unscoped fleet list. |
+| Dashboard | Roster and monitor state, independently; keyed by fleet id. Own the shared refresh counter. |
+| Timeline | Timeline for its explicit fleet client. |
+| Member detail | Inbox and sent history for its fleet/member pair; panel keyed by member id within the keyed Dashboard. |
+
+A resource has one initial load path. Development StrictMode may start and
+abort an extra attempt. A route change immediately removes the old fleet's
+name, roster, recipients, and form draft; data retained during a refresh must
+belong to the same fleet/member. Do not reject a member deep link until a
+successful roster load proves that member absent. Missing or cross-fleet
+members return to that fleet's dashboard before fetching their history.
+
+Every read receives an AbortSignal. Unmount or identity change aborts it and
+invalidates its generation. Only the current generation may publish results,
+clear its in-flight guard, or start pending work, even when a transport ignores
+abort. Refresh requests received during an active load coalesce into one
+follow-up load using the latest request. Success, failure, and abort release
+the current guard; old completion cannot release a newer request's guard.
+
+Dashboard keeps the existing five-second refresh cadence, including hidden
+tabs, plus manual Refresh and refresh after successful send or monitor edits.
+Each trigger refreshes roster, monitor, timeline, and mounted member histories;
+one failed or slow resource does not block the others. The picker also keeps
+its five-second polling. Timeline and member detail do not add polling timers.
+
+| Read state | Display |
+|---|---|
+| First load | Skeleton for the resource. |
+| Successful empty result | Its normal empty state, such as No messages. |
+| First-load error | Error and Retry; do not show a successful empty state. |
+| Refresh in progress | Keep the current resource's previous data. |
+| Refresh error | Keep that data, show an update-failed notice and Retry. |
+| Aborted or superseded attempt | No error or stale-result update. |
+
+Invalid routes and fleets absent from a successful fleet-list response
+(including soft-deleted fleets) return to the picker. Network, parse, and
+server failures keep the route and offer Retry. A scoped `404 Fleet not found`
+can invalidate the fleet; a monitor runtime `404` or a member `404` is not
+proof that the fleet is missing. Back/forward navigation and direct member
+links retain these rules. See the [user-facing recovery flow](../how-to/use-the-webui.md#loading-and-retrying).
+
 ## Response compatibility
 
 Typed broker records are internal. HTTP presenters retain each endpoint's

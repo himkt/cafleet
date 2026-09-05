@@ -106,6 +106,23 @@ the overflow flag through the same pure helper the component uses. These
 checks need neither a browser nor a running server; preserve the existing
 refresh and error behavior.
 
+## Frontend resource tests
+
+The [planned resource lifecycle](spec/webui-api.md#frontend-resource-lifecycle)
+uses the existing Vitest runner, with jsdom and React Testing Library for real
+component/hook tests. Keep pure `.test.ts` suites in the Node environment;
+DOM suites use `.test.tsx` and an explicit jsdom environment. Resolve compatible
+dev-dependency versions and update the lockfile when implementation starts.
+
+Use controlled promises and fake timers to verify reversed fleet/member
+responses, unmount cancellation, retry after initial failure, retained data
+with refresh errors, coalesced refreshes, five-second polling, and one roster
+load per mount. Observe real client URLs, headers and AbortSignals through a
+mocked fetch; render the real App/components/hooks rather than a substitute
+controller. Keep Step 7's 201-row requests and history display tests while
+migrating them to explicit fleet clients. These checks require no browser,
+server or fetch-library replacement.
+
 ## Tech stack
 
 | Concern | Technology | Notes |

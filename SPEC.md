@@ -3207,6 +3207,44 @@ take segment 0) is in the reserved set, re-raise the genuine 404; otherwise serv
 `index.html` (200); `GET /ui/...` or `/api/...` with no asset returns a genuine
 non-HTML 404.
 
+#### Frontend route and resource ownership (planned)
+
+The hash route is the sole selected-fleet authority. Fleet selection only
+navigates; remove global `setFleetId` and App's `initialMembers` prefetch.
+`createFleetClient(fleetId)` captures an immutable fleet id for every scoped
+read and mutation. Unscoped `listFleets` never sends `X-Fleet-Id`.
+
+App owns route/fleet existence validation; the picker owns its unscoped list;
+Dashboard owns roster and monitor state independently and the refresh counter;
+Timeline owns timeline reads; MemberDetail owns the inbox/sent reads. Key
+Dashboard by fleet id and its detail panel by member id. Use a fleet/member
+resource key and a single initial load path (StrictMode's aborted extra attempt
+is allowed). Do not prefetch the roster from a selection handler or route effect.
+
+Reads carry AbortController signals and generation ids. Abort and invalidate
+on unmount or identity change; only current-generation results/finally may
+publish state, release in-flight, or start pending work. An active request
+coalesces subsequent refreshes into one latest follow-up, including after
+failure, without leaving polling blocked. Dashboard's five-second timer,
+manual Refresh, successful send and monitor edit refresh its resources and
+mounted histories; one slow/failing resource cannot block another. Preserve
+hidden-tab polling. The picker retains its own five-second list refresh.
+
+First loads show skeletons. Successful empty results show the normal empty
+state. First-load failures show an error and Retry, never a success-empty
+message. Refresh retains same-resource data; refresh failure adds an
+update-failed notice and Retry. Aborted/old requests do not update the view.
+
+Keep fleet/member deep links and Back/Forward. Invalid fleet routes or a fleet
+absent from a successful fleet-list response (including soft deletion) return
+to the picker. Transport/parse/server errors retain the route and Retry.
+Only an actual fleet-not-found response invalidates a scoped fleet; missing
+monitor runtime/member errors do not imply missing fleet. Validate member
+membership only after successful roster loading, before history reads.
+Fleet switches must not mix old fleet names, recipients, sender identity or
+drafts into a new fleet's form. HTTP/CLI contracts stay unchanged, including
+the history 201-fetch/200-display limit and delivery-only timeline grouping.
+
 #### `X-Fleet-Id` header dependency
 
 Every data endpoint (everything except `GET /api/fleets`) resolves the fleet via
