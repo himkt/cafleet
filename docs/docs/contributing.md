@@ -50,6 +50,37 @@ outcomes retain the stored message id, notification attempt, and raw transport
 diagnostic. A failed preview does not roll back or resend the message; keep the
 [CLI partial-failure output and recovery instructions](spec/cli-options.md#message-send-partial-failure).
 
+## Shared diagnosis and query refactoring
+
+The following Step 6 contracts are prepared for implementation. Shared
+diagnosis, connection reuse, roster query separation, batched name lookup,
+and the final idle zero clamp are not yet implemented at this stage.
+
+Keep `Diagnosis` as facts: `SchemaState` is `Missing`, `Unversioned`, `Behind`,
+`Head`, `Ahead`, or `Unreachable`; `AssetState` records each agent's resolved
+path/source, matching or stale current install, missing current install, or
+path error, with superseded installs kept separately. Preserve versions and
+raw causes, and let CLI presenters supply the existing wording. These types
+must not add fields or enum names to doctor JSON.
+
+Use the invocation's existing SQLite connection for schema diagnosis, assets
+checks, and command work. Collect/apply schema first, then assets only when
+the command's policy permits it. Doctor still reports all three sections;
+setup still attempts assets after DB failure and refreshes diagnosis after
+DB creation/migration on the same connection. Reconnect when the first open
+failed rather than preventing recovery. HTTP retains a connection per
+blocking handler. The full guard and setup behavior is in
+[diagnosis reuse](spec/cli-options.md#diagnosis-reuse).
+
+Keep `list_roster_records` free of message activity aggregates;
+`list_member_records` supplies activity for CLI member listing. Batch
+`get_member_names` by at most 500 unique bound ids, preserving empty-input,
+unknown-id, and deregistered-member behavior. See
+[query and activity contracts](spec/data-model.md#query-and-activity-contracts).
+Tests should observe query counts and selected fields, connection reuse and
+guard order, plus fixed-clock activity results; implementation details such
+as SQL whitespace are not the contract.
+
 ## Tech stack
 
 | Concern | Technology | Notes |

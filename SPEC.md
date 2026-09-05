@@ -597,7 +597,7 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
 - **`list_fleets()`** — one record `{fleet_id, director_member_id, name,
   created_at, member_count}` per non-soft-deleted fleet (`deleted_at IS NULL`);
   `member_count` counts only **active** members (0 for empty fleets). Ordering:
-  **`created_at DESC, fleet_id ASC`**.
+  **`created_at DESC, fleet_id DESC`** (newer id first when timestamps tie).
 - **`get_fleet(fleet_id)`** — single-row lookup by id; **includes soft-deleted
   fleets** (no `deleted_at` filter) and exposes `deleted_at` so callers
   distinguish missing (None) from soft-deleted. Returns `{fleet_id, name,
@@ -676,22 +676,35 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
   projection. Called after the multiplexer resolves a spawned pane's real id.
 - **`verify_member_fleet(member_id, fleet_id)`** — EXISTS check; **status-
   agnostic** (deregistered members still pass).
-- **`get_member_names(member_ids)`** — empty input → `{}` with no query; else a
-  map id→name; **status-agnostic**.
+- **`get_member_names(member_ids)`** — returns `BTreeMap<i64, String>`, ordered
+  by member id and **status-agnostic**, including deregistered members. Empty
+  input executes no SQL. Deduplicate ids before querying; bind at most 500
+  unique ids per `IN` query, for at most `ceil(unique_ids / 500)` queries.
+  Unknown ids are absent from the map. Construct only the placeholder list
+  dynamically; all ids are bound parameters. Batching is a Step 6 requirement
+  pending implementation; these lookup results preserve existing behavior.
 
 #### Members — roster
 
 - **`list_members(fleet_id)`** — every **active** registry row of the fleet:
   active rows LEFT OUTER
   JOIN `member_placements`, joined against `fleets` for the `is_root` flag that
-  directly produces `kind` (§5.4); plus three
-  correlated per-member aggregates over messages, all filtered to `type !=
-  "broadcast_summary"`: `last_sent` (max `status_timestamp` where `from_member_id
-  = member_id`), `last_recv` (where `owner_member_id = member_id`), `last_ack` (where
-  `owner_member_id = member_id` AND `status_state = "completed"`). Then `idle` against
-  a single `now`: take the non-null of `(last_sent, last_recv)`; none → `idle =
-  null`; else `most_recent` = lexicographic max of the ISO timestamps, `idle =
-  max(0, floor(now − most_recent))` in seconds. Returns `{member_id, name,
+  directly produces `kind` (§5.4). Order by `member_id ASC`. The activity query
+  supplies `last_sent = MAX(created_at)` over **all** messages whose sender is
+  the member, including broadcast summaries; `last_recv = MAX(created_at)`
+  over unicast rows owned by the member; and `last_ack = MAX(status_timestamp)`
+  over completed unicast rows owned by the member. ACK changes the latter
+  without changing the send/receive creation timestamps.
+  Compute `idle` against one `now` for the whole list: choose the lexicographic
+  maximum non-null string from **all three** timestamps, then parse only that
+  selected string with the existing lenient RFC3339 reader. All null, or an
+  unparseable selected value, yields null; do not fall back to an older valid
+  timestamp. Otherwise use `max(0, (now - parsed).num_seconds())`, retaining
+  whole-second truncation and the existing offset/fraction parsing. Clamp
+  only the final idle result; leave stored timestamps and other age outputs
+  unchanged. The final zero clamp is pending Step 6 implementation; the
+  aggregate selection and three-timestamp maximum describe current behavior.
+  Returns `{member_id, name,
   kind, placement, last_sent, last_recv, last_ack, idle}` per row — `kind` is
   the same three values as `get_member` (§5.4), `placement` is null for
   placementless rows. Backs `member list`.
@@ -701,12 +714,16 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
   contributes to `kind` (§5.4), plus the member card's monitor marker. With
   `include_message_holders=True` (the WebUI
   roster), deregistered members that still own messages (a message exists with
-  `owner_member_id = member_id OR from_member_id = member_id`) are also returned, so
+  `owner_member_id = member_id`) are also returned, so
   the audit-relevant deregistered set stays visible. Returns `{member_id, name,
   description, status, registered_at, placement}` per row plus `kind` (the
   same three values as `get_member`), with
   `placement` null for placementless rows. Backs `GET /api/members`
-  (`include_message_holders=True`); it is not a CLI surface.
+  (`include_message_holders=True`); it is not a CLI surface. Order by
+  `member_id ASC`. Step 6 must separate this lean query from the activity
+  query: it performs no message activity aggregates, retaining only the
+  owner-message `EXISTS` needed for holder inclusion. Keep kind precedence,
+  placement null versus pending pane, and the existing wire projection.
 
 #### Messaging
 
@@ -1909,6 +1926,63 @@ first`. (The db half always runs first within the same command, so this fires
 only after a db-half failure or an externally broken schema.)
 
 An install failure aborts the loop; rows recorded before the failure remain.
+
+#### Shared diagnosis and connection reuse
+
+**Step 6 implementation contract:** the shared types and connection reuse
+below are planned; existing command text, JSON, exit codes, and validation
+order remain the compatibility baseline.
+
+`Diagnosis` holds a `SchemaState` and per-coding-agent/path `AssetState`
+facts. It carries versions, resolved paths and their sources, recorded
+installs, superseded rows, and raw failure causes; it does not contain
+preformatted guard or doctor messages. Boundary presenters retain their
+different existing wording for the same state.
+
+| SchemaState | Classification |
+|---|---|
+| `Missing` | No recorded schema version (ledger absent or empty) and no application tables, including an empty newly opened file. |
+| `Unversioned` | No recorded schema version (ledger absent or empty), but application tables exist. |
+| `Behind` | Recorded version is less than embedded head; preserve both numbers. |
+| `Head` | Recorded version equals embedded head. |
+| `Ahead` | Recorded version exceeds embedded head; preserve both numbers. |
+| `Unreachable` | Connection or schema inspection failed; preserve the original cause. |
+
+Asset facts distinguish a matching current install, a stale current install,
+no current install, and a path-resolution failure. "Current" means the
+resolved identity path, not the newest row for the agent. Version comparison
+remains string equality. Superseded rows remain informational. Preserve path
+validation, source selection, agent order, and the current-install absence
+rules of the existing guard and doctor sections; internal variant names do
+not become new wire values.
+
+Collect schema facts on the invocation's connection and reuse that connection
+for guards and the command's database work. Ordinary commands apply the
+schema guard before collecting/checking assets, then enter the command body;
+do not resolve invalid asset paths early and change which failure wins.
+`server` still has only the schema startup guard. HTTP still opens a connection
+per blocking handler; no process-global connection or diagnosis cache is
+introduced.
+
+Doctor keeps multiplexer → database → coding agents report order and reports
+connection/schema failures as data without suppressing the other sections.
+Read recorded asset rows only at schema head and only when `asset_installs`
+exists. Otherwise resolve agent paths and show the existing no-record state,
+including per-agent path errors, with no superseded footnotes. Guard and
+doctor presenters preserve all existing issue counts, text, JSON key order,
+nulls, and exit codes.
+
+Setup keeps its DB half followed by its independent assets half. Reuse a
+successfully opened connection, including after a refused/failed migration;
+after DB creation/migration, diagnose again on that connection rather than
+reusing stale pre-migration facts. A DB-half failure still attempts assets:
+an older schema with `asset_installs` may accept installation even when the
+DB half failed, while a missing table retains its existing assets preflight
+error. If the initial open failed, a later connection attempt is allowed;
+"reuse" does not prevent recovery. Resolve only selected agents for a
+targeted setup, and retain each half's existing diagnostics and combined exit
+result. The duplicate-monitor migration checks and callback order remain
+unchanged.
 
 #### Schema-version guard
 

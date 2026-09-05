@@ -63,7 +63,7 @@ never rolls back or resends the message. See
 
 ### GET /api/fleets — List Fleets
 
-Returns non-soft-deleted fleets (`deleted_at IS NULL`) with member counts, ordered newest-first by `created_at DESC, fleet_id ASC`. No headers required.
+Returns non-soft-deleted fleets (`deleted_at IS NULL`) with member counts, ordered newest-first by `created_at DESC, fleet_id DESC` (higher id first when timestamps tie). No headers required.
 
 **Response** (200 OK):
 
@@ -82,6 +82,13 @@ Returns non-soft-deleted fleets (`deleted_at IS NULL`) with member counts, order
 ### GET /api/members — List Members
 
 Returns the selected fleet's roster: every active registry entry plus deregistered members that still own messages (so their message history stays inspectable). Every row carries a `kind` discriminator so the frontend can locate the root Director without matching on its name.
+
+Rows are ordered by `member_id ASC`. Holder inclusion checks
+`messages.owner_member_id = members.member_id`; a sender-only reference does
+not include a deregistered member. The planned Step 6 lean query preserves
+this condition and the existing response while omitting unused message
+activity aggregates. CLI member listing retains its separate activity query;
+see [query and activity contracts](data-model.md#query-and-activity-contracts).
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 

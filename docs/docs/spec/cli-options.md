@@ -414,6 +414,40 @@ Per target:
 
 An install failure aborts the loop; rows recorded before the failure remain.
 
+## Shared diagnosis and connection reuse {#diagnosis-reuse}
+
+The Step 6 refactoring will share typed diagnosis and an invocation's SQLite
+connection between guards and command work. This is an implementation
+contract pending implementation; the existing output and failure rules below
+remain unchanged.
+
+| Internal schema state | Meaning |
+|---|---|
+| `Missing` | No recorded schema version (ledger absent or empty) and no application tables, including a newly opened empty file. |
+| `Unversioned` | Application tables exist without a recorded schema version (ledger absent or empty). |
+| `Behind` / `Head` / `Ahead` | Recorded schema version is below / equal to / above embedded head. |
+| `Unreachable` | Opening or inspecting the database failed; retain the original cause. |
+
+`Diagnosis` holds schema and per-agent/path `AssetState` facts rather than
+display strings. Assets retain their path source, current matching/stale or
+missing install, path-resolution error, and informational superseded records.
+The guard and doctor keep their respective text, JSON, issue counts, and exit
+codes; internal state names do not become new wire fields.
+
+Ordinary commands must apply schema → assets → command-body order on the
+same connection. Asset path validation must not run ahead of a failing schema
+guard. Doctor still reports multiplexer, database, and coding agents even
+after connection/schema failure; recorded assets are read only at head with
+the table present, as specified in its [database section](#database-section).
+
+Setup reuses a successfully opened connection and diagnoses again after DB
+creation/migration. DB failure still proceeds to the independent assets half;
+an older database with `asset_installs` can accept assets, while a missing
+table retains the preflight error. If the first connection attempt failed,
+the assets half may try again. Targeted setup still resolves only the selected
+agents. Keep the existing refusal messages and combined half-failure result.
+HTTP connections remain scoped to individual blocking handlers.
+
 ## Schema-version guard {#schema-version-guard}
 
 Every non-setup command — the `fleet`, `member`, and `message` groups, the
@@ -546,7 +580,8 @@ re-spawning a dead monitor.
 
 The only flag is the optional shared [`--json`](#json-output).
 
-Lists all non-soft-deleted fleets. Each row exposes `director_member_id` so
+Lists all non-soft-deleted fleets in `created_at DESC, fleet_id DESC` order
+(higher id first when timestamps tie). Each row exposes `director_member_id` so
 the Director's id can be recovered after `fleet create` output scrolls away.
 
 ### `fleet show`
@@ -1046,10 +1081,17 @@ prints `0 members.`.
 | `last_recv` | — | — | `last_recv` | ISO timestamp or `null` |
 | `last_ack` | — | — | `last_ack` | ISO timestamp or `null` |
 
-`idle` is the wall-time since the member's most recent message activity — the
-latest of `last_sent` (most recent outgoing message) and `last_recv` (most
-recent delivery), broadcast summaries excluded — humanized as `Ns` / `Nm` /
-`Nh` in text mode. `last_ack` is the most recent acknowledged delivery.
+Rows are ordered by `member_id ASC`. `last_sent` is the maximum creation time
+of every message sent by the member, including broadcast summaries;
+`last_recv` is the maximum creation time of owned unicast deliveries;
+`last_ack` is the maximum status timestamp of owned completed unicast
+deliveries. `idle` uses the greatest non-null string among all three, parsed
+with the existing lenient reader against one `now` for the list. All null or
+an unparseable selected value yields null; no older timestamp fallback is
+used. Text remains humanized as `Ns` / `Nm` / `Nh`.
+Step 6 adds a zero clamp to the final whole-second idle result; it does not
+change stored future timestamps or parsing. That clamp is pending
+implementation. See the [activity contract](data-model.md#query-and-activity-contracts).
 Per-member detail such as `description` and `registered_at` lives on
 [`member show`](#member-show).
 
