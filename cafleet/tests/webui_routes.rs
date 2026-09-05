@@ -889,3 +889,226 @@ async fn the_spa_fallback_serves_index_except_for_reserved_prefixes() {
         "reserved prefixes hard-404, got: {body}"
     );
 }
+
+#[tokio::test]
+async fn timeline_broadcast_excludes_summary_through_two_delivery_ack_transitions() {
+    let dir = TempDir::new().unwrap();
+    let (url, mut conn) = migrated(&dir);
+    let (_, director, _, helper) = seeded_fleet(&mut conn);
+    broker::deregister_member(&mut conn, helper).unwrap();
+    let router = app(&url);
+    let (status, body) = call(
+        router.clone(),
+        "POST",
+        "/api/messages/send",
+        Some("1"),
+        Some(json!({"from_member_id":director,"to_member_id":"*","text":"broadcast"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let response = parsed(&body);
+    let summary_id = response["message_id"].as_i64().unwrap();
+    assert_eq!(
+        response["status"], "completed",
+        "broadcast response still represents the persisted summary"
+    );
+    let summary = broker::get_message(&conn, summary_id).unwrap();
+    assert_eq!(summary["message"]["type"], "broadcast_summary");
+    assert!(summary["message"]["to_member_id"].is_null());
+    for acked in 0..=2 {
+        let (status, body) = call(router.clone(), "GET", "/api/timeline", Some("1"), None).await;
+        assert_eq!(status, StatusCode::OK);
+        let payload = parsed(&body);
+        assert_eq!(keys(&payload), ["messages"]);
+        let rows = payload["messages"].as_array().unwrap();
+        assert_eq!(
+            rows.len(),
+            2,
+            "completed summary is neither a recipient nor an ACK"
+        );
+        assert!(rows.iter().all(|r| r["type"] == "unicast"
+            && r["to_member_id"].is_i64()
+            && r["to_member_name"].is_string()
+            && r["origin_message_id"] == summary_id));
+        assert_eq!(
+            rows.iter().filter(|r| r["status"] == "completed").count(),
+            acked
+        );
+        assert_eq!(broker::get_message(&conn, summary_id).unwrap(), summary);
+        if let Some(row) = rows.iter().find(|r| r["status"] == "input_required") {
+            broker::ack_message(&mut conn, row["message_id"].as_i64().unwrap()).unwrap();
+        }
+    }
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM messages", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        3
+    );
+}
+
+#[tokio::test]
+async fn timeline_empty_and_summary_only_fleets_have_the_empty_messages_envelope() {
+    let dir = TempDir::new().unwrap();
+    let (url, mut conn) = migrated(&dir);
+    let (fleet, director, worker, helper) = seeded_fleet(&mut conn);
+    let router = app(&url);
+    let (status, body) = call(router.clone(), "GET", "/api/timeline", Some("1"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, r#"{"messages":[]}"#);
+    let monitor = broker::active_monitor_member_id(&conn, fleet)
+        .unwrap()
+        .unwrap();
+    for id in [worker, helper, monitor] {
+        broker::deregister_member(&mut conn, id).unwrap();
+    }
+    let result =
+        broker::broadcast_message(&mut conn, &NullNotifier, 200, director, "nobody").unwrap();
+    assert_eq!(result[0]["recipients"], 0);
+    let (status, body) = call(router, "GET", "/api/timeline", Some("1"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, r#"{"messages":[]}"#);
+    assert_eq!(
+        conn.query_row(
+            "SELECT count(*) FROM messages WHERE type='broadcast_summary'",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn timeline_owner_fleet_scope_and_status_id_order_survive_wire_formatting() {
+    let dir = TempDir::new().unwrap();
+    let (url, mut conn) = migrated(&dir);
+    let (_, director, worker, _) = seeded_fleet(&mut conn);
+    let (_, foreign_director, foreign_worker, _) = seeded_fleet(&mut conn);
+    for text in ["first", "second", "third"] {
+        broker::send_message(
+            &mut conn,
+            &NullNotifier,
+            200,
+            director,
+            &worker.to_string(),
+            text,
+        )
+        .unwrap();
+    }
+    broker::send_message(
+        &mut conn,
+        &NullNotifier,
+        200,
+        foreign_director,
+        &foreign_worker.to_string(),
+        "foreign endpoints, local owner",
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE messages SET owner_member_id=?1 WHERE message_id=4",
+        [worker],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE messages SET owner_member_id=?1 WHERE message_id=3",
+        [foreign_worker],
+    )
+    .unwrap();
+    conn.execute_batch("UPDATE messages SET status_timestamp='2026-01-01T00:00:00+00:00', created_at='2099-01-01T00:00:00+00:00';
+        UPDATE messages SET status_timestamp='2026-02-01T00:00:00+00:00', created_at='2020-01-01T00:00:00+00:00' WHERE message_id IN (1,2);").unwrap();
+    broker::deregister_member(&mut conn, worker).unwrap();
+    let (status, body) = call(app(&url), "GET", "/api/timeline", Some("1"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    let payload = parsed(&body);
+    let rows = payload["messages"].as_array().unwrap();
+    assert_eq!(
+        rows.iter()
+            .map(|r| r["message_id"].as_i64().unwrap())
+            .collect::<Vec<_>>(),
+        [2, 1, 4]
+    );
+    assert!(
+        rows.iter()
+            .all(|r| r["type"] == "unicast" && r["origin_message_id"].is_null())
+    );
+    assert_eq!(
+        keys(&rows[0]),
+        [
+            "message_id",
+            "from_member_id",
+            "from_member_name",
+            "to_member_id",
+            "to_member_name",
+            "type",
+            "status",
+            "created_at",
+            "status_timestamp",
+            "origin_message_id",
+            "body"
+        ]
+    );
+    let (status, body) = call(app(&url), "GET", "/api/timeline", Some("2"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        parsed(&body)["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["message_id"].as_i64().unwrap())
+            .collect::<Vec<_>>(),
+        [3]
+    );
+}
+
+#[tokio::test]
+async fn timeline_filters_before_200_row_cap_and_returns_only_fetched_broadcast_deliveries() {
+    let dir = TempDir::new().unwrap();
+    let (url, mut conn) = migrated(&dir);
+    let (_, director, worker, helper) = seeded_fleet(&mut conn);
+    broker::deregister_member(&mut conn, helper).unwrap();
+    broker::broadcast_message(&mut conn, &NullNotifier, 200, director, "partial").unwrap();
+    for _ in 0..199 {
+        broker::send_message(
+            &mut conn,
+            &NullNotifier,
+            200,
+            director,
+            &worker.to_string(),
+            "single",
+        )
+        .unwrap();
+    }
+    conn.execute_batch("UPDATE messages SET status_timestamp='2026-01-01T00:00:00+00:00';
+        UPDATE messages SET status_timestamp='2099-01-01T00:00:00+00:00' WHERE type='broadcast_summary';").unwrap();
+    let (status, body) = call(app(&url), "GET", "/api/timeline", Some("1"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    let payload = parsed(&body);
+    assert_eq!(
+        keys(&payload),
+        ["messages"],
+        "no group totals or pagination envelope are introduced"
+    );
+    let rows = payload["messages"].as_array().unwrap();
+    assert_eq!(rows.len(), 200);
+    assert_eq!(
+        rows.iter()
+            .map(|r| r["message_id"].as_i64().unwrap())
+            .collect::<Vec<_>>(),
+        (3..=202).rev().collect::<Vec<_>>()
+    );
+    let partial: Vec<_> = rows
+        .iter()
+        .filter(|r| r["origin_message_id"] == 1)
+        .collect();
+    assert_eq!(
+        partial.len(),
+        1,
+        "the other recipient is outside the fetched row cap"
+    );
+    assert_eq!(partial[0]["status"], "input_required");
+    assert_eq!(partial[0]["to_member_id"], worker);
+    assert_eq!(
+        broker::get_message(&conn, 1).unwrap()["message"]["type"],
+        "broadcast_summary"
+    );
+}

@@ -735,6 +735,14 @@ fn broadcast_json_summary_carries_the_null_recipient() {
         "self-referential origin"
     );
     assert_eq!(summary["text"], "Broadcast sent to 2 recipients");
+    let summary_id = summary["message_id"].as_i64().unwrap();
+    let shown = cli.run(&["message", "show", &summary_id.to_string(), "--json"]);
+    assert_eq!(code(&shown), 0, "{}", stderr(&shown));
+    let fetched: serde_json::Value = serde_json::from_str(stdout(&shown).trim()).unwrap();
+    assert_eq!(
+        fetched["message"], *summary,
+        "show retains the complete summary, including null recipient"
+    );
 }
 
 #[test]

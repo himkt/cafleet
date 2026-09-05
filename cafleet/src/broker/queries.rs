@@ -219,3 +219,215 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod timeline_regressions {
+    use super::*;
+    use crate::broker::{self, test_support as common};
+    use common::{FakeNotifier, MAX_TEXT_LEN};
+    use tempfile::TempDir;
+
+    fn fixture() -> (TempDir, Connection, i64, i64, i64) {
+        let dir = tempfile::Builder::new()
+            .prefix(".timeline-test-")
+            .tempdir_in(env!("CARGO_MANIFEST_DIR"))
+            .unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        let (fleet, director) = common::create_fleet(&mut conn, "timeline");
+        let worker = common::register(&mut conn, fleet, "worker", None);
+        (dir, conn, fleet, director, worker)
+    }
+
+    #[test]
+    fn timeline_broadcast_counts_only_two_deliveries_through_ack_zero_one_two() {
+        let (_dir, mut conn, fleet, director, _) = fixture();
+        let result = broker::broadcast_message(
+            &mut conn,
+            &FakeNotifier::succeeding(),
+            MAX_TEXT_LEN,
+            director,
+            "work",
+        )
+        .unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0]["recipients"], 2);
+        let summary = &result[0]["message"];
+        let summary_id = summary["message_id"].as_i64().unwrap();
+        assert_eq!(summary["type"], "broadcast_summary");
+        assert_eq!(summary["status_state"], "completed");
+        assert!(summary["to_member_id"].is_null());
+        for acked in 0..=2 {
+            let rows = list_timeline(&conn, fleet, 200).unwrap();
+            assert_eq!(rows.len(), 2, "summary is not a recipient or ACK");
+            assert!(rows.iter().all(|r| r["type"] == "unicast"
+                && r["origin_message_id"] == summary_id
+                && r["to_member_id"].is_i64()));
+            assert_eq!(
+                rows.iter()
+                    .filter(|r| r["status_state"] == "completed")
+                    .count(),
+                acked
+            );
+            assert_eq!(
+                get_message(&conn, summary_id).unwrap()["message"],
+                *summary,
+                "timeline/ACK never removes or rewrites the summary"
+            );
+            if let Some(row) = rows.iter().find(|r| r["status_state"] == "input_required") {
+                broker::ack_message(&mut conn, row["message_id"].as_i64().unwrap()).unwrap();
+            }
+        }
+        let count: i64 = conn
+            .query_row("SELECT count(*) FROM messages", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn timeline_empty_fleet_returns_no_rows() {
+        let (_dir, conn, fleet, _, _) = fixture();
+        assert!(list_timeline(&conn, fleet, 200).unwrap().is_empty());
+    }
+
+    #[test]
+    fn timeline_summary_only_fleet_returns_no_deliveries_but_keeps_show_result() {
+        let (_dir, mut conn, fleet, director, worker) = fixture();
+        let monitor = broker::active_monitor_member_id(&conn, fleet)
+            .unwrap()
+            .unwrap();
+        broker::deregister_member(&mut conn, monitor).unwrap();
+        broker::deregister_member(&mut conn, worker).unwrap();
+        let result = broker::broadcast_message(
+            &mut conn,
+            &FakeNotifier::succeeding(),
+            MAX_TEXT_LEN,
+            director,
+            "nobody",
+        )
+        .unwrap();
+        assert_eq!(result[0]["recipients"], 0);
+        let id = result[0]["message"]["message_id"].as_i64().unwrap();
+        assert!(list_timeline(&conn, fleet, 200).unwrap().is_empty());
+        assert_eq!(
+            get_message(&conn, id).unwrap()["message"],
+            result[0]["message"]
+        );
+    }
+
+    #[test]
+    fn timeline_scope_uses_owner_fleet_even_when_sender_and_recipient_disagree() {
+        let (_dir, mut conn, fleet_a, director_a, worker_a) = fixture();
+        let (fleet_b, director_b) = common::create_fleet(&mut conn, "foreign");
+        let worker_b = common::register(&mut conn, fleet_b, "foreign worker", None);
+        let notifier = FakeNotifier::succeeding();
+        let local = common::send(
+            &mut conn,
+            &notifier,
+            director_a,
+            worker_a,
+            "local endpoints",
+        )["message"]["message_id"]
+            .as_i64()
+            .unwrap();
+        let foreign = common::send(
+            &mut conn,
+            &notifier,
+            director_b,
+            worker_b,
+            "foreign endpoints",
+        )["message"]["message_id"]
+            .as_i64()
+            .unwrap();
+        // Deliberately distinguish ownership from either endpoint. This is a
+        // read-scope fixture, not a cross-fleet send API contract.
+        conn.execute(
+            "UPDATE messages SET owner_member_id=?1 WHERE message_id=?2",
+            params![worker_b, local],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE messages SET owner_member_id=?1 WHERE message_id=?2",
+            params![worker_a, foreign],
+        )
+        .unwrap();
+        broker::deregister_member(&mut conn, worker_a).unwrap();
+        let a = list_timeline(&conn, fleet_a, 200).unwrap();
+        let b = list_timeline(&conn, fleet_b, 200).unwrap();
+        assert_eq!(
+            a.iter()
+                .map(|r| r["message_id"].as_i64().unwrap())
+                .collect::<Vec<_>>(),
+            [foreign]
+        );
+        assert_eq!(
+            b.iter()
+                .map(|r| r["message_id"].as_i64().unwrap())
+                .collect::<Vec<_>>(),
+            [local]
+        );
+    }
+
+    #[test]
+    fn timeline_uses_status_timestamp_then_descending_id_not_created_at() {
+        let (_dir, mut conn, fleet, director, worker) = fixture();
+        for text in ["first", "second", "third"] {
+            common::send(
+                &mut conn,
+                &FakeNotifier::succeeding(),
+                director,
+                worker,
+                text,
+            );
+        }
+        conn.execute_batch("UPDATE messages SET status_timestamp='2026-01-01T00:00:00+00:00', created_at='2099-01-01T00:00:00+00:00' WHERE message_id=3;
+            UPDATE messages SET status_timestamp='2026-02-01T00:00:00+00:00', created_at='2020-01-01T00:00:00+00:00' WHERE message_id IN (1,2);").unwrap();
+        let rows = list_timeline(&conn, fleet, 200).unwrap();
+        assert_eq!(
+            rows.iter()
+                .map(|r| r["message_id"].as_i64().unwrap())
+                .collect::<Vec<_>>(),
+            [2, 1, 3]
+        );
+        assert!(rows.iter().all(|r| r["origin_message_id"].is_null()));
+    }
+
+    #[test]
+    fn timeline_filters_summaries_before_cap_and_keeps_partial_broadcast_as_rows() {
+        let (_dir, mut conn, fleet, director, worker) = fixture();
+        let notifier = FakeNotifier::succeeding();
+        broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, director, "broadcast")
+            .unwrap();
+        for _ in 0..199 {
+            common::send(&mut conn, &notifier, director, worker, "single");
+        }
+        conn.execute_batch("UPDATE messages SET status_timestamp='2026-01-01T00:00:00+00:00';
+            UPDATE messages SET status_timestamp='2099-01-01T00:00:00+00:00' WHERE type='broadcast_summary';").unwrap();
+        let rows = list_timeline(&conn, fleet, 200).unwrap();
+        assert_eq!(
+            rows.len(),
+            200,
+            "filter before limit, not after fetching 200 mixed rows"
+        );
+        assert_eq!(
+            rows.iter()
+                .map(|r| r["message_id"].as_i64().unwrap())
+                .collect::<Vec<_>>(),
+            (3..=202).rev().collect::<Vec<_>>()
+        );
+        let partial: Vec<_> = rows
+            .iter()
+            .filter(|r| !r["origin_message_id"].is_null())
+            .collect();
+        assert_eq!(
+            partial.len(),
+            1,
+            "row cap must not be widened to complete a group"
+        );
+        assert_eq!(partial[0]["status_state"], "input_required");
+        assert_eq!(list_timeline(&conn, fleet, 201).unwrap().len(), 201);
+        assert_eq!(
+            get_message(&conn, 1).unwrap()["message"]["type"],
+            "broadcast_summary"
+        );
+    }
+}
