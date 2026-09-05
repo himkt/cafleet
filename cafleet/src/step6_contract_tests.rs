@@ -1,11 +1,10 @@
-//! Phase A contracts for the approved Step 6 APIs. Phase B connects this file
-//! from lib.rs with `#[cfg(test)] mod step6_contract_tests;` after implementing
-//! diagnosis and the real invocation/query observers. This file is test code;
-//! it provides no implementation stub and is not yet part of the test build.
+//! Contracts for shared diagnosis and the real invocation/query observers.
+//! These crate unit tests inspect actual connections, statements, and command
+//! effects through the approved Step 6 APIs.
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use rusqlite::{Connection, params};
 use serde_json::json;
@@ -224,11 +223,11 @@ mod asset_contracts {
         );
         assert!(
             matches!(&report.agents[0].state, AssetState::Current { identity, install }
-            if identity.path == PathBuf::from(&claude) && matches!(identity.source, DirSource::EnvVar("CLAUDE_CONFIG_DIR")) && install.coding_agent == "claude" && install.path == claude && install.cafleet_version == "1.0.0" && install.installed_at == "raw-installed-at")
+            if identity.path == Path::new(&claude) && matches!(identity.source, DirSource::EnvVar("CLAUDE_CONFIG_DIR")) && install.coding_agent == "claude" && install.path == claude && install.cafleet_version == "1.0.0" && install.installed_at == "raw-installed-at")
         );
         assert!(
             matches!(&report.agents[1].state, AssetState::Stale { identity, install }
-            if identity.path == PathBuf::from(&codex) && install.cafleet_version == "1.0")
+            if identity.path == Path::new(&codex) && install.cafleet_version == "1.0")
         );
         assert!(matches!(
             &report.agents[2].state,

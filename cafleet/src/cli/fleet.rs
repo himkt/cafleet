@@ -365,6 +365,77 @@ mod creation_regressions {
         )
     }
 
+    fn invocation_slot(f: &Fixture) -> Option<Connection> {
+        let conn = f.conn();
+        conn.execute_batch("CREATE TEMP TABLE fleet_invocation_sentinel(value TEXT); INSERT INTO fleet_invocation_sentinel VALUES ('retained invocation')").unwrap();
+        Some(conn)
+    }
+
+    fn assert_retained_slot(slot: &Option<Connection>) {
+        let conn = slot
+            .as_ref()
+            .expect("the invocation still owns its connection");
+        assert_eq!(
+            conn.query_row(
+                "SELECT value FROM temp.fleet_invocation_sentinel",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            "retained invocation"
+        );
+        assert!(conn.is_autocommit());
+    }
+
+    fn create_in_slot(
+        f: &Fixture,
+        slot: &mut Option<Connection>,
+        mux: AnyMultiplexer,
+        prompt: &str,
+    ) -> Result<Value, CafleetError> {
+        let path = f.dir.path().join("monitor.md");
+        std::fs::write(&path, prompt).unwrap();
+        create_with_connection(
+            slot,
+            "fixture",
+            "claude",
+            path.to_str().unwrap(),
+            None,
+            || Ok(mux),
+            &FakeProbe::with_binary("claude", f.dir.path()),
+            f,
+        )
+    }
+
+    #[test]
+    fn precondition_failure_retains_the_invocation_slot_and_temp_state() {
+        let f = Fixture::new(false);
+        let mut slot = invocation_slot(&f);
+        let error = create_in_slot(
+            &f,
+            &mut slot,
+            f.mux(
+                Some((
+                    "current",
+                    RunError::Failed {
+                        stderr: "context unavailable".into(),
+                    },
+                )),
+                false,
+                false,
+            ),
+            "prompt",
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.message(),
+            "cafleet fleet create must be run inside a tmux or herdr session"
+        );
+        assert_retained_slot(&slot);
+        assert_eq!(f.timeline(), ["current:error"]);
+        f.assert_empty_bootstrap();
+    }
+
     #[test]
     fn callback_placeholder_failure_rolls_back_and_preserves_usage_with_synthetic_diagnostic() {
         for diagnostic in [false, true] {
@@ -399,12 +470,18 @@ mod creation_regressions {
         };
         for close_fails in [false, true] {
             let f = Fixture::new(false);
-            let error = create(
+            let mut slot = invocation_slot(&f);
+            let error = create_in_slot(
                 &f,
+                &mut slot,
                 f.mux(Some(("run", failure.clone())), close_fails, false),
                 "prompt",
             )
             .unwrap_err();
+            assert!(
+                slot.is_none(),
+                "a broker failure closes the invocation connection"
+            );
             assert!(matches!(error, CafleetError::App(_)));
             assert_eq!(error.exit_code(), 1);
             assert_eq!(
@@ -484,7 +561,14 @@ mod creation_regressions {
                     "ABORT"
                 };
                 f.sql(&format!("CREATE TRIGGER fail_insert BEFORE INSERT ON member_placements WHEN NEW.member_id=2 BEGIN SELECT RAISE({action}, 'primary placement failure'); END;"));
-                let error = create(&f, f.mux(None, close_fails, false), "prompt").unwrap_err();
+                let mut slot = invocation_slot(&f);
+                let error =
+                    create_in_slot(&f, &mut slot, f.mux(None, close_fails, false), "prompt")
+                        .unwrap_err();
+                assert!(
+                    slot.is_none(),
+                    "broker failure takes and closes the invocation connection"
+                );
                 assert_eq!(error.exit_code(), 1);
                 assert!(error.to_string().contains("primary placement failure"));
                 assert_eq!(
@@ -527,7 +611,14 @@ mod creation_regressions {
                     CREATE TABLE compensation_child(id INTEGER REFERENCES compensation_parent(id) DEFERRABLE INITIALLY DEFERRED);
                     CREATE TRIGGER defer_commit_failure AFTER INSERT ON member_placements WHEN NEW.member_id=2
                     BEGIN INSERT INTO compensation_child VALUES (999); END;");
-                let error = create(&f, f.mux(None, close_fails, false), "prompt").unwrap_err();
+                let mut slot = invocation_slot(&f);
+                let error =
+                    create_in_slot(&f, &mut slot, f.mux(None, close_fails, false), "prompt")
+                        .unwrap_err();
+                assert!(
+                    slot.is_none(),
+                    "broker failure takes and closes the invocation connection"
+                );
                 assert_eq!(error.exit_code(), 1);
                 let detail = error.to_string();
                 assert!(
@@ -615,7 +706,17 @@ mod creation_regressions {
     #[test]
     fn commit_success_disarms_pane_before_the_caller_can_emit_output() {
         let f = Fixture::new(false);
-        let value = create(&f, f.mux(None, false, false), "prompt").unwrap();
+        let mut slot = invocation_slot(&f);
+        let value = create_in_slot(&f, &mut slot, f.mux(None, false, false), "prompt").unwrap();
+        assert_retained_slot(&slot);
+        assert_eq!(
+            slot.as_ref()
+                .unwrap()
+                .query_row("SELECT count(*) FROM fleets", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
         assert_eq!(value["monitor"]["placement"]["mux_pane_id"], "w1:p9");
         assert_eq!(
             f.timeline(),
