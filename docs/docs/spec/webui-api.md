@@ -285,11 +285,47 @@ The three message endpoints compare as follows (this table owns their row-select
 
 | Endpoint | Rows returned | Excluded | Ordering | Row cap |
 |---|---|---|---|---|
-| `GET /api/members/{member_id}/inbox` | Messages where `owner_member_id = member_id` | `type == "broadcast_summary"` | `status_timestamp DESC` (newest first) | none — the member detail view truncates client-side to the 200 most recent rows per tab |
-| `GET /api/members/{member_id}/sent` | Messages where `from_member_id = member_id` | `type == "broadcast_summary"` | `status_timestamp DESC` (newest first) | none — the member detail view truncates client-side to the 200 most recent rows per tab |
+| `GET /api/members/{member_id}/inbox` | Messages where `owner_member_id = member_id` | `type == "broadcast_summary"` | `status_timestamp DESC, message_id DESC` (newest status update first; id breaks ties) | planned optional SQL `limit` of 1–1000; omitted means unbounded |
+| `GET /api/members/{member_id}/sent` | Messages where `from_member_id = member_id` | `type == "broadcast_summary"` | `status_timestamp DESC, message_id DESC` (newest status update first; id breaks ties) | planned optional SQL `limit` of 1–1000; omitted means unbounded |
 | `GET /api/timeline` | `type == "unicast"` deliveries, scoped through the owning member join | All non-delivery rows, including `broadcast_summary` | `status_timestamp DESC, message_id DESC` (newest status update first; id breaks ties) | SQL limit of 200 delivery rows, applied after filtering; may split a broadcast group; no pagination |
 
-**Request**: `X-Fleet-Id: <fleet_id>` header.
+#### Member history limits
+
+The following optional-limit contract is planned; the current implementation
+still returns unbounded history. It applies to both inbox and sent.
+
+**Request**: `X-Fleet-Id: <fleet_id>` header and optional `?limit=201`.
+
+| Query input | Result |
+|---|---|
+| `limit` omitted | All matching deliveries, including more than 201; existing callers keep their behavior. |
+| One decimal integer from 1 through 1000 | At most that many deliveries, selected by a bound SQL `LIMIT`. |
+| Empty, 0, negative, fractional, nonnumeric, overflowing, or repeated `limit` | `422`, exactly `{"detail":"limit must be an integer between 1 and 1000"}`. |
+| Unknown query parameter | Ignored, as before. |
+
+After URL form decoding, the value must contain only ASCII digits. Leading
+zeros are accepted (`001` means 1); signs, whitespace, Unicode digits, and
+exponent notation are rejected. Duplicate decoded `limit` keys are rejected
+even when a key was percent-encoded.
+
+Validation preserves the existing Path extraction first, then fleet header
+(`400`), fleet existence (`404`), and member membership (`404`), before checking
+`limit`. An invalid limit must not hide an earlier header or membership error.
+Deregistered members remain readable within their fleet. SQL errors keep the
+existing `500` response with a string `detail`.
+
+Selection and ordering happen before the limit: delivery rows only, newest
+`status_timestamp` first, then largest `message_id` for ties. Limits count rows
+and may split a broadcast. The response remains `{"messages":[...]}` with the
+same row keys, order, and nulls; there is no cursor, `has_more`, or total field.
+CLI retrieval remains unchanged.
+
+The planned WebUI change requests `?limit=201` for each tab and displays the
+first 200 deliveries. It shows `Showing the 200 most recent messages` only when
+there is a 201st delivery; empty results and results of exactly 200 have no
+omission footer. “Most recent” follows status updates, even though each row
+also displays its creation timestamp. This limits WebUI reads and explicit
+HTTP limits, not unbounded HTTP callers or database storage.
 
 **Response** (200 OK):
 
@@ -327,7 +363,7 @@ Returns messages sent by the member (see the comparison table above). Consumed b
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
-Same response format as inbox.
+Same response format and [planned limit contract](#member-history-limits) as inbox.
 
 ### GET /api/timeline — Unified Fleet Timeline
 

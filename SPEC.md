@@ -811,9 +811,17 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
 #### Queries
 
 - **`list_inbox(member_id)`** — all messages where `owner_member_id = member_id`, any
-  state, `broadcast_summary` excluded, ordered `status_timestamp DESC`.
+  state, `broadcast_summary` excluded, ordered `status_timestamp DESC, message_id DESC`.
 - **`list_sent(member_id)`** — all messages where `from_member_id = member_id`, any
-  state, `broadcast_summary` excluded, ordered `status_timestamp DESC`.
+  state, `broadcast_summary` excluded, ordered `status_timestamp DESC, message_id DESC`.
+  Both history queries retain their unbounded entry points. The planned
+  options entry points accept `HistoryOptions { limit: Option<usize> }`:
+  `None` omits SQL `LIMIT`; a supplied limit is bound in SQL after the delivery
+  filter and ordering, never implemented by fetching everything and truncating.
+  Direct options calls also reject zero or values above 1000 with a value error:
+  `limit must be an integer between 1 and 1000`.
+  The existing owner/status and sender/status indexes must be checked with
+  `EXPLAIN QUERY PLAN`; this change adds no index or storage-retention policy.
 - **`list_timeline(fleet_id, limit=200)`** — delivery rows (`g.type = 'unicast'`)
   joined to their **owning member's** row through `owner_member_id`, filtered to
   that member's `fleet_id`. SQL orders by `status_timestamp DESC, message_id DESC`
@@ -3242,6 +3250,29 @@ same `{"detail": <string>}` shape (a single human-readable string).
   ]}` over the member's inbox.
 - **`GET /api/members/{member_id}/sent`** — fleet-scoped. Same as inbox over sent
   messages; same `404` detail `Member not found`.
+  Planned optional query for **both** history routes: `limit`, a decimal integer
+  from **1 through 1000**. Empty, zero, negative, fractional, nonnumeric,
+  overflowing, or repeated values return `422` with exactly
+  `{"detail":"limit must be an integer between 1 and 1000"}`. Unknown query
+  parameters remain ignored. Omission retains the existing unbounded result,
+  including more than 201 rows; CLI retrieval is unchanged.
+  Validate after URL form decoding: require nonempty ASCII digits, accepting
+  leading zeros (`001` means 1) and rejecting signs, whitespace, Unicode digits,
+  and exponent notation. Detect duplicate decoded `limit` keys before reducing
+  the query to a map.
+  Preserve validation precedence: existing Path extraction, fleet header
+  (`400`), fleet existence (`404`), member membership (`404`), then limit.
+  Deregistered members remain readable when they belong to the fleet. Database
+  failures retain the existing `500` detail response.
+  Order by `status_timestamp DESC, message_id DESC`; latest means status update,
+  not creation time. Apply the bound limit to delivery rows, so a broadcast may
+  be partial. Preserve the `messages` envelope, row keys/order/nulls, and add no
+  cursor, `has_more`, or total count.
+  The planned WebUI change requests `?limit=201` on both routes, shows the first
+  200 deliveries per tab, and shows its existing omission footer only when a
+  201st delivery was returned. At 200 or fewer it shows no omission footer.
+  This bounds explicit-limit responses and WebUI reads, not unbounded HTTP
+  callers or stored history.
 - **`GET /api/timeline`** — fleet-scoped through the owning member, no per-member
   check. `{"messages": […]}` contains only `unicast` delivery rows, hard-capped
   in SQL at **200** rows ordered by `status_timestamp DESC, message_id DESC`.

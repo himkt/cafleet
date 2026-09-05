@@ -87,6 +87,25 @@ Tests should observe query counts and selected fields, connection reuse and
 guard order, plus fixed-clock activity results; implementation details such
 as SQL whitespace are not the contract.
 
+## Member history query limits
+
+The [planned history limit contract](spec/webui-api.md#member-history-limits)
+keeps unbounded broker/HTTP callers compatible and bounds the WebUI's inbox
+and sent requests at 201 rows for a 200-row display. Keep limits in bound SQL
+parameters after the delivery filter and deterministic status/id ordering;
+do not fetch all history and truncate it in Rust. Reuse the existing
+`idx_messages_owner_member_status_ts` and `idx_messages_from_member_status_ts`
+indexes, inspect `EXPLAIN QUERY PLAN`, and add no index for this change.
+
+Verify 0/200/201/large histories, timestamp ties, foreign-fleet rejection,
+deregistered members, invalid and duplicate limits, validation precedence,
+and omission compatibility. Observe the real prepared statement and its
+bindings to distinguish SQL limiting from result truncation. Test the actual
+frontend fetch functions with a mocked `fetch`, and test display slicing and
+the overflow flag through the same pure helper the component uses. These
+checks need neither a browser nor a running server; preserve the existing
+refresh and error behavior.
+
 ## Tech stack
 
 | Concern | Technology | Notes |
