@@ -530,7 +530,9 @@ mod integrity_regressions {
                 worker,
                 "work",
             );
-            let message = sent["message"].clone();
+            let message =
+                broker::get_message_record(&conn, sent["message"]["message_id"].as_i64().unwrap())
+                    .unwrap();
             conn.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
             conn.execute(
                 "DELETE FROM members WHERE member_id=?1",
@@ -539,7 +541,7 @@ mod integrity_regressions {
             .unwrap();
             conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                formatted_messages(&conn, &[message])
+                formatted_message_records(&conn, &[message])
             }));
             let error = result
                 .expect("the presenter must return an integrity error, never unwind")

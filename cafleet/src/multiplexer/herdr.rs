@@ -664,12 +664,15 @@ fn right_column(panes: &[Value]) -> Result<Vec<Value>, MultiplexerError> {
 #[cfg(test)]
 mod tests {
     use crate::multiplexer::PaneCleanup;
+    use crate::multiplexer::WakeEntry;
     use serde_json::json;
 
     use crate::multiplexer::test_support::{
         FakeRunner, argv, env, herdr_envelope, herdr_error_stderr, run_event, sleep_event,
     };
-    use crate::multiplexer::{HerdrMultiplexer, MultiplexerContext, RunError, build_wake_payload};
+    use crate::multiplexer::{
+        HerdrMultiplexer, MultiplexerContext, RunError, build_wake_payload_from_entries,
+    };
 
     fn herdr_env() -> std::collections::HashMap<String, String> {
         env(&[("HERDR_ENV", "1")])
@@ -977,27 +980,27 @@ mod tests {
     }
 
     #[test]
-    fn send_wake_trigger_is_esc_then_run() {
+    fn send_wake_entries_is_esc_then_run() {
         let runner = FakeRunner::with_binary("herdr");
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        let members = [json!({
-            "member_id": 4,
-            "name": "worker",
-            "coding_agent": "codex",
-            "pending_count": 0,
-        })];
-        let director = json!({
-            "member_id": 2,
-            "name": "Director",
-            "coding_agent": "claude",
-            "pending_count": 1,
-        });
+        let members = [WakeEntry {
+            member_id: 4,
+            name: "worker",
+            coding_agent: "codex",
+            pending_count: 0,
+        }];
+        let director = WakeEntry {
+            member_id: 2,
+            name: "Director",
+            coding_agent: "claude",
+            pending_count: 1,
+        };
         assert!(
-            mux.send_wake_trigger("w1:p9", 3, &members, &director)
+            mux.send_wake_entries("w1:p9", 3, &members, &director)
                 .unwrap()
         );
 
-        let payload = build_wake_payload(3, &members, &director).unwrap();
+        let payload = build_wake_payload_from_entries(3, &members, &director).unwrap();
         assert_eq!(
             runner.events(),
             vec![
@@ -1148,24 +1151,24 @@ mod tests {
     }
 
     #[test]
-    fn send_wake_trigger_remains_best_effort_on_delivery_failure() {
-        let members = [json!({
-            "member_id": 4,
-            "name": "worker",
-            "coding_agent": "codex",
-            "pending_count": 0,
-        })];
-        let director = json!({
-            "member_id": 2,
-            "name": "Director",
-            "coding_agent": "claude",
-            "pending_count": 0,
-        });
+    fn send_wake_entries_remains_best_effort_on_delivery_failure() {
+        let members = [WakeEntry {
+            member_id: 4,
+            name: "worker",
+            coding_agent: "codex",
+            pending_count: 0,
+        }];
+        let director = WakeEntry {
+            member_id: 2,
+            name: "Director",
+            coding_agent: "claude",
+            pending_count: 0,
+        };
 
         let runner = FakeRunner::without_binaries();
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
         assert!(
-            !mux.send_wake_trigger("w1:p9", 3, &members, &director)
+            !mux.send_wake_entries("w1:p9", 3, &members, &director)
                 .unwrap(),
             "herdr missing → Ok(false)"
         );
@@ -1177,7 +1180,7 @@ mod tests {
         }));
         let mux = HerdrMultiplexer::new(runner, herdr_env());
         assert!(
-            !mux.send_wake_trigger("w1:p9", 3, &members, &director)
+            !mux.send_wake_entries("w1:p9", 3, &members, &director)
                 .unwrap(),
             "a keystroke error stays Ok(false), never an Err"
         );

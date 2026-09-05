@@ -188,9 +188,9 @@ pub fn emit(json: bool, payload: &Value, text: impl FnOnce() -> String) {
 
 #[cfg(test)]
 mod tests {
-    use super::CliNotifier;
     use crate::broker::InlinePreviewSender;
     use crate::config::Settings;
+    use crate::runtime::RuntimeNotifier;
 
     fn settings(multiplexer: Option<&str>) -> Settings {
         Settings {
@@ -205,7 +205,7 @@ mod tests {
 
     #[test]
     fn cli_notifier_construction_is_infallible_and_defers_the_resolution_error() {
-        let notifier = CliNotifier::new(&settings(Some("bogus")));
+        let notifier = RuntimeNotifier::new(&settings(Some("bogus")));
         let expected = "CAFLEET_MULTIPLEXER='bogus' is not a supported multiplexer \
                         (expected one of: herdr, tmux)";
 

@@ -463,17 +463,24 @@ pub fn resolve_multiplexer_name(
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{Value, json};
+    use crate::multiplexer::WakeEntry;
 
-    use crate::multiplexer::{build_wake_payload, resolve_multiplexer_name, sanitize_wake_field};
+    use crate::multiplexer::{
+        build_wake_payload_from_entries, resolve_multiplexer_name, sanitize_wake_field,
+    };
 
-    fn member(member_id: i64, name: &str, coding_agent: &str, unacked: i64) -> Value {
-        json!({
-            "member_id": member_id,
-            "name": name,
-            "coding_agent": coding_agent,
-            "pending_count": unacked,
-        })
+    fn member<'a>(
+        member_id: i64,
+        name: &'a str,
+        coding_agent: &'a str,
+        unacked: i64,
+    ) -> WakeEntry<'a> {
+        WakeEntry {
+            member_id,
+            name,
+            coding_agent,
+            pending_count: unacked,
+        }
     }
 
     mod sanitize_wake_field_tests {
@@ -512,12 +519,12 @@ mod tests {
         }
     }
 
-    mod build_wake_payload_tests {
+    mod build_wake_payload_from_entries_tests {
         use super::*;
 
         #[test]
         fn two_members_join_entries_and_the_director_segment_trails() {
-            let payload = build_wake_payload(
+            let payload = build_wake_payload_from_entries(
                 3,
                 &[
                     member(6, "drafter", "claude", 2),
@@ -539,7 +546,7 @@ mod tests {
 
         #[test]
         fn a_single_member_uses_the_singular_noun() {
-            let payload = build_wake_payload(
+            let payload = build_wake_payload_from_entries(
                 7,
                 &[member(4, "worker", "opencode", 1)],
                 &member(2, "Director", "claude", 0),
@@ -557,7 +564,9 @@ mod tests {
 
         #[test]
         fn an_empty_roster_drops_the_entries_and_keeps_the_director_segment() {
-            let payload = build_wake_payload(7, &[], &member(2, "Director", "claude", 3)).unwrap();
+            let payload =
+                build_wake_payload_from_entries(7, &[], &member(2, "Director", "claude", 3))
+                    .unwrap();
             assert_eq!(
                 payload,
                 "[cafleet] tick: fleet 7 — no members to health-check. \
@@ -569,7 +578,7 @@ mod tests {
 
         #[test]
         fn member_and_director_names_are_sanitized_in_the_payload() {
-            let payload = build_wake_payload(
+            let payload = build_wake_payload_from_entries(
                 3,
                 &[member(5, "e`vil$(x)|z\nq", "claude", 0)],
                 &member(2, "Dir|ector", "claude", 0),
@@ -590,7 +599,7 @@ mod tests {
 
         #[test]
         fn an_unregistered_roster_coding_agent_aborts_the_wake() {
-            let err = build_wake_payload(
+            let err = build_wake_payload_from_entries(
                 3,
                 &[member(4, "worker", "python", 0)],
                 &member(2, "Director", "claude", 0),
@@ -605,7 +614,7 @@ mod tests {
 
         #[test]
         fn an_unregistered_director_coding_agent_aborts_the_wake() {
-            let err = build_wake_payload(
+            let err = build_wake_payload_from_entries(
                 3,
                 &[member(4, "worker", "claude", 0)],
                 &member(2, "Director", "python", 0),

@@ -489,7 +489,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        let result = broker::register_member(
+        let result = broker::register_member_record(
             &mut conn,
             fleet_id,
             "analyst",
@@ -498,6 +498,7 @@ mod tests {
             Some(&placement(Some("%2"))),
             false,
         )
+        .map(|record| crate::presentation::registered_member(&record))
         .unwrap();
         assert!(result["member_id"].as_i64().is_some());
         assert_eq!(result["name"], "analyst");
@@ -525,7 +526,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        let result = broker::register_member(
+        let result = broker::register_member_record(
             &mut conn,
             fleet_id,
             "analyst",
@@ -534,11 +535,13 @@ mod tests {
             Some(&placement(Some("%2"))),
             false,
         )
+        .map(|record| crate::presentation::registered_member(&record))
         .unwrap();
         let member_id = result["member_id"].as_i64().unwrap();
         let ts = result["registered_at"].as_str().unwrap().to_string();
 
-        let member = broker::get_member(&conn, member_id, fleet_id)
+        let member = broker::get_member_record(&conn, member_id, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::member))
             .unwrap()
             .unwrap();
         let expected = format!(
@@ -553,7 +556,7 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
         let skills = [json!("python"), json!("sql")];
-        let member_id = broker::register_member(
+        let member_id = broker::register_member_record(
             &mut conn,
             fleet_id,
             "analyst",
@@ -562,10 +565,12 @@ mod tests {
             Some(&placement(Some("%2"))),
             false,
         )
+        .map(|record| crate::presentation::registered_member(&record))
         .unwrap()["member_id"]
             .as_i64()
             .unwrap();
-        let member = broker::get_member(&conn, member_id, fleet_id)
+        let member = broker::get_member_record(&conn, member_id, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::member))
             .unwrap()
             .unwrap();
         assert_eq!(member["skills"], json!(["python", "sql"]));
@@ -576,19 +581,14 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        let member_id = broker::register_member(
-            &mut conn,
-            fleet_id,
-            "ghost",
-            "d",
-            &[],
-            None,
-            false,
-        )
-        .unwrap()["member_id"]
-            .as_i64()
-            .unwrap();
-        let member = broker::get_member(&conn, member_id, fleet_id)
+        let member_id =
+            broker::register_member_record(&mut conn, fleet_id, "ghost", "d", &[], None, false)
+                .map(|record| crate::presentation::registered_member(&record))
+                .unwrap()["member_id"]
+                .as_i64()
+                .unwrap();
+        let member = broker::get_member_record(&conn, member_id, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::member))
             .unwrap()
             .unwrap();
         assert_eq!(member["placement"], Value::Null);
@@ -605,7 +605,8 @@ mod tests {
     fn register_member_unknown_fleet_is_a_usage_error() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
-        let err = broker::register_member(&mut conn, 999, "x", "d", &[], None, false)
+        let err = broker::register_member_record(&mut conn, 999, "x", "d", &[], None, false)
+            .map(|record| crate::presentation::registered_member(&record))
             .expect_err("unknown fleet must error");
         assert!(matches!(err, CafleetError::Usage(_)));
         assert_eq!(err.message(), "Fleet '999' not found.");
@@ -617,7 +618,8 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
         broker::delete_fleet(&mut conn, fleet_id).unwrap();
-        let err = broker::register_member(&mut conn, fleet_id, "x", "d", &[], None, false)
+        let err = broker::register_member_record(&mut conn, fleet_id, "x", "d", &[], None, false)
+            .map(|record| crate::presentation::registered_member(&record))
             .expect_err("deleted fleet must error");
         assert!(matches!(err, CafleetError::Usage(_)));
         assert_eq!(err.message(), format!("fleet {fleet_id} is deleted"));
@@ -634,7 +636,7 @@ mod tests {
         )
         .unwrap();
 
-        let err = broker::register_member(
+        let err = broker::register_member_record(
             &mut conn,
             fleet_id,
             "worker",
@@ -643,6 +645,7 @@ mod tests {
             Some(&placement(Some("%2"))),
             false,
         )
+        .map(|record| crate::presentation::registered_member(&record))
         .expect_err("a placed registration under an inactive Director must fail loudly");
         assert!(matches!(err, CafleetError::App(_)));
         assert_eq!(
@@ -650,7 +653,8 @@ mod tests {
             format!("fleet {fleet_id}'s root Director (member {director_id}) is not active.")
         );
 
-        broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None, false)
+        broker::register_member_record(&mut conn, fleet_id, "ghost", "d", &[], None, false)
+            .map(|record| crate::presentation::registered_member(&record))
             .expect("a placementless registration skips the invariant guard");
     }
 
@@ -707,13 +711,15 @@ mod tests {
         let member_id = register(&mut conn, fleet_a, "worker", Some("%2"));
 
         assert!(
-            broker::get_member(&conn, member_id, fleet_b)
+            broker::get_member_record(&conn, member_id, fleet_b)
+                .map(|record| record.as_ref().map(crate::presentation::member))
                 .unwrap()
                 .is_none()
         );
         broker::deregister_member(&mut conn, member_id).unwrap();
         assert!(
-            broker::get_member(&conn, member_id, fleet_a)
+            broker::get_member_record(&conn, member_id, fleet_a)
+                .map(|record| record.as_ref().map(crate::presentation::member))
                 .unwrap()
                 .is_none()
         );
@@ -726,29 +732,26 @@ mod tests {
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
         let member_id = register(&mut conn, fleet_id, "worker", None);
 
-        let updated = broker::update_placement_pane_id(&mut conn, member_id, "%9")
+        let updated = broker::update_placement_record(&mut conn, member_id, "%9")
+            .map(|record| record.as_ref().map(crate::presentation::placement))
             .unwrap()
             .unwrap();
         assert_eq!(updated["mux_pane_id"], "%9");
-        let member = broker::get_member(&conn, member_id, fleet_id)
+        let member = broker::get_member_record(&conn, member_id, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::member))
             .unwrap()
             .unwrap();
         assert_eq!(member["placement"]["mux_pane_id"], "%9");
 
-        let placementless = broker::register_member(
-            &mut conn,
-            fleet_id,
-            "ghost",
-            "d",
-            &[],
-            None,
-            false,
-        )
-        .unwrap()["member_id"]
-            .as_i64()
-            .unwrap();
+        let placementless =
+            broker::register_member_record(&mut conn, fleet_id, "ghost", "d", &[], None, false)
+                .map(|record| crate::presentation::registered_member(&record))
+                .unwrap()["member_id"]
+                .as_i64()
+                .unwrap();
         assert!(
-            broker::update_placement_pane_id(&mut conn, placementless, "%1")
+            broker::update_placement_record(&mut conn, placementless, "%1")
+                .map(|record| record.as_ref().map(crate::presentation::placement))
                 .unwrap()
                 .is_none()
         );
@@ -791,16 +794,25 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
-        let ghost_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None, false)
-            .unwrap()["member_id"]
-            .as_i64()
-            .unwrap();
+        let ghost_id =
+            broker::register_member_record(&mut conn, fleet_id, "ghost", "d", &[], None, false)
+                .map(|record| crate::presentation::registered_member(&record))
+                .unwrap()["member_id"]
+                .as_i64()
+                .unwrap();
 
         let notifier = FakeNotifier::succeeding();
         let sent = common::send(&mut conn, &notifier, director_id, member_id, "hi");
         let message_id = sent["message"]["message_id"].as_i64().unwrap();
 
-        let rows = broker::list_members(&conn, fleet_id).unwrap();
+        let rows = broker::list_member_records(&conn, fleet_id)
+            .map(|records| {
+                records
+                    .iter()
+                    .map(crate::presentation::member_activity)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
         assert_eq!(
             rows.len(),
             4,
@@ -826,8 +838,17 @@ mod tests {
         assert_eq!(ghost["last_recv"], Value::Null);
         assert_eq!(ghost["idle"], Value::Null);
 
-        broker::ack_message(&mut conn, message_id).unwrap();
-        let rows = broker::list_members(&conn, fleet_id).unwrap();
+        broker::ack_message_record(&mut conn, message_id)
+            .map(|record| crate::presentation::message_envelope(&record))
+            .unwrap();
+        let rows = broker::list_member_records(&conn, fleet_id)
+            .map(|records| {
+                records
+                    .iter()
+                    .map(crate::presentation::member_activity)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
         let worker = rows.iter().find(|r| r["member_id"] == member_id).unwrap();
         assert!(worker["last_ack"].is_string());
     }
@@ -839,7 +860,14 @@ mod tests {
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
         let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
         broker::deregister_member(&mut conn, member_id).unwrap();
-        let rows = broker::list_members(&conn, fleet_id).unwrap();
+        let rows = broker::list_member_records(&conn, fleet_id)
+            .map(|records| {
+                records
+                    .iter()
+                    .map(crate::presentation::member_activity)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
         assert!(rows.iter().all(|r| r["member_id"] != member_id));
     }
 
@@ -882,7 +910,8 @@ mod tests {
             "the Director writes no $.cafleet object"
         );
 
-        let monitor = broker::get_member(&conn, monitor_id, fleet_id)
+        let monitor = broker::get_member_record(&conn, monitor_id, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::member))
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -943,15 +972,32 @@ mod tests {
         ];
 
         for (id, kind) in expected {
-            let member = broker::get_member(&conn, id, fleet_id).unwrap().unwrap();
+            let member = broker::get_member_record(&conn, id, fleet_id)
+                .map(|record| record.as_ref().map(crate::presentation::member))
+                .unwrap()
+                .unwrap();
             assert_eq!(member["kind"], kind, "get_member kind for member {id}");
         }
-        let rows = broker::list_members(&conn, fleet_id).unwrap();
+        let rows = broker::list_member_records(&conn, fleet_id)
+            .map(|records| {
+                records
+                    .iter()
+                    .map(crate::presentation::member_activity)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
         for (id, kind) in expected {
             let row = rows.iter().find(|r| r["member_id"] == id).unwrap();
             assert_eq!(row["kind"], kind, "list_members kind for member {id}");
         }
-        let roster = broker::list_roster(&conn, fleet_id, false).unwrap();
+        let roster = broker::list_roster_records(&conn, fleet_id, false)
+            .map(|records| {
+                records
+                    .iter()
+                    .map(crate::presentation::roster_member)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
         for (id, kind) in expected {
             let row = roster.iter().find(|r| r["member_id"] == id).unwrap();
             assert_eq!(row["kind"], kind, "list_roster kind for member {id}");
@@ -970,10 +1016,24 @@ mod tests {
         broker::deregister_member(&mut conn, holder_id).unwrap();
         broker::deregister_member(&mut conn, silent_id).unwrap();
 
-        let active_only = broker::list_roster(&conn, fleet_id, false).unwrap();
+        let active_only = broker::list_roster_records(&conn, fleet_id, false)
+            .map(|records| {
+                records
+                    .iter()
+                    .map(crate::presentation::roster_member)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
         assert!(active_only.iter().all(|r| r["member_id"] != holder_id));
 
-        let with_holders = broker::list_roster(&conn, fleet_id, true).unwrap();
+        let with_holders = broker::list_roster_records(&conn, fleet_id, true)
+            .map(|records| {
+                records
+                    .iter()
+                    .map(crate::presentation::roster_member)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
         let holder = with_holders
             .iter()
             .find(|r| r["member_id"] == holder_id)
@@ -1005,7 +1065,7 @@ mod compatibility_regressions {
             r#"{"skills":{}}"#,
             r#"{"skills":42}"#,
         ] {
-            assert_eq!(card_skills(raw), json!([]), "{raw}");
+            assert_eq!(skills_from_card(raw), Vec::<Value>::new(), "{raw}");
         }
     }
 
@@ -1025,9 +1085,14 @@ mod compatibility_regressions {
             json!([3, 2, 1]),
         ];
         let registered =
-            register_member(&mut conn, fleet, "worker", "desc", &skills, None, false).unwrap();
+            register_member_record(&mut conn, fleet, "worker", "desc", &skills, None, false)
+                .map(|record| crate::presentation::registered_member(&record))
+                .unwrap();
         let id = registered["member_id"].as_i64().unwrap();
-        let member = get_member(&conn, id, fleet).unwrap().unwrap();
+        let member = get_member_record(&conn, id, fleet)
+            .map(|record| record.as_ref().map(crate::presentation::member))
+            .unwrap()
+            .unwrap();
         assert_eq!(member["skills"], json!(skills));
         for raw in ["{}", r#"{"skills":false}"#, r#"{"skills":"not-array"}"#] {
             conn.execute(
@@ -1036,7 +1101,10 @@ mod compatibility_regressions {
             )
             .unwrap();
             assert_eq!(
-                get_member(&conn, id, fleet).unwrap().unwrap()["skills"],
+                get_member_record(&conn, id, fleet)
+                    .map(|record| record.as_ref().map(crate::presentation::member))
+                    .unwrap()
+                    .unwrap()["skills"],
                 json!([])
             );
         }
@@ -1051,7 +1119,10 @@ mod compatibility_regressions {
         let mut conn = common::migrated_conn(&dir);
         let (fleet, _) = common::create_fleet(&mut conn, "compatibility");
         let id = common::register(&mut conn, fleet, "worker", None);
-        let member = get_member(&conn, id, fleet).unwrap().unwrap();
+        let member = get_member_record(&conn, id, fleet)
+            .map(|record| record.as_ref().map(crate::presentation::member))
+            .unwrap()
+            .unwrap();
         let ts = member["placement"]["created_at"].as_str().unwrap();
         assert_eq!(
             crate::output::format_json(&member["placement"]),
@@ -1059,7 +1130,17 @@ mod compatibility_regressions {
                 r#"{{"backend":"tmux","mux_session":"main","mux_window_id":"@1","mux_pane_id":null,"coding_agent":"claude","created_at":"{ts}"}}"#
             )
         );
-        let ghost = register_member(&mut conn, fleet, "ghost", "desc", &[], None, false).unwrap()["member_id"].as_i64().unwrap();
-        assert!(get_member(&conn, ghost, fleet).unwrap().unwrap()["placement"].is_null());
+        let ghost = register_member_record(&mut conn, fleet, "ghost", "desc", &[], None, false)
+            .map(|record| crate::presentation::registered_member(&record))
+            .unwrap()["member_id"]
+            .as_i64()
+            .unwrap();
+        assert!(
+            get_member_record(&conn, ghost, fleet)
+                .map(|record| record.as_ref().map(crate::presentation::member))
+                .unwrap()
+                .unwrap()["placement"]
+                .is_null()
+        );
     }
 }

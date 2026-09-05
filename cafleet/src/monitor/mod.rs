@@ -315,7 +315,7 @@ mod tests {
         DEFAULT_TICK_SECONDS, MONITOR_STALE_FACTOR, MONITOR_STALE_FLOOR_SECONDS, MonitorMux,
         TickResult, monitor_tick, run_monitor_loop, wake_due,
     };
-    use crate::multiplexer::MultiplexerError;
+    use crate::multiplexer::{MultiplexerError, WakeEntry};
     use crate::time::format_utc;
 
     fn own_pid() -> i64 {
@@ -326,7 +326,45 @@ mod tests {
         Utc.with_ymd_and_hms(2026, 7, 30, 10, 0, 0).unwrap()
     }
 
-    type WakeCall = (String, i64, Vec<Value>, Value);
+    #[test]
+    fn wake_descriptor_preserves_typed_identity_agent_and_nonzero_pending_count() {
+        let target = broker::records::WakeTarget {
+            member_id: 42,
+            name: "worker name | special".into(),
+            coding_agent: "codex".into(),
+            pending_count: 7,
+        };
+        assert_eq!(
+            super::wake_descriptor(&target),
+            WakeEntry {
+                member_id: 42,
+                name: "worker name | special",
+                coding_agent: "codex",
+                pending_count: 7,
+            }
+        );
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct ObservedWake {
+        member_id: i64,
+        name: String,
+        coding_agent: String,
+        pending_count: i64,
+    }
+
+    impl From<&WakeEntry<'_>> for ObservedWake {
+        fn from(entry: &WakeEntry<'_>) -> Self {
+            Self {
+                member_id: entry.member_id,
+                name: entry.name.into(),
+                coding_agent: entry.coding_agent.into(),
+                pending_count: entry.pending_count,
+            }
+        }
+    }
+
+    type WakeCall = (String, i64, Vec<ObservedWake>, ObservedWake);
 
     struct FakeMux {
         live_panes: BTreeSet<String>,
@@ -353,18 +391,18 @@ mod tests {
             Ok(self.live_panes.clone())
         }
 
-        fn send_wake_trigger(
+        fn send_wake_entries(
             &self,
             target_pane_id: &str,
             fleet_id: i64,
-            members: &[Value],
-            director: &Value,
+            members: &[WakeEntry<'_>],
+            director: &WakeEntry<'_>,
         ) -> Result<bool, MultiplexerError> {
             self.wakes.borrow_mut().push((
                 target_pane_id.to_string(),
                 fleet_id,
-                members.to_vec(),
-                director.clone(),
+                members.iter().map(ObservedWake::from).collect(),
+                ObservedWake::from(director),
             ));
             Ok(self.wake_ok.get())
         }
@@ -414,14 +452,16 @@ mod tests {
     }
 
     fn last_wake_at(conn: &rusqlite::Connection, fleet_id: i64) -> Value {
-        broker::read_monitor_runtime(conn, fleet_id)
+        broker::read_monitor_runtime_record(conn, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
             .unwrap()
             .unwrap()["last_wake_at"]
             .clone()
     }
 
     fn wake_requested_at(conn: &rusqlite::Connection, fleet_id: i64) -> Value {
-        broker::read_monitor_runtime(conn, fleet_id)
+        broker::read_monitor_runtime_record(conn, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
             .unwrap()
             .unwrap()["wake_requested_at"]
             .clone()
@@ -574,21 +614,21 @@ mod tests {
                 2,
                 "both workers, never the Director or the monitor"
             );
-            assert_eq!(members[0]["member_id"], member_id);
-            assert_eq!(members[1]["member_id"], second_id);
+            assert_eq!(members[0].member_id, member_id);
+            assert_eq!(members[1].member_id, second_id);
             assert!(
                 members
                     .iter()
-                    .all(|m| m["member_id"] != director_id && m["member_id"] != monitor_id),
+                    .all(|m| m.member_id != director_id && m.member_id != monitor_id),
                 "the monitor is the recipient and the Director rides its own segment"
             );
             assert_eq!(
-                director["member_id"], director_id,
+                director.member_id, director_id,
                 "the Director descriptor passes through to the wake"
             );
-            assert_eq!(director["name"], "Director");
-            assert_eq!(director["coding_agent"], "claude");
-            assert_eq!(director["pending_count"], 0);
+            assert_eq!(director.name, "Director");
+            assert_eq!(director.coding_agent, "claude");
+            assert_eq!(director.pending_count, 0);
             drop(wakes);
 
             let iso = format_utc(due_at);
@@ -679,7 +719,8 @@ mod tests {
             assert!(echo.is_empty());
             assert_eq!(last_wake_at(&conn, fleet_id), Value::Null);
 
-            let row = broker::read_monitor_runtime(&conn, fleet_id)
+            let row = broker::read_monitor_runtime_record(&conn, fleet_id)
+                .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
                 .unwrap()
                 .unwrap();
             assert_eq!(
@@ -763,7 +804,8 @@ mod tests {
                 "0 disables the wake from the next tick"
             );
             assert!(echo.is_empty());
-            let row = broker::read_monitor_runtime(&conn, fleet_id)
+            let row = broker::read_monitor_runtime_record(&conn, fleet_id)
+                .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
                 .unwrap()
                 .unwrap();
             assert_eq!(
@@ -990,7 +1032,7 @@ mod tests {
             assert_eq!(pane, "%1");
             assert!(members.is_empty(), "the N == 0 roster is empty");
             assert_eq!(
-                director["member_id"], director_id,
+                director.member_id, director_id,
                 "the Director segment rides even the N == 0 wake"
             );
             drop(wakes);

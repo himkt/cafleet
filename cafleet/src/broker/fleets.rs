@@ -394,7 +394,8 @@ mod tests {
         assert_eq!(fleet["name"], "alpha");
         assert_eq!(fleet["deleted_at"], serde_json::Value::Null);
 
-        let director = broker::get_member(&conn, director_id, fleet_id)
+        let director = broker::get_member_record(&conn, director_id, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::member))
             .unwrap()
             .unwrap();
         assert_eq!(director["name"], "Director");
@@ -406,7 +407,8 @@ mod tests {
         assert_eq!(director["placement"]["coding_agent"], "claude");
 
         let monitor_id = bootstrap_monitor(&conn, fleet_id);
-        let monitor = broker::get_member(&conn, monitor_id, fleet_id)
+        let monitor = broker::get_member_record(&conn, monitor_id, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::member))
             .unwrap()
             .unwrap();
         assert_eq!(monitor["name"], "monitor");
@@ -637,7 +639,8 @@ mod tests {
             "the cascade drops the Director, monitor, and worker placements"
         );
         assert!(
-            broker::read_monitor_runtime(&conn, fleet_id)
+            broker::read_monitor_runtime_record(&conn, fleet_id)
+                .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
                 .unwrap()
                 .is_none()
         );

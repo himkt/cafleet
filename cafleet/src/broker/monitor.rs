@@ -468,14 +468,16 @@ mod tests {
         broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, 600, &when).unwrap();
 
         broker::record_monitor_wake(&mut conn, fleet_id, &when).unwrap();
-        let row = broker::read_monitor_runtime(&conn, fleet_id)
+        let row = broker::read_monitor_runtime_record(&conn, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
             .unwrap()
             .unwrap();
         assert_eq!(row["last_wake_at"], when);
 
         let later = format_utc(base_time() + Duration::seconds(600));
         broker::record_monitor_wake(&mut conn, fleet_id, &later).unwrap();
-        let row = broker::read_monitor_runtime(&conn, fleet_id)
+        let row = broker::read_monitor_runtime_record(&conn, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -497,7 +499,8 @@ mod tests {
         // a restarted loop reclaim the slot.
         let later = format_utc(base_time() + Duration::seconds(100));
         assert!(broker::claim_monitor_runtime(&mut conn, fleet_id, 4242, 5, 600, &later).unwrap());
-        let row = broker::read_monitor_runtime(&conn, fleet_id)
+        let row = broker::read_monitor_runtime_record(&conn, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -513,12 +516,21 @@ mod tests {
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         let worker_id = register(&mut conn, fleet_id, "worker", Some("%2"));
         let pending_id = register(&mut conn, fleet_id, "pending", None);
-        let ghost_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None, false)
-            .unwrap()["member_id"]
-            .as_i64()
-            .unwrap();
+        let ghost_id =
+            broker::register_member_record(&mut conn, fleet_id, "ghost", "d", &[], None, false)
+                .map(|record| crate::presentation::registered_member(&record))
+                .unwrap()["member_id"]
+                .as_i64()
+                .unwrap();
 
-        let targets = broker::list_fleet_wake_targets(&conn, fleet_id).unwrap();
+        let targets = broker::list_fleet_wake_target_records(&conn, fleet_id)
+            .map(|records| {
+                records
+                    .iter()
+                    .map(crate::presentation::wake_target)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
         assert_eq!(targets.len(), 2, "got: {targets:?}");
         assert!(
             !targets.iter().any(|t| t["member_id"] == director_id),
@@ -562,11 +574,27 @@ mod tests {
         common::send(&mut conn, &notifier, director_id, member_id, "two");
         let first_id = first["message"]["message_id"].as_i64().unwrap();
 
-        let targets = broker::list_fleet_wake_targets(&conn, fleet_id).unwrap();
+        let targets = broker::list_fleet_wake_target_records(&conn, fleet_id)
+            .map(|records| {
+                records
+                    .iter()
+                    .map(crate::presentation::wake_target)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
         assert_eq!(targets[0]["pending_count"], 2);
 
-        broker::ack_message(&mut conn, first_id).unwrap();
-        let targets = broker::list_fleet_wake_targets(&conn, fleet_id).unwrap();
+        broker::ack_message_record(&mut conn, first_id)
+            .map(|record| crate::presentation::message_envelope(&record))
+            .unwrap();
+        let targets = broker::list_fleet_wake_target_records(&conn, fleet_id)
+            .map(|records| {
+                records
+                    .iter()
+                    .map(crate::presentation::wake_target)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
         assert_eq!(targets[0]["pending_count"], 1);
     }
 
@@ -578,7 +606,14 @@ mod tests {
         let monitor_id = bootstrap_monitor(&conn, fleet_id);
         let worker_id = register(&mut conn, fleet_id, "worker", Some("%3"));
 
-        let targets = broker::list_fleet_wake_targets(&conn, fleet_id).unwrap();
+        let targets = broker::list_fleet_wake_target_records(&conn, fleet_id)
+            .map(|records| {
+                records
+                    .iter()
+                    .map(crate::presentation::wake_target)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
         assert_eq!(targets.len(), 1, "got: {targets:?}");
         assert_eq!(targets[0]["member_id"], worker_id);
         assert!(
@@ -595,7 +630,14 @@ mod tests {
         let monitor_id = bootstrap_monitor(&conn, fleet_id);
         let worker_id = register(&mut conn, fleet_id, "worker", Some("%3"));
 
-        let rows = broker::monitor_members_payload(&conn, fleet_id, base_time()).unwrap();
+        let rows = broker::monitor_member_records(&conn, fleet_id, base_time())
+            .map(|records| {
+                records
+                    .iter()
+                    .map(crate::presentation::monitor_member)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
         assert_eq!(rows.len(), 1, "got: {rows:?}");
         assert_eq!(rows[0]["member_id"], worker_id);
         assert!(
@@ -611,7 +653,9 @@ mod tests {
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         let worker_id = register(&mut conn, fleet_id, "worker", Some("%2"));
 
-        let director = broker::fleet_wake_director(&conn, fleet_id).unwrap();
+        let director = broker::fleet_wake_director_record(&conn, fleet_id)
+            .map(|record| crate::presentation::wake_target(&record))
+            .unwrap();
         assert_eq!(director["member_id"], director_id);
         assert_eq!(director["name"], "Director");
         assert_eq!(director["coding_agent"], "claude");
@@ -631,14 +675,20 @@ mod tests {
         let notifier = FakeNotifier::succeeding();
         let sent = common::send(&mut conn, &notifier, worker_id, director_id, "status");
         let message_id = sent["message"]["message_id"].as_i64().unwrap();
-        let director = broker::fleet_wake_director(&conn, fleet_id).unwrap();
+        let director = broker::fleet_wake_director_record(&conn, fleet_id)
+            .map(|record| crate::presentation::wake_target(&record))
+            .unwrap();
         assert_eq!(
             director["pending_count"], 1,
             "pending_count counts the Director's input_required unicast deliveries"
         );
 
-        broker::ack_message(&mut conn, message_id).unwrap();
-        let director = broker::fleet_wake_director(&conn, fleet_id).unwrap();
+        broker::ack_message_record(&mut conn, message_id)
+            .map(|record| crate::presentation::message_envelope(&record))
+            .unwrap();
+        let director = broker::fleet_wake_director_record(&conn, fleet_id)
+            .map(|record| crate::presentation::wake_target(&record))
+            .unwrap();
         assert_eq!(director["pending_count"], 0);
     }
 
@@ -646,7 +696,9 @@ mod tests {
     fn fleet_wake_director_is_a_loud_error_when_the_row_is_missing() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
-        broker::fleet_wake_director(&conn, 999).expect_err("an unknown fleet has no Director row");
+        broker::fleet_wake_director_record(&conn, 999)
+            .map(|record| crate::presentation::wake_target(&record))
+            .expect_err("an unknown fleet has no Director row");
 
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         conn.execute(
@@ -654,7 +706,8 @@ mod tests {
             [director_id],
         )
         .unwrap();
-        broker::fleet_wake_director(&conn, fleet_id)
+        broker::fleet_wake_director_record(&conn, fleet_id)
+            .map(|record| crate::presentation::wake_target(&record))
             .expect_err("a Director without a placement is a loud error, not a skip");
     }
 
@@ -668,7 +721,8 @@ mod tests {
         assert!(
             broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, 600, &when).unwrap()
         );
-        let row = broker::read_monitor_runtime(&conn, fleet_id)
+        let row = broker::read_monitor_runtime_record(&conn, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
             .unwrap()
             .unwrap();
         assert_eq!(row["fleet_id"], fleet_id);
@@ -715,7 +769,8 @@ mod tests {
         // stale even though the owning process (this test) is alive.
         let later = format_utc(base_time() + Duration::seconds(100));
         assert!(broker::claim_monitor_runtime(&mut conn, fleet_id, 4242, 5, 600, &later).unwrap());
-        let row = broker::read_monitor_runtime(&conn, fleet_id)
+        let row = broker::read_monitor_runtime_record(&conn, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
             .unwrap()
             .unwrap();
         assert_eq!(row["pid"], 4242);
@@ -761,7 +816,8 @@ mod tests {
 
         let tick = format_utc(base_time() + Duration::seconds(2));
         assert!(broker::heartbeat_monitor_runtime(&mut conn, fleet_id, own_pid(), &tick).unwrap());
-        let row = broker::read_monitor_runtime(&conn, fleet_id)
+        let row = broker::read_monitor_runtime_record(&conn, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
             .unwrap()
             .unwrap();
         assert_eq!(row["last_tick_at"], tick);
@@ -774,7 +830,8 @@ mod tests {
         )
         .unwrap();
         assert!(!displaced, "a non-owner heartbeat matches zero rows");
-        let row = broker::read_monitor_runtime(&conn, fleet_id)
+        let row = broker::read_monitor_runtime_record(&conn, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
             .unwrap()
             .unwrap();
         assert_eq!(row["last_tick_at"], tick, "the owner's heartbeat survives");
@@ -790,13 +847,15 @@ mod tests {
         broker::record_monitor_wake(&mut conn, fleet_id, &when).unwrap();
 
         broker::clear_monitor_runtime(&mut conn, fleet_id, 4242).unwrap();
-        let row = broker::read_monitor_runtime(&conn, fleet_id)
+        let row = broker::read_monitor_runtime_record(&conn, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
             .unwrap()
             .unwrap();
         assert_eq!(row["pid"], own_pid(), "a loser's clear is a no-op");
 
         broker::clear_monitor_runtime(&mut conn, fleet_id, own_pid()).unwrap();
-        let row = broker::read_monitor_runtime(&conn, fleet_id)
+        let row = broker::read_monitor_runtime_record(&conn, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
             .unwrap()
             .unwrap();
         assert_eq!(row["pid"], Value::Null);
@@ -843,15 +902,18 @@ mod tests {
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
         let now = base_time();
 
-        let absent = broker::monitor_runtime_payload(&conn, fleet_id, now).unwrap();
+        let absent = broker::monitor_runtime_view(&conn, fleet_id, now)
+            .map(|record| crate::presentation::monitor_runtime_view(&record))
+            .unwrap();
         assert_eq!(absent["running"], false);
         assert_eq!(absent["pid"], Value::Null);
         assert_eq!(absent["tick_seconds"], Value::Null);
 
         let when = format_utc(now);
         broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, 600, &when).unwrap();
-        let live =
-            broker::monitor_runtime_payload(&conn, fleet_id, now + Duration::seconds(2)).unwrap();
+        let live = broker::monitor_runtime_view(&conn, fleet_id, now + Duration::seconds(2))
+            .map(|record| crate::presentation::monitor_runtime_view(&record))
+            .unwrap();
         assert_eq!(live["running"], true);
         assert_eq!(live["pid"], own_pid());
         assert_eq!(live["tick_seconds"], 5);
@@ -859,8 +921,9 @@ mod tests {
         assert_eq!(live["last_tick_age_seconds"], 2);
         assert_eq!(live["started_at"], when);
 
-        let stale =
-            broker::monitor_runtime_payload(&conn, fleet_id, now + Duration::seconds(100)).unwrap();
+        let stale = broker::monitor_runtime_view(&conn, fleet_id, now + Duration::seconds(100))
+            .map(|record| crate::presentation::monitor_runtime_view(&record))
+            .unwrap();
         assert_eq!(stale["running"], false);
         assert_eq!(stale["pid"], Value::Null, "a stale row never leaks its pid");
         assert_eq!(
@@ -879,7 +942,8 @@ mod tests {
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
         let when = format_utc(base_time());
         broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, 600, &when).unwrap();
-        let row = broker::read_monitor_runtime(&conn, fleet_id)
+        let row = broker::read_monitor_runtime_record(&conn, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
             .unwrap()
             .unwrap();
         assert_eq!(row["wake_interval_seconds"], 600);
@@ -888,7 +952,8 @@ mod tests {
         // a restarted loop reclaim the slot and re-stamp the interval.
         let later = format_utc(base_time() + Duration::seconds(100));
         assert!(broker::claim_monitor_runtime(&mut conn, fleet_id, 4242, 5, 300, &later).unwrap());
-        let row = broker::read_monitor_runtime(&conn, fleet_id)
+        let row = broker::read_monitor_runtime_record(&conn, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -910,7 +975,8 @@ mod tests {
         let when = format_utc(base_time());
         broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, 600, &when).unwrap();
         assert!(broker::set_monitor_wake_interval(&mut conn, fleet_id, 120).unwrap());
-        let row = broker::read_monitor_runtime(&conn, fleet_id)
+        let row = broker::read_monitor_runtime_record(&conn, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
             .unwrap()
             .unwrap();
         assert_eq!(row["wake_interval_seconds"], 120);
@@ -920,7 +986,8 @@ mod tests {
             broker::set_monitor_wake_interval(&mut conn, fleet_id, 0).unwrap(),
             "the update is ownership-free; a stopped loop's row still updates"
         );
-        let row = broker::read_monitor_runtime(&conn, fleet_id)
+        let row = broker::read_monitor_runtime_record(&conn, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
             .unwrap()
             .unwrap();
         assert_eq!(row["wake_interval_seconds"], 0);
@@ -933,7 +1000,9 @@ mod tests {
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
         let now = base_time();
 
-        let absent = broker::monitor_runtime_payload(&conn, fleet_id, now).unwrap();
+        let absent = broker::monitor_runtime_view(&conn, fleet_id, now)
+            .map(|record| crate::presentation::monitor_runtime_view(&record))
+            .unwrap();
         assert_eq!(
             absent["wake_interval_seconds"],
             Value::Null,
@@ -942,12 +1011,14 @@ mod tests {
 
         let when = format_utc(now);
         broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, 600, &when).unwrap();
-        let live =
-            broker::monitor_runtime_payload(&conn, fleet_id, now + Duration::seconds(2)).unwrap();
+        let live = broker::monitor_runtime_view(&conn, fleet_id, now + Duration::seconds(2))
+            .map(|record| crate::presentation::monitor_runtime_view(&record))
+            .unwrap();
         assert_eq!(live["wake_interval_seconds"], 600);
 
-        let stale =
-            broker::monitor_runtime_payload(&conn, fleet_id, now + Duration::seconds(100)).unwrap();
+        let stale = broker::monitor_runtime_view(&conn, fleet_id, now + Duration::seconds(100))
+            .map(|record| crate::presentation::monitor_runtime_view(&record))
+            .unwrap();
         assert_eq!(
             stale["wake_interval_seconds"], 600,
             "preserved from the stale row, like tick_seconds"
@@ -975,7 +1046,9 @@ mod tests {
         )
         .unwrap();
         let premigration =
-            broker::monitor_runtime_payload(&conn, fleet_id, now + Duration::seconds(100)).unwrap();
+            broker::monitor_runtime_view(&conn, fleet_id, now + Duration::seconds(100))
+                .map(|record| crate::presentation::monitor_runtime_view(&record))
+                .unwrap();
         assert_eq!(premigration["wake_interval_seconds"], Value::Null);
     }
 
@@ -992,14 +1065,16 @@ mod tests {
 
         broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, 600, &when).unwrap();
         assert!(broker::request_monitor_wake(&mut conn, fleet_id, &when).unwrap());
-        let row = broker::read_monitor_runtime(&conn, fleet_id)
+        let row = broker::read_monitor_runtime_record(&conn, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
             .unwrap()
             .unwrap();
         assert_eq!(row["wake_requested_at"], when);
 
         let later = format_utc(base_time() + Duration::seconds(30));
         assert!(broker::request_monitor_wake(&mut conn, fleet_id, &later).unwrap());
-        let row = broker::read_monitor_runtime(&conn, fleet_id)
+        let row = broker::read_monitor_runtime_record(&conn, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -1015,7 +1090,8 @@ mod tests {
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
         let when = format_utc(base_time());
         broker::claim_monitor_runtime(&mut conn, fleet_id, own_pid(), 5, 600, &when).unwrap();
-        let row = broker::read_monitor_runtime(&conn, fleet_id)
+        let row = broker::read_monitor_runtime_record(&conn, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -1030,7 +1106,8 @@ mod tests {
         // a restarted loop reclaim the slot.
         let later = format_utc(base_time() + Duration::seconds(100));
         assert!(broker::claim_monitor_runtime(&mut conn, fleet_id, 4242, 5, 600, &later).unwrap());
-        let row = broker::read_monitor_runtime(&conn, fleet_id)
+        let row = broker::read_monitor_runtime_record(&conn, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -1051,7 +1128,8 @@ mod tests {
 
         let later = format_utc(base_time() + Duration::seconds(10));
         broker::record_monitor_wake(&mut conn, fleet_id, &later).unwrap();
-        let row = broker::read_monitor_runtime(&conn, fleet_id)
+        let row = broker::read_monitor_runtime_record(&conn, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
             .unwrap()
             .unwrap();
         assert_eq!(row["last_wake_at"], later);
@@ -1077,7 +1155,7 @@ mod compatibility_regressions {
         let mut conn = common::migrated_conn(&dir);
         let (fleet, _) = common::create_fleet(&mut conn, "runtime");
         assert!(
-            broker::read_monitor_runtime(&conn, fleet)
+            broker::read_monitor_runtime_record(&conn, fleet)
                 .unwrap()
                 .is_none()
         );
@@ -1089,7 +1167,18 @@ mod compatibility_regressions {
                 params![interval, fleet],
             )
             .unwrap();
-            let row = broker::read_monitor_runtime(&conn, fleet).unwrap().unwrap();
+            let record = broker::read_monitor_runtime_record(&conn, fleet)
+                .unwrap()
+                .unwrap();
+            assert_eq!(record.fleet_id, fleet);
+            assert_eq!(record.pid, None);
+            assert_eq!(record.tick_seconds, 5);
+            assert_eq!(record.wake_interval_seconds, interval);
+            assert_eq!(record.started_at, None);
+            assert_eq!(record.last_tick_at, None);
+            assert_eq!(record.last_wake_at, None);
+            assert_eq!(record.wake_requested_at, None);
+            let row = crate::presentation::monitor_runtime(&record);
             let interval_json = serde_json::to_string(&interval).unwrap();
             assert_eq!(
                 crate::output::format_json(&row),
@@ -1104,8 +1193,11 @@ mod compatibility_regressions {
         )
         .unwrap();
         assert_eq!(
-            broker::read_monitor_runtime(&conn, fleet).unwrap().unwrap()["pid"],
-            0,
+            broker::read_monitor_runtime_record(&conn, fleet)
+                .unwrap()
+                .unwrap()
+                .pid,
+            Some(0),
             "zero is a stored PID, not a new null sentinel"
         );
     }
@@ -1126,7 +1218,10 @@ mod compatibility_regressions {
         broker::record_monitor_wake(&mut conn, fleet, wake).unwrap();
         broker::request_monitor_wake(&mut conn, fleet, request).unwrap();
         broker::clear_monitor_runtime(&mut conn, fleet, pid).unwrap();
-        let stopped = broker::read_monitor_runtime(&conn, fleet).unwrap().unwrap();
+        let stopped = broker::read_monitor_runtime_record(&conn, fleet)
+            .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
+            .unwrap()
+            .unwrap();
         assert_eq!(
             crate::output::format_json(&stopped),
             format!(
@@ -1134,13 +1229,19 @@ mod compatibility_regressions {
             )
         );
         assert!(broker::claim_monitor_runtime(&mut conn, fleet, pid, 9, 45, request).unwrap());
-        let reclaimed = broker::read_monitor_runtime(&conn, fleet).unwrap().unwrap();
+        let reclaimed = broker::read_monitor_runtime_record(&conn, fleet)
+            .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
+            .unwrap()
+            .unwrap();
         assert_eq!(reclaimed["last_wake_at"], wake);
         assert!(reclaimed["wake_requested_at"].is_null());
         assert_eq!(reclaimed["wake_interval_seconds"], 45);
         broker::request_monitor_wake(&mut conn, fleet, request).unwrap();
         broker::record_monitor_wake(&mut conn, fleet, request).unwrap();
-        let delivered = broker::read_monitor_runtime(&conn, fleet).unwrap().unwrap();
+        let delivered = broker::read_monitor_runtime_record(&conn, fleet)
+            .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
+            .unwrap()
+            .unwrap();
         assert!(delivered["wake_requested_at"].is_null());
         assert_eq!(delivered["last_wake_at"], request);
     }
@@ -1161,11 +1262,26 @@ mod compatibility_regressions {
                 params![interval, fleet],
             )
             .unwrap();
-            let raw = broker::read_monitor_runtime(&conn, fleet).unwrap().unwrap();
-            assert_eq!(raw["started_at"], "unparsed-start");
-            assert_eq!(raw["last_tick_at"], "not-a-time");
-            assert_eq!(raw["wake_requested_at"], "pending");
-            let payload = broker::monitor_runtime_payload(&conn, fleet, now).unwrap();
+            let raw = broker::read_monitor_runtime_record(&conn, fleet)
+                .unwrap()
+                .unwrap();
+            assert_eq!(raw.started_at.as_deref(), Some("unparsed-start"));
+            assert_eq!(raw.last_tick_at.as_deref(), Some("not-a-time"));
+            assert_eq!(raw.last_wake_at.as_deref(), Some("unparsed-wake"));
+            assert_eq!(raw.wake_requested_at.as_deref(), Some("pending"));
+            assert_eq!(raw.pid, Some(0));
+            assert_eq!(raw.wake_interval_seconds, interval);
+            let view = broker::monitor_runtime_view(&conn, fleet, now).unwrap();
+            assert!(!view.running);
+            assert_eq!(view.pid, None);
+            assert_eq!(view.tick_seconds, Some(5));
+            assert_eq!(view.wake_interval_seconds, interval);
+            assert_eq!(view.started_at, None);
+            assert_eq!(view.last_tick_at, None);
+            assert_eq!(view.last_wake_at, None);
+            assert_eq!(view.last_tick_age_seconds, None);
+            assert_eq!(view.last_wake_age_seconds, None);
+            let payload = crate::presentation::monitor_runtime_view(&view);
             let interval_json = serde_json::to_string(&interval).unwrap();
             assert_eq!(
                 crate::output::format_json(&payload),
