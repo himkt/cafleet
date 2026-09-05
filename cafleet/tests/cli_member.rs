@@ -442,6 +442,15 @@ fn member_show_takes_the_positional_subject() {
         "the detailed view is JSON-only"
     );
 
+    let registered = payload["registered_at"].as_str().unwrap();
+    let placed = payload["placement"]["created_at"].as_str().unwrap();
+    assert_eq!(
+        stdout(&output),
+        format!(
+            r#"{{"member_id":{member_id},"name":"worker","description":"test member","status":"active","registered_at":"{registered}","kind":"member","skills":[],"placement":{{"backend":"tmux","mux_session":"main","mux_window_id":"@1","mux_pane_id":"%7","coding_agent":"claude","created_at":"{placed}"}}}}"#
+        ) + "\n"
+    );
+
     let output = cli.run(&["member", "show", "99"]);
     assert_eq!(code(&output), 1);
     assert!(

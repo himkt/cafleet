@@ -489,3 +489,44 @@ async fn spa_fallback(uri: Uri) -> Response {
     }
     embedded_file("index.html").expect("the dist is embedded at build time")
 }
+
+#[cfg(test)]
+mod integrity_regressions {
+    use super::*;
+    use crate::broker::test_support as common;
+
+    #[test]
+    fn required_message_names_return_errors_without_unwinding_in_the_presenter() {
+        for sender_missing in [false, true] {
+            let dir = tempfile::Builder::new()
+                .prefix(".missing-name-")
+                .tempdir_in(env!("CARGO_MANIFEST_DIR"))
+                .unwrap();
+            let mut conn = common::migrated_conn(&dir);
+            let (fleet, director) = common::create_fleet(&mut conn, "integrity");
+            let worker = common::register(&mut conn, fleet, "worker", None);
+            let sent = common::send(
+                &mut conn,
+                &common::FakeNotifier::succeeding(),
+                director,
+                worker,
+                "work",
+            );
+            let message = sent["message"].clone();
+            conn.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+            conn.execute(
+                "DELETE FROM members WHERE member_id=?1",
+                [if sender_missing { director } else { worker }],
+            )
+            .unwrap();
+            conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                formatted_messages(&conn, &[message])
+            }));
+            let error = result
+                .expect("the presenter must return an integrity error, never unwind")
+                .expect_err("missing required names cannot produce successful partial rows");
+            assert!(!error.to_string().trim().is_empty());
+        }
+    }
+}

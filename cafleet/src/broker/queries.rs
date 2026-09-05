@@ -431,3 +431,53 @@ mod timeline_regressions {
         );
     }
 }
+
+#[cfg(test)]
+mod integrity_regressions {
+    use crate::broker::{self, test_support as common};
+
+    #[test]
+    fn invalid_stored_message_kind_is_an_error_without_unwinding_or_fabricating_a_row() {
+        invalid_message_field("type");
+    }
+
+    #[test]
+    fn invalid_stored_message_status_is_an_error_without_unwinding_or_fabricating_a_row() {
+        invalid_message_field("status_state");
+    }
+
+    fn invalid_message_field(field: &str) {
+        let dir = tempfile::Builder::new()
+            .prefix(".invalid-message-")
+            .tempdir_in(env!("CARGO_MANIFEST_DIR"))
+            .unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        let (_, director) = common::create_fleet(&mut conn, "integrity");
+        let id = common::send(
+            &mut conn,
+            &common::FakeNotifier::succeeding(),
+            director,
+            director,
+            "work",
+        )["message"]["message_id"]
+            .as_i64()
+            .unwrap();
+        // Only the isolated fixture relaxes CHECK constraints; production
+        // schema and ordinary writes remain untouched.
+        conn.execute_batch("PRAGMA ignore_check_constraints=ON")
+            .unwrap();
+        conn.execute(
+            &format!("UPDATE messages SET {field}='corrupt-enum' WHERE message_id=?1"),
+            [id],
+        )
+        .unwrap();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            broker::get_message(&conn, id)
+        }));
+        let error = result
+            .expect("invalid stored enum must not panic")
+            .expect_err("unknown enum must not become a successful wire row");
+        assert_eq!(error.exit_code(), 1);
+        assert!(!error.to_string().trim().is_empty());
+    }
+}

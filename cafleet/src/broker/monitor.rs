@@ -1052,3 +1052,117 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod compatibility_regressions {
+    use super::*;
+    use crate::broker::{self, test_support as common};
+
+    #[test]
+    fn raw_runtime_distinguishes_absence_legacy_null_zero_and_positive_intervals() {
+        let dir = tempfile::Builder::new()
+            .prefix(".runtime-wire-")
+            .tempdir_in(env!("CARGO_MANIFEST_DIR"))
+            .unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        let (fleet, _) = common::create_fleet(&mut conn, "runtime");
+        assert!(
+            broker::read_monitor_runtime(&conn, fleet)
+                .unwrap()
+                .is_none()
+        );
+        conn.execute("INSERT INTO monitor_runtime(fleet_id) VALUES (?1)", [fleet])
+            .unwrap();
+        for interval in [None, Some(0), Some(90)] {
+            conn.execute(
+                "UPDATE monitor_runtime SET wake_interval_seconds=?1 WHERE fleet_id=?2",
+                params![interval, fleet],
+            )
+            .unwrap();
+            let row = broker::read_monitor_runtime(&conn, fleet).unwrap().unwrap();
+            let interval_json = serde_json::to_string(&interval).unwrap();
+            assert_eq!(
+                crate::output::format_json(&row),
+                format!(
+                    r#"{{"fleet_id":{fleet},"pid":null,"started_at":null,"last_tick_at":null,"tick_seconds":5,"wake_interval_seconds":{interval_json},"last_wake_at":null,"wake_requested_at":null}}"#
+                )
+            );
+        }
+        conn.execute(
+            "UPDATE monitor_runtime SET pid=0 WHERE fleet_id=?1",
+            [fleet],
+        )
+        .unwrap();
+        assert_eq!(
+            broker::read_monitor_runtime(&conn, fleet).unwrap().unwrap()["pid"],
+            0,
+            "zero is a stored PID, not a new null sentinel"
+        );
+    }
+
+    #[test]
+    fn clear_preserves_pending_request_and_wake_ledger_while_reclaim_resets_only_request() {
+        let dir = tempfile::Builder::new()
+            .prefix(".runtime-lifecycle-")
+            .tempdir_in(env!("CARGO_MANIFEST_DIR"))
+            .unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        let (fleet, _) = common::create_fleet(&mut conn, "runtime");
+        let pid = i64::from(std::process::id());
+        let started = "2026-01-01T00:00:00+00:00";
+        let wake = "2026-01-01T00:00:01+00:00";
+        let request = "2026-01-01T00:00:02+00:00";
+        broker::claim_monitor_runtime(&mut conn, fleet, pid, 7, 0, started).unwrap();
+        broker::record_monitor_wake(&mut conn, fleet, wake).unwrap();
+        broker::request_monitor_wake(&mut conn, fleet, request).unwrap();
+        broker::clear_monitor_runtime(&mut conn, fleet, pid).unwrap();
+        let stopped = broker::read_monitor_runtime(&conn, fleet).unwrap().unwrap();
+        assert_eq!(
+            crate::output::format_json(&stopped),
+            format!(
+                r#"{{"fleet_id":{fleet},"pid":null,"started_at":null,"last_tick_at":null,"tick_seconds":7,"wake_interval_seconds":0,"last_wake_at":"{wake}","wake_requested_at":"{request}"}}"#
+            )
+        );
+        assert!(broker::claim_monitor_runtime(&mut conn, fleet, pid, 9, 45, request).unwrap());
+        let reclaimed = broker::read_monitor_runtime(&conn, fleet).unwrap().unwrap();
+        assert_eq!(reclaimed["last_wake_at"], wake);
+        assert!(reclaimed["wake_requested_at"].is_null());
+        assert_eq!(reclaimed["wake_interval_seconds"], 45);
+        broker::request_monitor_wake(&mut conn, fleet, request).unwrap();
+        broker::record_monitor_wake(&mut conn, fleet, request).unwrap();
+        let delivered = broker::read_monitor_runtime(&conn, fleet).unwrap().unwrap();
+        assert!(delivered["wake_requested_at"].is_null());
+        assert_eq!(delivered["last_wake_at"], request);
+    }
+
+    #[test]
+    fn stopped_runtime_projection_preserves_intervals_but_masks_raw_timestamps() {
+        let dir = tempfile::Builder::new()
+            .prefix(".runtime-projection-")
+            .tempdir_in(env!("CARGO_MANIFEST_DIR"))
+            .unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        let (fleet, _) = common::create_fleet(&mut conn, "runtime");
+        let now = crate::time::parse_lenient("2026-01-01T00:00:00+00:00").unwrap();
+        conn.execute("INSERT INTO monitor_runtime(fleet_id,pid,started_at,last_tick_at,last_wake_at,wake_requested_at) VALUES (?1,0,'unparsed-start','not-a-time','unparsed-wake','pending')", [fleet]).unwrap();
+        for interval in [None, Some(0), Some(90)] {
+            conn.execute(
+                "UPDATE monitor_runtime SET wake_interval_seconds=?1 WHERE fleet_id=?2",
+                params![interval, fleet],
+            )
+            .unwrap();
+            let raw = broker::read_monitor_runtime(&conn, fleet).unwrap().unwrap();
+            assert_eq!(raw["started_at"], "unparsed-start");
+            assert_eq!(raw["last_tick_at"], "not-a-time");
+            assert_eq!(raw["wake_requested_at"], "pending");
+            let payload = broker::monitor_runtime_payload(&conn, fleet, now).unwrap();
+            let interval_json = serde_json::to_string(&interval).unwrap();
+            assert_eq!(
+                crate::output::format_json(&payload),
+                format!(
+                    r#"{{"running":false,"pid":null,"tick_seconds":5,"wake_interval_seconds":{interval_json},"last_tick_at":null,"last_tick_age_seconds":null,"started_at":null,"last_wake_at":null,"last_wake_age_seconds":null}}"#
+                )
+            );
+        }
+    }
+}

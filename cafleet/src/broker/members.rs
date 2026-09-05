@@ -1025,3 +1025,80 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod compatibility_regressions {
+    use super::*;
+    use crate::broker::test_support as common;
+
+    #[test]
+    fn card_skills_keeps_legacy_empty_fallback_for_broken_missing_or_non_array_values() {
+        for raw in [
+            "not JSON",
+            "{",
+            "null",
+            "[]",
+            "{}",
+            r#"{"skills":null}"#,
+            r#"{"skills":"rust"}"#,
+            r#"{"skills":{}}"#,
+            r#"{"skills":42}"#,
+        ] {
+            assert_eq!(card_skills(raw), json!([]), "{raw}");
+        }
+    }
+
+    #[test]
+    fn free_form_skills_preserve_nested_values_and_order_through_member_presentation() {
+        let dir = tempfile::Builder::new()
+            .prefix(".member-wire-")
+            .tempdir_in(env!("CARGO_MANIFEST_DIR"))
+            .unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        let (fleet, _) = common::create_fleet(&mut conn, "compatibility");
+        let skills = vec![
+            json!(null),
+            json!(true),
+            json!(4),
+            json!({"nested":["日本語",false]}),
+            json!([3, 2, 1]),
+        ];
+        let registered =
+            register_member(&mut conn, fleet, "worker", "desc", &skills, None, false).unwrap();
+        let id = registered["member_id"].as_i64().unwrap();
+        let member = get_member(&conn, id, fleet).unwrap().unwrap();
+        assert_eq!(member["skills"], json!(skills));
+        for raw in ["{}", r#"{"skills":false}"#, r#"{"skills":"not-array"}"#] {
+            conn.execute(
+                "UPDATE members SET member_card_json=?1 WHERE member_id=?2",
+                params![raw, id],
+            )
+            .unwrap();
+            assert_eq!(
+                get_member(&conn, id, fleet).unwrap().unwrap()["skills"],
+                json!([])
+            );
+        }
+    }
+
+    #[test]
+    fn pending_placement_keeps_an_object_with_null_pane_and_exact_wire_order() {
+        let dir = tempfile::Builder::new()
+            .prefix(".placement-wire-")
+            .tempdir_in(env!("CARGO_MANIFEST_DIR"))
+            .unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        let (fleet, _) = common::create_fleet(&mut conn, "compatibility");
+        let id = common::register(&mut conn, fleet, "worker", None);
+        let member = get_member(&conn, id, fleet).unwrap().unwrap();
+        let ts = member["placement"]["created_at"].as_str().unwrap();
+        assert_eq!(
+            crate::output::format_json(&member["placement"]),
+            format!(
+                r#"{{"backend":"tmux","mux_session":"main","mux_window_id":"@1","mux_pane_id":null,"coding_agent":"claude","created_at":"{ts}"}}"#
+            )
+        );
+        let ghost = register_member(&mut conn, fleet, "ghost", "desc", &[], None, false).unwrap()["member_id"].as_i64().unwrap();
+        assert!(get_member(&conn, ghost, fleet).unwrap().unwrap()["placement"].is_null());
+    }
+}

@@ -1112,3 +1112,153 @@ async fn timeline_filters_before_200_row_cap_and_returns_only_fetched_broadcast_
         "broadcast_summary"
     );
 }
+
+#[tokio::test]
+async fn integrity_missing_sender_name_returns_500_without_a_panicked_task_detail() {
+    missing_message_name_is_an_integrity_error(true).await;
+}
+
+#[tokio::test]
+async fn integrity_missing_recipient_name_returns_500_without_a_panicked_task_detail() {
+    missing_message_name_is_an_integrity_error(false).await;
+}
+
+async fn missing_message_name_is_an_integrity_error(sender: bool) {
+    let dir = TempDir::new().unwrap();
+    let (url, mut conn) = migrated(&dir);
+    let (_, director, worker, _) = seeded_fleet(&mut conn);
+    broker::send_message(
+        &mut conn,
+        &NullNotifier,
+        200,
+        director,
+        &worker.to_string(),
+        "integrity",
+    )
+    .unwrap();
+    let absent = if sender { director } else { worker };
+    // Break only this isolated database. Keep a valid owner so the read
+    // reaches name resolution instead of being filtered out of the timeline.
+    conn.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+    if !sender {
+        conn.execute("UPDATE messages SET owner_member_id=?1", [director])
+            .unwrap();
+    }
+    conn.execute("DELETE FROM members WHERE member_id=?1", [absent])
+        .unwrap();
+    conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+    let (status, body) = call(app(&url), "GET", "/api/timeline", Some("1"), None).await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+    let payload = parsed(&body);
+    assert_eq!(keys(&payload), ["detail"]);
+    let detail = payload["detail"].as_str().unwrap();
+    assert!(
+        !detail.contains("panicked") && !detail.contains("internal error: task"),
+        "integrity errors must not originate from a panicked blocking task: {detail}"
+    );
+    assert!(!detail.trim().is_empty());
+}
+
+#[tokio::test]
+async fn integrity_invalid_message_status_is_500_in_inbox_sent_and_timeline() {
+    let dir = TempDir::new().unwrap();
+    let (url, mut conn) = migrated(&dir);
+    let (_, director, worker, _) = seeded_fleet(&mut conn);
+    broker::send_message(
+        &mut conn,
+        &NullNotifier,
+        200,
+        director,
+        &worker.to_string(),
+        "integrity",
+    )
+    .unwrap();
+    conn.execute_batch(
+        "PRAGMA ignore_check_constraints=ON; UPDATE messages SET status_state='corrupt-status';",
+    )
+    .unwrap();
+    for path in [
+        format!("/api/members/{worker}/inbox"),
+        format!("/api/members/{director}/sent"),
+        "/api/timeline".into(),
+    ] {
+        let (status, body) = call(app(&url), "GET", &path, Some("1"), None).await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{path}: {body}");
+        let payload = parsed(&body);
+        assert_eq!(keys(&payload), ["detail"]);
+        let detail = payload["detail"].as_str().unwrap();
+        assert!(
+            !detail.trim().is_empty() && !detail.contains("panicked"),
+            "{detail}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn integrity_invalid_member_status_is_500_instead_of_a_successful_roster_row() {
+    let dir = TempDir::new().unwrap();
+    let (url, mut conn) = migrated(&dir);
+    let (_, director, worker, _) = seeded_fleet(&mut conn);
+    broker::send_message(
+        &mut conn,
+        &NullNotifier,
+        200,
+        director,
+        &worker.to_string(),
+        "holder",
+    )
+    .unwrap();
+    conn.execute_batch("PRAGMA ignore_check_constraints=ON")
+        .unwrap();
+    conn.execute(
+        "UPDATE members SET status='corrupt-status' WHERE member_id=?1",
+        [worker],
+    )
+    .unwrap();
+    let (status, body) = call(app(&url), "GET", "/api/members", Some("1"), None).await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+    let payload = parsed(&body);
+    assert_eq!(keys(&payload), ["detail"]);
+    let detail = payload["detail"].as_str().unwrap();
+    assert!(
+        !detail.trim().is_empty() && !detail.contains("panicked"),
+        "{detail}"
+    );
+}
+
+#[tokio::test]
+async fn compatibility_stopped_monitor_wire_distinguishes_no_row_null_zero_and_positive_interval() {
+    let dir = TempDir::new().unwrap();
+    let (url, mut conn) = migrated(&dir);
+    let (fleet, _, _, _) = seeded_fleet(&mut conn);
+    for (row_exists, interval) in [
+        (false, None),
+        (true, None),
+        (true, Some(0)),
+        (true, Some(90)),
+    ] {
+        if row_exists {
+            conn.execute(
+                "INSERT OR IGNORE INTO monitor_runtime(fleet_id) VALUES (?1)",
+                [fleet],
+            )
+            .unwrap();
+            conn.execute("UPDATE monitor_runtime SET wake_interval_seconds=?1, last_wake_at='durable', wake_requested_at='pending' WHERE fleet_id=?2", rusqlite::params![interval,fleet]).unwrap();
+        }
+        let (status, body) = call(app(&url), "GET", "/api/monitor", Some("1"), None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let tick_json = if row_exists { "5" } else { "null" };
+        let interval_json = serde_json::to_string(&interval).unwrap();
+        assert_eq!(
+            body,
+            format!(
+                r#"{{"running":false,"pid":null,"tick_seconds":{tick_json},"wake_interval_seconds":{interval_json},"last_tick_at":null,"last_tick_age_seconds":null,"started_at":null,"last_wake_at":null,"last_wake_age_seconds":null,"members":[{{"member_id":3,"name":"worker","pending_count":0,"oldest_pending_ts":null,"oldest_pending_age_seconds":null}},{{"member_id":4,"name":"helper","pending_count":0,"oldest_pending_ts":null,"oldest_pending_age_seconds":null}}]}}"#
+            )
+        );
+        if row_exists {
+            let raw = broker::read_monitor_runtime(&conn, fleet).unwrap().unwrap();
+            assert_eq!(raw["last_wake_at"], "durable");
+            assert_eq!(raw["wake_requested_at"], "pending");
+        }
+    }
+}

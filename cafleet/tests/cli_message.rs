@@ -781,3 +781,44 @@ fn show_json_pins_the_typed_column_envelope() {
         "compact JSON with the pinned key order"
     );
 }
+
+#[test]
+fn integrity_invalid_stored_message_enum_exits_one_without_success_output_or_panic() {
+    for field in ["type", "status_state"] {
+        let cli = Cli::new();
+        let (_, director, worker) = fleet_with_member(&cli);
+        let sent = cli.run(&[
+            "message",
+            "send",
+            "--from-member-id",
+            &director.to_string(),
+            "--to-member-id",
+            &worker.to_string(),
+            "integrity",
+        ]);
+        assert_eq!(code(&sent), 0, "{}", stderr(&sent));
+        let conn = cli.sqlite();
+        conn.execute_batch("PRAGMA ignore_check_constraints=ON")
+            .unwrap();
+        conn.execute_batch(&format!("UPDATE messages SET {field}='corrupt-enum'"))
+            .unwrap();
+        let id: i64 = conn
+            .query_row("SELECT message_id FROM messages", [], |r| r.get(0))
+            .unwrap();
+        for json in [false, true] {
+            let id_arg = id.to_string();
+            let mut args = vec!["message", "show", &id_arg];
+            if json {
+                args.push("--json");
+            }
+            let shown = cli.run(&args);
+            assert_eq!(code(&shown), 1, "invalid {field}: {}", stdout(&shown));
+            assert!(stdout(&shown).is_empty());
+            let detail = stderr(&shown);
+            assert!(
+                detail.starts_with("Error: ") && !detail.contains("panicked"),
+                "{detail}"
+            );
+        }
+    }
+}
