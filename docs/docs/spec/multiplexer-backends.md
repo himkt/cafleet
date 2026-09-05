@@ -74,6 +74,25 @@ subclasses in the [backend matrix](#backend-matrix). CLI boundaries catch
 `MultiplexerError`, so both backends' failures are handled uniformly while each
 backend keeps its own message text.
 
+## Subprocess output and deadlines
+
+The shared subprocess runner captures stdout and stderr without truncation.
+With a timeout, it drains both pipes concurrently from spawn using nonblocking
+I/O. Each loop checks the monotonic deadline and the direct child's exit status,
+then reads at most 64 KiB per stream; polling waits at most 20 ms or the remaining
+deadline, whichever is shorter. Interrupted operations retry against the same
+deadline. Completion requires both the child's exit and EOF on both streams.
+Success returns stdout as lossy UTF-8; a nonzero exit reports stderr as lossy
+UTF-8. Calls without a timeout retain the unbounded output-collection path.
+
+At the deadline, the runner kills and reaps the direct child, closes both read
+pipes, and reports a timeout. This also applies when the direct child has exited
+but a descendant still holds a pipe open. Descendant termination is outside this
+contract. FD setup, read, poll, and child-status failures also release the pipes
+and kill/reap the child; cleanup failures accompany the primary error instead of
+replacing it. The deadline bounds observation and the start of cleanup; an
+unresponsive operating system can delay cleanup itself.
+
 ## Native agent-state (herdr only) {#native-agent-state}
 
 herdr natively tracks each agent's lifecycle state

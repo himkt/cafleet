@@ -2266,6 +2266,23 @@ tmux error only when **both** `ignore_missing` is true **and** the message text
 failure re-raises even under `ignore_missing`. Whatever error shape a port uses
 MUST keep the message/stderr text inspectable for this substring match.
 
+The shared runner's timed path drains stdout and stderr concurrently from spawn
+with nonblocking descriptors. Each iteration checks the monotonic deadline and
+the direct child's status, reads at most 64 KiB from each stream, and polls for
+at most the lesser of 20 ms and the remaining deadline. Interrupted operations
+retry with the same deadline. Completion requires child exit and EOF on both
+streams. Output is not truncated: success returns lossy UTF-8 stdout and nonzero
+exit returns lossy UTF-8 stderr. The untimed path collects output without a
+deadline.
+
+Deadline expiry kills and reaps the direct child, closes both read descriptors,
+and returns the timeout category. A descendant holding a pipe open after the
+direct child exits remains subject to that deadline; descendant termination is
+not guaranteed. FD configuration, read, poll, or child-status errors also trigger
+direct-child kill/reap and descriptor release. Cleanup failures accompany the
+primary cause and do not replace it. The deadline bounds observation and cleanup
+initiation, not wall-clock return when the operating system does not respond.
+
 #### Wake-field sanitizer — payload contract
 
 Applied to each member name and `coding_agent` value before interpolation into
