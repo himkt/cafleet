@@ -188,7 +188,7 @@ fn run(failure: Failure, clear_failed: bool) -> Case {
             log: log.clone(),
         }))
     };
-    let observe = |event| {
+    let observe = |event: MonitorEvent<'_>| {
         match event {
             MonitorEvent::Claimed { conn } => {
                 assert!(conn.is_autocommit());
