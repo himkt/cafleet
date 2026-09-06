@@ -1,10 +1,10 @@
 //! Shared fixtures for typed broker contract tests (SPEC §6.2).
 //!
-//! Storage APIs return broker::records types: register_member_record returns
-//! RegisteredMember; get_member_record/list_roster_records return MemberRecord;
-//! list_member_records adds MemberActivity; update_placement_record returns
-//! Placement. Message reads and ACK use MessageRecord, send_message_record
-//! returns SendOutcome with NotificationAttempt, and broadcast_message_record
+//! Storage APIs return broker::records types: register_member returns
+//! RegisteredMember; get_member/list_roster return MemberRecord;
+//! list_members adds MemberActivity; update_placement_pane_id returns
+//! Placement. Message reads and ACK use MessageRecord, send_message
+//! returns SendOutcome with NotificationAttempt, and broadcast_message
 //! returns BroadcastOutcome. Monitor queries distinguish optional raw
 //! MonitorRuntime from MonitorRuntimeView, MonitorMember, and WakeTarget.
 //!
@@ -75,7 +75,7 @@ pub fn bootstrap_monitor(conn: &Connection, fleet_id: i64) -> i64 {
 }
 
 pub fn register(conn: &mut Connection, fleet_id: i64, name: &str, pane: Option<&str>) -> i64 {
-    broker::register_member_record(
+    broker::register_member(
         conn,
         fleet_id,
         name,
@@ -84,10 +84,8 @@ pub fn register(conn: &mut Connection, fleet_id: i64, name: &str, pane: Option<&
         Some(&placement(pane)),
         false,
     )
-    .map(|record| crate::presentation::registered_member(&record))
-    .unwrap()["member_id"]
-        .as_i64()
-        .unwrap()
+    .unwrap()
+    .member_id
 }
 
 pub fn register_monitor(
@@ -96,7 +94,7 @@ pub fn register_monitor(
     name: &str,
     pane: Option<&str>,
 ) -> i64 {
-    broker::register_member_record(
+    broker::register_member(
         conn,
         fleet_id,
         name,
@@ -105,10 +103,8 @@ pub fn register_monitor(
         Some(&placement(pane)),
         true,
     )
-    .map(|record| crate::presentation::registered_member(&record))
-    .unwrap()["member_id"]
-        .as_i64()
-        .unwrap()
+    .unwrap()
+    .member_id
 }
 
 pub struct NotifyCall {
@@ -164,7 +160,7 @@ impl InlinePreviewSender for FakeNotifier {
 }
 
 /// Send and return the outcome's `{message, notification_sent}` payload;
-/// tests that assert NotificationAttempt call broker::send_message_record directly.
+/// tests that assert NotificationAttempt call broker::send_message directly.
 pub fn send(
     conn: &mut Connection,
     notifier: &FakeNotifier,
@@ -173,7 +169,6 @@ pub fn send(
     text: &str,
 ) -> Value {
     let outcome =
-        broker::send_message_record(conn, notifier, MAX_TEXT_LEN, from, &to.to_string(), text)
-            .unwrap();
+        broker::send_message(conn, notifier, MAX_TEXT_LEN, from, &to.to_string(), text).unwrap();
     crate::presentation::send_outcome(&outcome)
 }

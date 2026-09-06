@@ -43,32 +43,6 @@ pub(crate) fn fetch_fleet(
     .map_err(db_err)
 }
 
-/// Per-call transaction observations. Events report real operation results;
-/// `after_rollback` can add a diagnostic only after successful recovery.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum BootstrapEvent {
-    Begun,
-    CommitFinished {
-        fleet_id: i64,
-        error: Option<String>,
-    },
-    RollbackFinished {
-        fleet_id: Option<i64>,
-        error: Option<String>,
-        autocommit: bool,
-    },
-}
-
-pub(crate) trait BootstrapHooks {
-    fn observe(&self, _event: BootstrapEvent) {}
-    fn after_rollback(&self, _fleet_id: Option<i64>) -> Result<(), CafleetError> {
-        Ok(())
-    }
-}
-
-struct NoopBootstrapHooks;
-impl BootstrapHooks for NoopBootstrapHooks {}
-
 /// Bootstrap DB rows in one transaction around the caller's monitor spawn.
 /// Failures explicitly attempt rollback and preserve any recovery diagnostic.
 #[allow(clippy::too_many_arguments)]
@@ -84,40 +58,10 @@ pub fn create_fleet(
     monitor_description: &str,
     spawn_monitor: impl FnOnce(i64, i64, i64) -> Result<String, CafleetError>,
 ) -> Result<Value, CafleetError> {
-    create_fleet_with_hooks(
-        conn,
-        name,
-        mux_session,
-        mux_window_id,
-        mux_pane_id,
-        coding_agent,
-        backend,
-        monitor_name,
-        monitor_description,
-        spawn_monitor,
-        &NoopBootstrapHooks,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn create_fleet_with_hooks(
-    conn: &mut Connection,
-    name: Option<&str>,
-    mux_session: &str,
-    mux_window_id: &str,
-    mux_pane_id: &str,
-    coding_agent: &str,
-    backend: &str,
-    monitor_name: &str,
-    monitor_description: &str,
-    spawn_monitor: impl FnOnce(i64, i64, i64) -> Result<String, CafleetError>,
-    hooks: &dyn BootstrapHooks,
-) -> Result<Value, CafleetError> {
     let now = format_utc(now_utc());
     let director_card = member_card(DIRECTOR_NAME, DIRECTOR_DESCRIPTION, &[], false);
     let monitor_card = member_card(monitor_name, monitor_description, &[], true);
     let mut tx = conn.transaction().map_err(db_err)?;
-    hooks.observe(BootstrapEvent::Begun);
     let mut allocated_fleet_id = None;
     let result: Result<Value, CafleetError> = (|| {
         tx.execute(
@@ -183,12 +127,7 @@ pub(crate) fn create_fleet_with_hooks(
             ],
         )
         .map_err(db_err)?;
-        let commit = tx.execute_batch("COMMIT").map_err(db_err);
-        hooks.observe(BootstrapEvent::CommitFinished {
-            fleet_id,
-            error: commit.as_ref().err().map(ToString::to_string),
-        });
-        commit?;
+        tx.execute_batch("COMMIT").map_err(db_err)?;
         Ok(json!({
             "fleet_id": fleet_id,
             "name": name,
@@ -238,13 +177,8 @@ pub(crate) fn create_fleet_with_hooks(
             tx.set_drop_behavior(rusqlite::DropBehavior::Ignore);
             drop(tx);
             let autocommit = conn.is_autocommit();
-            hooks.observe(BootstrapEvent::RollbackFinished {
-                fleet_id: allocated_fleet_id,
-                error: rollback.as_ref().err().map(ToString::to_string),
-                autocommit,
-            });
             let cleanup = match rollback {
-                Ok(()) if autocommit => hooks.after_rollback(allocated_fleet_id),
+                Ok(()) if autocommit => Ok(()),
                 Ok(()) => Err(CafleetError::App(
                     "transaction remains open after rollback".into(),
                 )),
@@ -394,7 +328,7 @@ mod tests {
         assert_eq!(fleet["name"], "alpha");
         assert_eq!(fleet["deleted_at"], serde_json::Value::Null);
 
-        let director = broker::get_member_record(&conn, director_id, fleet_id)
+        let director = broker::get_member(&conn, director_id, fleet_id)
             .map(|record| record.as_ref().map(crate::presentation::member))
             .unwrap()
             .unwrap();
@@ -407,7 +341,7 @@ mod tests {
         assert_eq!(director["placement"]["coding_agent"], "claude");
 
         let monitor_id = bootstrap_monitor(&conn, fleet_id);
-        let monitor = broker::get_member_record(&conn, monitor_id, fleet_id)
+        let monitor = broker::get_member(&conn, monitor_id, fleet_id)
             .map(|record| record.as_ref().map(crate::presentation::member))
             .unwrap()
             .unwrap();
@@ -663,7 +597,7 @@ mod tests {
             "the cascade drops the Director, monitor, and worker placements"
         );
         assert!(
-            broker::read_monitor_runtime_record(&conn, fleet_id)
+            broker::read_monitor_runtime(&conn, fleet_id)
                 .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
                 .unwrap()
                 .is_none()

@@ -878,3 +878,6 @@ mod ownership_regressions {
         assert_eq!(*calls.borrow(), ["pane-9"]);
     }
 }
+
+#[cfg(test)]
+mod spawn_tests;

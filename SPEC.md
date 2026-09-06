@@ -2011,8 +2011,8 @@ database automatically; rerun setup with the original database configuration.
 1. Write every replacement into its own stage and validate its embedded
    manifest before changing installed entries or the database. A staging
    failure cleans stages only. Stage validation checks the expected file set,
-   content digests and skill entry points; required runtime-reference closure
-   joins this validation when the runtime documents are bundled.
+   content digests and skill entry points. The build embeds runtime documents
+   directly from `docs/docs/`; `docs-check` validates installed links and anchors.
 2. Durably write `<identity>/.cafleet-install-journal.json`, containing the
    transaction ID, phase, target/stage/backup paths, old entry presence,
    previous complete `asset_installs` row or null, and new version/manifest.
@@ -2078,8 +2078,7 @@ filesystem's sync and rename guarantees.
 Shared diagnosis and connection reuse preserve existing command text, JSON,
 exit codes, and validation order.
 
-`Diagnosis` holds a `SchemaState` and per-coding-agent/path `AssetState`
-facts. It carries versions, resolved paths and their sources, recorded
+`SchemaState` and per-coding-agent/path `AssetState` facts carry versions, resolved paths and their sources, recorded
 installs, superseded rows, and raw failure causes; it does not contain
 preformatted guard or doctor messages. Boundary presenters retain their
 different existing wording for the same state.

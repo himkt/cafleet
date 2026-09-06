@@ -168,7 +168,7 @@ async fn roster(State(state): State<AppState>, headers: HeaderMap) -> Response {
         if let Err(response) = require_fleet(conn, fleet_id) {
             return *response;
         }
-        match broker::list_roster_records(conn, fleet_id, true) {
+        match broker::list_roster(conn, fleet_id, true) {
             Ok(members) => json_response(StatusCode::OK, &json!({"members": members.iter().map(crate::presentation::roster_member).collect::<Vec<_>>()})),
             Err(error) => broker_500(error),
         }
@@ -319,9 +319,9 @@ async fn member_messages(
             Err(error) => return detail(StatusCode::UNPROCESSABLE_ENTITY, &error.message()),
         };
         let rows = if sent {
-            broker::list_sent_records_with_options(conn, member_id, options)
+            broker::list_sent_with_options(conn, member_id, options)
         } else {
-            broker::list_inbox_records_with_options(conn, member_id, options)
+            broker::list_inbox_with_options(conn, member_id, options)
         };
         let rows = match rows {
             Ok(rows) => rows,
@@ -368,7 +368,7 @@ async fn timeline(State(state): State<AppState>, headers: HeaderMap) -> Response
         if let Err(response) = require_fleet(conn, fleet_id) {
             return *response;
         }
-        let rows = match broker::list_timeline_records(conn, fleet_id, 200) {
+        let rows = match broker::list_timeline(conn, fleet_id, 200) {
             Ok(rows) => rows,
             Err(error) => return broker_500(error),
         };
@@ -423,7 +423,7 @@ async fn send(State(state): State<AppState>, headers: HeaderMap, body: Bytes) ->
         if let Err(response) = require_fleet(conn, fleet_id) {
             return *response;
         }
-        match broker::get_member_record(conn, from, fleet_id) {
+        match broker::get_member(conn, from, fleet_id) {
             Ok(Some(_)) => {}
             Ok(None) => return detail(StatusCode::BAD_REQUEST, "from_member not in fleet"),
             Err(error) => return broker_500(error),
@@ -435,24 +435,19 @@ async fn send(State(state): State<AppState>, headers: HeaderMap, body: Bytes) ->
         let notifier = RuntimeNotifier::new(&settings);
         let message = match recipient {
             SendRecipient::Broadcast => {
-                match broker::broadcast_message_record(
-                    conn,
-                    &notifier,
-                    settings.max_text_len,
-                    from,
-                    &text,
-                ) {
+                match broker::broadcast_message(conn, &notifier, settings.max_text_len, from, &text)
+                {
                     Ok(result) => result.message,
                     Err(error) => return broker_500(error),
                 }
             }
             SendRecipient::Member(to) => {
-                match broker::get_member_record(conn, to, fleet_id) {
+                match broker::get_member(conn, to, fleet_id) {
                     Ok(Some(_)) => {}
                     Ok(None) => return detail(StatusCode::NOT_FOUND, "Member not found"),
                     Err(error) => return broker_500(error),
                 }
-                match broker::send_message_record(
+                match broker::send_message(
                     conn,
                     &notifier,
                     settings.max_text_len,
@@ -541,7 +536,7 @@ mod integrity_regressions {
                 "work",
             );
             let message =
-                broker::get_message_record(&conn, sent["message"]["message_id"].as_i64().unwrap())
+                broker::get_message(&conn, sent["message"]["message_id"].as_i64().unwrap())
                     .unwrap();
             conn.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
             conn.execute(

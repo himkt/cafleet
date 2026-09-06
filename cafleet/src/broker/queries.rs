@@ -1,4 +1,4 @@
-//! Read-only message queries — inbox / sent / timeline / `get_message_record`
+//! Read-only message queries — inbox / sent / timeline / `get_message`
 //! visibility rule (SPEC §6.2 *Queries*). The colocated tests pin the
 //! contract; see [`super::test_support`] for the API.
 
@@ -14,22 +14,12 @@ fn message_list(
     sql: &str,
     params: impl rusqlite::Params,
 ) -> Result<Vec<MessageRecord>, CafleetError> {
-    message_list_observed(conn, sql, params, &|_| {})
-}
-
-fn message_list_observed(
-    conn: &Connection,
-    sql: &str,
-    params: impl rusqlite::Params,
-    observe: &dyn Fn(&rusqlite::Statement<'_>),
-) -> Result<Vec<MessageRecord>, CafleetError> {
     let mut stmt = conn.prepare(sql).map_err(db_err)?;
     let rows = stmt
         .query_map(params, map_message_row)
         .map_err(db_err)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(db_err)?;
-    observe(&stmt);
     Ok(rows)
 }
 
@@ -55,54 +45,30 @@ impl HistoryOptions {
 
 /// Every delivery the member received, acked rows included; summaries are the
 /// sender's bookkeeping, never a delivery. This entry point stays unbounded.
-pub fn list_inbox_records(
-    conn: &Connection,
-    member_id: i64,
-) -> Result<Vec<MessageRecord>, CafleetError> {
-    list_inbox_records_with_options(conn, member_id, HistoryOptions::default())
+pub fn list_inbox(conn: &Connection, member_id: i64) -> Result<Vec<MessageRecord>, CafleetError> {
+    list_inbox_with_options(conn, member_id, HistoryOptions::default())
 }
 
 /// Every sent delivery, including broadcast fan-out but excluding summaries.
 /// This entry point stays unbounded.
-pub fn list_sent_records(
-    conn: &Connection,
-    member_id: i64,
-) -> Result<Vec<MessageRecord>, CafleetError> {
-    list_sent_records_with_options(conn, member_id, HistoryOptions::default())
+pub fn list_sent(conn: &Connection, member_id: i64) -> Result<Vec<MessageRecord>, CafleetError> {
+    list_sent_with_options(conn, member_id, HistoryOptions::default())
 }
 
-pub fn list_inbox_records_with_options(
+pub fn list_inbox_with_options(
     conn: &Connection,
     member_id: i64,
     options: HistoryOptions,
 ) -> Result<Vec<MessageRecord>, CafleetError> {
-    list_inbox_records_observed(conn, member_id, options, &|_| {})
+    history_records(conn, "owner_member_id", member_id, options)
 }
 
-pub fn list_sent_records_with_options(
+pub fn list_sent_with_options(
     conn: &Connection,
     member_id: i64,
     options: HistoryOptions,
 ) -> Result<Vec<MessageRecord>, CafleetError> {
-    list_sent_records_observed(conn, member_id, options, &|_| {})
-}
-
-pub(crate) fn list_inbox_records_observed(
-    conn: &Connection,
-    member_id: i64,
-    options: HistoryOptions,
-    observe: &dyn Fn(&rusqlite::Statement<'_>),
-) -> Result<Vec<MessageRecord>, CafleetError> {
-    history_records(conn, "owner_member_id", member_id, options, observe)
-}
-
-pub(crate) fn list_sent_records_observed(
-    conn: &Connection,
-    member_id: i64,
-    options: HistoryOptions,
-    observe: &dyn Fn(&rusqlite::Statement<'_>),
-) -> Result<Vec<MessageRecord>, CafleetError> {
-    history_records(conn, "from_member_id", member_id, options, observe)
+    history_records(conn, "from_member_id", member_id, options)
 }
 
 fn history_records(
@@ -110,7 +76,6 @@ fn history_records(
     member_column: &str,
     member_id: i64,
     options: HistoryOptions,
-    observe: &dyn Fn(&rusqlite::Statement<'_>),
 ) -> Result<Vec<MessageRecord>, CafleetError> {
     let options = options.validate()?;
     // The column is selected only by the two fixed entry points above.
@@ -122,15 +87,15 @@ fn history_records(
     match options.limit {
         Some(limit) => {
             sql.push_str(" LIMIT ?2");
-            message_list_observed(conn, &sql, params![member_id, limit as i64], observe)
+            message_list(conn, &sql, params![member_id, limit as i64])
         }
-        None => message_list_observed(conn, &sql, [member_id], observe),
+        None => message_list(conn, &sql, [member_id]),
     }
 }
 
 /// The fleet's deliveries (scoped via the owning member's fleet), newest first,
 /// hard-capped at `limit`.
-pub fn list_timeline_records(
+pub fn list_timeline(
     conn: &Connection,
     fleet_id: i64,
     limit: usize,
@@ -149,10 +114,7 @@ pub fn list_timeline_records(
 
 /// Fetch one message by id — the fleet is derived from the message row;
 /// existence is the only guard (SPEC §6.2).
-pub fn get_message_record(
-    conn: &Connection,
-    message_id: i64,
-) -> Result<MessageRecord, CafleetError> {
+pub fn get_message(conn: &Connection, message_id: i64) -> Result<MessageRecord, CafleetError> {
     let message = message_row(conn, message_id)?
         .ok_or_else(|| CafleetError::Value(format!("Message {message_id} not found")))?;
     Ok(message)
@@ -181,30 +143,19 @@ mod tests {
         let second = common::send(&mut conn, &notifier, director_id, member_id, "two");
         let first_id = first["message"]["message_id"].as_i64().unwrap();
         let second_id = second["message"]["message_id"].as_i64().unwrap();
-        broker::ack_message_record(&mut conn, first_id)
-            .map(|record| crate::presentation::message_envelope(&record))
-            .unwrap();
-        broker::broadcast_message_record(&mut conn, &notifier, MAX_TEXT_LEN, member_id, "x")
-            .map(|record| vec![crate::presentation::broadcast_outcome(&record)])
-            .unwrap();
+        broker::ack_message(&mut conn, first_id).unwrap();
+        broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, member_id, "x").unwrap();
 
-        let inbox = broker::list_inbox_records(&conn, member_id)
-            .map(|records| {
-                records
-                    .iter()
-                    .map(crate::presentation::message)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap();
+        let inbox = broker::list_inbox(&conn, member_id).unwrap();
         assert_eq!(
             inbox.len(),
             2,
             "acked rows stay; the sender's summary is not a delivery"
         );
-        assert!(inbox.iter().all(|m| m["type"] == "unicast"));
-        let acked = inbox.iter().find(|m| m["message_id"] == first_id).unwrap();
-        assert_eq!(acked["status_state"], "completed");
-        assert!(inbox.iter().any(|m| m["message_id"] == second_id));
+        assert!(inbox.iter().all(|m| m.kind.as_str() == "unicast"));
+        let acked = inbox.iter().find(|m| m.message_id == first_id).unwrap();
+        assert_eq!(acked.status.as_str(), "completed");
+        assert!(inbox.iter().any(|m| m.message_id == second_id));
     }
 
     #[test]
@@ -215,25 +166,17 @@ mod tests {
         register(&mut conn, fleet_id, "a", Some("%2"));
         register(&mut conn, fleet_id, "b", Some("%3"));
         let notifier = FakeNotifier::succeeding();
-        broker::broadcast_message_record(&mut conn, &notifier, MAX_TEXT_LEN, director_id, "fanout")
-            .map(|record| vec![crate::presentation::broadcast_outcome(&record)])
+        broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, director_id, "fanout")
             .unwrap();
 
-        let sent = broker::list_sent_records(&conn, director_id)
-            .map(|records| {
-                records
-                    .iter()
-                    .map(crate::presentation::message)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap();
+        let sent = broker::list_sent(&conn, director_id).unwrap();
         assert_eq!(
             sent.len(),
             3,
             "one delivery per peer (monitor included); summary excluded"
         );
-        assert!(sent.iter().all(|m| m["type"] == "unicast"));
-        assert!(sent.iter().all(|m| m["from_member_id"] == director_id));
+        assert!(sent.iter().all(|m| m.kind.as_str() == "unicast"));
+        assert!(sent.iter().all(|m| m.from_member_id == director_id));
     }
 
     #[test]
@@ -251,35 +194,21 @@ mod tests {
         let third = common::send(&mut conn, &notifier, member_a, director_a, "three");
         let foreign = common::send(&mut conn, &notifier, director_b, member_b, "other");
 
-        let timeline = broker::list_timeline_records(&conn, fleet_a, 2)
-            .map(|records| {
-                records
-                    .iter()
-                    .map(crate::presentation::message)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap();
+        let timeline = broker::list_timeline(&conn, fleet_a, 2).unwrap();
         assert_eq!(timeline.len(), 2, "capped at the supplied limit");
         assert_eq!(
-            timeline[0]["message_id"],
+            timeline[0].message_id,
             third["message"]["message_id"].as_i64().unwrap()
         );
         assert_eq!(
-            timeline[1]["message_id"],
+            timeline[1].message_id,
             second["message"]["message_id"].as_i64().unwrap()
         );
 
-        let full = broker::list_timeline_records(&conn, fleet_a, 200)
-            .map(|records| {
-                records
-                    .iter()
-                    .map(crate::presentation::message)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap();
+        let full = broker::list_timeline(&conn, fleet_a, 200).unwrap();
         assert_eq!(full.len(), 3);
         let foreign_id = foreign["message"]["message_id"].as_i64().unwrap();
-        assert!(full.iter().all(|m| m["message_id"] != foreign_id));
+        assert!(full.iter().all(|m| m.message_id != foreign_id));
     }
 
     #[test]
@@ -292,7 +221,7 @@ mod tests {
         let sent = common::send(&mut conn, &notifier, director_id, member_id, "hi");
         let message_id = sent["message"]["message_id"].as_i64().unwrap();
 
-        let result = broker::get_message_record(&conn, message_id)
+        let result = broker::get_message(&conn, message_id)
             .map(|record| crate::presentation::message_envelope(&record))
             .unwrap();
         assert_eq!(result["message"]["message_id"], message_id);
@@ -305,9 +234,7 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let _ = create_fleet(&mut conn, "alpha");
 
-        let err = broker::get_message_record(&conn, 999)
-            .map(|record| crate::presentation::message_envelope(&record))
-            .expect_err("missing message");
+        let err = broker::get_message(&conn, 999).expect_err("missing message");
         assert!(matches!(err, CafleetError::Value(_)));
         assert_eq!(err.message(), "Message 999 not found");
     }
@@ -319,18 +246,13 @@ mod tests {
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         register(&mut conn, fleet_id, "worker", Some("%2"));
         let notifier = FakeNotifier::succeeding();
-        let result = broker::broadcast_message_record(
-            &mut conn,
-            &notifier,
-            MAX_TEXT_LEN,
-            director_id,
-            "fanout",
-        )
-        .map(|record| vec![crate::presentation::broadcast_outcome(&record)])
-        .unwrap();
+        let result =
+            broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, director_id, "fanout")
+                .map(|record| vec![crate::presentation::broadcast_outcome(&record)])
+                .unwrap();
         let summary_id = result[0]["message"]["message_id"].as_i64().unwrap();
 
-        let fetched = broker::get_message_record(&conn, summary_id)
+        let fetched = broker::get_message(&conn, summary_id)
             .map(|record| crate::presentation::message_envelope(&record))
             .unwrap();
         assert_eq!(fetched["message"]["type"], "broadcast_summary");
@@ -363,7 +285,7 @@ mod timeline_regressions {
     #[test]
     fn timeline_broadcast_counts_only_two_deliveries_through_ack_zero_one_two() {
         let (_dir, mut conn, fleet, director, _) = fixture();
-        let result = broker::broadcast_message_record(
+        let result = broker::broadcast_message(
             &mut conn,
             &FakeNotifier::succeeding(),
             MAX_TEXT_LEN,
@@ -380,35 +302,26 @@ mod timeline_regressions {
         assert_eq!(summary["status_state"], "completed");
         assert!(summary["to_member_id"].is_null());
         for acked in 0..=2 {
-            let rows = list_timeline_records(&conn, fleet, 200)
-                .map(|records| {
-                    records
-                        .iter()
-                        .map(crate::presentation::message)
-                        .collect::<Vec<_>>()
-                })
-                .unwrap();
+            let rows = list_timeline(&conn, fleet, 200).unwrap();
             assert_eq!(rows.len(), 2, "summary is not a recipient or ACK");
-            assert!(rows.iter().all(|r| r["type"] == "unicast"
-                && r["origin_message_id"] == summary_id
-                && r["to_member_id"].is_i64()));
+            assert!(rows.iter().all(|r| r.kind.as_str() == "unicast"
+                && r.origin_message_id == Some(summary_id)
+                && r.to_member_id.is_some()));
             assert_eq!(
                 rows.iter()
-                    .filter(|r| r["status_state"] == "completed")
+                    .filter(|r| r.status.as_str() == "completed")
                     .count(),
                 acked
             );
             assert_eq!(
-                get_message_record(&conn, summary_id)
+                get_message(&conn, summary_id)
                     .map(|record| crate::presentation::message_envelope(&record))
                     .unwrap()["message"],
                 *summary,
                 "timeline/ACK never removes or rewrites the summary"
             );
-            if let Some(row) = rows.iter().find(|r| r["status_state"] == "input_required") {
-                broker::ack_message_record(&mut conn, row["message_id"].as_i64().unwrap())
-                    .map(|record| crate::presentation::message_envelope(&record))
-                    .unwrap();
+            if let Some(row) = rows.iter().find(|r| r.status.as_str() == "input_required") {
+                broker::ack_message(&mut conn, row.message_id).unwrap();
             }
         }
         let count: i64 = conn
@@ -420,15 +333,7 @@ mod timeline_regressions {
     #[test]
     fn timeline_empty_fleet_returns_no_rows() {
         let (_dir, conn, fleet, _, _) = fixture();
-        assert!(
-            list_timeline_records(&conn, fleet, 200)
-                .map(|records| records
-                    .iter()
-                    .map(crate::presentation::message)
-                    .collect::<Vec<_>>())
-                .unwrap()
-                .is_empty()
-        );
+        assert!(list_timeline(&conn, fleet, 200).unwrap().is_empty());
     }
 
     #[test]
@@ -439,7 +344,7 @@ mod timeline_regressions {
             .unwrap();
         broker::deregister_member(&mut conn, monitor).unwrap();
         broker::deregister_member(&mut conn, worker).unwrap();
-        let result = broker::broadcast_message_record(
+        let result = broker::broadcast_message(
             &mut conn,
             &FakeNotifier::succeeding(),
             MAX_TEXT_LEN,
@@ -450,17 +355,9 @@ mod timeline_regressions {
         .unwrap();
         assert_eq!(result[0]["recipients"], 0);
         let id = result[0]["message"]["message_id"].as_i64().unwrap();
-        assert!(
-            list_timeline_records(&conn, fleet, 200)
-                .map(|records| records
-                    .iter()
-                    .map(crate::presentation::message)
-                    .collect::<Vec<_>>())
-                .unwrap()
-                .is_empty()
-        );
+        assert!(list_timeline(&conn, fleet, 200).unwrap().is_empty());
         assert_eq!(
-            get_message_record(&conn, id)
+            get_message(&conn, id)
                 .map(|record| crate::presentation::message_envelope(&record))
                 .unwrap()["message"],
             result[0]["message"]
@@ -504,34 +401,13 @@ mod timeline_regressions {
         )
         .unwrap();
         broker::deregister_member(&mut conn, worker_a).unwrap();
-        let a = list_timeline_records(&conn, fleet_a, 200)
-            .map(|records| {
-                records
-                    .iter()
-                    .map(crate::presentation::message)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap();
-        let b = list_timeline_records(&conn, fleet_b, 200)
-            .map(|records| {
-                records
-                    .iter()
-                    .map(crate::presentation::message)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap();
+        let a = list_timeline(&conn, fleet_a, 200).unwrap();
+        let b = list_timeline(&conn, fleet_b, 200).unwrap();
         assert_eq!(
-            a.iter()
-                .map(|r| r["message_id"].as_i64().unwrap())
-                .collect::<Vec<_>>(),
+            a.iter().map(|r| r.message_id).collect::<Vec<_>>(),
             [foreign]
         );
-        assert_eq!(
-            b.iter()
-                .map(|r| r["message_id"].as_i64().unwrap())
-                .collect::<Vec<_>>(),
-            [local]
-        );
+        assert_eq!(b.iter().map(|r| r.message_id).collect::<Vec<_>>(), [local]);
     }
 
     #[test]
@@ -548,76 +424,48 @@ mod timeline_regressions {
         }
         conn.execute_batch("UPDATE messages SET status_timestamp='2026-01-01T00:00:00+00:00', created_at='2099-01-01T00:00:00+00:00' WHERE message_id=3;
             UPDATE messages SET status_timestamp='2026-02-01T00:00:00+00:00', created_at='2020-01-01T00:00:00+00:00' WHERE message_id IN (1,2);").unwrap();
-        let rows = list_timeline_records(&conn, fleet, 200)
-            .map(|records| {
-                records
-                    .iter()
-                    .map(crate::presentation::message)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap();
+        let rows = list_timeline(&conn, fleet, 200).unwrap();
         assert_eq!(
-            rows.iter()
-                .map(|r| r["message_id"].as_i64().unwrap())
-                .collect::<Vec<_>>(),
+            rows.iter().map(|r| r.message_id).collect::<Vec<_>>(),
             [2, 1, 3]
         );
-        assert!(rows.iter().all(|r| r["origin_message_id"].is_null()));
+        assert!(rows.iter().all(|r| r.origin_message_id.is_none()));
     }
 
     #[test]
     fn timeline_filters_summaries_before_cap_and_keeps_partial_broadcast_as_rows() {
         let (_dir, mut conn, fleet, director, worker) = fixture();
         let notifier = FakeNotifier::succeeding();
-        broker::broadcast_message_record(&mut conn, &notifier, MAX_TEXT_LEN, director, "broadcast")
-            .map(|record| vec![crate::presentation::broadcast_outcome(&record)])
+        broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, director, "broadcast")
             .unwrap();
         for _ in 0..199 {
             common::send(&mut conn, &notifier, director, worker, "single");
         }
         conn.execute_batch("UPDATE messages SET status_timestamp='2026-01-01T00:00:00+00:00';
             UPDATE messages SET status_timestamp='2099-01-01T00:00:00+00:00' WHERE type='broadcast_summary';").unwrap();
-        let rows = list_timeline_records(&conn, fleet, 200)
-            .map(|records| {
-                records
-                    .iter()
-                    .map(crate::presentation::message)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap();
+        let rows = list_timeline(&conn, fleet, 200).unwrap();
         assert_eq!(
             rows.len(),
             200,
             "filter before limit, not after fetching 200 mixed rows"
         );
         assert_eq!(
-            rows.iter()
-                .map(|r| r["message_id"].as_i64().unwrap())
-                .collect::<Vec<_>>(),
+            rows.iter().map(|r| r.message_id).collect::<Vec<_>>(),
             (3..=202).rev().collect::<Vec<_>>()
         );
         let partial: Vec<_> = rows
             .iter()
-            .filter(|r| !r["origin_message_id"].is_null())
+            .filter(|r| r.origin_message_id.is_some())
             .collect();
         assert_eq!(
             partial.len(),
             1,
             "row cap must not be widened to complete a group"
         );
-        assert_eq!(partial[0]["status_state"], "input_required");
+        assert_eq!(partial[0].status.as_str(), "input_required");
+        assert_eq!(list_timeline(&conn, fleet, 201).unwrap().len(), 201);
         assert_eq!(
-            list_timeline_records(&conn, fleet, 201)
-                .map(|records| records
-                    .iter()
-                    .map(crate::presentation::message)
-                    .collect::<Vec<_>>())
-                .unwrap()
-                .len(),
-            201
-        );
-        assert_eq!(
-            get_message_record(&conn, 1)
+            get_message(&conn, 1)
                 .map(|record| crate::presentation::message_envelope(&record))
                 .unwrap()["message"]["type"],
             "broadcast_summary"
@@ -665,7 +513,7 @@ mod integrity_regressions {
         )
         .unwrap();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            broker::get_message_record(&conn, id)
+            broker::get_message(&conn, id)
                 .map(|record| crate::presentation::message_envelope(&record))
         }));
         let error = result
@@ -681,30 +529,126 @@ mod integrity_regressions {
 }
 
 #[cfg(test)]
-mod step7_unbounded_compatibility {
+mod history_tests {
     use super::*;
-    use crate::broker::test_support as common;
-
-    #[test]
-    fn history_existing_two_argument_apis_remain_unbounded_beyond_1000_deliveries() {
+    use crate::broker::{self, test_support as common};
+    type Query = fn(&Connection, i64, HistoryOptions) -> Result<Vec<MessageRecord>, CafleetError>;
+    fn endpoints(sender: i64, owner: i64) -> [(i64, Query); 2] {
+        [
+            (owner, list_inbox_with_options),
+            (sender, list_sent_with_options),
+        ]
+    }
+    fn fixture(count: usize) -> (Connection, i64, i64) {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::db::migrate_to_head(&mut conn).unwrap();
         let (fleet, sender) = common::create_fleet(&mut conn, "history");
         let owner = common::register(&mut conn, fleet, "owner", None);
         let tx = conn.transaction().unwrap();
-        for id in 1..=1205 {
-            tx.execute("INSERT INTO messages(message_id,owner_member_id,from_member_id,to_member_id,type,created_at,status_state,status_timestamp,origin_message_id,text) VALUES (?1,?2,?3,?2,'unicast','raw-created','input_required','same-status',NULL,'body')",params![id,owner,sender]).unwrap();
+        for id in 1..=count as i64 {
+            tx.execute("INSERT INTO messages(message_id,owner_member_id,from_member_id,to_member_id,type,created_at,status_state,status_timestamp,origin_message_id,text) VALUES (?1,?2,?3,?2,'unicast','2026-01-01T00:00:00Z','input_required','2026-01-02T00:00:00Z',NULL,'body')", params![id,owner,sender]).unwrap();
         }
+        tx.execute("INSERT INTO messages(message_id,owner_member_id,from_member_id,to_member_id,type,created_at,status_state,status_timestamp,origin_message_id,text) VALUES (20000,?1,?2,NULL,'broadcast_summary','2026-02-01T00:00:00Z','completed','2026-02-01T00:00:00Z',20000,'summary')", params![owner,sender]).unwrap();
         tx.commit().unwrap();
-        for rows in [
-            list_inbox_records(&conn, owner).unwrap(),
-            list_sent_records(&conn, sender).unwrap(),
-        ] {
-            assert_eq!(rows.len(), 1205);
+        (conn, sender, owner)
+    }
+
+    fn ids(rows: &[MessageRecord]) -> Vec<i64> {
+        rows.iter().map(|row| row.message_id).collect()
+    }
+
+    #[test]
+    fn history_options_preserve_unbounded_compatibility_and_all_boundary_result_counts() {
+        assert_eq!(HistoryOptions::default(), HistoryOptions { limit: None });
+        for count in [0, 200, 201, 1205] {
+            let (conn, sender, owner) = fixture(count);
+            for (subject, query) in endpoints(sender, owner) {
+                let unbounded = query(&conn, subject, HistoryOptions::default()).unwrap();
+                assert_eq!(
+                    ids(&unbounded),
+                    (1..=count as i64).rev().collect::<Vec<_>>()
+                );
+                for limit in [1, 200, 201, 1000] {
+                    let rows =
+                        query(&conn, subject, HistoryOptions { limit: Some(limit) }).unwrap();
+                    assert_eq!(
+                        rows,
+                        unbounded.iter().take(limit).cloned().collect::<Vec<_>>()
+                    );
+                }
+            }
             assert_eq!(
-                rows.iter().map(|row| row.message_id).collect::<Vec<_>>(),
-                (1..=1205).rev().collect::<Vec<_>>()
+                broker::list_inbox(&conn, owner).unwrap(),
+                broker::list_inbox_with_options(&conn, owner, HistoryOptions::default()).unwrap()
             );
+            assert_eq!(
+                broker::list_sent(&conn, sender).unwrap(),
+                broker::list_sent_with_options(&conn, sender, HistoryOptions::default()).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn history_scope_order_and_ack_fields_survive_options_and_deregistration() {
+        let (mut conn, sender, owner) = fixture(3);
+        // Recipient deliberately differs from owner: inbox membership uses owner.
+        conn.execute(
+            "UPDATE messages SET to_member_id=?1 WHERE type='unicast'",
+            [sender],
+        )
+        .unwrap();
+        conn.execute("UPDATE messages SET created_at='2020-01-01T00:00:00Z',status_timestamp='2026-01-03T00:00:00Z',status_state='completed' WHERE message_id=1",[]).unwrap();
+        broker::deregister_member(&mut conn, owner).unwrap();
+        for (subject, query) in endpoints(sender, owner) {
+            let rows = query(&conn, subject, HistoryOptions { limit: Some(3) }).unwrap();
+            assert_eq!(ids(&rows), vec![1, 3, 2]);
+            assert_eq!(rows[0].created_at, "2020-01-01T00:00:00Z");
+            assert_eq!(rows[0].status, broker::records::MessageStatus::Completed);
+            assert_eq!(rows[0].origin_message_id, None);
+            assert_eq!(rows[0].to_member_id, Some(sender));
+            assert!(
+                query(&conn, 999999, HistoryOptions { limit: Some(1) })
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+        assert!(
+            broker::list_inbox_with_options(&conn, sender, HistoryOptions { limit: Some(1) })
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            broker::list_sent_with_options(&conn, owner, HistoryOptions { limit: Some(1) })
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn invalid_history_limit_fails_before_querying() {
+        let conn = Connection::open_in_memory().unwrap();
+        for (subject, query) in endpoints(1, 2) {
+            for limit in [0, 1001, usize::MAX] {
+                assert!(
+                    matches!(query(&conn, subject, HistoryOptions { limit: Some(limit) }),
+                Err(CafleetError::Value(message)) if message == HISTORY_LIMIT_ERROR)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn history_limit_applies_before_decoding() {
+        let (conn, sender, owner) = fixture(3);
+        conn.execute_batch("PRAGMA ignore_check_constraints=ON; UPDATE messages SET status_state='corrupt-status' WHERE message_id=1").unwrap();
+        for (subject, query) in endpoints(sender, owner) {
+            assert_eq!(
+                ids(&query(&conn, subject, HistoryOptions { limit: Some(2) }).unwrap()),
+                [3, 2]
+            );
+            assert!(matches!(query(&conn, subject, HistoryOptions::default()),
+            Err(CafleetError::InvalidStoredValue { field, value })
+            if field == "messages.status_state" && value == "corrupt-status"));
         }
     }
 }

@@ -21,8 +21,8 @@ Director → monitor → ordinary member kind precedence. Missing placement
 remains null, while a placement whose pane is pending remains an object
 with `mux_pane_id: null`.
 
-`list_member_records` returns active members with activity. The WebUI uses
-`list_roster_records` with message holders included: active members plus
+`list_members` returns active members with activity. The WebUI uses
+`list_roster` with message holders included: active members plus
 deregistered members for whom an owned message exists
 (`messages.owner_member_id = members.member_id`). A sender-only reference
 does not include a deregistered member. The lean roster query keeps

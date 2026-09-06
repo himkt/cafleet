@@ -56,7 +56,7 @@ Shared diagnosis and connection reuse preserve CLI behavior while roster
 query separation and batched name lookup avoid unused database work. Idle
 calculation clamps only its final result to zero.
 
-Keep `Diagnosis` as facts: `SchemaState` is `Missing`, `Unversioned`, `Behind`,
+Keep diagnosis as facts: `SchemaState` is `Missing`, `Unversioned`, `Behind`,
 `Head`, `Ahead`, or `Unreachable`; `AssetState` records each agent's resolved
 path/source, matching or stale current install, missing current install, or
 path error, with superseded installs kept separately. Preserve versions and
@@ -78,8 +78,8 @@ pane compensation on broker failure. The slot then stays empty; successful
 creation keeps the same connection. Observers report the real remaining
 connection and must not reopen it just to supply an observation.
 
-Keep `list_roster_records` free of message activity aggregates;
-`list_member_records` supplies activity for CLI member listing. Batch
+Keep `list_roster` free of message activity aggregates;
+`list_members` supplies activity for CLI member listing. Batch
 `get_member_names` by at most 500 unique bound ids, preserving empty-input,
 unknown-id, and deregistered-member behavior. See
 [query and activity contracts](spec/data-model.md#query-and-activity-contracts).
@@ -139,9 +139,9 @@ or change user configuration to obtain it. Injected operation failures verify
 recovery behavior, not cross-device rename support.
 
 Stage validation checks embedded file membership, digests and required skill
-entry points. Runtime-document generation and its required-reference closure
-extend this same validation before swapping when those assets are bundled;
-they are a separate change from the installer recovery work. See the
+entry points. Runtime references in `skills/cafleet/reference/runtime/` are relative symlinks
+to `docs/docs/`. The build embeds their contents as ordinary installed files. `mise //cafleet:docs-check`
+validates links and anchors in the installed skills for each coding agent. See the
 [installation recovery contract](spec/cli-options.md#assets-install-recovery).
 
 ## Frontend resource tests

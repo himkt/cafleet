@@ -112,7 +112,7 @@ pub fn monitor_tick(
         return Ok(TickResult::Stop);
     }
 
-    let runtime = broker::read_monitor_runtime_record(conn, fleet_id)?.ok_or_else(|| {
+    let runtime = broker::read_monitor_runtime(conn, fleet_id)?.ok_or_else(|| {
         CafleetError::InvalidStoredValue {
             field: "monitor_runtime.fleet_id".into(),
             value: fleet_id.to_string(),
@@ -146,7 +146,7 @@ pub fn monitor_tick(
     let Some(monitor_id) = broker::active_monitor_member_id(conn, fleet_id)? else {
         return Ok(TickResult::Continue);
     };
-    let monitor = broker::get_member_record(conn, monitor_id, fleet_id)?;
+    let monitor = broker::get_member(conn, monitor_id, fleet_id)?;
     let monitor_pane = monitor
         .as_ref()
         .and_then(|member| member.placement.as_ref())
@@ -159,8 +159,8 @@ pub fn monitor_tick(
         return Ok(TickResult::Continue);
     }
 
-    let roster = broker::list_fleet_wake_target_records(conn, fleet_id)?;
-    let director = broker::fleet_wake_director_record(conn, fleet_id)?;
+    let roster = broker::list_fleet_wake_targets(conn, fleet_id)?;
+    let director = broker::fleet_wake_director(conn, fleet_id)?;
     let entries = roster.iter().map(wake_descriptor).collect::<Vec<_>>();
     let woke = mux
         .send_wake_entries(
@@ -218,36 +218,6 @@ pub(crate) struct MonitorLoopHooks<'a> {
     pub now: &'a dyn Fn() -> DateTime<Utc>,
     pub register: &'a RegisterSignal<'a>,
     pub sleep: &'a dyn Fn(u64, &AtomicBool),
-    pub observe: &'a dyn for<'event> Fn(MonitorEvent<'event>),
-}
-
-// The standard observer is a no-op; injected observers inspect these facts.
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) enum MonitorEvent<'a> {
-    Claimed {
-        conn: &'a Connection,
-    },
-    SignalRegistered {
-        signal: MonitorSignal,
-    },
-    SignalUnregistered {
-        signal: MonitorSignal,
-        removed: bool,
-    },
-    StartupWriteFinished {
-        result: &'a std::io::Result<()>,
-    },
-    StartupFlushFinished {
-        result: &'a std::io::Result<()>,
-    },
-    TickFinished {
-        conn: &'a Connection,
-        result: &'a Result<TickResult, CafleetError>,
-    },
-    ClearFinished {
-        conn: &'a Connection,
-        result: &'a Result<(), CafleetError>,
-    },
 }
 
 struct SystemSignalHandle(signal_hook::SigId);
@@ -261,7 +231,7 @@ struct MonitorLease<'a, 'h> {
     conn: &'a mut Connection,
     fleet_id: i64,
     hooks: &'h MonitorLoopHooks<'h>,
-    handles: Vec<(MonitorSignal, Box<dyn MonitorSignalHandle>)>,
+    handles: Vec<Box<dyn MonitorSignalHandle>>,
     armed: bool,
 }
 impl MonitorLease<'_, '_> {
@@ -270,16 +240,10 @@ impl MonitorLease<'_, '_> {
             return Ok(());
         }
         self.armed = false;
-        for (signal, handle) in self.handles.drain(..) {
-            let removed = handle.unregister();
-            (self.hooks.observe)(MonitorEvent::SignalUnregistered { signal, removed });
+        for handle in self.handles.drain(..) {
+            handle.unregister();
         }
-        let result = broker::clear_monitor_runtime(self.conn, self.fleet_id, self.hooks.pid);
-        (self.hooks.observe)(MonitorEvent::ClearFinished {
-            conn: self.conn,
-            result: &result,
-        });
-        result
+        broker::clear_monitor_runtime(self.conn, self.fleet_id, self.hooks.pid)
     }
     fn finish(mut self, outcome: Result<(), CafleetError>) -> Result<(), CafleetError> {
         match (outcome, self.cleanup()) {
@@ -328,7 +292,6 @@ pub fn run_monitor_loop(
             now: &now_utc,
             register: &register,
             sleep: &interruptible_sleep,
-            observe: &|_| {},
         },
     )
 }
@@ -362,33 +325,25 @@ pub(crate) fn run_monitor_loop_with_hooks(
         handles: Vec::new(),
         armed: true,
     };
-    (hooks.observe)(MonitorEvent::Claimed { conn: lease.conn });
     let outcome = (|| {
         for signal in [MonitorSignal::Terminate, MonitorSignal::Interrupt] {
             let handle = (hooks.register)(signal, Arc::clone(&hooks.stop)).map_err(|e| {
                 CafleetError::App(format!("cannot install the signal handler: {e}"))
             })?;
-            lease.handles.push((signal, handle));
-            (hooks.observe)(MonitorEvent::SignalRegistered { signal });
+            lease.handles.push(handle);
         }
         let result = writeln!(
             out,
             "monitor loop started (fleet {fleet_id}, tick {tick_seconds}s, pid {pid})"
         );
-        (hooks.observe)(MonitorEvent::StartupWriteFinished { result: &result });
         result.map_err(|e| CafleetError::App(format!("stdout write failed: {e}")))?;
         let result = out.flush();
-        (hooks.observe)(MonitorEvent::StartupFlushFinished { result: &result });
         result.map_err(|e| CafleetError::App(format!("stdout flush failed: {e}")))?;
         loop {
             if hooks.stop.load(Ordering::Relaxed) {
                 return Ok(());
             }
             let result = monitor_tick(lease.conn, mux, out, fleet_id, pid, (hooks.now)());
-            (hooks.observe)(MonitorEvent::TickFinished {
-                conn: lease.conn,
-                result: &result,
-            });
             match result? {
                 TickResult::Stop => return Ok(()),
                 TickResult::Continue => {}
@@ -558,7 +513,7 @@ mod tests {
     }
 
     fn last_wake_at(conn: &rusqlite::Connection, fleet_id: i64) -> Value {
-        broker::read_monitor_runtime_record(conn, fleet_id)
+        broker::read_monitor_runtime(conn, fleet_id)
             .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
             .unwrap()
             .unwrap()["last_wake_at"]
@@ -566,7 +521,7 @@ mod tests {
     }
 
     fn wake_requested_at(conn: &rusqlite::Connection, fleet_id: i64) -> Value {
-        broker::read_monitor_runtime_record(conn, fleet_id)
+        broker::read_monitor_runtime(conn, fleet_id)
             .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
             .unwrap()
             .unwrap()["wake_requested_at"]
@@ -825,7 +780,7 @@ mod tests {
             assert!(echo.is_empty());
             assert_eq!(last_wake_at(&conn, fleet_id), Value::Null);
 
-            let row = broker::read_monitor_runtime_record(&conn, fleet_id)
+            let row = broker::read_monitor_runtime(&conn, fleet_id)
                 .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
                 .unwrap()
                 .unwrap();
@@ -910,7 +865,7 @@ mod tests {
                 "0 disables the wake from the next tick"
             );
             assert!(echo.is_empty());
-            let row = broker::read_monitor_runtime_record(&conn, fleet_id)
+            let row = broker::read_monitor_runtime(&conn, fleet_id)
                 .map(|record| record.as_ref().map(crate::presentation::monitor_runtime))
                 .unwrap()
                 .unwrap();
@@ -1340,3 +1295,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod cleanup_tests;

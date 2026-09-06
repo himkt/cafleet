@@ -474,8 +474,7 @@ guards and command work. The output and failure rules below remain unchanged.
 | `Behind` / `Head` / `Ahead` | Recorded schema version is below / equal to / above embedded head. |
 | `Unreachable` | Opening or inspecting the database failed; retain the original cause. |
 
-`Diagnosis` holds schema and per-agent/path `AssetState` facts rather than
-display strings. Assets retain their path source, current matching/stale or
+Schema and per-agent/path `AssetState` facts carry the diagnostic state. Assets retain their path source, current matching/stale or
 missing install, path-resolution error, incomplete recovery, and informational
 superseded records. Incomplete recovery uses the existing JSON keys with
 `state: "incomplete"` and its recovery diagnostic in `error`.

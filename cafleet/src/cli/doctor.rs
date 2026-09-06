@@ -9,11 +9,11 @@ use clap::Args;
 use serde_json::{Value, json};
 use unicode_width::UnicodeWidthStr;
 
+use super::InvocationHooks;
 use super::helpers::{emit, resolve_mux, tilde};
-use super::{InvocationEvent, InvocationHooks, SchemaPoint, inspect_schema};
 use crate::config::Settings;
 use crate::config_dir::DirSource;
-use crate::diagnosis::{self, AssetMode, AssetReport, AssetState, Diagnosis, SchemaState};
+use crate::diagnosis::{self, AssetMode, AssetReport, AssetState, SchemaState};
 use crate::error::CafleetError;
 use crate::multiplexer::{Multiplexer, MultiplexerContext};
 use crate::presentation;
@@ -51,17 +51,14 @@ pub fn run(
 
     let mux = multiplexer_report(settings);
     let conn = (hooks.connect)(&settings.database_url);
-    let mut facts = Diagnosis {
-        head_version: crate::db::head_version(),
-        schema: match &conn {
-            Ok(conn) => inspect_schema(conn, SchemaPoint::Doctor, hooks),
-            Err(cause) => SchemaState::Unreachable {
-                cause: cause.clone(),
-            },
+    let head = crate::db::head_version();
+    let schema = match &conn {
+        Ok(conn) => diagnosis::classify_schema(conn, head),
+        Err(cause) => SchemaState::Unreachable {
+            cause: cause.clone(),
         },
-        assets: None,
     };
-    let db_ok = matches!(facts.schema, SchemaState::Head { .. });
+    let db_ok = matches!(schema, SchemaState::Head { .. });
     let asset_conn = if db_ok { conn.as_ref().ok() } else { None };
     let assets = diagnosis::diagnose_assets(
         asset_conn,
@@ -70,18 +67,8 @@ pub fn run(
         super::VERSION,
         AssetMode::Report,
     );
-    (hooks.observe)(InvocationEvent::AssetsInspected {
-        conn: asset_conn,
-        result: &assets,
-    });
-    facts.assets = Some(assets);
-    let assets = facts
-        .assets
-        .as_ref()
-        .expect("assets inspected")
-        .as_ref()
-        .map_err(Clone::clone)?;
-    let agents = agent_rows(&home, assets);
+    let assets = assets?;
+    let agents = agent_rows(&home, &assets);
     let superseded = &assets.superseded;
 
     let issues = usize::from(mux.is_err())
@@ -112,8 +99,8 @@ pub fn run(
                 "error": error,
             }),
         },
-        "database": presentation::doctor_database(&facts.schema, facts.head_version),
-        "coding_agents": presentation::doctor_assets(assets, super::VERSION),
+        "database": presentation::doctor_database(&schema, head),
+        "coding_agents": presentation::doctor_assets(&assets, super::VERSION),
         "issues": issues,
     });
 
@@ -139,7 +126,7 @@ pub fn run(
         lines.push(format!("{} database", if db_ok { "✓" } else { "✗" }));
         lines.push(format!(
             "  {}",
-            presentation::doctor_database_detail(&facts.schema)
+            presentation::doctor_database_detail(&schema)
         ));
         lines.push(format!(
             "{} coding agents",

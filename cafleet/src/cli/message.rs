@@ -115,7 +115,7 @@ pub fn run(
             let text = resolve_body(body.text.as_deref(), body.file.as_deref(), "--file")?;
 
             let notifier = RuntimeNotifier::new(settings);
-            let outcome = broker::send_message_record(
+            let outcome = broker::send_message(
                 conn,
                 &notifier,
                 settings.max_text_len,
@@ -148,7 +148,7 @@ pub fn run(
             let text = resolve_body(body.text.as_deref(), body.file.as_deref(), "--file")?;
 
             let notifier = RuntimeNotifier::new(settings);
-            let result = broker::broadcast_message_record(
+            let result = broker::broadcast_message(
                 conn,
                 &notifier,
                 settings.max_text_len,
@@ -169,7 +169,7 @@ pub fn run(
             Ok(())
         }
         MessageCommand::Poll { member_id, json } => {
-            let result = broker::poll_message_records(conn, member_id)?
+            let result = broker::poll_messages(conn, member_id)?
                 .iter()
                 .map(presentation::message)
                 .collect();
@@ -180,16 +180,14 @@ pub fn run(
             Ok(())
         }
         MessageCommand::Ack { message_id, json } => {
-            let result =
-                presentation::message_envelope(&broker::ack_message_record(conn, message_id)?);
+            let result = presentation::message_envelope(&broker::ack_message(conn, message_id)?);
             emit_result(settings, result, json, |result| {
                 format!("Message acknowledged.\n{}", format_message(result))
             });
             Ok(())
         }
         MessageCommand::Show { message_id, json } => {
-            let result =
-                presentation::message_envelope(&broker::get_message_record(conn, message_id)?);
+            let result = presentation::message_envelope(&broker::get_message(conn, message_id)?);
             emit_result(settings, result, json, format_message);
             Ok(())
         }

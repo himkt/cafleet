@@ -198,16 +198,14 @@ fn stale_prechecks_on_two_connections_cannot_register_two_monitors() {
     fleet(&a, 1);
     assert_eq!(broker::active_monitor_member_id(&a, 1).unwrap(), None);
     assert_eq!(broker::active_monitor_member_id(&b, 1).unwrap(), None);
-    let winner =
-        broker::register_member_record(&mut a, 1, "winner", "", &[], Some(&placement()), true)
-            .map(|record| cafleet::presentation::registered_member(&record))
-            .unwrap();
+    let winner = broker::register_member(&mut a, 1, "winner", "", &[], Some(&placement()), true)
+        .map(|record| cafleet::presentation::registered_member(&record))
+        .unwrap();
     let id = winner["member_id"].as_i64().unwrap();
     let before = records(&a);
-    let error =
-        broker::register_member_record(&mut b, 1, "loser", "", &[], Some(&placement()), true)
-            .map(|record| cafleet::presentation::registered_member(&record))
-            .unwrap_err();
+    let error = broker::register_member(&mut b, 1, "loser", "", &[], Some(&placement()), true)
+        .map(|record| cafleet::presentation::registered_member(&record))
+        .unwrap_err();
     assert!(matches!(
         &error,
         cafleet::error::CafleetError::ActiveMonitorExists { fleet_id: 1, member_id }
@@ -236,7 +234,7 @@ fn an_unrelated_unique_constraint_is_not_reported_as_an_existing_monitor() {
         .unwrap();
     let before = records(&conn);
     let error =
-        broker::register_member_record(&mut conn, 1, "member-1", "", &[], Some(&placement()), true)
+        broker::register_member(&mut conn, 1, "member-1", "", &[], Some(&placement()), true)
             .map(|record| cafleet::presentation::registered_member(&record))
             .unwrap_err();
     assert!(
@@ -260,10 +258,9 @@ fn placement_failure_rolls_back_monitor_registration() {
     fleet(&conn, 1);
     conn.execute_batch("CREATE TRIGGER fail_placement BEFORE INSERT ON member_placements BEGIN SELECT RAISE(ABORT, 'fixture placement failure'); END").unwrap();
     let before = records(&conn);
-    let error =
-        broker::register_member_record(&mut conn, 1, "monitor", "", &[], Some(&placement()), true)
-            .map(|record| cafleet::presentation::registered_member(&record))
-            .unwrap_err();
+    let error = broker::register_member(&mut conn, 1, "monitor", "", &[], Some(&placement()), true)
+        .map(|record| cafleet::presentation::registered_member(&record))
+        .unwrap_err();
     assert!(
         error.to_string().contains("fixture placement failure"),
         "{error}"
@@ -303,7 +300,7 @@ fn bootstrap_director_has_no_monitor_marker_and_director_display_still_wins() {
     )
     .unwrap();
     assert_eq!(
-        broker::get_member_record(&conn, director, fleet)
+        broker::get_member(&conn, director, fleet)
             .map(|record| record.as_ref().map(cafleet::presentation::member))
             .unwrap()
             .unwrap()["kind"],

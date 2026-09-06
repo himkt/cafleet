@@ -3,15 +3,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
 use pulldown_cmark::{Event, LinkType, Options, Parser, Tag, TagEnd};
-use serde_json::Value;
 
-const RUNTIME: &str = "skills/cafleet/reference/runtime";
-const SPEC_URL: &str = "https://github.com/himkt/cafleet/blob/main/SPEC.md";
 type Files = BTreeMap<PathBuf, String>;
 
 #[derive(Default)]
 struct Markdown {
-    links: Vec<(String, Vec<String>)>,
+    links: Vec<String>,
     anchors: BTreeSet<String>,
     obsolete: Vec<String>,
 }
@@ -39,8 +36,7 @@ fn parse(text: &str) -> Markdown {
         Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_HEADING_ATTRIBUTES,
         Some(&mut broken),
     );
-    let mut headings: Vec<(usize, String)> = Vec::new();
-    let mut heading: Option<(usize, Option<String>, String)> = None;
+    let mut heading: Option<(Option<String>, String)> = None;
     let mut duplicate = BTreeMap::<String, usize>::new();
     let mut code = false;
     let mut link_depth = 0;
@@ -48,11 +44,11 @@ fn parse(text: &str) -> Markdown {
         match event {
             Event::Start(Tag::CodeBlock(_)) => code = true,
             Event::End(TagEnd::CodeBlock) => code = false,
-            Event::Start(Tag::Heading { level, id, .. }) => {
-                heading = Some((level as usize, id.map(|id| id.to_string()), String::new()));
+            Event::Start(Tag::Heading { id, .. }) => {
+                heading = Some((id.map(|id| id.to_string()), String::new()));
             }
             Event::End(TagEnd::Heading(_)) => {
-                let (level, id, title) = heading.take().unwrap();
+                let (id, title) = heading.take().unwrap();
                 let base = id.unwrap_or_else(|| slug(&title));
                 let count = duplicate.entry(base.clone()).or_default();
                 result.anchors.insert(if *count == 0 {
@@ -61,21 +57,14 @@ fn parse(text: &str) -> Markdown {
                     format!("{base}-{count}")
                 });
                 *count += 1;
-                while headings.last().is_some_and(|h| h.0 >= level) {
-                    headings.pop();
-                }
-                headings.push((level, slug(&title)));
             }
             Event::Start(Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. }) => {
-                result.links.push((
-                    dest_url.to_string(),
-                    headings.iter().map(|h| h.1.clone()).collect(),
-                ));
+                result.links.push(dest_url.to_string());
                 link_depth += 1;
             }
             Event::End(TagEnd::Link | TagEnd::Image) => link_depth -= 1,
             Event::Code(value) => {
-                if let Some((_, _, title)) = &mut heading {
+                if let Some((_, title)) = &mut heading {
                     title.push_str(&value);
                 }
                 // Link labels and fenced examples are not instructions to open a file.
@@ -87,7 +76,7 @@ fn parse(text: &str) -> Markdown {
                 }
             }
             Event::Text(value) if !code => {
-                if let Some((_, _, title)) = &mut heading {
+                if let Some((_, title)) = &mut heading {
                     title.push_str(&value);
                 }
             }
@@ -143,7 +132,7 @@ fn validate(files: &Files) -> Result<(), String> {
                 doc.obsolete
             ));
         }
-        for (url, _) in doc.links {
+        for url in doc.links {
             if let Some((target, anchor)) = local(path, &url)? {
                 let target_content = files.get(&target).ok_or_else(|| {
                     format!("{} -> {url}: missing {}", path.display(), target.display())
@@ -201,109 +190,7 @@ fn bootstrap_block(text: &str, agent: &str) -> String {
     out.replace_range(start..finish, &format!("\n\n```text\n{prompt}```\n\n"));
     out
 }
-fn manifest_check(root: &Path, manifest: &Value, runtime: &Files) {
-    let refs = manifest["references"].as_array().unwrap();
-    assert_eq!(refs.len(), 29);
-    let mut expected = BTreeMap::<(String, String, String), usize>::new();
-    let mut ids = BTreeSet::new();
-    for r in refs {
-        assert!(ids.insert(r["id"].as_str().unwrap()));
-        let source = r["source"].as_str().unwrap();
-        let target = r["target"].as_str().unwrap();
-        if r["classification"] == "optional" {
-            assert_eq!(r["id"], "L29");
-            assert_eq!(target, SPEC_URL);
-            for content in [
-                std::fs::read_to_string(root.join("docs/docs").join(source)).unwrap(),
-                runtime[&Path::new("cafleet/reference/runtime").join(source)].clone(),
-            ] {
-                assert_eq!(
-                    parse(&content)
-                        .links
-                        .iter()
-                        .filter(|l| l.0 == SPEC_URL)
-                        .count(),
-                    1
-                );
-                assert!(content.contains("optional reference"));
-            }
-            continue;
-        }
-        assert_eq!(r["classification"], "required");
-        let key = (
-            source.to_string(),
-            slug(r["heading"].as_str().unwrap()),
-            target.to_string(),
-        );
-        let count = expected.entry(key).or_default();
-        *count += 1;
-        assert_eq!(r["occurrence"].as_u64().unwrap() as usize, *count);
-    }
-    assert_eq!(expected.values().sum::<usize>(), 28);
-    let mut actual = BTreeMap::new();
-    let mut skills = Files::new();
-    collect(
-        &root.join("skills/cafleet"),
-        &root.join("skills/cafleet"),
-        &mut skills,
-    );
-    for (source, content) in skills {
-        if source.starts_with("reference/runtime") {
-            continue;
-        }
-        for (url, headings) in parse(&content).links {
-            if let Some((target, _)) = local(&Path::new("cafleet").join(&source), &url).unwrap()
-                && target.starts_with("cafleet/reference/runtime")
-            {
-                let heading = headings
-                    .iter()
-                    .rev()
-                    .find(|heading| {
-                        expected.contains_key(&(
-                            source.display().to_string(),
-                            (*heading).clone(),
-                            url.clone(),
-                        ))
-                    })
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "unclassified runtime reference: {} -> {url}",
-                            source.display()
-                        )
-                    });
-                *actual
-                    .entry((source.display().to_string(), heading.clone(), url))
-                    .or_insert(0usize) += 1;
-            }
-        }
-    }
-    assert_eq!(actual, expected, "runtime manifest occurrence drift");
-    for r in manifest["optional_runtime_references"].as_array().unwrap() {
-        let source = r["source"].as_str().unwrap();
-        let target = r["target"].as_str().unwrap();
-        assert!(!r["reason"].as_str().unwrap().is_empty());
-        for content in [
-            std::fs::read_to_string(root.join("docs/docs").join(source)).unwrap(),
-            runtime[&Path::new("cafleet/reference/runtime").join(source)].clone(),
-        ] {
-            assert_eq!(
-                parse(&content)
-                    .links
-                    .iter()
-                    .filter(|l| l.0 == target)
-                    .count(),
-                1
-            );
-            assert!(content.contains(r["label"].as_str().unwrap()));
-        }
-    }
-}
-
 pub(super) fn prepare(root: &Path, updates: &mut BTreeMap<PathBuf, (String, String)>) {
-    let manifest: Value = serde_json::from_str(include_str!(
-        "../../tests/fixtures/runtime-reference-manifest.json"
-    ))
-    .unwrap();
     for (file, agents) in [
         ("quickstart.md", &["claude"][..]),
         ("concepts/coding-agents.md", &["codex", "opencode"][..]),
@@ -324,55 +211,16 @@ pub(super) fn prepare(root: &Path, updates: &mut BTreeMap<PathBuf, (String, Stri
         }
         updates.insert(path, (original, rendered));
     }
-    let mut runtime = Files::new();
-    let pages: BTreeSet<_> = manifest["pages"]
-        .as_array()
-        .unwrap()
+    let files = crate::embedded::SKILLS
         .iter()
-        .map(|p| p.as_str().unwrap())
-        .collect();
-    assert_eq!(pages.len(), 12);
-    let destination = root.join(RUNTIME);
-    if destination.exists() {
-        let mut existing = Files::new();
-        collect(&destination, &destination, &mut existing);
-        assert_eq!(
-            existing
-                .keys()
-                .map(|p| p.to_str().unwrap())
-                .collect::<BTreeSet<_>>(),
-            pages,
-            "runtime file-set drift"
-        );
-    }
-    for page in pages {
-        let source = root.join("docs/docs").join(page);
-        let content = updates
-            .get(&source)
-            .map(|v| v.1.clone())
-            .unwrap_or_else(|| std::fs::read_to_string(&source).unwrap());
-        let target = destination.join(page);
-        updates.insert(
-            target.clone(),
+        .map(|(path, bytes)| {
             (
-                std::fs::read_to_string(target).unwrap_or_default(),
-                content.clone(),
-            ),
-        );
-        runtime.insert(Path::new("cafleet/reference/runtime").join(page), content);
-    }
-    validate(&runtime).unwrap();
-    manifest_check(root, &manifest, &runtime);
-    let mut all = Files::new();
-    for name in ["cafleet", "cafleet-design-doc"] {
-        collect(
-            &root.join("skills"),
-            &root.join("skills").join(name),
-            &mut all,
-        );
-    }
-    all.extend(runtime);
-    validate(&all).unwrap();
+                PathBuf::from(path),
+                std::str::from_utf8(bytes).unwrap().to_owned(),
+            )
+        })
+        .collect();
+    validate(&files).unwrap();
 }
 
 pub(super) fn installed(root: &Path) {

@@ -205,7 +205,7 @@ mod tests {
     fn member_records_preserve_roles_skills_and_optional_placement() {
         let (_dir, mut conn, fleet, director) = fixture();
         let skills = vec![json!({"nested": [null, true, 7]}), json!(["free", "form"])];
-        let registered = broker::register_member_record(
+        let registered = broker::register_member(
             &mut conn,
             fleet,
             "unplaced",
@@ -218,7 +218,7 @@ mod tests {
         assert_eq!(registered.name, "unplaced");
         assert!(registered.member_id > 0);
         assert!(!registered.registered_at.is_empty());
-        let row = broker::get_member_record(&conn, registered.member_id, fleet)
+        let row = broker::get_member(&conn, registered.member_id, fleet)
             .unwrap()
             .unwrap();
         assert_eq!(row.member_id, registered.member_id);
@@ -230,7 +230,7 @@ mod tests {
         assert_eq!(row.skills, skills);
         assert_eq!(row.placement, None);
         assert_eq!(
-            broker::get_member_record(&conn, director, fleet)
+            broker::get_member(&conn, director, fleet)
                 .unwrap()
                 .unwrap()
                 .kind,
@@ -238,14 +238,14 @@ mod tests {
         );
         let monitor = common::bootstrap_monitor(&conn, fleet);
         assert_eq!(
-            broker::get_member_record(&conn, monitor, fleet)
+            broker::get_member(&conn, monitor, fleet)
                 .unwrap()
                 .unwrap()
                 .kind,
             MemberKind::Monitor
         );
         let pending = common::register(&mut conn, fleet, "pending", None);
-        let placement = broker::get_member_record(&conn, pending, fleet)
+        let placement = broker::get_member(&conn, pending, fleet)
             .unwrap()
             .unwrap()
             .placement
@@ -255,7 +255,7 @@ mod tests {
         assert_eq!(placement.mux_window_id, "@1");
         assert_eq!(placement.mux_pane_id, None);
         assert_eq!(placement.coding_agent, "claude");
-        let activities = broker::list_member_records(&conn, fleet).unwrap();
+        let activities = broker::list_members(&conn, fleet).unwrap();
         let activity = activities
             .iter()
             .find(|a| a.member.member_id == registered.member_id)
@@ -266,14 +266,14 @@ mod tests {
             (&None, &None, &None)
         );
         assert_eq!(
-            broker::list_roster_records(&conn, fleet, false)
+            broker::list_roster(&conn, fleet, false)
                 .unwrap()
                 .into_iter()
                 .find(|m| m.member_id == row.member_id)
                 .unwrap(),
             row
         );
-        broker::send_message_record(
+        broker::send_message(
             &mut conn,
             &common::FakeNotifier::succeeding(),
             common::MAX_TEXT_LEN,
@@ -284,11 +284,11 @@ mod tests {
         .unwrap();
         broker::deregister_member(&mut conn, registered.member_id).unwrap();
         assert!(
-            broker::get_member_record(&conn, registered.member_id, fleet)
+            broker::get_member(&conn, registered.member_id, fleet)
                 .unwrap()
                 .is_none()
         );
-        let historical = broker::list_roster_records(&conn, fleet, true)
+        let historical = broker::list_roster(&conn, fleet, true)
             .unwrap()
             .into_iter()
             .find(|m| m.member_id == registered.member_id)
@@ -299,7 +299,7 @@ mod tests {
     #[test]
     fn corrupt_member_status_returns_the_domain_variant_from_storage() {
         let (_dir, mut conn, fleet, director) = fixture();
-        broker::send_message_record(
+        broker::send_message(
             &mut conn,
             &common::FakeNotifier::succeeding(),
             common::MAX_TEXT_LEN,
@@ -315,7 +315,7 @@ mod tests {
             [director],
         )
         .unwrap();
-        assert!(matches!(broker::list_roster_records(&conn, fleet, true),
+        assert!(matches!(broker::list_roster(&conn, fleet, true),
             Err(CafleetError::InvalidStoredValue { field, value })
             if field == "members.status" && value == "corrupt-status"));
     }
@@ -325,7 +325,7 @@ mod tests {
         let (_dir, mut conn, fleet, director) = fixture();
         let recipient = common::register(&mut conn, fleet, "recipient", Some("%9"));
         let notifier = common::FakeNotifier::failing();
-        let outcome = broker::send_message_record(
+        let outcome = broker::send_message(
             &mut conn,
             &notifier,
             common::MAX_TEXT_LEN,
@@ -350,23 +350,19 @@ mod tests {
         assert_eq!(message.text, "work");
         assert_eq!(message.status_timestamp, message.created_at);
         assert_eq!(
-            broker::get_message_record(&conn, message.message_id).unwrap(),
+            broker::get_message(&conn, message.message_id).unwrap(),
             message
         );
         assert_eq!(
-            broker::poll_message_records(&conn, recipient).unwrap(),
+            broker::poll_messages(&conn, recipient).unwrap(),
             vec![message.clone()]
         );
-        let ack = broker::ack_message_record(&mut conn, message.message_id).unwrap();
+        let ack = broker::ack_message(&mut conn, message.message_id).unwrap();
         assert_eq!(ack.status, MessageStatus::Completed);
         assert_eq!(ack.message_id, message.message_id);
         assert_eq!(ack.created_at, message.created_at);
         assert_eq!(ack.to_member_id, message.to_member_id);
-        assert!(
-            broker::poll_message_records(&conn, recipient)
-                .unwrap()
-                .is_empty()
-        );
+        assert!(broker::poll_messages(&conn, recipient).unwrap().is_empty());
         assert_eq!(notifier.calls.borrow().len(), 1);
     }
 
@@ -374,7 +370,7 @@ mod tests {
     fn broadcast_records_distinguish_summary_metadata_from_pending_deliveries() {
         let (_dir, mut conn, fleet, director) = fixture();
         let recipient = common::register(&mut conn, fleet, "recipient", Some("%9"));
-        let outcome = broker::broadcast_message_record(
+        let outcome = broker::broadcast_message(
             &mut conn,
             &common::FakeNotifier::succeeding(),
             common::MAX_TEXT_LEN,
@@ -394,10 +390,10 @@ mod tests {
             Some(outcome.message.message_id)
         );
         assert_eq!(
-            broker::get_message_record(&conn, outcome.message.message_id).unwrap(),
+            broker::get_message(&conn, outcome.message.message_id).unwrap(),
             outcome.message
         );
-        let deliveries = broker::poll_message_records(&conn, recipient).unwrap();
+        let deliveries = broker::poll_messages(&conn, recipient).unwrap();
         assert_eq!(deliveries.len(), 1);
         assert_eq!(deliveries[0].kind, MessageKind::Unicast);
         assert_eq!(deliveries[0].status, MessageStatus::InputRequired);
@@ -415,7 +411,7 @@ mod tests {
         let member = common::register(&mut conn, fleet, "worker name", Some("%9"));
         let notifier = common::FakeNotifier::succeeding();
         for _ in 0..2 {
-            broker::send_message_record(
+            broker::send_message(
                 &mut conn,
                 &notifier,
                 common::MAX_TEXT_LEN,
@@ -425,7 +421,7 @@ mod tests {
             )
             .unwrap();
         }
-        let targets = broker::list_fleet_wake_target_records(&conn, fleet).unwrap();
+        let targets = broker::list_fleet_wake_targets(&conn, fleet).unwrap();
         assert_eq!(
             targets,
             vec![WakeTarget {
@@ -435,7 +431,7 @@ mod tests {
                 pending_count: 2
             }]
         );
-        let root = broker::fleet_wake_director_record(&conn, fleet).unwrap();
+        let root = broker::fleet_wake_director(&conn, fleet).unwrap();
         assert_eq!(root.member_id, director);
         assert_eq!(root.coding_agent, "claude");
         assert_eq!(root.pending_count, 0);

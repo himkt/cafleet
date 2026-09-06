@@ -21,7 +21,7 @@ pub fn resolve_mux(settings: &Settings) -> Result<AnyMultiplexer, MultiplexerErr
 }
 
 /// The broker-side preview notifier. Construction is infallible even though
-/// it runs before `broker::send_message_record`: a multiplexer-resolution failure is
+/// it runs before `broker::send_message`: a multiplexer-resolution failure is
 /// retained as its raw string and exposed only from an attempted
 /// `send_inline_preview`, so it can never preempt the insert or fail an
 /// intentional skip (SPEC §6.2).

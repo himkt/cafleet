@@ -88,7 +88,7 @@ fn preview_text(text: &str, max_text_len: usize) -> String {
     truncate_text(Some(text), max_text_len).expect("Some input yields Some")
 }
 
-pub fn send_message_record(
+pub fn send_message(
     conn: &mut Connection,
     notifier: &dyn InlinePreviewSender,
     max_text_len: usize,
@@ -156,7 +156,7 @@ pub fn send_message_record(
     })
 }
 
-pub fn broadcast_message_record(
+pub fn broadcast_message(
     conn: &mut Connection,
     notifier: &dyn InlinePreviewSender,
     max_text_len: usize,
@@ -229,7 +229,7 @@ pub fn broadcast_message_record(
     })
 }
 
-pub fn poll_message_records(
+pub fn poll_messages(
     conn: &Connection,
     member_id: i64,
 ) -> Result<Vec<MessageRecord>, CafleetError> {
@@ -253,10 +253,7 @@ pub fn poll_message_records(
     Ok(rows)
 }
 
-pub fn ack_message_record(
-    conn: &mut Connection,
-    message_id: i64,
-) -> Result<MessageRecord, CafleetError> {
+pub fn ack_message(conn: &mut Connection, message_id: i64) -> Result<MessageRecord, CafleetError> {
     let row: Option<MessageStatus> = conn
         .query_row(
             "SELECT status_state FROM messages WHERE message_id=?1",
@@ -308,7 +305,7 @@ mod tests {
         let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
         let notifier = FakeNotifier::succeeding();
 
-        let outcome = broker::send_message_record(
+        let outcome = broker::send_message(
             &mut conn,
             &notifier,
             MAX_TEXT_LEN,
@@ -351,7 +348,7 @@ mod tests {
         let notifier = FakeNotifier::succeeding();
         let text = "a".repeat(10);
 
-        let result = broker::send_message_record(
+        let result = broker::send_message(
             &mut conn,
             &notifier,
             5,
@@ -375,7 +372,7 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (_, director_id) = create_fleet(&mut conn, "alpha");
         let notifier = FakeNotifier::succeeding();
-        let outcome = broker::send_message_record(
+        let outcome = broker::send_message(
             &mut conn,
             &notifier,
             MAX_TEXT_LEN,
@@ -403,7 +400,7 @@ mod tests {
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         let pending_id = register(&mut conn, fleet_id, "pending", None);
         let notifier = FakeNotifier::succeeding();
-        let outcome = broker::send_message_record(
+        let outcome = broker::send_message(
             &mut conn,
             &notifier,
             MAX_TEXT_LEN,
@@ -432,7 +429,7 @@ mod tests {
         let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
         let notifier = FakeNotifier::failing();
 
-        let outcome = broker::send_message_record(
+        let outcome = broker::send_message(
             &mut conn,
             &notifier,
             MAX_TEXT_LEN,
@@ -463,7 +460,7 @@ mod tests {
             "the payload keeps the exact envelope; notification_error never enters the JSON"
         );
 
-        let pending = broker::poll_message_records(&conn, member_id)
+        let pending = broker::poll_messages(&conn, member_id)
             .map(|records| {
                 records
                     .iter()
@@ -487,7 +484,7 @@ mod tests {
         let pending_id = register(&mut conn, fleet_id, "pending", None);
         let notifier = FakeNotifier::failing();
 
-        let outcome = broker::send_message_record(
+        let outcome = broker::send_message(
             &mut conn,
             &notifier,
             MAX_TEXT_LEN,
@@ -506,7 +503,7 @@ mod tests {
             "self-send attempts nothing"
         );
 
-        let outcome = broker::send_message_record(
+        let outcome = broker::send_message(
             &mut conn,
             &notifier,
             MAX_TEXT_LEN,
@@ -536,15 +533,9 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (_, director_id) = create_fleet(&mut conn, "alpha");
         let notifier = FakeNotifier::succeeding();
-        let err = broker::send_message_record(
-            &mut conn,
-            &notifier,
-            MAX_TEXT_LEN,
-            director_id,
-            "abc",
-            "hi",
-        )
-        .expect_err("a non-integer destination must error");
+        let err =
+            broker::send_message(&mut conn, &notifier, MAX_TEXT_LEN, director_id, "abc", "hi")
+                .expect_err("a non-integer destination must error");
         assert!(matches!(err, CafleetError::Value(_)));
         assert_eq!(err.message(), "Invalid destination format: abc");
     }
@@ -555,7 +546,7 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let _ = create_fleet(&mut conn, "alpha");
         let notifier = FakeNotifier::succeeding();
-        let err = broker::send_message_record(&mut conn, &notifier, MAX_TEXT_LEN, 999, "1", "hi")
+        let err = broker::send_message(&mut conn, &notifier, MAX_TEXT_LEN, 999, "1", "hi")
             .expect_err("an unknown sender must error");
         assert!(matches!(err, CafleetError::Value(_)));
         assert_eq!(err.message(), "Sender member not found or not active: 999");
@@ -567,15 +558,9 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (_, director_id) = create_fleet(&mut conn, "alpha");
         let notifier = FakeNotifier::succeeding();
-        let err = broker::send_message_record(
-            &mut conn,
-            &notifier,
-            MAX_TEXT_LEN,
-            director_id,
-            "999",
-            "hi",
-        )
-        .expect_err("a missing destination must error");
+        let err =
+            broker::send_message(&mut conn, &notifier, MAX_TEXT_LEN, director_id, "999", "hi")
+                .expect_err("a missing destination must error");
         assert!(matches!(err, CafleetError::Value(_)));
         assert_eq!(err.message(), "Destination member not found: 999");
     }
@@ -588,7 +573,7 @@ mod tests {
         let (fleet_b, _) = create_fleet(&mut conn, "beta");
         let stranger_id = register(&mut conn, fleet_b, "stranger", Some("%5"));
         let notifier = FakeNotifier::succeeding();
-        let err = broker::send_message_record(
+        let err = broker::send_message(
             &mut conn,
             &notifier,
             MAX_TEXT_LEN,
@@ -614,15 +599,10 @@ mod tests {
         let member_b = register(&mut conn, fleet_id, "b", Some("%3"));
         let notifier = FakeNotifier::succeeding();
 
-        let result = broker::broadcast_message_record(
-            &mut conn,
-            &notifier,
-            MAX_TEXT_LEN,
-            director_id,
-            "all hands",
-        )
-        .map(|record| vec![crate::presentation::broadcast_outcome(&record)])
-        .unwrap();
+        let result =
+            broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, director_id, "all hands")
+                .map(|record| vec![crate::presentation::broadcast_outcome(&record)])
+                .unwrap();
         assert_eq!(result.len(), 1, "single-element result list");
         let envelope = &result[0];
         assert_eq!(envelope["recipients"], 3, "monitor + two workers");
@@ -648,7 +628,7 @@ mod tests {
             (member_a, "%2"),
             (member_b, "%3"),
         ] {
-            let pending = broker::poll_message_records(&conn, recipient)
+            let pending = broker::poll_messages(&conn, recipient)
                 .map(|records| {
                     records
                         .iter()
@@ -687,15 +667,10 @@ mod tests {
         register(&mut conn, fleet_id, "pending", None);
         let notifier = FakeNotifier::succeeding();
 
-        let result = broker::broadcast_message_record(
-            &mut conn,
-            &notifier,
-            MAX_TEXT_LEN,
-            sender_id,
-            "hello",
-        )
-        .map(|record| vec![crate::presentation::broadcast_outcome(&record)])
-        .unwrap();
+        let result =
+            broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, sender_id, "hello")
+                .map(|record| vec![crate::presentation::broadcast_outcome(&record)])
+                .unwrap();
         let envelope = &result[0];
         assert_eq!(
             envelope["recipients"], 4,
@@ -751,15 +726,10 @@ mod tests {
             attempts: RefCell::new(0),
         };
 
-        let result = broker::broadcast_message_record(
-            &mut conn,
-            &notifier,
-            MAX_TEXT_LEN,
-            director_id,
-            "all hands",
-        )
-        .map(|record| vec![crate::presentation::broadcast_outcome(&record)])
-        .unwrap();
+        let result =
+            broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, director_id, "all hands")
+                .map(|record| vec![crate::presentation::broadcast_outcome(&record)])
+                .unwrap();
         assert_eq!(result.len(), 1, "still the single summary envelope");
         let envelope = &result[0];
         assert_eq!(
@@ -784,7 +754,7 @@ mod tests {
         );
 
         for recipient in [monitor_id, member_a, member_b] {
-            let pending = broker::poll_message_records(&conn, recipient)
+            let pending = broker::poll_messages(&conn, recipient)
                 .map(|records| {
                     records
                         .iter()
@@ -806,8 +776,7 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let _ = create_fleet(&mut conn, "alpha");
         let notifier = FakeNotifier::succeeding();
-        let err = broker::broadcast_message_record(&mut conn, &notifier, MAX_TEXT_LEN, 999, "hi")
-            .map(|record| vec![crate::presentation::broadcast_outcome(&record)])
+        let err = broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, 999, "hi")
             .expect_err("an unknown sender must error");
         assert!(matches!(err, CafleetError::Value(_)));
         assert_eq!(err.message(), "Sender member not found or not active: 999");
@@ -826,7 +795,7 @@ mod tests {
         let first_id = first["message"]["message_id"].as_i64().unwrap();
         let second_id = second["message"]["message_id"].as_i64().unwrap();
 
-        let pending = broker::poll_message_records(&conn, member_id)
+        let pending = broker::poll_messages(&conn, member_id)
             .map(|records| {
                 records
                     .iter()
@@ -838,10 +807,8 @@ mod tests {
         assert_eq!(pending[0]["message_id"], second_id, "newest first");
         assert_eq!(pending[1]["message_id"], first_id);
 
-        broker::ack_message_record(&mut conn, first_id)
-            .map(|record| crate::presentation::message_envelope(&record))
-            .unwrap();
-        let pending = broker::poll_message_records(&conn, member_id)
+        broker::ack_message(&mut conn, first_id).unwrap();
+        let pending = broker::poll_messages(&conn, member_id)
             .map(|records| {
                 records
                     .iter()
@@ -852,10 +819,8 @@ mod tests {
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0]["message_id"], second_id);
 
-        broker::broadcast_message_record(&mut conn, &notifier, 200, member_id, "fanout")
-            .map(|record| vec![crate::presentation::broadcast_outcome(&record)])
-            .unwrap();
-        let sender_pending = broker::poll_message_records(&conn, member_id)
+        broker::broadcast_message(&mut conn, &notifier, 200, member_id, "fanout").unwrap();
+        let sender_pending = broker::poll_messages(&conn, member_id)
             .map(|records| {
                 records
                     .iter()
@@ -874,7 +839,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let _ = create_fleet(&mut conn, "alpha");
-        let err = broker::poll_message_records(&conn, 999)
+        let err = broker::poll_messages(&conn, 999)
             .map(|records| {
                 records
                     .iter()
@@ -900,7 +865,7 @@ mod tests {
             .unwrap()
             .to_string();
 
-        let acked = broker::ack_message_record(&mut conn, message_id)
+        let acked = broker::ack_message(&mut conn, message_id)
             .map(|record| crate::presentation::message_envelope(&record))
             .unwrap();
         let message = &acked["message"];
@@ -922,17 +887,12 @@ mod tests {
         let sent = common::send(&mut conn, &notifier, director_id, member_id, "hi");
         let message_id = sent["message"]["message_id"].as_i64().unwrap();
 
-        let err = broker::ack_message_record(&mut conn, 999)
-            .map(|record| crate::presentation::message_envelope(&record))
-            .expect_err("missing message");
+        let err = broker::ack_message(&mut conn, 999).expect_err("missing message");
         assert!(matches!(err, CafleetError::Value(_)));
         assert_eq!(err.message(), "Message 999 not found");
 
-        broker::ack_message_record(&mut conn, message_id)
-            .map(|record| crate::presentation::message_envelope(&record))
-            .unwrap();
-        let err = broker::ack_message_record(&mut conn, message_id)
-            .map(|record| crate::presentation::message_envelope(&record))
+        broker::ack_message(&mut conn, message_id).unwrap();
+        let err = broker::ack_message(&mut conn, message_id)
             .expect_err("a completed message cannot be acked again");
         assert!(matches!(err, CafleetError::Value(_)));
         assert_eq!(err.message(), "Cannot ACK message in state completed");

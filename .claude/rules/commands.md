@@ -16,7 +16,7 @@
 - Start admin dev server: `mise //admin:dev`
 - Build admin: `mise //admin:build` — runs `tsc -b` and Vite.
 - Check generated documentation and installed skill references: `mise //cafleet:docs-check`
-- Regenerate documentation: `mise //cafleet:docs-generate` — explicitly writes generated blocks and bundled runtime pages; ignored during ordinary tests.
+- Regenerate documentation: `mise //cafleet:docs-generate` — explicitly writes generated documentation blocks; ignored during ordinary tests.
 
 Every cargo-invoking task (`test`, `lint`, `typecheck`, `build`, `install`, `dev`, `docs-check`, `docs-generate`) depends on `//admin:build`, because the cargo build embeds the admin dist and fails loudly when `cafleet/webui-dist/` is missing — a fresh clone works with no manual prerequisite.
 

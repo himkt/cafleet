@@ -450,5 +450,5 @@ pub fn install_agent(
 }
 
 #[cfg(test)]
-#[path = "assets/step10_contract_tests.rs"]
-mod step10_contract_tests;
+#[path = "assets/tests.rs"]
+mod tests;

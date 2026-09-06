@@ -11,7 +11,7 @@ use crate::broker;
 use crate::capture::{CaptureSnapshot, ScanEntry, write_scan};
 use crate::config::Settings;
 use crate::error::CafleetError;
-use crate::multiplexer::{Multiplexer, MultiplexerError};
+use crate::multiplexer::Multiplexer;
 use crate::time::now_utc;
 
 #[derive(Args)]
@@ -122,37 +122,13 @@ fn scan(
     ansi: bool,
     json_output: bool,
 ) -> Result<(), CafleetError> {
-    let entries = scan_with_dependencies(
-        conn,
-        fleet_id,
-        lines,
-        ansi,
-        || resolve_mux(settings),
-        &now_utc,
-    )?;
-    write_scan(
-        &mut std::io::stdout(),
-        &entries,
-        json_output,
-        &crate::presentation::scan_text,
-    )
-}
-
-pub(crate) fn scan_with_dependencies<M: Multiplexer>(
-    conn: &Connection,
-    fleet_id: i64,
-    lines: i64,
-    ansi: bool,
-    resolve_mux: impl FnOnce() -> Result<M, MultiplexerError>,
-    now: &dyn Fn() -> chrono::DateTime<chrono::Utc>,
-) -> Result<Vec<ScanEntry>, CafleetError> {
     let fleet = require_live_fleet(conn, fleet_id)?;
-    let mux = resolve_mux().map_err(|e| CafleetError::App(e.to_string()))?;
+    let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
 
     let director_member_id = fleet.director_member_id;
-    let members = broker::list_member_records(conn, fleet_id)?
+    let members = broker::list_members(conn, fleet_id)?
         .into_iter()
         .map(|row| row.member)
         .collect::<Vec<_>>();
@@ -183,7 +159,7 @@ pub(crate) fn scan_with_dependencies<M: Multiplexer>(
             Some(pane) => mux
                 .capture_pane(pane, lines)
                 .map_err(|error| format!("capture failed: {error}"))
-                .map(|raw| CaptureSnapshot::from_raw(&raw, ansi, now())),
+                .map(|raw| CaptureSnapshot::from_raw(&raw, ansi, now_utc())),
         };
         entries.push(ScanEntry {
             member_id: member.member_id,
@@ -195,5 +171,5 @@ pub(crate) fn scan_with_dependencies<M: Multiplexer>(
             outcome,
         });
     }
-    Ok(entries)
+    write_scan(&mut std::io::stdout(), &entries, json_output)
 }

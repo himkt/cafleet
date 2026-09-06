@@ -64,7 +64,7 @@ fn seeded_fleet(conn: &mut rusqlite::Connection) -> (i64, i64, i64, i64) {
     .unwrap();
     let fleet_id = fleet["fleet_id"].as_i64().unwrap();
     let director_id = fleet["director"]["member_id"].as_i64().unwrap();
-    let member_id = broker::register_member_record(
+    let member_id = broker::register_member(
         conn,
         fleet_id,
         "worker",
@@ -77,7 +77,7 @@ fn seeded_fleet(conn: &mut rusqlite::Connection) -> (i64, i64, i64, i64) {
     .unwrap()["member_id"]
         .as_i64()
         .unwrap();
-    let helper_id = broker::register_member_record(
+    let helper_id = broker::register_member(
         conn,
         fleet_id,
         "helper",
@@ -196,13 +196,12 @@ async fn the_roster_wraps_members_with_the_three_value_kind_union() {
     let monitor_id = broker::active_monitor_member_id(&conn, fleet_id)
         .unwrap()
         .expect("the bootstrap registers the monitor member");
-    let holder_id =
-        broker::register_member_record(&mut conn, fleet_id, "ghost", "d", &[], None, false)
-            .map(|record| cafleet::presentation::registered_member(&record))
-            .unwrap()["member_id"]
-            .as_i64()
-            .unwrap();
-    broker::send_message_record(
+    let holder_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None, false)
+        .map(|record| cafleet::presentation::registered_member(&record))
+        .unwrap()["member_id"]
+        .as_i64()
+        .unwrap();
+    broker::send_message(
         &mut conn,
         &NullNotifier,
         200,
@@ -274,7 +273,7 @@ async fn inbox_and_sent_carry_the_formatted_message_wire_shape() {
     let dir = TempDir::new().unwrap();
     let (url, mut conn) = migrated(&dir);
     let (_, director_id, member_id, _) = seeded_fleet(&mut conn);
-    broker::send_message_record(
+    broker::send_message(
         &mut conn,
         &NullNotifier,
         200,
@@ -342,7 +341,7 @@ async fn the_timeline_is_hard_capped_at_200() {
     let (url, mut conn) = migrated(&dir);
     let (_, director_id, member_id, _) = seeded_fleet(&mut conn);
     for i in 0..201 {
-        broker::send_message_record(
+        broker::send_message(
             &mut conn,
             &NullNotifier,
             200,
@@ -451,7 +450,7 @@ async fn the_monitor_endpoint_reports_and_masks_the_runtime() {
     let monitor_id = broker::active_monitor_member_id(&conn, fleet_id)
         .unwrap()
         .expect("the bootstrap registers the monitor member");
-    broker::send_message_record(
+    broker::send_message(
         &mut conn,
         &NullNotifier,
         200,
@@ -789,7 +788,7 @@ async fn post_monitor_wake_requests_a_forced_wake_with_the_pinned_error_contract
         body, r#"{"detail":"monitor is not running for this fleet"}"#,
         "a stale heartbeat reads as not running"
     );
-    let row = broker::read_monitor_runtime_record(&conn, fleet_id)
+    let row = broker::read_monitor_runtime(&conn, fleet_id)
         .map(|record| record.as_ref().map(cafleet::presentation::monitor_runtime))
         .unwrap()
         .unwrap();
@@ -836,7 +835,7 @@ async fn post_monitor_wake_requests_a_forced_wake_with_the_pinned_error_contract
     let stamp = payload["wake_requested_at"]
         .as_str()
         .expect("a UTC ISO string");
-    let row = broker::read_monitor_runtime_record(&conn, fleet_id)
+    let row = broker::read_monitor_runtime(&conn, fleet_id)
         .map(|record| record.as_ref().map(cafleet::presentation::monitor_runtime))
         .unwrap()
         .unwrap();
@@ -918,7 +917,7 @@ async fn timeline_broadcast_excludes_summary_through_two_delivery_ack_transition
         response["status"], "completed",
         "broadcast response still represents the persisted summary"
     );
-    let summary = broker::get_message_record(&conn, summary_id)
+    let summary = broker::get_message(&conn, summary_id)
         .map(|record| cafleet::presentation::message_envelope(&record))
         .unwrap();
     assert_eq!(summary["message"]["type"], "broadcast_summary");
@@ -943,13 +942,13 @@ async fn timeline_broadcast_excludes_summary_through_two_delivery_ack_transition
             acked
         );
         assert_eq!(
-            broker::get_message_record(&conn, summary_id)
+            broker::get_message(&conn, summary_id)
                 .map(|record| cafleet::presentation::message_envelope(&record))
                 .unwrap(),
             summary
         );
         if let Some(row) = rows.iter().find(|r| r["status"] == "input_required") {
-            broker::ack_message_record(&mut conn, row["message_id"].as_i64().unwrap())
+            broker::ack_message(&mut conn, row["message_id"].as_i64().unwrap())
                 .map(|record| cafleet::presentation::message_envelope(&record))
                 .unwrap();
         }
@@ -976,10 +975,9 @@ async fn timeline_empty_and_summary_only_fleets_have_the_empty_messages_envelope
     for id in [worker, helper, monitor] {
         broker::deregister_member(&mut conn, id).unwrap();
     }
-    let result =
-        broker::broadcast_message_record(&mut conn, &NullNotifier, 200, director, "nobody")
-            .map(|record| vec![cafleet::presentation::broadcast_outcome(&record)])
-            .unwrap();
+    let result = broker::broadcast_message(&mut conn, &NullNotifier, 200, director, "nobody")
+        .map(|record| vec![cafleet::presentation::broadcast_outcome(&record)])
+        .unwrap();
     assert_eq!(result[0]["recipients"], 0);
     let (status, body) = call(router, "GET", "/api/timeline", Some("1"), None).await;
     assert_eq!(status, StatusCode::OK);
@@ -1002,7 +1000,7 @@ async fn timeline_owner_fleet_scope_and_status_id_order_survive_wire_formatting(
     let (_, director, worker, _) = seeded_fleet(&mut conn);
     let (_, foreign_director, foreign_worker, _) = seeded_fleet(&mut conn);
     for text in ["first", "second", "third"] {
-        broker::send_message_record(
+        broker::send_message(
             &mut conn,
             &NullNotifier,
             200,
@@ -1012,7 +1010,7 @@ async fn timeline_owner_fleet_scope_and_status_id_order_survive_wire_formatting(
         )
         .unwrap();
     }
-    broker::send_message_record(
+    broker::send_message(
         &mut conn,
         &NullNotifier,
         200,
@@ -1083,11 +1081,11 @@ async fn timeline_filters_before_200_row_cap_and_returns_only_fetched_broadcast_
     let (url, mut conn) = migrated(&dir);
     let (_, director, worker, helper) = seeded_fleet(&mut conn);
     broker::deregister_member(&mut conn, helper).unwrap();
-    broker::broadcast_message_record(&mut conn, &NullNotifier, 200, director, "partial")
+    broker::broadcast_message(&mut conn, &NullNotifier, 200, director, "partial")
         .map(|record| vec![cafleet::presentation::broadcast_outcome(&record)])
         .unwrap();
     for _ in 0..199 {
-        broker::send_message_record(
+        broker::send_message(
             &mut conn,
             &NullNotifier,
             200,
@@ -1127,7 +1125,7 @@ async fn timeline_filters_before_200_row_cap_and_returns_only_fetched_broadcast_
     assert_eq!(partial[0]["status"], "input_required");
     assert_eq!(partial[0]["to_member_id"], worker);
     assert_eq!(
-        broker::get_message_record(&conn, 1)
+        broker::get_message(&conn, 1)
             .map(|record| cafleet::presentation::message_envelope(&record))
             .unwrap()["message"]["type"],
         "broadcast_summary"
@@ -1148,7 +1146,7 @@ async fn missing_message_name_is_an_integrity_error(sender: bool) {
     let dir = TempDir::new().unwrap();
     let (url, mut conn) = migrated(&dir);
     let (_, director, worker, _) = seeded_fleet(&mut conn);
-    broker::send_message_record(
+    broker::send_message(
         &mut conn,
         &NullNotifier,
         200,
@@ -1185,7 +1183,7 @@ async fn integrity_invalid_message_status_is_500_in_inbox_sent_and_timeline() {
     let dir = TempDir::new().unwrap();
     let (url, mut conn) = migrated(&dir);
     let (_, director, worker, _) = seeded_fleet(&mut conn);
-    broker::send_message_record(
+    broker::send_message(
         &mut conn,
         &NullNotifier,
         200,
@@ -1220,7 +1218,7 @@ async fn integrity_invalid_member_status_is_500_instead_of_a_successful_roster_r
     let dir = TempDir::new().unwrap();
     let (url, mut conn) = migrated(&dir);
     let (_, director, worker, _) = seeded_fleet(&mut conn);
-    broker::send_message_record(
+    broker::send_message(
         &mut conn,
         &NullNotifier,
         200,
@@ -1277,7 +1275,7 @@ async fn compatibility_stopped_monitor_wire_distinguishes_no_row_null_zero_and_p
             )
         );
         if row_exists {
-            let raw = broker::read_monitor_runtime_record(&conn, fleet)
+            let raw = broker::read_monitor_runtime(&conn, fleet)
                 .map(|record| record.as_ref().map(cafleet::presentation::monitor_runtime))
                 .unwrap()
                 .unwrap();
@@ -1515,17 +1513,10 @@ mod history_limit_regressions {
     #[tokio::test]
     async fn history_deregistered_members_keep_scoped_history() {
         let (_dir, url, mut conn, fleet, sender, owner) = fixture(3);
-        let historical_sender = broker::register_member_record(
-            &mut conn,
-            fleet,
-            "historical sender",
-            "",
-            &[],
-            None,
-            false,
-        )
-        .unwrap()
-        .member_id;
+        let historical_sender =
+            broker::register_member(&mut conn, fleet, "historical sender", "", &[], None, false)
+                .unwrap()
+                .member_id;
         conn.execute(
             "UPDATE messages SET from_member_id=?1 WHERE from_member_id=?2",
             rusqlite::params![historical_sender, sender],

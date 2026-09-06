@@ -7,8 +7,7 @@ use rusqlite::Connection;
 use serde_json::{Value, json};
 
 use super::creation::{
-    CreationHooks, MemberCreateOptions, NoopCreationHooks, PaneGuard, PreparedSpawn,
-    RegistrationGuard, SpawnPreparation,
+    MemberCreateOptions, PaneGuard, PreparedSpawn, RegistrationGuard, SpawnPreparation,
 };
 use super::helpers::{emit, resolve_body, resolve_mux};
 use crate::broker::records::MemberRecord;
@@ -165,7 +164,7 @@ fn load_member(
 ) -> Result<MemberRecord, CafleetError> {
     let fleet_id = broker::active_member_fleet(conn, member_id)?
         .ok_or_else(|| CafleetError::App(format!("Member {member_id} not found")))?;
-    let member = broker::get_member_record(conn, member_id, fleet_id)?
+    let member = broker::get_member(conn, member_id, fleet_id)?
         .ok_or_else(|| CafleetError::App(format!("Member {member_id} not found")))?;
     if member.placement.is_none() && !tolerate_missing_placement {
         return Err(CafleetError::App(format!(
@@ -193,7 +192,7 @@ fn resolve_coding_agent(
              Re-run with an explicit --coding-agent."
         ))
     };
-    let director = match broker::get_member_record(conn, director_id, fleet_id) {
+    let director = match broker::get_member(conn, director_id, fleet_id) {
         Ok(Some(director)) => director,
         Ok(None) => {
             return Err(unresolved(format!(
@@ -300,7 +299,6 @@ fn create(
             clock: &SystemClock,
             runner: &SystemRunner,
         },
-        &NoopCreationHooks,
     )?;
     emit(json, &result, || format_member(&result));
     Ok(())
@@ -313,7 +311,6 @@ pub(crate) fn create_with_options<M: SpawnMultiplexer>(
     probe: &dyn SpawnProbe,
     preparation: &SpawnPreparation<'_>,
     execution: &SpawnExecution<'_>,
-    hooks: &dyn CreationHooks,
 ) -> Result<Value, CafleetError> {
     let MemberCreateOptions {
         fleet_id,
@@ -384,7 +381,6 @@ pub(crate) fn create_with_options<M: SpawnMultiplexer>(
         mux.name(),
         preparation,
     )?;
-    hooks.prepared(conn, &plan);
 
     // 6. Register the member with a pending placement, threading the
     //    monitor role into its card marker.
@@ -395,7 +391,7 @@ pub(crate) fn create_with_options<M: SpawnMultiplexer>(
         mux_pane_id: None,
         coding_agent: agent_name.clone(),
     };
-    let registered = broker::register_member_record(
+    let registered = broker::register_member(
         conn,
         fleet_id,
         name,
@@ -411,7 +407,7 @@ pub(crate) fn create_with_options<M: SpawnMultiplexer>(
         other => CafleetError::App(format!("register failed: {}", other.message())),
     })?;
     let member_id = registered.member_id;
-    let mut registration = RegistrationGuard::new(conn, member_id, hooks);
+    let mut registration = RegistrationGuard::new(conn, member_id);
 
     let deadline = Deadline::after(execution.clock, Duration::from_secs(30));
     let argv = match plan.render(fleet_id, member_id, director_id) {
@@ -445,11 +441,10 @@ pub(crate) fn create_with_options<M: SpawnMultiplexer>(
                 execution,
             )
         }),
-        hooks,
     );
 
     // 10. A failed placement patch compensates the pane before registration.
-    let patched = broker::update_placement_record(registration.connection(), member_id, &pane_id);
+    let patched = broker::update_placement_pane_id(registration.connection(), member_id, &pane_id);
     let placement_view = match patched {
         Ok(Some(placement)) => placement,
         outcome => {
@@ -533,7 +528,7 @@ fn show(conn: &mut Connection, member_id: i64, json: bool) -> Result<(), Cafleet
 }
 
 fn list(conn: &mut Connection, fleet_id: i64, json: bool) -> Result<(), CafleetError> {
-    let members: Vec<Value> = broker::list_member_records(conn, fleet_id)?
+    let members: Vec<Value> = broker::list_members(conn, fleet_id)?
         .iter()
         .map(presentation::member_activity)
         .collect();
@@ -633,26 +628,7 @@ fn capture(
     ansi: bool,
     json: bool,
 ) -> Result<(), CafleetError> {
-    let capture = capture_with_dependencies(
-        conn,
-        member_id,
-        lines,
-        ansi,
-        || resolve_mux(settings),
-        &now_utc,
-    )?;
-    write_member_capture(&mut std::io::stdout(), &capture, json)
-}
-
-pub(crate) fn capture_with_dependencies<M: Multiplexer>(
-    conn: &Connection,
-    member_id: i64,
-    lines: i64,
-    ansi: bool,
-    resolve_mux: impl FnOnce() -> Result<M, MultiplexerError>,
-    now: &dyn Fn() -> chrono::DateTime<chrono::Utc>,
-) -> Result<MemberCapture, CafleetError> {
-    let mux = resolve_mux().map_err(|e| CafleetError::App(e.to_string()))?;
+    let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
 
@@ -661,12 +637,13 @@ pub(crate) fn capture_with_dependencies<M: Multiplexer>(
     let raw = mux
         .capture_pane(&pane_id, lines)
         .map_err(|e| CafleetError::App(format!("capture failed: {e}")))?;
-    Ok(MemberCapture {
+    let capture = MemberCapture {
         member_id,
         pane_id,
         lines,
-        snapshot: CaptureSnapshot::from_raw(&raw, ansi, now()),
-    })
+        snapshot: CaptureSnapshot::from_raw(&raw, ansi, now_utc()),
+    };
+    write_member_capture(&mut std::io::stdout(), &capture, json)
 }
 
 #[cfg(test)]
@@ -746,236 +723,5 @@ mod tests {
             panic!("monitor is the sole accepted --role value");
         };
         assert_eq!(err.kind(), clap::error::ErrorKind::InvalidValue);
-    }
-}
-
-#[cfg(test)]
-mod creation_regressions {
-    use super::*;
-    use crate::cli::creation::test_support::{Fixture, SpawnFixture};
-    use crate::coding_agent::test_support::FakeProbe;
-    use crate::multiplexer::RunError;
-
-    fn create(f: &Fixture, mut spawn: SpawnFixture, prompt: &str) -> Result<Value, CafleetError> {
-        let mux = spawn.take_mux();
-        create_with_options(
-            &mut f.conn(),
-            &MemberCreateOptions {
-                fleet_id: 1,
-                name: "worker",
-                description: "fixture",
-                explicit_agent: None,
-                model: None,
-                effort: None,
-                monitor: false,
-                prompt: Some(prompt),
-                file: None,
-            },
-            || Ok(mux),
-            &FakeProbe::with_binary("claude", f.dir.path()),
-            &SpawnPreparation {
-                cwd: &|| Ok(f.dir.path().to_path_buf()),
-                env: &|_| None,
-            },
-            &spawn.execution(),
-            f,
-        )
-    }
-
-    #[test]
-    fn registration_failure_has_no_pane_or_registration_guard_to_compensate() {
-        let f = Fixture::new(true);
-        f.sql("CREATE TRIGGER fail_register BEFORE INSERT ON members BEGIN SELECT RAISE(ABORT, 'registration failed'); END;");
-        let error = create(&f, f.spawn(None, false, false), "prompt").unwrap_err();
-        assert_eq!(error.exit_code(), 1);
-        assert!(error.to_string().contains("registration failed"));
-        assert_eq!(f.timeline(), ["current:ok"]);
-        assert_eq!(f.count("members"), 2);
-        assert_eq!(f.count("member_placements"), 2);
-    }
-
-    #[test]
-    fn placeholder_failure_only_deregisters_and_keeps_usage_class_on_cleanup_failure() {
-        for fail_cleanup in [false, true] {
-            let f = Fixture::new(true);
-            if fail_cleanup {
-                f.sql("CREATE TRIGGER fail_deregister BEFORE UPDATE OF status ON members BEGIN SELECT RAISE(ABORT, 'deregister failed'); END;");
-            }
-            let error = create(&f, f.spawn(None, false, false), "{unknown}").unwrap_err();
-            assert!(matches!(error, CafleetError::Usage(_)));
-            assert_eq!(error.exit_code(), 2);
-            assert!(
-                error
-                    .to_string()
-                    .starts_with("Unknown placeholder 'unknown'")
-            );
-            assert_eq!(
-                f.timeline(),
-                [
-                    "current:ok",
-                    if fail_cleanup {
-                        "deregister:error"
-                    } else {
-                        "deregister:ok"
-                    },
-                    "disarm:registration"
-                ]
-            );
-            if fail_cleanup {
-                assert!(error.to_string().contains("cleanup failed for member 3:"));
-                assert_eq!(f.count("member_placements"), 3);
-            } else {
-                f.assert_deregistered();
-            }
-        }
-    }
-
-    #[test]
-    fn backend_run_error_closes_before_deregister_even_when_close_fails() {
-        let failure = RunError::Failed {
-            stderr: "primary run failure".into(),
-        };
-        for close_fails in [false, true] {
-            let f = Fixture::new(true);
-            let error = create(
-                &f,
-                f.spawn(Some(("run", failure.clone())), close_fails, false),
-                "prompt",
-            )
-            .unwrap_err();
-            assert!(matches!(error, CafleetError::App(_)));
-            assert_eq!(error.exit_code(), 1);
-            assert_eq!(
-                f.timeline(),
-                [
-                    "current:ok",
-                    "list:ok",
-                    "split:ok",
-                    "run:error",
-                    "write-lock:true",
-                    if close_fails {
-                        "close:error"
-                    } else {
-                        "close:ok"
-                    },
-                    "deregister:ok",
-                    "disarm:registration"
-                ]
-            );
-            assert_eq!(
-                error
-                    .to_string()
-                    .matches("cleanup failed for pane w1:p9:")
-                    .count(),
-                usize::from(close_fails)
-            );
-            f.assert_deregistered();
-        }
-    }
-
-    #[test]
-    fn placement_error_or_missing_row_kills_before_deregister_despite_cleanup_errors() {
-        for missing in [false, true] {
-            for (close_fails, deregister_fails) in [(false, false), (true, false), (true, true)] {
-                let f = Fixture::new(true);
-                f.sql(if missing {
-                    "CREATE TRIGGER fail_patch BEFORE UPDATE OF mux_pane_id ON member_placements BEGIN DELETE FROM member_placements WHERE member_id=NEW.member_id; SELECT RAISE(IGNORE); END;"
-                } else {
-                    "CREATE TRIGGER fail_patch BEFORE UPDATE OF mux_pane_id ON member_placements BEGIN SELECT RAISE(ABORT, 'primary placement failure'); END;"
-                });
-                if deregister_fails {
-                    f.sql("CREATE TRIGGER fail_deregister BEFORE UPDATE OF status ON members BEGIN SELECT RAISE(ABORT, 'secondary deregister failure'); END;");
-                }
-                let error = create(&f, f.spawn(None, close_fails, false), "prompt").unwrap_err();
-                assert_eq!(error.exit_code(), 1);
-                let detail = error.to_string();
-                assert!(
-                    detail.contains(if missing {
-                        "placement row vanished"
-                    } else {
-                        "primary placement failure"
-                    }),
-                    "{detail}"
-                );
-                assert_eq!(
-                    f.timeline(),
-                    [
-                        "current:ok",
-                        "list:ok",
-                        "split:ok",
-                        "run:ok",
-                        "write-lock:true",
-                        if close_fails {
-                            "close:error"
-                        } else {
-                            "close:ok"
-                        },
-                        if close_fails {
-                            "cli-kill:error"
-                        } else {
-                            "cli-kill:ok"
-                        },
-                        "disarm:pane",
-                        if deregister_fails {
-                            "deregister:error"
-                        } else {
-                            "deregister:ok"
-                        },
-                        "disarm:registration"
-                    ]
-                );
-                if deregister_fails {
-                    assert!(
-                        detail.find("cleanup failed for pane w1:p9:").unwrap()
-                            < detail.find("cleanup failed for member 3:").unwrap()
-                    );
-                    assert!(!detail.contains("Rolled back"));
-                } else {
-                    f.assert_deregistered();
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn split_with_unknown_id_deregisters_without_guessed_kill() {
-        let f = Fixture::new(true);
-        let error = create(&f, f.spawn(None, false, true), "prompt").unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("pane ID unknown; pane cleanup unconfirmed")
-        );
-        assert_eq!(
-            f.timeline(),
-            [
-                "current:ok",
-                "list:ok",
-                "split:ok",
-                "deregister:ok",
-                "disarm:registration"
-            ]
-        );
-        f.assert_deregistered();
-    }
-
-    #[test]
-    fn successful_creation_disarms_both_guards_before_returning_output_value() {
-        let f = Fixture::new(true);
-        let value = create(&f, f.spawn(None, false, false), "prompt").unwrap();
-        assert_eq!(value["member_id"], 3);
-        assert_eq!(value["placement"]["mux_pane_id"], "w1:p9");
-        assert_eq!(
-            f.timeline(),
-            [
-                "current:ok",
-                "list:ok",
-                "split:ok",
-                "run:ok",
-                "disarm:pane",
-                "disarm:registration"
-            ]
-        );
-        assert_eq!(f.count("member_placements"), 3);
     }
 }
