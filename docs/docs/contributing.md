@@ -106,6 +106,40 @@ the overflow flag through the same pure helper the component uses. These
 checks need neither a browser nor a running server; preserve the existing
 refresh and error behavior.
 
+## Assets installer tests {#assets-installer-tests}
+
+Exercise the production installer and recovery entry points with real files
+and SQLite fixtures under an explicit temporary home. Inject `EnvLookup` and
+paths; do not overwrite `HOME` or `CODEX_HOME` or install into user settings.
+Per-call checkpoints before/after real filesystem, journal persistence and DB
+operations provide deterministic failures and simulated interruption. Failure
+runs compensation; interruption preserves durable state for a fresh recovery
+call. These hooks do not replace the installer with a test implementation or
+use global fault flags.
+
+Compare file digests, exact old rows (including absent rows and timestamps),
+journals and backup remnants for same-version reinstall, each skill/preset
+swap, obsolete research removal, symlink entries, record failure, rollback
+failure and committed cleanup failure. Interrupt and resume recovery itself,
+including after a backup has already been restored. Use real advisory locks
+and independent SQLite connections for concurrency and alias fixtures.
+Simulated interruption releases owned handles; it does not demonstrate
+power-loss durability or real process-kill behavior.
+
+Every stage/backup must share its own target's parent filesystem. Fixtures
+with separated skills and preset directories verify path placement; they do
+not prove different filesystem devices. Use a genuinely separate writable
+device only when the test environment already provides one, record device
+IDs, and otherwise report that coverage as unavailable. Do not mount a device
+or change user configuration to obtain it. Injected operation failures verify
+recovery behavior, not cross-device rename support.
+
+Stage validation checks embedded file membership, digests and required skill
+entry points. Runtime-document generation and its required-reference closure
+extend this same validation before swapping when those assets are bundled;
+they are a separate change from the installer recovery work. See the
+[installation recovery contract](spec/cli-options.md#assets-install-recovery).
+
 ## Frontend resource tests
 
 The [resource lifecycle](spec/webui-api.md#frontend-resource-lifecycle)

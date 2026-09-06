@@ -388,31 +388,60 @@ binary next to the skills; install targets resolve per
 | codex | `presets/codex/cafleet.rules` | `<codex base>/rules/cafleet.rules` (default `~/.codex/rules/cafleet.rules`) |
 | opencode | `presets/opencode/cafleet.md` | `<preset base>/agents/cafleet.md` (default `~/.opencode/agents/cafleet.md`) |
 
-Per target:
+Each backend installs the two embedded skills, its preset where present, and
+removes a leftover `cafleet-research` entry as one recoverable plan. Unrelated
+skills remain untouched. A symlink target is moved or unlinked as an entry;
+its referent is not deleted. Skills-operation errors retain `failed to install
+skills into <skills_dir>: <error>` and preset-operation errors retain `failed
+to install preset into <target>: <error>`.
 
-1. The two skill directories are delete-and-reinstalled into the agent's
-   resolved skills dir; after the copy, a leftover `<skills_dir>/cafleet-research`
-   entry is removed when present, using the same existing-target check order as
-   the preset install (a symlink is unlinked; else a directory is recursively
-   deleted; else an existing entry is unlinked) and producing no extra output.
-   A failure in either half aborts with `failed to install skills into
-   <skills_dir>: <error>`.
-2. For agents with a bundled preset (codex, opencode), the preset is installed
-   to its resolved target, overwriting whatever exists there — a regular file,
-   a directory, or a symlink. A filesystem error aborts with `failed to install
-   preset into <target>: <error>`.
-3. The agent's `asset_installs` row — keyed on `(coding_agent, path)`, `path`
-   being the agent's recorded identity path — is upserted only after both its
-   skills and its preset install successfully — the row attests skills +
-   preset — then the command echoes the resolved directories (the preset line
-   appears for codex and opencode targets only):
+After durable success, the command prints the existing lines (the preset line
+appears only for codex and opencode):
 
 ```
 <agent>: installed cafleet, cafleet-design-doc (v<version>) -> <skills dir>
 <agent>: installed preset (v<version>) -> <target>
 ```
 
-An install failure aborts the loop; rows recorded before the failure remain.
+### Assets install recovery {#assets-install-recovery}
+
+Setup first writes and validates all replacements in hidden staging entries
+beside their targets. Each backup also lives beside its target, so a preset
+on another filesystem does not require a cross-filesystem rename. Physical
+target locks serialize concurrent setup calls, including configured paths
+that alias the same skills tree. These are OS advisory locks released on
+process exit, not PID-file checks; recorded identity paths remain unchanged.
+
+Before exchanging entries, setup writes a durable
+`<identity>/.cafleet-install-journal.json` with transaction/phase, paths, old
+entry presence, the previous database row or null, and the new manifest.
+Updates use temporary-file write, file sync, rename and directory sync before
+destructive changes. Old entries move to backups; stages move to targets.
+The obsolete research skill moves to a backup without a replacement.
+Only after all exchanges does setup commit the new `asset_installs` row and
+mark the journal committed. It then removes backups/stages and the journal last.
+
+| Failure or interruption | Result and next setup |
+|---|---|
+| Stage write or validation | Current files and row remain unchanged; unused stages can be cleaned. |
+| Before durable journal commit, even after SQLite commit | Restore old entries and the exact previous row, including its timestamp or absence. Retry interrupted recovery from the journal. |
+| After durable journal commit | Installation succeeded. A cleanup failure is reported separately; retain the journal and next time verify the new manifest/row and resume cleanup only. |
+| Corrupt journal or failed restoration | Preserve journal and remaining backups, report incomplete installation, and stop. |
+
+Do not delete journals or backups to clear an error. Guard and doctor report
+`incomplete assets install at <path>; run 'cafleet setup' to recover` while
+recovery evidence remains unfinished, including committed cleanup pending.
+Version equality alone does not establish a healthy install. Doctor includes
+this as an assets issue (`state: "incomplete"` in JSON) even when no asset row
+can be read, and continues the other diagnostic sections.
+
+An install failure aborts the backend loop; successful earlier backends remain
+installed and recorded. A committed cleanup warning does not make the assets
+half fail. The DB and assets halves retain their independent failure handling.
+The procedure recovers coordinated changes across filesystems and SQLite; it
+is not one atomic commit. Power-loss guarantees depend on filesystem support
+for sync and rename. See [installer test boundaries](../contributing.md#assets-installer-tests)
+for what isolated fixtures establish.
 
 ## Shared diagnosis and connection reuse {#diagnosis-reuse}
 
@@ -428,7 +457,9 @@ guards and command work. The output and failure rules below remain unchanged.
 
 `Diagnosis` holds schema and per-agent/path `AssetState` facts rather than
 display strings. Assets retain their path source, current matching/stale or
-missing install, path-resolution error, and informational superseded records.
+missing install, path-resolution error, incomplete recovery, and informational
+superseded records. Incomplete recovery uses the existing JSON keys with
+`state: "incomplete"` and its recovery diagnostic in `error`.
 The guard and doctor keep their respective text, JSON, issue counts, and exit
 codes; internal state names do not become new wire fields.
 
@@ -486,19 +517,21 @@ the `monitor` command — validates the recorded assets installs after the
 [schema-version guard](#schema-version-guard) passes and before any
 subcommand body runs. The guard resolves each agent's identity path per
 [Config-dir resolution](#config-dir-resolution) and checks only the row at
-that path:
+that path plus recovery evidence. Apply the following precedence:
 
 | Recorded install state | Result | Exit |
 |---|---|---|
 | A config-path variable fails validation | The pinned [validation error](#config-dir-resolution) | 1 |
+| Recovery evidence remains unfinished, even with a matching version or absent row | `Error: incomplete assets install at <path>; run 'cafleet setup' to recover` | 1 |
 | No agent has a row at its currently-resolved path (zero rows, or — on a hand-tampered at-head database — a dropped `asset_installs` table) | `Error: no assets install is recorded at the resolved paths; run 'cafleet setup' to install` | 1 |
 | A row at a resolved path has `cafleet_version` ≠ the runtime CLI version (string inequality — either direction) | `Error: stale assets detected (<agent>=<recorded>[, ...]; CLI <runtime>); run 'cafleet setup' to reinstall`, stale agents in ascending order | 1 |
 | Every row at a resolved path matches | The command proceeds silently | 0 |
 
-Agents with no row at their currently-resolved path are not checked (they
+After recovery checks, agents with no row at their currently-resolved path
+are not checked for staleness (they
 contribute nothing to staleness), and superseded rows at other paths are
 ignored everywhere in the guard. Plain `cafleet setup` remains the correct
-remedy for both errors: it installs all three agents at their resolved
+remedy for these errors: it recovers or installs agents at their resolved
 paths. Three surfaces are exempt:
 
 | Exempt surface | Why exempt | Behavior under a stale/missing install |
@@ -676,7 +709,8 @@ coding-agents section, but the recorded rows are read only when the database
 report is `✓` (at head) AND the `asset_installs` table exists. Whenever the
 rows are not read — any non-head state, or an at-head ledger with a
 hand-dropped table — the section renders with no recorded-install data:
-every resolvable agent shows the `–` state, no superseded footnotes render,
+every resolvable agent without incomplete recovery shows the `–` state;
+incomplete recovery still shows an assets issue. No superseded footnotes render,
 and — in the non-head states — doctor exits 1 for the database issue;
 either way, never a raw SQLite error from `asset_installs`.
 
@@ -695,6 +729,7 @@ length. One row per agent in the fixed order `claude`, `codex`, `opencode`.
 
 | State | Cell | Issue |
 |---|---|---|
+| Recovery evidence remains unfinished at the resolved install (takes precedence over the row/version states below) | `✗ incomplete assets install at <path>; run 'cafleet setup' to recover` | yes |
 | A row exists at the resolved path, version = CLI version (string equality) | `✓ <version>` | no |
 | A row exists at the resolved path, version ≠ CLI version (string inequality, either direction — never semver comparison) | `✗ <recorded-version> → cafleet setup --coding-agent <agent>` | yes |
 | No row exists at the resolved path (regardless of rows elsewhere) | `– cafleet setup --coding-agent <agent>` (`–` U+2013 EN DASH) | never |
@@ -721,11 +756,11 @@ before output.
 
 Mirrors the sections with `ok` booleans, unabbreviated absolute paths, and
 the issue count. `source` holds the winning env-var **name** (no `$`) or the
-literal `"default"`; `state` is `"ok" | "stale" | "not_installed" | "error"`
+literal `"default"`; `state` is `"ok" | "stale" | "not_installed" | "error" | "incomplete"`
 (`"error"` is the per-agent resolution-error state; `"not_installed"` never
-contributes to `issues`). Every agent row carries the same keys; `error` is
-`null` except in the `"error"` state, where it holds the pinned validation
-message (without the `Error: ` prefix). Section `error` fields likewise hold
+contributes to `issues`). Every agent row carries the same keys. `error` is
+the validation message for `"error"`, the recovery diagnostic for
+`"incomplete"` (one issue), and otherwise null, without an `Error: ` prefix. Section `error` fields likewise hold
 the detail text when `ok` is false, else `null`.
 
 ```json
@@ -771,9 +806,9 @@ agent resolution error the row is `{"coding_agent": "...", "path": null,
 raw invalid value appears only inside `error`; `path` stays `null` because
 no path resolved. `schema_version` is `null` when the ledger is absent.
 When the recorded rows are not read (a non-`ok` database report, or a
-missing `asset_installs` table), every agent row renders as the
-`"not_installed"` shape and `superseded` is empty — the JSON shape is
-unchanged. Exit-code semantics are identical to text mode.
+missing `asset_installs` table), resolved agents use `"not_installed"`
+unless recovery evidence requires `"incomplete"`; path errors remain
+`"error"`. Recorded fields are null and `superseded` is empty. Exit-code semantics are identical to text mode.
 
 ## `cafleet server` — Admin WebUI Server {#cafleet-server}
 
