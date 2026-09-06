@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "test": "tsc -b && vitest run"
+    "test": "vitest run"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",
