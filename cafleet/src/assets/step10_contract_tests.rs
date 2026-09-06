@@ -875,6 +875,7 @@ fn interruption_cuts(rollback: bool) -> Vec<Cut> {
 #[test]
 fn interrupt_every_distinct_phase_pending_and_operation_boundary_then_recover_from_disk() {
     let cuts = interruption_cuts(false);
+    let completed_cuts = cuts.len();
     for cut in cuts {
         let mut fixture = Fixture::new("codex", true, true);
         let before = fixture.snapshot();
@@ -929,11 +930,14 @@ fn interrupt_every_distinct_phase_pending_and_operation_boundary_then_recover_fr
             RecoveryOutcome::None
         ));
     }
+    eprintln!("Step 10 install matrix completed cuts: {completed_cuts}");
 }
 
 #[test]
 fn interrupt_rollback_before_and_after_every_distinct_restore_boundary_and_retry_idempotently() {
-    for cut in interruption_cuts(true) {
+    let cuts = interruption_cuts(true);
+    let completed_cuts = cuts.len();
+    for cut in cuts {
         let mut fixture = Fixture::new("codex", true, true);
         let before = fixture.snapshot();
         let record = fixture.record();
@@ -963,6 +967,7 @@ fn interrupt_rollback_before_and_after_every_distinct_restore_boundary_and_retry
             RecoveryOutcome::None
         ));
     }
+    eprintln!("Step 10 rollback matrix completed cuts: {completed_cuts}");
 }
 
 #[test]
