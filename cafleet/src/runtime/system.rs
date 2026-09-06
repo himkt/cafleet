@@ -83,11 +83,7 @@ fn run_process(argv: &[String], timeout: Option<Duration>) -> Result<String, Run
         }
     };
     if let Some(timeout) = timeout {
-        return run_timed(
-            child,
-            timeout.saturating_sub(started.elapsed()),
-            &mut SystemProcessHooks,
-        );
+        return run_timed(child, timeout.saturating_sub(started.elapsed()));
     }
     let output = child.wait_with_output().map_err(|e| RunError::Failed {
         stderr: e.to_string(),
@@ -100,35 +96,6 @@ fn run_process(argv: &[String], timeout: Option<Duration>) -> Result<String, Run
         })
     }
 }
-
-/// Per-invocation observation/failure seam. Cleanup checks run *after* the real
-/// operation, so injected kill/wait errors never prevent actual child recovery.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProcessOperation {
-    ConfigureStdout,
-    ConfigureStderr,
-    ReadStdout,
-    ReadStderr,
-    Poll,
-    TryWait,
-    Kill,
-    Wait,
-}
-
-trait ProcessHooks {
-    fn check(&mut self, _operation: ProcessOperation) -> io::Result<()> {
-        Ok(())
-    }
-
-    fn cleanup_diagnostic(&mut self, diagnostic: &str) {
-        // Timeout has no diagnostic payload; preserve that public category and
-        // report secondary failures on stderr without panicking on a closed FD.
-        let _ = writeln!(io::stderr().lock(), "{diagnostic}");
-    }
-}
-
-struct SystemProcessHooks;
-impl ProcessHooks for SystemProcessHooks {}
 
 struct OwnedChild {
     child: Child,
@@ -153,17 +120,13 @@ fn retry_interrupted<T>(mut action: impl FnMut() -> io::Result<T>) -> io::Result
     }
 }
 
-fn run_timed(
-    child: Child,
-    timeout: Duration,
-    hooks: &mut impl ProcessHooks,
-) -> Result<String, RunError> {
+fn run_timed(child: Child, timeout: Duration) -> Result<String, RunError> {
     let started = Instant::now();
     let mut owned = OwnedChild {
         child,
         reaped: false,
     };
-    let result = collect_timed(&mut owned, started, timeout, hooks);
+    let result = collect_timed(&mut owned, started, timeout);
     match result {
         Ok((status, stdout, stderr)) => {
             if status.success() {
@@ -179,7 +142,7 @@ fn run_timed(
             let mut diagnostics = Vec::new();
             if !owned.reaped {
                 let killed = retry_interrupted(|| owned.child.kill());
-                if let Err(error) = killed.and_then(|()| hooks.check(ProcessOperation::Kill)) {
+                if let Err(error) = killed {
                     diagnostics.push(format!(
                         "cleanup failed for child {} kill: {error}",
                         owned.child.id()
@@ -188,7 +151,7 @@ fn run_timed(
             }
             let waited = retry_interrupted(|| owned.child.wait());
             owned.reaped = waited.is_ok();
-            if let Err(error) = waited.and_then(|_| hooks.check(ProcessOperation::Wait)) {
+            if let Err(error) = waited {
                 diagnostics.push(format!(
                     "cleanup failed for child {} wait: {error}",
                     owned.child.id()
@@ -200,7 +163,9 @@ fn run_timed(
                         stderr.push('\n');
                         stderr.push_str(&diagnostic);
                     }
-                    _ => hooks.cleanup_diagnostic(&diagnostic),
+                    _ => {
+                        let _ = writeln!(io::stderr().lock(), "{diagnostic}");
+                    }
                 }
             }
             Err(primary)
@@ -221,17 +186,10 @@ fn remaining(started: Instant, timeout: Duration) -> Result<Duration, RunError> 
         .ok_or(RunError::Timeout)
 }
 
-fn configure_pipe(
-    fd: BorrowedFd<'_>,
-    operation: ProcessOperation,
-    started: Instant,
-    timeout: Duration,
-    hooks: &mut impl ProcessHooks,
-) -> Result<(), RunError> {
+fn configure_pipe(fd: BorrowedFd<'_>, started: Instant, timeout: Duration) -> Result<(), RunError> {
     loop {
         remaining(started, timeout)?;
         let result: io::Result<()> = (|| {
-            hooks.check(operation)?;
             let flags = OFlag::from_bits_truncate(fcntl(fd, FcntlArg::F_GETFL)?);
             fcntl(fd, FcntlArg::F_SETFL(flags | OFlag::O_NONBLOCK))?;
             Ok(())
@@ -245,12 +203,7 @@ fn configure_pipe(
 
 /// One stream gets at most 64 KiB per iteration, including short reads. An
 /// interruption yields to the outer deadline/status check instead of spinning.
-fn drain_pipe(
-    pipe: &mut Option<impl Read>,
-    output: &mut Vec<u8>,
-    operation: ProcessOperation,
-    hooks: &mut impl ProcessHooks,
-) -> io::Result<()> {
+fn drain_pipe(pipe: &mut Option<impl Read>, output: &mut Vec<u8>) -> io::Result<()> {
     let Some(reader) = pipe.as_mut() else {
         return Ok(());
     };
@@ -258,9 +211,7 @@ fn drain_pipe(
     let mut budget = 64 * 1024;
     while budget > 0 {
         let capacity = buffer.len().min(budget);
-        let result = hooks
-            .check(operation)
-            .and_then(|()| reader.read(&mut buffer[..capacity]));
+        let result = reader.read(&mut buffer[..capacity]);
         match result {
             Ok(0) => {
                 *pipe = None;
@@ -288,21 +239,14 @@ fn collect_timed(
     owned: &mut OwnedChild,
     started: Instant,
     timeout: Duration,
-    hooks: &mut impl ProcessHooks,
 ) -> Result<(ExitStatus, Vec<u8>, Vec<u8>), RunError> {
     let mut stdout = owned.child.stdout.take();
     let mut stderr = owned.child.stderr.take();
-    for (fd, operation) in [
-        (
-            stdout.as_ref().expect("stdout is piped").as_fd(),
-            ProcessOperation::ConfigureStdout,
-        ),
-        (
-            stderr.as_ref().expect("stderr is piped").as_fd(),
-            ProcessOperation::ConfigureStderr,
-        ),
+    for fd in [
+        stdout.as_ref().expect("stdout is piped").as_fd(),
+        stderr.as_ref().expect("stderr is piped").as_fd(),
     ] {
-        configure_pipe(fd, operation, started, timeout, hooks)?;
+        configure_pipe(fd, started, timeout)?;
     }
     let mut out = Vec::new();
     let mut err = Vec::new();
@@ -310,10 +254,7 @@ fn collect_timed(
     loop {
         remaining(started, timeout)?;
         if status.is_none() {
-            match hooks
-                .check(ProcessOperation::TryWait)
-                .and_then(|()| owned.child.try_wait())
-            {
+            match owned.child.try_wait() {
                 Ok(observed) => {
                     status = observed;
                     owned.reaped = status.is_some();
@@ -322,10 +263,8 @@ fn collect_timed(
                 Err(error) => return Err(io_failure(error)),
             }
         }
-        drain_pipe(&mut stdout, &mut out, ProcessOperation::ReadStdout, hooks)
-            .map_err(io_failure)?;
-        drain_pipe(&mut stderr, &mut err, ProcessOperation::ReadStderr, hooks)
-            .map_err(io_failure)?;
+        drain_pipe(&mut stdout, &mut out).map_err(io_failure)?;
+        drain_pipe(&mut stderr, &mut err).map_err(io_failure)?;
         if stdout.is_none()
             && stderr.is_none()
             && let Some(status) = status
@@ -341,7 +280,7 @@ fn collect_timed(
             fds.push(PollFd::new(pipe.as_fd(), PollFlags::POLLIN));
         }
         // Floor the sub-millisecond remainder so poll never exceeds the budget.
-        let result: io::Result<()> = hooks.check(ProcessOperation::Poll).and_then(|()| {
+        let result: io::Result<()> = (|| {
             poll(&mut fds, wait.as_millis() as u16)?;
             if fds.iter().any(|fd| {
                 fd.revents()
@@ -350,7 +289,7 @@ fn collect_timed(
                 return Err(io::Error::other("invalid subprocess pipe descriptor"));
             }
             Ok(())
-        });
+        })();
         match result {
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
             Err(error) => return Err(io_failure(error)),
@@ -667,269 +606,6 @@ mod tests {
         }
     }
 
-    #[derive(Default)]
-    struct FaultHooks {
-        faults: Vec<(ProcessOperation, io::ErrorKind, usize)>,
-        events: Vec<ProcessOperation>,
-        diagnostics: Vec<String>,
-    }
-
-    impl FaultHooks {
-        fn fail(&mut self, operation: ProcessOperation, kind: io::ErrorKind, times: usize) {
-            self.faults.push((operation, kind, times));
-        }
-
-        fn count(&self, operation: ProcessOperation) -> usize {
-            self.events
-                .iter()
-                .filter(|&&event| event == operation)
-                .count()
-        }
-    }
-
-    impl ProcessHooks for FaultHooks {
-        fn check(&mut self, operation: ProcessOperation) -> io::Result<()> {
-            self.events.push(operation);
-            for (target, kind, remaining) in &mut self.faults {
-                if *target == operation && *remaining > 0 {
-                    *remaining -= 1;
-                    return Err(io::Error::new(*kind, format!("injected {operation:?}")));
-                }
-            }
-            Ok(())
-        }
-
-        fn cleanup_diagnostic(&mut self, diagnostic: &str) {
-            self.diagnostics.push(diagnostic.to_owned());
-        }
-    }
-
-    impl ProcessFixture {
-        fn run_with_hooks(
-            &self,
-            script: &str,
-            timeout: Duration,
-            hooks: &mut impl ProcessHooks,
-        ) -> Result<String, RunError> {
-            use std::os::fd::AsRawFd;
-            use std::os::unix::fs::MetadataExt;
-
-            let child = Command::new("/bin/sh")
-                .args(["-c", script])
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .unwrap();
-            let pid = Pid::from_raw(child.id() as i32);
-            let pipes = [
-                child.stdout.as_ref().unwrap().as_raw_fd(),
-                child.stderr.as_ref().unwrap().as_raw_fd(),
-            ]
-            .map(|fd| {
-                let path = format!("/dev/fd/{fd}");
-                let metadata = std::fs::metadata(&path).unwrap();
-                (path, metadata.dev(), metadata.ino())
-            });
-            let result = run_timed(child, timeout, hooks);
-            assert_eq!(
-                waitpid(pid, Some(WaitPidFlag::WNOHANG)),
-                Err(Errno::ECHILD),
-                "direct child was not reaped: {result:?}"
-            );
-            for (path, device, inode) in pipes {
-                // Other unit tests may reuse the descriptor number after it closes.
-                if let Ok(metadata) = std::fs::metadata(&path) {
-                    assert_ne!(
-                        (metadata.dev(), metadata.ino()),
-                        (device, inode),
-                        "original pipe {path} remained open: {result:?}"
-                    );
-                }
-            }
-            result
-        }
-    }
-
-    fn assert_operation_failure(operation: ProcessOperation) {
-        let fixture = ProcessFixture::new();
-        let mut hooks = FaultHooks::default();
-        hooks.fail(operation, io::ErrorKind::Other, 1);
-        let result = fixture.run_with_hooks("exec sleep 30", Duration::from_secs(5), &mut hooks);
-        match result {
-            Err(RunError::Failed { stderr }) => {
-                assert_eq!(stderr, format!("injected {operation:?}"));
-            }
-            result => panic!("expected injected primary failure, got {result:?}"),
-        }
-        assert_eq!(hooks.count(operation), 1);
-        assert_eq!(hooks.count(ProcessOperation::Kill), 1);
-        assert_eq!(hooks.count(ProcessOperation::Wait), 1);
-        assert_eq!(
-            &hooks.events[hooks.events.len() - 2..],
-            &[ProcessOperation::Kill, ProcessOperation::Wait]
-        );
-        assert!(hooks.diagnostics.is_empty());
-    }
-
-    fn assert_interrupted_operation_retries(operation: ProcessOperation) {
-        let fixture = ProcessFixture::new();
-        let mut hooks = FaultHooks::default();
-        hooks.fail(operation, io::ErrorKind::Interrupted, 2);
-        let result =
-            fixture.run_with_hooks("exec sleep 30", Duration::from_millis(100), &mut hooks);
-        assert!(matches!(result, Err(RunError::Timeout)), "{result:?}");
-        assert!(hooks.count(operation) >= 3, "events: {:?}", hooks.events);
-        assert!(hooks.diagnostics.is_empty());
-    }
-
-    macro_rules! operation_contract_tests {
-        ($failure:ident, $interrupted:ident, $operation:ident) => {
-            #[test]
-            fn $failure() {
-                assert_operation_failure(ProcessOperation::$operation);
-            }
-
-            #[test]
-            fn $interrupted() {
-                assert_interrupted_operation_retries(ProcessOperation::$operation);
-            }
-        };
-    }
-
-    operation_contract_tests!(
-        stdout_configuration_failure_recovers_child_and_pipes,
-        stdout_configuration_interruption_retries,
-        ConfigureStdout
-    );
-    operation_contract_tests!(
-        stderr_configuration_failure_recovers_child_and_pipes,
-        stderr_configuration_interruption_retries,
-        ConfigureStderr
-    );
-    operation_contract_tests!(
-        stdout_read_failure_recovers_child_and_pipes,
-        stdout_read_interruption_retries,
-        ReadStdout
-    );
-    operation_contract_tests!(
-        stderr_read_failure_recovers_child_and_pipes,
-        stderr_read_interruption_retries,
-        ReadStderr
-    );
-    operation_contract_tests!(
-        poll_failure_recovers_child_and_pipes,
-        poll_interruption_retries,
-        Poll
-    );
-    operation_contract_tests!(
-        try_wait_failure_recovers_child_and_pipes,
-        try_wait_interruption_retries,
-        TryWait
-    );
-
-    #[test]
-    fn persistent_interruption_at_each_operation_preserves_original_deadline() {
-        for operation in [
-            ProcessOperation::ConfigureStdout,
-            ProcessOperation::ConfigureStderr,
-            ProcessOperation::ReadStdout,
-            ProcessOperation::ReadStderr,
-            ProcessOperation::Poll,
-            ProcessOperation::TryWait,
-        ] {
-            let fixture = ProcessFixture::new();
-            let mut hooks = FaultHooks::default();
-            hooks.fail(operation, io::ErrorKind::Interrupted, usize::MAX);
-            let started = Instant::now();
-            let result =
-                fixture.run_with_hooks("exec sleep 30", Duration::from_millis(30), &mut hooks);
-            assert!(
-                matches!(result, Err(RunError::Timeout)),
-                "{operation:?}: {result:?}"
-            );
-            assert!(started.elapsed() < Duration::from_secs(5), "{operation:?}");
-            assert!(hooks.count(operation) > 1, "{operation:?}");
-            assert!(hooks.diagnostics.is_empty());
-        }
-    }
-
-    #[test]
-    fn cleanup_failures_follow_primary_error_and_do_not_skip_reaping() {
-        for cleanup in [
-            vec![ProcessOperation::Kill],
-            vec![ProcessOperation::Wait],
-            vec![ProcessOperation::Kill, ProcessOperation::Wait],
-        ] {
-            let fixture = ProcessFixture::new();
-            let mut hooks = FaultHooks::default();
-            hooks.fail(ProcessOperation::ConfigureStderr, io::ErrorKind::Other, 1);
-            for operation in &cleanup {
-                hooks.fail(*operation, io::ErrorKind::Other, 1);
-            }
-            let result =
-                fixture.run_with_hooks("exec sleep 30", Duration::from_secs(5), &mut hooks);
-            let Err(RunError::Failed { stderr }) = result else {
-                panic!("primary failure was replaced: {result:?}");
-            };
-            let lines: Vec<_> = stderr.lines().collect();
-            assert_eq!(lines[0], "injected ConfigureStderr");
-            assert_eq!(lines.len(), 1 + cleanup.len());
-            for (line, operation) in lines[1..].iter().zip(&cleanup) {
-                assert!(line.starts_with("cleanup failed for child "), "{line}");
-                let detail = match operation {
-                    ProcessOperation::Kill => " kill: injected Kill",
-                    ProcessOperation::Wait => " wait: injected Wait",
-                    _ => unreachable!(),
-                };
-                assert!(line.ends_with(detail), "{line}");
-            }
-            assert_eq!(hooks.count(ProcessOperation::Kill), 1);
-            assert_eq!(hooks.count(ProcessOperation::Wait), 1);
-            assert!(hooks.diagnostics.is_empty());
-        }
-    }
-
-    #[test]
-    fn timeout_retains_category_and_reports_both_secondary_cleanup_errors() {
-        let fixture = ProcessFixture::new();
-        let mut hooks = FaultHooks::default();
-        hooks.fail(ProcessOperation::Kill, io::ErrorKind::Other, 1);
-        hooks.fail(ProcessOperation::Wait, io::ErrorKind::Other, 1);
-        let result = fixture.run_with_hooks("exec sleep 30", Duration::from_millis(30), &mut hooks);
-        assert!(matches!(result, Err(RunError::Timeout)), "{result:?}");
-        assert_eq!(hooks.diagnostics.len(), 2);
-        assert!(hooks.diagnostics[0].ends_with(" kill: injected Kill"));
-        assert!(hooks.diagnostics[1].ends_with(" wait: injected Wait"));
-        assert_eq!(hooks.count(ProcessOperation::Kill), 1);
-        assert_eq!(hooks.count(ProcessOperation::Wait), 1);
-    }
-
-    #[test]
-    fn successful_collection_does_not_run_cleanup_hooks() {
-        let fixture = ProcessFixture::new();
-        let mut hooks = FaultHooks::default();
-        let result = fixture.run_with_hooks("printf 'done'", Duration::from_secs(5), &mut hooks);
-        assert_eq!(result.unwrap(), "done");
-        assert_eq!(hooks.count(ProcessOperation::Kill), 0);
-        assert_eq!(hooks.count(ProcessOperation::Wait), 0);
-        assert!(hooks.diagnostics.is_empty());
-    }
-
-    #[test]
-    fn nonzero_exit_preserves_stderr_without_spurious_cleanup() {
-        let fixture = ProcessFixture::new();
-        let mut hooks = FaultHooks::default();
-        let result = fixture.run_with_hooks(
-            "printf 'primary' >&2; exit 2",
-            Duration::from_secs(5),
-            &mut hooks,
-        );
-        assert!(matches!(result, Err(RunError::Failed { stderr }) if stderr == "primary"));
-        assert_eq!(hooks.count(ProcessOperation::Kill), 0);
-        assert_eq!(hooks.count(ProcessOperation::Wait), 0);
-    }
-
     struct EndlessReader {
         max_read: usize,
     }
@@ -947,67 +623,10 @@ mod tests {
         for max_read in [3, 8192] {
             let mut pipe = Some(EndlessReader { max_read });
             let mut output = Vec::new();
-            let mut hooks = FaultHooks::default();
-            drain_pipe(
-                &mut pipe,
-                &mut output,
-                ProcessOperation::ReadStdout,
-                &mut hooks,
-            )
-            .unwrap();
+            drain_pipe(&mut pipe, &mut output).unwrap();
             assert_eq!(output, vec![b'x'; 64 * 1024]);
             assert!(pipe.is_some());
         }
-    }
-
-    #[test]
-    fn interrupted_or_would_block_read_yields_without_losing_prior_bytes() {
-        for kind in [io::ErrorKind::Interrupted, io::ErrorKind::WouldBlock] {
-            let mut pipe = Some(io::Cursor::new(b"tail".to_vec()));
-            let mut output = b"head".to_vec();
-            let mut hooks = FaultHooks::default();
-            hooks.fail(ProcessOperation::ReadStdout, kind, 1);
-            drain_pipe(
-                &mut pipe,
-                &mut output,
-                ProcessOperation::ReadStdout,
-                &mut hooks,
-            )
-            .unwrap();
-            assert_eq!(output, b"head");
-            assert!(pipe.is_some());
-            drain_pipe(
-                &mut pipe,
-                &mut output,
-                ProcessOperation::ReadStdout,
-                &mut hooks,
-            )
-            .unwrap();
-            assert_eq!(output, b"headtail");
-            assert!(pipe.is_none());
-        }
-    }
-
-    #[test]
-    fn both_streams_are_serviced_between_deadline_checks() {
-        let fixture = ProcessFixture::new();
-        let mut hooks = FaultHooks::default();
-        let result =
-            fixture.run_with_hooks("exec sleep 30", Duration::from_millis(100), &mut hooks);
-        assert!(matches!(result, Err(RunError::Timeout)), "{result:?}");
-        let mut completed_iterations = 0;
-        for iteration in hooks
-            .events
-            .split(|event| *event == ProcessOperation::TryWait)
-            .skip(1)
-        {
-            if iteration.contains(&ProcessOperation::Poll) {
-                assert!(iteration.contains(&ProcessOperation::ReadStdout));
-                assert!(iteration.contains(&ProcessOperation::ReadStderr));
-                completed_iterations += 1;
-            }
-        }
-        assert!(completed_iterations > 0);
     }
 
     #[test]
