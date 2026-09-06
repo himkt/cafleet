@@ -39,6 +39,11 @@ pub(crate) enum AssetState {
     NotInstalled {
         identity: ResolvedDir,
     },
+    Incomplete {
+        identity: ResolvedDir,
+        install: Option<AssetInstallRecord>,
+        recovery: crate::assets::IncompleteInstall,
+    },
     PathError {
         variable: &'static str,
         raw_value: String,
@@ -188,21 +193,27 @@ pub(crate) fn diagnose_assets(
                         .filter(|r| r.coding_agent == agent.coding_agent && r.path != path)
                         .cloned(),
                 );
-                match records
+                let install = records
                     .iter()
                     .find(|r| r.coding_agent == agent.coding_agent && r.path == path)
-                {
-                    Some(install) if install.cafleet_version == cli_version => {
-                        AssetState::Current {
-                            identity,
-                            install: install.clone(),
-                        }
-                    }
-                    Some(install) => AssetState::Stale {
+                    .cloned();
+                // Reuse the resolved identity; do not reread environment variables.
+                let paths =
+                    crate::assets::agent_paths(&|_| Some(path.clone()), home, agent.coding_agent)?;
+                if let Some(recovery) = crate::assets::inspect_install(&paths)? {
+                    AssetState::Incomplete {
                         identity,
-                        install: install.clone(),
-                    },
-                    None => AssetState::NotInstalled { identity },
+                        install,
+                        recovery,
+                    }
+                } else {
+                    match install {
+                        Some(install) if install.cafleet_version == cli_version => {
+                            AssetState::Current { identity, install }
+                        }
+                        Some(install) => AssetState::Stale { identity, install },
+                        None => AssetState::NotInstalled { identity },
+                    }
                 }
             }
             other => other,

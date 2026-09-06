@@ -412,6 +412,17 @@ target locks serialize concurrent setup calls, including configured paths
 that alias the same skills tree. These are OS advisory locks released on
 process exit, not PID-file checks; recorded identity paths remain unchanged.
 
+Persistent lock sidecars point to the owning journal, so another configured
+identity sharing a physical skills tree can find interrupted work. Keep these
+files: Finished sidecars without a journal are normal. Recovery checks the
+recorded physical database path against the current connection and asks for
+the original database configuration on a mismatch; it never opens another DB
+automatically. During reinstall, an old Finished sidecar may temporarily refer
+to a new untouched Prepared journal. Setup verifies the exact old row and all
+old entries, then updates every sidecar to the current Active transaction
+before beginning rollback. Other transaction or target mismatches stop and
+retain evidence. This normalization is itself restartable.
+
 Before exchanging entries, setup writes a durable
 `<identity>/.cafleet-install-journal.json` with transaction/phase, paths, old
 entry presence, the previous database row or null, and the new manifest.
@@ -438,6 +449,9 @@ can be read, and continues the other diagnostic sections.
 An install failure aborts the backend loop; successful earlier backends remain
 installed and recorded. A committed cleanup warning does not make the assets
 half fail. The DB and assets halves retain their independent failure handling.
+Its stderr line is `warning: assets installed at <path>; cleanup pending:
+<cause>; run 'cafleet setup' to recover`. A later cleanup-only run prints the
+journal's version, not the version of a newer binary running the recovery.
 The procedure recovers coordinated changes across filesystems and SQLite; it
 is not one atomic commit. Power-loss guarantees depend on filesystem support
 for sync and rename. See [installer test boundaries](../contributing.md#assets-installer-tests)

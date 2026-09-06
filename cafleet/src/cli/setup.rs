@@ -8,7 +8,7 @@ use clap::Args;
 use rusqlite::Connection;
 
 use super::{InvocationEvent, InvocationHooks, InvocationPhase, SchemaPoint, inspect_schema};
-use crate::assets::{TARGET_AGENTS, agent_paths, install_agent};
+use crate::assets::{InstallHooks, LockMode, TARGET_AGENTS, agent_paths, install_agent_with_hooks};
 use crate::config::Settings;
 #[cfg(test)]
 use crate::diagnosis::recorded_version;
@@ -219,24 +219,82 @@ fn assets_half(
     selected: &[String],
     env: crate::config_dir::EnvLookup<'_>,
 ) -> Result<(), CafleetError> {
-    if !asset_table_exists(conn)? {
-        return Err(CafleetError::App(
-            "the database schema is missing or outdated; run 'cafleet setup' first".to_string(),
-        ));
-    }
+    assets_preflight(conn)?;
     let home = PathBuf::from(
         std::env::var("HOME").map_err(|_| CafleetError::App("HOME is not set".to_string()))?,
     );
+    let hooks = InstallHooks {
+        lock_mode: LockMode::Wait,
+        checkpoint: &|_| Ok(()),
+    };
+    install_selected_assets(
+        conn,
+        selected,
+        &SetupAssetsOptions {
+            home: &home,
+            env,
+            install_hooks: &hooks,
+        },
+        &mut std::io::stdout().lock(),
+        &mut std::io::stderr().lock(),
+    )
+}
 
+struct SetupAssetsOptions<'a> {
+    home: &'a std::path::Path,
+    env: crate::config_dir::EnvLookup<'a>,
+    install_hooks: &'a InstallHooks<'a>,
+}
+// Explicit-path entry for per-call fixtures; shares preflight and the real backend loop.
+#[cfg_attr(not(test), allow(dead_code))]
+fn assets_half_with_options(
+    conn: &mut Connection,
+    selected: &[String],
+    options: &SetupAssetsOptions<'_>,
+    out: &mut dyn std::io::Write,
+    err: &mut dyn std::io::Write,
+) -> Result<(), CafleetError> {
+    assets_preflight(conn)?;
+    install_selected_assets(conn, selected, options, out, err)
+}
+
+fn assets_preflight(conn: &Connection) -> Result<(), CafleetError> {
+    if !asset_table_exists(conn)? {
+        return Err(CafleetError::App(
+            "the database schema is missing or outdated; run 'cafleet setup' first".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn install_selected_assets(
+    conn: &mut Connection,
+    selected: &[String],
+    options: &SetupAssetsOptions<'_>,
+    out: &mut dyn std::io::Write,
+    err: &mut dyn std::io::Write,
+) -> Result<(), CafleetError> {
     for agent in TARGET_AGENTS {
         if !selected.is_empty() && !selected.iter().any(|s| s == agent) {
             continue;
         }
-        let paths = agent_paths(env, &home, agent)?;
-        install_agent(conn, agent, &paths, super::VERSION)?;
+        let paths = agent_paths(options.env, options.home, agent)?;
+        install_agent_with_hooks(
+            conn,
+            agent,
+            &paths,
+            super::VERSION,
+            options.install_hooks,
+            out,
+            err,
+        )?;
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "setup/step10_contract_tests.rs"]
+mod step10_contract_tests;
 
 #[cfg(test)]
 mod tests {

@@ -1930,6 +1930,21 @@ locks through recovery, staging, swaps, database recording and cleanup.
 Process exit releases locks; a PID file is not the lock. Physical lock
 normalization does not change the existing recorded-path identity contract.
 
+Stable lock files have durable intent sidecars that identify their owning
+transaction and journal, allowing another identity sharing the same physical
+skills tree to discover interrupted work. Retain lock inodes; finish sidecars
+before removing the journal. An Active sidecar without its journal is
+incomplete; Finished without a journal is normal. A Finished sidecar pointing
+to a new transaction is accepted only as a discovery candidate when the
+journal is Prepared, has no pending operation, and every entry is Original.
+Under all required locks, verify the journal database identity, exact old row,
+all old fingerprints and absence of backups before normalizing every sidecar
+to the new Active transaction while still Prepared. Only then enter rollback.
+This ordering also applies to same-call failure recovery, and permits another
+interruption during normalization. Other transaction/key/state mismatches
+stop with evidence retained. Recovery never opens a different recorded
+database automatically; rerun setup with the original database configuration.
+
 1. Write every replacement into its own stage and validate its embedded
    manifest before changing installed entries or the database. A staging
    failure cleans stages only. Stage validation checks the expected file set,
@@ -1988,7 +2003,10 @@ half fails with `the database schema is missing or outdated; run 'cafleet
 setup' first`. The DB half runs first and assets are still attempted after
 its failure. An install failure aborts the backend loop; successful earlier
 backends and their rows remain. Committed cleanup warnings are not an
-assets-half install failure. This is a recoverable sequence across filesystems
+assets-half install failure. Their stderr line is
+`warning: assets installed at <path>; cleanup pending: <cause>; run 'cafleet setup' to recover`.
+Cleanup-only success prints the journal's installed version, even when the
+running binary has a different version. This is a recoverable sequence across filesystems
 and SQLite, not a single atomic commit; power-loss durability depends on the
 filesystem's sync and rename guarantees.
 

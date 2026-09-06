@@ -50,6 +50,17 @@ pub(crate) fn doctor_assets(assets: &AssetReport, cli_version: &str) -> Value {
                 AssetState::NotInstalled { identity } => {
                     (Some(identity), None, "not_installed", None, None)
                 }
+                AssetState::Incomplete {
+                    identity,
+                    install,
+                    recovery,
+                } => (
+                    Some(identity),
+                    install.as_ref(),
+                    "incomplete",
+                    Some(std::borrow::Cow::Owned(recovery.diagnostic())),
+                    None,
+                ),
                 AssetState::PathError {
                     variable, cause, ..
                 } => (None, None, "error", Some(cause.message()), Some(*variable)),

@@ -121,7 +121,11 @@ Compare file digests, exact old rows (including absent rows and timestamps),
 journals and backup remnants for same-version reinstall, each skill/preset
 swap, obsolete research removal, symlink entries, record failure, rollback
 failure and committed cleanup failure. Interrupt and resume recovery itself,
-including after a backup has already been restored. Use real advisory locks
+including after a backup has already been restored. Also start from a real
+successful install: interrupt the next Prepared publication and partial intent
+updates, then interrupt normalization and rollback again. Initial-install
+matrices alone do not cover surviving Finished sidecars from earlier installs.
+Use real advisory locks
 and independent SQLite connections for concurrency and alias fixtures.
 Simulated interruption releases owned handles; it does not demonstrate
 power-loss durability or real process-kill behavior.

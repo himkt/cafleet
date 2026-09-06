@@ -35,11 +35,19 @@ pub(crate) fn stale_assets_guard(
     cli_version: &str,
 ) -> Result<(), CafleetError> {
     use crate::diagnosis::AssetState;
+    for agent in &assets.agents {
+        if let AssetState::PathError { cause, .. } = &agent.state {
+            return Err(cause.clone());
+        }
+    }
     let mut current = 0;
     let mut stale = Vec::new();
     for agent in &assets.agents {
         match &agent.state {
             AssetState::PathError { cause, .. } => return Err(cause.clone()),
+            AssetState::Incomplete { recovery, .. } => {
+                return Err(CafleetError::App(recovery.diagnostic()));
+            }
             AssetState::Current { .. } => current += 1,
             AssetState::Stale { install, .. } => {
                 current += 1;

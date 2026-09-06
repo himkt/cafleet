@@ -208,6 +208,9 @@ fn agent_rows(home: &Path, report: &AssetReport) -> Vec<AgentRow> {
                     format!("– cafleet setup --coding-agent {}", agent.coding_agent),
                     false,
                 ),
+                AssetState::Incomplete {
+                    identity, recovery, ..
+                } => (identity, format!("✗ {}", recovery.diagnostic()), true),
                 AssetState::PathError {
                     variable,
                     raw_value,
