@@ -302,16 +302,26 @@ The unified shapes:
 
 **MonitorRuntime** (1:1 with Fleet; `fleet_id` is PK = FK, not autoincrement)
 
-| Field | Type | Notes |
-|---|---|---|
-| `fleet_id` | integer | FK→fleets, ON DELETE RESTRICT |
-| `pid` | optional integer | |
-| `started_at` | optional string | |
-| `last_tick_at` | optional string | |
-| `tick_seconds` | integer | DDL default 5 |
-| `last_wake_at` | optional string | nullable; the UTC ISO timestamp of the last successfully delivered wake, durable across loop restarts; preserved by the runtime clear |
-| `wake_interval_seconds` | optional integer | nullable; the live mirror of the running loop's wake interval — stamped at every claim/reclaim, re-read per tick, overwritten by `PATCH /api/monitor`, preserved by the runtime clear; `NULL` only in rows that predate the column and were never re-claimed |
-| `wake_requested_at` | optional string | nullable; the UTC ISO timestamp of the latest pending forced-wake request (`POST /api/monitor/wake`) — `NULL` when none is pending; repeat requests overwrite the timestamp (coalesce into a single wake); cleared by a delivered wake (`record_monitor_wake`) and by the reclaim reset in `claim_monitor_runtime` |
+<!-- BEGIN GENERATED schema-monitor-runtime -->
+| Column | SQLite type | DDL NOT NULL | DDL default | PK position |
+|---|---|---|---|---|
+| `fleet_id` | `INTEGER` | true | — | 1 |
+| `pid` | `INTEGER` | false | — | 0 |
+| `started_at` | `TEXT` | false | — | 0 |
+| `last_tick_at` | `TEXT` | false | — | 0 |
+| `tick_seconds` | `INTEGER` | true | `5` | 0 |
+| `last_wake_at` | `TEXT` | false | — | 0 |
+| `wake_interval_seconds` | `INTEGER` | false | — | 0 |
+| `wake_requested_at` | `TEXT` | false | — | 0 |
+
+DDL metadata only: PK position is separate from the NOT NULL flag; foreign keys and runtime semantics remain in the prose.
+<!-- END GENERATED schema-monitor-runtime -->
+
+- `fleet_id`: FK→fleets, ON DELETE RESTRICT
+- `tick_seconds`: DDL default 5
+- `last_wake_at`: nullable; the UTC ISO timestamp of the last successfully delivered wake, durable across loop restarts; preserved by the runtime clear
+- `wake_interval_seconds`: nullable; the live mirror of the running loop's wake interval — stamped at every claim/reclaim, re-read per tick, overwritten by `PATCH /api/monitor`, preserved by the runtime clear; `NULL` only in rows that predate the column and were never re-claimed
+- `wake_requested_at`: nullable; the UTC ISO timestamp of the latest pending forced-wake request (`POST /api/monitor/wake`) — `NULL` when none is pending; repeat requests overwrite the timestamp (coalesce into a single wake); cleared by a delivered wake (`record_monitor_wake`) and by the reclaim reset in `claim_monitor_runtime`
 
 A missing row is distinct from any nullable field on an existing row.
 `pid = NULL` means no claim; claim records the loop's direct pid and clear
@@ -332,12 +342,21 @@ projection, which hides process timestamps but preserves stored intervals
 
 **AssetInstalls** (composite TEXT PK `(coding_agent, path)`, not autoincrement, not FK-linked)
 
-| Field | Type | Notes |
-|---|---|---|
-| `coding_agent` | string | PK part; one of `"claude"` / `"codex"` / `"opencode"` |
-| `path` | string | PK part; the agent's resolved identity path (§6.3 *Config-dir resolution*), stored absolute exactly as resolved |
-| `cafleet_version` | string | the CLI's compile-time version string at install time (§7.6) |
-| `installed_at` | string | UTC ISO-8601 with microsecond precision |
+<!-- BEGIN GENERATED schema-asset-installs -->
+| Column | SQLite type | DDL NOT NULL | DDL default | PK position |
+|---|---|---|---|---|
+| `coding_agent` | `TEXT` | true | — | 1 |
+| `path` | `TEXT` | true | — | 2 |
+| `cafleet_version` | `TEXT` | true | — | 0 |
+| `installed_at` | `TEXT` | true | — | 0 |
+
+DDL metadata only: PK position is separate from the NOT NULL flag; foreign keys and runtime semantics remain in the prose.
+<!-- END GENERATED schema-asset-installs -->
+
+- `coding_agent`: PK part; one of `"claude"` / `"codex"` / `"opencode"`
+- `path`: PK part; the agent's resolved identity path (§6.3 *Config-dir resolution*), stored absolute exactly as resolved
+- `cafleet_version`: the CLI's compile-time version string at install time (§7.6)
+- `installed_at`: UTC ISO-8601 with microsecond precision
 
 Writes are upserts on the composite key (`ON CONFLICT(coding_agent, path) DO UPDATE SET cafleet_version, installed_at`). Rows are written by the assets half of `cafleet setup` — one row per installed agent at its resolved identity path — after that agent's skills and preset (where one exists) install successfully, so a row attests skills + preset; the db half never touches the rows. Consumers partition an agent's rows by comparing `path` against the currently-resolved identity path: the row at the resolved path (at most one, by the primary key) is **current**; every other row of that agent is **superseded**. Current rows feed the stale-assets guard on every fleet-scoped command group and the `cafleet doctor` coding-agents section; superseded rows surface only as informational doctor footnotes.
 
@@ -487,6 +506,17 @@ connection performing the delete. Omitting either PRAGMA is a correctness bug,
 not a no-op. Both must run on every connection the reimplementation opens.
 
 #### Structural invariants
+
+<!-- BEGIN GENERATED schema-indexes -->
+| Table | Index | Unique | Columns | Partial | Definition |
+|---|---|---|---|---|---|
+| `members` | `idx_members_fleet_status` | false | `fleet_id, status` | false | `CREATE INDEX idx_members_fleet_status ON members (fleet_id, status)` |
+| `members` | `idx_members_one_active_monitor_per_fleet` | true | `fleet_id` | true | `CREATE UNIQUE INDEX idx_members_one_active_monitor_per_fleet ON members(fleet_id) WHERE status = 'active' AND json_extract(member_card_json, '$.cafleet.kind') = 'monitor'` |
+| `messages` | `idx_messages_from_member_status_ts` | false | `from_member_id, status_timestamp` | false | `CREATE INDEX idx_messages_from_member_status_ts ON messages (from_member_id, status_timestamp)` |
+| `messages` | `idx_messages_owner_member_status_ts` | false | `owner_member_id, status_timestamp` | false | `CREATE INDEX idx_messages_owner_member_status_ts ON messages (owner_member_id, status_timestamp)` |
+
+Application-created indexes only; SQLite autoindexes for PRIMARY KEY/UNIQUE constraints and migration bookkeeping are excluded.
+<!-- END GENERATED schema-indexes -->
 
 - **AUTOINCREMENT on exactly three tables** — `fleets`, `members`, `messages` —
   guaranteeing monotonically increasing ids that are never reused. The 1:1
@@ -1484,7 +1514,7 @@ for the fleet's single root Director bootstrapped by `fleet create` — no
    pane added by the losing registration. Re-raise an application error
    verbatim (preserves the root-Director invariant guard); wrap any other exception as
    `register failed: <error>`. Capture the new member id.
-7. **Substitute placeholders** (below) — run `str.format` over the resolved body
+7. **Substitute placeholders** (below) — run the Rust spawn-placeholder mini-formatter over the resolved body
    (step 4), substituting `{fleet_id}` / `{member_id}` (the new member id from
    step 6) / `{director_member_id}` (the auto-resolved Director) /
    `{coding_agent}`. An unknown-placeholder or
@@ -1666,6 +1696,17 @@ member <name> (<pane_id>) — poll keystroke dispatched.`.
 
 #### `member capture`
 
+<!-- BEGIN GENERATED cli-member-capture -->
+| Argument | Type | Values per occurrence | Action | Parser default | Required |
+|---|---|---|---|---|---|
+| `MEMBER_ID` | `i64` | 1 | `Set` | — | yes |
+| `--lines` | `i64` | 1 | `Set` | `20` | no |
+| `--ansi` | `bool` | 0 | `SetTrue` | `false` | no |
+| `--json` | `bool` | 0 | `SetTrue` | `false` | no |
+
+Parser defaults only; runtime environment fallbacks and value constraints remain in the prose.
+<!-- END GENERATED cli-member-capture -->
+
 Pane read. Arguments: positional `MEMBER_ID` (the **target**), `--lines`
 (integer, default
 **20**, shown in help), `--ansi` (boolean, default `false` — preserve ANSI
@@ -1685,6 +1726,17 @@ emitted string. Text output stays byte-identical. Capture content is not
 stored.
 
 #### `monitor`
+
+<!-- BEGIN GENERATED cli-monitor -->
+| Argument | Type | Values per occurrence | Action | Parser default | Required |
+|---|---|---|---|---|---|
+| `FLEET_ID` | `i64` | 1 | `Set` | — | yes |
+| `--tick` | `i64` | 1 | `Set` | `5` | no |
+| `--interval` | `i64` | 1 | `Set` | — | no |
+
+Parser defaults only; runtime environment fallbacks and value constraints remain in the prose.
+Required arguments apply to the loop form; selecting a subcommand negates them.
+<!-- END GENERATED cli-monitor -->
 
 A two-form top-level command: the bare positional form runs the supervision
 loop; the `scan` subcommand is a one-shot batch capture. The loop positionals
@@ -1719,6 +1771,17 @@ Director's first ordinary
 `cafleet member create`: `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)`.
 
 ##### `monitor scan`
+
+<!-- BEGIN GENERATED cli-monitor-scan -->
+| Argument | Type | Values per occurrence | Action | Parser default | Required |
+|---|---|---|---|---|---|
+| `FLEET_ID` | `i64` | 1 | `Set` | — | yes |
+| `--lines` | `i64` | 1 | `Set` | `20` | no |
+| `--ansi` | `bool` | 0 | `SetTrue` | `false` | no |
+| `--json` | `bool` | 0 | `SetTrue` | `false` | no |
+
+Parser defaults only; runtime environment fallbacks and value constraints remain in the prose.
+<!-- END GENERATED cli-monitor-scan -->
 
 Shared capture uses `CaptureSnapshot::from_raw(raw, ansi, now)` for both
 member capture and scan. ANSI false applies the existing strip/CR normalization;
@@ -2171,9 +2234,11 @@ bare `member create` with neither the positional nor `--file` is clap's
 native missing-required-argument-group error (exit 2).
 
 **Placeholder substitution.** After the body is resolved, `member create` runs
-`str.format` over it, substituting `{fleet_id}`, `{member_id}` (the spawned
+the Rust spawn-placeholder mini-formatter over it, substituting `{fleet_id}`, `{member_id}` (the spawned
 member's own id), `{director_member_id}`, and `{coding_agent}` (the resolved
 backend). A custom prompt keeps a literal brace by doubling it (`{{` / `}}`).
+Only these four exact names and doubled braces are supported; Python format
+specifications, conversions, and attribute/index access are not interpreted.
 Error surfaces (both usage errors, exit 2): an unknown placeholder → `Unknown
 placeholder '<key>' in custom prompt. Supported placeholders: {fleet_id},
 {member_id}, {director_member_id}, {coding_agent}. Double literal braces ({{, }})
@@ -3664,7 +3729,11 @@ for age math.
 
 ### 7.6 Packaging & distribution
 
-`cafleet` ships as a **single static binary** distributed on GitHub Releases.
+`cafleet` ships as a single binary. Install with Homebrew
+(`brew install himkt/tap/cafleet`) or download an archive from GitHub Releases.
+The release workflow also publishes Homebrew bottles; Linux release targets
+use musl. Skills, presets, migrations, and WebUI files are embedded, not
+separate runtime downloads.
 
 - **Release targets:** `aarch64-apple-darwin`, `x86_64-unknown-linux-musl`,
   `aarch64-unknown-linux-musl`.

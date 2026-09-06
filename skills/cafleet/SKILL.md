@@ -82,7 +82,7 @@ In the Director's own commands, substitute the literal ids printed by `cafleet f
 
 ### Spawned-member identity via `str.format` substitution
 
-`cafleet member create` runs `str.format` over the resolved spawn prompt (supplied as exactly one of the positional `PROMPT` or `--file <path>`), rendering exactly four placeholders to literals at spawn time:
+`cafleet member create` uses the Rust spawn-placeholder mini-formatter on the resolved spawn prompt (supplied as exactly one of the positional `PROMPT` or `--file <path>`), rendering exactly four placeholders to literals at spawn time. It accepts exact names and doubled literal braces only, not Python format specifications, conversions, or attribute/index access:
 
 - `{fleet_id}` — the member's fleet id.
 - `{member_id}` — the member's **own** newly-allocated id (the CLI allocates it during the spawn and substitutes it itself — the Director never needs to know it).

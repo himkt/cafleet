@@ -3,6 +3,11 @@
 How the unified CAFleet CLI (`cafleet`) accepts configuration parameters. This
 page catalogs the arguments, conventions, and error strings.
 
+The marked argument blocks for monitor loop/scan and member capture come
+from clap. Maintainers run `mise //cafleet:docs-generate` to update these
+and the bounded schema blocks in SPEC, then `mise //cafleet:docs-check` to
+check for drift without writing documents. Other contracts remain hand-written.
+
 ## Subcommand summary
 
 One row per subcommand. The **subject** — the id a command acts on — is a
@@ -1021,7 +1026,7 @@ The per-backend spawn argv and auto-approval flags live in
 
 #### Spawn-prompt substitution
 
-`cafleet member create` runs `str.format` over the resolved prompt body,
+`cafleet member create` uses the Rust spawn-placeholder mini-formatter on the resolved prompt body,
 substituting exactly four placeholders:
 
 | Placeholder | Substituted value | How the spawned member sees it |
@@ -1033,7 +1038,9 @@ substituting exactly four placeholders:
 
 Identity reaches the spawned member as literals rendered into its prompt; the
 only environment variable forwarded into the pane is `CAFLEET_DATABASE_URL`.
-A literal brace must be doubled (`{{` / `}}`); an unknown placeholder or
+The formatter accepts only the four exact names above and doubled literal
+braces (`{{` / `}}`), not Python format specifications, conversions, or
+attribute/index access. An unknown placeholder or
 malformed brace expression exits 2 and attempts to deregister the just-registered
 member; any cleanup failure is reported after the primary error
 (see [Error Messages](#error-messages)).
@@ -1251,10 +1258,19 @@ still exit 1.
 `cafleet member capture MEMBER_ID [--lines N] [--ansi] [--json]` — the
 positional `MEMBER_ID` names the target member.
 
-| Argument | Required | Notes |
-|---|---|---|
-| `--lines` | no | Number of trailing lines to capture (default: **20**). |
-| `--ansi` | no | Preserve ANSI escapes in the raw capture. The default strips ANSI escapes and cleans carriage-return redraws. |
+<!-- BEGIN GENERATED cli-member-capture -->
+| Argument | Type | Values per occurrence | Action | Parser default | Required |
+|---|---|---|---|---|---|
+| `MEMBER_ID` | `i64` | 1 | `Set` | — | yes |
+| `--lines` | `i64` | 1 | `Set` | `20` | no |
+| `--ansi` | `bool` | 0 | `SetTrue` | `false` | no |
+| `--json` | `bool` | 0 | `SetTrue` | `false` | no |
+
+Parser defaults only; runtime environment fallbacks and value constraints remain in the prose.
+<!-- END GENERATED cli-member-capture -->
+
+- `--lines`: Number of trailing lines to capture (default: **20**).
+- `--ansi`: Preserve ANSI escapes in the raw capture. The default strips ANSI escapes and cleans carriage-return redraws.
 
 Output shapes are in [Output shapes](#output-shapes); target resolution is
 shared with the `member` keystroke verbs — see
@@ -1296,10 +1312,19 @@ is no stop subcommand — deleting the monitor member kills the pane hosting
 the loop, and a still-running loop self-terminates on its next tick after
 `fleet delete`.
 
-| Flag | Required | Notes |
-|---|---|---|
-| `--tick` | no | The scan-tick cadence in seconds (an integer ≥ 1, default **5**). The tick is the floor on interval precision — see [Monitoring](../concepts/monitoring.md#cadence-and-tick-precision). |
-| `--interval` | no | The wake interval in seconds (an integer ≥ 0); `0` disables the wake while the loop keeps heartbeating. When omitted, falls back to `CAFLEET_MONITOR_WAKE_INTERVAL` (default **600**). |
+<!-- BEGIN GENERATED cli-monitor -->
+| Argument | Type | Values per occurrence | Action | Parser default | Required |
+|---|---|---|---|---|---|
+| `FLEET_ID` | `i64` | 1 | `Set` | — | yes |
+| `--tick` | `i64` | 1 | `Set` | `5` | no |
+| `--interval` | `i64` | 1 | `Set` | — | no |
+
+Parser defaults only; runtime environment fallbacks and value constraints remain in the prose.
+Required arguments apply to the loop form; selecting a subcommand negates them.
+<!-- END GENERATED cli-monitor -->
+
+- `--tick`: The scan-tick cadence in seconds (an integer ≥ 1, default **5**). The tick is the floor on interval precision — see [Monitoring](../concepts/monitoring.md#cadence-and-tick-precision).
+- `--interval`: The wake interval in seconds (an integer ≥ 0); `0` disables the wake while the loop keeps heartbeating. When omitted, falls back to `CAFLEET_MONITOR_WAKE_INTERVAL` (default **600**).
 
 The startup-resolved interval (`--interval` > `CAFLEET_MONITOR_WAKE_INTERVAL`
 > 600) is stamped into the fleet's `monitor_runtime` row at each start and
@@ -1354,11 +1379,20 @@ member's pane, captured back-to-back and printed in a single invocation.
 No loop runs, no `monitor_runtime` row is claimed, the command performs no
 DB writes, and capture content is never stored in SQLite.
 
-| Flag | Required | Notes |
-|---|---|---|
-| `--lines` | no | Trailing lines captured per pane (an integer ≥ 1, default **20**). |
-| `--ansi` | no | Preserve ANSI escapes in every captured content. The default strips ANSI escapes, as in [`member capture`](#member-capture). |
-| `--json` | no | Emit the JSON array instead of the text sections. |
+<!-- BEGIN GENERATED cli-monitor-scan -->
+| Argument | Type | Values per occurrence | Action | Parser default | Required |
+|---|---|---|---|---|---|
+| `FLEET_ID` | `i64` | 1 | `Set` | — | yes |
+| `--lines` | `i64` | 1 | `Set` | `20` | no |
+| `--ansi` | `bool` | 0 | `SetTrue` | `false` | no |
+| `--json` | `bool` | 0 | `SetTrue` | `false` | no |
+
+Parser defaults only; runtime environment fallbacks and value constraints remain in the prose.
+<!-- END GENERATED cli-monitor-scan -->
+
+- `--lines`: Trailing lines captured per pane (an integer ≥ 1, default **20**).
+- `--ansi`: Preserve ANSI escapes in every captured content. The default strips ANSI escapes, as in [`member capture`](#member-capture).
+- `--json`: Emit the JSON array instead of the text sections.
 
 **Roster.** The scan requires a live fleet (a soft-deleted or unknown fleet
 errors — see [Error Messages](#error-messages)) and a resolvable

@@ -4,6 +4,8 @@
 //! multiplexer / output / coding-agent.
 
 pub(crate) mod creation;
+#[cfg(test)]
+mod doc_contract;
 mod doctor;
 pub(crate) mod fleet;
 pub(crate) mod helpers;
