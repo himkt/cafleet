@@ -949,3 +949,110 @@ mod invocation_contracts {
         assert_eq!(*events.borrow(), vec!["db error", "assets ok"]);
     }
 }
+
+// Step 10 compatibility checks use only the existing public installer adapter.
+mod step10_existing_installer {
+    use super::*;
+    use crate::assets::{agent_paths, install_agent};
+    use crate::embedded::{PRESETS, SKILLS, lookup};
+
+    #[test]
+    fn same_version_reinstall_replaces_different_bytes_and_preserves_unrelated_siblings() {
+        let dir = fixture_dir();
+        let base = dir.path().join("codex");
+        let lookup_env = |_: &str| Some(base.display().to_string());
+        let paths = agent_paths(&lookup_env, dir.path(), "codex").unwrap();
+        let mut conn = Connection::open(dir.path().join("assets.sqlite3")).unwrap();
+        crate::db::migrate_to_head(&mut conn).unwrap();
+        install_agent(&mut conn, "codex", &paths, "same").unwrap();
+        for skill in ["cafleet", "cafleet-design-doc"] {
+            std::fs::write(
+                base.join("skills").join(skill).join("SKILL.md"),
+                b"old bytes, same version",
+            )
+            .unwrap();
+            std::fs::write(
+                base.join("skills").join(skill).join("obsolete.txt"),
+                b"old extra",
+            )
+            .unwrap();
+        }
+        std::fs::write(base.join("rules/cafleet.rules"), b"old preset").unwrap();
+        std::fs::create_dir_all(base.join("skills/unrelated")).unwrap();
+        std::fs::write(base.join("skills/unrelated/keep"), b"keep").unwrap();
+        std::fs::write(base.join("rules/unrelated.rules"), b"keep rule").unwrap();
+        install_agent(&mut conn, "codex", &paths, "same").unwrap();
+        for (relative, bytes) in SKILLS {
+            assert_eq!(
+                std::fs::read(base.join("skills").join(relative)).unwrap(),
+                *bytes,
+                "{relative}"
+            );
+        }
+        for skill in ["cafleet", "cafleet-design-doc"] {
+            assert!(
+                !base
+                    .join("skills")
+                    .join(skill)
+                    .join("obsolete.txt")
+                    .exists()
+            );
+        }
+        assert_eq!(
+            std::fs::read(base.join("rules/cafleet.rules")).unwrap(),
+            lookup(PRESETS, "codex/cafleet.rules").unwrap()
+        );
+        assert_eq!(
+            std::fs::read(base.join("skills/unrelated/keep")).unwrap(),
+            b"keep"
+        );
+        assert_eq!(
+            std::fs::read(base.join("rules/unrelated.rules")).unwrap(),
+            b"keep rule"
+        );
+        assert_eq!(broker::list_asset_installs(&conn).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn obsolete_research_symlink_removal_does_not_follow_its_external_target() {
+        let dir = fixture_dir();
+        let base = dir.path().join("claude");
+        let paths = agent_paths(
+            &|_: &str| Some(base.display().to_string()),
+            dir.path(),
+            "claude",
+        )
+        .unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("keep"), b"untouched").unwrap();
+        std::fs::create_dir_all(base.join("skills")).unwrap();
+        let research = base.join("skills/cafleet-research");
+        std::os::unix::fs::symlink(&outside, &research).unwrap();
+        let mut conn = Connection::open(dir.path().join("assets.sqlite3")).unwrap();
+        crate::db::migrate_to_head(&mut conn).unwrap();
+        install_agent(&mut conn, "claude", &paths, "new").unwrap();
+        assert!(std::fs::symlink_metadata(&research).is_err());
+        assert_eq!(std::fs::read(outside.join("keep")).unwrap(), b"untouched");
+    }
+
+    #[test]
+    fn later_backend_failure_preserves_earlier_backend_bytes_and_exact_record() {
+        let dir = fixture_dir();
+        let mut conn = Connection::open(dir.path().join("assets.sqlite3")).unwrap();
+        crate::db::migrate_to_head(&mut conn).unwrap();
+        let claude = agent_paths(&|_| None, dir.path(), "claude").unwrap();
+        install_agent(&mut conn, "claude", &claude, "new").unwrap();
+        let rows = broker::list_asset_installs(&conn).unwrap();
+        let before = std::fs::read(dir.path().join(".claude/skills/cafleet/SKILL.md")).unwrap();
+        let codex = agent_paths(&|_| None, dir.path(), "codex").unwrap();
+        std::fs::create_dir_all(dir.path().join(".codex")).unwrap();
+        std::fs::write(dir.path().join(".codex/skills"), b"not a directory").unwrap();
+        assert!(install_agent(&mut conn, "codex", &codex, "new").is_err());
+        assert_eq!(broker::list_asset_installs(&conn).unwrap(), rows);
+        assert_eq!(
+            std::fs::read(dir.path().join(".claude/skills/cafleet/SKILL.md")).unwrap(),
+            before
+        );
+    }
+}
