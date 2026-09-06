@@ -10,7 +10,6 @@ unsafe_code = "forbid"
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
-form_urlencoded = "1"
 nix = { version = "0.31", features = ["signal", "fs", "poll"] }
 refinery = { version = "0.9", features = ["rusqlite"] }
 regex = "1"
@@ -22,7 +21,6 @@ tokio = { version = "1", default-features = false, features = ["net", "rt-multi-
 unicode-width = "0.2"
 
 [dev-dependencies]
-pulldown-cmark = { version = "0.13.4", default-features = false }
 sha2 = "0.11"
 tempfile = "3"
 tokio = { version = "1", default-features = false, features = ["macros"] }

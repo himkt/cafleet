@@ -6,26 +6,20 @@ use clap::{Args, Subcommand};
 use rusqlite::Connection;
 use serde_json::{Value, json};
 
-use super::creation::{
-    MemberCreateOptions, PaneGuard, PreparedSpawn, RegistrationGuard, SpawnPreparation,
-};
+use super::creation::{PaneGuard, RegistrationGuard};
 use super::helpers::{emit, resolve_body, resolve_mux};
 use crate::broker::records::MemberRecord;
 use crate::broker::{self, NewPlacement};
 use crate::capture::{CaptureSnapshot, MemberCapture, write_member_capture};
-use crate::coding_agent::{SpawnProbe, coding_agent};
+use crate::coding_agent::coding_agent;
 use crate::config::Settings;
 use crate::error::CafleetError;
-use crate::multiplexer::spawn::{
-    Deadline, PaneSpawnRequest, SpawnExecution, SpawnMultiplexer, SystemClock,
-};
-use crate::multiplexer::{Multiplexer, MultiplexerError};
+
+use crate::multiplexer::Multiplexer;
 use crate::output::{format_member, format_member_detail, format_member_list};
 use crate::presentation;
 use crate::runtime::system::SystemProbe;
-use crate::runtime::system::SystemRunner;
 use crate::time::now_utc;
-use std::time::Duration;
 
 #[derive(Args)]
 #[group(required = true, multiple = false)]
@@ -276,54 +270,6 @@ fn create(
     body: &PromptArgs,
     json: bool,
 ) -> Result<(), CafleetError> {
-    let result = create_with_options(
-        conn,
-        &MemberCreateOptions {
-            fleet_id,
-            name,
-            description,
-            explicit_agent,
-            model,
-            effort,
-            monitor,
-            prompt: body.prompt.as_deref(),
-            file: body.file.as_deref(),
-        },
-        || resolve_mux(settings),
-        &SystemProbe,
-        &SpawnPreparation {
-            cwd: &std::env::current_dir,
-            env: &|key| std::env::var(key).ok(),
-        },
-        &SpawnExecution {
-            clock: &SystemClock,
-            runner: &SystemRunner,
-        },
-    )?;
-    emit(json, &result, || format_member(&result));
-    Ok(())
-}
-
-pub(crate) fn create_with_options<M: SpawnMultiplexer>(
-    conn: &mut Connection,
-    options: &MemberCreateOptions<'_>,
-    resolve_mux: impl FnOnce() -> Result<M, MultiplexerError>,
-    probe: &dyn SpawnProbe,
-    preparation: &SpawnPreparation<'_>,
-    execution: &SpawnExecution<'_>,
-) -> Result<Value, CafleetError> {
-    let MemberCreateOptions {
-        fleet_id,
-        name,
-        description,
-        explicit_agent,
-        model,
-        effort,
-        monitor,
-        prompt,
-        file,
-    } = *options;
-
     // 1. Auto-resolve the Director from the fleet row, first thing.
     let fleet = broker::fleets::fetch_fleet(conn, fleet_id)?
         .ok_or_else(|| CafleetError::Usage(format!("Fleet '{fleet_id}' not found.")))?;
@@ -361,26 +307,22 @@ pub(crate) fn create_with_options<M: SpawnMultiplexer>(
 
     // 4. Resolve the body before any side effect; substitution is deferred
     //    until the new member id exists.
-    let prompt_body = resolve_body(prompt, file, "--file")?;
+    let prompt_body = resolve_body(body.prompt.as_deref(), body.file.as_deref(), "--file")?;
 
     // 5. Preconditions.
-    let mux = resolve_mux().map_err(|e| CafleetError::App(e.to_string()))?;
+    let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
-    backend.ensure_available(probe)?;
+    backend.ensure_available(&SystemProbe)?;
     let context = mux
         .context_discovery()
         .map_err(|e| CafleetError::App(e.to_string()))?;
 
-    let plan = PreparedSpawn::prepare(
-        prompt_body,
-        backend,
-        name,
-        model,
-        effort,
-        mux.name(),
-        preparation,
-    )?;
+    let env: Vec<_> = std::env::var("CAFLEET_DATABASE_URL")
+        .ok()
+        .map(|value| ("CAFLEET_DATABASE_URL".to_string(), value))
+        .into_iter()
+        .collect();
 
     // 6. Register the member with a pending placement, threading the
     //    monitor role into its card marker.
@@ -408,22 +350,18 @@ pub(crate) fn create_with_options<M: SpawnMultiplexer>(
     })?;
     let member_id = registered.member_id;
     let mut registration = RegistrationGuard::new(conn, member_id);
-
-    let deadline = Deadline::after(execution.clock, Duration::from_secs(30));
-    let argv = match plan.render(fleet_id, member_id, director_id) {
-        Ok(argv) => argv,
+    let prompt = match crate::spawn_prompt::substitute_spawn_placeholders(
+        &prompt_body,
+        fleet_id,
+        member_id,
+        director_id,
+        &agent_name,
+    ) {
+        Ok(prompt) => prompt,
         Err(original) => return Err(registration.rollback(original)),
     };
-    let pane_id = match mux.split_prepared(
-        &PaneSpawnRequest {
-            reference: &context,
-            env: &plan.env,
-            command: &argv,
-            cwd: plan.cwd.as_deref(),
-        },
-        &deadline,
-        execution,
-    ) {
+    let argv = backend.build_spawn_argv(&prompt, name, model, effort);
+    let pane_id = match mux.split_window(&context, &env, &argv) {
         Ok(pane_id) => pane_id,
         Err(error) => {
             return Err(registration.rollback(CafleetError::App(format!(
@@ -431,17 +369,7 @@ pub(crate) fn create_with_options<M: SpawnMultiplexer>(
             ))));
         }
     };
-    let mut pane = PaneGuard::with_kill(
-        pane_id.clone(),
-        Box::new(|id| {
-            mux.kill_pane_with_deadline(
-                id,
-                true,
-                &Deadline::after(execution.clock, Duration::from_secs(5)),
-                execution,
-            )
-        }),
-    );
+    let mut pane = PaneGuard::with_kill(pane_id.clone(), Box::new(|id| mux.kill_pane(id, true)));
 
     // 10. A failed placement patch compensates the pane before registration.
     let patched = broker::update_placement_pane_id(registration.connection(), member_id, &pane_id);
@@ -468,7 +396,8 @@ pub(crate) fn create_with_options<M: SpawnMultiplexer>(
         "registered_at": registered.registered_at,
         "placement": presentation::placement(&placement_view),
     });
-    Ok(result)
+    emit(json, &result, || format_member(&result));
+    Ok(())
 }
 
 fn delete(

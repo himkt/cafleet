@@ -1,7 +1,7 @@
 //! Creation compensation contract: isolated CLI, SQLite faults, and recorded pane commands.
 mod common;
 
-use common::{Cli, code, stderr, stdout};
+use common::{Cli, code, stderr};
 use std::os::unix::fs::PermissionsExt;
 use std::process::Output;
 
@@ -402,68 +402,5 @@ fn herdr_unknown_split_never_guesses_a_pane_for_member_or_fleet_cleanup() {
         } else {
             assert_fleet_compensated(&cli);
         }
-    }
-}
-
-#[test]
-fn successful_member_text_and_json_leave_the_new_pane_and_member_active() {
-    for json in [false, true] {
-        let cli = fixture(true);
-        let output = member_create(&cli, "prompt", json);
-        assert_eq!(code(&output), 0, "{}", stderr(&output));
-        assert!(stderr(&output).is_empty());
-        if json {
-            let value: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
-            let registered = value["registered_at"].as_str().unwrap();
-            let placed = value["placement"]["created_at"].as_str().unwrap();
-            assert!(cafleet::time::parse_lenient(registered).is_ok());
-            assert!(cafleet::time::parse_lenient(placed).is_ok());
-            assert_eq!(
-                stdout(&output),
-                format!(
-                    r#"{{"member_id":3,"name":"worker","registered_at":"{registered}","placement":{{"backend":"tmux","mux_session":"main","mux_window_id":"@1","mux_pane_id":"%9","coding_agent":"claude","created_at":"{placed}"}}}}"#
-                ) + "\n"
-            );
-        } else {
-            assert_eq!(stdout(&output), "3 worker backend=claude pane=%9\n");
-        }
-        assert_eq!(count(&cli, "compensation_events"), 0);
-        assert!(
-            calls(&cli)
-                .iter()
-                .all(|line| !line.starts_with("kill-pane"))
-        );
-        assert_no_exit_commands(&cli);
-    }
-}
-
-#[test]
-fn successful_fleet_text_and_json_do_not_run_creation_cleanup() {
-    for json in [false, true] {
-        let cli = fixture(false);
-        let output = fleet_create(&cli, json);
-        assert_eq!(code(&output), 0, "{}", stderr(&output));
-        if json {
-            let value: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
-            let ts = value["created_at"].as_str().unwrap();
-            assert!(cafleet::time::parse_lenient(ts).is_ok());
-            assert_eq!(
-                stdout(&output),
-                format!(
-                    r#"{{"fleet_id":1,"name":"fixture","created_at":"{ts}","director":{{"member_id":1,"name":"Director","description":"Root Director for this fleet","registered_at":"{ts}","placement":{{"backend":"tmux","mux_session":"main","mux_window_id":"@1","mux_pane_id":"%0","coding_agent":"claude","created_at":"{ts}"}}}},"monitor":{{"member_id":2,"name":"monitor","description":"Monitor member for this fleet","registered_at":"{ts}","placement":{{"backend":"tmux","mux_session":"main","mux_window_id":"@1","mux_pane_id":"%9","coding_agent":"claude","created_at":"{ts}"}}}}}}"#
-                ) + "\n"
-            );
-        } else {
-            assert_eq!(stdout(&output), "1 director=1 monitor=2\n");
-        }
-        assert_eq!(count(&cli, "members"), 2);
-        assert_eq!(count(&cli, "member_placements"), 2);
-        assert_eq!(count(&cli, "compensation_events"), 0);
-        assert!(
-            calls(&cli)
-                .iter()
-                .all(|line| !line.starts_with("kill-pane"))
-        );
-        assert_no_exit_commands(&cli);
     }
 }

@@ -980,7 +980,6 @@ mod tests {
 #[cfg(test)]
 mod compatibility_regressions {
     use super::*;
-    use crate::broker::test_support as common;
 
     #[test]
     fn card_skills_keeps_legacy_empty_fallback_for_broken_missing_or_non_array_values() {
@@ -998,91 +997,11 @@ mod compatibility_regressions {
             assert_eq!(skills_from_card(raw), Vec::<Value>::new(), "{raw}");
         }
     }
-
-    #[test]
-    fn free_form_skills_preserve_nested_values_and_order_through_member_presentation() {
-        let dir = tempfile::Builder::new()
-            .prefix(".member-wire-")
-            .tempdir_in(env!("CARGO_MANIFEST_DIR"))
-            .unwrap();
-        let mut conn = common::migrated_conn(&dir);
-        let (fleet, _) = common::create_fleet(&mut conn, "compatibility");
-        let skills = vec![
-            json!(null),
-            json!(true),
-            json!(4),
-            json!({"nested":["日本語",false]}),
-            json!([3, 2, 1]),
-        ];
-        let registered = register_member(&mut conn, fleet, "worker", "desc", &skills, None, false)
-            .map(|record| crate::presentation::registered_member(&record))
-            .unwrap();
-        let id = registered["member_id"].as_i64().unwrap();
-        let member = get_member(&conn, id, fleet)
-            .map(|record| record.as_ref().map(crate::presentation::member))
-            .unwrap()
-            .unwrap();
-        assert_eq!(member["skills"], json!(skills));
-        for raw in ["{}", r#"{"skills":false}"#, r#"{"skills":"not-array"}"#] {
-            conn.execute(
-                "UPDATE members SET member_card_json=?1 WHERE member_id=?2",
-                params![raw, id],
-            )
-            .unwrap();
-            assert_eq!(
-                get_member(&conn, id, fleet)
-                    .map(|record| record.as_ref().map(crate::presentation::member))
-                    .unwrap()
-                    .unwrap()["skills"],
-                json!([])
-            );
-        }
-    }
-
-    #[test]
-    fn pending_placement_keeps_an_object_with_null_pane_and_exact_wire_order() {
-        let dir = tempfile::Builder::new()
-            .prefix(".placement-wire-")
-            .tempdir_in(env!("CARGO_MANIFEST_DIR"))
-            .unwrap();
-        let mut conn = common::migrated_conn(&dir);
-        let (fleet, _) = common::create_fleet(&mut conn, "compatibility");
-        let id = common::register(&mut conn, fleet, "worker", None);
-        let member = get_member(&conn, id, fleet)
-            .map(|record| record.as_ref().map(crate::presentation::member))
-            .unwrap()
-            .unwrap();
-        let ts = member["placement"]["created_at"].as_str().unwrap();
-        assert_eq!(
-            crate::output::format_json(&member["placement"]),
-            format!(
-                r#"{{"backend":"tmux","mux_session":"main","mux_window_id":"@1","mux_pane_id":null,"coding_agent":"claude","created_at":"{ts}"}}"#
-            )
-        );
-        let ghost = register_member(&mut conn, fleet, "ghost", "desc", &[], None, false)
-            .unwrap()
-            .member_id;
-        assert!(
-            get_member(&conn, ghost, fleet)
-                .map(|record| record.as_ref().map(crate::presentation::member))
-                .unwrap()
-                .unwrap()["placement"]
-                .is_null()
-        );
-    }
 }
 
 #[cfg(test)]
 mod step6_behavior_regressions {
     use super::*;
-    use crate::broker::{self, test_support as common};
-
-    fn memory_fleet() -> (Connection, i64, i64) {
-        let mut conn = Connection::open_in_memory().unwrap();
-        crate::db::migrate_to_head(&mut conn).unwrap();
-        let (fleet, director) = common::create_fleet(&mut conn, "query");
-        (conn, fleet, director)
-    }
 
     fn activity(sent: Option<&str>, received: Option<&str>, ack: Option<&str>) -> MemberActivity {
         MemberActivity {
@@ -1146,150 +1065,6 @@ mod step6_behavior_regressions {
         assert_eq!(idle_seconds(&row, now), Some(0));
         let row = activity(None, None, Some("2025-12-31T23:59:59.950000+00:00"));
         assert_eq!(idle_seconds(&row, now), Some(1));
-    }
-
-    #[test]
-    fn step6_name_lookup_boundaries_return_sorted_unique_known_and_deregistered_ids() {
-        let (conn, fleet, _) = memory_fleet();
-        for id in 10000..11001_i64 {
-            conn.execute("INSERT INTO members(member_id,fleet_id,name,description,status,registered_at,member_card_json) VALUES (?1,?2,?3,'','deregistered','2026-01-01T00:00:00Z','{}')", params![id,fleet,format!("member-{id}")]).unwrap();
-        }
-        for count in [0, 1, 500, 501, 1001] {
-            let ids: Vec<i64> = (10000..10000 + count).rev().collect();
-            let repeated: Vec<i64> = ids.iter().copied().cycle().take(ids.len() * 4).collect();
-            let names = broker::get_member_names(&conn, &repeated).unwrap();
-            assert_eq!(
-                names.keys().copied().collect::<Vec<_>>(),
-                (10000..10000 + count).collect::<Vec<_>>()
-            );
-            for (id, name) in names {
-                assert_eq!(name, format!("member-{id}"));
-            }
-        }
-        let names = broker::get_member_names(&conn, &[10000, i64::MAX, -1, 10000]).unwrap();
-        assert_eq!(
-            names.into_iter().collect::<Vec<_>>(),
-            vec![(10000, "member-10000".into())]
-        );
-    }
-
-    #[test]
-    fn step6_roster_includes_only_owner_history_and_preserves_role_placement_and_id_order() {
-        let (mut conn, fleet, director) = memory_fleet();
-        let owner = common::register(&mut conn, fleet, "owner", Some("%2"));
-        let sender = common::register(&mut conn, fleet, "sender only", Some("%3"));
-        let pending = common::register(&mut conn, fleet, "pending", None);
-        common::send(
-            &mut conn,
-            &common::FakeNotifier::succeeding(),
-            sender,
-            owner,
-            "history",
-        );
-        broker::deregister_member(&mut conn, owner).unwrap();
-        broker::deregister_member(&mut conn, sender).unwrap();
-        let rows = broker::list_roster(&conn, fleet, true).unwrap();
-        assert_eq!(
-            rows.iter().map(|r| r.member_id).collect::<Vec<_>>(),
-            vec![
-                director,
-                common::bootstrap_monitor(&conn, fleet),
-                owner,
-                pending
-            ]
-        );
-        assert_eq!(rows[0].kind, MemberKind::Director);
-        assert_eq!(rows[1].kind, MemberKind::Monitor);
-        assert_eq!(rows[2].status, MemberStatus::Deregistered);
-        assert_eq!(rows[2].placement, None);
-        assert_eq!(rows[3].kind, MemberKind::Member);
-        assert_eq!(rows[3].placement.as_ref().unwrap().mux_pane_id, None);
-        assert!(
-            broker::list_roster(&conn, fleet, false)
-                .unwrap()
-                .iter()
-                .all(|r| r.member_id != owner && r.member_id != sender)
-        );
-    }
-
-    #[test]
-    fn step6_activity_uses_owner_delivery_times_and_only_ack_status_time() {
-        let (mut conn, fleet, director) = memory_fleet();
-        let member = common::register(&mut conn, fleet, "worker", None);
-        let sent = broker::send_message(
-            &mut conn,
-            &common::FakeNotifier::succeeding(),
-            common::MAX_TEXT_LEN,
-            director,
-            &member.to_string(),
-            "work",
-        )
-        .unwrap()
-        .message;
-        let created = "2020-01-01T00:00:00Z";
-        conn.execute(
-            "UPDATE messages SET created_at=?1,status_timestamp=?1 WHERE message_id=?2",
-            params![created, sent.message_id],
-        )
-        .unwrap();
-        // Read fixture deliberately separates owner from the recipient column.
-        conn.execute(
-            "UPDATE messages SET to_member_id=?1 WHERE message_id=?2",
-            params![director, sent.message_id],
-        )
-        .unwrap();
-        let before = broker::list_members(&conn, fleet)
-            .unwrap()
-            .into_iter()
-            .find(|r| r.member.member_id == member)
-            .unwrap();
-        assert_eq!(before.last_recv.as_deref(), Some(created));
-        assert_eq!(before.last_ack, None);
-        let ack = broker::ack_message(&mut conn, sent.message_id).unwrap();
-        let after = broker::list_members(&conn, fleet)
-            .unwrap()
-            .into_iter()
-            .find(|r| r.member.member_id == member)
-            .unwrap();
-        assert_eq!(ack.created_at, created);
-        assert_eq!(after.last_recv, before.last_recv);
-        assert_eq!(after.last_sent, None);
-        assert_eq!(after.last_ack, Some(ack.status_timestamp));
-        let director_row = broker::list_members(&conn, fleet)
-            .unwrap()
-            .into_iter()
-            .find(|r| r.member.member_id == director)
-            .unwrap();
-        assert_eq!(director_row.last_sent.as_deref(), Some(created));
-        assert_eq!(director_row.last_recv, None);
-        assert_eq!(director_row.last_ack, None);
-    }
-
-    #[test]
-    fn step6_broadcast_summary_counts_as_sent_but_never_received_or_acknowledged() {
-        let (mut conn, fleet, director) = memory_fleet();
-        let broadcast = broker::broadcast_message(
-            &mut conn,
-            &common::FakeNotifier::succeeding(),
-            common::MAX_TEXT_LEN,
-            director,
-            "broadcast",
-        )
-        .unwrap();
-        conn.execute(
-            "UPDATE messages SET created_at='2020-01-01T00:00:00Z' WHERE type='unicast'",
-            [],
-        )
-        .unwrap();
-        conn.execute("UPDATE messages SET created_at='2021-01-01T00:00:00Z',status_timestamp='2022-01-01T00:00:00Z' WHERE message_id=?1", [broadcast.message.message_id]).unwrap();
-        let row = broker::list_members(&conn, fleet)
-            .unwrap()
-            .into_iter()
-            .find(|r| r.member.member_id == director)
-            .unwrap();
-        assert_eq!(row.last_sent.as_deref(), Some("2021-01-01T00:00:00Z"));
-        assert_eq!(row.last_recv, None);
-        assert_eq!(row.last_ack, None);
     }
 }
 

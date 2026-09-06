@@ -1,7 +1,5 @@
-// Phase A: move to admin/tests/history.test.ts when src/history.ts exists.
-// Kept outside the current tsc/Vitest includes so API URL regressions can run.
 import { describe, expect, it } from "vitest";
-import { HISTORY_FETCH_LIMIT, HISTORY_ROW_CAP, selectHistory } from "../src/history";
+import { selectHistory } from "../src/history";
 import type { HistoryWindow } from "../src/history";
 import type { FormattedMessage, TimelineMessage } from "../src/types";
 
@@ -32,11 +30,6 @@ function summary(): FormattedMessage {
 }
 
 describe("member history display window", () => {
-  it("shares the 200 row cap and one extra fetched delivery", () => {
-    expect(HISTORY_ROW_CAP).toBe(200);
-    expect(HISTORY_FETCH_LIMIT).toBe(201);
-  });
-
   it.each([0, 200, 201, 1205])("selects up to 200 of %i deliveries and reports actual truncation", (count) => {
     const rows = Array.from({ length: count }, (_, i) => delivery(count - i));
     const result: HistoryWindow = selectHistory(rows);

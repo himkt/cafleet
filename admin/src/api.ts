@@ -1,4 +1,3 @@
-import { HISTORY_FETCH_LIMIT } from "./history";
 import type { MembersResponse, TimelineResponse, FleetListItem, MonitorRuntime } from "./types";
 
 export interface RequestOptions { signal?: AbortSignal }
@@ -41,8 +40,8 @@ export function createFleetClient(fleetId: number): FleetClient {
     fleetId,
     getMembers: (options: RequestOptions = {}) => request<MembersResponse>("/members", fleetId, options),
     fetchTimeline: (options: RequestOptions = {}) => request<TimelineResponse>("/timeline", fleetId, options),
-    fetchInbox: (memberId: number, options: RequestOptions = {}) => request<TimelineResponse>(`/members/${memberId}/inbox?limit=${HISTORY_FETCH_LIMIT}`, fleetId, options),
-    fetchSent: (memberId: number, options: RequestOptions = {}) => request<TimelineResponse>(`/members/${memberId}/sent?limit=${HISTORY_FETCH_LIMIT}`, fleetId, options),
+    fetchInbox: (memberId: number, options: RequestOptions = {}) => request<TimelineResponse>(`/members/${memberId}/inbox`, fleetId, options),
+    fetchSent: (memberId: number, options: RequestOptions = {}) => request<TimelineResponse>(`/members/${memberId}/sent`, fleetId, options),
     getMonitor: (options: RequestOptions = {}) => request<MonitorRuntime>("/monitor", fleetId, options),
     async sendMessage(fromMemberId: number, toMemberId: number | "*", text: string, options: RequestOptions = {}) {
       await request("/messages/send", fleetId, { ...options, method: "POST", body: JSON.stringify({ from_member_id: fromMemberId, to_member_id: toMemberId, text }) });

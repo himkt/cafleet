@@ -21,94 +21,17 @@ No server-side session cookies. The SPA stores the active fleet_id client-side v
 
 ## Fleet selection and asynchronous reads {#frontend-resource-lifecycle}
 
-The WebUI uses the following client lifecycle. HTTP endpoints and response
-shapes follow the contracts below.
-
-The hash route is the sole source of the selected fleet:
-`#/fleets`, `#/fleets/<fleet-id>/members`, and
-`#/fleets/<fleet-id>/members/<member-id>`. Selection changes the route only.
-Route ids must be nonempty ASCII decimal digits representing positive safe
-integers; leading zeroes are accepted, but signs, whitespace, exponents, and
-overflow are not. Invalid member ids return to their fleet dashboard; invalid
-fleet ids or unknown paths return to the picker. Match the whole route.
-A client created with `createFleetClient(fleetId)` captures that fleet id for
-every scoped read and mutation. `listFleets` is unscoped and never attaches
-`X-Fleet-Id`. There is no mutable global selected-fleet header.
-
-| Owner | Reads and identity |
-|---|---|
-| App | Resolve the route and confirm the fleet against the fleet list; no roster prefetch. |
-| Fleet picker | Unscoped fleet list. |
-| Dashboard | Roster and monitor state, independently; keyed by fleet id. Own the shared refresh counter. |
-| Timeline | Timeline for its explicit fleet client. |
-| Member detail | Inbox and sent history for its fleet/member pair; panel keyed by member id within the keyed Dashboard. |
-
-A resource has one initial load path. Development StrictMode may start and
-abort an extra attempt. A route change immediately removes the old fleet's
-name, roster, recipients, and form draft; data retained during a refresh must
-belong to the same fleet/member. Do not reject a member deep link until a
-successful roster load proves that member absent. Missing or cross-fleet
-members return to that fleet's dashboard before fetching their history.
-
-Every read receives an AbortSignal. Unmount or identity change aborts it and
-invalidates its generation. Only the current generation may publish results,
-clear its in-flight guard, or start pending work, even when a transport ignores
-abort. Refresh requests received during an active load coalesce into one
-follow-up load using the latest request. Success, failure, and abort release
-the current guard; old completion cannot release a newer request's guard.
-
-Dashboard keeps the existing five-second refresh cadence, including hidden
-tabs, plus manual Refresh and refresh after successful send or monitor edits.
-Each trigger refreshes roster, monitor, timeline, and mounted member histories;
-one failed or slow resource does not block the others. The picker also keeps
-its five-second polling. Timeline and member detail do not add polling timers.
-
-| Read state | Display |
-|---|---|
-| First load | Skeleton for the resource. |
-| Successful empty result | Its normal empty state, such as No messages. |
-| First-load error | Error and Retry; do not show a successful empty state. |
-| Refresh in progress | Keep the current resource's previous data. |
-| Refresh error | Keep that data, show an update-failed notice and Retry. |
-| Aborted or superseded attempt | No error or stale-result update. |
-
-Invalid routes and fleets absent from a successful fleet-list response
-(including soft-deleted fleets) return to the picker. Network, parse, and
-server failures keep the route and offer Retry. A scoped `404 Fleet not found`
-can invalidate the fleet; a monitor runtime `404` or a member `404` is not
-proof that the fleet is missing. Back/forward navigation and direct member
-links retain these rules. Automatic invalid-route/member corrections and
-fleet-deletion fallbacks replace the current history entry, so Back does not
-revisit a rejected URL and trigger another fallback. Explicit fleet/member
-selection and Back/Close actions keep normal navigation history. See the [optional UI walkthrough](https://github.com/himkt/cafleet/blob/main/docs/docs/how-to/use-the-webui.md).
+Hash routes select fleets and members. Requests use a client bound to that
+fleet and are cancelled when the selected resource changes. Stale responses
+cannot update the new view. Refresh retains existing data; failures show an
+error with Retry. Missing fleets return to the picker, while transport errors
+retain the route. Polling and manual refresh update each resource independently.
 
 ## Response compatibility
 
-Typed broker records are internal. HTTP presenters retain each endpoint's
-existing key names and order, nulls versus omitted fields, scalar types, list
-order, and response envelope. Rust enum names or struct layouts do not become
-wire fields. Timestamps retain their existing formatting and parsing rules.
-The CLI keeps its separate text/JSON formatting, exit codes, diagnostics, and
-validation order.
-
-Message presenters still rename `status_state` to `status` and `text` to `body`,
-and resolve names for non-null member ids. They emit keys in this order:
-`message_id`, `from_member_id`, `from_member_name`, `to_member_id`,
-`to_member_name`, `type`, `status`, `created_at`, `status_timestamp`,
-`origin_message_id`, `body`. A summary's recipient id and name remain null.
-
-| Condition | Boundary behavior |
-|---|---|
-| Missing fleet/member or active-monitor conflict | Map the domain error using the operation's existing status/detail or CLI error; retain its validation order. |
-| Invalid stored enum or missing required sender/recipient name | Return an integrity failure as HTTP 500 with `{"detail": <string>}`; do not panic, substitute a fabricated name, or return a successful partial row. |
-| Persisted message whose pane notification fails | Preserve the successful HTTP send response; CLI unicast retains its exit-1 partial-failure result and recovery instruction, while broadcast retains its delivered count. |
-
-Concrete process/probe/notifier adapters belong to `runtime/`; HTTP handlers
-use them without importing CLI helpers. This move preserves the notification
-attempt, durable message id, and raw transport diagnostic. A failed preview
-never rolls back or resends the message. See
-[CLI partial-failure recovery](cli-options.md#message-send-partial-failure) and
-[typed records](data-model.md#typed-broker-records).
+HTTP presenters convert typed broker records to the response shapes below.
+Preserve nulls and field names; invalid stored values or missing required
+member names return a 500 detail response.
 
 ## Endpoints
 
@@ -348,47 +271,9 @@ The three message endpoints compare as follows (this table owns their row-select
 
 | Endpoint | Rows returned | Excluded | Ordering | Row cap |
 |---|---|---|---|---|
-| `GET /api/members/{member_id}/inbox` | Messages where `owner_member_id = member_id` | `type == "broadcast_summary"` | `status_timestamp DESC, message_id DESC` (newest status update first; id breaks ties) | optional SQL `limit` of 1–1000; omitted means unbounded |
-| `GET /api/members/{member_id}/sent` | Messages where `from_member_id = member_id` | `type == "broadcast_summary"` | `status_timestamp DESC, message_id DESC` (newest status update first; id breaks ties) | optional SQL `limit` of 1–1000; omitted means unbounded |
+| `GET /api/members/{member_id}/inbox` | Messages where `owner_member_id = member_id` | `type == "broadcast_summary"` | `status_timestamp DESC, message_id DESC` (newest status update first; id breaks ties) | unbounded |
+| `GET /api/members/{member_id}/sent` | Messages where `from_member_id = member_id` | `type == "broadcast_summary"` | `status_timestamp DESC, message_id DESC` (newest status update first; id breaks ties) | unbounded |
 | `GET /api/timeline` | `type == "unicast"` deliveries, scoped through the owning member join | All non-delivery rows, including `broadcast_summary` | `status_timestamp DESC, message_id DESC` (newest status update first; id breaks ties) | SQL limit of 200 delivery rows, applied after filtering; may split a broadcast group; no pagination |
-
-#### Member history limits
-
-Both inbox and sent accept an optional limit. Omitting it returns unbounded
-history.
-
-**Request**: `X-Fleet-Id: <fleet_id>` header and optional `?limit=201`.
-
-| Query input | Result |
-|---|---|
-| `limit` omitted | All matching deliveries, including more than 201; existing callers keep their behavior. |
-| One decimal integer from 1 through 1000 | At most that many deliveries, selected by a bound SQL `LIMIT`. |
-| Empty, 0, negative, fractional, nonnumeric, overflowing, or repeated `limit` | `422`, exactly `{"detail":"limit must be an integer between 1 and 1000"}`. |
-| Unknown query parameter | Ignored, as before. |
-
-After URL form decoding, the value must contain only ASCII digits. Leading
-zeros are accepted (`001` means 1); signs, whitespace, Unicode digits, and
-exponent notation are rejected. Duplicate decoded `limit` keys are rejected
-even when a key was percent-encoded.
-
-Validation preserves the existing Path extraction first, then fleet header
-(`400`), fleet existence (`404`), and member membership (`404`), before checking
-`limit`. An invalid limit must not hide an earlier header or membership error.
-Deregistered members remain readable within their fleet. SQL errors keep the
-existing `500` response with a string `detail`.
-
-Selection and ordering happen before the limit: delivery rows only, newest
-`status_timestamp` first, then largest `message_id` for ties. Limits count rows
-and may split a broadcast. The response remains `{"messages":[...]}` with the
-same row keys, order, and nulls; there is no cursor, `has_more`, or total field.
-CLI retrieval remains unchanged.
-
-The WebUI requests `?limit=201` for each tab and displays the
-first 200 deliveries. It shows `Showing the 200 most recent messages` only when
-there is a 201st delivery; empty results and results of exactly 200 have no
-omission footer. “Most recent” follows status updates, even though each row
-also displays its creation timestamp. This limits WebUI reads and explicit
-HTTP limits, not unbounded HTTP callers or database storage.
 
 **Response** (200 OK):
 

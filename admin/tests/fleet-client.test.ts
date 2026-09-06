@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import * as api from "../src/api";
 import { ApiError, createFleetClient, listFleets } from "../src/api";
 import type { FleetClient } from "../src/api";
 import { deferred } from "./step9-fixtures";
@@ -9,8 +8,8 @@ const methods: { name: string; path: string; verb: string; body?: unknown; respo
   call: (client: FleetClient, signal: AbortSignal) => Promise<unknown> }[] = [
   { name: "members", path: "/members", verb: "GET", response: {members: []}, result: {members: []}, call: (c,s) => c.getMembers({signal:s}) },
   { name: "timeline", path: "/timeline", verb: "GET", response: {messages: []}, result: {messages: []}, call: (c,s) => c.fetchTimeline({signal:s}) },
-  { name: "inbox", path: "/members/42/inbox?limit=201", verb: "GET", response: {messages: []}, result: {messages: []}, call: (c,s) => c.fetchInbox(42,{signal:s}) },
-  { name: "sent", path: "/members/42/sent?limit=201", verb: "GET", response: {messages: []}, result: {messages: []}, call: (c,s) => c.fetchSent(42,{signal:s}) },
+  { name: "inbox", path: "/members/42/inbox", verb: "GET", response: {messages: []}, result: {messages: []}, call: (c,s) => c.fetchInbox(42,{signal:s}) },
+  { name: "sent", path: "/members/42/sent", verb: "GET", response: {messages: []}, result: {messages: []}, call: (c,s) => c.fetchSent(42,{signal:s}) },
   { name: "monitor", path: "/monitor", verb: "GET", response: {running:true,wake_interval_seconds:600}, result: {running:true,wake_interval_seconds:600}, call: (c,s) => c.getMonitor({signal:s}) },
   { name: "send", path: "/messages/send", verb: "POST", body: {from_member_id:11,to_member_id:12,text:"雪\nmessage"}, response: {message_id:7}, result: undefined, call: (c,s) => c.sendMessage(11,12,"雪\nmessage",{signal:s}) },
   { name: "patch", path: "/monitor", verb: "PATCH", body: {wake_interval_seconds:0}, response: {ok:true}, result: undefined, call: (c,s) => c.patchMonitor(0,{signal:s}) },
@@ -91,10 +90,5 @@ describe("explicit immutable fleet client", () => {
     const error=await createFleetClient(1).getMembers().catch((error:unknown)=>error);
     expect(error).toBeInstanceOf(SyntaxError);
     expect(error).not.toBeInstanceOf(ApiError);
-  });
-  it("removes global selection and unscoped versions of every scoped method", () => {
-    for (const name of ["setFleetId","getMembers","fetchTimeline","fetchInbox","fetchSent","getMonitor","sendMessage","patchMonitor","postMonitorWake"]) {
-      expect(name in api).toBe(false);
-    }
   });
 });

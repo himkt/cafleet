@@ -14,46 +14,11 @@ Minted ids are **never reused** and real ids are always `>= 1`.
 
 ## Query and activity contracts
 
-Fleet lists exclude soft-deleted fleets and order by
-`created_at DESC, fleet_id DESC`; a timestamp tie puts the higher id first.
-Member lists and rosters order by `member_id ASC` and preserve the root
-Director → monitor → ordinary member kind precedence. Missing placement
-remains null, while a placement whose pane is pending remains an object
-with `mux_pane_id: null`.
-
-`list_members` returns active members with activity. The WebUI uses
-`list_roster` with message holders included: active members plus
-deregistered members for whom an owned message exists
-(`messages.owner_member_id = members.member_id`). A sender-only reference
-does not include a deregistered member. The lean roster query keeps
-this `EXISTS` condition but computes no send/receive/ACK aggregates.
-
-| Activity field | Selection |
-|---|---|
-| `last_sent` | `MAX(created_at)` for all messages sent by this member, including broadcast summaries. |
-| `last_recv` | `MAX(created_at)` for unicast deliveries owned by this member. |
-| `last_ack` | `MAX(status_timestamp)` for completed unicast deliveries owned by this member. |
-
-For `idle`, take the lexicographically greatest non-null string among all
-three fields, then parse that one value with the existing lenient RFC3339
-reader. All null or an unparseable selected value yields null, even if a
-smaller string would parse. Use one `now` for the list, retain whole-second
-truncation and existing timezone/fraction handling, and clamp only the final
-result to zero: `max(0, (now - latest).num_seconds())`. Future stored values
-stay unchanged. ACK can change `last_ack` and idle without changing the
-creation timestamps used by `last_sent` and `last_recv`.
-
-Name resolution returns `BTreeMap<i64, String>` with ascending keys. The
-batched lookup deduplicates ids before issuing `IN` queries with at
-most 500 bound ids each: empty input executes zero SQL, and other inputs
-execute at most `ceil(unique_ids / 500)` queries. Unknown ids are omitted;
-deregistered members are included. Only placeholders are assembled into SQL;
-ids remain bound parameters.
-
-Timeline scope follows the **owning member**, through
-`messages.owner_member_id → members.member_id → members.fleet_id`, rather
-than a sender join. This preserves the delivery selection and ordering in
-the [WebUI API](webui-api.md).
+CLI member lists include send/receive/ACK activity; WebUI rosters query member
+and placement data directly. Include deregistered roster members only when
+they own messages. Idle uses the latest activity timestamp and clamps future
+activity to zero. Name lookup deduplicates ids and binds batches of at most
+500, returning known active or deregistered members in id order.
 
 ## Tables
 
@@ -173,30 +138,11 @@ superseded rows surface only as informational doctor footnotes (see
 
 ## Typed broker records
 
-The broker decodes database columns into Rust records once. CLI and HTTP
-presenters construct the existing output; these internal types do not change
-the database schema or wire keys.
-
-| Record | Fields |
-|---|---|
-| `MemberRecord` | `member_id`, `fleet_id`: `i64`; `name`, `description`, `registered_at`: `String`; `status: MemberStatus`, `kind: MemberKind`; `skills: Vec<Value>`; `placement: Option<Placement>` |
-| `Placement` | `backend`, `mux_session`, `mux_window_id`, `coding_agent`, `created_at`: `String`; `mux_pane_id: Option<String>` |
-| `MessageRecord` | `message_id`, `owner_member_id`, `from_member_id`: `i64`; `to_member_id`, `origin_message_id`: `Option<i64>`; `kind: MessageKind`, `status: MessageStatus`; `created_at`, `status_timestamp`, `text`: `String` |
-| `MonitorRuntime` | The fields and nullable states in the `monitor_runtime` table above; row absence is `Option<MonitorRuntime>::None`. |
-
-A missing placement differs from an existing placement whose pane id is still
-null. A summary's null recipient differs from any actual member id. Preserve
-those distinctions, timestamp strings, and the existing parse/format rules.
-Only free-form skill elements remain generic `Value` inside these records;
-JSON values at the output boundary remain appropriate.
-
-When extracting skills, preserve the existing empty-array fallback for malformed
-card JSON, missing skills, or a non-array skills value. Unknown stored enum
-values instead return `InvalidStoredValue`; do not panic or invent a valid
-status/kind. CLI/HTTP adapters map domain failures to their existing error
-categories and response shapes. See
-[response compatibility](webui-api.md#response-compatibility) and
-[optional contributor reference](https://github.com/himkt/cafleet/blob/main/docs/docs/contributing.md).
+Broker queries decode rows into typed member, placement, message, and monitor
+records. Presenters preserve the wire shapes below. Missing placements differ
+from pending panes, and absent monitor rows differ from nullable fields.
+Unknown stored enums are integrity errors; free-form skills retain their
+existing JSON representation.
 
 ## Foreign key enforcement
 

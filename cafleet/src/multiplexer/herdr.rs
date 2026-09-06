@@ -3,12 +3,8 @@
 //! phases. The colocated tests pin the contract; see [`super::test_support`]
 //! for the API.
 
-use super::spawn::{
-    Deadline, PaneSpawnRequest, SpawnExecution, SpawnMultiplexer, SpawnOps, SpawnRun,
-};
 use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
-use std::time::Duration;
 
 use serde_json::Value;
 
@@ -204,39 +200,8 @@ impl HerdrMultiplexer {
                 "cannot resolve the working directory for pane spawn: {e}"
             ))
         })?;
-        self.split_common(
-            &PaneSpawnRequest {
-                reference,
-                env,
-                command,
-                cwd: Some(&cwd),
-            },
-            &SpawnOps {
-                run: &|argv| self.run(argv, None),
-                kill: &|id| self.kill_pane(id, true),
-                transfer: &|| Ok(()),
-            },
-        )
-    }
-
-    fn split_common(
-        &self,
-        request: &PaneSpawnRequest<'_>,
-        ops: &SpawnOps<'_>,
-    ) -> Result<String, MultiplexerError> {
-        let PaneSpawnRequest {
-            reference,
-            env,
-            command,
-            cwd,
-        } = *request;
-        let cwd = cwd
-            .ok_or_else(|| {
-                MultiplexerError::new("herdr pane spawn requires a prepared working directory")
-            })?
-            .display()
-            .to_string();
-        let result = parse_envelope(&(ops.run)(&herdr_argv(&["herdr", "pane", "list"]))?)?;
+        let cwd = cwd.display().to_string();
+        let result = parse_envelope(&self.run(&herdr_argv(&["herdr", "pane", "list"]), None)?)?;
         let panes = result["panes"]
             .as_array()
             .ok_or_else(|| MultiplexerError::new("herdr pane list missing 'panes' field"))?;
@@ -249,25 +214,19 @@ impl HerdrMultiplexer {
             }
         }
         let new_pane_id = match column.iter().max() {
-            None => self.split_pane(&reference.pane_id, "right", &cwd, env, ops.run)?,
-            Some(target) => self.split_pane(target, "down", &cwd, env, ops.run)?,
+            None => self.split_pane(&reference.pane_id, "right", &cwd, env)?,
+            Some(target) => self.split_pane(target, "down", &cwd, env)?,
         };
-        let mut pane = PaneOwnership::new(new_pane_id.clone(), ops.kill);
-        let result = (|| {
-            if !column.is_empty()
-                && let Err(error) = self.resize_tab_column(&reference.pane_id, ops.run)
-                && error.is_timeout()
-            {
-                return Err(error);
+        let mut pane = PaneOwnership::new(new_pane_id.clone(), |id| self.kill_pane(id, true));
+        let result: Result<(), MultiplexerError> = (|| {
+            if !column.is_empty() {
+                let _ = self.resize_tab_column(&reference.pane_id);
             }
-            (ops.run)(&herdr_argv(&[
-                "herdr",
-                "pane",
-                "run",
-                &new_pane_id,
-                &shlex_join(command),
-            ]))?;
-            (ops.transfer)()
+            self.run(
+                &herdr_argv(&["herdr", "pane", "run", &new_pane_id, &shlex_join(command)]),
+                None,
+            )?;
+            Ok(())
         })();
         if let Err(error) = result {
             return Err(error.with_pane_cleanup(pane.rollback()));
@@ -281,7 +240,6 @@ impl HerdrMultiplexer {
         direction: &str,
         cwd: &str,
         env: &[(String, String)],
-        run: &SpawnRun<'_>,
     ) -> Result<String, MultiplexerError> {
         let mut args = herdr_argv(&[
             "herdr",
@@ -298,7 +256,8 @@ impl HerdrMultiplexer {
             args.push("--env".to_string());
             args.push(format!("{key}={value}"));
         }
-        let result = run(&args)
+        let result = self
+            .run(&args, None)
             .and_then(|raw| parse_envelope(&raw))
             .map_err(|error| error.with_pane_cleanup(PaneCleanup::Unknown))?;
         let id = str_field(&result["pane"], "pane split", "pane_id")
@@ -315,15 +274,11 @@ impl HerdrMultiplexer {
     fn read_tab_layout(
         &self,
         anchor_pane_id: &str,
-        run: &SpawnRun<'_>,
     ) -> Result<(Vec<Value>, Vec<Value>), MultiplexerError> {
-        let result = parse_envelope(&run(&herdr_argv(&[
-            "herdr",
-            "pane",
-            "layout",
-            "--pane",
-            anchor_pane_id,
-        ]))?)?;
+        let result = parse_envelope(&self.run(
+            &herdr_argv(&["herdr", "pane", "layout", "--pane", anchor_pane_id]),
+            None,
+        )?)?;
         let layout = &result["layout"];
         let panes = layout["panes"]
             .as_array()
@@ -337,17 +292,13 @@ impl HerdrMultiplexer {
     /// Rebalance the members' right column on the anchor's tab to equal
     /// heights — the tmux `select-layout main-vertical` reflow herdr has no
     /// single command for.
-    fn resize_tab_column(
-        &self,
-        anchor_pane_id: &str,
-        run: &SpawnRun<'_>,
-    ) -> Result<(), MultiplexerError> {
-        let (panes, splits) = self.read_tab_layout(anchor_pane_id, run)?;
+    fn resize_tab_column(&self, anchor_pane_id: &str) -> Result<(), MultiplexerError> {
+        let (panes, splits) = self.read_tab_layout(anchor_pane_id)?;
         let column = right_column(&panes)?;
         if column.len() < 2 {
             return Ok(());
         }
-        self.equalize_column(&column, &splits, run)
+        self.equalize_column(&column, &splits)
     }
 
     /// A right column of N stacked members is a right-leaning chain of `down`
@@ -355,12 +306,7 @@ impl HerdrMultiplexer {
     /// heights ⇔ split_k has ratio 1/(N-k). `resize --amount` is a signed
     /// delta on a split's ratio, so each split is driven to its target by one
     /// arithmetic resize.
-    fn equalize_column(
-        &self,
-        column: &[Value],
-        splits: &[Value],
-        run: &SpawnRun<'_>,
-    ) -> Result<(), MultiplexerError> {
+    fn equalize_column(&self, column: &[Value], splits: &[Value]) -> Result<(), MultiplexerError> {
         let n = column.len();
         let col_x = f64_field(&column[0]["rect"], "pane layout", "x")?;
         let mut down_splits: Vec<&Value> = Vec::new();
@@ -392,17 +338,20 @@ impl HerdrMultiplexer {
                 (&column[i + 1], "up", -delta)
             };
             let pane_id = str_field(pane, "pane layout", "pane_id")?;
-            run(&herdr_argv(&[
-                "herdr",
-                "pane",
-                "resize",
-                "--pane",
-                pane_id,
-                "--direction",
-                direction,
-                "--amount",
-                &amount.to_string(),
-            ]))?;
+            self.run(
+                &herdr_argv(&[
+                    "herdr",
+                    "pane",
+                    "resize",
+                    "--pane",
+                    pane_id,
+                    "--direction",
+                    direction,
+                    "--amount",
+                    &amount.to_string(),
+                ]),
+                None,
+            )?;
         }
         Ok(())
     }
@@ -586,14 +535,13 @@ impl HerdrMultiplexer {
         let Some(anchor_pane_id) = self.surviving_pane_in_tab(target_tab_id)? else {
             return Ok(()); // the tab has no panes left — nothing to rebalance
         };
-        let (panes, splits) =
-            self.read_tab_layout(&anchor_pane_id, &|argv| self.run(argv, None))?;
+        let (panes, splits) = self.read_tab_layout(&anchor_pane_id)?;
         if panes.is_empty() {
             return Ok(());
         }
         let column = right_column(&panes)?;
         if column.len() >= 2 {
-            self.equalize_column(&column, &splits, &|argv| self.run(argv, None))
+            self.equalize_column(&column, &splits)
         } else if column.is_empty() {
             self.restore_director_full_width(&panes, &splits)
         } else {
@@ -695,50 +643,8 @@ fn right_column(panes: &[Value]) -> Result<Vec<Value>, MultiplexerError> {
     Ok(column)
 }
 
-impl SpawnMultiplexer for HerdrMultiplexer {
-    fn split_prepared(
-        &self,
-        request: &PaneSpawnRequest<'_>,
-        deadline: &Deadline,
-        execution: &SpawnExecution<'_>,
-    ) -> Result<String, MultiplexerError> {
-        self.split_common(
-            request,
-            &SpawnOps {
-                run: &|argv| execution.run("herdr", argv, deadline),
-                kill: &|id| {
-                    self.kill_pane_with_deadline(
-                        id,
-                        true,
-                        &Deadline::after(execution.clock, Duration::from_secs(5)),
-                        execution,
-                    )
-                },
-                transfer: &|| execution.check_transfer("herdr", deadline),
-            },
-        )
-    }
-    fn kill_pane_with_deadline(
-        &self,
-        pane_id: &str,
-        ignore_missing: bool,
-        deadline: &Deadline,
-        execution: &SpawnExecution<'_>,
-    ) -> Result<(), MultiplexerError> {
-        execution
-            .run_tolerating(
-                "herdr",
-                &herdr_argv(&["herdr", "pane", "close", pane_id]),
-                deadline,
-                &|stderr| ignore_missing && error_code(stderr).as_deref() == Some(PANE_NOT_FOUND),
-            )
-            .map(|_| ())
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::multiplexer::PaneCleanup;
     use crate::multiplexer::WakeEntry;
     use serde_json::json;
 
@@ -1565,177 +1471,5 @@ mod tests {
         }));
         let mux = HerdrMultiplexer::new(runner, herdr_env());
         assert!(mux.agent_status("w1:p2").is_err());
-    }
-
-    fn queue_first_member_split(runner: &FakeRunner) {
-        runner.respond(Ok(herdr_envelope(json!({
-            "panes": [{"pane_id": "w1:p1", "tab_id": "w1:t1", "workspace_id": "w1"}]
-        }))));
-        runner.respond(Ok(herdr_envelope(json!({"pane": {"pane_id": "w1:p9"}}))));
-    }
-
-    #[test]
-    fn creation_run_failure_closes_the_known_pane_exactly_once() {
-        let runner = FakeRunner::with_binary("herdr");
-        queue_first_member_split(&runner);
-        runner.respond(Err(RunError::Failed {
-            stderr: "primary run failure".into(),
-        }));
-        runner.respond(Err(RunError::Failed {
-            stderr: "optional layout lookup failed".into(),
-        }));
-        runner.respond(Ok(String::new()));
-        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        let error = mux
-            .split_window(&reference(), &[], &argv(&["claude"]))
-            .unwrap_err();
-        assert!(error.to_string().contains("primary run failure"), "{error}");
-        assert!(
-            matches!(error.pane_cleanup(), Some(PaneCleanup::Attempted { pane_id, error: None }) if pane_id == "w1:p9")
-        );
-        drop(mux);
-        let calls = runner.run_argvs();
-        assert_eq!(
-            calls
-                .iter()
-                .map(|args| args[2].as_str())
-                .collect::<Vec<_>>(),
-            ["list", "split", "run", "get", "close"]
-        );
-        assert_eq!(
-            calls.last().unwrap(),
-            &argv(&["herdr", "pane", "close", "w1:p9"])
-        );
-        assert!(
-            !calls
-                .iter()
-                .any(|args| args.iter().any(|arg| arg == "/exit"))
-        );
-    }
-
-    #[test]
-    fn creation_close_failure_retains_run_error_and_pane_id_without_retry() {
-        let runner = FakeRunner::with_binary("herdr");
-        queue_first_member_split(&runner);
-        runner.respond(Err(RunError::Failed {
-            stderr: "primary run failure".into(),
-        }));
-        runner.respond(Err(RunError::Failed {
-            stderr: "optional layout lookup failed".into(),
-        }));
-        runner.respond(Err(RunError::Failed {
-            stderr: "secondary close failure".into(),
-        }));
-        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        let error = mux
-            .split_window(&reference(), &[], &argv(&["claude"]))
-            .unwrap_err();
-        assert!(
-            matches!(error.pane_cleanup(), Some(PaneCleanup::Attempted { pane_id, error: Some(detail) }) if pane_id == "w1:p9" && detail.contains("secondary close failure"))
-        );
-        let detail = error.to_string();
-        assert!(
-            detail.contains("cleanup failed for pane w1:p9:"),
-            "{detail}"
-        );
-        assert!(
-            detail.find("primary run failure").unwrap()
-                < detail.find("secondary close failure").unwrap()
-        );
-        drop(mux);
-        assert_eq!(
-            runner
-                .run_argvs()
-                .iter()
-                .filter(|args| args[2] == "close")
-                .count(),
-            1
-        );
-    }
-
-    #[test]
-    fn creation_malformed_split_reports_unknown_compensation_and_never_guesses_a_pane() {
-        for response in ["not-json".to_string(), herdr_envelope(json!({"pane": {}}))] {
-            let runner = FakeRunner::with_binary("herdr");
-            runner.respond(Ok(herdr_envelope(json!({"panes": []}))));
-            runner.respond(Ok(response));
-            let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-            let error = mux
-                .split_window(&reference(), &[], &argv(&["claude"]))
-                .unwrap_err();
-            assert!(matches!(error.pane_cleanup(), Some(PaneCleanup::Unknown)));
-            let detail = error.to_string().to_lowercase();
-            assert!(
-                detail.contains("unknown") && detail.contains("unconfirmed"),
-                "{detail}"
-            );
-            drop(mux);
-            assert_eq!(
-                runner
-                    .run_argvs()
-                    .iter()
-                    .map(|args| args[2].as_str())
-                    .collect::<Vec<_>>(),
-                ["list", "split"]
-            );
-        }
-    }
-
-    #[test]
-    fn creation_failed_split_retains_primary_and_reports_unconfirmed_compensation() {
-        let runner = FakeRunner::with_binary("herdr");
-        runner.respond(Ok(herdr_envelope(json!({"panes": []}))));
-        runner.respond(Err(RunError::Failed {
-            stderr: "split transport failed".into(),
-        }));
-        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        let error = mux
-            .split_window(&reference(), &[], &argv(&["claude"]))
-            .unwrap_err();
-        assert!(matches!(error.pane_cleanup(), Some(PaneCleanup::Unknown)));
-        let detail = error.to_string().to_lowercase();
-        assert!(detail.contains("split transport failed"), "{detail}");
-        assert!(
-            detail.contains("unknown") && detail.contains("unconfirmed"),
-            "{detail}"
-        );
-        assert_eq!(runner.run_argvs().len(), 2);
-    }
-
-    #[test]
-    fn creation_list_failure_does_not_split_or_close_any_pane() {
-        let runner = FakeRunner::with_binary("herdr");
-        runner.respond(Err(RunError::Failed {
-            stderr: "list failed".into(),
-        }));
-        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        let error = mux
-            .split_window(&reference(), &[], &argv(&["claude"]))
-            .unwrap_err();
-        assert!(error.to_string().contains("list failed"));
-        assert!(error.pane_cleanup().is_none());
-        assert_eq!(runner.run_argvs(), vec![argv(&["herdr", "pane", "list"])]);
-    }
-
-    #[test]
-    fn creation_success_transfers_ownership_without_closing_the_pane_on_drop() {
-        let runner = FakeRunner::with_binary("herdr");
-        queue_first_member_split(&runner);
-        runner.respond(Ok(String::new()));
-        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        assert_eq!(
-            mux.split_window(&reference(), &[], &argv(&["claude"]))
-                .unwrap(),
-            "w1:p9"
-        );
-        drop(mux);
-        assert_eq!(
-            runner
-                .run_argvs()
-                .iter()
-                .map(|args| args[2].as_str())
-                .collect::<Vec<_>>(),
-            ["list", "split", "run"]
-        );
     }
 }

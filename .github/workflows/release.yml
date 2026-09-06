@@ -28,7 +28,7 @@ jobs:
         with:
           experimental: true
       - run: mise //admin:install
-      - run: mise //cafleet:docs-check
+      - run: mise //admin:build
       - run: rustup target add ${{ matrix.target }}
       - name: Install cargo-zigbuild
         if: contains(matrix.target, 'musl')

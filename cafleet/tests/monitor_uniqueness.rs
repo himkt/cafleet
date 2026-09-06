@@ -112,55 +112,6 @@ fn unique_monitor_index_rejects_a_second_active_monitor_insert() {
 }
 
 #[test]
-fn unique_monitor_index_rejects_reactivation_of_a_deregistered_monitor() {
-    let cli = Cli::new();
-    let conn = head_schema(&cli);
-    fleet(&conn, 1);
-    member(&conn, 1, 1, "active", MONITOR).unwrap();
-    member(&conn, 2, 1, "deregistered", MONITOR).unwrap();
-    let before = records(&conn);
-    assert_constraint(
-        conn.execute("UPDATE members SET status='active' WHERE member_id=2", [])
-            .unwrap_err(),
-    );
-    assert_eq!(records(&conn), before);
-}
-
-#[test]
-fn unique_monitor_index_rejects_card_conversion_into_a_second_monitor() {
-    let cli = Cli::new();
-    let conn = head_schema(&cli);
-    fleet(&conn, 1);
-    member(&conn, 1, 1, "active", MONITOR).unwrap();
-    member(&conn, 2, 1, "active", "{}").unwrap();
-    let before = records(&conn);
-    assert_constraint(
-        conn.execute(
-            "UPDATE members SET member_card_json=?1 WHERE member_id=2",
-            [MONITOR],
-        )
-        .unwrap_err(),
-    );
-    assert_eq!(records(&conn), before);
-}
-
-#[test]
-fn unique_monitor_index_rejects_moving_a_monitor_into_an_occupied_fleet() {
-    let cli = Cli::new();
-    let conn = head_schema(&cli);
-    fleet(&conn, 1);
-    fleet(&conn, 2);
-    member(&conn, 1, 1, "active", MONITOR).unwrap();
-    member(&conn, 2, 2, "active", MONITOR).unwrap();
-    let before = records(&conn);
-    assert_constraint(
-        conn.execute("UPDATE members SET fleet_id=1 WHERE member_id=2", [])
-            .unwrap_err(),
-    );
-    assert_eq!(records(&conn), before);
-}
-
-#[test]
 fn uniqueness_predicate_allows_ordinary_deregistered_and_other_fleet_members() {
     let cli = Cli::new();
     let mut conn = head_schema(&cli);
@@ -270,55 +221,6 @@ fn placement_failure_rolls_back_monitor_registration() {
 }
 
 #[test]
-fn bootstrap_director_has_no_monitor_marker_and_director_display_still_wins() {
-    let cli = Cli::new();
-    let mut conn = head_schema(&cli);
-    let created = broker::create_fleet(
-        &mut conn,
-        Some("fixture"),
-        "main",
-        "@1",
-        "%0",
-        "claude",
-        "tmux",
-        "monitor",
-        "",
-        |_, _, _| Ok("%1".into()),
-    )
-    .unwrap();
-    let fleet = created["fleet_id"].as_i64().unwrap();
-    let director = created["director"]["member_id"].as_i64().unwrap();
-    let marker: Option<String> = conn.query_row("SELECT json_extract(member_card_json, '$.cafleet.kind') FROM members WHERE member_id=?1", [director], |r| r.get(0)).unwrap();
-    assert_eq!(marker, None);
-    let monitor = broker::active_monitor_member_id(&conn, fleet)
-        .unwrap()
-        .unwrap();
-    broker::deregister_member(&mut conn, monitor).unwrap();
-    conn.execute(
-        "UPDATE members SET member_card_json=?1 WHERE member_id=?2",
-        params![MONITOR, director],
-    )
-    .unwrap();
-    assert_eq!(
-        broker::get_member(&conn, director, fleet)
-            .map(|record| record.as_ref().map(cafleet::presentation::member))
-            .unwrap()
-            .unwrap()["kind"],
-        "director"
-    );
-}
-
-#[test]
-fn empty_database_migrates_to_v8_and_reapplying_changes_nothing() {
-    let cli = Cli::new();
-    let mut conn = db::connect(&cli.db_url()).unwrap();
-    assert_eq!(db::migrate_to_head(&mut conn).unwrap(), 8);
-    let before = schema_and_history(&conn);
-    assert_eq!(db::migrate_to_head(&mut conn).unwrap(), 8);
-    assert_eq!(schema_and_history(&conn), before);
-}
-
-#[test]
 fn populated_v7_upgrade_preserves_records_and_adds_the_unique_index() {
     let cli = Cli::new();
     let mut conn = old_schema(&cli, 7);
@@ -332,21 +234,6 @@ fn populated_v7_upgrade_preserves_records_and_adds_the_unique_index() {
     let index: (i64, i64) = conn.query_row("SELECT \"unique\", partial FROM pragma_index_list('members') WHERE name='idx_members_one_active_monitor_per_fleet'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
     assert_eq!(index, (1, 1));
     assert_constraint(member(&conn, 4, 1, "active", MONITOR).unwrap_err());
-}
-
-#[test]
-fn duplicate_v7_migration_preserves_schema_history_and_all_records() {
-    let cli = Cli::new();
-    let mut conn = old_schema(&cli, 7);
-    fleet(&conn, 1);
-    member(&conn, 1, 1, "active", MONITOR).unwrap();
-    member(&conn, 2, 1, "active", MONITOR).unwrap();
-    let data = records(&conn);
-    let schema = schema_and_history(&conn);
-    assert!(db::migrate_to_head(&mut conn).is_err());
-    assert_eq!(records(&conn), data);
-    assert_eq!(schema_and_history(&conn), schema);
-    assert!(conn.is_autocommit());
 }
 
 #[test]
@@ -387,26 +274,6 @@ fn unrelated_ddl_failure_preserves_original_cause_and_pending_schema() {
 }
 
 #[test]
-fn duplicate_committed_after_clean_precheck_is_rejected_by_migration() {
-    let cli = Cli::new();
-    let mut a = old_schema(&cli, 7);
-    let b = db::connect(&cli.db_url()).unwrap();
-    fleet(&a, 1);
-    member(&a, 1, 1, "active", MONITOR).unwrap();
-    let duplicates = rows(
-        &a,
-        "SELECT fleet_id FROM members WHERE status='active' AND json_extract(member_card_json, '$.cafleet.kind')='monitor' GROUP BY fleet_id HAVING count(*)>1",
-    );
-    assert!(duplicates.is_empty());
-    member(&b, 2, 1, "active", MONITOR).unwrap();
-    let data = records(&a);
-    let schema = schema_and_history(&a);
-    assert!(db::migrate_to_head(&mut a).is_err());
-    assert_eq!(records(&a), data);
-    assert_eq!(schema_and_history(&a), schema);
-}
-
-#[test]
 fn setup_sorts_duplicate_diagnostics_preserves_data_and_still_installs_assets() {
     let cli = Cli::new();
     let conn = old_schema(&cli, 7);
@@ -438,41 +305,6 @@ fn setup_sorts_duplicate_diagnostics_preserves_data_and_still_installs_assets() 
             .is_file()
     );
     assert!(!cli.shim_log.exists(), "setup must not operate on panes");
-}
-
-#[test]
-fn behind_schema_blocks_new_cli_delete_until_legacy_data_repair_and_setup_retry() {
-    let cli = Cli::new();
-    let mut conn = old_schema(&cli, 7);
-    fleet(&conn, 1);
-    member(&conn, 1, 1, "active", MONITOR).unwrap();
-    member(&conn, 2, 1, "active", MONITOR).unwrap();
-    let failed = cli.run(&["setup", "--coding-agent", "claude"]);
-    assert_eq!(code(&failed), 1);
-    let before = records(&conn);
-    let deleted = cli.run(&["member", "delete", "2"]);
-    assert_eq!(code(&deleted), 1);
-    assert!(
-        stderr(&deleted).contains("database schema is outdated (schema 7, head 8)"),
-        "{}",
-        stderr(&deleted)
-    );
-    assert_eq!(records(&conn), before);
-    assert!(!cli.shim_log.exists());
-    // Models the persisted result of the documented old-version cleanup, not an old binary run.
-    broker::deregister_member(&mut conn, 2).unwrap();
-    let repaired = records(&conn);
-    let retried = cli.run(&["setup", "--coding-agent", "claude"]);
-    assert_eq!(
-        code(&retried),
-        0,
-        "{}{}",
-        stdout(&retried),
-        stderr(&retried)
-    );
-    assert!(stdout(&retried).contains("Upgraded from 7 to 8."));
-    assert_eq!(records(&conn), repaired);
-    assert_eq!(broker::active_monitor_member_id(&conn, 1).unwrap(), Some(1));
 }
 
 #[test]

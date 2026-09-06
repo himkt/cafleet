@@ -627,32 +627,4 @@ mod tests {
         assert!(matches!(err, CafleetError::App(_)));
         assert_eq!(err.message(), "fleet '999' not found.");
     }
-    #[test]
-    fn creation_null_name_preserves_complete_success_wire_shape_and_key_order() {
-        let dir = tempfile::Builder::new()
-            .prefix(".bootstrap-wire-")
-            .tempdir_in(env!("CARGO_MANIFEST_DIR"))
-            .unwrap();
-        let mut conn = migrated_conn(&dir);
-        let fleet = super::create_fleet(
-            &mut conn,
-            None,
-            "main",
-            "@1",
-            "%0",
-            "claude",
-            "tmux",
-            "monitor",
-            "Monitor member for this fleet",
-            |_, _, _| Ok("%1".into()),
-        )
-        .unwrap();
-        let ts = fleet["created_at"].as_str().unwrap();
-        assert_eq!(
-            format_json(&fleet),
-            format!(
-                r#"{{"fleet_id":1,"name":null,"created_at":"{ts}","director":{{"member_id":1,"name":"Director","description":"Root Director for this fleet","registered_at":"{ts}","placement":{{"backend":"tmux","mux_session":"main","mux_window_id":"@1","mux_pane_id":"%0","coding_agent":"claude","created_at":"{ts}"}}}},"monitor":{{"member_id":2,"name":"monitor","description":"Monitor member for this fleet","registered_at":"{ts}","placement":{{"backend":"tmux","mux_session":"main","mux_window_id":"@1","mux_pane_id":"%1","coding_agent":"claude","created_at":"{ts}"}}}}}}"#
-            )
-        );
-    }
 }

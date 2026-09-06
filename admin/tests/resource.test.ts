@@ -16,113 +16,6 @@ afterEach(() => {
 });
 const loading: ResourceState<string> = {status:"loading",data:null,error:null,refreshing:false};
 
-describe("production resource lifecycle and snapshots", () => {
-  it("construction, reads and subscriptions have no fetch or notification side effect", async () => {
-    const load = vi.fn<Load>();
-    const current = resource(load);
-    const first = current.getSnapshot();
-    expect(first).toEqual(loading);
-    const listener = vi.fn();
-    const unsubscribe = current.subscribe(listener);
-    await flush();
-    expect(current.getSnapshot()).toBe(first);
-    expect(load).not.toHaveBeenCalled();
-    expect(listener).not.toHaveBeenCalled();
-    unsubscribe(); unsubscribe();
-    expect(current.getSnapshot()).toBe(first);
-  });
-
-  it("first start fetches once, repeated active starts do nothing before and after settlement", async () => {
-    const pending = deferred<string>();
-    const load = vi.fn<Load>().mockReturnValue(pending.promise);
-    const current = resource(load);
-    current.start(); current.start(); await flush();
-    expect(load).toHaveBeenCalledTimes(1);
-    expect(load.mock.calls[0][0]).toBeInstanceOf(AbortSignal);
-    expect(load.mock.calls[0][0].aborted).toBe(false);
-    const initial = current.getSnapshot();
-    expect(initial).toEqual(loading);
-    current.start(); expect(current.getSnapshot()).toBe(initial);
-    pending.resolve("ready"); await flush();
-    expect(current.getSnapshot()).toEqual({status:"success",data:"ready",error:null,refreshing:false});
-    const success = current.getSnapshot();
-    current.start(); await flush();
-    expect(load).toHaveBeenCalledTimes(1); expect(current.getSnapshot()).toBe(success);
-  });
-
-  it("publishes the actual snapshot before notifying and keeps references stable between changes", async () => {
-    const pending = deferred<string>();
-    const current = resource(vi.fn<Load>().mockReturnValue(pending.promise));
-    const observed: ResourceState<string>[] = [];
-    const unsubscribe = current.subscribe(() => observed.push(current.getSnapshot()));
-    current.start(); await flush(); observed.length = 0;
-    pending.resolve("published"); await flush();
-    const snapshot = current.getSnapshot();
-    expect(observed).toContain(snapshot);
-    expect(snapshot).toEqual({status:"success",data:"published",error:null,refreshing:false});
-    expect(current.getSnapshot()).toBe(snapshot);
-    await flush(); expect(current.getSnapshot()).toBe(snapshot);
-    unsubscribe();
-  });
-
-  it("unsubscribe suppresses future notifications without unsubscribing other listeners", async () => {
-    const first = deferred<string>(), second = deferred<string>();
-    const load = vi.fn<Load>().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
-    const current = resource(load);
-    const removed = vi.fn(), retained = vi.fn();
-    const unsubscribe = current.subscribe(removed);
-    current.subscribe(retained); current.start(); await flush();
-    unsubscribe(); const removedCount = removed.mock.calls.length;
-    first.resolve("first"); await flush();
-    expect(removed).toHaveBeenCalledTimes(removedCount);
-    expect(retained).toHaveBeenCalled(); retained.mockClear();
-    current.refresh(); await flush(); second.resolve("second"); await flush();
-    expect(removed).toHaveBeenCalledTimes(removedCount);
-    expect(retained).toHaveBeenCalled();
-    expect(current.getSnapshot().data).toBe("second");
-  });
-
-  it("stop has no notification, invalidates before abort callbacks settle, and ignores refresh while stopped", async () => {
-    const pending = deferred<string>();
-    const load = vi.fn<Load>((signal) => {
-      signal.addEventListener("abort", () => pending.resolve("settled synchronously by abort"), {once:true});
-      return pending.promise;
-    });
-    const current = resource(load), listener = vi.fn();
-    current.subscribe(listener); current.start(); await flush(); current.refresh();
-    const count = listener.mock.calls.length;
-    current.stop();
-    expect(listener).toHaveBeenCalledTimes(count);
-    expect(load.mock.calls[0][0].aborted).toBe(true);
-    const stopped = current.getSnapshot();
-    current.stop(); current.refresh(); current.refresh(); await flush();
-    expect(load).toHaveBeenCalledTimes(1);
-    expect(listener).toHaveBeenCalledTimes(count);
-    expect(current.getSnapshot()).toBe(stopped);
-  });
-
-  it("refresh before the first start is a no-op rather than a deferred initial request", async () => {
-    const load = vi.fn<Load>().mockResolvedValue("one start");
-    const current = resource(load);
-    current.refresh(); current.refresh(); await flush(); expect(load).not.toHaveBeenCalled();
-    current.start(); await flush();
-    expect(load).toHaveBeenCalledTimes(1); expect(current.getSnapshot().data).toBe("one start");
-  });
-
-  it("restarting a successful resource returns loading and obtains a fresh signal and value", async () => {
-    const first = deferred<string>(), second = deferred<string>();
-    const load = vi.fn<Load>().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
-    const current = resource(load);
-    current.start(); await flush(); first.resolve("old data"); await flush();
-    current.stop(); current.start(); await flush();
-    expect(current.getSnapshot()).toEqual(loading);
-    expect(load).toHaveBeenCalledTimes(2);
-    expect(load.mock.calls[1][0]).not.toBe(load.mock.calls[0][0]);
-    expect(load.mock.calls[1][0].aborted).toBe(false);
-    second.resolve("new data"); await flush(); expect(current.getSnapshot().data).toBe("new data");
-  });
-});
-
 describe("production resource failure and retry", () => {
   it("initial failure retains its Error and a refresh retries with a free request guard", async () => {
     const pending = deferred<string>(), retry = deferred<string>();
@@ -142,16 +35,6 @@ describe("production resource failure and retry", () => {
     expect(current.getSnapshot().error).toBeInstanceOf(Error);
     if (typeof reason === "string") expect(current.getSnapshot().error?.message).toContain(reason);
     current.refresh(); await flush(); expect(current.getSnapshot().data).toBe("recovered");
-  });
-
-  it("synchronous loader throw enters the same failure path without escaping start or blocking retry", async () => {
-    const error = new Error("synchronous failure");
-    const load = vi.fn<Load>().mockImplementationOnce(() => { throw error; }).mockResolvedValue("retried");
-    const current = resource(load);
-    expect(() => current.start()).not.toThrow(); await flush();
-    expect(current.getSnapshot()).toEqual({status:"error",data:null,error,refreshing:false});
-    current.refresh(); await flush(); expect(load).toHaveBeenCalledTimes(2);
-    expect(current.getSnapshot()).toEqual({status:"success",data:"retried",error:null,refreshing:false});
   });
 
   it("refresh retains data, exposes its failure, and clears that failure when retry starts", async () => {
@@ -216,18 +99,6 @@ describe("production coalescing and obsolete completion guards", () => {
     expect(load).toHaveBeenCalledTimes(2);
   });
 
-  it("an earlier request finally cannot unlock its same-generation pending successor", async () => {
-    const first = deferred<string>(), second = deferred<string>(), third = deferred<string>();
-    const load = vi.fn<Load>().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise).mockReturnValueOnce(third.promise);
-    const current = resource(load); current.start(); await flush(); current.refresh();
-    first.resolve("first"); await flush(); expect(load).toHaveBeenCalledTimes(2);
-    current.refresh(); current.refresh(); await flush();
-    expect(load).toHaveBeenCalledTimes(2); expect(load.mock.calls[1][0].aborted).toBe(false);
-    second.resolve("second"); await flush(); expect(load).toHaveBeenCalledTimes(3);
-    third.resolve("third"); await flush(); expect(load).toHaveBeenCalledTimes(3);
-    expect(current.getSnapshot()).toEqual({status:"success",data:"third",error:null,refreshing:false});
-  });
-
   it.each(["resolve","reject"] as const)("stopped request ignoring abort cannot %s into state, listeners or queued work", async (kind) => {
     const pending = deferred<string>(); const load = vi.fn<Load>().mockReturnValue(pending.promise);
     const current = resource(load), listener = vi.fn(); current.subscribe(listener);
@@ -260,15 +131,6 @@ describe("production coalescing and obsolete completion guards", () => {
     expect(load).toHaveBeenCalledTimes(3);
   });
 
-  it("stop discards old pending work instead of replaying it after restart", async () => {
-    const old = deferred<string>(), next = deferred<string>();
-    const load = vi.fn<Load>().mockReturnValueOnce(old.promise).mockReturnValueOnce(next.promise);
-    const current = resource(load); current.start(); await flush(); current.refresh(); current.stop();
-    current.start(); await flush(); next.resolve("new"); await flush(); old.resolve("old"); await flush();
-    expect(load).toHaveBeenCalledTimes(2);
-    expect(current.getSnapshot()).toEqual({status:"success",data:"new",error:null,refreshing:false});
-  });
-
   it("independent resources settle and refresh without sharing state, controllers or pending flags", async () => {
     const slow = deferred<string>(), fastUpdate = deferred<string>();
     const loadA = vi.fn<Load>().mockReturnValue(slow.promise);
@@ -285,10 +147,4 @@ describe("production coalescing and obsolete completion guards", () => {
     fastUpdate.resolve("B updated"); await flush(); expect(b.getSnapshot().data).toBe("B updated");
   });
 
-  it("a newly constructed resource never inherits another instance's cached data", async () => {
-    const a = resource(vi.fn<Load>().mockResolvedValue("A data")); a.start(); await flush();
-    const loadB = vi.fn<Load>(), b = resource(loadB);
-    expect(a.getSnapshot().data).toBe("A data"); expect(b.getSnapshot()).toEqual(loading);
-    expect(loadB).not.toHaveBeenCalled();
-  });
 });

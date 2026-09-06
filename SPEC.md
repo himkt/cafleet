@@ -302,56 +302,21 @@ The unified shapes:
 
 **MonitorRuntime** (1:1 with Fleet; `fleet_id` is PK = FK, not autoincrement)
 
-<!-- BEGIN GENERATED schema-monitor-runtime -->
-| Column | SQLite type | DDL NOT NULL | DDL default | PK position |
-|---|---|---|---|---|
-| `fleet_id` | `INTEGER` | true | — | 1 |
-| `pid` | `INTEGER` | false | — | 0 |
-| `started_at` | `TEXT` | false | — | 0 |
-| `last_tick_at` | `TEXT` | false | — | 0 |
-| `tick_seconds` | `INTEGER` | true | `5` | 0 |
-| `last_wake_at` | `TEXT` | false | — | 0 |
-| `wake_interval_seconds` | `INTEGER` | false | — | 0 |
-| `wake_requested_at` | `TEXT` | false | — | 0 |
-
-DDL metadata only: PK position is separate from the NOT NULL flag; foreign keys and runtime semantics remain in the prose.
-<!-- END GENERATED schema-monitor-runtime -->
-
-- `fleet_id`: FK→fleets, ON DELETE RESTRICT
+- `fleet_id`: integer, FK→fleets, ON DELETE RESTRICT
+- `pid`: optional integer, the claiming process
+- `started_at`, `last_tick_at`: optional timestamp strings
 - `tick_seconds`: DDL default 5
 - `last_wake_at`: nullable; the UTC ISO timestamp of the last successfully delivered wake, durable across loop restarts; preserved by the runtime clear
 - `wake_interval_seconds`: nullable; the live mirror of the running loop's wake interval — stamped at every claim/reclaim, re-read per tick, overwritten by `PATCH /api/monitor`, preserved by the runtime clear; `NULL` only in rows that predate the column and were never re-claimed
 - `wake_requested_at`: nullable; the UTC ISO timestamp of the latest pending forced-wake request (`POST /api/monitor/wake`) — `NULL` when none is pending; repeat requests overwrite the timestamp (coalesce into a single wake); cleared by a delivered wake (`record_monitor_wake`) and by the reclaim reset in `claim_monitor_runtime`
 
-A missing row is distinct from any nullable field on an existing row.
-`pid = NULL` means no claim; claim records the loop's direct pid and clear
-removes it. Do not reinterpret pid zero as a new missing-value sentinel; keep
-the existing process probe. `started_at = NULL` means no claim start time.
-`last_tick_at = NULL` or an unparseable value is not a fresh heartbeat. Clear
-nulls pid/start/tick, but preserves `last_wake_at`, `wake_requested_at`, and the
-intervals. A null `last_wake_at` falls back to `started_at` for cadence.
-
-`tick_seconds` has DB default 5; zero is invalid CLI input, not a disable flag.
-`wake_interval_seconds = NULL` is the legacy V5-column state before a later
-claim, distinct from zero (scheduled wakes disabled; forced wake still allowed)
-and positive seconds. Claim/reclaim always records a non-null wake interval.
-Keep raw nullable storage fields separate from the stopped-monitor HTTP
-projection, which hides process timestamps but preserves stored intervals
-(§6.8). Do not normalize legacy null intervals into zero.
+A missing runtime row differs from null fields on an existing row. Clear
+nulls pid/start/tick, preserving wake timestamps and intervals; the stopped
+HTTP projection masks process timestamps. A null wake interval differs from
+zero, which disables scheduled wakes while permitting forced wakes.
 
 
 **AssetInstalls** (composite TEXT PK `(coding_agent, path)`, not autoincrement, not FK-linked)
-
-<!-- BEGIN GENERATED schema-asset-installs -->
-| Column | SQLite type | DDL NOT NULL | DDL default | PK position |
-|---|---|---|---|---|
-| `coding_agent` | `TEXT` | true | — | 1 |
-| `path` | `TEXT` | true | — | 2 |
-| `cafleet_version` | `TEXT` | true | — | 0 |
-| `installed_at` | `TEXT` | true | — | 0 |
-
-DDL metadata only: PK position is separate from the NOT NULL flag; foreign keys and runtime semantics remain in the prose.
-<!-- END GENERATED schema-asset-installs -->
 
 - `coding_agent`: PK part; one of `"claude"` / `"codex"` / `"opencode"`
 - `path`: PK part; the agent's resolved identity path (§6.3 *Config-dir resolution*), stored absolute exactly as resolved
@@ -400,57 +365,10 @@ sentinel.
 
 ### 5.6 Typed records and wire presenters
 
-Decode SQL columns into small Rust records once. Move consumers in the order
-member → placement → message → monitor; eliminate JSON field indexing and
-reparsing between these internal consumers. A temporary compatibility adapter
-may remain during one migration stage, but remove it when all its consumers
-use the typed interface. Do not introduce a generic repository framework.
-
-| Record | Fields and constraints |
-|---|---|
-| `MemberRecord` | `member_id`, `fleet_id`: `i64`; `name`, `description`, `registered_at`: `String`; `status: MemberStatus`, `kind: MemberKind`; `skills: Vec<Value>`; `placement: Option<Placement>` |
-| `Placement` | `backend`, `mux_session`, `mux_window_id`, `coding_agent`, `created_at`: `String`; `mux_pane_id: Option<String>` |
-| `MessageRecord` | `message_id`, `owner_member_id`, `from_member_id`: `i64`; `to_member_id`, `origin_message_id`: `Option<i64>`; `kind: MessageKind`, `status: MessageStatus`; `created_at`, `status_timestamp`, `text`: `String` |
-| `MonitorRuntime` | `fleet_id`, `tick_seconds`: `i64`; `pid`, `wake_interval_seconds`: `Option<i64>`; `started_at`, `last_tick_at`, `last_wake_at`, `wake_requested_at`: `Option<String>` |
-
-Free-form skill elements may remain `Value`. SQL records and required fields
-must not travel as generic JSON internally; `Value` remains appropriate at the
-CLI/HTTP output boundary. A missing placement and a placement with a pending
-(null) pane id are distinct states. A missing runtime row is
-`Option<MonitorRuntime>::None`, not a synthetic row with id zero.
-
-Unknown stored enum values become `InvalidStoredValue` errors, not panics or
-invented defaults. Preserve the existing skills-extraction fallback: malformed
-card JSON, absent skills, or a non-array skills value yields an empty skills
-array. Do not alter timestamp parsing or formatting solely to introduce types.
-
-Presenters construct JSON explicitly in each operation's existing key order
-(`serde_json` uses `preserve_order`). Preserve names, nulls versus absent keys,
-scalar types, list order, envelopes, compact JSON, and text formatting. Rust
-field names or enum variant names must not leak into the wire. Message CLI
-fields remain `message_id, owner_member_id, from_member_id, to_member_id, type,
-created_at, status_state, status_timestamp, origin_message_id, text`; HTTP uses
-the projection in §6.8. Summary recipient ids/names stay null, never zero or an
-invented label.
-
-Introduce domain variants only where callers need to branch, including
-`ActiveMonitorExists`, `MemberNotFound`, `FleetNotFound`, and
-`InvalidStoredValue`. CLI adapters retain the operation's existing
-Usage/App/Value classification, exit code, diagnostic text, and validation
-order. HTTP adapters retain endpoint-specific status/detail mappings. Invalid
-stored values or missing required sender/recipient names are integrity failures
-(HTTP 500 with `{"detail": <string>}`, CLI application failure), not fabricated
-successful rows; a missing name must not escape as a panic. Do not replace an
-existing endpoint's validation precedence with a global error mapping.
-
-Typed send outcomes retain the persisted message id, `NotificationAttempt`,
-and the raw transport diagnostic as caller metadata. They do not add error
-fields to successful wire payloads. A failed attempted preview never rolls
-back or resends the message: preserve the exit-1 CLI partial-failure result and
-its recovery instruction, broadcast's delivered count, and HTTP's persisted
-send response (§6.2/§6.3/§6.8).
-
----
+Broker queries decode rows into typed records. CLI and HTTP presenters build
+wire JSON, preserving field names, order, nulls, and existing envelopes.
+Invalid stored enums and missing required message names are integrity errors.
+Concrete subprocess and notification adapters live in `runtime/`.
 
 ## 6. Module specifications
 
@@ -506,17 +424,6 @@ connection performing the delete. Omitting either PRAGMA is a correctness bug,
 not a no-op. Both must run on every connection the reimplementation opens.
 
 #### Structural invariants
-
-<!-- BEGIN GENERATED schema-indexes -->
-| Table | Index | Unique | Columns | Partial | Definition |
-|---|---|---|---|---|---|
-| `members` | `idx_members_fleet_status` | false | `fleet_id, status` | false | `CREATE INDEX idx_members_fleet_status ON members (fleet_id, status)` |
-| `members` | `idx_members_one_active_monitor_per_fleet` | true | `fleet_id` | true | `CREATE UNIQUE INDEX idx_members_one_active_monitor_per_fleet ON members(fleet_id) WHERE status = 'active' AND json_extract(member_card_json, '$.cafleet.kind') = 'monitor'` |
-| `messages` | `idx_messages_from_member_status_ts` | false | `from_member_id, status_timestamp` | false | `CREATE INDEX idx_messages_from_member_status_ts ON messages (from_member_id, status_timestamp)` |
-| `messages` | `idx_messages_owner_member_status_ts` | false | `owner_member_id, status_timestamp` | false | `CREATE INDEX idx_messages_owner_member_status_ts ON messages (owner_member_id, status_timestamp)` |
-
-Application-created indexes only; SQLite autoindexes for PRIMARY KEY/UNIQUE constraints and migration bookkeeping are excluded.
-<!-- END GENERATED schema-indexes -->
 
 - **AUTOINCREMENT on exactly three tables** — `fleets`, `members`, `messages` —
   guaranteeing monotonically increasing ids that are never reused. The 1:1
@@ -844,14 +751,6 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
   state, `broadcast_summary` excluded, ordered `status_timestamp DESC, message_id DESC`.
 - **`list_sent(member_id)`** — all messages where `from_member_id = member_id`, any
   state, `broadcast_summary` excluded, ordered `status_timestamp DESC, message_id DESC`.
-  Both history queries retain their unbounded entry points. The
-  options entry points accept `HistoryOptions { limit: Option<usize> }`:
-  `None` omits SQL `LIMIT`; a supplied limit is bound in SQL after the delivery
-  filter and ordering, never implemented by fetching everything and truncating.
-  Direct options calls also reject zero or values above 1000 with a value error:
-  `limit must be an integer between 1 and 1000`.
-  The existing owner/status and sender/status indexes must be checked with
-  `EXPLAIN QUERY PLAN`; this change adds no index or storage-retention policy.
 - **`list_timeline(fleet_id, limit=200)`** — delivery rows (`g.type = 'unicast'`)
   joined to their **owning member's** row through `owner_member_id`, filtered to
   that member's `fleet_id`. SQL orders by `status_timestamp DESC, message_id DESC`
@@ -1201,8 +1100,7 @@ coding-agents section, but the recorded rows are read only when the database
 report is `✓` (at head) AND the `asset_installs` table exists. Whenever the
 rows are not read — any non-head state, or an at-head ledger with a
 hand-dropped table — the section renders with no recorded-install data:
-every resolvable agent without incomplete recovery shows the `–` state;
-incomplete recovery still shows an assets issue. No superseded footnotes render,
+every resolvable agent shows the `–` state. No superseded footnotes render,
 and — in the non-head states — doctor exits 1 for the database issue;
 either way, never a raw SQLite error from `asset_installs`.
 
@@ -1222,7 +1120,6 @@ single-width, but the rule is general. One row per agent in the fixed order
 
 | State | Cell | Issue |
 |---|---|---|
-| Recovery evidence remains unfinished at the resolved install (takes precedence over the row/version states below) | `✗ incomplete assets install at <path>; run 'cafleet setup' to recover` | yes |
 | A row exists at the resolved path, version = CLI version (string equality) | `✓ <version>` | no |
 | A row exists at the resolved path, version ≠ CLI version (string inequality, either direction — never semver comparison) | `✗ <recorded-version> → cafleet setup --coding-agent <agent>` | yes |
 | No row exists at the resolved path (regardless of rows elsewhere) | `– cafleet setup --coding-agent <agent>` (`–` U+2013 EN DASH) | never |
@@ -1246,10 +1143,9 @@ output; every failure is a rendered issue.
 **JSON mode.** Mirrors the sections with `ok` booleans, unabbreviated
 absolute paths, and the issue count. `source` holds the winning env-var
 **name** (no `$`) or the literal `"default"`; `state` is `"ok" | "stale" |
-"not_installed" | "error" | "incomplete"` (`"error"` is the per-agent resolution-error
+"not_installed" | "error"` (`"error"` is the per-agent resolution-error
 state; `"not_installed"` never contributes to `issues`). Every agent row
-carries the same keys. `error` is the validation message for `"error"`, the
-recovery diagnostic for `"incomplete"` (one issue), and otherwise null,
+carries the same keys. `error` is the validation message for `"error"`, and otherwise null,
 without an `Error: ` prefix.
 Section `error` fields likewise hold the detail text when `ok` is false,
 else `null`.
@@ -1298,7 +1194,7 @@ raw invalid value appears only inside `error`; `path` stays `null` because
 no path resolved. `schema_version` is `null` when the ledger is absent.
 When the recorded rows are not read (a non-`ok` database report, or a
 missing `asset_installs` table), resolved agents use `"not_installed"`
-unless recovery evidence requires `"incomplete"`; path errors remain
+and path errors remain
 `"error"`. Recorded fields are null and `superseded` is empty. `installed_at` values are printed **verbatim** (microsecond
 precision, exactly as stored). Exit-code semantics are identical to text
 mode.
@@ -1542,57 +1438,12 @@ for the fleet's single root Director bootstrapped by `fleet create` — no
 
 #### Creation ownership and compensation
 
-`split_window` owns the new pane until success. Herdr arms its pane guard
-immediately after extracting the id from the split response and attempts
-`kill_pane(id, true)` if the subsequent run fails. Preserve the run error and
-id even if closing the pane fails. On success, transfer ownership immediately
-to the CLI guard; a fleet callback returns the id without another fallible
-operation between transfer and return. The broker knows no pane operations.
-
-| Failure point | Guard ownership and compensation order | DB result on successful compensation |
-|---|---|---|
-| Member registration | Broker rolls back registration; no pane guard | No added member/placement |
-| Member placeholder expansion | CLI registration guard deregisters; no pane exists | Member deregistered, placement removed |
-| Member Herdr run with known id | Backend pane guard tries kill, returns error, then CLI registration guard deregisters | Member deregistered, placement removed |
-| Member placement update error or missing row | Handle failed SQL, then CLI pane guard kills, then registration guard deregisters | Member deregistered, placement removed |
-| Fleet callback before pane creation | No pane guard; broker rolls back bootstrap | No added fleet/Director/monitor/placement |
-| Fleet callback Herdr run failure/timeout with known id | Backend guard tries kill, callback returns error, then broker rolls back bootstrap | No added bootstrap rows |
-| Fleet placement insert/commit after callback success | CLI holds transferred pane guard; broker rolls back and closes transaction, then CLI kills | No added bootstrap rows |
-| Fleet callback failure/timeout before id acquisition | Backend reports unconfirmed pane compensation, then broker rolls back; no guessed pane kill | No added bootstrap rows; pane state unconfirmed |
-
-A backend error records `PaneCleanup::Attempted { pane_id, error: Option<_> }`
-when it attempted compensation, whether the close succeeded (`None`) or failed
-(`Some`). The CLI performs remaining DB compensation without a second kill.
-`PaneCleanup::Unknown` means the split response did not establish a pane id;
-report that the id is unknown and cleanup is unconfirmed, and never close an
-inferred alternative pane. This also applies to member split failures.
-A failure before issuing a split has no created-pane ownership to compensate.
-
-Each earlier cleanup failure must still allow later compensation to run in
-the table's order. Keep the primary error first and preserve its exit category;
-append applicable secondary diagnostics on stderr:
-
-- `cleanup failed for pane <id>: <detail>`
-- `cleanup failed for member <id>: <detail>`
-- `cleanup failed for fleet <id> transaction: <detail>`
-
-Rollback failures leave DB state uncertain and must be reported explicitly.
-Do not claim success or complete rollback when compensation failed or a pane
-is unconfirmed; existing rollback-success suffixes require confirmed cleanup.
-Creation rollback does not use `send_exit`, which cannot guarantee shell/pane
-termination. Guard `finish`/`rollback` disarms ownership, even after a handled
-cleanup failure; `Drop` is only the final defense for unhandled ownership.
-This prevents double kill/deregistration. On confirmed member placement or
-successful fleet commit, disarm all creation guards before `emit`. Preserve
-normal text/JSON keys, order, nulls, and output streams; do not introduce a new
-stdout-failure exit-code or diagnostic contract. Existing `member delete`,
-notification keystrokes, and persisted-message notification failure reporting
-remain unchanged.
-
-Failure fixtures observe the ordering at the backend/CLI/transaction
-boundaries, including list → split/id → run failure → close, close and
-rollback failures, missing placement, commit failure, unknown ids, and success
-without any kill. No DB/pane atomicity is claimed for failed compensation.
+A backend owns a newly allocated pane until successful return, then the CLI
+owns it. A known-pane failure attempts cleanup exactly once; an unknown pane
+id is reported without guessing. Fleet failure rolls back and closes its DB
+connection before CLI pane cleanup. Member placement failure cleans the pane
+then deregisters the member. Preserve the primary error and append cleanup
+failures; successful creation disarms cleanup.
 
 #### `member delete`
 
@@ -1696,17 +1547,6 @@ member <name> (<pane_id>) — poll keystroke dispatched.`.
 
 #### `member capture`
 
-<!-- BEGIN GENERATED cli-member-capture -->
-| Argument | Type | Values per occurrence | Action | Parser default | Required |
-|---|---|---|---|---|---|
-| `MEMBER_ID` | `i64` | 1 | `Set` | — | yes |
-| `--lines` | `i64` | 1 | `Set` | `20` | no |
-| `--ansi` | `bool` | 0 | `SetTrue` | `false` | no |
-| `--json` | `bool` | 0 | `SetTrue` | `false` | no |
-
-Parser defaults only; runtime environment fallbacks and value constraints remain in the prose.
-<!-- END GENERATED cli-member-capture -->
-
 Pane read. Arguments: positional `MEMBER_ID` (the **target**), `--lines`
 (integer, default
 **20**, shown in help), `--ansi` (boolean, default `false` — preserve ANSI
@@ -1726,17 +1566,6 @@ emitted string. Text output stays byte-identical. Capture content is not
 stored.
 
 #### `monitor`
-
-<!-- BEGIN GENERATED cli-monitor -->
-| Argument | Type | Values per occurrence | Action | Parser default | Required |
-|---|---|---|---|---|---|
-| `FLEET_ID` | `i64` | 1 | `Set` | — | yes |
-| `--tick` | `i64` | 1 | `Set` | `5` | no |
-| `--interval` | `i64` | 1 | `Set` | — | no |
-
-Parser defaults only; runtime environment fallbacks and value constraints remain in the prose.
-Required arguments apply to the loop form; selecting a subcommand negates them.
-<!-- END GENERATED cli-monitor -->
 
 A two-form top-level command: the bare positional form runs the supervision
 loop; the `scan` subcommand is a one-shot batch capture. The loop positionals
@@ -1771,17 +1600,6 @@ Director's first ordinary
 `cafleet member create`: `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)`.
 
 ##### `monitor scan`
-
-<!-- BEGIN GENERATED cli-monitor-scan -->
-| Argument | Type | Values per occurrence | Action | Parser default | Required |
-|---|---|---|---|---|---|
-| `FLEET_ID` | `i64` | 1 | `Set` | — | yes |
-| `--lines` | `i64` | 1 | `Set` | `20` | no |
-| `--ansi` | `bool` | 0 | `SetTrue` | `false` | no |
-| `--json` | `bool` | 0 | `SetTrue` | `false` | no |
-
-Parser defaults only; runtime environment fallbacks and value constraints remain in the prose.
-<!-- END GENERATED cli-monitor-scan -->
 
 Shared capture uses `CaptureSnapshot::from_raw(raw, ansi, now)` for both
 member capture and scan. ANSI false applies the existing strip/CR normalization;
@@ -1979,165 +1797,12 @@ Skills resolve to `<claude base>/skills`, `<codex home>/skills`, and the fixed
 `presets/codex/cafleet.rules` to `<codex home>/rules/cafleet.rules`, and
 `presets/opencode/cafleet.md` to `<preset base>/agents/cafleet.md`.
 
-##### Recoverable assets installation
-
-Create stage and backup entries with unique hidden names beside each target,
-on that target's filesystem. Never rename the whole skills or preset parent:
-unrelated entries remain untouched. Inspect targets without following the
-final symlink; moving or deleting a target affects the entry, not its referent.
-Only absence is treated as absence; other filesystem inspection errors fail.
-
-Acquire OS advisory locks in normalized physical target order, including
-aliases that share a skills tree despite different recorded identities. Keep
-locks through recovery, staging, swaps, database recording and cleanup.
-Process exit releases locks; a PID file is not the lock. Physical lock
-normalization does not change the existing recorded-path identity contract.
-
-Stable lock files have durable intent sidecars that identify their owning
-transaction and journal, allowing another identity sharing the same physical
-skills tree to discover interrupted work. Retain lock inodes; finish sidecars
-before removing the journal. An Active sidecar without its journal is
-incomplete; Finished without a journal is normal. A Finished sidecar pointing
-to a new transaction is accepted only as a discovery candidate when the
-journal is Prepared, has no pending operation, and every entry is Original.
-Under all required locks, verify the journal database identity, exact old row,
-all old fingerprints and absence of backups before normalizing every sidecar
-to the new Active transaction while still Prepared. Only then enter rollback.
-This ordering also applies to same-call failure recovery, and permits another
-interruption during normalization. Other transaction/key/state mismatches
-stop with evidence retained. Recovery never opens a different recorded
-database automatically; rerun setup with the original database configuration.
-
-1. Write every replacement into its own stage and validate its embedded
-   manifest before changing installed entries or the database. A staging
-   failure cleans stages only. Stage validation checks the expected file set,
-   content digests and skill entry points. The build embeds runtime documents
-   directly from `docs/docs/`; `docs-check` validates installed links and anchors.
-2. Durably write `<identity>/.cafleet-install-journal.json`, containing the
-   transaction ID, phase, target/stage/backup paths, old entry presence,
-   previous complete `asset_installs` row or null, and new version/manifest.
-   Use temporary-file write, file sync, rename and parent-directory sync.
-   Record intent durably before every destructive operation and completion
-   afterward, including recovery operations.
-3. Rename old targets to their backups, then stages to targets. Removing the
-   obsolete research skill is a backup move without a replacement. On failure,
-   restore this backend's old entries in reverse order and its exact old
-   database row, including `installed_at`; delete the row if none existed.
-4. After all swaps, upsert the new row in a SQLite transaction and commit it.
-   Then persist the journal's `committed` phase. A database commit followed by
-   failure or interruption before durable `committed` still requires restoring
-   both old files and the old row. Matching versions are not evidence of commit.
-5. After durable `committed`, remove backups/stages and remove the journal
-   last. Cleanup failure retains recovery evidence and reports installation
-   success with cleanup pending, separately from an install failure. The next
-   setup verifies the recorded new manifest and database row, then resumes
-   cleanup only for that backend; it does not roll back committed assets.
-
-| State found by the next setup | Recovery under the locks |
-|---|---|
-| No journal, unused stages | Installed entries and the row were not changed; clean identifiable unreferenced stages. Never discard unexplained backups. |
-| Uncommitted journal, including after DB commit | Reconcile journal intent with actual entries and restore old files and the exact old row. Each restore/delete is restartable. |
-| Committed journal | Verify the journal's new manifest and row, then finish cleanup without reinstalling or rolling back. |
-| Corrupt journal, inconsistent evidence, or failed restoration | Retain journal and remaining backups; stop with an incomplete-install diagnostic. |
-
-Guard and doctor inspect recovery evidence for the resolved install even when
-its recorded version matches. An unfinished journal, including pending
-committed cleanup, produces
-`incomplete assets install at <path>; run 'cafleet setup' to recover`.
-Doctor reports an assets issue while continuing its other sections; no-record
-or unavailable-database diagnosis must not hide a filesystem journal.
-Healthy output and existing path-validation precedence remain unchanged.
-
-After durable installation success, preserve the existing output lines:
-
-```
-<agent>: installed cafleet, cafleet-design-doc (v<version>) -> <skills dir>
-<agent>: installed preset (v<version>) -> <target>
-```
-
-The preset line appears only for codex/opencode. A skills operation error
-retains `failed to install skills into <skills_dir>: <error>`; a preset
-operation error retains `failed to install preset into <target>: <error>`.
-If rollback also fails, preserve the primary error and append recovery
-failure information instead of claiming the previous install is healthy.
-
-Assets-half pre-flight still requires the `asset_installs` table, else the
-half fails with `the database schema is missing or outdated; run 'cafleet
-setup' first`. The DB half runs first and assets are still attempted after
-its failure. An install failure aborts the backend loop; successful earlier
-backends and their rows remain. Committed cleanup warnings are not an
-assets-half install failure. Their stderr line is
-`warning: assets installed at <path>; cleanup pending: <cause>; run 'cafleet setup' to recover`.
-Cleanup-only success prints the journal's installed version, even when the
-running binary has a different version. This is a recoverable sequence across filesystems
-and SQLite, not a single atomic commit; power-loss durability depends on the
-filesystem's sync and rename guarantees.
-
 #### Shared diagnosis and connection reuse
 
-Shared diagnosis and connection reuse preserve existing command text, JSON,
-exit codes, and validation order.
-
-`SchemaState` and per-coding-agent/path `AssetState` facts carry versions, resolved paths and their sources, recorded
-installs, superseded rows, and raw failure causes; it does not contain
-preformatted guard or doctor messages. Boundary presenters retain their
-different existing wording for the same state.
-
-| SchemaState | Classification |
-|---|---|
-| `Missing` | No recorded schema version (ledger absent or empty) and no application tables, including an empty newly opened file. |
-| `Unversioned` | No recorded schema version (ledger absent or empty), but application tables exist. |
-| `Behind` | Recorded version is less than embedded head; preserve both numbers. |
-| `Head` | Recorded version equals embedded head. |
-| `Ahead` | Recorded version exceeds embedded head; preserve both numbers. |
-| `Unreachable` | Connection or schema inspection failed; preserve the original cause. |
-
-Asset facts distinguish a matching current install, a stale current install,
-no current install, a path-resolution failure, and incomplete installation
-recovery. "Current" means the
-resolved identity path, not the newest row for the agent. Version comparison
-remains string equality. Superseded rows remain informational. Preserve path
-validation, source selection, agent order, and the current-install absence
-rules of the existing guard and doctor sections. Incomplete installation adds
-doctor assets `state: "incomplete"` and the recovery diagnostic in `error`,
-using the existing key order and nullable record fields. Other internal
-variant names do not become new wire values.
-
-Collect schema facts on the invocation's connection and reuse that connection
-for guards and the command's database work. Ordinary commands apply the
-schema guard before collecting/checking assets, then enter the command body;
-do not resolve invalid asset paths early and change which failure wins.
-`server` still has only the schema startup guard. HTTP still opens a connection
-per blocking handler; no process-global connection or diagnosis cache is
-introduced.
-
-The invocation owns an `Option<Connection>` and lends the open connection to
-command work. Fleet creation also receives its owner slot: if the broker
-fails, it closes the actual DB handle before CLI pane compensation, including
-after a failed explicit rollback. That failure leaves the slot empty; do not
-reopen merely to report it. Successful creation retains the same connection.
-This preserves the creation cleanup order specified above.
-
-Doctor keeps multiplexer → database → coding agents report order and reports
-connection/schema failures as data without suppressing the other sections.
-Read recorded asset rows only at schema head and only when `asset_installs`
-exists. Otherwise resolve agent paths and inspect recovery evidence, showing incomplete
-installation or the existing no-record state, including per-agent path errors,
-with no superseded footnotes. Guard and
-doctor presenters preserve all existing issue counts, text, JSON key order,
-nulls, and exit codes.
-
-Setup keeps its DB half followed by its independent assets half. Reuse a
-successfully opened connection, including after a refused/failed migration;
-after DB creation/migration, diagnose again on that connection rather than
-reusing stale pre-migration facts. A DB-half failure still attempts assets:
-an older schema with `asset_installs` may accept installation even when the
-DB half failed, while a missing table retains its existing assets preflight
-error. If the initial open failed, a later connection attempt is allowed;
-"reuse" does not prevent recovery. Resolve only selected agents for a
-targeted setup, and retain each half's existing diagnostics and combined exit
-result. The duplicate-monitor migration checks and callback order remain
-unchanged.
+Schema and asset diagnosis return typed facts; CLI presenters supply messages.
+Guards and command work share the invocation connection. Setup attempts both
+halves, reuses an open connection, and diagnoses again after migration.
+Doctor reports all sections and reads installed versions only at schema head.
 
 #### Schema-version guard
 
@@ -2179,16 +1844,12 @@ the top of the group callback, before any subcommand body runs) and the
 `monitor` command (both forms, before the command body) — resolves, after
 the schema-version guard passes, each
 agent's identity path (§6.3 *Config-dir resolution*) and validates the
-recorded assets installs and recovery evidence at those paths:
+recorded assets installs at those paths:
 
 1. If a config-path variable fails validation, exit 1 with the pinned
    validation error (§6.3 *Config-dir resolution*).
 
-2. If any resolved install has unfinished recovery evidence, exit 1 with
-   `Error: incomplete assets install at <path>; run 'cafleet setup' to recover`.
-   This also applies when the recorded version matches or the row is absent.
-
-3. If no agent has a row at its currently-resolved path (zero rows, or — on
+2. If no agent has a row at its currently-resolved path (zero rows, or — on
    a hand-tampered at-head database — a dropped `asset_installs` table,
    which the kept `asset_installs_table_exists` pre-check classifies as the
    no-rows case), exit 1 with:
@@ -2196,7 +1857,7 @@ recorded assets installs and recovery evidence at those paths:
    Error: no assets install is recorded at the resolved paths; run 'cafleet setup' to install
    ```
 
-4. If a row at a resolved path has a `cafleet_version` differing from the
+3. If a row at a resolved path has a `cafleet_version` differing from the
    runtime CLI version (simple string inequality — a downgrade also
    triggers), exit 1 with the stale agents listed in ascending
    `coding_agent` order:
@@ -2643,35 +2304,6 @@ sequence — it does NOT fragment into a second submit. Esc-first matrix:
 `send_poll_trigger` **YES**, `send_inline_preview` **YES**, `send_wake_trigger`
 **YES**, `send_exit` **YES**, and both `send_prompt` forms **YES**.
 
-#### Shared creation preparation and deadlines
-
-Group current CLI arguments into `MemberCreateOptions` and `FleetCreateOptions`
-without merging their distinct validation ladders. Resolve prompt/backend and
-prepare cwd, forwarded environment, and identity-independent argv before the
-fleet transaction or member registration. Leave only id-dependent prompt/argv
-rendering and pane spawn after identity allocation. Fleet bootstrap remains a
-single fleet/Director/monitor/placement commit; do not publish partial fleets.
-
-The fleet callback and shared member spawn path each receive one 30-second
-monotonic deadline. Every Herdr list/split/layout/resize/run and tmux split/layout
-call consumes its remaining duration, with no resetting or whole-second
-round-up. Known-pane compensation has a separate 5-second budget. Preserve
-backend kill before rollback for id-known run timeout, Unknown/no guessed kill
-for split timeout before id confirmation, and rollback/actual DB close before
-CLI kill after callback success. Preserve the primary error and continue other
-compensation when close fails; ownership transfer still prevents duplicate kill.
-The existing SQLite busy timeout stays 5 seconds. DB waits, rollback, process
-creation and OS termination are not guaranteed to finish within 30 seconds.
-
-Keep ordinary best-effort layout/resize failures nonfatal, but treat timeout
-or exhausted deadline as creation failure, including a final check before
-ownership transfer. Bounded cleanup directly closes the known pane within its
-separate five seconds, skipping lookup and cosmetic rebalance; ordinary delete
-retains its existing behavior. Use actual fractional remaining durations for
-the runner and timeout diagnostics, without rounding up. Pre-command expiry
-reports `<backend> spawn deadline exceeded: <argv>`; pre-transfer expiry reports
-`<backend> spawn deadline exceeded`.
-
 #### Subprocess core, timeout, and pane-gone tolerance
 
 The subprocess runner invokes tmux as an argv list (no shell), treats a non-zero
@@ -2679,9 +2311,7 @@ exit as a failure, and returns stdout on success. Failure-message intents:
 binary-not-found → `tmux binary not found: <detail>`; timeout → `tmux command
 timed out after <timeout>s: <space-joined argv>`; non-zero exit → `tmux command
 failed: <space-joined argv>\nstderr: <trimmed stderr>`. A **per-call timeout** of
-`5`s is passed by `list_pane_ids` and the three keystroke helpers. Creation
-uses the shared deadline above, with an independent five-second compensation
-budget; other legacy calls remain unbounded. **Pane-gone tolerance:** the tolerant runner swallows a
+`5`s is passed by `list_pane_ids` and the three keystroke helpers. Other calls remain unbounded. **Pane-gone tolerance:** the tolerant runner swallows a
 tmux error only when **both** `ignore_missing` is true **and** the message text
 (case-insensitive) contains `"can't find pane"` or `"no such pane"`; any other
 failure re-raises even under `ignore_missing`. Whatever error shape a port uses
@@ -3041,17 +2671,10 @@ next tick sees the soft-deleted fleet and self-terminates via step 2 of
 
 #### Monitor resource ownership
 
-The driver owns `MonitorLease` immediately after successful claim, before signal
-registration. Retain each successful registration handle, installing SIGTERM
-then SIGINT before writing and flushing the existing startup line. A failure
-registering either handler, writing/flushing startup, or running a tick must
-unregister all retained handles and attempt conditional clear. Normal stop and
-owner displacement use the same cleanup. Clear only `(fleet_id, pid)`, retaining
-a replacement owner and the existing wake ledger. Preserve a primary work
-error and its exit category if clear also fails, appending the clear diagnostic;
-return clear's error when work succeeded. Hard kill/crash still recover via
-stale reclaim. Inject signal registration, clock, and stop flag per invocation
-for tests; never mutate global signals or clocks to test these paths.
+After claiming a runtime row, retain each signal registration and clean up on
+normal stop or failure: unregister handlers and clear only the owned
+`(fleet_id, pid)` row. Preserve wake settings and ledger fields. Append cleanup
+failure to a primary error; report cleanup failure when work succeeded.
 
 #### Interruptible sleep & signals
 
@@ -3350,44 +2973,11 @@ non-HTML 404.
 
 #### Frontend route and resource ownership
 
-The hash route is the sole selected-fleet authority. Fleet selection only
-navigates; remove global `setFleetId` and App's `initialMembers` prefetch.
-`createFleetClient(fleetId)` captures an immutable fleet id for every scoped
-read and mutation. Unscoped `listFleets` never sends `X-Fleet-Id`.
-
-App owns route/fleet existence validation; the picker owns its unscoped list;
-Dashboard owns roster and monitor state independently and the refresh counter;
-Timeline owns timeline reads; MemberDetail owns the inbox/sent reads. Key
-Dashboard by fleet id and its detail panel by member id. Use a fleet/member
-resource key and a single initial load path (StrictMode's aborted extra attempt
-is allowed). Do not prefetch the roster from a selection handler or route effect.
-
-Reads carry AbortController signals and generation ids. Abort and invalidate
-on unmount or identity change; only current-generation results/finally may
-publish state, release in-flight, or start pending work. An active request
-coalesces subsequent refreshes into one latest follow-up, including after
-failure, without leaving polling blocked. Dashboard's five-second timer,
-manual Refresh, successful send and monitor edit refresh its resources and
-mounted histories; one slow/failing resource cannot block another. Preserve
-hidden-tab polling. The picker retains its own five-second list refresh.
-
-First loads show skeletons. Successful empty results show the normal empty
-state. First-load failures show an error and Retry, never a success-empty
-message. Refresh retains same-resource data; refresh failure adds an
-update-failed notice and Retry. Aborted/old requests do not update the view.
-
-Keep fleet/member deep links and Back/Forward. Invalid fleet routes or a fleet
-absent from a successful fleet-list response (including soft deletion) return
-to the picker. Transport/parse/server errors retain the route and Retry.
-Only an actual fleet-not-found response invalidates a scoped fleet; missing
-monitor runtime/member errors do not imply missing fleet. Validate member
-membership only after successful roster loading, before history reads.
-Automatic invalid-route/member correction and fleet-deletion fallback replace
-the current history entry while retaining hashchange notification. Explicit
-fleet/member selection and Back/Close keep normal navigation history.
-Fleet switches must not mix old fleet names, recipients, sender identity or
-drafts into a new fleet's form. HTTP/CLI contracts stay unchanged, including
-the history 201-fetch/200-display limit and delivery-only timeline grouping.
+Hash routes select the fleet and member. Each fleet client captures its fleet
+id; each resource aborts and invalidates requests when its identity changes.
+Refreshes coalesce while a request runs. Keep existing data during refresh,
+show errors with Retry, and publish only current-resource results. Missing
+fleets return to the picker; transport failures retain the route.
 
 #### `X-Fleet-Id` header dependency
 
@@ -3484,29 +3074,6 @@ same `{"detail": <string>}` shape (a single human-readable string).
   ]}` over the member's inbox.
 - **`GET /api/members/{member_id}/sent`** — fleet-scoped. Same as inbox over sent
   messages; same `404` detail `Member not found`.
-  Optional query for **both** history routes: `limit`, a decimal integer
-  from **1 through 1000**. Empty, zero, negative, fractional, nonnumeric,
-  overflowing, or repeated values return `422` with exactly
-  `{"detail":"limit must be an integer between 1 and 1000"}`. Unknown query
-  parameters remain ignored. Omission retains the existing unbounded result,
-  including more than 201 rows; CLI retrieval is unchanged.
-  Validate after URL form decoding: require nonempty ASCII digits, accepting
-  leading zeros (`001` means 1) and rejecting signs, whitespace, Unicode digits,
-  and exponent notation. Detect duplicate decoded `limit` keys before reducing
-  the query to a map.
-  Preserve validation precedence: existing Path extraction, fleet header
-  (`400`), fleet existence (`404`), member membership (`404`), then limit.
-  Deregistered members remain readable when they belong to the fleet. Database
-  failures retain the existing `500` detail response.
-  Order by `status_timestamp DESC, message_id DESC`; latest means status update,
-  not creation time. Apply the bound limit to delivery rows, so a broadcast may
-  be partial. Preserve the `messages` envelope, row keys/order/nulls, and add no
-  cursor, `has_more`, or total count.
-  The WebUI requests `?limit=201` on both routes, shows the first
-  200 deliveries per tab, and shows its existing omission footer only when a
-  201st delivery was returned. At 200 or fewer it shows no omission footer.
-  This bounds explicit-limit responses and WebUI reads, not unbounded HTTP
-  callers or stored history.
 - **`GET /api/timeline`** — fleet-scoped through the owning member, no per-member
   check. `{"messages": […]}` contains only `unicast` delivery rows, hard-capped
   in SQL at **200** rows ordered by `status_timestamp DESC, message_id DESC`.
@@ -3544,27 +3111,10 @@ the existing wire fields; it does not add a discriminator to the HTTP response.
 
 ##### Timeline grouping and ACK display
 
-The frontend's pure `groupMessages` helper in `timeline.ts` excludes summary
-rows defensively before grouping, even if one appears in its input. A delivery
-with `origin_message_id === null` is a standalone unicast; non-null ids group
-broadcast deliveries by their shared summary id. Use an explicit null check,
-not a truthiness check.
-
-SQL selects recent status updates; the UI then sorts the returned entries
-ascending by creation time for newest-at-bottom rendering. A unicast uses its
-`created_at`; a broadcast uses the minimum `created_at` among its returned
-delivery rows. An ACK changes `status_timestamp`, not `created_at`.
-
-Recipient counts and ReactionBar ACK indicators cover only returned delivery
-rows. Each `completed` delivery contributes one ACK at its `status_timestamp`;
-a summary's initial `completed` state contributes none. Two pending deliveries
-plus their summary therefore yield two recipients and zero ACKs, then one and
-two ACKs as the deliveries are acknowledged. Empty or summary-only input yields
-no entries. A broadcast cut by the 200-row cap is a partial group: the UI must
-explain that counts and ACKs refer to the displayed deliveries and must not
-claim a whole-broadcast completion rate. It does not fetch omitted recipients
-or raise the cap to complete a group.
-
+Group unicast deliveries by `origin_message_id`, leaving null-origin messages
+standalone. Exclude summaries. Order groups by their earliest creation time;
+count recipients and ACKs only among fetched deliveries. The 200-row cap can
+split a broadcast, so the UI labels these as displayed-delivery counts.
 
 #### `cafleet server` launcher
 
@@ -3946,22 +3496,8 @@ table-less DB), else `Upgraded from <M> to <N>.`. `<M>` / `<N>` are the
 integer migration versions (the head is `8`). The driver's
 connection is closed when the command finishes (success or failure).
 
-**Duplicate-monitor recovery.** Stop new registrations against the affected
-DB and let the operator choose which listed monitor to retain. Run the
-preceding release that supports the old schema from a separate binary path,
-with the same `CAFLEET_DATABASE_URL` and backend configuration directories.
-The new binary's `member delete` cannot repair a behind-head database because
-its schema guard rejects it. Because `setup`'s halves run independently, a
-failed new DB migration may already have installed and recorded newer assets.
-In that case, first run the old binary's `setup` for the same backend(s) to
-restore assets compatible with the old binary. Then run the old binary's
-`member delete <surplus-id>`, one isolated invocation per surplus monitor.
-These commands can run against the still-old schema. After resolving the
-duplicates, rerun the new binary's `setup`; once the upgrade succeeds, the
-old binary cannot automatically downgrade the database. The human-facing
-procedure is in [Storage](docs/docs/concepts/storage.md#duplicate-monitor-recovery).
-
----
+**Duplicate-monitor recovery.** Use the operator procedure in
+[Storage](docs/docs/concepts/storage.md#duplicate-monitor-recovery).
 
 ## 9. Testing strategy
 

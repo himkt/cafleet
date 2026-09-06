@@ -6,20 +6,16 @@ use rusqlite::Connection;
 use clap::Subcommand;
 use serde_json::Value;
 
-use super::creation::{FleetCreateOptions, PaneGuard, PreparedSpawn, SpawnPreparation};
+use super::creation::PaneGuard;
 use super::helpers::{emit, resolve_body, resolve_mux};
 use crate::broker;
-use crate::coding_agent::{SpawnProbe, coding_agent};
+use crate::coding_agent::coding_agent;
 use crate::config::Settings;
 use crate::error::CafleetError;
-use crate::multiplexer::MultiplexerError;
-use crate::multiplexer::spawn::{
-    Deadline, PaneSpawnRequest, SpawnExecution, SpawnMultiplexer, SystemClock,
-};
+use crate::multiplexer::Multiplexer;
+
 use crate::output::format_fleet_create;
 use crate::runtime::system::SystemProbe;
-use crate::runtime::system::SystemRunner;
-use std::time::Duration;
 
 const MONITOR_NAME: &str = "monitor";
 const MONITOR_DESCRIPTION: &str = "Monitor member for this fleet";
@@ -121,50 +117,12 @@ fn create(
     monitor_model: Option<&str>,
     json: bool,
 ) -> Result<(), CafleetError> {
-    let fleet = create_with_options(
-        slot,
-        &FleetCreateOptions {
-            name,
-            agent_name,
-            monitor_file,
-            monitor_model,
-        },
-        || resolve_mux(settings),
-        &SystemProbe,
-        &SpawnPreparation {
-            cwd: &std::env::current_dir,
-            env: &|key| std::env::var(key).ok(),
-        },
-        &SpawnExecution {
-            clock: &SystemClock,
-            runner: &SystemRunner,
-        },
-    )?;
-    emit(json, &fleet, || format_fleet_create(&fleet));
-    Ok(())
-}
-
-pub(crate) fn create_with_options<M: SpawnMultiplexer>(
-    slot: &mut Option<Connection>,
-    options: &FleetCreateOptions<'_>,
-    resolve_mux: impl FnOnce() -> Result<M, MultiplexerError>,
-    probe: &dyn SpawnProbe,
-    preparation: &SpawnPreparation<'_>,
-    execution: &SpawnExecution<'_>,
-) -> Result<Value, CafleetError> {
-    let FleetCreateOptions {
-        name,
-        agent_name,
-        monitor_file,
-        monitor_model,
-    } = *options;
-
     let inside_session = || {
         CafleetError::App(
             "cafleet fleet create must be run inside a tmux or herdr session".to_string(),
         )
     };
-    let mux = resolve_mux().map_err(|_| inside_session())?;
+    let mux = resolve_mux(settings).map_err(|_| inside_session())?;
     mux.ensure_available().map_err(|_| inside_session())?;
     let context = mux.context_discovery().map_err(|_| inside_session())?;
 
@@ -173,17 +131,13 @@ pub(crate) fn create_with_options<M: SpawnMultiplexer>(
     let backend = coding_agent(agent_name)
         .unwrap_or_else(|| panic!("'{agent_name}' is a registry-validated backend"));
     backend.validate_model(monitor_model)?;
-    backend.ensure_available(probe)?;
+    backend.ensure_available(&SystemProbe)?;
 
-    let plan = PreparedSpawn::prepare(
-        prompt_body,
-        backend,
-        MONITOR_NAME,
-        monitor_model,
-        None,
-        mux.name(),
-        preparation,
-    )?;
+    let env: Vec<_> = std::env::var("CAFLEET_DATABASE_URL")
+        .ok()
+        .map(|value| ("CAFLEET_DATABASE_URL".to_string(), value))
+        .into_iter()
+        .collect();
     let conn = slot
         .as_mut()
         .ok_or_else(|| CafleetError::App("database connection is closed".into()))?;
@@ -199,30 +153,20 @@ pub(crate) fn create_with_options<M: SpawnMultiplexer>(
         MONITOR_NAME,
         MONITOR_DESCRIPTION,
         |fleet_id, director_id, monitor_id| {
-            let deadline = Deadline::after(execution.clock, Duration::from_secs(30));
-            let argv = plan.render(fleet_id, monitor_id, director_id)?;
+            let prompt = crate::spawn_prompt::substitute_spawn_placeholders(
+                &prompt_body,
+                fleet_id,
+                monitor_id,
+                director_id,
+                agent_name,
+            )?;
+            let argv = backend.build_spawn_argv(&prompt, MONITOR_NAME, monitor_model, None);
             let pane_id = mux
-                .split_prepared(
-                    &PaneSpawnRequest {
-                        reference: &context,
-                        env: &plan.env,
-                        command: &argv,
-                        cwd: plan.cwd.as_deref(),
-                    },
-                    &deadline,
-                    execution,
-                )
+                .split_window(&context, &env, &argv)
                 .map_err(|error| CafleetError::App(format!("tmux split-window failed: {error}")))?;
             spawned_pane = Some(PaneGuard::with_kill(
                 pane_id.clone(),
-                Box::new(|id| {
-                    mux.kill_pane_with_deadline(
-                        id,
-                        true,
-                        &Deadline::after(execution.clock, Duration::from_secs(5)),
-                        execution,
-                    )
-                }),
+                Box::new(|id| mux.kill_pane(id, true)),
             ));
             Ok(pane_id)
         },
@@ -242,7 +186,8 @@ pub(crate) fn create_with_options<M: SpawnMultiplexer>(
     if let Some(pane) = &mut spawned_pane {
         pane.finish();
     }
-    Ok(fleet)
+    emit(json, &fleet, || format_fleet_create(&fleet));
+    Ok(())
 }
 
 fn list(conn: &mut Connection, json: bool) -> Result<(), CafleetError> {

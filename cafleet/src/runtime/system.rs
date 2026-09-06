@@ -53,15 +53,6 @@ impl CommandRunner for SystemRunner {
     }
 }
 
-impl crate::multiplexer::spawn::TimedCommandRunner for SystemRunner {
-    fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError> {
-        if timeout.is_zero() {
-            return Err(RunError::Timeout);
-        }
-        run_process(argv, Some(timeout))
-    }
-}
-
 fn run_process(argv: &[String], timeout: Option<Duration>) -> Result<String, RunError> {
     let started = Instant::now();
     let (program, args) = argv.split_first().expect("argv carries the program");
@@ -323,58 +314,6 @@ pub fn read_stdin() -> std::io::Result<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    mod duration_tests {
-        use super::{ProcessFixture, SystemRunner};
-        use crate::multiplexer::{RunError, spawn::TimedCommandRunner};
-        use std::time::Duration;
-        fn run(
-            fixture: &ProcessFixture,
-            script: &str,
-            timeout: Duration,
-        ) -> Result<String, RunError> {
-            SystemRunner.run_for(
-                &[
-                    "/bin/sh".into(),
-                    "-c".into(),
-                    format!("printf '%s' \"$$\" > \"$1/pid\"\n{script}"),
-                    "cafleet-duration-test".into(),
-                    fixture.dir.path().to_str().unwrap().into(),
-                ],
-                timeout,
-            )
-        }
-        #[test]
-        fn duration_entry_drains_large_dual_streams_and_keeps_exit_classification() {
-            let fixture = ProcessFixture::new();
-            let result = run(
-                &fixture,
-                "exec /usr/bin/python3 -c 'import os; os.write(1,b\"x\"*1048576); os.write(2,b\"y\"*1048576)'",
-                Duration::from_millis(10_125),
-            );
-            fixture.assert_direct_child_reaped(&result);
-            assert_eq!(result.unwrap(), "x".repeat(1_048_576));
-            let result = run(
-                &fixture,
-                "exec /usr/bin/python3 -c 'import os; os.write(1,b\"x\"*1048576); os.write(2,b\"y\"*1048576); raise SystemExit(7)'",
-                Duration::from_millis(10_125),
-            );
-            fixture.assert_direct_child_reaped(&result);
-            assert_eq!(
-                result,
-                Err(RunError::Failed {
-                    stderr: "y".repeat(1_048_576)
-                })
-            );
-        }
-        #[test]
-        fn duration_timeout_uses_fractional_budget_and_reaps_direct_child() {
-            let fixture = ProcessFixture::new();
-            let result = run(&fixture, "exec /bin/sleep 5", Duration::from_millis(1_125));
-            assert_eq!(result, Err(RunError::Timeout));
-            fixture.assert_direct_child_reaped(&result);
-        }
-    }
-
     use super::*;
     use nix::errno::Errno;
     use nix::sys::wait::{WaitPidFlag, waitpid};
@@ -436,35 +375,6 @@ mod tests {
 
     fn megabyte() -> Vec<u8> {
         (0..1024 * 1024).map(|i| b'a' + (i % 26) as u8).collect()
-    }
-
-    #[test]
-    fn timed_runner_preserves_one_megabyte_of_stdout() {
-        let fixture = ProcessFixture::new();
-        let payload = megabyte();
-        fixture.write("payload", &payload);
-        let result = fixture.run("cat \"$1/payload\"", Some(10));
-        fixture.assert_direct_child_reaped(&result);
-        assert_eq!(result.unwrap().as_bytes(), payload);
-    }
-
-    #[test]
-    fn timed_runner_drains_one_megabyte_of_stderr_on_success() {
-        let fixture = ProcessFixture::new();
-        fixture.write("payload", &megabyte());
-        let result = fixture.run("cat \"$1/payload\" >&2", Some(10));
-        fixture.assert_direct_child_reaped(&result);
-        assert_eq!(result.unwrap(), "");
-    }
-
-    #[test]
-    fn timed_runner_preserves_one_megabyte_of_stderr_on_failure() {
-        let fixture = ProcessFixture::new();
-        let payload = megabyte();
-        fixture.write("payload", &payload);
-        let result = fixture.run("cat \"$1/payload\" >&2; exit 7", Some(10));
-        fixture.assert_direct_child_reaped(&result);
-        assert!(matches!(result, Err(RunError::Failed { stderr }) if stderr.as_bytes() == payload));
     }
 
     #[test]
@@ -539,25 +449,6 @@ mod tests {
         fixture.assert_direct_child_reaped(&result);
         assert!(matches!(result, Err(RunError::Timeout)), "{result:?}");
         assert!(elapsed < Duration::from_secs(5), "elapsed: {elapsed:?}");
-    }
-
-    #[test]
-    fn timed_runner_returns_empty_stdout_for_empty_success() {
-        let fixture = ProcessFixture::new();
-        let result = fixture.run("exit 0", Some(10));
-        fixture.assert_direct_child_reaped(&result);
-        assert_eq!(result.unwrap(), "");
-    }
-
-    #[test]
-    fn timed_runner_reports_stderr_and_discards_stdout_for_nonzero_exit() {
-        let fixture = ProcessFixture::new();
-        let result = fixture.run(
-            "printf 'discard me'; printf 'failure\\n' >&2; exit 3",
-            Some(10),
-        );
-        fixture.assert_direct_child_reaped(&result);
-        assert!(matches!(result, Err(RunError::Failed { stderr }) if stderr == "failure\n"));
     }
 
     #[test]

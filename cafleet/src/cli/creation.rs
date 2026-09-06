@@ -3,88 +3,8 @@
 use rusqlite::Connection;
 
 use crate::broker;
-use crate::coding_agent::CodingAgent;
 use crate::error::CafleetError;
 use crate::multiplexer::MultiplexerError;
-use std::path::PathBuf;
-
-pub(crate) struct MemberCreateOptions<'a> {
-    pub fleet_id: i64,
-    pub name: &'a str,
-    pub description: &'a str,
-    pub explicit_agent: Option<&'a str>,
-    pub model: Option<&'a str>,
-    pub effort: Option<&'a str>,
-    pub monitor: bool,
-    pub prompt: Option<&'a str>,
-    pub file: Option<&'a str>,
-}
-pub(crate) struct FleetCreateOptions<'a> {
-    pub name: &'a str,
-    pub agent_name: &'a str,
-    pub monitor_file: &'a str,
-    pub monitor_model: Option<&'a str>,
-}
-pub(crate) struct SpawnPreparation<'a> {
-    pub cwd: &'a dyn Fn() -> std::io::Result<PathBuf>,
-    pub env: crate::config_dir::EnvLookup<'a>,
-}
-pub(crate) struct PreparedSpawn {
-    pub prompt_template: String,
-    pub argv_prefix: Vec<String>,
-    pub coding_agent: String,
-    pub env: Vec<(String, String)>,
-    pub cwd: Option<PathBuf>,
-}
-impl PreparedSpawn {
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn prepare(
-        prompt_template: String,
-        backend: &dyn CodingAgent,
-        name: &str,
-        model: Option<&str>,
-        effort: Option<&str>,
-        mux_name: &str,
-        preparation: &SpawnPreparation<'_>,
-    ) -> Result<Self, CafleetError> {
-        let cwd = if mux_name == "herdr" {
-            Some((preparation.cwd)().map_err(|error| CafleetError::App(
-            format!("tmux split-window failed: cannot resolve the working directory for pane spawn: {error}")))?)
-        } else {
-            None
-        };
-        let env = (preparation.env)("CAFLEET_DATABASE_URL")
-            .map(|url| vec![("CAFLEET_DATABASE_URL".into(), url)])
-            .unwrap_or_default();
-        let mut argv_prefix = backend.build_spawn_argv("", name, model, effort);
-        debug_assert_eq!(argv_prefix.last().map(String::as_str), Some(""));
-        argv_prefix.pop();
-        Ok(Self {
-            prompt_template,
-            argv_prefix,
-            coding_agent: backend.name().into(),
-            env,
-            cwd,
-        })
-    }
-    pub(crate) fn render(
-        &self,
-        fleet_id: i64,
-        member_id: i64,
-        director_id: i64,
-    ) -> Result<Vec<String>, CafleetError> {
-        let rendered = crate::spawn_prompt::substitute_spawn_placeholders(
-            &self.prompt_template,
-            fleet_id,
-            member_id,
-            director_id,
-            &self.coding_agent,
-        )?;
-        let mut argv = self.argv_prefix.clone();
-        argv.push(rendered);
-        Ok(argv)
-    }
-}
 
 type PaneKill<'a> = dyn Fn(&str) -> Result<(), MultiplexerError> + 'a;
 

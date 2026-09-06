@@ -1,7 +1,6 @@
 import type { FormattedMessage, TimelineMessage } from "./types";
 
 export const HISTORY_ROW_CAP = 200;
-export const HISTORY_FETCH_LIMIT = HISTORY_ROW_CAP + 1;
 
 export interface HistoryWindow {
   visible: TimelineMessage[];

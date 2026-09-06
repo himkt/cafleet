@@ -20,16 +20,6 @@ description = "Run clippy (deny warnings) and the rustfmt check"
 run = "cargo fmt"
 description = "Format the Rust sources with rustfmt"
 
-[tasks.docs-generate]
-depends = ["//admin:build"]
-run = "cargo test --lib cli::doc_contract::generate -- --ignored --exact"
-description = "Regenerate the bounded CLI and schema documentation blocks"
-
-[tasks.docs-check]
-depends = ["//admin:build"]
-run = "cargo test --lib cli::doc_contract::check -- --exact"
-description = "Check documentation blocks and installed skill links"
-
 [tasks.typecheck]
 depends = ["//admin:build"]
 run = "cargo check"

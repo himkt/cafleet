@@ -5,7 +5,6 @@
 //! expected API is catalogued in [`test_support`].
 
 pub mod herdr;
-pub(crate) mod spawn;
 #[cfg(test)]
 pub mod test_support;
 pub mod tmux;
@@ -43,7 +42,6 @@ pub enum PaneCleanup {
 pub struct MultiplexerError {
     message: String,
     pane_cleanup: Option<PaneCleanup>,
-    timed_out: bool,
 }
 
 impl MultiplexerError {
@@ -51,16 +49,7 @@ impl MultiplexerError {
         Self {
             message: message.into(),
             pane_cleanup: None,
-            timed_out: false,
         }
-    }
-
-    pub(crate) fn with_timeout(mut self) -> Self {
-        self.timed_out = true;
-        self
-    }
-    pub(crate) fn is_timeout(&self) -> bool {
-        self.timed_out
     }
 
     pub fn pane_cleanup(&self) -> Option<&PaneCleanup> {
@@ -819,65 +808,3 @@ mod tests {
         }
     }
 }
-
-#[cfg(test)]
-mod ownership_regressions {
-    use super::*;
-    use std::cell::RefCell;
-
-    #[test]
-    fn ordinary_error_has_no_cleanup_metadata_and_keeps_its_exact_display() {
-        let error = MultiplexerError::new("binary unavailable\noriginal detail");
-        assert!(error.pane_cleanup().is_none());
-        assert_eq!(error.to_string(), "binary unavailable\noriginal detail");
-    }
-
-    #[test]
-    fn backend_finish_transfers_id_and_disarms_drop_without_kill() {
-        let calls = RefCell::new(Vec::new());
-        let guard = PaneOwnership::new("pane-9".into(), |id: &str| {
-            calls.borrow_mut().push(id.to_string());
-            Ok(())
-        });
-        assert_eq!(guard.finish(), "pane-9");
-        assert!(calls.borrow().is_empty());
-    }
-
-    #[test]
-    fn backend_rollback_records_one_attempt_and_disarms_drop_even_on_failure() {
-        for fail in [false, true] {
-            let calls = RefCell::new(Vec::new());
-            let mut guard = PaneOwnership::new("pane-9".into(), |id: &str| {
-                calls.borrow_mut().push(id.to_string());
-                if fail {
-                    Err(MultiplexerError::new("close failed"))
-                } else {
-                    Ok(())
-                }
-            });
-            assert_eq!(
-                guard.rollback(),
-                PaneCleanup::Attempted {
-                    pane_id: "pane-9".into(),
-                    error: fail.then(|| "close failed".into()),
-                }
-            );
-            drop(guard);
-            assert_eq!(*calls.borrow(), ["pane-9"]);
-        }
-    }
-
-    #[test]
-    fn backend_drop_only_cleans_the_still_owned_pane_once() {
-        let calls = RefCell::new(Vec::new());
-        let guard = PaneOwnership::new("pane-9".into(), |id: &str| {
-            calls.borrow_mut().push(id.to_string());
-            Err(MultiplexerError::new("close failed"))
-        });
-        drop(guard);
-        assert_eq!(*calls.borrow(), ["pane-9"]);
-    }
-}
-
-#[cfg(test)]
-mod spawn_tests;

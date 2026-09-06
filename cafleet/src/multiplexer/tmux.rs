@@ -3,10 +3,8 @@
 //! tolerance, and the best-effort-vs-fail-fast split. The colocated tests pin
 //! the contract; see [`super::test_support`] for the API.
 
-use super::spawn::{Deadline, PaneSpawnRequest, SpawnExecution, SpawnMultiplexer, SpawnOps};
 use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
-use std::time::Duration;
 
 use super::{
     CommandRunner, ESC_SETTLE_DELAY, MultiplexerContext, MultiplexerError, RunError, SUBMIT_DELAY,
@@ -175,32 +173,6 @@ impl TmuxMultiplexer {
         env: &[(String, String)],
         command: &[String],
     ) -> Result<String, MultiplexerError> {
-        self.split_common(
-            &PaneSpawnRequest {
-                reference,
-                env,
-                command,
-                cwd: None,
-            },
-            &SpawnOps {
-                run: &|argv| self.run(argv, None),
-                kill: &|id| self.kill_pane(id, true),
-                transfer: &|| Ok(()),
-            },
-        )
-    }
-
-    fn split_common(
-        &self,
-        request: &PaneSpawnRequest<'_>,
-        ops: &SpawnOps<'_>,
-    ) -> Result<String, MultiplexerError> {
-        let PaneSpawnRequest {
-            reference,
-            env,
-            command,
-            ..
-        } = *request;
         let mut args = tmux_argv(&[
             "tmux",
             "split-window",
@@ -216,7 +188,8 @@ impl TmuxMultiplexer {
             args.push(format!("{key}={value}"));
         }
         args.extend(command.iter().cloned());
-        let pane_id = (ops.run)(&args)
+        let pane_id = self
+            .run(&args, None)
             .map_err(|error| error.with_pane_cleanup(super::PaneCleanup::Unknown))?
             .trim()
             .to_string();
@@ -226,22 +199,17 @@ impl TmuxMultiplexer {
                     .with_pane_cleanup(super::PaneCleanup::Unknown),
             );
         }
-        let mut pane = super::PaneOwnership::new(pane_id, ops.kill);
-        let result = (ops.run)(&tmux_argv(&[
-            "tmux",
-            "select-layout",
-            "-t",
-            &reference.window_id,
-            "main-vertical",
-        ]));
-        let result = match result {
-            Err(error) if error.is_timeout() => Err(error),
-            _ => (ops.transfer)(),
-        };
-        if let Err(error) = result {
-            return Err(error.with_pane_cleanup(pane.rollback()));
-        }
-        Ok(pane.finish())
+        let _ = self.run(
+            &tmux_argv(&[
+                "tmux",
+                "select-layout",
+                "-t",
+                &reference.window_id,
+                "main-vertical",
+            ]),
+            None,
+        );
+        Ok(pane_id)
     }
 
     pub fn send_exit(
@@ -364,47 +332,6 @@ impl TmuxMultiplexer {
     /// tmux tracks no native agent state.
     pub fn agent_status(&self, _target_pane_id: &str) -> Result<Option<String>, MultiplexerError> {
         Ok(None)
-    }
-}
-
-impl SpawnMultiplexer for TmuxMultiplexer {
-    fn split_prepared(
-        &self,
-        request: &PaneSpawnRequest<'_>,
-        deadline: &Deadline,
-        execution: &SpawnExecution<'_>,
-    ) -> Result<String, MultiplexerError> {
-        self.split_common(
-            request,
-            &SpawnOps {
-                run: &|argv| execution.run("tmux", argv, deadline),
-                kill: &|id| {
-                    self.kill_pane_with_deadline(
-                        id,
-                        true,
-                        &Deadline::after(execution.clock, Duration::from_secs(5)),
-                        execution,
-                    )
-                },
-                transfer: &|| execution.check_transfer("tmux", deadline),
-            },
-        )
-    }
-    fn kill_pane_with_deadline(
-        &self,
-        pane_id: &str,
-        ignore_missing: bool,
-        deadline: &Deadline,
-        execution: &SpawnExecution<'_>,
-    ) -> Result<(), MultiplexerError> {
-        execution
-            .run_tolerating(
-                "tmux",
-                &tmux_argv(&["tmux", "kill-pane", "-t", pane_id]),
-                deadline,
-                &|stderr| ignore_missing && is_pane_gone(stderr),
-            )
-            .map(|_| ())
     }
 }
 

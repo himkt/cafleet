@@ -15,12 +15,10 @@
 - Start admin WebUI server: either `cafleet server` (packaged launcher; `--host` / `--port` flags, defaults `127.0.0.1:8000` from `settings.broker_host` / `settings.broker_port`, also honors `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT`) **or** `mise //cafleet:dev` (runs `cargo run -- server`). Both are entry points to the same app and neither auto-reloads — contributors restart manually between edits. WebUI-only: CLI commands do not require a running server. The WebUI dist is embedded into the binary at build time.
 - Start admin dev server: `mise //admin:dev`
 - Build admin: `mise //admin:build` — runs `tsc -b` and Vite.
-- Check generated documentation and installed skill references: `mise //cafleet:docs-check`
-- Regenerate documentation: `mise //cafleet:docs-generate` — explicitly writes generated documentation blocks; ignored during ordinary tests.
 
-Every cargo-invoking task (`test`, `lint`, `typecheck`, `build`, `install`, `dev`, `docs-check`, `docs-generate`) depends on `//admin:build`, because the cargo build embeds the admin dist and fails loudly when `cafleet/webui-dist/` is missing — a fresh clone works with no manual prerequisite.
+Every cargo-invoking task (`test`, `lint`, `typecheck`, `build`, `install`, `dev`) depends on `//admin:build`, because the cargo build embeds the admin dist and fails loudly when `cafleet/webui-dist/` is missing — a fresh clone works with no manual prerequisite.
 
-CI runs admin lint with Rust lint, and admin tests with the existing Rust suite. The Rust tasks supply the admin build and TypeScript check; clippy checks all Rust targets, so CI does not repeat the separate Rust typecheck task. The regular Rust suite includes the documentation check. Release CI runs `docs-check` before packaging, including its admin build prerequisite.
+CI runs admin lint with Rust lint, and admin tests with the existing Rust suite. The Rust tasks supply the admin build and TypeScript check; clippy checks all Rust targets, so CI does not repeat the separate Rust typecheck task.
 
 ## mise Tasks
 
@@ -28,7 +26,6 @@ CI runs admin lint with Rust lint, and admin tests with the existing Rust suite.
 - Do NOT use `mise run <task>` — the `run` subcommand is unnecessary.
 - **mise tasks forward positional args to the underlying command.** When you need to pass cargo-test args (test-name filters, `--nocapture`, etc.), pass them directly to the mise task — do NOT fall back to `cargo test` to "get more control". Examples:
   - Run tests matching a name: `mise //cafleet:test my_test_name`
-  - Show output from one existing check: `CI=true mise //cafleet:test --lib cli::doc_contract::check -- -- --nocapture --exact`
   - Pass Cargo options and test-name filters before the separators. Use two standalone `--` separators before test-harness flags: mise consumes the first, and Cargo uses the second to forward flags such as `--nocapture`, `--exact`, or `--test-threads=1` to the harness.
 
 ## NEVER bypass mise with the underlying tool

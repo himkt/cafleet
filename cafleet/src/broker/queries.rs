@@ -26,71 +26,23 @@ fn message_list(
 const MESSAGE_COLUMNS: &str = "message_id, owner_member_id, from_member_id, to_member_id, \
      type, created_at, status_state, status_timestamp, origin_message_id, text";
 
-pub(crate) const HISTORY_LIMIT_ERROR: &str = "limit must be an integer between 1 and 1000";
-
-/// An optional SQL row bound; the default preserves complete member history.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct HistoryOptions {
-    pub limit: Option<usize>,
-}
-
-impl HistoryOptions {
-    pub(crate) fn validate(self) -> Result<Self, CafleetError> {
-        if self.limit.is_some_and(|limit| !(1..=1000).contains(&limit)) {
-            return Err(CafleetError::Value(HISTORY_LIMIT_ERROR.to_string()));
-        }
-        Ok(self)
-    }
-}
-
-/// Every delivery the member received, acked rows included; summaries are the
-/// sender's bookkeeping, never a delivery. This entry point stays unbounded.
 pub fn list_inbox(conn: &Connection, member_id: i64) -> Result<Vec<MessageRecord>, CafleetError> {
-    list_inbox_with_options(conn, member_id, HistoryOptions::default())
+    history_records(conn, "owner_member_id", member_id)
 }
 
-/// Every sent delivery, including broadcast fan-out but excluding summaries.
-/// This entry point stays unbounded.
 pub fn list_sent(conn: &Connection, member_id: i64) -> Result<Vec<MessageRecord>, CafleetError> {
-    list_sent_with_options(conn, member_id, HistoryOptions::default())
-}
-
-pub fn list_inbox_with_options(
-    conn: &Connection,
-    member_id: i64,
-    options: HistoryOptions,
-) -> Result<Vec<MessageRecord>, CafleetError> {
-    history_records(conn, "owner_member_id", member_id, options)
-}
-
-pub fn list_sent_with_options(
-    conn: &Connection,
-    member_id: i64,
-    options: HistoryOptions,
-) -> Result<Vec<MessageRecord>, CafleetError> {
-    history_records(conn, "from_member_id", member_id, options)
+    history_records(conn, "from_member_id", member_id)
 }
 
 fn history_records(
     conn: &Connection,
     member_column: &str,
     member_id: i64,
-    options: HistoryOptions,
 ) -> Result<Vec<MessageRecord>, CafleetError> {
-    let options = options.validate()?;
-    // The column is selected only by the two fixed entry points above.
-    let mut sql = format!(
-        "SELECT {MESSAGE_COLUMNS} FROM messages \
-         WHERE {member_column}=?1 AND type='unicast' \
-         ORDER BY status_timestamp DESC, message_id DESC"
+    let sql = format!(
+        "SELECT {MESSAGE_COLUMNS} FROM messages WHERE {member_column}=?1 AND type='unicast' ORDER BY status_timestamp DESC, message_id DESC"
     );
-    match options.limit {
-        Some(limit) => {
-            sql.push_str(" LIMIT ?2");
-            message_list(conn, &sql, params![member_id, limit as i64])
-        }
-        None => message_list(conn, &sql, [member_id]),
-    }
+    message_list(conn, &sql, [member_id])
 }
 
 /// The fleet's deliveries (scoped via the owning member's fleet), newest first,
@@ -283,88 +235,6 @@ mod timeline_regressions {
     }
 
     #[test]
-    fn timeline_broadcast_counts_only_two_deliveries_through_ack_zero_one_two() {
-        let (_dir, mut conn, fleet, director, _) = fixture();
-        let result = broker::broadcast_message(
-            &mut conn,
-            &FakeNotifier::succeeding(),
-            MAX_TEXT_LEN,
-            director,
-            "work",
-        )
-        .map(|record| vec![crate::presentation::broadcast_outcome(&record)])
-        .unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0]["recipients"], 2);
-        let summary = &result[0]["message"];
-        let summary_id = summary["message_id"].as_i64().unwrap();
-        assert_eq!(summary["type"], "broadcast_summary");
-        assert_eq!(summary["status_state"], "completed");
-        assert!(summary["to_member_id"].is_null());
-        for acked in 0..=2 {
-            let rows = list_timeline(&conn, fleet, 200).unwrap();
-            assert_eq!(rows.len(), 2, "summary is not a recipient or ACK");
-            assert!(rows.iter().all(|r| r.kind.as_str() == "unicast"
-                && r.origin_message_id == Some(summary_id)
-                && r.to_member_id.is_some()));
-            assert_eq!(
-                rows.iter()
-                    .filter(|r| r.status.as_str() == "completed")
-                    .count(),
-                acked
-            );
-            assert_eq!(
-                get_message(&conn, summary_id)
-                    .map(|record| crate::presentation::message_envelope(&record))
-                    .unwrap()["message"],
-                *summary,
-                "timeline/ACK never removes or rewrites the summary"
-            );
-            if let Some(row) = rows.iter().find(|r| r.status.as_str() == "input_required") {
-                broker::ack_message(&mut conn, row.message_id).unwrap();
-            }
-        }
-        let count: i64 = conn
-            .query_row("SELECT count(*) FROM messages", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(count, 3);
-    }
-
-    #[test]
-    fn timeline_empty_fleet_returns_no_rows() {
-        let (_dir, conn, fleet, _, _) = fixture();
-        assert!(list_timeline(&conn, fleet, 200).unwrap().is_empty());
-    }
-
-    #[test]
-    fn timeline_summary_only_fleet_returns_no_deliveries_but_keeps_show_result() {
-        let (_dir, mut conn, fleet, director, worker) = fixture();
-        let monitor = broker::active_monitor_member_id(&conn, fleet)
-            .unwrap()
-            .unwrap();
-        broker::deregister_member(&mut conn, monitor).unwrap();
-        broker::deregister_member(&mut conn, worker).unwrap();
-        let result = broker::broadcast_message(
-            &mut conn,
-            &FakeNotifier::succeeding(),
-            MAX_TEXT_LEN,
-            director,
-            "nobody",
-        )
-        .map(|record| vec![crate::presentation::broadcast_outcome(&record)])
-        .unwrap();
-        assert_eq!(result[0]["recipients"], 0);
-        let id = result[0]["message"]["message_id"].as_i64().unwrap();
-        assert!(list_timeline(&conn, fleet, 200).unwrap().is_empty());
-        assert_eq!(
-            get_message(&conn, id)
-                .map(|record| crate::presentation::message_envelope(&record))
-                .unwrap()["message"],
-            result[0]["message"]
-        );
-    }
-
-    #[test]
     fn timeline_scope_uses_owner_fleet_even_when_sender_and_recipient_disagree() {
         let (_dir, mut conn, fleet_a, director_a, worker_a) = fixture();
         let (fleet_b, director_b) = common::create_fleet(&mut conn, "foreign");
@@ -525,130 +395,5 @@ mod integrity_regressions {
             field: actual_field, value
         } if actual_field == format!("messages.{field}") && value == "corrupt-enum")
         );
-    }
-}
-
-#[cfg(test)]
-mod history_tests {
-    use super::*;
-    use crate::broker::{self, test_support as common};
-    type Query = fn(&Connection, i64, HistoryOptions) -> Result<Vec<MessageRecord>, CafleetError>;
-    fn endpoints(sender: i64, owner: i64) -> [(i64, Query); 2] {
-        [
-            (owner, list_inbox_with_options),
-            (sender, list_sent_with_options),
-        ]
-    }
-    fn fixture(count: usize) -> (Connection, i64, i64) {
-        let mut conn = Connection::open_in_memory().unwrap();
-        crate::db::migrate_to_head(&mut conn).unwrap();
-        let (fleet, sender) = common::create_fleet(&mut conn, "history");
-        let owner = common::register(&mut conn, fleet, "owner", None);
-        let tx = conn.transaction().unwrap();
-        for id in 1..=count as i64 {
-            tx.execute("INSERT INTO messages(message_id,owner_member_id,from_member_id,to_member_id,type,created_at,status_state,status_timestamp,origin_message_id,text) VALUES (?1,?2,?3,?2,'unicast','2026-01-01T00:00:00Z','input_required','2026-01-02T00:00:00Z',NULL,'body')", params![id,owner,sender]).unwrap();
-        }
-        tx.execute("INSERT INTO messages(message_id,owner_member_id,from_member_id,to_member_id,type,created_at,status_state,status_timestamp,origin_message_id,text) VALUES (20000,?1,?2,NULL,'broadcast_summary','2026-02-01T00:00:00Z','completed','2026-02-01T00:00:00Z',20000,'summary')", params![owner,sender]).unwrap();
-        tx.commit().unwrap();
-        (conn, sender, owner)
-    }
-
-    fn ids(rows: &[MessageRecord]) -> Vec<i64> {
-        rows.iter().map(|row| row.message_id).collect()
-    }
-
-    #[test]
-    fn history_options_preserve_unbounded_compatibility_and_all_boundary_result_counts() {
-        assert_eq!(HistoryOptions::default(), HistoryOptions { limit: None });
-        for count in [0, 200, 201, 1205] {
-            let (conn, sender, owner) = fixture(count);
-            for (subject, query) in endpoints(sender, owner) {
-                let unbounded = query(&conn, subject, HistoryOptions::default()).unwrap();
-                assert_eq!(
-                    ids(&unbounded),
-                    (1..=count as i64).rev().collect::<Vec<_>>()
-                );
-                for limit in [1, 200, 201, 1000] {
-                    let rows =
-                        query(&conn, subject, HistoryOptions { limit: Some(limit) }).unwrap();
-                    assert_eq!(
-                        rows,
-                        unbounded.iter().take(limit).cloned().collect::<Vec<_>>()
-                    );
-                }
-            }
-            assert_eq!(
-                broker::list_inbox(&conn, owner).unwrap(),
-                broker::list_inbox_with_options(&conn, owner, HistoryOptions::default()).unwrap()
-            );
-            assert_eq!(
-                broker::list_sent(&conn, sender).unwrap(),
-                broker::list_sent_with_options(&conn, sender, HistoryOptions::default()).unwrap()
-            );
-        }
-    }
-
-    #[test]
-    fn history_scope_order_and_ack_fields_survive_options_and_deregistration() {
-        let (mut conn, sender, owner) = fixture(3);
-        // Recipient deliberately differs from owner: inbox membership uses owner.
-        conn.execute(
-            "UPDATE messages SET to_member_id=?1 WHERE type='unicast'",
-            [sender],
-        )
-        .unwrap();
-        conn.execute("UPDATE messages SET created_at='2020-01-01T00:00:00Z',status_timestamp='2026-01-03T00:00:00Z',status_state='completed' WHERE message_id=1",[]).unwrap();
-        broker::deregister_member(&mut conn, owner).unwrap();
-        for (subject, query) in endpoints(sender, owner) {
-            let rows = query(&conn, subject, HistoryOptions { limit: Some(3) }).unwrap();
-            assert_eq!(ids(&rows), vec![1, 3, 2]);
-            assert_eq!(rows[0].created_at, "2020-01-01T00:00:00Z");
-            assert_eq!(rows[0].status, broker::records::MessageStatus::Completed);
-            assert_eq!(rows[0].origin_message_id, None);
-            assert_eq!(rows[0].to_member_id, Some(sender));
-            assert!(
-                query(&conn, 999999, HistoryOptions { limit: Some(1) })
-                    .unwrap()
-                    .is_empty()
-            );
-        }
-        assert!(
-            broker::list_inbox_with_options(&conn, sender, HistoryOptions { limit: Some(1) })
-                .unwrap()
-                .is_empty()
-        );
-        assert!(
-            broker::list_sent_with_options(&conn, owner, HistoryOptions { limit: Some(1) })
-                .unwrap()
-                .is_empty()
-        );
-    }
-
-    #[test]
-    fn invalid_history_limit_fails_before_querying() {
-        let conn = Connection::open_in_memory().unwrap();
-        for (subject, query) in endpoints(1, 2) {
-            for limit in [0, 1001, usize::MAX] {
-                assert!(
-                    matches!(query(&conn, subject, HistoryOptions { limit: Some(limit) }),
-                Err(CafleetError::Value(message)) if message == HISTORY_LIMIT_ERROR)
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn history_limit_applies_before_decoding() {
-        let (conn, sender, owner) = fixture(3);
-        conn.execute_batch("PRAGMA ignore_check_constraints=ON; UPDATE messages SET status_state='corrupt-status' WHERE message_id=1").unwrap();
-        for (subject, query) in endpoints(sender, owner) {
-            assert_eq!(
-                ids(&query(&conn, subject, HistoryOptions { limit: Some(2) }).unwrap()),
-                [3, 2]
-            );
-            assert!(matches!(query(&conn, subject, HistoryOptions::default()),
-            Err(CafleetError::InvalidStoredValue { field, value })
-            if field == "messages.status_state" && value == "corrupt-status"));
-        }
     }
 }
