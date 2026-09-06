@@ -5,10 +5,20 @@ body lives in its own typed column. The only JSON `TEXT` blob is
 `members.member_card_json`. The database is SQLite, accessed synchronously
 and bundled into the binary; the schema is managed by a chain of SQL
 migrations embedded in the binary — run `cafleet setup` to migrate to head
-(idempotent, data-preserving; see [Storage](../concepts/storage.md)). The exact column-level DDL contract lives
-in the repository's `SPEC.md`.
+(idempotent, data-preserving; see [Storage](../concepts/storage.md)). The complete column-level DDL contract is an optional reference for
+reimplementers: [Repository specification](https://github.com/himkt/cafleet/blob/main/SPEC.md).
+Fleet operation uses the CLI and bundled contract pages; opening that URL
+is not required for offline operation.
 
 Minted ids are **never reused** and real ids are always `>= 1`.
+
+## Query and activity contracts
+
+CLI member lists include send/receive/ACK activity; WebUI rosters query member
+and placement data directly. Include deregistered roster members only when
+they own messages. Idle uses the latest activity timestamp and clamps future
+activity to zero. Name lookup deduplicates ids and binds batches of at most
+500, returning known active or deregistered members in id order.
 
 ## Tables
 
@@ -29,9 +39,14 @@ placement), the `director_member_id` back-reference, and the monitor member
 placement) in one all-or-nothing transaction — which is why
 `director_member_id` is DB-nullable despite the post-bootstrap NOT NULL
 invariant. The pane spawn happens **inside** the transaction, between the
-monitor registration and its placement insert, so any failure (spawn
-included) unwinds every row; a pane spawned before a placement-insert or
-commit failure is killed by the CLI error path. The connection holds
+monitor registration and its placement insert. A failure attempts to roll
+back every added row; rollback failure is explicitly reported rather than
+claimed as complete cancellation. A Herdr run failure is compensated by the
+backend before the callback error causes DB rollback. After a successful
+callback, placement-insert or commit failure closes the broker transaction
+before the CLI kills its owned pane. A split failure with no confirmed id
+leaves pane compensation unconfirmed. See the
+[creation failure order](cli-options.md#creation-failure-compensation). The connection holds
 SQLite's write lock across the pane-spawn subprocess call, so a concurrent
 cafleet writer on the shared database blocks for the duration of the
 multiplexer call, backstopped by the connection's `busy_timeout=5000`
@@ -44,13 +59,34 @@ Active query paths filter `status='active'`. A member's `kind` (`director` /
 `director_member_id` back-reference plus the member card: a monitor-member
 registration writes the application-level marker
 `"cafleet": {"kind": "monitor"}` into `member_card_json`, while the Director
-and ordinary members write no `$.cafleet` object. The marker is plain JSON —
-no schema migration backs it, and no dedicated column exists.
+and ordinary members write no `$.cafleet` object. The marker remains plain JSON with no dedicated column. Schema V8 adds a
+partial unique index enforcing at most one active monitor per fleet:
+
+```sql
+CREATE UNIQUE INDEX idx_members_one_active_monitor_per_fleet
+ON members(fleet_id)
+WHERE status = 'active'
+  AND json_extract(member_card_json, '$.cafleet.kind') = 'monitor';
+```
+
+The predicate is the same one used by the active-monitor lookup. It applies
+to inserts and updates of status, card, or fleet id. Ordinary members and
+deregistered monitors are outside the constraint; different fleets are
+independent. Root Director cards continue to omit the monitor marker, and
+read-time kind resolution still gives the Director back-reference priority.
+Registration takes an `IMMEDIATE` transaction and rechecks the monitor slot
+inside it, before inserting either a member or placement. The CLI's early
+check preserves validation order; the DB constraint also protects direct
+broker callers and concurrent registrations. A conflict retains the existing
+CLI error and exit 1, without creating a losing member, placement, or pane.
+See [duplicate-monitor recovery](../concepts/storage.md#duplicate-monitor-recovery)
+for migration of databases that already contain conflicting rows.
 
 ### `messages`
 
-One row per delivery: a unicast row, a broadcast delivery row, or a broadcast
-summary row (see [Broadcast grouping](#broadcast-grouping)). `from_member_id`,
+One row per unicast delivery, plus a separate summary row for each broadcast.
+Broadcast deliveries also have type `unicast`; their summary has type
+`broadcast_summary` (see [Broadcast grouping](#broadcast-grouping)). `from_member_id`,
 `to_member_id`, and `origin_message_id` are deliberately not foreign keys —
 historical messages may outlive their sender. `status_timestamp` is updated on
 every state change and drives `ORDER BY DESC` listing. The rendered envelope is specified in
@@ -68,23 +104,22 @@ value.
 
 `monitor_runtime` is the one-row-per-fleet loop pid/heartbeat table:
 
-| Column | Meaning | Written / cleared by |
+| Field | Rust type | Meaning and lifecycle |
 |---|---|---|
-| `pid`, `started_at` | The single-instance claim | Stamped at every `cafleet monitor` start (claim and reclaim); cleared by a clean stop |
-| `last_tick_at` | The liveness heartbeat (UTC ISO) | Rewritten by the running loop on every tick |
-| `tick_seconds` | The loop's scan-tick cadence | Stamped at every start; preserved across a loop stop |
-| `last_wake_at` | Nullable UTC ISO timestamp of the last successfully delivered wake, durable across loop restarts | Stamped by a delivered wake — scheduled or forced |
-| `wake_interval_seconds` | Nullable live mirror of the running loop's wake interval, re-read by the loop on every tick | Stamped with the startup-resolved value at every start; overwritten by `PATCH /api/monitor`; preserved across a loop stop |
-| `wake_requested_at` | Nullable UTC ISO timestamp of the latest pending forced-wake request (`POST /api/monitor/wake`); `NULL` when none is pending | Set by `POST /api/monitor/wake`; cleared by a delivered wake or a new loop instance's reclaim |
+| `fleet_id` | `i64` | Non-null fleet key; an absent row is `None`, not an id-zero row. |
+| `pid` | `Option<i64>` | Null means no claim; claim stores the direct loop pid and normal clear nulls it. Preserve the existing process probe's handling of zero. |
+| `started_at` | `Option<String>` | Null means no claim start time; claim/reclaim stamps it and normal clear nulls it. |
+| `last_tick_at` | `Option<String>` | Null or an unparseable timestamp is not a fresh heartbeat. Claim/tick updates it and normal clear nulls it. |
+| `last_wake_at` | `Option<String>` | Null means no successful wake is recorded; cadence then falls back to `started_at`. Successful scheduled/forced delivery updates it, and clear/reclaim preserve it. |
+| `wake_requested_at` | `Option<String>` | Null means no forced-wake request; repeated requests overwrite/coalesce. Successful delivery or reclaim clears it; normal clear alone preserves it. |
+| `tick_seconds` | `i64` | Non-null tick cadence, DB default 5; CLI rejects zero rather than treating it as disabled. Normal clear preserves it. |
+| `wake_interval_seconds` | `Option<i64>` | Null is the legacy state before a row has been claimed since V5 added the column; zero disables scheduled wakes while permitting forced wake. Positive values are seconds; claim/reclaim/PATCH stamps the value and normal clear preserves it. |
 
-Repeat forced-wake requests overwrite `wake_requested_at`, coalescing into a
-single wake. Exactly two writes clear it: a delivered wake — scheduled or
-forced — stamps `last_wake_at` and clears the request in the same write, and
-a new loop instance's reclaim resets it, so a pending request never survives
-into a later loop instance. The durable `last_wake_at` lets an immediate
-restart honor the remaining wake cadence. `wake_interval_seconds` is `NULL`
-only in rows that predate the column and have not been re-claimed since — a
-running loop's row is always stamped. The cadence semantics are defined in
+A claimed loop always has a non-null wake interval. Do not normalize the legacy
+null interval into zero or treat a stopped HTTP response as the stored row:
+[the monitor response](webui-api.md#get-apimonitor--fleet-monitor-runtime) hides
+process timestamps when stopped but preserves stored intervals. The cadence
+rules are defined in
 [Monitoring](../concepts/monitoring.md#cadence-and-tick-precision).
 
 ### `asset_installs`
@@ -100,6 +135,14 @@ one, by the primary key) is **current**; every other row of that agent is
 row feeds the stale-assets guard and the `cafleet doctor` setup column, while
 superseded rows surface only as informational doctor footnotes (see
 [CLI options](cli-options.md#stale-assets-guard)).
+
+## Typed broker records
+
+Broker queries decode rows into typed member, placement, message, and monitor
+records. Presenters preserve the wire shapes below. Missing placements differ
+from pending panes, and absent monitor rows differ from nullable fields.
+Unknown stored enums are integrity errors; free-form skills retain their
+existing JSON representation.
 
 ## Foreign key enforcement
 
@@ -134,8 +177,17 @@ one `broadcast_summary` message — grouped by `origin_message_id`:
 
 Because ids are DB-assigned, the summary row is inserted first with a
 temporarily `NULL` `origin_message_id`, then self-linked before the delivery rows
-are inserted. The grouping predicate `origin_message_id IS NOT NULL` cleanly
-partitions the timeline into standalone unicasts vs broadcast groups. The
-per-recipient ACK time is read from the `completed` delivery row's
+are inserted. The timeline first selects only `type = 'unicast'` delivery rows,
+then groups non-null `origin_message_id` values into broadcasts; a null origin
+identifies a standalone unicast. Summary rows remain in the database and in
+`message show` / broadcast results, but do not count as recipients or ACKs.
+
+The per-recipient ACK time is read from the `completed` delivery row's
 `status_timestamp`, which is valid because a delivery message makes exactly one
-state transition over its lifetime.
+state transition over its lifetime. A summary is already `completed` when
+created, without any recipient having acknowledged it.
+
+The timeline's 200-row limit can return only part of a broadcast. Its recipient
+and ACK counts describe the returned deliveries, not the entire broadcast.
+See [timeline selection and grouping](webui-api.md#get-apitimeline--unified-fleet-timeline)
+for SQL ordering and the separate UI creation-time ordering.

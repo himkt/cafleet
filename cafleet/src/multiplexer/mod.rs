@@ -11,8 +11,6 @@ pub mod tmux;
 
 use std::fmt;
 
-use serde_json::Value;
-
 use crate::coding_agent::coding_agent;
 
 pub use herdr::HerdrMultiplexer;
@@ -29,20 +27,88 @@ pub struct MultiplexerContext {
     pub pane_id: String,
 }
 
-/// A terminal-multiplexer backend failure; `Display` renders the backend
-/// message.
+/// The outcome of backend-owned pane compensation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaneCleanup {
+    Attempted {
+        pane_id: String,
+        error: Option<String>,
+    },
+    Unknown,
+}
+
+/// A backend failure with optional pane ownership information.
 #[derive(Debug)]
-pub struct MultiplexerError(String);
+pub struct MultiplexerError {
+    message: String,
+    pane_cleanup: Option<PaneCleanup>,
+}
 
 impl MultiplexerError {
     pub(crate) fn new(message: impl Into<String>) -> Self {
-        MultiplexerError(message.into())
+        Self {
+            message: message.into(),
+            pane_cleanup: None,
+        }
+    }
+
+    pub fn pane_cleanup(&self) -> Option<&PaneCleanup> {
+        self.pane_cleanup.as_ref()
+    }
+
+    pub(crate) fn with_pane_cleanup(mut self, cleanup: PaneCleanup) -> Self {
+        self.pane_cleanup = Some(cleanup);
+        self
     }
 }
 
 impl fmt::Display for MultiplexerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.message)?;
+        match &self.pane_cleanup {
+            Some(PaneCleanup::Attempted {
+                pane_id,
+                error: Some(error),
+            }) => write!(f, "\ncleanup failed for pane {pane_id}: {error}"),
+            Some(PaneCleanup::Unknown) => {
+                f.write_str("\npane ID unknown; pane cleanup unconfirmed")
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
+/// Owns a known pane until transfer or an explicit cleanup attempt. Drop is
+/// only a last resort for unwinding before either operation.
+pub(crate) struct PaneOwnership<F: Fn(&str) -> Result<(), MultiplexerError>> {
+    pane_id: Option<String>,
+    kill: F,
+}
+
+impl<F: Fn(&str) -> Result<(), MultiplexerError>> PaneOwnership<F> {
+    pub(crate) fn new(pane_id: String, kill: F) -> Self {
+        Self {
+            pane_id: Some(pane_id),
+            kill,
+        }
+    }
+
+    pub(crate) fn rollback(&mut self) -> PaneCleanup {
+        let pane_id = self.pane_id.take().expect("pane is still owned");
+        let error = (self.kill)(&pane_id).err().map(|error| error.to_string());
+        PaneCleanup::Attempted { pane_id, error }
+    }
+
+    pub(crate) fn finish(mut self) -> String {
+        self.pane_id.take().expect("pane is still owned")
+    }
+}
+
+impl<F: Fn(&str) -> Result<(), MultiplexerError>> Drop for PaneOwnership<F> {
+    fn drop(&mut self) {
+        if let Some(pane_id) = self.pane_id.take() {
+            let _ = (self.kill)(&pane_id);
+        }
     }
 }
 
@@ -99,22 +165,30 @@ pub fn sanitize_wake_field(value: &str) -> String {
         .replace('|', "│")
 }
 
-/// Render one wake descriptor — a roster entry or the Director — in the
-/// shared field grammar; an unregistered coding agent aborts the wake.
-fn wake_entry(member: &Value) -> Result<String, MultiplexerError> {
-    let agent = member["coding_agent"].as_str().unwrap_or("");
+/// Transport-facing wake descriptor. The monitor maps broker records into
+/// these borrowed fields; backends have no dependency on broker records.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WakeEntry<'a> {
+    pub member_id: i64,
+    pub name: &'a str,
+    pub coding_agent: &'a str,
+    pub pending_count: i64,
+}
+
+/// Render one wake descriptor; an unregistered coding agent aborts the wake.
+fn wake_entry(member: &WakeEntry<'_>) -> Result<String, MultiplexerError> {
+    let agent = member.coding_agent;
     if coding_agent(agent).is_none() {
         return Err(MultiplexerError::new(format!(
             "member {} has invalid coding_agent '{agent}'",
-            member["member_id"]
+            member.member_id
         )));
     }
-    let name = member["name"].as_str().unwrap_or("");
     Ok(format!(
         "{} ({}; coding_agent={agent}; unacked={})",
-        member["member_id"],
-        sanitize_wake_field(name),
-        member["pending_count"]
+        member.member_id,
+        sanitize_wake_field(member.name),
+        member.pending_count
     ))
 }
 
@@ -122,10 +196,10 @@ fn wake_entry(member: &Value) -> Result<String, MultiplexerError> {
 /// the roster entries, the trailing `Director:` segment, and the two fixed
 /// protocol sentences. A roster member or Director with an unregistered
 /// coding agent aborts the wake.
-pub fn build_wake_payload(
+pub fn build_wake_payload_from_entries(
     fleet_id: i64,
-    members: &[Value],
-    director: &Value,
+    members: &[WakeEntry<'_>],
+    director: &WakeEntry<'_>,
 ) -> Result<String, MultiplexerError> {
     let entries = members
         .iter()
@@ -169,12 +243,12 @@ pub trait Multiplexer {
     fn send_exit(&self, target_pane_id: &str, ignore_missing: bool)
     -> Result<(), MultiplexerError>;
     fn send_poll_trigger(&self, target_pane_id: &str, member_id: i64) -> bool;
-    fn send_wake_trigger(
+    fn send_wake_entries(
         &self,
         target_pane_id: &str,
         fleet_id: i64,
-        members: &[Value],
-        director: &Value,
+        members: &[WakeEntry<'_>],
+        director: &WakeEntry<'_>,
     ) -> Result<bool, MultiplexerError>;
     fn send_inline_preview(
         &self,
@@ -246,14 +320,14 @@ impl Multiplexer for AnyMultiplexer {
         dispatch!(self, mux => mux.send_poll_trigger(target_pane_id, member_id))
     }
 
-    fn send_wake_trigger(
+    fn send_wake_entries(
         &self,
         target_pane_id: &str,
         fleet_id: i64,
-        members: &[Value],
-        director: &Value,
+        members: &[WakeEntry<'_>],
+        director: &WakeEntry<'_>,
     ) -> Result<bool, MultiplexerError> {
-        dispatch!(self, mux => mux.send_wake_trigger(target_pane_id, fleet_id, members, director))
+        dispatch!(self, mux => mux.send_wake_entries(target_pane_id, fleet_id, members, director))
     }
 
     fn send_inline_preview(
@@ -296,6 +370,107 @@ impl Multiplexer for AnyMultiplexer {
         dispatch!(self, mux => mux.agent_status(target_pane_id))
     }
 }
+
+// Concrete backends expose the same operations as the selected backend.
+macro_rules! implement_backend {
+    ($backend:ident) => {
+        impl Multiplexer for $backend {
+            fn name(&self) -> &'static str {
+                $backend::name(self)
+            }
+
+            fn ensure_available(&self) -> Result<(), MultiplexerError> {
+                $backend::ensure_available(self)
+            }
+
+            fn context_discovery(&self) -> Result<MultiplexerContext, MultiplexerError> {
+                $backend::context_discovery(self)
+            }
+
+            fn split_window(
+                &self,
+                reference: &MultiplexerContext,
+                env: &[(String, String)],
+                command: &[String],
+            ) -> Result<String, MultiplexerError> {
+                $backend::split_window(self, reference, env, command)
+            }
+
+            fn send_exit(
+                &self,
+                target_pane_id: &str,
+                ignore_missing: bool,
+            ) -> Result<(), MultiplexerError> {
+                $backend::send_exit(self, target_pane_id, ignore_missing)
+            }
+
+            fn send_poll_trigger(&self, target_pane_id: &str, member_id: i64) -> bool {
+                $backend::send_poll_trigger(self, target_pane_id, member_id)
+            }
+
+            fn send_wake_entries(
+                &self,
+                target_pane_id: &str,
+                fleet_id: i64,
+                members: &[WakeEntry<'_>],
+                director: &WakeEntry<'_>,
+            ) -> Result<bool, MultiplexerError> {
+                $backend::send_wake_entries(self, target_pane_id, fleet_id, members, director)
+            }
+
+            fn send_inline_preview(
+                &self,
+                target_pane_id: &str,
+                message_id: i64,
+                sender_id: i64,
+                ts: &str,
+                text: &str,
+            ) -> Result<(), MultiplexerError> {
+                $backend::send_inline_preview(self, target_pane_id, message_id, sender_id, ts, text)
+            }
+
+            fn send_prompt(
+                &self,
+                target_pane_id: &str,
+                text: &str,
+                shell: bool,
+            ) -> Result<(), MultiplexerError> {
+                $backend::send_prompt(self, target_pane_id, text, shell)
+            }
+
+            fn capture_pane(
+                &self,
+                target_pane_id: &str,
+                lines: i64,
+            ) -> Result<String, MultiplexerError> {
+                $backend::capture_pane(self, target_pane_id, lines)
+            }
+
+            fn list_pane_ids(
+                &self,
+            ) -> Result<std::collections::BTreeSet<String>, MultiplexerError> {
+                $backend::list_pane_ids(self)
+            }
+
+            fn kill_pane(
+                &self,
+                target_pane_id: &str,
+                ignore_missing: bool,
+            ) -> Result<(), MultiplexerError> {
+                $backend::kill_pane(self, target_pane_id, ignore_missing)
+            }
+
+            fn agent_status(
+                &self,
+                target_pane_id: &str,
+            ) -> Result<Option<String>, MultiplexerError> {
+                $backend::agent_status(self, target_pane_id)
+            }
+        }
+    };
+}
+implement_backend!(TmuxMultiplexer);
+implement_backend!(HerdrMultiplexer);
 
 /// Resolve the backend per the SPEC precedence and construct it over the
 /// given runner and environment snapshot.
@@ -345,17 +520,24 @@ pub fn resolve_multiplexer_name(
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{Value, json};
+    use crate::multiplexer::WakeEntry;
 
-    use crate::multiplexer::{build_wake_payload, resolve_multiplexer_name, sanitize_wake_field};
+    use crate::multiplexer::{
+        build_wake_payload_from_entries, resolve_multiplexer_name, sanitize_wake_field,
+    };
 
-    fn member(member_id: i64, name: &str, coding_agent: &str, unacked: i64) -> Value {
-        json!({
-            "member_id": member_id,
-            "name": name,
-            "coding_agent": coding_agent,
-            "pending_count": unacked,
-        })
+    fn member<'a>(
+        member_id: i64,
+        name: &'a str,
+        coding_agent: &'a str,
+        unacked: i64,
+    ) -> WakeEntry<'a> {
+        WakeEntry {
+            member_id,
+            name,
+            coding_agent,
+            pending_count: unacked,
+        }
     }
 
     mod sanitize_wake_field_tests {
@@ -394,12 +576,12 @@ mod tests {
         }
     }
 
-    mod build_wake_payload_tests {
+    mod build_wake_payload_from_entries_tests {
         use super::*;
 
         #[test]
         fn two_members_join_entries_and_the_director_segment_trails() {
-            let payload = build_wake_payload(
+            let payload = build_wake_payload_from_entries(
                 3,
                 &[
                     member(6, "drafter", "claude", 2),
@@ -421,7 +603,7 @@ mod tests {
 
         #[test]
         fn a_single_member_uses_the_singular_noun() {
-            let payload = build_wake_payload(
+            let payload = build_wake_payload_from_entries(
                 7,
                 &[member(4, "worker", "opencode", 1)],
                 &member(2, "Director", "claude", 0),
@@ -439,7 +621,9 @@ mod tests {
 
         #[test]
         fn an_empty_roster_drops_the_entries_and_keeps_the_director_segment() {
-            let payload = build_wake_payload(7, &[], &member(2, "Director", "claude", 3)).unwrap();
+            let payload =
+                build_wake_payload_from_entries(7, &[], &member(2, "Director", "claude", 3))
+                    .unwrap();
             assert_eq!(
                 payload,
                 "[cafleet] tick: fleet 7 — no members to health-check. \
@@ -451,7 +635,7 @@ mod tests {
 
         #[test]
         fn member_and_director_names_are_sanitized_in_the_payload() {
-            let payload = build_wake_payload(
+            let payload = build_wake_payload_from_entries(
                 3,
                 &[member(5, "e`vil$(x)|z\nq", "claude", 0)],
                 &member(2, "Dir|ector", "claude", 0),
@@ -472,7 +656,7 @@ mod tests {
 
         #[test]
         fn an_unregistered_roster_coding_agent_aborts_the_wake() {
-            let err = build_wake_payload(
+            let err = build_wake_payload_from_entries(
                 3,
                 &[member(4, "worker", "python", 0)],
                 &member(2, "Director", "claude", 0),
@@ -487,7 +671,7 @@ mod tests {
 
         #[test]
         fn an_unregistered_director_coding_agent_aborts_the_wake() {
-            let err = build_wake_payload(
+            let err = build_wake_payload_from_entries(
                 3,
                 &[member(4, "worker", "claude", 0)],
                 &member(2, "Director", "python", 0),

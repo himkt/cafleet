@@ -1,0 +1,1 @@
+../../../../../docs/docs/spec/message-envelope.md

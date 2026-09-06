@@ -74,6 +74,54 @@ subclasses in the [backend matrix](#backend-matrix). CLI boundaries catch
 `MultiplexerError`, so both backends' failures are handled uniformly while each
 backend keeps its own message text.
 
+## Pane ownership during creation {#pane-creation-ownership}
+
+`split_window` owns a newly created pane until it returns successfully. As
+soon as herdr extracts the pane id from the split response, it arms a pane
+guard. If the subsequent `pane run` fails, that guard calls
+`kill_pane(id, true)` before returning the original run error. A failed close
+retains both the pane id and the run error and adds the cleanup failure.
+Layout equalization remains best-effort and does not fail an otherwise
+successful spawn.
+
+Creation errors carry internal cleanup metadata:
+
+| Metadata | Meaning and caller action |
+|---|---|
+| `PaneCleanup::Attempted { pane_id, error: None }` | The backend already closed the known pane; the CLI performs the remaining DB compensation without another kill. |
+| `PaneCleanup::Attempted { pane_id, error: Some(_) }` | The backend tried to close the known pane and failed; retain that diagnostic, perform remaining DB compensation, and do not retry the pane kill. |
+| `PaneCleanup::Unknown` | A failed or malformed split response left no confirmed pane id; report that pane compensation is unconfirmed, and do not guess an id or close another pane. |
+
+On success, ownership transfers immediately to the CLI's creation guard. A
+fleet callback installs that guard and returns the id without another
+fallible operation between those steps. Guard `finish`/`rollback` explicitly
+disarms ownership; `Drop` is a last defense for unhandled ownership, so an
+explicit cleanup attempt cannot cause a second kill. CLI registration and
+transaction compensation follow the
+[creation failure order](cli-options.md#creation-failure-compensation).
+Creation compensation uses `kill_pane`, because `send_exit` submits a command
+to the pane and does not guarantee shell or pane termination. Normal
+`member delete` and notification keystrokes keep their existing behavior.
+
+## Subprocess output and deadlines
+
+The shared subprocess runner captures stdout and stderr without truncation.
+With a timeout, it drains both pipes concurrently from spawn using nonblocking
+I/O. Each loop checks the monotonic deadline and the direct child's exit status,
+then reads at most 64 KiB per stream; polling waits at most 20 ms or the remaining
+deadline, whichever is shorter. Interrupted operations retry against the same
+deadline. Completion requires both the child's exit and EOF on both streams.
+Success returns stdout as lossy UTF-8; a nonzero exit reports stderr as lossy
+UTF-8. Calls without a timeout retain the unbounded output-collection path.
+
+At the deadline, the runner kills and reaps the direct child, closes both read
+pipes, and reports a timeout. This also applies when the direct child has exited
+but a descendant still holds a pipe open. Descendant termination is outside this
+contract. FD setup, read, poll, and child-status failures also release the pipes
+and kill/reap the child; cleanup failures accompany the primary error instead of
+replacing it. The deadline bounds observation and the start of cleanup; an
+unresponsive operating system can delay cleanup itself.
+
 ## Native agent-state (herdr only) {#native-agent-state}
 
 herdr natively tracks each agent's lifecycle state
@@ -245,7 +293,7 @@ the payload and `Enter`.
 | Inline preview (`message send` / `message broadcast`) | The 2-line preview + `Enter` | A recipient parked on a pending permission-approval prompt has it dismissed before the trailing `Enter` lands |
 | `cafleet member ping` | The literal poll command with the resume clause + `Enter` | The manual re-poke for a pane that missed an inline preview |
 | `cafleet member prompt` (plain and `--shell` forms) | The text, optionally prefixed with `! `, + `Enter` | The same safeguard and failure semantics protect both forms; the flag changes only the payload prefix |
-| Member teardown (`send_exit`) | `/exit` + `Enter` | Teardown uses the same safeguard, with pane-gone tolerance covering the leading `Esc` when `ignore_missing` is enabled |
+| Exit-command helper (`send_exit`) | `/exit` + `Enter` | Uses the same safeguard, with pane-gone tolerance covering the leading `Esc` when `ignore_missing` is enabled; creation rollback uses `kill_pane` |
 | Monitor-loop wake trigger (`send_wake_trigger`) | The `[cafleet] tick:` wake + `Enter` | It targets the monitor member's pane, which can be parked on a permission prompt (see [Monitoring](../concepts/monitoring.md)) |
 
 ### Design principles

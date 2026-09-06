@@ -19,6 +19,20 @@ These fleet-scoping errors apply to **every** fleet-scoped endpoint:
 
 No server-side session cookies. The SPA stores the active fleet_id client-side via hash-based routing and sends it in the X-Fleet-Id header on each request.
 
+## Fleet selection and asynchronous reads {#frontend-resource-lifecycle}
+
+Hash routes select fleets and members. Requests use a client bound to that
+fleet and are cancelled when the selected resource changes. Stale responses
+cannot update the new view. Refresh retains existing data; failures show an
+error with Retry. Missing fleets return to the picker, while transport errors
+retain the route. Polling and manual refresh update each resource independently.
+
+## Response compatibility
+
+HTTP presenters convert typed broker records to the response shapes below.
+Preserve nulls and field names; invalid stored values or missing required
+member names return a 500 detail response.
+
 ## Endpoints
 
 | Method | Path | Returns | X-Fleet-Id required |
@@ -35,7 +49,7 @@ No server-side session cookies. The SPA stores the active fleet_id client-side v
 
 ### GET /api/fleets — List Fleets
 
-Returns non-soft-deleted fleets (`deleted_at IS NULL`) with member counts, ordered newest-first by `created_at DESC, fleet_id ASC`. No headers required.
+Returns non-soft-deleted fleets (`deleted_at IS NULL`) with member counts, ordered newest-first by `created_at DESC, fleet_id DESC` (higher id first when timestamps tie). No headers required.
 
 **Response** (200 OK):
 
@@ -54,6 +68,13 @@ Returns non-soft-deleted fleets (`deleted_at IS NULL`) with member counts, order
 ### GET /api/members — List Members
 
 Returns the selected fleet's roster: every active registry entry plus deregistered members that still own messages (so their message history stays inspectable). Every row carries a `kind` discriminator so the frontend can locate the root Director without matching on its name.
+
+Rows are ordered by `member_id ASC`. Holder inclusion checks
+`messages.owner_member_id = members.member_id`; a sender-only reference does
+not include a deregistered member. The lean query preserves
+this condition and the existing response while omitting unused message
+activity aggregates. CLI member listing retains its separate activity query;
+see [query and activity contracts](data-model.md#query-and-activity-contracts).
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
@@ -150,6 +171,16 @@ the runtime fields take these values:
 | `tick_seconds` | `null` | **preserved** — the cadence the monitor last ran at |
 | `wake_interval_seconds` | `null` | **preserved** — the wake interval the monitor last ran at; `null` when the row predates the column and was never re-stamped |
 
+This is a presenter projection, not a serialization of the stored
+`MonitorRuntime` record. Stored null, zero, and a positive wake interval remain
+distinct: zero disables scheduled wakes but still allows forced wake, while a
+legacy null interval remains null until claimed. A normal clear retains the
+stored `last_wake_at` and pending `wake_requested_at` even though stopped-process
+timestamps are hidden here; the request field is not added to this response.
+The complete field lifecycle is in the
+[data model](data-model.md#monitor_runtime).
+
+
 Launching the loop is CLI-only (`cafleet monitor`), and the monitor member owns
 it as a long-lived execution resolved by its backend. It has no `POST`/`DELETE` counterpart
 and no CLI stop command — deleting the monitor member kills the pane hosting
@@ -240,11 +271,9 @@ The three message endpoints compare as follows (this table owns their row-select
 
 | Endpoint | Rows returned | Excluded | Ordering | Row cap |
 |---|---|---|---|---|
-| `GET /api/members/{member_id}/inbox` | Messages where `owner_member_id = member_id` | `type == "broadcast_summary"` | `status_timestamp DESC` (newest first) | none — the member detail view truncates client-side to the 200 most recent rows per tab |
-| `GET /api/members/{member_id}/sent` | Messages where `from_member_id = member_id` | `type == "broadcast_summary"` | `status_timestamp DESC` (newest first) | none — the member detail view truncates client-side to the 200 most recent rows per tab |
-| `GET /api/timeline` | All fleet messages, scoped through the sender join | `type == "broadcast_summary"` | `status_timestamp DESC` (newest first) | Hard-capped at 200 rows; no pagination |
-
-**Request**: `X-Fleet-Id: <fleet_id>` header.
+| `GET /api/members/{member_id}/inbox` | Messages where `owner_member_id = member_id` | `type == "broadcast_summary"` | `status_timestamp DESC, message_id DESC` (newest status update first; id breaks ties) | unbounded |
+| `GET /api/members/{member_id}/sent` | Messages where `from_member_id = member_id` | `type == "broadcast_summary"` | `status_timestamp DESC, message_id DESC` (newest status update first; id breaks ties) | unbounded |
+| `GET /api/timeline` | `type == "unicast"` deliveries, scoped through the owning member join | All non-delivery rows, including `broadcast_summary` | `status_timestamp DESC, message_id DESC` (newest status update first; id breaks ties) | SQL limit of 200 delivery rows, applied after filtering; may split a broadcast group; no pagination |
 
 **Response** (200 OK):
 
@@ -270,6 +299,8 @@ The three message endpoints compare as follows (this table owns their row-select
 
 All message endpoints (inbox, sent, timeline) share the same row formatter, so the field set is identical to `GET /api/timeline` — including `status_timestamp` and `origin_message_id` (see the timeline section below for their semantics).
 
+The wire `type` distinguishes `unicast` deliveries, with non-null `to_member_id` and `to_member_name`, from `broadcast_summary` rows, whose recipient id and name are null. The frontend models this distinction and narrows inbox, sent, and timeline data to delivery rows. Existing response keys and envelopes are preserved.
+
 The `body` field is the message's `text` column.
 
 **Status values**: `input_required` (Pending), `completed` (Acknowledged).
@@ -280,7 +311,7 @@ Returns messages sent by the member (see the comparison table above). Consumed b
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
-Same response format as inbox.
+Same response format as inbox; both endpoints return the full history.
 
 ### GET /api/timeline — Unified Fleet Timeline
 
@@ -288,7 +319,7 @@ Returns the fleet's unified message timeline (see the comparison table above). C
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
-Fleet scoping is reached through the `messages.from_member_id → members.member_id → members.fleet_id` join. Only messages whose **sender** belongs to the header fleet are returned; cross-fleet messages are invisible.
+Fleet scoping follows `messages.owner_member_id → members.member_id → members.fleet_id`. Only delivery rows whose **owning member** belongs to the header fleet are returned. SQL selects `type = 'unicast'` before ordering and applying the 200-row cap.
 
 **Response** (200 OK):
 
@@ -312,9 +343,9 @@ Fleet scoping is reached through the `messages.from_member_id → members.member
 }
 ```
 
-The frontend re-orders ascending for newest-at-bottom chat rendering.
+The frontend orders the returned entries by creation time, ascending for newest-at-bottom chat rendering. This is distinct from the API's selection by most recent status update: an ACK updates `status_timestamp` but leaves `created_at` unchanged.
 
-**Exclusions**: the summary row is not needed for the UI — the grouping convention below lets the frontend reconstruct broadcasts from their delivery rows alone.
+**Exclusions**: `broadcast_summary` rows never enter the timeline response or consume its row cap. They remain stored and accessible through `message show` and the broadcast command's result. A summary is created in the `completed` state; that state is not a recipient ACK. The frontend also ignores summary rows defensively before grouping if they appear in its input.
 
 **Broadcast grouping**: Every row carries an `origin_message_id` field:
 
@@ -323,7 +354,11 @@ The frontend re-orders ascending for newest-at-bottom chat rendering.
 | Unicast delivery | `null` |
 | Broadcast delivery | The broadcast's summary message id (shared across all N delivery rows in the same broadcast) |
 
-The client groups rows by `origin_message_id` (non-null rows sharing a value form one broadcast entry; null rows are standalone unicast entries). Each broadcast entry's sort key is the `MIN(created_at)` of its rows — stable, so a broadcast never drifts when a lagging recipient ACKs.
+The client groups delivery rows by `origin_message_id` using an explicit null check: non-null rows sharing a value form one broadcast entry; null rows are standalone unicast entries. Each broadcast entry's sort key is the minimum `created_at` among its returned delivery rows. A standalone unicast uses its own `created_at`.
+
+**Partial groups and counts**: the cap applies to delivery rows, not whole broadcasts. It can omit some recipients of a group. Recipient counts and the ReactionBar's ACK indicators describe only the returned deliveries; the UI explains this limit and does not present them as a whole-broadcast completion rate. Omitted recipients are not fetched to complete a group.
+
+For two pending broadcast deliveries and their stored summary, the timeline shows two recipients and zero ACKs. Acknowledging one delivery produces one ACK; acknowledging both produces two. The summary contributes neither a recipient nor an ACK. Empty or summary-only input produces no timeline entries.
 
 **ACK timestamps**: Per-recipient ACK time is read from the `status_timestamp` of a `completed` delivery row. Delivery messages make exactly one state transition over their lifetime (`input_required → completed` on ACK), so for `status == "completed"` rows `status_timestamp` IS the ACK moment. See [Data model § Broadcast Grouping](data-model.md#broadcast-grouping).
 

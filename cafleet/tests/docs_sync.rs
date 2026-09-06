@@ -264,7 +264,6 @@ fn cli_options_defines_the_ping_skip_and_moved_capture() {
             "skipped",
             "pending placement",
             "nothing to",
-            "--interval",
             "CAFLEET_MONITOR_WAKE_INTERVAL",
             "then resume your work",
         ],

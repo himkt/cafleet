@@ -8,6 +8,7 @@ pub mod members;
 pub mod messaging;
 pub mod monitor;
 pub mod queries;
+pub mod records;
 #[cfg(test)]
 pub mod test_support;
 

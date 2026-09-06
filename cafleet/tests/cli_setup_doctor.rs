@@ -12,7 +12,7 @@ fn plain_setup_installs_and_records_all_three_agents_on_a_fresh_database() {
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let out = stdout(&output);
     assert!(
-        out.contains("applied migrations to head (7)."),
+        out.contains("applied migrations to head (8)."),
         "fresh DB reports the created-and-migrated line, got: {out}"
     );
     for (agent, skills_dir) in [
@@ -64,7 +64,7 @@ fn plain_setup_installs_and_records_all_three_agents_on_a_fresh_database() {
     let again = cli.run(&["setup"]);
     assert_eq!(code(&again), 0);
     assert!(
-        stdout(&again).contains("Already at head (7); nothing to do."),
+        stdout(&again).contains("Already at head (8); nothing to do."),
         "got: {}",
         stdout(&again)
     );
@@ -379,7 +379,7 @@ fn an_invalid_variable_fails_the_assets_half_with_the_pinned_error() {
         "got: {combined}"
     );
     assert!(
-        combined.contains("applied migrations to head (7)."),
+        combined.contains("applied migrations to head (8)."),
         "the db half is unaffected: {combined}"
     );
 }
@@ -412,7 +412,7 @@ fn plain_setup_fails_the_assets_half_on_an_invalid_config_path_variable() {
         "plain setup resolves all three identity paths: {combined}"
     );
     assert!(
-        combined.contains("applied migrations to head (7)."),
+        combined.contains("applied migrations to head (8)."),
         "the db half is unaffected: {combined}"
     );
 }
@@ -579,7 +579,7 @@ fn doctor_reports_a_healthy_environment_with_no_issues() {
         assert!(out.contains(detail), "multiplexer detail {detail}: {out}");
     }
     assert!(out.contains("✓ database"), "got: {out}");
-    assert!(out.contains("schema 7 (head)"), "got: {out}");
+    assert!(out.contains("schema 8 (head)"), "got: {out}");
     assert!(out.contains("✓ coding agents"), "got: {out}");
     assert_eq!(
         out.matches(&format!("✓ {VERSION}")).count(),
@@ -636,13 +636,13 @@ fn doctor_reports_a_behind_head_schema() {
     let cli = Cli::new();
     cli.migrate();
     cli.sqlite()
-        .execute("DELETE FROM refinery_schema_history WHERE version = 7", [])
+        .execute("DELETE FROM refinery_schema_history WHERE version > 6", [])
         .unwrap();
     let output = cli.run(&["doctor"]);
     assert_eq!(code(&output), 1);
     let out = stdout(&output);
     assert!(
-        out.contains("schema 6, head is 7 — run: cafleet setup"),
+        out.contains("schema 6, head is 8 — run: cafleet setup"),
         "got: {out}"
     );
     assert!(
@@ -661,7 +661,7 @@ fn doctor_completes_the_report_against_a_pre_v6_database() {
     assert!(out.contains("✓ multiplexer"), "got: {out}");
     assert!(out.contains("✗ database"), "got: {out}");
     assert!(
-        out.contains("schema 5, head is 7 — run: cafleet setup"),
+        out.contains("schema 5, head is 8 — run: cafleet setup"),
         "got: {out}"
     );
     assert_eq!(
@@ -690,7 +690,7 @@ fn doctor_json_against_a_pre_v6_database_keeps_the_shape() {
 
     assert_eq!(payload["database"]["ok"], false);
     assert_eq!(payload["database"]["schema_version"], 5);
-    assert_eq!(payload["database"]["head_version"], 7);
+    assert_eq!(payload["database"]["head_version"], 8);
 
     let agents = payload["coding_agents"]["agents"].as_array().unwrap();
     assert_eq!(agents.len(), 3);
@@ -748,7 +748,7 @@ fn doctor_reports_a_newer_schema_than_the_cli() {
     let output = cli.run(&["doctor"]);
     assert_eq!(code(&output), 1);
     assert!(
-        stdout(&output).contains("schema 99 is newer than this CLI (head 7) — upgrade cafleet"),
+        stdout(&output).contains("schema 99 is newer than this CLI (head 8) — upgrade cafleet"),
         "got: {}",
         stdout(&output)
     );
@@ -955,8 +955,8 @@ fn doctor_json_mirrors_the_report() {
     assert_eq!(payload["multiplexer"]["error"], serde_json::Value::Null);
 
     assert_eq!(payload["database"]["ok"], true);
-    assert_eq!(payload["database"]["schema_version"], 7);
-    assert_eq!(payload["database"]["head_version"], 7);
+    assert_eq!(payload["database"]["schema_version"], 8);
+    assert_eq!(payload["database"]["head_version"], 8);
     assert_eq!(payload["database"]["error"], serde_json::Value::Null);
 
     let agents = payload["coding_agents"]["agents"].as_array().unwrap();
@@ -1020,4 +1020,140 @@ fn doctor_json_null_contracts_on_failures() {
     );
 
     assert_eq!(payload["issues"], 3, "multiplexer + database + codex");
+}
+
+#[test]
+fn step6_doctor_empty_ledger_distinguishes_missing_from_foreign_database() {
+    for foreign in [false, true] {
+        let cli = Cli::new();
+        let conn = cli.sqlite();
+        conn.execute_batch("CREATE TABLE refinery_schema_history(version INTEGER)")
+            .unwrap();
+        if foreign {
+            conn.execute_batch("CREATE TABLE foreign_data(x INTEGER)")
+                .unwrap();
+        }
+        drop(conn);
+        let output = cli.run(&["doctor", "--json"]);
+        assert_eq!(code(&output), 1);
+        let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+        let error = if foreign {
+            "database has tables but no schema history — not a cafleet database?"
+        } else {
+            "no database — run: cafleet setup"
+        };
+        assert_eq!(
+            payload["database"],
+            serde_json::json!({"ok":false,"schema_version":null,"head_version":cafleet::db::head_version(),"error":error})
+        );
+        assert_eq!(payload["multiplexer"]["ok"], true);
+        assert_eq!(
+            payload["coding_agents"]["agents"].as_array().unwrap().len(),
+            3
+        );
+        assert_eq!(payload["issues"], 1);
+    }
+}
+
+#[test]
+fn step6_doctor_open_and_path_failures_still_render_all_sections_in_text_and_json() {
+    let mut cli = Cli::new();
+    let directory = cli.home.path().join("not-a-database");
+    std::fs::create_dir(&directory).unwrap();
+    cli.set_env(
+        "CAFLEET_DATABASE_URL",
+        &format!("sqlite:///{}", directory.display()),
+    );
+    cli.set_env("CLAUDE_CONFIG_DIR", "relative");
+    let output = cli.run(&["doctor", "--json"]);
+    assert_eq!(code(&output), 1);
+    let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+    assert_eq!(
+        payload
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        vec!["multiplexer", "database", "coding_agents", "issues"]
+    );
+    assert_eq!(payload["multiplexer"]["ok"], true);
+    assert_eq!(payload["database"]["ok"], false);
+    assert_eq!(
+        payload["database"]["schema_version"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        payload["database"]["head_version"],
+        cafleet::db::head_version()
+    );
+    assert!(
+        payload["database"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("failed to open database")
+    );
+    let agents = payload["coding_agents"]["agents"].as_array().unwrap();
+    assert_eq!(
+        agents
+            .iter()
+            .map(|a| a["coding_agent"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["claude", "codex", "opencode"]
+    );
+    assert_eq!(agents[0]["state"], "error");
+    assert_eq!(agents[1]["state"], "not_installed");
+    assert_eq!(agents[2]["state"], "not_installed");
+    assert_eq!(payload["issues"], 2);
+    let output = cli.run(&["doctor"]);
+    assert_eq!(code(&output), 1);
+    let text = stdout(&output);
+    assert!(text.find("multiplexer").unwrap() < text.find("database").unwrap());
+    assert!(text.find("database").unwrap() < text.find("coding agents").unwrap());
+    assert!(text.contains("CLAUDE_CONFIG_DIR is not an absolute path"));
+    assert!(text.contains("2 issues found"));
+}
+
+#[test]
+fn step6_doctor_non_head_states_do_not_query_malformed_asset_records() {
+    for ahead in [false, true] {
+        let cli = Cli::new();
+        cli.migrate();
+        let conn = cli.sqlite();
+        if ahead {
+            conn.execute(
+                "UPDATE refinery_schema_history SET version=?1 WHERE version=?2",
+                rusqlite::params![cafleet::db::head_version() + 1, cafleet::db::head_version()],
+            )
+            .unwrap();
+        } else {
+            conn.execute(
+                "DELETE FROM refinery_schema_history WHERE version=?1",
+                [cafleet::db::head_version()],
+            )
+            .unwrap();
+        }
+        conn.execute_batch(
+            "DROP TABLE asset_installs; CREATE TABLE asset_installs(wrong_column TEXT)",
+        )
+        .unwrap();
+        drop(conn);
+        let output = cli.run(&["doctor", "--json"]);
+        assert_eq!(code(&output), 1);
+        let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+        assert_eq!(payload["database"]["ok"], false);
+        assert_eq!(payload["coding_agents"]["ok"], true);
+        assert_eq!(
+            payload["coding_agents"]["agents"].as_array().unwrap().len(),
+            3
+        );
+        assert!(
+            payload["coding_agents"]["agents"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|a| a["state"] == "not_installed")
+        );
+        assert_eq!(payload["issues"], 1);
+    }
 }

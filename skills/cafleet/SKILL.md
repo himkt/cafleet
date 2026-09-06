@@ -40,7 +40,7 @@ Before your first action other than these Reads, Read every file in the **Load-b
 
 Director-only governance — [`reference/supervision.md`](reference/supervision.md) (governance + the `cafleet monitor` heartbeat) and [`reference/director.md`](reference/director.md) (`member create` / `member delete` / `member list` / `member capture` / `member prompt` / `member ping`) — is load-bearing for a Director; its gated Required-reading block lives in [`roles/director.md`](roles/director.md), not on this dispatch surface.
 
-Exhaustive per-subcommand flags, exit codes, and error strings live in [`docs/docs/spec/cli-options.md`](../../docs/docs/spec/cli-options.md).
+Exhaustive per-subcommand flags, exit codes, and error strings live in [`cli-options.md`](reference/runtime/spec/cli-options.md).
 
 ## Resolve your overlay
 
@@ -78,11 +78,11 @@ Every `cafleet` invocation that touches members or messages names its **subject*
 - `--from-member-id <int>` / `--to-member-id <int>` — the two parties of a two-party command: the **sender** and the **recipient** on `message send`; `message broadcast` takes the sender only. The fleet is derived from the sender row.
 - `--fleet-id <int>` — only on `member create`: the fleet the new member joins (the subject of the command is the member being created; the Director is auto-resolved from the fleet row).
 
-In the Director's own commands, substitute the literal ids printed by `cafleet fleet create` / `cafleet member create` — never your own exported shell variables. `permissions.allow` matches Bash invocations as fixed strings, so an ad-hoc `export MEMBER_ID=…; cafleet message poll $MEMBER_ID` breaks the match and forces prompts. See [`cli-options.md`](../../docs/docs/spec/cli-options.md#positional-subject-ids) for the rationale and [`permissions.allow` coverage](../../docs/docs/spec/cli-options.md#permissionsallow-coverage) for the pattern set.
+In the Director's own commands, substitute the literal ids printed by `cafleet fleet create` / `cafleet member create` — never your own exported shell variables. `permissions.allow` matches Bash invocations as fixed strings, so an ad-hoc `export MEMBER_ID=…; cafleet message poll $MEMBER_ID` breaks the match and forces prompts. See [`cli-options.md`](reference/runtime/spec/cli-options.md#positional-subject-ids) for the rationale and [`permissions.allow` coverage](reference/runtime/spec/cli-options.md#permissionsallow-coverage) for the pattern set.
 
 ### Spawned-member identity via `str.format` substitution
 
-`cafleet member create` runs `str.format` over the resolved spawn prompt (supplied as exactly one of the positional `PROMPT` or `--file <path>`), rendering exactly four placeholders to literals at spawn time:
+`cafleet member create` uses the Rust spawn-placeholder mini-formatter on the resolved spawn prompt (supplied as exactly one of the positional `PROMPT` or `--file <path>`), rendering exactly four placeholders to literals at spawn time. It accepts exact names and doubled literal braces only, not Python format specifications, conversions, or attribute/index access:
 
 - `{fleet_id}` — the member's fleet id.
 - `{member_id}` — the member's **own** newly-allocated id (the CLI allocates it during the spawn and substitutes it itself — the Director never needs to know it).
@@ -134,7 +134,7 @@ cafleet message send --from-member-id <my-member-id> \
   --to-member-id <target-member-id> "Did the API schema change?"
 ```
 
-`--to-member-id` (recipient id) is required, plus exactly one of the positional `TEXT` (inline body) or `--file <path>` (a UTF-8 file, or `-` for stdin — use it for long or multi-line bodies that would exceed the shell's `ARG_MAX`). The delivered body is truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` in the inline preview and text output. `--json` carries the complete untruncated body per [`reference/cli.md`](reference/cli.md) § *Output switch*. After persisting, the broker keystrokes a 2-line inline preview into the recipient's pane — an `Esc`-safeguarded auto-fire the recipient consumes as a fresh user-turn (the same path serves `message broadcast`), caught on the next manual `message poll` or a Director `cafleet member ping` if missed; full mechanics in [`multiplexer-backends.md`](../../docs/docs/spec/multiplexer-backends.md#push-notifications).
+`--to-member-id` (recipient id) is required, plus exactly one of the positional `TEXT` (inline body) or `--file <path>` (a UTF-8 file, or `-` for stdin — use it for long or multi-line bodies that would exceed the shell's `ARG_MAX`). The delivered body is truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` in the inline preview and text output. `--json` carries the complete untruncated body per [`reference/cli.md`](reference/cli.md) § *Output switch*. After persisting, the broker keystrokes a 2-line inline preview into the recipient's pane — an `Esc`-safeguarded auto-fire the recipient consumes as a fresh user-turn (the same path serves `message broadcast`), caught on the next manual `message poll` or a Director `cafleet member ping` if missed; full mechanics in [`multiplexer-backends.md`](reference/runtime/spec/multiplexer-backends.md#push-notifications).
 
 When `message send` exits nonzero while stating that `Message <id> was persisted`, the id proves the send committed: do **not resend** the body. Repair or re-engage the recipient pane, then run `cafleet member ping <recipient-id>` as its own isolated invocation, or have the recipient run `cafleet message poll <recipient-id>` as its own isolated invocation, and consume and ack the existing row normally. This is the only response to the partial failure — it introduces no retry of the notification.
 

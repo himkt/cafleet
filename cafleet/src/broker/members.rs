@@ -5,9 +5,12 @@
 
 use std::collections::BTreeMap;
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde_json::{Value, json};
 
+use super::records::{
+    MemberActivity, MemberKind, MemberRecord, MemberStatus, Placement, RegisteredMember,
+};
 use crate::error::CafleetError;
 use crate::time::{format_utc, now_utc, parse_lenient};
 
@@ -21,6 +24,11 @@ pub struct NewPlacement {
 }
 
 pub(crate) fn db_err(e: rusqlite::Error) -> CafleetError {
+    if let rusqlite::Error::FromSqlConversionFailure(_, _, source) = &e
+        && let Some(error) = source.downcast_ref::<CafleetError>()
+    {
+        return error.clone();
+    }
     CafleetError::App(format!("database error: {e}"))
 }
 
@@ -40,43 +48,25 @@ pub(crate) fn member_card(
 /// The three-value derivation over the SQL-supplied `is_director` flag plus
 /// the member card's `$.cafleet.kind` marker (SPEC §5.4); `director` wins, so
 /// a root Director can never read as `monitor` regardless of its card.
-pub(crate) fn derive_member_kind(is_director: bool, is_monitor: bool) -> &'static str {
+fn member_kind(is_director: bool, is_monitor: bool) -> MemberKind {
     if is_director {
-        "director"
+        MemberKind::Director
     } else if is_monitor {
-        "monitor"
+        MemberKind::Monitor
     } else {
-        "member"
+        MemberKind::Member
     }
 }
 
 const IS_MONITOR_COLUMN: &str =
     "COALESCE(json_extract(m.member_card_json, '$.cafleet.kind')='monitor', 0)";
 
-pub(crate) fn card_skills(card_json: &str) -> Value {
+fn skills_from_card(card_json: &str) -> Vec<Value> {
     let card: Value = serde_json::from_str(card_json).unwrap_or(Value::Null);
     match card.get("skills") {
-        Some(Value::Array(skills)) => Value::Array(skills.clone()),
-        _ => json!([]),
+        Some(Value::Array(skills)) => skills.clone(),
+        _ => Vec::new(),
     }
-}
-
-pub(crate) fn placement_value(
-    backend: &str,
-    mux_session: &str,
-    mux_window_id: &str,
-    mux_pane_id: Option<&str>,
-    coding_agent: &str,
-    created_at: &str,
-) -> Value {
-    json!({
-        "backend": backend,
-        "mux_session": mux_session,
-        "mux_window_id": mux_window_id,
-        "mux_pane_id": mux_pane_id,
-        "coding_agent": coding_agent,
-        "created_at": created_at,
-    })
 }
 
 pub fn register_member(
@@ -87,7 +77,7 @@ pub fn register_member(
     skills: &[Value],
     placement: Option<&NewPlacement>,
     monitor: bool,
-) -> Result<Value, CafleetError> {
+) -> Result<RegisteredMember, CafleetError> {
     let fleet = super::fleets::fetch_fleet(conn, fleet_id)?
         .ok_or_else(|| CafleetError::Usage(format!("Fleet '{fleet_id}' not found.")))?;
     if fleet.deleted_at.is_some() {
@@ -114,13 +104,37 @@ pub fn register_member(
 
     let now = format_utc(now_utc());
     let card = member_card(name, description, skills, monitor);
-    let tx = conn.transaction().map_err(db_err)?;
-    tx.execute(
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(db_err)?;
+    if monitor && let Some(member_id) = active_monitor_member_id(&tx, fleet_id)? {
+        return Err(CafleetError::ActiveMonitorExists {
+            fleet_id,
+            member_id,
+        });
+    }
+    let inserted = tx.execute(
         "INSERT INTO members (fleet_id, name, description, status, registered_at, member_card_json) \
          VALUES (?1, ?2, ?3, 'active', ?4, ?5)",
         params![fleet_id, name, description, now, card],
-    )
-    .map_err(db_err)?;
+    );
+    if let Err(error) = inserted {
+        // SQLite reports column names for this (non-expression) index. Match
+        // its extended code and exact column, then require a monitor conflict
+        // in this same writer transaction. Other constraints retain their cause.
+        if monitor
+            && matches!(&error, rusqlite::Error::SqliteFailure(code, Some(message))
+                if code.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE
+                    && message == "UNIQUE constraint failed: members.fleet_id")
+            && let Ok(Some(member_id)) = active_monitor_member_id(&tx, fleet_id)
+        {
+            return Err(CafleetError::ActiveMonitorExists {
+                fleet_id,
+                member_id,
+            });
+        }
+        return Err(db_err(error));
+    }
     let member_id = tx.last_insert_rowid();
     if let Some(p) = placement {
         tx.execute(
@@ -140,14 +154,18 @@ pub fn register_member(
         .map_err(db_err)?;
     }
     tx.commit().map_err(db_err)?;
-    Ok(json!({"member_id": member_id, "name": name, "registered_at": now}))
+    Ok(RegisteredMember {
+        member_id,
+        name: name.into(),
+        registered_at: now,
+    })
 }
 
 pub fn get_member(
     conn: &Connection,
     member_id: i64,
     fleet_id: i64,
-) -> Result<Option<Value>, CafleetError> {
+) -> Result<Option<MemberRecord>, CafleetError> {
     let row = conn
         .query_row(
             &format!(
@@ -161,72 +179,23 @@ pub fn get_member(
             ),
             params![member_id, fleet_id],
             |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, bool>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, Option<String>>(7)?,
-                    row.get::<_, Option<String>>(8)?,
-                    row.get::<_, Option<String>>(9)?,
-                    row.get::<_, Option<String>>(10)?,
-                    row.get::<_, Option<String>>(11)?,
-                    row.get::<_, bool>(12)?,
-                ))
+                let backend: Option<String> = row.get(6)?;
+                Ok(MemberRecord {
+                    member_id,
+                    fleet_id,
+                    name: row.get(0)?,
+                    description: row.get(1)?,
+                    status: row.get(2)?,
+                    registered_at: row.get(3)?,
+                    kind: member_kind(row.get(5)?, row.get(12)?),
+                    skills: skills_from_card(&row.get::<_, String>(4)?),
+                    placement: backend.map(|_| Placement::from_row(row, 6)).transpose()?,
+                })
             },
         )
         .optional()
         .map_err(db_err)?;
-    Ok(row.map(
-        |(
-            name,
-            description,
-            status,
-            registered_at,
-            card,
-            is_director,
-            backend,
-            session,
-            window,
-            pane,
-            agent,
-            created,
-            is_monitor,
-        )| {
-            let placement = match backend {
-                None => Value::Null,
-                Some(backend) => placement_value(
-                    &backend,
-                    session
-                        .as_deref()
-                        .expect("placement row carries mux_session"),
-                    window
-                        .as_deref()
-                        .expect("placement row carries mux_window_id"),
-                    pane.as_deref(),
-                    agent
-                        .as_deref()
-                        .expect("placement row carries coding_agent"),
-                    created
-                        .as_deref()
-                        .expect("placement row carries created_at"),
-                ),
-            };
-            json!({
-                "member_id": member_id,
-                "name": name,
-                "description": description,
-                "status": status,
-                "registered_at": registered_at,
-                "kind": derive_member_kind(is_director, is_monitor),
-                "skills": card_skills(&card),
-                "placement": placement,
-            })
-        },
-    ))
+    Ok(row)
 }
 
 /// The fleet's single `status='active'` member whose card carries the
@@ -299,7 +268,7 @@ pub fn update_placement_pane_id(
     conn: &mut Connection,
     member_id: i64,
     pane_id: &str,
-) -> Result<Option<Value>, CafleetError> {
+) -> Result<Option<Placement>, CafleetError> {
     let changed = conn
         .execute(
             "UPDATE member_placements SET mux_pane_id=?1 WHERE member_id=?2",
@@ -313,16 +282,7 @@ pub fn update_placement_pane_id(
         "SELECT backend, mux_session, mux_window_id, mux_pane_id, coding_agent, created_at \
          FROM member_placements WHERE member_id=?1",
         [member_id],
-        |row| {
-            Ok(placement_value(
-                &row.get::<_, String>(0)?,
-                &row.get::<_, String>(1)?,
-                &row.get::<_, String>(2)?,
-                row.get::<_, Option<String>>(3)?.as_deref(),
-                &row.get::<_, String>(4)?,
-                &row.get::<_, String>(5)?,
-            ))
-        },
+        |row| Placement::from_row(row, 0),
     )
     .optional()
     .map_err(db_err)
@@ -345,42 +305,44 @@ pub fn get_member_names(
     conn: &Connection,
     member_ids: &[i64],
 ) -> Result<BTreeMap<i64, String>, CafleetError> {
+    let ids = member_ids
+        .iter()
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>();
+    let ids = ids.into_iter().collect::<Vec<_>>();
     let mut names = BTreeMap::new();
-    for &member_id in member_ids {
-        let name: Option<String> = conn
-            .query_row(
-                "SELECT name FROM members WHERE member_id=?1",
-                [member_id],
-                |row| row.get(0),
-            )
-            .optional()
+    for chunk in ids.chunks(500) {
+        let placeholders = vec!["?"; chunk.len()].join(",");
+        let mut statement = conn
+            .prepare(&format!(
+                "SELECT member_id, name FROM members WHERE member_id IN ({placeholders})"
+            ))
             .map_err(db_err)?;
-        if let Some(name) = name {
-            names.insert(member_id, name);
-        }
+        let rows = statement
+            .query_map(rusqlite::params_from_iter(chunk), |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(db_err)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(db_err)?;
+        names.extend(rows);
     }
     Ok(names)
-}
-
-struct RosterRow {
-    member_id: i64,
-    name: String,
-    status: String,
-    is_director: bool,
-    is_monitor: bool,
-    placement: Option<Value>,
-    last_sent: Option<String>,
-    last_recv: Option<String>,
-    last_ack: Option<String>,
-    description: String,
-    registered_at: String,
 }
 
 fn roster_rows(
     conn: &Connection,
     fleet_id: i64,
     include_message_holders: bool,
-) -> Result<Vec<RosterRow>, CafleetError> {
+    activity: bool,
+) -> Result<Vec<MemberActivity>, CafleetError> {
+    let activity_columns = if activity {
+        ", (SELECT MAX(created_at) FROM messages WHERE from_member_id=m.member_id), \
+          (SELECT MAX(created_at) FROM messages WHERE owner_member_id=m.member_id AND type='unicast'), \
+          (SELECT MAX(status_timestamp) FROM messages WHERE owner_member_id=m.member_id AND type='unicast' AND status_state='completed')"
+    } else {
+        ""
+    };
     let mut stmt = conn
         .prepare(&format!(
             "SELECT m.member_id, m.name, m.status, \
@@ -388,13 +350,8 @@ fn roster_rows(
                            WHERE f.fleet_id=m.fleet_id AND f.director_member_id=m.member_id), \
                     p.backend, p.mux_session, p.mux_window_id, p.mux_pane_id, p.coding_agent, \
                     p.created_at, \
-                    (SELECT MAX(created_at) FROM messages WHERE from_member_id=m.member_id), \
-                    (SELECT MAX(created_at) FROM messages \
-                     WHERE owner_member_id=m.member_id AND type='unicast'), \
-                    (SELECT MAX(status_timestamp) FROM messages \
-                     WHERE owner_member_id=m.member_id AND type='unicast' \
-                       AND status_state='completed'), \
-                    m.description, m.registered_at, {IS_MONITOR_COLUMN} \
+                    m.description, m.registered_at, {IS_MONITOR_COLUMN}, m.member_card_json \
+                    {activity_columns} \
              FROM members m LEFT JOIN member_placements p ON p.member_id=m.member_id \
              WHERE m.fleet_id=?1 AND (m.status='active' OR (?2 AND EXISTS( \
                    SELECT 1 FROM messages WHERE owner_member_id=m.member_id))) \
@@ -404,29 +361,22 @@ fn roster_rows(
     let rows = stmt
         .query_map(params![fleet_id, include_message_holders], |row| {
             let backend: Option<String> = row.get(4)?;
-            let placement = match backend {
-                None => None,
-                Some(backend) => Some(placement_value(
-                    &backend,
-                    &row.get::<_, String>(5)?,
-                    &row.get::<_, String>(6)?,
-                    row.get::<_, Option<String>>(7)?.as_deref(),
-                    &row.get::<_, String>(8)?,
-                    &row.get::<_, String>(9)?,
-                )),
-            };
-            Ok(RosterRow {
-                member_id: row.get(0)?,
-                name: row.get(1)?,
-                status: row.get(2)?,
-                is_director: row.get(3)?,
-                is_monitor: row.get(15)?,
-                placement,
-                last_sent: row.get(10)?,
-                last_recv: row.get(11)?,
-                last_ack: row.get(12)?,
-                description: row.get(13)?,
-                registered_at: row.get(14)?,
+            Ok(MemberActivity {
+                member: MemberRecord {
+                    member_id: row.get(0)?,
+                    fleet_id,
+                    name: row.get(1)?,
+                    status: row.get::<_, MemberStatus>(2)?,
+                    kind: member_kind(row.get(3)?, row.get(12)?),
+                    placement: backend.map(|_| Placement::from_row(row, 4)).transpose()?,
+                    description: row.get(10)?,
+                    registered_at: row.get(11)?,
+                    skills: skills_from_card(&row.get::<_, String>(13)?),
+                },
+                last_sent: if activity { row.get(14)? } else { None },
+                last_recv: if activity { row.get(15)? } else { None },
+                last_ack: if activity { row.get(16)? } else { None },
+                idle: None,
             })
         })
         .map_err(db_err)?
@@ -435,53 +385,32 @@ fn roster_rows(
     Ok(rows)
 }
 
-fn idle_seconds(row: &RosterRow, now: chrono::DateTime<chrono::Utc>) -> Option<i64> {
+fn idle_seconds(row: &MemberActivity, now: chrono::DateTime<chrono::Utc>) -> Option<i64> {
     let latest = [&row.last_sent, &row.last_recv, &row.last_ack]
         .into_iter()
         .flatten()
         .max()?;
     let parsed = parse_lenient(latest).ok()?;
-    Some((now - parsed).num_seconds())
+    Some((now - parsed).num_seconds().max(0))
 }
 
-pub fn list_members(conn: &Connection, fleet_id: i64) -> Result<Vec<Value>, CafleetError> {
+pub fn list_members(conn: &Connection, fleet_id: i64) -> Result<Vec<MemberActivity>, CafleetError> {
     let now = now_utc();
-    Ok(roster_rows(conn, fleet_id, false)?
-        .into_iter()
-        .map(|row| {
-            let idle = idle_seconds(&row, now);
-            json!({
-                "member_id": row.member_id,
-                "name": row.name,
-                "kind": derive_member_kind(row.is_director, row.is_monitor),
-                "placement": row.placement.clone().unwrap_or(Value::Null),
-                "last_sent": row.last_sent,
-                "last_recv": row.last_recv,
-                "last_ack": row.last_ack,
-                "idle": idle,
-            })
-        })
-        .collect())
+    let mut rows = roster_rows(conn, fleet_id, false, true)?;
+    for row in &mut rows {
+        row.idle = idle_seconds(row, now);
+    }
+    Ok(rows)
 }
 
 pub fn list_roster(
     conn: &Connection,
     fleet_id: i64,
     include_message_holders: bool,
-) -> Result<Vec<Value>, CafleetError> {
-    Ok(roster_rows(conn, fleet_id, include_message_holders)?
+) -> Result<Vec<MemberRecord>, CafleetError> {
+    Ok(roster_rows(conn, fleet_id, include_message_holders, false)?
         .into_iter()
-        .map(|row| {
-            json!({
-                "member_id": row.member_id,
-                "name": row.name,
-                "description": row.description,
-                "status": row.status,
-                "registered_at": row.registered_at,
-                "kind": derive_member_kind(row.is_director, row.is_monitor),
-                "placement": row.placement.clone().unwrap_or(Value::Null),
-            })
-        })
+        .map(|row| row.member)
         .collect())
 }
 
@@ -513,6 +442,7 @@ mod tests {
             Some(&placement(Some("%2"))),
             false,
         )
+        .map(|record| crate::presentation::registered_member(&record))
         .unwrap();
         assert!(result["member_id"].as_i64().is_some());
         assert_eq!(result["name"], "analyst");
@@ -549,11 +479,13 @@ mod tests {
             Some(&placement(Some("%2"))),
             false,
         )
+        .map(|record| crate::presentation::registered_member(&record))
         .unwrap();
         let member_id = result["member_id"].as_i64().unwrap();
         let ts = result["registered_at"].as_str().unwrap().to_string();
 
         let member = broker::get_member(&conn, member_id, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::member))
             .unwrap()
             .unwrap();
         let expected = format!(
@@ -577,10 +509,10 @@ mod tests {
             Some(&placement(Some("%2"))),
             false,
         )
-        .unwrap()["member_id"]
-            .as_i64()
-            .unwrap();
+        .unwrap()
+        .member_id;
         let member = broker::get_member(&conn, member_id, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::member))
             .unwrap()
             .unwrap();
         assert_eq!(member["skills"], json!(["python", "sql"]));
@@ -591,22 +523,22 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        let member_id = broker::register_member(
-            &mut conn,
-            fleet_id,
-            "ghost",
-            "d",
-            &[],
-            None,
-            false,
-        )
-        .unwrap()["member_id"]
-            .as_i64()
-            .unwrap();
+        let member_id =
+            broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None, false)
+                .unwrap()
+                .member_id;
         let member = broker::get_member(&conn, member_id, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::member))
             .unwrap()
             .unwrap();
         assert_eq!(member["placement"], Value::Null);
+        let ts = member["registered_at"].as_str().unwrap();
+        assert_eq!(
+            format_json(&member),
+            format!(
+                r#"{{"member_id":{member_id},"name":"ghost","description":"d","status":"active","registered_at":"{ts}","kind":"member","skills":[],"placement":null}}"#
+            )
+        );
     }
 
     #[test]
@@ -659,6 +591,7 @@ mod tests {
         );
 
         broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None, false)
+            .map(|record| crate::presentation::registered_member(&record))
             .expect("a placementless registration skips the invariant guard");
     }
 
@@ -716,12 +649,14 @@ mod tests {
 
         assert!(
             broker::get_member(&conn, member_id, fleet_b)
+                .map(|record| record.as_ref().map(crate::presentation::member))
                 .unwrap()
                 .is_none()
         );
         broker::deregister_member(&mut conn, member_id).unwrap();
         assert!(
             broker::get_member(&conn, member_id, fleet_a)
+                .map(|record| record.as_ref().map(crate::presentation::member))
                 .unwrap()
                 .is_none()
         );
@@ -735,28 +670,23 @@ mod tests {
         let member_id = register(&mut conn, fleet_id, "worker", None);
 
         let updated = broker::update_placement_pane_id(&mut conn, member_id, "%9")
+            .map(|record| record.as_ref().map(crate::presentation::placement))
             .unwrap()
             .unwrap();
         assert_eq!(updated["mux_pane_id"], "%9");
         let member = broker::get_member(&conn, member_id, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::member))
             .unwrap()
             .unwrap();
         assert_eq!(member["placement"]["mux_pane_id"], "%9");
 
-        let placementless = broker::register_member(
-            &mut conn,
-            fleet_id,
-            "ghost",
-            "d",
-            &[],
-            None,
-            false,
-        )
-        .unwrap()["member_id"]
-            .as_i64()
-            .unwrap();
+        let placementless =
+            broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None, false)
+                .unwrap()
+                .member_id;
         assert!(
             broker::update_placement_pane_id(&mut conn, placementless, "%1")
+                .map(|record| record.as_ref().map(crate::presentation::placement))
                 .unwrap()
                 .is_none()
         );
@@ -800,15 +730,21 @@ mod tests {
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
         let ghost_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None, false)
-            .unwrap()["member_id"]
-            .as_i64()
-            .unwrap();
+            .unwrap()
+            .member_id;
 
         let notifier = FakeNotifier::succeeding();
         let sent = common::send(&mut conn, &notifier, director_id, member_id, "hi");
         let message_id = sent["message"]["message_id"].as_i64().unwrap();
 
-        let rows = broker::list_members(&conn, fleet_id).unwrap();
+        let rows = broker::list_members(&conn, fleet_id)
+            .map(|records| {
+                records
+                    .iter()
+                    .map(crate::presentation::member_activity)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
         assert_eq!(
             rows.len(),
             4,
@@ -835,7 +771,14 @@ mod tests {
         assert_eq!(ghost["idle"], Value::Null);
 
         broker::ack_message(&mut conn, message_id).unwrap();
-        let rows = broker::list_members(&conn, fleet_id).unwrap();
+        let rows = broker::list_members(&conn, fleet_id)
+            .map(|records| {
+                records
+                    .iter()
+                    .map(crate::presentation::member_activity)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
         let worker = rows.iter().find(|r| r["member_id"] == member_id).unwrap();
         assert!(worker["last_ack"].is_string());
     }
@@ -847,7 +790,14 @@ mod tests {
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
         let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
         broker::deregister_member(&mut conn, member_id).unwrap();
-        let rows = broker::list_members(&conn, fleet_id).unwrap();
+        let rows = broker::list_members(&conn, fleet_id)
+            .map(|records| {
+                records
+                    .iter()
+                    .map(crate::presentation::member_activity)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
         assert!(rows.iter().all(|r| r["member_id"] != member_id));
     }
 
@@ -891,6 +841,7 @@ mod tests {
         );
 
         let monitor = broker::get_member(&conn, monitor_id, fleet_id)
+            .map(|record| record.as_ref().map(crate::presentation::member))
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -951,15 +902,32 @@ mod tests {
         ];
 
         for (id, kind) in expected {
-            let member = broker::get_member(&conn, id, fleet_id).unwrap().unwrap();
+            let member = broker::get_member(&conn, id, fleet_id)
+                .map(|record| record.as_ref().map(crate::presentation::member))
+                .unwrap()
+                .unwrap();
             assert_eq!(member["kind"], kind, "get_member kind for member {id}");
         }
-        let rows = broker::list_members(&conn, fleet_id).unwrap();
+        let rows = broker::list_members(&conn, fleet_id)
+            .map(|records| {
+                records
+                    .iter()
+                    .map(crate::presentation::member_activity)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
         for (id, kind) in expected {
             let row = rows.iter().find(|r| r["member_id"] == id).unwrap();
             assert_eq!(row["kind"], kind, "list_members kind for member {id}");
         }
-        let roster = broker::list_roster(&conn, fleet_id, false).unwrap();
+        let roster = broker::list_roster(&conn, fleet_id, false)
+            .map(|records| {
+                records
+                    .iter()
+                    .map(crate::presentation::roster_member)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
         for (id, kind) in expected {
             let row = roster.iter().find(|r| r["member_id"] == id).unwrap();
             assert_eq!(row["kind"], kind, "list_roster kind for member {id}");
@@ -978,10 +946,24 @@ mod tests {
         broker::deregister_member(&mut conn, holder_id).unwrap();
         broker::deregister_member(&mut conn, silent_id).unwrap();
 
-        let active_only = broker::list_roster(&conn, fleet_id, false).unwrap();
+        let active_only = broker::list_roster(&conn, fleet_id, false)
+            .map(|records| {
+                records
+                    .iter()
+                    .map(crate::presentation::roster_member)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
         assert!(active_only.iter().all(|r| r["member_id"] != holder_id));
 
-        let with_holders = broker::list_roster(&conn, fleet_id, true).unwrap();
+        let with_holders = broker::list_roster(&conn, fleet_id, true)
+            .map(|records| {
+                records
+                    .iter()
+                    .map(crate::presentation::roster_member)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
         let holder = with_holders
             .iter()
             .find(|r| r["member_id"] == holder_id)
@@ -992,5 +974,123 @@ mod tests {
             with_holders.iter().all(|r| r["member_id"] != silent_id),
             "a deregistered member without messages stays hidden"
         );
+    }
+}
+
+#[cfg(test)]
+mod compatibility_regressions {
+    use super::*;
+
+    #[test]
+    fn card_skills_keeps_legacy_empty_fallback_for_broken_missing_or_non_array_values() {
+        for raw in [
+            "not JSON",
+            "{",
+            "null",
+            "[]",
+            "{}",
+            r#"{"skills":null}"#,
+            r#"{"skills":"rust"}"#,
+            r#"{"skills":{}}"#,
+            r#"{"skills":42}"#,
+        ] {
+            assert_eq!(skills_from_card(raw), Vec::<Value>::new(), "{raw}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod step6_behavior_regressions {
+    use super::*;
+
+    fn activity(sent: Option<&str>, received: Option<&str>, ack: Option<&str>) -> MemberActivity {
+        MemberActivity {
+            member: MemberRecord {
+                member_id: 1,
+                fleet_id: 1,
+                name: "worker".into(),
+                description: String::new(),
+                registered_at: String::new(),
+                status: MemberStatus::Active,
+                kind: MemberKind::Member,
+                skills: vec![],
+                placement: None,
+            },
+            last_sent: sent.map(str::to_owned),
+            last_recv: received.map(str::to_owned),
+            last_ack: ack.map(str::to_owned),
+            idle: None,
+        }
+    }
+
+    #[test]
+    fn step6_idle_clamps_future_activity_to_zero() {
+        let now = parse_lenient("2026-01-01T00:00:00Z").unwrap();
+        for row in [
+            activity(Some("2026-01-01T00:01:00Z"), None, None),
+            activity(None, Some("2026-01-01T00:01:00Z"), None),
+            activity(None, None, Some("2026-01-01T00:01:00Z")),
+        ] {
+            assert_eq!(idle_seconds(&row, now), Some(0));
+        }
+    }
+
+    #[test]
+    fn step6_idle_null_and_invalid_maximum_do_not_fall_back_to_older_valid_times() {
+        let now = parse_lenient("2026-01-01T00:00:00Z").unwrap();
+        assert_eq!(idle_seconds(&activity(None, None, None), now), None);
+        for row in [
+            activity(Some("z-invalid"), Some("2025-12-31T23:59:50Z"), None),
+            activity(None, Some("z-invalid"), Some("2025-12-31T23:59:50Z")),
+        ] {
+            assert_eq!(idle_seconds(&row, now), None);
+        }
+    }
+
+    #[test]
+    fn step6_idle_selects_raw_lexicographic_maximum_before_parsing_offsets() {
+        let now = parse_lenient("2026-01-01T00:00:00Z").unwrap();
+        let row = activity(
+            Some("2026-01-01T08:00:00+09:00"),
+            Some("2025-12-31T23:59:50Z"),
+            None,
+        );
+        assert_eq!(idle_seconds(&row, now), Some(3600));
+    }
+
+    #[test]
+    fn step6_idle_preserves_fractional_second_truncation() {
+        let now = parse_lenient("2026-01-01T00:00:01.900000+00:00").unwrap();
+        let row = activity(Some("2026-01-01T00:00:00.950000+00:00"), None, None);
+        assert_eq!(idle_seconds(&row, now), Some(0));
+        let row = activity(None, None, Some("2025-12-31T23:59:59.950000+00:00"));
+        assert_eq!(idle_seconds(&row, now), Some(1));
+    }
+}
+
+#[cfg(test)]
+mod name_lookup_tests {
+    use super::*;
+    use crate::broker::test_support as common;
+
+    #[test]
+    fn names_deduplicate_ids_across_batch_boundaries() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate_to_head(&mut conn).unwrap();
+        let (fleet, _) = common::create_fleet(&mut conn, "names");
+        for id in 10000..11001_i64 {
+            conn.execute("INSERT INTO members(member_id,fleet_id,name,description,status,registered_at,member_card_json) VALUES (?1,?2,?3,'','deregistered','raw','{}')",
+                params![id,fleet,format!("member-{id}")]).unwrap();
+        }
+        for count in [0_usize, 1, 500, 501, 1001] {
+            let ids: Vec<_> = (10000..10000 + count as i64).rev().collect();
+            let repeated: Vec<_> = ids.iter().copied().cycle().take(count * 4).collect();
+            let expected = ids.iter().map(|&id| (id, format!("member-{id}"))).collect();
+            assert_eq!(get_member_names(&conn, &repeated).unwrap(), expected);
+        }
+        assert!(get_member_names(&conn, &[i64::MAX]).unwrap().is_empty());
+        let missing = Connection::open_in_memory().unwrap();
+        assert!(get_member_names(&missing, &[]).unwrap().is_empty());
+        assert!(get_member_names(&missing, &[1]).is_err());
     }
 }

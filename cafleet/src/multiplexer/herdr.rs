@@ -9,8 +9,8 @@ use std::rc::Rc;
 use serde_json::Value;
 
 use super::{
-    CommandRunner, ESC_SETTLE_DELAY, MultiplexerContext, MultiplexerError, RunError, SUBMIT_DELAY,
-    build_wake_payload,
+    CommandRunner, ESC_SETTLE_DELAY, MultiplexerContext, MultiplexerError, PaneCleanup,
+    PaneOwnership, RunError, SUBMIT_DELAY, WakeEntry, build_wake_payload_from_entries,
 };
 
 const PANE_NOT_FOUND: &str = "pane_not_found";
@@ -195,15 +195,13 @@ impl HerdrMultiplexer {
         env: &[(String, String)],
         command: &[String],
     ) -> Result<String, MultiplexerError> {
-        let cwd = std::env::current_dir()
-            .map_err(|e| {
-                MultiplexerError::new(format!(
-                    "cannot resolve the working directory for pane spawn: {e}"
-                ))
-            })?
-            .display()
-            .to_string();
-        let result = self.run_json(&herdr_argv(&["herdr", "pane", "list"]), None)?;
+        let cwd = std::env::current_dir().map_err(|e| {
+            MultiplexerError::new(format!(
+                "cannot resolve the working directory for pane spawn: {e}"
+            ))
+        })?;
+        let cwd = cwd.display().to_string();
+        let result = parse_envelope(&self.run(&herdr_argv(&["herdr", "pane", "list"]), None)?)?;
         let panes = result["panes"]
             .as_array()
             .ok_or_else(|| MultiplexerError::new("herdr pane list missing 'panes' field"))?;
@@ -217,17 +215,23 @@ impl HerdrMultiplexer {
         }
         let new_pane_id = match column.iter().max() {
             None => self.split_pane(&reference.pane_id, "right", &cwd, env)?,
-            Some(target) => {
-                let pane = self.split_pane(target, "down", &cwd, env)?;
-                let _ = self.resize_tab_column(&reference.pane_id);
-                pane
-            }
+            Some(target) => self.split_pane(target, "down", &cwd, env)?,
         };
-        self.run(
-            &herdr_argv(&["herdr", "pane", "run", &new_pane_id, &shlex_join(command)]),
-            None,
-        )?;
-        Ok(new_pane_id)
+        let mut pane = PaneOwnership::new(new_pane_id.clone(), |id| self.kill_pane(id, true));
+        let result: Result<(), MultiplexerError> = (|| {
+            if !column.is_empty() {
+                let _ = self.resize_tab_column(&reference.pane_id);
+            }
+            self.run(
+                &herdr_argv(&["herdr", "pane", "run", &new_pane_id, &shlex_join(command)]),
+                None,
+            )?;
+            Ok(())
+        })();
+        if let Err(error) = result {
+            return Err(error.with_pane_cleanup(pane.rollback()));
+        }
+        Ok(pane.finish())
     }
 
     fn split_pane(
@@ -252,18 +256,29 @@ impl HerdrMultiplexer {
             args.push("--env".to_string());
             args.push(format!("{key}={value}"));
         }
-        let result = self.run_json(&args, None)?;
-        Ok(str_field(&result["pane"], "pane split", "pane_id")?.to_string())
+        let result = self
+            .run(&args, None)
+            .and_then(|raw| parse_envelope(&raw))
+            .map_err(|error| error.with_pane_cleanup(PaneCleanup::Unknown))?;
+        let id = str_field(&result["pane"], "pane split", "pane_id")
+            .map_err(|error| error.with_pane_cleanup(PaneCleanup::Unknown))?;
+        if id.trim().is_empty() {
+            return Err(
+                MultiplexerError::new("herdr pane split returned an empty pane ID")
+                    .with_pane_cleanup(PaneCleanup::Unknown),
+            );
+        }
+        Ok(id.to_string())
     }
 
     fn read_tab_layout(
         &self,
         anchor_pane_id: &str,
     ) -> Result<(Vec<Value>, Vec<Value>), MultiplexerError> {
-        let result = self.run_json(
+        let result = parse_envelope(&self.run(
             &herdr_argv(&["herdr", "pane", "layout", "--pane", anchor_pane_id]),
             None,
-        )?;
+        )?)?;
         let layout = &result["layout"];
         let panes = layout["panes"]
             .as_array()
@@ -371,14 +386,14 @@ impl HerdrMultiplexer {
 
     /// Esc first: the wake targets the monitor member's own pane, which can
     /// be parked on a permission prompt.
-    pub fn send_wake_trigger(
+    pub fn send_wake_entries(
         &self,
         target_pane_id: &str,
         fleet_id: i64,
-        members: &[Value],
-        director: &Value,
+        members: &[WakeEntry<'_>],
+        director: &WakeEntry<'_>,
     ) -> Result<bool, MultiplexerError> {
-        let payload = build_wake_payload(fleet_id, members, director)?;
+        let payload = build_wake_payload_from_entries(fleet_id, members, director)?;
         Ok(self.best_effort(|| {
             self.send_esc(target_pane_id, false)?;
             self.run(
@@ -630,12 +645,15 @@ fn right_column(panes: &[Value]) -> Result<Vec<Value>, MultiplexerError> {
 
 #[cfg(test)]
 mod tests {
+    use crate::multiplexer::WakeEntry;
     use serde_json::json;
 
     use crate::multiplexer::test_support::{
         FakeRunner, argv, env, herdr_envelope, herdr_error_stderr, run_event, sleep_event,
     };
-    use crate::multiplexer::{HerdrMultiplexer, MultiplexerContext, RunError, build_wake_payload};
+    use crate::multiplexer::{
+        HerdrMultiplexer, MultiplexerContext, RunError, build_wake_payload_from_entries,
+    };
 
     fn herdr_env() -> std::collections::HashMap<String, String> {
         env(&[("HERDR_ENV", "1")])
@@ -943,27 +961,27 @@ mod tests {
     }
 
     #[test]
-    fn send_wake_trigger_is_esc_then_run() {
+    fn send_wake_entries_is_esc_then_run() {
         let runner = FakeRunner::with_binary("herdr");
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        let members = [json!({
-            "member_id": 4,
-            "name": "worker",
-            "coding_agent": "codex",
-            "pending_count": 0,
-        })];
-        let director = json!({
-            "member_id": 2,
-            "name": "Director",
-            "coding_agent": "claude",
-            "pending_count": 1,
-        });
+        let members = [WakeEntry {
+            member_id: 4,
+            name: "worker",
+            coding_agent: "codex",
+            pending_count: 0,
+        }];
+        let director = WakeEntry {
+            member_id: 2,
+            name: "Director",
+            coding_agent: "claude",
+            pending_count: 1,
+        };
         assert!(
-            mux.send_wake_trigger("w1:p9", 3, &members, &director)
+            mux.send_wake_entries("w1:p9", 3, &members, &director)
                 .unwrap()
         );
 
-        let payload = build_wake_payload(3, &members, &director).unwrap();
+        let payload = build_wake_payload_from_entries(3, &members, &director).unwrap();
         assert_eq!(
             runner.events(),
             vec![
@@ -1114,24 +1132,24 @@ mod tests {
     }
 
     #[test]
-    fn send_wake_trigger_remains_best_effort_on_delivery_failure() {
-        let members = [json!({
-            "member_id": 4,
-            "name": "worker",
-            "coding_agent": "codex",
-            "pending_count": 0,
-        })];
-        let director = json!({
-            "member_id": 2,
-            "name": "Director",
-            "coding_agent": "claude",
-            "pending_count": 0,
-        });
+    fn send_wake_entries_remains_best_effort_on_delivery_failure() {
+        let members = [WakeEntry {
+            member_id: 4,
+            name: "worker",
+            coding_agent: "codex",
+            pending_count: 0,
+        }];
+        let director = WakeEntry {
+            member_id: 2,
+            name: "Director",
+            coding_agent: "claude",
+            pending_count: 0,
+        };
 
         let runner = FakeRunner::without_binaries();
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
         assert!(
-            !mux.send_wake_trigger("w1:p9", 3, &members, &director)
+            !mux.send_wake_entries("w1:p9", 3, &members, &director)
                 .unwrap(),
             "herdr missing → Ok(false)"
         );
@@ -1143,7 +1161,7 @@ mod tests {
         }));
         let mux = HerdrMultiplexer::new(runner, herdr_env());
         assert!(
-            !mux.send_wake_trigger("w1:p9", 3, &members, &director)
+            !mux.send_wake_entries("w1:p9", 3, &members, &director)
                 .unwrap(),
             "a keystroke error stays Ok(false), never an Err"
         );

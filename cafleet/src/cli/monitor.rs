@@ -2,17 +2,17 @@
 //! guard, the in-process heartbeat loop, and the one-shot `scan` batch
 //! capture.
 
-use clap::{Args, Subcommand};
-use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
+use rusqlite::Connection;
 
-use super::helpers::{connect, emit, resolve_mux};
+use clap::{Args, Subcommand};
+
+use super::helpers::resolve_mux;
 use crate::broker;
+use crate::capture::{CaptureSnapshot, ScanEntry, write_scan};
 use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::multiplexer::Multiplexer;
-use crate::output::strip_ansi;
-use crate::time::{format_utc, now_utc};
+use crate::time::now_utc;
 
 #[derive(Args)]
 #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
@@ -52,24 +52,32 @@ enum MonitorCommand {
     },
 }
 
-fn require_live_fleet(conn: &rusqlite::Connection, fleet_id: i64) -> Result<Value, CafleetError> {
-    match broker::get_fleet(conn, fleet_id)? {
-        Some(fleet) if fleet["deleted_at"].is_null() => Ok(fleet),
+fn require_live_fleet(
+    conn: &rusqlite::Connection,
+    fleet_id: i64,
+) -> Result<broker::fleets::FleetRow, CafleetError> {
+    match broker::fleets::fetch_fleet(conn, fleet_id)? {
+        Some(fleet) if fleet.deleted_at.is_none() => Ok(fleet),
         _ => Err(CafleetError::App(format!("fleet {fleet_id} not found"))),
     }
 }
 
 /// Dispatch the two forms: the `scan` subcommand, else the loop (clap
 /// guarantees the loop positional whenever no subcommand is given).
-pub fn run(settings: &Settings, args: MonitorArgs) -> Result<(), CafleetError> {
+pub fn run(
+    conn: &mut Connection,
+    settings: &Settings,
+    args: MonitorArgs,
+) -> Result<(), CafleetError> {
     match args.command {
         Some(MonitorCommand::Scan {
             fleet_id,
             lines,
             ansi,
             json,
-        }) => scan(settings, fleet_id, lines, ansi, json),
+        }) => scan(conn, settings, fleet_id, lines, ansi, json),
         None => run_loop(
+            conn,
             settings,
             args.fleet_id
                 .expect("clap guarantees the loop positional when no subcommand is given"),
@@ -82,19 +90,19 @@ pub fn run(settings: &Settings, args: MonitorArgs) -> Result<(), CafleetError> {
 /// Requires a live fleet, then the multiplexer; blocks in the loop until
 /// stopped or displaced.
 fn run_loop(
+    conn: &mut Connection,
     settings: &Settings,
     fleet_id: i64,
     tick: i64,
     interval: Option<i64>,
 ) -> Result<(), CafleetError> {
-    let mut conn = connect(settings)?;
-    require_live_fleet(&conn, fleet_id)?;
+    require_live_fleet(conn, fleet_id)?;
     let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
     let mut out = std::io::stdout();
     crate::monitor::run_monitor_loop(
-        &mut conn,
+        conn,
         &mux,
         &mut out,
         fleet_id,
@@ -107,102 +115,61 @@ fn run_loop(
 /// first, then every other active placement-owning member ascending by
 /// member id. An annotated entry never aborts the scan; no DB writes.
 fn scan(
+    conn: &mut Connection,
     settings: &Settings,
     fleet_id: i64,
     lines: i64,
     ansi: bool,
     json_output: bool,
 ) -> Result<(), CafleetError> {
-    let conn = connect(settings)?;
-    let fleet = require_live_fleet(&conn, fleet_id)?;
+    let fleet = require_live_fleet(conn, fleet_id)?;
     let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
 
-    let director_member_id = fleet["director_member_id"].as_i64();
-    let members = broker::list_members(&conn, fleet_id)?;
-    let mut roster: Vec<&Value> = members
+    let director_member_id = fleet.director_member_id;
+    let members = broker::list_members(conn, fleet_id)?
+        .into_iter()
+        .map(|row| row.member)
+        .collect::<Vec<_>>();
+    let mut roster: Vec<_> = members
         .iter()
-        .filter(|member| member["member_id"].as_i64() == director_member_id)
+        .filter(|member| Some(member.member_id) == director_member_id)
         .collect();
-    let mut rest: Vec<&Value> = members
+    let mut rest: Vec<_> = members
         .iter()
-        .filter(|member| {
-            member["member_id"].as_i64() != director_member_id && !member["placement"].is_null()
-        })
+        .filter(|member| Some(member.member_id) != director_member_id && member.placement.is_some())
         .collect();
-    rest.sort_by_key(|member| member["member_id"].as_i64());
+    rest.sort_by_key(|member| Some(member.member_id));
     roster.extend(rest);
 
-    let mut sections = Vec::new();
     let mut entries = Vec::new();
     for member in roster {
-        let member_id = &member["member_id"];
-        let name = member["name"].as_str().expect("member rows carry a name");
-        let kind = member["kind"].as_str().expect("member rows carry a kind");
-        let placement = &member["placement"];
-        let coding_agent = placement["coding_agent"]
-            .as_str()
-            .expect("roster entries own a placement row recording coding_agent");
-        let pane_id = placement["mux_pane_id"].as_str();
-
-        let outcome = match pane_id {
+        let placement =
+            member
+                .placement
+                .as_ref()
+                .ok_or_else(|| CafleetError::InvalidStoredValue {
+                    field: "member placement".into(),
+                    value: member.member_id.to_string(),
+                })?;
+        let pane_id = placement.mux_pane_id.clone();
+        let outcome = match pane_id.as_deref() {
             None => Err("pane not available (pending placement)".to_string()),
             Some(pane) => mux
                 .capture_pane(pane, lines)
                 .map_err(|error| format!("capture failed: {error}"))
-                .map(|raw| if ansi { raw } else { strip_ansi(&raw) }),
+                .map(|raw| CaptureSnapshot::from_raw(&raw, ansi, now_utc())),
         };
-        match outcome {
-            Ok(content) => {
-                let pane = pane_id.expect("a successful capture has a pane");
-                let captured_at = format_utc(now_utc());
-                let digest = Sha256::digest(content.as_bytes());
-                let content_sha256: String =
-                    digest.iter().map(|byte| format!("{byte:02x}")).collect();
-                sections.push(format!(
-                    "=== {member_id} ({name}; kind={kind}; coding_agent={coding_agent}; \
-                     pane={pane}; captured_at={captured_at}) ===\n{content}"
-                ));
-                entries.push(json!({
-                    "member_id": member_id,
-                    "name": name,
-                    "kind": kind,
-                    "coding_agent": coding_agent,
-                    "pane_id": pane,
-                    "lines": lines,
-                    "content": content,
-                    "captured_at": captured_at,
-                    "content_sha256": content_sha256,
-                    "error": Value::Null,
-                }));
-            }
-            Err(annotation) => {
-                let pane_token = pane_id.unwrap_or("—");
-                sections.push(format!(
-                    "=== {member_id} ({name}; kind={kind}; coding_agent={coding_agent}; \
-                     pane={pane_token}) ===\n{annotation}"
-                ));
-                entries.push(json!({
-                    "member_id": member_id,
-                    "name": name,
-                    "kind": kind,
-                    "coding_agent": coding_agent,
-                    "pane_id": pane_id,
-                    "lines": lines,
-                    "content": Value::Null,
-                    "captured_at": Value::Null,
-                    "content_sha256": Value::Null,
-                    "error": annotation,
-                }));
-            }
-        }
+        entries.push(ScanEntry {
+            member_id: member.member_id,
+            name: member.name.clone(),
+            kind: member.kind,
+            coding_agent: placement.coding_agent.clone(),
+            pane_id,
+            lines,
+            outcome,
+        });
     }
-
-    if json_output {
-        emit(true, &Value::Array(entries), String::new);
-    } else {
-        println!("{}", sections.join("\n\n"));
-    }
-    Ok(())
+    write_scan(&mut std::io::stdout(), &entries, json_output)
 }

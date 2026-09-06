@@ -73,6 +73,7 @@ fn seeded_fleet(conn: &mut rusqlite::Connection) -> (i64, i64, i64, i64) {
         Some(&placed("%2")),
         false,
     )
+    .map(|record| cafleet::presentation::registered_member(&record))
     .unwrap()["member_id"]
         .as_i64()
         .unwrap();
@@ -85,6 +86,7 @@ fn seeded_fleet(conn: &mut rusqlite::Connection) -> (i64, i64, i64, i64) {
         Some(&placed("%3")),
         false,
     )
+    .map(|record| cafleet::presentation::registered_member(&record))
     .unwrap()["member_id"]
         .as_i64()
         .unwrap();
@@ -195,6 +197,7 @@ async fn the_roster_wraps_members_with_the_three_value_kind_union() {
         .unwrap()
         .expect("the bootstrap registers the monitor member");
     let holder_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", &[], None, false)
+        .map(|record| cafleet::presentation::registered_member(&record))
         .unwrap()["member_id"]
         .as_i64()
         .unwrap();
@@ -786,6 +789,7 @@ async fn post_monitor_wake_requests_a_forced_wake_with_the_pinned_error_contract
         "a stale heartbeat reads as not running"
     );
     let row = broker::read_monitor_runtime(&conn, fleet_id)
+        .map(|record| record.as_ref().map(cafleet::presentation::monitor_runtime))
         .unwrap()
         .unwrap();
     assert_eq!(
@@ -832,6 +836,7 @@ async fn post_monitor_wake_requests_a_forced_wake_with_the_pinned_error_contract
         .as_str()
         .expect("a UTC ISO string");
     let row = broker::read_monitor_runtime(&conn, fleet_id)
+        .map(|record| record.as_ref().map(cafleet::presentation::monitor_runtime))
         .unwrap()
         .unwrap();
     assert_eq!(
@@ -887,5 +892,183 @@ async fn the_spa_fallback_serves_index_except_for_reserved_prefixes() {
     assert!(
         !body.contains("<div id="),
         "reserved prefixes hard-404, got: {body}"
+    );
+}
+
+#[tokio::test]
+async fn timeline_broadcast_excludes_summary_through_two_delivery_ack_transitions() {
+    let dir = TempDir::new().unwrap();
+    let (url, mut conn) = migrated(&dir);
+    let (_, director, _, helper) = seeded_fleet(&mut conn);
+    broker::deregister_member(&mut conn, helper).unwrap();
+    let router = app(&url);
+    let (status, body) = call(
+        router.clone(),
+        "POST",
+        "/api/messages/send",
+        Some("1"),
+        Some(json!({"from_member_id":director,"to_member_id":"*","text":"broadcast"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let response = parsed(&body);
+    let summary_id = response["message_id"].as_i64().unwrap();
+    assert_eq!(
+        response["status"], "completed",
+        "broadcast response still represents the persisted summary"
+    );
+    let summary = broker::get_message(&conn, summary_id)
+        .map(|record| cafleet::presentation::message_envelope(&record))
+        .unwrap();
+    assert_eq!(summary["message"]["type"], "broadcast_summary");
+    assert!(summary["message"]["to_member_id"].is_null());
+    for acked in 0..=2 {
+        let (status, body) = call(router.clone(), "GET", "/api/timeline", Some("1"), None).await;
+        assert_eq!(status, StatusCode::OK);
+        let payload = parsed(&body);
+        assert_eq!(keys(&payload), ["messages"]);
+        let rows = payload["messages"].as_array().unwrap();
+        assert_eq!(
+            rows.len(),
+            2,
+            "completed summary is neither a recipient nor an ACK"
+        );
+        assert!(rows.iter().all(|r| r["type"] == "unicast"
+            && r["to_member_id"].is_i64()
+            && r["to_member_name"].is_string()
+            && r["origin_message_id"] == summary_id));
+        assert_eq!(
+            rows.iter().filter(|r| r["status"] == "completed").count(),
+            acked
+        );
+        assert_eq!(
+            broker::get_message(&conn, summary_id)
+                .map(|record| cafleet::presentation::message_envelope(&record))
+                .unwrap(),
+            summary
+        );
+        if let Some(row) = rows.iter().find(|r| r["status"] == "input_required") {
+            broker::ack_message(&mut conn, row["message_id"].as_i64().unwrap())
+                .map(|record| cafleet::presentation::message_envelope(&record))
+                .unwrap();
+        }
+    }
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM messages", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        3
+    );
+}
+
+#[tokio::test]
+async fn integrity_missing_sender_name_returns_500_without_a_panicked_task_detail() {
+    missing_message_name_is_an_integrity_error(true).await;
+}
+
+#[tokio::test]
+async fn integrity_missing_recipient_name_returns_500_without_a_panicked_task_detail() {
+    missing_message_name_is_an_integrity_error(false).await;
+}
+
+async fn missing_message_name_is_an_integrity_error(sender: bool) {
+    let dir = TempDir::new().unwrap();
+    let (url, mut conn) = migrated(&dir);
+    let (_, director, worker, _) = seeded_fleet(&mut conn);
+    broker::send_message(
+        &mut conn,
+        &NullNotifier,
+        200,
+        director,
+        &worker.to_string(),
+        "integrity",
+    )
+    .unwrap();
+    let absent = if sender { director } else { worker };
+    // Break only this isolated database. Keep a valid owner so the read
+    // reaches name resolution instead of being filtered out of the timeline.
+    conn.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+    if !sender {
+        conn.execute("UPDATE messages SET owner_member_id=?1", [director])
+            .unwrap();
+    }
+    conn.execute("DELETE FROM members WHERE member_id=?1", [absent])
+        .unwrap();
+    conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+    let (status, body) = call(app(&url), "GET", "/api/timeline", Some("1"), None).await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+    let payload = parsed(&body);
+    assert_eq!(keys(&payload), ["detail"]);
+    let detail = payload["detail"].as_str().unwrap();
+    assert!(
+        !detail.contains("panicked") && !detail.contains("internal error: task"),
+        "integrity errors must not originate from a panicked blocking task: {detail}"
+    );
+    assert!(!detail.trim().is_empty());
+}
+
+#[tokio::test]
+async fn integrity_invalid_message_status_is_500_in_inbox_sent_and_timeline() {
+    let dir = TempDir::new().unwrap();
+    let (url, mut conn) = migrated(&dir);
+    let (_, director, worker, _) = seeded_fleet(&mut conn);
+    broker::send_message(
+        &mut conn,
+        &NullNotifier,
+        200,
+        director,
+        &worker.to_string(),
+        "integrity",
+    )
+    .unwrap();
+    conn.execute_batch(
+        "PRAGMA ignore_check_constraints=ON; UPDATE messages SET status_state='corrupt-status';",
+    )
+    .unwrap();
+    for path in [
+        format!("/api/members/{worker}/inbox"),
+        format!("/api/members/{director}/sent"),
+        "/api/timeline".into(),
+    ] {
+        let (status, body) = call(app(&url), "GET", &path, Some("1"), None).await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{path}: {body}");
+        let payload = parsed(&body);
+        assert_eq!(keys(&payload), ["detail"]);
+        let detail = payload["detail"].as_str().unwrap();
+        assert!(
+            !detail.trim().is_empty() && !detail.contains("panicked"),
+            "{detail}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn integrity_invalid_member_status_is_500_instead_of_a_successful_roster_row() {
+    let dir = TempDir::new().unwrap();
+    let (url, mut conn) = migrated(&dir);
+    let (_, director, worker, _) = seeded_fleet(&mut conn);
+    broker::send_message(
+        &mut conn,
+        &NullNotifier,
+        200,
+        director,
+        &worker.to_string(),
+        "holder",
+    )
+    .unwrap();
+    conn.execute_batch("PRAGMA ignore_check_constraints=ON")
+        .unwrap();
+    conn.execute(
+        "UPDATE members SET status='corrupt-status' WHERE member_id=?1",
+        [worker],
+    )
+    .unwrap();
+    let (status, body) = call(app(&url), "GET", "/api/members", Some("1"), None).await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+    let payload = parsed(&body);
+    assert_eq!(keys(&payload), ["detail"]);
+    let detail = payload["detail"].as_str().unwrap();
+    assert!(
+        !detail.trim().is_empty() && !detail.contains("panicked"),
+        "{detail}"
     );
 }

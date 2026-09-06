@@ -1,8 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
-import { Boxes, ChevronRight, TriangleAlert } from "lucide-react";
+import { useCallback } from "react";
+import { Boxes, ChevronRight } from "lucide-react";
 import type { FleetListItem } from "../types";
 import { listFleets } from "../api";
-import { usePolling, POLL_INTERVAL_MS } from "../hooks/usePolling";
+import { useRefreshKey } from "../hooks/useRefreshKey";
+import { useResource } from "../hooks/useResource";
+import ResourceNotice from "./ResourceNotice";
 import AppHeader from "./AppHeader";
 import EmptyState from "./EmptyState";
 import Skeleton from "./Skeleton";
@@ -57,44 +59,22 @@ function FleetCardSkeleton() {
 }
 
 export default function FleetPicker({ onSelect }: FleetPickerProps) {
-  const [fleets, setFleets] = useState<FleetListItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [isPolling, setIsPolling] = useState(false);
-
-  const loadFleets = useCallback(async () => {
-    setIsPolling(true);
-    try {
-      const data = await listFleets();
-      setFleets(data);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load fleets");
-    } finally {
-      setLoading(false);
-      setIsPolling(false);
-    }
-  }, []);
-
-  const trigger = usePolling(loadFleets, POLL_INTERVAL_MS);
-
-  useEffect(() => {
-    void trigger();
-  }, [trigger]);
+  const { refreshKey, refresh } = useRefreshKey();
+  const load = useCallback((signal: AbortSignal) => listFleets({ signal }), []);
+  const resource = useResource({ key: "fleets", load, refreshKey });
+  const { state } = resource;
+  const fleets = state.data ?? [];
+  const loading = state.status === "loading";
+  const isPolling = loading || state.refreshing;
 
   return (
     <div className="flex min-h-screen flex-col bg-surface">
-      <AppHeader isPolling={isPolling} onRefresh={() => void trigger()} />
+      <AppHeader isPolling={isPolling} onRefresh={refresh} />
 
       <main className="mx-auto mt-8 w-full max-w-2xl flex-1 px-4 pb-8">
         <h1 className="text-xl font-semibold tracking-tight">Select a Fleet</h1>
 
-        {error && (
-          <div className="mt-4 flex items-start gap-2 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger">
-            <TriangleAlert size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
-            {error}
-          </div>
-        )}
+        {!loading && <ResourceNotice state={state} name="fleets" retry={resource.refresh} />}
 
         {loading ? (
           <div className="mt-4 flex flex-col gap-3">
@@ -102,7 +82,7 @@ export default function FleetPicker({ onSelect }: FleetPickerProps) {
             <FleetCardSkeleton />
             <FleetCardSkeleton />
           </div>
-        ) : fleets.length === 0 ? (
+        ) : state.status === "error" ? null : fleets.length === 0 ? (
           <EmptyState icon={Boxes} title="No fleets found.">
             <p className="text-xs text-text-muted">
               Run{" "}

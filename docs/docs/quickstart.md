@@ -1,41 +1,23 @@
 # Quickstart
 
-This page is a one-screen walkthrough that creates a CAFleet fleet, spawns
-two member panes, and sends a message between them. It starts from a clean
-machine: install the CLI, configure your coding agent, then run the
-walkthrough.
+Create a fleet, send a message, and close the team from your coding-agent
+pane inside tmux or herdr. Use the literal IDs returned by each command.
+Run each CAFleet command in its own shell-tool invocation.
 
 ## Install
 
-Prerequisites:
-
-| Requirement | Accepted | Notes |
-|---|---|---|
-| Platform | macOS (Apple Silicon) or Linux (x86_64 / aarch64) | One prebuilt binary per target — see the install block below |
-| Terminal multiplexer | tmux or herdr | Auto-detected — see [Multiplexer backends](spec/multiplexer-backends.md) |
-| Coding agent | `claude` (Claude Code), `codex` (OpenAI Codex CLI), or `opencode` | At least one; a mixed fleet may use all three — see [Coding agents](concepts/coding-agents.md) |
-
-Install the CLI with Homebrew, then run the setup — the single
-`cafleet setup` command migrates the database and installs the skills and
-presets for all three coding agents (pass `--coding-agent` to narrow the
-selection):
-
 ```bash
 brew install himkt/tap/cafleet
-cafleet setup
 ```
-
-Alternatively, download the archive for your platform from
-[GitHub Releases](https://github.com/himkt/cafleet/releases) —
-`cafleet-v<version>-<target>.tar.gz` for `aarch64-apple-darwin`,
-`x86_64-unknown-linux-musl`, or `aarch64-unknown-linux-musl` — then extract
-the single `cafleet` binary onto your `PATH` and run the same setup:
 
 ```bash
-tar -xzf cafleet-v<version>-<target>.tar.gz
-mv cafleet ~/.local/bin/
 cafleet setup
 ```
+
+Alternatively, extract the binary for your platform from
+[GitHub Releases](https://github.com/himkt/cafleet/releases) onto PATH, then
+run setup. Setup installs embedded skills and presets offline; use
+`--coding-agent` to select a backend.
 
 ## Configure
 
@@ -49,9 +31,9 @@ system:
 | `codex` (OpenAI Codex CLI) | `~/.codex/config.toml` | The `[sandbox_workspace_write]` entries below | The skills, plus `~/.codex/rules/cafleet.rules` | [The `cafleet` rules file](spec/coding-agent-backends.md#cafleet-rules-file) |
 | `opencode` | none | none required | The skills, plus the `cafleet` agent preset at `~/.opencode/agents/cafleet.md` | [Opencode](spec/coding-agent-backends.md#opencode) |
 
-The paths above are the defaults: the backend config-location variables
-`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, and `OPENCODE_CONFIG_DIR` relocate them,
-and `cafleet setup` installs to the same resolved directories — see
+The paths above are defaults. `CLAUDE_CONFIG_DIR` and `CODEX_HOME` relocate
+their skills and presets. `OPENCODE_CONFIG_DIR` relocates only the Opencode
+preset; its skills remain under `~/.config/opencode/skills`. See
 [Config-dir resolution](spec/cli-options.md#config-dir-resolution).
 
 The snippets below are the recommended starting points for the two backends
@@ -111,133 +93,98 @@ granted per directory, so each git worktree needs its own approval.
 
 ## Simple example — invoke from a coding agent
 
-For the simplest path, ask Claude Code or Codex to demonstrate CAFleet for
-you. Inside an agent, send the following prompt:
-
-```text
-I want to see how cafleet works.
-Please create a new team with two members using cafleet and let them ping-pong each other.
-After the demonstration, please shutdown the team.
-```
-
-The coding agent will invoke the `cafleet` skill, which guides it through the
-fleet-create / member-create / message-send loop and finally tears the team
-down.
+You can ask your agent: “Use the cafleet skill to create a team with two
+members, exchange a message, then shut down the team.” The skill manages
+the bootstrap and supervision protocol below.
 
 ## Raw CLI walkthrough
 
-If you would rather drive CAFleet from the shell directly, the commands below
-mirror what the skill does internally. Run them inside a tmux or herdr session —
-the `fleet create` and `member create` commands require one.
+This example uses Claude; [Codex and Opencode skill paths](concepts/coding-agents.md#complete-monitor-prompts)
+follow the same template. The example HOME is `/home/cafleet-demo` and the
+workspace is `/home/cafleet-demo/work/demo`. Replace those with your actual
+absolute paths, using `cafleet doctor --json` and
+[Config-dir resolution](spec/cli-options.md#config-dir-resolution) to locate
+the installed skill. Save the following as `monitor-prompt.md` in the workspace.
+Keep the four identity placeholders: fleet creation fills them in.
 
-:::details Expand the walkthrough
-
-The walkthrough pastes literal integer ids: fleet `1`, root Director `2`,
-monitor member `3`, members `4` and `5`, message `10`. Your ids will
-differ — substitute the integers your own commands print.
-
-Create a fleet. One command creates the fleet, your pane's root Director,
-and the monitor member ([Monitoring](concepts/monitoring.md)).
-`--coding-agent` is required — pass the backend the Director is
-actually running on (here, Claude Code); the monitor member inherits it.
-`--monitor-file` is required and carries the monitor's spawn prompt (a
-one-liner is enough for this demo); `--monitor-model` optionally pins the
-monitor's model:
-
-```bash
-echo "You are the monitor member. Follow your monitor role protocol." > monitor-prompt.md
-cafleet fleet create --name "demo" --coding-agent claude \
-  --monitor-file monitor-prompt.md --monitor-model haiku
-```
-
-```
-1 director=2 monitor=3
-```
-
-The line carries the fleet id (`1`), the root Director's member id (`2`),
-and the monitor member's id (`3`). If it scrolls away, run
-`cafleet fleet list` — it re-prints the fleet id and the Director id (the
-`DIRECTOR` column).
-
-Spawn two member panes. Each member's prompt is just a one-line greeting.
-Optional: add `--model <m>` (e.g. `--model sonnet`) to pin a member's LLM;
-omitted, the backend binary uses its own default model:
-
-```bash
-cafleet member create --fleet-id 1 \
-  --name "demo-member" \
-  --description "Demo member" \
-  "You are demo-member. Reply hello when polled."
-```
-
-```
-4 demo-member backend=claude pane=%8
+```text
+You are the monitor member in a CAFleet team.
+ROLE DEFINITION: Open /home/cafleet-demo/.claude/skills/cafleet/roles/monitor.md BEFORE any other action. Follow that role definition.
+Read /home/cafleet-demo/.claude/skills/cafleet/reference/coding-agent-overlays.md and resolve your own backend section, then load /home/cafleet-demo/.claude/skills/cafleet/SKILL.md as a member. Read /home/cafleet-demo/.claude/skills/cafleet/reference/base-dir.md before writing files. Do not start a nested workflow or team.
+FLEET ID: {fleet_id}
+DIRECTOR MEMBER ID: {director_member_id}
+YOUR MEMBER ID: {member_id}
+BASE: /home/cafleet-demo/work/demo
+CODING AGENT: {coding_agent}
+Send ready first. Launch the monitor loop in your own pane using the resolved backend lifecycle, retain its execution handle, and confirm the startup line before sending monitor live. Report a failed start without claiming live; the Director waits for monitor live before spawning ordinary members.
 ```
 
 ```bash
-cafleet member create --fleet-id 1 \
-  --name "reviewer" \
-  --description "Reviewer member" \
-  "You are reviewer. Reply hello when polled."
+cafleet fleet create --name demo --coding-agent claude --monitor-file /home/cafleet-demo/work/demo/monitor-prompt.md
 ```
 
-```
-5 reviewer backend=claude pane=%9
+The result contains the fleet, Director and monitor IDs. In the following
+example they are 1, 2 and 3. The monitor sends `ready`, starts the loop in
+its own pane, checks the startup line, then sends `monitor live`. Wait for
+that confirmed `monitor live` before creating an ordinary member. Codex
+retains the managed session and applies its bounded startup check; all
+backend lifecycle details remain in the installed monitor role.
+
+```bash
+cafleet member create --fleet-id 1 --name demo-member --description "Demo member" "Load the cafleet skill as a member and read its roles/member.md before acting.
+FLEET ID: {fleet_id}
+DIRECTOR MEMBER ID: {director_member_id}
+YOUR MEMBER ID: {member_id}
+CODING AGENT: {coding_agent}
+Send ready to your Director, then wait for instructions."
 ```
 
-List the fleet's roster — the new members' ids (`4` and `5`) appear
-alongside the Director and the bootstrap monitor member:
+Wait for the member's `ready`, then take a fresh capture and confirm the
+member is ready to receive work under the [capture gate](concepts/monitoring.md).
+If the returned member ID is 4, send it work through the broker:
+
+```bash
+cafleet message send --from-member-id 2 --to-member-id 4 "Please reply hello."
+```
+
+The member receives an inline preview, polls, acknowledges and replies.
+Read the Director inbox and acknowledge the returned message ID:
+
+```bash
+cafleet message poll 2
+```
+
+```bash
+cafleet message ack 10
+```
+
+Here 10 is an example: use the actual message ID. Follow the
+[Monitoring](concepts/monitoring.md) capture gate before further dispatch.
+
+## Shutdown
+
+Delete the monitor first to stop its wake source, then the ordinary member.
+Verify only the Director remains before deleting the fleet:
+
+```bash
+cafleet member delete 3
+```
+
+```bash
+cafleet member delete 4
+```
 
 ```bash
 cafleet member list 1
 ```
 
-```
-4 members:
-  member_id  name           kind      backend   pane_id  idle
-  ---------  -------------  --------  --------  -------  ----
-  2          Director       director  claude    %0       -
-  3          monitor        monitor   claude    %7       -
-  4          demo-member    member    claude    %8       -
-  5          reviewer       member    claude    %9       -
-```
-
-Send a message between the members — `demo-member` (`4`) messages
-`reviewer` (`5`):
-
 ```bash
-cafleet message send --from-member-id 4 --to-member-id 5 "hi"
-```
-
-```
-Message sent.
-[10 | from:4 | 2026-06-11T09:00:00.123456+00:00]
-hi
-```
-
-`reviewer` receives the message as a 2-line inline preview pushed into its
-tmux pane and the message lands in the broker queue. From here, the typical
-flow is `cafleet message poll` from the recipient and `cafleet message ack`
-once it has consumed the message.
-
-When you are done, tear the fleet down — the monitor member goes first
-(first-out), so its pane kill ends the wake loop before any other member
-disappears:
-
-```bash
-cafleet member delete 3
-cafleet member delete 4
-cafleet member delete 5
 cafleet fleet delete 1
 ```
 
+```bash
+cafleet fleet list
 ```
-Deleted fleet 1. Deregistered 1 members.
-```
 
-:::
-
-Where to go next:
-
-- [CLI options](spec/cli-options.md) — every subcommand and flag.
-- [How-to guides](how-to/mixed-backend-team.md) — prompt-first task guides.
+See [CLI options](spec/cli-options.md) for command contracts and
+[Mixed-backend teams](how-to/mixed-backend-team.md) for a larger example.

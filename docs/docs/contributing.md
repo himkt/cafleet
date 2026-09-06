@@ -16,6 +16,13 @@ path.
 | `design-docs/` | Numbered design documents (`NNNNNNN-<slug>/design-doc.md`). |
 | `docs/` | The rspress documentation-site project (standalone pnpm package `cafleet-docs`): `rspress.config.ts` and the operator-facing pages in its nested `docs/` content root. |
 
+## Rust boundaries
+
+Broker queries return typed records; CLI and HTTP presenters build wire JSON.
+Shared diagnosis returns schema and asset facts. Keep process and notification
+adapters in `runtime/`, and preserve command output and guard order when refactoring.
+Use the existing CLI integration tests to check behavior across these boundaries.
+
 ## Tech stack
 
 | Concern | Technology | Notes |

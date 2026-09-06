@@ -1,15 +1,18 @@
-import { useState, useLayoutEffect, useRef, useCallback } from "react";
+import { useLayoutEffect, useRef, useCallback, useMemo, useEffect } from "react";
 import type { ReactNode } from "react";
 import { Inbox } from "lucide-react";
-import type { TimelineMessage, TimelineEntry, Member } from "../types";
-import { fetchTimeline } from "../api";
-import { useRefreshKeyLoad } from "../hooks/useRefreshKeyLoad";
-import { entrySortKey } from "../timeline";
+import type { TimelineEntry, Member } from "../types";
+import { ApiError } from "../api";
+import type { FleetClient } from "../api";
+import { useResource } from "../hooks/useResource";
+import ResourceNotice from "./ResourceNotice";
+import { entrySortKey, groupMessages } from "../timeline";
 import TimelineMessageComponent from "./TimelineMessage";
 import EmptyState from "./EmptyState";
 import Skeleton from "./Skeleton";
 
-interface TimelineProps {
+export interface TimelineProps {
+  client: FleetClient;
   members: Member[];
   refreshKey: number;
 }
@@ -18,39 +21,6 @@ function entryKey(entry: TimelineEntry): string {
   return entry.kind === "unicast"
     ? String(entry.message.message_id)
     : `bcast:${entry.rows[0].origin_message_id ?? entry.rows[0].message_id}`;
-}
-
-function groupMessages(msgs: TimelineMessage[]): TimelineEntry[] {
-  const groups = new Map<number, TimelineMessage[]>();
-  const singletons: TimelineEntry[] = [];
-
-  for (const m of msgs) {
-    if (!m.origin_message_id) {
-      singletons.push({ kind: "unicast", message: m });
-      continue;
-    }
-    const existing = groups.get(m.origin_message_id);
-    if (existing) {
-      existing.push(m);
-    } else {
-      groups.set(m.origin_message_id, [m]);
-    }
-  }
-
-  const broadcasts = Array.from(
-    groups.values(),
-    (rows): TimelineEntry => ({
-      kind: "broadcast",
-      rows,
-      sortKey: rows.reduce((a, b) =>
-        a.created_at < b.created_at ? a : b,
-      ).created_at,
-    }),
-  );
-
-  return [...singletons, ...broadcasts].sort((a, b) =>
-    entrySortKey(a).localeCompare(entrySortKey(b)),
-  );
 }
 
 function dayLabel(iso: string): string {
@@ -87,30 +57,19 @@ function TimelineSkeleton() {
   );
 }
 
-export default function Timeline({ members, refreshKey }: TimelineProps) {
-  const [entries, setEntries] = useState<TimelineEntry[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function Timeline({ client, members, refreshKey }: TimelineProps) {
+  const load = useCallback((signal: AbortSignal) => client.fetchTimeline({ signal }), [client]);
+  const { state, refresh } = useResource({ key: `${client.fleetId}:timeline`, load, refreshKey });
+  useEffect(() => {
+    const error = state.error;
+    if (error instanceof ApiError && error.status === 404 && error.message === "Fleet not found") {
+      window.location.replace("#/fleets");
+    }
+  }, [state.error]);
+  const entries = useMemo(() => state.data ? groupMessages(state.data.messages) : [], [state.data]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const prevScrollHeightRef = useRef<number | null>(null);
-
-  // Timeline is driven entirely by Dashboard's `refreshKey` bump, which Dashboard's
-  // usePolling fires every POLL_INTERVAL_MS. Owning a second usePolling here would
-  // double the fetch rate without adding coverage. useRefreshKeyLoad owns the
-  // in-flight guard, which still matters because a refreshKey bump can land while a
-  // slow fetchTimeline() is pending.
-  const loadTimeline = useCallback(async () => {
-    try {
-      const data = await fetchTimeline();
-      setEntries(groupMessages(data.messages));
-    } catch {
-      /* swallow — preserve last-known entries; next bump re-attempts */
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useRefreshKeyLoad(loadTimeline, refreshKey);
 
   useLayoutEffect(() => {
     const el = scrollerRef.current;
@@ -125,15 +84,15 @@ export default function Timeline({ members, refreshKey }: TimelineProps) {
     prevScrollHeightRef.current = el.scrollHeight;
   }, [entries]);
 
-  if (loading) {
-    return <TimelineSkeleton />;
-  }
+  if (state.status === "loading") return <div aria-label="Loading timeline"><TimelineSkeleton /></div>;
+  const notice = <ResourceNotice state={state} name="timeline" retry={refresh} />;
+  if (state.status === "error") return notice;
 
   if (entries.length === 0) {
     return (
-      <div className="flex flex-1 items-center justify-center">
+      <><ResourceNotice state={state} name="timeline" retry={refresh} /><div className="flex flex-1 items-center justify-center">
         <EmptyState icon={Inbox} title="No messages yet" />
-      </div>
+      </div></>
     );
   }
 
@@ -157,9 +116,9 @@ export default function Timeline({ members, refreshKey }: TimelineProps) {
   }
 
   return (
-    <div ref={scrollerRef} className="flex-1 overflow-y-auto py-2">
+    <>{notice}<div ref={scrollerRef} className="flex-1 overflow-y-auto py-2">
       {items}
       <div ref={bottomRef} />
-    </div>
+    </div></>
   );
 }

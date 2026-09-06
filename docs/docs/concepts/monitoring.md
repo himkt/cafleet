@@ -14,7 +14,11 @@ timer. The monitor member alone owns the execution handle and liveness checks;
 the Director reacts only to broker signals and never launches or polls the
 execution. Hosting mechanics differ by backend, while the heartbeat semantics
 are identical. One monitor loop per fleet; deleting the monitor member kills
-its pane and the loop process with it.
+its pane and the loop process with it. Separately, the database enforces one
+active monitor member per fleet, including concurrent registrations. A
+monitor's pane dying does not itself deregister the member: deregister the
+old member before re-spawning it. Existing duplicate records block migration
+and require [duplicate-monitor recovery](storage.md#duplicate-monitor-recovery).
 
 ## Heartbeat, classification, facilitation
 
@@ -94,6 +98,24 @@ pane's snapshot is stale and a further re-engagement of the same member needs
 a fresh capture. The full pre-ping capture gate is part of the cafleet skill's
 supervision protocol. The capture-state taxonomy thus has two consumers: the
 monitor member's on-wake classification and the Director's pre-ping gate.
+
+For the Director, `finished` with no outstanding assignment is normal rest.
+Outstanding work may resume through the fresh-capture gate; a
+`stall_candidate` needs unchanged captures across consecutive facilitation
+turns. `working` and `awaiting_user` defer the entire send, including message
+persistence. Idle duration, unread counts, and monitor events alone do not
+authorize a ping. A captured prompt is not a relayed question: the Director
+answers explicit member questions through the broker. Immediate replies to
+reply-soliciting messages and explicitly requested shell dispatch retain
+their exceptions to the gate.
+
+An `unknown` capture calls for investigation, not a ping or an assumption
+that the pane died. Use `cafleet doctor` to diagnose the current connection and
+`cafleet member list` / `member show` to check the registered placement.
+Registry data does not prove physical pane presence or absence; retain
+`unknown` when disappearance is unproven. Ask the user for missing pane-state
+facts only if that uncertainty blocks the work. The skill's recovery reference
+owns the procedure.
 
 The scan both consumers use is a **read-only snapshot**:
 `cafleet monitor scan <fleet-id>` is a one-shot command that captures the
@@ -176,16 +198,27 @@ died silently reads as stale. Both the per-tick heartbeat and the on-exit
 clear are ownership-checked — a displaced loop's next heartbeat matches zero
 rows and it self-terminates.
 
+## Runtime cleanup
+
+The [resource cleanup](../spec/cli-options.md#monitor-resource-cleanup)
+keeps a lease immediately after claim, unregisters every installed signal
+handle, and attempts owner-checked clear on startup failure, tick failure,
+normal stop, or replacement by another PID. A failed startup write or flush
+cannot establish a healthy running loop. Cleanup preserves the primary error
+and reports an additional clear failure; a clear failure alone is an error.
+A replacement owner's row survives, and crash recovery continues to use stale
+reclaim.
+
 ## Lifecycle
 
 **Spawn.** `cafleet fleet create` spawns the monitor member as part of the
-fleet bootstrap: one command atomically creates the fleet, the root
-Director, and the monitor member — registration and pane — with the
+fleet bootstrap: one command creates the fleet, root Director, and monitor
+rows in a DB transaction and takes ownership of the spawned pane, with the
 Director-authored monitor prompt passed via `--monitor-file` and the
 backend's monitor-default model via `--monitor-model` (see
-[CLI options](../spec/cli-options.md#fleet-create)). Any failure rolls the
-whole bootstrap back — no fleet, no rows, no pane — so the command is
-retryable as-is. At startup the monitor member sends the standard `ready`
+[CLI options](../spec/cli-options.md#fleet-create)). Failed bootstrap attempts
+DB rollback and known-pane cleanup. A cleanup failure or unknown pane id is
+reported with the primary error; inspect those diagnostics before retrying. At startup the monitor member sends the standard `ready`
 signal, launches `cafleet monitor <fleet-id>` using its backend-resolved
 long-lived-execution primitive, and confirms the startup line the loop prints
 immediately after claiming the runtime row — `monitor loop started (fleet

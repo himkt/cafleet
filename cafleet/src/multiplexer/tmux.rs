@@ -6,11 +6,9 @@
 use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
 
-use serde_json::Value;
-
 use super::{
     CommandRunner, ESC_SETTLE_DELAY, MultiplexerContext, MultiplexerError, RunError, SUBMIT_DELAY,
-    build_wake_payload,
+    WakeEntry, build_wake_payload_from_entries,
 };
 
 const PANE_GONE_MARKERS: [&str; 2] = ["can't find pane", "no such pane"];
@@ -190,7 +188,17 @@ impl TmuxMultiplexer {
             args.push(format!("{key}={value}"));
         }
         args.extend(command.iter().cloned());
-        let pane_id = self.run(&args, None)?.trim().to_string();
+        let pane_id = self
+            .run(&args, None)
+            .map_err(|error| error.with_pane_cleanup(super::PaneCleanup::Unknown))?
+            .trim()
+            .to_string();
+        if pane_id.is_empty() {
+            return Err(
+                MultiplexerError::new("tmux split-window returned an empty pane ID")
+                    .with_pane_cleanup(super::PaneCleanup::Unknown),
+            );
+        }
         let _ = self.run(
             &tmux_argv(&[
                 "tmux",
@@ -220,14 +228,14 @@ impl TmuxMultiplexer {
         self.best_effort_send(target_pane_id, &payload, true)
     }
 
-    pub fn send_wake_trigger(
+    pub fn send_wake_entries(
         &self,
         target_pane_id: &str,
         fleet_id: i64,
-        members: &[Value],
-        director: &Value,
+        members: &[WakeEntry<'_>],
+        director: &WakeEntry<'_>,
     ) -> Result<bool, MultiplexerError> {
-        let payload = build_wake_payload(fleet_id, members, director)?;
+        let payload = build_wake_payload_from_entries(fleet_id, members, director)?;
         Ok(self.best_effort_send(target_pane_id, &payload, true))
     }
 
@@ -329,10 +337,12 @@ impl TmuxMultiplexer {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use crate::multiplexer::WakeEntry;
 
     use crate::multiplexer::test_support::{FakeRunner, argv, env, run_event, sleep_event};
-    use crate::multiplexer::{MultiplexerContext, RunError, TmuxMultiplexer, build_wake_payload};
+    use crate::multiplexer::{
+        MultiplexerContext, RunError, TmuxMultiplexer, build_wake_payload_from_entries,
+    };
 
     fn tmux_env() -> std::collections::HashMap<String, String> {
         env(&[
@@ -667,24 +677,24 @@ mod tests {
     }
 
     #[test]
-    fn send_wake_trigger_is_esc_first_and_types_the_shared_payload() {
+    fn send_wake_entries_is_esc_first_and_types_the_shared_payload() {
         let runner = FakeRunner::with_binary("tmux");
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        let members = [json!({
-            "member_id": 4,
-            "name": "worker",
-            "coding_agent": "codex",
-            "pending_count": 0,
-        })];
-        let director = json!({
-            "member_id": 2,
-            "name": "Director",
-            "coding_agent": "claude",
-            "pending_count": 1,
-        });
-        assert!(mux.send_wake_trigger("%9", 3, &members, &director).unwrap());
+        let members = [WakeEntry {
+            member_id: 4,
+            name: "worker",
+            coding_agent: "codex",
+            pending_count: 0,
+        }];
+        let director = WakeEntry {
+            member_id: 2,
+            name: "Director",
+            coding_agent: "claude",
+            pending_count: 1,
+        };
+        assert!(mux.send_wake_entries("%9", 3, &members, &director).unwrap());
 
-        let payload = build_wake_payload(3, &members, &director).unwrap();
+        let payload = build_wake_payload_from_entries(3, &members, &director).unwrap();
         assert_eq!(
             runner.events(),
             vec![
@@ -699,44 +709,44 @@ mod tests {
     }
 
     #[test]
-    fn send_wake_trigger_aborts_on_an_invalid_agent_without_keystrokes() {
+    fn send_wake_entries_aborts_on_an_invalid_agent_without_keystrokes() {
         let runner = FakeRunner::with_binary("tmux");
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        let members = [json!({
-            "member_id": 4,
-            "name": "worker",
-            "coding_agent": "python",
-            "pending_count": 0,
-        })];
-        let director = json!({
-            "member_id": 2,
-            "name": "Director",
-            "coding_agent": "claude",
-            "pending_count": 0,
-        });
-        assert!(mux.send_wake_trigger("%9", 3, &members, &director).is_err());
+        let members = [WakeEntry {
+            member_id: 4,
+            name: "worker",
+            coding_agent: "python",
+            pending_count: 0,
+        }];
+        let director = WakeEntry {
+            member_id: 2,
+            name: "Director",
+            coding_agent: "claude",
+            pending_count: 0,
+        };
+        assert!(mux.send_wake_entries("%9", 3, &members, &director).is_err());
         assert!(runner.events().is_empty());
     }
 
     #[test]
-    fn send_wake_trigger_remains_best_effort_on_delivery_failure() {
-        let members = [json!({
-            "member_id": 4,
-            "name": "worker",
-            "coding_agent": "codex",
-            "pending_count": 0,
-        })];
-        let director = json!({
-            "member_id": 2,
-            "name": "Director",
-            "coding_agent": "claude",
-            "pending_count": 0,
-        });
+    fn send_wake_entries_remains_best_effort_on_delivery_failure() {
+        let members = [WakeEntry {
+            member_id: 4,
+            name: "worker",
+            coding_agent: "codex",
+            pending_count: 0,
+        }];
+        let director = WakeEntry {
+            member_id: 2,
+            name: "Director",
+            coding_agent: "claude",
+            pending_count: 0,
+        };
 
         let runner = FakeRunner::without_binaries();
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
         assert!(
-            !mux.send_wake_trigger("%9", 3, &members, &director).unwrap(),
+            !mux.send_wake_entries("%9", 3, &members, &director).unwrap(),
             "tmux missing → Ok(false)"
         );
         assert!(runner.events().is_empty());
@@ -747,7 +757,7 @@ mod tests {
         }));
         let mux = TmuxMultiplexer::new(runner, tmux_env());
         assert!(
-            !mux.send_wake_trigger("%9", 3, &members, &director).unwrap(),
+            !mux.send_wake_entries("%9", 3, &members, &director).unwrap(),
             "a keystroke error stays Ok(false), never an Err"
         );
     }
@@ -1059,5 +1069,34 @@ mod tests {
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
         assert_eq!(mux.agent_status("%5").unwrap(), None);
         assert!(runner.events().is_empty(), "no native state to query");
+    }
+    #[test]
+    fn creation_unknown_id_failure_never_guesses_or_closes_a_pane() {
+        for response in [
+            Ok("   \n".into()),
+            Err(RunError::Failed {
+                stderr: "split failed".into(),
+            }),
+        ] {
+            let runner = FakeRunner::with_binary("tmux");
+            runner.respond(response);
+            let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
+            let error = mux
+                .split_window(&reference(), &[], &argv(&["claude"]))
+                .unwrap_err();
+            assert!(matches!(
+                error.pane_cleanup(),
+                Some(crate::multiplexer::PaneCleanup::Unknown)
+            ));
+            assert!(
+                error
+                    .to_string()
+                    .contains("pane ID unknown; pane cleanup unconfirmed")
+            );
+            drop(mux);
+            let calls = runner.run_argvs();
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0][1], "split-window");
+        }
     }
 }

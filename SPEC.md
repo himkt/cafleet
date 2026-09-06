@@ -94,7 +94,7 @@ broker from blocking tasks.
 
 The rationale for the split:
 
-- CLI invocations stay runtime-free — no async runtime spin-up for a one-shot
+- CLI invocations stay free of an async runtime — no async runtime spin-up for a one-shot
   command like `cafleet message send`.
 - SQLite's per-connection write lock serializes monitor claims without async
   complication.
@@ -123,7 +123,8 @@ cafleet
 ├── multiplexer     Multiplexer interface, tmux + herdr backends, resolver, keystrokes
 ├── coding-agent    coding-agent interface + claude/codex/opencode
 ├── output          render + formatter layers
-├── broker          data-access layer
+├── broker          typed data-access layer and notification traits
+├── runtime         concrete process/probe/notifier adapters
 ├── monitor         heartbeat loop
 ├── webui           server half: HTTP app, /api router, SPA fallback
 └── cli             command tree + handlers; the cafleet entry point
@@ -137,59 +138,52 @@ it.
 
 ## 4. Architecture & module dependency graph
 
-The ASCII diagram below is an at-a-glance sketch; the **edge list that follows it
-is the authoritative dependency contract**. Where the diagram's arrows are hard
-to trace, defer to the edge list.
+The diagram shows the process and notification boundary; the edge list defines
+the remaining dependencies. Arrows point from callers to their dependencies.
 
-```
-                 config  ◄─────────────────────┐ (leaf; CAFLEET_* settings)
-                  ▲   ▲   ▲                     │
-        ┌─────────┘   │   └──────────┐          │
-       db          output          webui        │
-        ▲             ▲              ▲   │       │
-        │             │              │   └──► broker
-        │             │              │          ▲
-   multiplexer    coding-agent       │          │ (db + multiplexer + config)
-        ▲   ▲          ▲             │          │
-        │   └──────────┼─────────┐   │          │
-        │           monitor ─────┘───┼──────────┤ (broker + multiplexer)
-        │              ▲             │          │
-        └────────────  cli  ─────────┴──────────┘
-                 (broker, output, multiplexer,
-                  coding-agent, monitor, config,
-                  db, webui)  → cafleet entry point
+```text
+CLI / HTTP presenters ─────────────► broker ──► db
+        │                              ▲
+        ▼                              │ notification traits
+     runtime adapters ─────────────────┘
+        │
+        ├──► multiplexer ──► injected CommandRunner
+        └──► coding-agent ─► injected SpawnProbe
 ```
 
 Edges (who depends on whom):
 
 - **config** — leaf. No internal deps.
-- **db** — depends on `config` (reads `settings.database_url`). Owns the
-  connection factory and the embedded migration chain.
-- **output** — depends on `config` (reads `settings.max_text_len`). Pure
-  string/structure transforms otherwise.
-- **multiplexer** — leaf (process invocation only). Truncation for inline
-  previews is done by the *broker* before calling `send_inline_preview`, so the
-  multiplexer needs no config.
-- **coding-agent** — leaf (process/PATH checks + the opencode preset-existence
-  check).
-- **broker** — depends on `db` (models + connection), `multiplexer`
-  (`MultiplexerContext` argument to `create_fleet`; `send_inline_preview` for
-  inline previews), and `config` (`max_text_len` for preview truncation).
-- **monitor** — depends on `broker` (monitor DB ops + `get_fleet`) and
-  `multiplexer` (`list_pane_ids`, `send_wake_trigger`).
-- **webui** — depends on `broker` and `config`. Treats broker results as
-  pass-through payloads (renaming two keys, dropping two).
-- **cli** — depends on all of the above; it is the orchestration glue that
-  wires broker ↔ multiplexer ↔ coding-agent ↔ output, and embeds `webui` for
-  `cafleet server`.
+- **db** — depends on `config` for the database URL. Owns the connection
+  factory and embedded migration chain.
+- **output** — pure string/structure transforms, using configuration-derived
+  text limits where required.
+- **multiplexer / coding-agent** — backend protocols, using injectable runner
+  and probe interfaces. Inline-preview truncation remains broker-side.
+- **broker** — depends on DB/domain types and pure formatting helpers. It owns
+  the notification trait and policy, not a concrete multiplexer or process
+  launcher. It neither starts subprocesses nor imports HTTP or CLI handlers.
+  The existing monitor liveness semantics, including the signal-0 probe, stay
+  unchanged by this boundary refactor.
+- **runtime** — owns `SystemRunner`, `SystemProbe`, and the concrete notifier
+  adapter. It implements the broker's notification trait using multiplexer and
+  coding-agent interfaces, and may consume configuration. It imports neither
+  CLI handlers nor HTTP handlers.
+- **monitor** — uses broker monitor operations and injected multiplexer
+  operations for pane discovery and wake delivery.
+- **webui** — uses broker types, runtime adapters, and configuration. HTTP
+  presenters construct the existing wire payloads; webui never imports cli.
+- **cli** — composes broker, runtime adapters, output, multiplexer,
+  coding-agent, monitor, config, db, and webui for the single `cafleet` entry
+  point. CLI presenters retain their existing output and error contracts.
 
 **Reconciled overlap points** (specced once, here, then referenced):
 
-1. **Broker ↔ multiplexer inline preview.** The broker's `_try_notify_recipient`
+1. **Broker → runtime notifier → multiplexer inline preview.** The broker's `_try_notify_recipient`
    (§6.2) looks up the recipient's `mux_pane_id`, skips self-sends and
    paneless recipients, **truncates** `text` to `settings.max_text_len` with a
-   `…` suffix, then calls `send_inline_preview` (§6.5) which keystrokes the
-   2-line `[cafleet msg …]` payload Esc-first. The multiplexer call returns a
+   `…` suffix, then calls its notification trait. The runtime adapter delegates to
+   `send_inline_preview` (§6.5), which keystrokes the 2-line `[cafleet msg …]` payload Esc-first. The multiplexer call returns a
    result carrying the **raw backend error** on failure (§6.5); the broker
    never rolls back the persisted message on a failed keystroke and never
    retries it. The unicast CLI surfaces an attempted-and-failed notification
@@ -205,7 +199,7 @@ Edges (who depends on whom):
    placeholders (§6.3) → `build_spawn_argv` (§6.7) →
    multiplexer `split_window` (§6.5), forwarding `CAFLEET_DATABASE_URL` (when
    set) into the new pane's environment (§7.1) → broker
-   `update_placement_pane_id`. A rollback ladder deregisters the member on any
+   `update_placement_pane_id`. A rollback ladder attempts deregistration on any
    post-register failure.
 3. **Monitor loop ↔ broker monitor DB ops.** The loop (§6.6) owns the
    OS-facing half (signal handling, sleep, the single keystroke); all DB
@@ -308,25 +302,26 @@ The unified shapes:
 
 **MonitorRuntime** (1:1 with Fleet; `fleet_id` is PK = FK, not autoincrement)
 
-| Field | Type | Notes |
-|---|---|---|
-| `fleet_id` | integer | FK→fleets, ON DELETE RESTRICT |
-| `pid` | optional integer | |
-| `started_at` | optional string | |
-| `last_tick_at` | optional string | |
-| `tick_seconds` | integer | DDL default 5 |
-| `last_wake_at` | optional string | nullable; the UTC ISO timestamp of the last successfully delivered wake, durable across loop restarts; preserved by the runtime clear |
-| `wake_interval_seconds` | optional integer | nullable; the live mirror of the running loop's wake interval — stamped at every claim/reclaim, re-read per tick, overwritten by `PATCH /api/monitor`, preserved by the runtime clear; `NULL` only in rows that predate the column and were never re-claimed |
-| `wake_requested_at` | optional string | nullable; the UTC ISO timestamp of the latest pending forced-wake request (`POST /api/monitor/wake`) — `NULL` when none is pending; repeat requests overwrite the timestamp (coalesce into a single wake); cleared by a delivered wake (`record_monitor_wake`) and by the reclaim reset in `claim_monitor_runtime` |
+- `fleet_id`: integer, FK→fleets, ON DELETE RESTRICT
+- `pid`: optional integer, the claiming process
+- `started_at`, `last_tick_at`: optional timestamp strings
+- `tick_seconds`: DDL default 5
+- `last_wake_at`: nullable; the UTC ISO timestamp of the last successfully delivered wake, durable across loop restarts; preserved by the runtime clear
+- `wake_interval_seconds`: nullable; the live mirror of the running loop's wake interval — stamped at every claim/reclaim, re-read per tick, overwritten by `PATCH /api/monitor`, preserved by the runtime clear; `NULL` only in rows that predate the column and were never re-claimed
+- `wake_requested_at`: nullable; the UTC ISO timestamp of the latest pending forced-wake request (`POST /api/monitor/wake`) — `NULL` when none is pending; repeat requests overwrite the timestamp (coalesce into a single wake); cleared by a delivered wake (`record_monitor_wake`) and by the reclaim reset in `claim_monitor_runtime`
+
+A missing runtime row differs from null fields on an existing row. Clear
+nulls pid/start/tick, preserving wake timestamps and intervals; the stopped
+HTTP projection masks process timestamps. A null wake interval differs from
+zero, which disables scheduled wakes while permitting forced wakes.
+
 
 **AssetInstalls** (composite TEXT PK `(coding_agent, path)`, not autoincrement, not FK-linked)
 
-| Field | Type | Notes |
-|---|---|---|
-| `coding_agent` | string | PK part; one of `"claude"` / `"codex"` / `"opencode"` |
-| `path` | string | PK part; the agent's resolved identity path (§6.3 *Config-dir resolution*), stored absolute exactly as resolved |
-| `cafleet_version` | string | the CLI's compile-time version string at install time (§7.6) |
-| `installed_at` | string | UTC ISO-8601 with microsecond precision |
+- `coding_agent`: PK part; one of `"claude"` / `"codex"` / `"opencode"`
+- `path`: PK part; the agent's resolved identity path (§6.3 *Config-dir resolution*), stored absolute exactly as resolved
+- `cafleet_version`: the CLI's compile-time version string at install time (§7.6)
+- `installed_at`: UTC ISO-8601 with microsecond precision
 
 Writes are upserts on the composite key (`ON CONFLICT(coding_agent, path) DO UPDATE SET cafleet_version, installed_at`). Rows are written by the assets half of `cafleet setup` — one row per installed agent at its resolved identity path — after that agent's skills and preset (where one exists) install successfully, so a row attests skills + preset; the db half never touches the rows. Consumers partition an agent's rows by comparing `path` against the currently-resolved identity path: the row at the resolved path (at most one, by the primary key) is **current**; every other row of that agent is **superseded**. Current rows feed the stale-assets guard on every fleet-scoped command group and the `cafleet doctor` coding-agents section; superseded rows surface only as informational doctor footnotes.
 
@@ -368,16 +363,12 @@ the recipient — e.g. the WebUI's name resolution over message endpoints
 Model `to_member_id` as an **optional/nullable integer**; there is no `0`
 sentinel.
 
-### 5.6 Result shapes vs. typed entities
+### 5.6 Typed records and wire presenters
 
-How the broker-result boundary is modeled — typed entities (as in §5.2)
-for broker results, versus a generic JSON/value type for the output render
-walkers (which must handle heterogeneous nested shapes and conditional key
-emission) — is an implementation choice and is not part of the contract. The
-contract for which fields may be absent is the optional-vs-required field-access
-tables in §6.4.
-
----
+Broker queries decode rows into typed records. CLI and HTTP presenters build
+wire JSON, preserving field names, order, nulls, and existing envelopes.
+Invalid stored enums and missing required message names are integrity errors.
+Concrete subprocess and notification adapters live in `runtime/`.
 
 ## 6. Module specifications
 
@@ -473,8 +464,10 @@ module that reads/writes the operational tables (fleets, members, placements,
 messages, monitor schedule/runtime, message queries). Owns
 transaction boundaries, the member-kind predicates, soft-delete + cascade, the
 message status lifecycle, and the monitor single-instance claim/heartbeat/clear. It
-performs no OS side effects except one attempted inline-preview keystroke
-during message delivery (§6.5) and one process-liveness probe (signal-0).
+delegates attempted inline-preview delivery through its notification trait;
+the runtime adapter owns the concrete multiplexer call (§4). The broker does
+not start subprocesses or depend on HTTP/CLI handlers. Its existing
+process-liveness probe (signal-0) retains the monitor claim semantics.
 
 #### Session semantics
 
@@ -508,9 +501,8 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
 #### Fleets
 
 - **`create_fleet(name, director_context, coding_agent, spawn_monitor)`** —
-  atomically bootstraps a fleet, its root Director, and its monitor member
-  (registration **and** pane) in one
-  write_session. Order: stamp `created_at`; insert the fleet with
+  bootstraps the fleet, root Director, and monitor rows in one write_session,
+  with owned-pane compensation across the DB/multiplexer boundary. Order: stamp `created_at`; insert the fleet with
   `director_member_id = NULL`; insert the Director member row (`name="Director"`,
   `description="Root Director for this fleet"`, `status="active"`, card
   `{name, description, skills:[]}` with **no** `cafleet.kind`); insert the
@@ -523,18 +515,26 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
   fleet's `director_member_id`; invoke the caller-supplied `spawn_monitor`
   callback with the three allocated ids (`fleet_id`, `director_member_id`,
   the monitor's `member_id`) — the CLI's callback performs the prompt
-  substitution and the pane split and returns the pane id; insert the
+  substitution and pane split, transfers the successful split's pane ownership
+  immediately to its CLI guard, and returns the id without intervening fallible
+  work; insert the
   monitor placement row with the returned pane id (same session/window
   context as the Director; `coding_agent` = the fleet's coding agent);
-  commit. A callback error unwinds the whole transaction — no fleet,
-  Director, monitor, or placement rows persist. The transaction holds
+  commit. A callback error triggers explicit transaction rollback; on success,
+  no fleet, Director, monitor, or placement rows persist. Report rollback
+  failure as a secondary diagnostic and do not claim full cancellation.
+  A Herdr run failure with known id closes the pane in the backend before the
+  callback error reaches the broker. A placement-insert/commit failure after
+  callback success closes the DB transaction before the CLI kills its owned
+  pane (§6.3 *Creation ownership and compensation*); no new broker API forces
+  pane-first compensation in this case. The transaction holds
   SQLite's write lock across the callback's subprocess call, backstopped by
   the connection's `busy_timeout=5000` PRAGMA. Returns
   `{fleet_id, name, created_at, director:{…}, monitor:{…}}`.
 - **`list_fleets()`** — one record `{fleet_id, director_member_id, name,
   created_at, member_count}` per non-soft-deleted fleet (`deleted_at IS NULL`);
   `member_count` counts only **active** members (0 for empty fleets). Ordering:
-  **`created_at DESC, fleet_id ASC`**.
+  **`created_at DESC, fleet_id DESC`** (newer id first when timestamps tie).
 - **`get_fleet(fleet_id)`** — single-row lookup by id; **includes soft-deleted
   fleets** (no `deleted_at` filter) and exposes `deleted_at` so callers
   distinguish missing (None) from soft-deleted. Returns `{fleet_id, name,
@@ -557,12 +557,12 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
   skills: skills or []}`, adding `cafleet: {kind: "monitor"}` only when
   `monitor` is true — an ordinary registration's card carries no kind
   marker. The `placement` dict carries no director id — the fleet row is the
-  single source of the Director identity. **`register_member` is guard-free
-  with respect to the monitor role**: the one-per-fleet and monitor-first
-  guards (§6.3 `member create`) are evaluated entirely CLI-side, before
-  `register_member` is ever called, so a direct broker caller (as in the
-  broker's own test suite) may register a `monitor=True` or an ordinary
-  member into any fleet state without the CLI's guard checks re-running.
+  single source of the Director identity. Registration uses an `IMMEDIATE`
+  transaction to serialize writers. Monitor uniqueness is enforced both by
+  an in-transaction recheck and the partial unique index (§8), including for
+  direct broker callers. The monitor-first policy for ordinary pane creation
+  remains CLI-side: ordinary broker registration does not require an active
+  monitor.
   Inside the transaction:
   - **Root-Director invariant guard** (only when `placement` is given): the
     fleet's `director_member_id` must reference an active member of the fleet;
@@ -570,6 +570,16 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
     {id}) is not active.` — a loud invariant failure, not a usage error, since
     the value is not user input. Nested teams stay impossible by
     construction: no caller supplies a director id.
+  - When `monitor` is true, check `active_monitor_member_id` inside the
+    transaction before inserting the member or placement. A conflicting row
+    raises `ActiveMonitorExists { fleet_id, member_id }`, identifying the
+    existing monitor. A unique-constraint violation is converted to this
+    variant only for `idx_members_one_active_monitor_per_fleet`; unrelated
+    SQL errors retain their original classification. The CLI maps the variant
+    to application error (exit 1) `fleet {fleet_id} already has an active
+    monitor member (member {member_id})`, without `register failed:`. A losing
+    registration adds no member or placement and cannot proceed to pane
+    creation, including when two CLI prechecks both saw an empty slot.
   - Insert the member row; if `placement` given, insert it. There is no
     per-member monitor enrollment — supervision cadence lives entirely on the
     fleet-scoped `monitor_runtime` row (§6.2 *Monitor — runtime claim /
@@ -577,8 +587,10 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
     the only per-member monitor state.
 - **`active_monitor_member_id(fleet_id)`** — the fleet's single active member
   whose card carries the monitor marker (`json_extract(member_card_json,
-  '$.cafleet.kind') = 'monitor'`), or `None`. Consumed by the CLI's two
-  `member create` monitor-role guards (§6.3) and by the monitor loop's
+  '$.cafleet.kind') = 'monitor'` and `status = 'active'`), or `None`. This
+  predicate exactly matches the unique index (§8). Consumed by registration's
+  transaction check, the CLI's two `member create` monitor-role guards (§6.3),
+  and the monitor loop's
   pane resolution (§6.6).
 - **`get_member(member_id, fleet_id)`** — **active only**. Returns `{member_id,
   name, description, status, registered_at, kind, skills, placement}` where
@@ -601,22 +613,34 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
   projection. Called after the multiplexer resolves a spawned pane's real id.
 - **`verify_member_fleet(member_id, fleet_id)`** — EXISTS check; **status-
   agnostic** (deregistered members still pass).
-- **`get_member_names(member_ids)`** — empty input → `{}` with no query; else a
-  map id→name; **status-agnostic**.
+- **`get_member_names(member_ids)`** — returns `BTreeMap<i64, String>`, ordered
+  by member id and **status-agnostic**, including deregistered members. Empty
+  input executes no SQL. Deduplicate ids before querying; bind at most 500
+  unique ids per `IN` query, for at most `ceil(unique_ids / 500)` queries.
+  Unknown ids are absent from the map. Construct only the placeholder list
+  dynamically; all ids are bound parameters. Batching preserves the existing lookup results.
 
 #### Members — roster
 
 - **`list_members(fleet_id)`** — every **active** registry row of the fleet:
   active rows LEFT OUTER
   JOIN `member_placements`, joined against `fleets` for the `is_root` flag that
-  directly produces `kind` (§5.4); plus three
-  correlated per-member aggregates over messages, all filtered to `type !=
-  "broadcast_summary"`: `last_sent` (max `status_timestamp` where `from_member_id
-  = member_id`), `last_recv` (where `owner_member_id = member_id`), `last_ack` (where
-  `owner_member_id = member_id` AND `status_state = "completed"`). Then `idle` against
-  a single `now`: take the non-null of `(last_sent, last_recv)`; none → `idle =
-  null`; else `most_recent` = lexicographic max of the ISO timestamps, `idle =
-  max(0, floor(now − most_recent))` in seconds. Returns `{member_id, name,
+  directly produces `kind` (§5.4). Order by `member_id ASC`. The activity query
+  supplies `last_sent = MAX(created_at)` over **all** messages whose sender is
+  the member, including broadcast summaries; `last_recv = MAX(created_at)`
+  over unicast rows owned by the member; and `last_ack = MAX(status_timestamp)`
+  over completed unicast rows owned by the member. ACK changes the latter
+  without changing the send/receive creation timestamps.
+  Compute `idle` against one `now` for the whole list: choose the lexicographic
+  maximum non-null string from **all three** timestamps, then parse only that
+  selected string with the existing lenient RFC3339 reader. All null, or an
+  unparseable selected value, yields null; do not fall back to an older valid
+  timestamp. Otherwise use `max(0, (now - parsed).num_seconds())`, retaining
+  whole-second truncation and the existing offset/fraction parsing. Clamp
+  only the final idle result; leave stored timestamps and other age outputs
+  unchanged. The final zero clamp leaves the aggregate selection and
+  three-timestamp maximum unchanged.
+  Returns `{member_id, name,
   kind, placement, last_sent, last_recv, last_ack, idle}` per row — `kind` is
   the same three values as `get_member` (§5.4), `placement` is null for
   placementless rows. Backs `member list`.
@@ -626,12 +650,16 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
   contributes to `kind` (§5.4), plus the member card's monitor marker. With
   `include_message_holders=True` (the WebUI
   roster), deregistered members that still own messages (a message exists with
-  `owner_member_id = member_id OR from_member_id = member_id`) are also returned, so
+  `owner_member_id = member_id`) are also returned, so
   the audit-relevant deregistered set stays visible. Returns `{member_id, name,
   description, status, registered_at, placement}` per row plus `kind` (the
   same three values as `get_member`), with
   `placement` null for placementless rows. Backs `GET /api/members`
-  (`include_message_holders=True`); it is not a CLI surface.
+  (`include_message_holders=True`); it is not a CLI surface. Order by
+  `member_id ASC`. This lean query is separate from the activity
+  query: it performs no message activity aggregates, retaining only the
+  owner-message `EXISTS` needed for holder inclusion. Keep kind precedence,
+  placement null versus pending pane, and the existing wire projection.
 
 #### Messaging
 
@@ -720,12 +748,16 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
 #### Queries
 
 - **`list_inbox(member_id)`** — all messages where `owner_member_id = member_id`, any
-  state, `broadcast_summary` excluded, ordered `status_timestamp DESC`.
+  state, `broadcast_summary` excluded, ordered `status_timestamp DESC, message_id DESC`.
 - **`list_sent(member_id)`** — all messages where `from_member_id = member_id`, any
-  state, `broadcast_summary` excluded, ordered `status_timestamp DESC`.
-- **`list_timeline(fleet_id, limit=200)`** — messages joined to their **sender's**
-  member row, filtered to the sender's `fleet_id`, `broadcast_summary` excluded,
-  ordered `status_timestamp DESC`, capped at `limit`.
+  state, `broadcast_summary` excluded, ordered `status_timestamp DESC, message_id DESC`.
+- **`list_timeline(fleet_id, limit=200)`** — delivery rows (`g.type = 'unicast'`)
+  joined to their **owning member's** row through `owner_member_id`, filtered to
+  that member's `fleet_id`. SQL orders by `status_timestamp DESC, message_id DESC`
+  and applies `LIMIT` after the delivery filter. The cap counts delivery rows,
+  so it can cut through a broadcast group. Summary rows remain stored and
+  available through `get_message` / `message show` and broadcast results; their
+  initial `completed` state is not a recipient ACK.
 - **`get_message(message_id)`** — single-message lookup; the fleet is
   **derived from the message row** — existence is the only guard. Load;
   absent → value error `Message {message_id} not found`.
@@ -868,6 +900,7 @@ HTTP status). The exit-code policy is
 | `register_member` | usage | `Fleet '{fleet_id}' not found.` |
 | `register_member` | usage | `fleet {fleet_id} is deleted` |
 | `register_member` | application | `fleet {fleet_id}'s root Director (member {id}) is not active.` |
+| `register_member` | `ActiveMonitorExists`, mapped to application | `fleet {fleet_id} already has an active monitor member (member {member_id})` |
 | `deregister_member` | application | `cannot deregister the root Director; use 'cafleet fleet delete' instead` |
 | `delete_fleet` | application | `fleet '{fleet_id}' not found.` |
 | `send_message` | value | `Invalid destination format: {to}` |
@@ -1067,7 +1100,7 @@ coding-agents section, but the recorded rows are read only when the database
 report is `✓` (at head) AND the `asset_installs` table exists. Whenever the
 rows are not read — any non-head state, or an at-head ledger with a
 hand-dropped table — the section renders with no recorded-install data:
-every resolvable agent shows the `–` state, no superseded footnotes render,
+every resolvable agent shows the `–` state. No superseded footnotes render,
 and — in the non-head states — doctor exits 1 for the database issue;
 either way, never a raw SQLite error from `asset_installs`.
 
@@ -1112,8 +1145,8 @@ absolute paths, and the issue count. `source` holds the winning env-var
 **name** (no `$`) or the literal `"default"`; `state` is `"ok" | "stale" |
 "not_installed" | "error"` (`"error"` is the per-agent resolution-error
 state; `"not_installed"` never contributes to `issues`). Every agent row
-carries the same keys; `error` is `null` except in the `"error"` state,
-where it holds the pinned validation message (without the `Error: ` prefix).
+carries the same keys. `error` is the validation message for `"error"`, and otherwise null,
+without an `Error: ` prefix.
 Section `error` fields likewise hold the detail text when `ok` is false,
 else `null`.
 
@@ -1160,9 +1193,9 @@ agent resolution error the row is `{"coding_agent": "...", "path": null,
 raw invalid value appears only inside `error`; `path` stays `null` because
 no path resolved. `schema_version` is `null` when the ledger is absent.
 When the recorded rows are not read (a non-`ok` database report, or a
-missing `asset_installs` table), every agent row renders as the
-`"not_installed"` shape and `superseded` is empty — the JSON shape is
-unchanged. `installed_at` values are printed **verbatim** (microsecond
+missing `asset_installs` table), resolved agents use `"not_installed"`
+and path errors remain
+`"error"`. Recorded fields are null and `superseded` is empty. `installed_at` values are printed **verbatim** (microsecond
 precision, exactly as stored). Exit-code semantics are identical to text
 mode.
 
@@ -1184,24 +1217,31 @@ subcommands take the shared `--json` flag and emit JSON when it is set.
   backend exactly as `member create --model`; omitted → the backend's own
   default model), `--json` (shared). Omitting any required flag → clap's
   native missing-required-argument error naming the flag, exit 2.
-  One invocation atomically creates the fleet, the root Director, and the
-  monitor member (registration + pane). Ladder: (1) multiplexer
+  One invocation creates fleet/Director/monitor rows transactionally and
+  compensates an owned pane on failure. Ladder: (1) multiplexer
   preconditions — on a `MultiplexerError` → application error `cafleet
   fleet create must be run inside a tmux or herdr session` (exit 1, no DB
   writes); (2) resolve the monitor prompt body from `--monitor-file`;
   (3) backend checks before any write — backend lookup, `validate_model`
   on `--monitor-model`, `ensure_available`; (4) broker `create_fleet`
   (§6.2) with a callback that substitutes the four identity placeholders
-  (substitution errors → the two `member create` strings verbatim, exit 2,
-  transaction rolled back) and spawns the monitor pane detached
+  (substitution errors → the two `member create` primary strings, exit 2,
+  transaction rollback attempted with any failure reported) and spawns the monitor pane detached
   (`display_name="monitor"`, the `--monitor-model` value, no effort,
   `CAFLEET_DATABASE_URL` as the only forwarded environment variable;
-  `split_window` failure → application error `tmux split-window failed:
-  <detail>. Rolled back fleet creation.`, exit 1). Any failure leaves no
-  rows; a placement-insert or commit failure after a successful split also
-  kills the spawned pane (the callback records the pane id into a
-  caller-held capture the error path consults). The command is retryable
-  as-is.
+  `split_window` failure → application error with primary reason
+  `tmux split-window failed: <detail>`, exit 1). On split success the callback
+  immediately arms the CLI pane guard and returns the id. Herdr run failure
+  inside the callback is compensated backend-side before DB rollback;
+  placement-insert/commit failure after callback success rolls back and
+  closes the DB transaction first, then kills the CLI-owned pane. Cleanup
+  diagnostics follow the primary reason; `Rolled back fleet creation.` is
+  a confirmed-compensation suffix, never an unconditional failure claim.
+  If the pane id was not obtained, report unknown/unconfirmed pane cleanup
+  and never guess a pane to kill. After commit success, disarm every creation
+  guard before the existing text/JSON `emit` boundary. Full failure ordering
+  and rollback-failure reporting are in § *Creation ownership and compensation*.
+
 - **list** — `--json` (shared). Empty → `No fleets found.`; else a header plus
   one formatted row per fleet (five columns: FLEET_ID / DIRECTOR / NAME / MEMBERS
   left-padded 40 / 40 / 20 / 8, then a trailing unpadded CREATED_AT; nullable
@@ -1291,10 +1331,13 @@ is derived from the member row.
   check pane presence (`member delete` tolerates a pending
   placement). Callers re-fetch by the canonical
   member id.
-- **Deregister-with-warning** — best-effort deregister; on failure print a
-  `WARNING: rollback deregister failed …` line to **stderr**, do not raise.
-- **Rollback-register** — deregister-with-warning, then raise an application
-  error `<reason>. Rolled back registration of <new_member_id>.`.
+- **Registration compensation** — an owned registration guard attempts
+  deregistration and placement removal. Preserve the primary error's category
+  and message; report failure as `cleanup failed for member <id>: <detail>`
+  after it on stderr. A `Rolled back registration of <new_member_id>.` suffix
+  describes confirmed compensation only, never a failed or unconfirmed
+  cleanup. Explicit `finish`/`rollback` disarms the guard, so it does not
+  deregister twice; see § *Creation ownership and compensation*.
 - **Resolve-coding-agent** — explicit `--coding-agent` wins; else (flag
   omitted) inherit the Director's placement coding agent, with three
   error surfaces (Director fetch failure / not found / no placement), each
@@ -1339,9 +1382,8 @@ for the fleet's single root Director bootstrapped by `fleet create` — no
 2. **Model and effort validation** — validate `--model`, then `--effort`
    (`validate_model` then `validate_effort`); a failure → usage error (exit 2)
    with the backend's message, **before any registration or tmux side effect**.
-3. **Monitor-role guards** — evaluated CLI-side (`register_member` itself is
-   guard-free, §6.2), before any registration or pane effect, one-per-fleet
-   guard first: `--role monitor` into a fleet that already has an active
+3. **Monitor-role guards** — evaluated CLI-side for early diagnostics,
+   before any registration or pane effect, one-per-fleet guard first: `--role monitor` into a fleet that already has an active
    monitor member (via the broker's `active_monitor_member_id`, §6.2) →
    application error `fleet <fleet-id> already has an active monitor member
    (member <member-id>)`; no `--role` (an ordinary member) into a fleet with
@@ -1361,33 +1403,47 @@ for the fleet's single root Director bootstrapped by `fleet create` — no
    window id, an unset pane id, and the coding agent (no director id — the
    fleet row is the single source), passing `--role`'s presence through as
    `register_member`'s `monitor` boolean (§6.2) so a monitor registration's
-   card carries the `$.cafleet.kind == "monitor"` marker. Re-raise an
-   application error verbatim
-   (preserves the root-Director invariant guard); wrap any other exception as
+   card carries the `$.cafleet.kind == "monitor"` marker. Registration's
+   `IMMEDIATE` transaction rechecks the active monitor, and the DB unique
+   index backstops all writers (§6.2). Map `ActiveMonitorExists` to the same
+   one-per-fleet application error as step 3, with no member, placement, or
+   pane added by the losing registration. Re-raise an application error
+   verbatim (preserves the root-Director invariant guard); wrap any other exception as
    `register failed: <error>`. Capture the new member id.
-7. **Substitute placeholders** (below) — run `str.format` over the resolved body
+7. **Substitute placeholders** (below) — run the Rust spawn-placeholder mini-formatter over the resolved body
    (step 4), substituting `{fleet_id}` / `{member_id}` (the new member id from
    step 6) / `{director_member_id}` (the auto-resolved Director) /
    `{coding_agent}`. An unknown-placeholder or
    malformed-brace error is a usage error (exit 2); on it,
-   **deregister-with-warning, then re-raise the original error unwrapped** —
-   preserving both the exact message and its exit code.
+   use the registration guard to deregister and remove placement, then
+   return the original usage error and exit 2, appending any cleanup failure
+   after the original cause. No pane guard exists yet.
 8. **Build the spawn argv** from the backend (the rendered prompt from step 7,
    display name, model, effort).
 9. **Split the pane** — split the window to obtain the pane id. The only
    forwarded env var is `CAFLEET_DATABASE_URL` (when set); identity travels in
-   the rendered prompt (step 7), not the environment. tmux error →
-   rollback-register, reason `tmux split-window failed: <error>`.
-10. **Patch the pane id** — record it on the placement. On exception: best-effort
-    send `/exit` (tolerating a missing pane), then rollback-register, reason
-    `placement update failed: <error>`. If the placement row vanished: same
-    best-effort `/exit`, then rollback-register, reason `placement row vanished
-    before pane-id patch`.
-11. **Emit** — attach the placement view; emit JSON (the complete result) or
-    the compact spawned-member text formatter (`format_member`, §6.4).
+   the rendered prompt (step 7), not the environment. The backend owns the
+   pane until successful return, then immediately transfers it to the CLI
+   pane guard. A split failure retains the primary reason
+   `tmux split-window failed: <error>` and compensates the registration; the
+   CLI never repeats a backend's recorded pane-cleanup attempt.
+10. **Patch the pane id** — record it on the placement. On exception, handle
+    the failed SQL, then kill the owned pane and deregister, preserving primary
+    reason `placement update failed: <error>`. If the placement vanished, use
+    the same compensation order with reason `placement row vanished before
+    pane-id patch`. Use `kill_pane(id, true)`, not `send_exit`.
+11. **Emit** — once the placement is confirmed, disarm all creation guards,
+    attach the placement view, then use the existing JSON (complete result)
+    or compact spawned-member text formatter (`format_member`, §6.4).
 
-The ladder contract: any post-register failure deregisters the member so no
-orphan row survives; the best-effort cleanup never masks the original error.
+#### Creation ownership and compensation
+
+A backend owns a newly allocated pane until successful return, then the CLI
+owns it. A known-pane failure attempts cleanup exactly once; an unknown pane
+id is reported without guessing. Fleet failure rolls back and closes its DB
+connection before CLI pane cleanup. Member placement failure cleans the pane
+then deregisters the member. Preserve the primary error and append cleanup
+failures; successful creation disarms cleanup.
 
 #### `member delete`
 
@@ -1545,6 +1601,14 @@ Director's first ordinary
 
 ##### `monitor scan`
 
+Shared capture uses `CaptureSnapshot::from_raw(raw, ansi, now)` for both
+member capture and scan. ANSI false applies the existing strip/CR normalization;
+true uses raw content. Hash the final string's UTF-8 bytes to lowercase SHA256
+hex, retaining the existing timestamp format and line-input/windowing contract.
+Text member capture adds no newline. Scan carries typed success/error results;
+only its text presenter builds headings, and JSON keeps the exact existing
+key order and error-null behavior. No capture content is stored in SQLite.
+
 `cafleet monitor scan FLEET_ID [--lines N] [--ansi] [--json]` — capture the
 Director's pane plus every active member's pane once, print, exit. No loop
 runs, no `monitor_runtime` row is claimed, and the command performs no DB
@@ -1637,8 +1701,11 @@ first, then assets):
   (§8): force a sync SQLite URL, create the DB file's parent directory, and
   apply the bundled migrations up to the head revision (idempotent). On an
   application error, print `db half failed: <message>` and record the
-  failure. If the db half failed, the assets half fails its schema pre-flight and
-  both halves are reported failed.
+  failure. The assets half still runs after a DB-half failure. Its pre-flight
+  fails if `asset_installs` is missing, but an old database with that table can
+  accept assets updates even when duplicate monitors prevent migration.
+  Report only the halves that actually failed; the DB failure still makes
+  the overall command exit 1.
 - **Assets half** — installs, from the data embedded in the binary at build
   time (§7.6) with **no network access**, each selected agent's skills plus
   its bundled preset (where one exists) at the directories resolved per
@@ -1721,43 +1788,23 @@ absolute-path validation):
 
 ##### Shared helpers (the assets half)
 
-**resolve-targets** (the selection semantics above: the explicitly named
-agents, or — on the no-flag form — all three agents, always in the fixed
-order `claude`, `codex`, `opencode`);
-**install-skills** (per target, create the target's resolved skills dir as
-needed, then
-copy each embedded skill dir — exactly the two skill dirs `cafleet`,
-`cafleet-design-doc` — into it, removing any existing copy first; after the
-copy, remove `<skills_dir>/cafleet-research` when present, using the same
-existing-target check order as install-preset — a symlink → unlink; else a
-directory → recursive delete; else if it exists → unlink — with no extra
-output on success; a filesystem error in either half → `failed to install
-skills into <skills_dir>: <error>`;
-success prints
-`<agent>: installed cafleet, cafleet-design-doc (v<version>)
--> <skills dir>`);
-**install-preset** (per target with a preset — codex: embedded source
-`presets/codex/cafleet.rules` → `<codex home>/rules/cafleet.rules`; opencode:
-`presets/opencode/cafleet.md` → `<preset base>/agents/cafleet.md`; claude has
-none: create the target's parent directory chain recursively, remove any
-existing target in this explicit check order — a symlink → unlink; else a
-directory → recursive delete; else if it exists → unlink (the symlink check
-comes first because the directory check follows symlinks and the recursive
-delete refuses them) — then
-copy the embedded source in; a filesystem error → `failed to install preset into
-<target>: <error>`; success prints `<agent>: installed preset (v<version>) ->
-<target>`). A target's `asset_installs` row is upserted only after both its
-skills and its preset (where one exists) install successfully. Skills dirs
-resolve per § *Config-dir resolution*: `claude` → `<claude base>/skills`,
-`codex` → `<codex home>/skills`, `opencode` → `~/.config/opencode/skills`
-(fixed).
+**resolve-targets** selects the explicitly named agents, or all three in the
+fixed order `claude`, `codex`, `opencode`. Each backend sequentially replaces
+the two embedded skills `cafleet`, `cafleet-design-doc`, removes
+`<skills_dir>/cafleet-research`, then replaces its preset where present.
+Each target is deleted before writing its replacement. Success output follows
+each operation; the installed version is recorded after all operations succeed.
+Skills resolve to `<claude base>/skills`, `<codex home>/skills`, and the fixed
+`~/.config/opencode/skills`. Presets map embedded
+`presets/codex/cafleet.rules` to `<codex home>/rules/cafleet.rules`, and
+`presets/opencode/cafleet.md` to `<preset base>/agents/cafleet.md`.
 
-Assets-half pre-flight: the `asset_installs` table must exist, else the half
-fails with `the database schema is missing or outdated; run 'cafleet setup'
-first`. (The db half always runs first within the same command, so this fires
-only after a db-half failure or an externally broken schema.)
+#### Shared diagnosis and connection reuse
 
-An install failure aborts the loop; rows recorded before the failure remain.
+Schema and asset diagnosis return typed facts; CLI presenters supply messages.
+Guards and command work share the invocation connection. Setup attempts both
+halves, reuses an open connection, and diagnoses again after migration.
+Doctor reports all sections and reads installed versions only at schema head.
 
 #### Schema-version guard
 
@@ -1799,7 +1846,7 @@ the top of the group callback, before any subcommand body runs) and the
 `monitor` command (both forms, before the command body) — resolves, after
 the schema-version guard passes, each
 agent's identity path (§6.3 *Config-dir resolution*) and validates the
-recorded assets installs against the rows at those paths only:
+recorded assets installs at those paths:
 
 1. If a config-path variable fails validation, exit 1 with the pinned
    validation error (§6.3 *Config-dir resolution*).
@@ -1820,12 +1867,11 @@ recorded assets installs against the rows at those paths only:
    Error: stale assets detected (<agent>=<recorded>[, ...]; CLI <runtime>); run 'cafleet setup' to reinstall
    ```
 
-4. Otherwise proceed silently.
+5. Otherwise proceed silently.
 
-Agents with no row at their currently-resolved path are not checked (they
-contribute nothing to staleness); superseded rows at other paths are ignored
-everywhere in the guard. Plain `cafleet setup` remains the correct remedy
-for both errors: it installs all three agents at their resolved paths.
+Staleness checks use version records at currently-resolved paths; agents without
+a matching row contribute nothing to staleness. Plain `cafleet setup` installs
+agents at their resolved paths.
 Exempt surfaces: `setup` (must remain runnable to
 repair), `doctor`
 (reports instead of blocking), and `server` (human-facing WebUI, not
@@ -1848,9 +1894,11 @@ bare `member create` with neither the positional nor `--file` is clap's
 native missing-required-argument-group error (exit 2).
 
 **Placeholder substitution.** After the body is resolved, `member create` runs
-`str.format` over it, substituting `{fleet_id}`, `{member_id}` (the spawned
+the Rust spawn-placeholder mini-formatter over it, substituting `{fleet_id}`, `{member_id}` (the spawned
 member's own id), `{director_member_id}`, and `{coding_agent}` (the resolved
 backend). A custom prompt keeps a literal brace by doubling it (`{{` / `}}`).
+Only these four exact names and doubled braces are supported; Python format
+specifications, conversions, and attribute/index access are not interpreted.
 Error surfaces (both usage errors, exit 2): an unknown placeholder → `Unknown
 placeholder '<key>' in custom prompt. Supported placeholders: {fleet_id},
 {member_id}, {director_member_id}, {coding_agent}. Double literal braces ({{, }})
@@ -2087,9 +2135,13 @@ the deterministic escape hatch.
 `Multiplexer.split_window(*, reference: MultiplexerContext, env, command) -> str`
 takes the full reference context rather than a bare window id: tmux splits a
 *window* and uses `reference.window_id`; herdr splits a *pane* and uses
-`reference.pane_id`. The sole call site — the `member create` spawn
-orchestration (§6.3) — already holds the
-Director's `MultiplexerContext` and passes it directly.
+`reference.pane_id`. The `member create` and `fleet create` orchestrators
+(§6.3) hold the Director's `MultiplexerContext` and pass it directly. The
+backend owns a created pane until successful return; the CLI takes ownership
+then. Failed creation carries `PaneCleanup::Attempted` or
+`PaneCleanup::Unknown` metadata when applicable, per §6.3 *Creation ownership
+and compensation*. A missing/invalid id is an unconfirmed cleanup, not a
+license to infer another target.
 
 #### `TmuxMultiplexer` method surface
 
@@ -2259,12 +2311,28 @@ exit as a failure, and returns stdout on success. Failure-message intents:
 binary-not-found → `tmux binary not found: <detail>`; timeout → `tmux command
 timed out after <timeout>s: <space-joined argv>`; non-zero exit → `tmux command
 failed: <space-joined argv>\nstderr: <trimmed stderr>`. A **per-call timeout** of
-`5`s is passed only by `list_pane_ids` and the three keystroke helpers; every
-other call is unbounded. **Pane-gone tolerance:** the tolerant runner swallows a
+`5`s is passed by `list_pane_ids` and the three keystroke helpers. Other calls remain unbounded. **Pane-gone tolerance:** the tolerant runner swallows a
 tmux error only when **both** `ignore_missing` is true **and** the message text
 (case-insensitive) contains `"can't find pane"` or `"no such pane"`; any other
 failure re-raises even under `ignore_missing`. Whatever error shape a port uses
 MUST keep the message/stderr text inspectable for this substring match.
+
+The shared runner's timed path drains stdout and stderr concurrently from spawn
+with nonblocking descriptors. Each iteration checks the monotonic deadline and
+the direct child's status, reads at most 64 KiB from each stream, and polls for
+at most the lesser of 20 ms and the remaining deadline. Interrupted operations
+retry with the same deadline. Completion requires child exit and EOF on both
+streams. Output is not truncated: success returns lossy UTF-8 stdout and nonzero
+exit returns lossy UTF-8 stderr. The untimed path collects output without a
+deadline.
+
+Deadline expiry kills and reaps the direct child, closes both read descriptors,
+and returns the timeout category. A descendant holding a pipe open after the
+direct child exits remains subject to that deadline; descendant termination is
+not guaranteed. FD configuration, read, poll, or child-status errors also trigger
+direct-child kill/reap and descriptor release. Cleanup failures accompany the
+primary cause and do not replace it. The deadline bounds observation and cleanup
+initiation, not wall-clock return when the operating system does not respond.
 
 #### Wake-field sanitizer — payload contract
 
@@ -2311,7 +2379,13 @@ Each method's herdr realization:
   The argv `command` is rendered to a single properly-quoted string with
   `shlex.join` before the `pane run` because `pane run` submits one text line into
   the pane's shell (a genuine semantic difference from the tmux exec-argv path —
-  otherwise an argument containing spaces would be re-split).
+  otherwise an argument containing spaces would be re-split). Immediately
+  after extracting `<new_id>` from the split response, arm the backend pane
+  guard. A later run failure tries `kill_pane(new_id, true)` and returns the
+  run error with id and `PaneCleanup::Attempted` metadata; close failure adds
+  its diagnostic without replacing the run error. Return success only after
+  transferring pane ownership to the caller. A split failure before obtaining
+  an id returns unknown/unconfirmed compensation and never guesses a pane.
 - **`_equalize_tab_column(anchor_pane_id)`** — herdr has no single reflow command,
   so after appending a member `split_window` rebalances the right column to equal
   heights arithmetically. It reads the tab geometry of the tab containing
@@ -2594,6 +2668,13 @@ no cleanup — the row's heartbeat goes stale and the broker's later liveness ch
 reports it dead. `cafleet fleet delete` also ends a still-running loop — its
 next tick sees the soft-deleted fleet and self-terminates via step 2 of
 `monitor_tick`.
+
+#### Monitor resource ownership
+
+After claiming a runtime row, retain each signal registration and clean up on
+normal stop or failure: unregister handlers and clear only the owned
+`(fleet_id, pid)` row. Preserve wake settings and ledger fields. Append cleanup
+failure to a primary error; report cleanup failure when work succeeded.
 
 #### Interruptible sleep & signals
 
@@ -2890,6 +2971,14 @@ take segment 0) is in the reserved set, re-raise the genuine 404; otherwise serv
 `index.html` (200); `GET /ui/...` or `/api/...` with no asset returns a genuine
 non-HTML 404.
 
+#### Frontend route and resource ownership
+
+Hash routes select the fleet and member. Each fleet client captures its fleet
+id; each resource aborts and invalidates requests when its identity changes.
+Refreshes coalesce while a request runs. Keep existing data during refresh,
+show errors with Retry, and publish only current-resource results. Missing
+fleets return to the picker; transport failures retain the route.
+
 #### `X-Fleet-Id` header dependency
 
 Every data endpoint (everything except `GET /api/fleets`) resolves the fleet via
@@ -2985,9 +3074,11 @@ same `{"detail": <string>}` shape (a single human-readable string).
   ]}` over the member's inbox.
 - **`GET /api/members/{member_id}/sent`** — fleet-scoped. Same as inbox over sent
   messages; same `404` detail `Member not found`.
-- **`GET /api/timeline`** — fleet-scoped, no per-member check. `{"messages": […]}`
-  over the fleet's messages, hard-capped at the **200** most recent
-  (`status_timestamp DESC`).
+- **`GET /api/timeline`** — fleet-scoped through the owning member, no per-member
+  check. `{"messages": […]}` contains only `unicast` delivery rows, hard-capped
+  in SQL at **200** rows ordered by `status_timestamp DESC, message_id DESC`.
+  No pagination or group-level limit is introduced. Summary rows neither occupy
+  this cap nor count as ACKs; response fields and wrapping stay unchanged.
 - **`POST /api/messages/send`** — fleet-scoped. Body `{from_member_id: int,
   to_member_id: int | "*", text: string}`. `to_member_id` deserializes as **either
   a JSON integer or the exact JSON string `"*"`** (broadcast); anything else
@@ -3009,9 +3100,21 @@ same `{"detail": <string>}` shape (a single human-readable string).
 from_member_id, from_member_name, to_member_id, to_member_name, type, status,
 created_at, status_timestamp, origin_message_id, body}`. Names are resolved by a
 single bulk lookup over the union of all `from_member_id`/`to_member_id` values,
-using **direct keyed access** — a missing id is a hard failure (→ 500), never a
-silent fallback. `status` is the renamed `status_state`; `body` the renamed
+using checked keyed lookup — a missing required id/name returns an integrity
+error (→ 500 with a detail string), never a panic or a silent fallback. `status` is the renamed `status_state`; `body` the renamed
 `text`; `type` the raw row type. Empty input → empty array.
+
+The TypeScript wire model uses `type` to distinguish `unicast` deliveries
+(non-null recipient id/name) from `broadcast_summary` rows (null recipient
+id/name). Inbox, sent, and timeline consumers accept delivery rows. This models
+the existing wire fields; it does not add a discriminator to the HTTP response.
+
+##### Timeline grouping and ACK display
+
+Group unicast deliveries by `origin_message_id`, leaving null-origin messages
+standalone. Exclude summaries. Order groups by their earliest creation time;
+count recipients and ACKs only among fetched deliveries. The 200-row cap can
+split a broadcast, so the UI labels these as displayed-delivery counts.
 
 #### `cafleet server` launcher
 
@@ -3163,7 +3266,8 @@ UTF-8 (no ASCII escaping).
 
 - The monitor loop emits one heartbeat line per delivered wake to **stdout**
   (`{iso} tick -> wake monitor {monitor_member_id} ({N} members)`).
-- `member create` rollback diagnostics go to **stderr**. Preserve the stream
+- Creation rollback diagnostics go to **stderr**, following the primary cause.
+  Preserve the stream
   choice (stdout vs. stderr) — it is part of the observable contract.
 
 ### 7.5 Time discipline
@@ -3174,7 +3278,11 @@ for age math.
 
 ### 7.6 Packaging & distribution
 
-`cafleet` ships as a **single static binary** distributed on GitHub Releases.
+`cafleet` ships as a single binary. Install with Homebrew
+(`brew install himkt/tap/cafleet`) or download an archive from GitHub Releases.
+The release workflow also publishes Homebrew bottles; Linux release targets
+use musl. Skills, presets, migrations, and WebUI files are embedded, not
+separate runtime downloads.
 
 - **Release targets:** `aarch64-apple-darwin`, `x86_64-unknown-linux-musl`,
   `aarch64-unknown-linux-musl`.
@@ -3258,7 +3366,17 @@ defaults, FK rules, AUTOINCREMENT, and the create-order quirk are in §6.1.
 - `idx_messages_owner_member_status_ts` on `messages(owner_member_id, status_timestamp)`
 - `idx_messages_from_member_status_ts` on `messages(from_member_id, status_timestamp)`
 
-**The migration chain.** Head is **`V7`**, contiguous from 1 with exactly one
+**Partial unique index, at head:**
+
+- `idx_members_one_active_monitor_per_fleet` on `members(fleet_id)` where
+  `status = 'active' AND json_extract(member_card_json, '$.cafleet.kind') = 'monitor'`.
+  This is the `active_monitor_member_id` predicate. It applies to INSERT and
+  UPDATE of status, card, or fleet id. Ordinary members and deregistered
+  monitors are excluded, and fleets are independent. Root Director card
+  generation omits the monitor marker; Director-first display-kind resolution
+  (§5.4) is unchanged and does not override this index predicate.
+
+**The migration chain.** Head is **`V8`**, contiguous from 1 with exactly one
 baseline:
 
 1. `V1__baseline.sql` — the baseline, creating the schema in this order:
@@ -3332,6 +3450,15 @@ baseline:
        wake_requested_at TEXT
    );
    ```
+8. `V8__unique_active_monitor.sql` — adds the partial unique index:
+   ```sql
+   CREATE UNIQUE INDEX idx_members_one_active_monitor_per_fleet
+   ON members(fleet_id)
+   WHERE status = 'active'
+     AND json_extract(member_card_json, '$.cafleet.kind') = 'monitor';
+   ```
+   Existing duplicate active monitors make this DDL fail. No survivor is
+   selected automatically, and existing migration files remain unchanged.
 
 There are no CHECK constraints. Future schema changes are hand-written
 numbered files `V<N>__<slug>.sql` appended to the chain; the chain stays
@@ -3351,14 +3478,26 @@ unversioned database.`; a recorded version greater than the embedded chain's
 head → the **ahead-of-head refusal**, application error `DB schema is at
 version <M> which is unknown to this version of cafleet. Refusing to downgrade
 automatically.`; (5) already at head (recorded version == head) → print
-`Already at head (<N>); nothing to do.` and stop; (6) otherwise apply the
-pending migrations to head and print `Created <db_file> and applied migrations
+`Already at head (<N>); nothing to do.` and stop; (6) before applying pending
+migrations, if `members` exists, query duplicate fleets using the partial
+index's exact predicate, with fleet ids and member ids in ascending order.
+A duplicate fails the DB half with
+`active monitor duplicates prevent migration: fleet <id>: members <ids>; ...`.
+Preserve all member/placement rows, panes, and schema history: diagnosis makes
+no changes and does not choose a survivor. A new database without `members`
+skips this check; (7) apply all pending migrations in refinery's grouped
+transaction. If index creation fails (including a duplicate introduced after
+step 6), roll back the entire pending group and its ledger writes. Re-query
+for duplicates after failure: if that succeeds and finds duplicates, report
+the same diagnostic; otherwise preserve the original migration error. On
+success print `Created <db_file> and applied migrations
 to head (<N>).` when no version was recorded before the run (a fresh or
 table-less DB), else `Upgraded from <M> to <N>.`. `<M>` / `<N>` are the
-integer migration versions (the head is `7`). The driver's
+integer migration versions (the head is `8`). The driver's
 connection is closed when the command finishes (success or failure).
 
----
+**Duplicate-monitor recovery.** Use the operator procedure in
+[Storage](docs/docs/concepts/storage.md#duplicate-monitor-recovery).
 
 ## 9. Testing strategy
 

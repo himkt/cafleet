@@ -5,18 +5,21 @@
 use clap::{Args, Subcommand};
 use rusqlite::Connection;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 
-use super::helpers::{connect, emit, resolve_body, resolve_mux};
-use super::system::SystemProbe;
+use super::creation::{PaneGuard, RegistrationGuard};
+use super::helpers::{emit, resolve_body, resolve_mux};
+use crate::broker::records::MemberRecord;
 use crate::broker::{self, NewPlacement};
+use crate::capture::{CaptureSnapshot, MemberCapture, write_member_capture};
 use crate::coding_agent::coding_agent;
 use crate::config::Settings;
 use crate::error::CafleetError;
+
 use crate::multiplexer::Multiplexer;
-use crate::output::{format_member, format_member_detail, format_member_list, strip_ansi};
-use crate::spawn_prompt::substitute_spawn_placeholders;
-use crate::time::{format_utc, now_utc};
+use crate::output::{format_member, format_member_detail, format_member_list};
+use crate::presentation;
+use crate::runtime::system::SystemProbe;
+use crate::time::now_utc;
 
 #[derive(Args)]
 #[group(required = true, multiple = false)]
@@ -130,10 +133,15 @@ pub enum MemberCommand {
     },
 }
 
-fn require_pane(member: &Value, member_id: i64, action: &str) -> Result<String, CafleetError> {
-    member["placement"]["mux_pane_id"]
-        .as_str()
-        .map(str::to_string)
+fn require_pane(
+    member: &MemberRecord,
+    member_id: i64,
+    action: &str,
+) -> Result<String, CafleetError> {
+    member
+        .placement
+        .as_ref()
+        .and_then(|placement| placement.mux_pane_id.clone())
         .ok_or_else(|| {
             CafleetError::App(format!(
                 "member {member_id} has no pane yet (pending placement) — nothing to {action}."
@@ -147,34 +155,18 @@ fn load_member(
     conn: &Connection,
     member_id: i64,
     tolerate_missing_placement: bool,
-) -> Result<Value, CafleetError> {
+) -> Result<MemberRecord, CafleetError> {
     let fleet_id = broker::active_member_fleet(conn, member_id)?
         .ok_or_else(|| CafleetError::App(format!("Member {member_id} not found")))?;
     let member = broker::get_member(conn, member_id, fleet_id)?
         .ok_or_else(|| CafleetError::App(format!("Member {member_id} not found")))?;
-    if member["placement"].is_null() && !tolerate_missing_placement {
+    if member.placement.is_none() && !tolerate_missing_placement {
         return Err(CafleetError::App(format!(
             "member {member_id} has no placement row; it was not spawned via \
              `cafleet member create`."
         )));
     }
     Ok(member)
-}
-
-fn deregister_with_warning(conn: &mut Connection, member_id: i64) {
-    if let Err(error) = broker::deregister_member(conn, member_id) {
-        eprintln!(
-            "WARNING: rollback deregister failed for member {member_id}: {}",
-            error.message()
-        );
-    }
-}
-
-fn rollback_register(conn: &mut Connection, member_id: i64, reason: String) -> CafleetError {
-    deregister_with_warning(conn, member_id);
-    CafleetError::App(format!(
-        "{reason}. Rolled back registration of {member_id}."
-    ))
 }
 
 /// Resolve the effective coding agent: an explicit flag wins; otherwise
@@ -208,7 +200,7 @@ fn resolve_coding_agent(
             )));
         }
     };
-    match director["placement"]["coding_agent"].as_str() {
+    match director.placement.as_ref().map(|p| p.coding_agent.as_str()) {
         Some(agent) => Ok(agent.to_string()),
         None => Err(unresolved(format!(
             "Director (member {director_id}) has no placement."
@@ -216,7 +208,11 @@ fn resolve_coding_agent(
     }
 }
 
-pub fn run(settings: &Settings, command: MemberCommand) -> Result<(), CafleetError> {
+pub fn run(
+    conn: &mut Connection,
+    settings: &Settings,
+    command: MemberCommand,
+) -> Result<(), CafleetError> {
     match command {
         MemberCommand::Create {
             fleet_id,
@@ -229,6 +225,7 @@ pub fn run(settings: &Settings, command: MemberCommand) -> Result<(), CafleetErr
             body,
             json,
         } => create(
+            conn,
             settings,
             fleet_id,
             &name,
@@ -240,27 +237,28 @@ pub fn run(settings: &Settings, command: MemberCommand) -> Result<(), CafleetErr
             &body,
             json,
         ),
-        MemberCommand::Delete { member_id, json } => delete(settings, member_id, json),
-        MemberCommand::Show { member_id, json } => show(settings, member_id, json),
-        MemberCommand::List { fleet_id, json } => list(settings, fleet_id, json),
+        MemberCommand::Delete { member_id, json } => delete(conn, settings, member_id, json),
+        MemberCommand::Show { member_id, json } => show(conn, member_id, json),
+        MemberCommand::List { fleet_id, json } => list(conn, fleet_id, json),
         MemberCommand::Prompt {
             member_id,
             text,
             shell,
             json,
-        } => prompt(settings, member_id, shell, &text, json),
-        MemberCommand::Ping { member_id, json } => ping(settings, member_id, json),
+        } => prompt(conn, settings, member_id, shell, &text, json),
+        MemberCommand::Ping { member_id, json } => ping(conn, settings, member_id, json),
         MemberCommand::Capture {
             member_id,
             lines,
             ansi,
             json,
-        } => capture(settings, member_id, lines, ansi, json),
+        } => capture(conn, settings, member_id, lines, ansi, json),
     }
 }
 
 #[allow(clippy::too_many_arguments)]
 fn create(
+    conn: &mut Connection,
     settings: &Settings,
     fleet_id: i64,
     name: &str,
@@ -272,21 +270,19 @@ fn create(
     body: &PromptArgs,
     json: bool,
 ) -> Result<(), CafleetError> {
-    let mut conn = connect(settings)?;
-
     // 1. Auto-resolve the Director from the fleet row, first thing.
-    let fleet = broker::get_fleet(&conn, fleet_id)?
+    let fleet = broker::fleets::fetch_fleet(conn, fleet_id)?
         .ok_or_else(|| CafleetError::Usage(format!("Fleet '{fleet_id}' not found.")))?;
-    if !fleet["deleted_at"].is_null() {
+    if fleet.deleted_at.is_some() {
         return Err(CafleetError::App(format!("fleet {fleet_id} is deleted")));
     }
-    let Some(director_id) = fleet["director_member_id"].as_i64() else {
+    let Some(director_id) = fleet.director_member_id else {
         return Err(CafleetError::App(format!(
             "fleet {fleet_id} has no root Director recorded; re-create the fleet \
              with 'cafleet fleet create'."
         )));
     };
-    let agent_name = resolve_coding_agent(&conn, fleet_id, director_id, explicit_agent)?;
+    let agent_name = resolve_coding_agent(conn, fleet_id, director_id, explicit_agent)?;
     let backend = coding_agent(&agent_name)
         .unwrap_or_else(|| panic!("'{agent_name}' is a registry-validated backend"));
 
@@ -295,8 +291,8 @@ fn create(
     backend.validate_effort(effort)?;
 
     // 3. Monitor-role guards, one-per-fleet first, before any registration
-    //    or pane effect (`register_member` itself is guard-free).
-    let active_monitor = broker::active_monitor_member_id(&conn, fleet_id)?;
+    //    or pane effect (the broker also enforces monitor uniqueness).
+    let active_monitor = broker::active_monitor_member_id(conn, fleet_id)?;
     if monitor {
         if let Some(existing) = active_monitor {
             return Err(CafleetError::App(format!(
@@ -322,6 +318,12 @@ fn create(
         .context_discovery()
         .map_err(|e| CafleetError::App(e.to_string()))?;
 
+    let env: Vec<_> = std::env::var("CAFLEET_DATABASE_URL")
+        .ok()
+        .map(|value| ("CAFLEET_DATABASE_URL".to_string(), value))
+        .into_iter()
+        .collect();
+
     // 6. Register the member with a pending placement, threading the
     //    monitor role into its card marker.
     let placement = NewPlacement {
@@ -332,7 +334,7 @@ fn create(
         coding_agent: agent_name.clone(),
     };
     let registered = broker::register_member(
-        &mut conn,
+        conn,
         fleet_id,
         name,
         description,
@@ -341,98 +343,86 @@ fn create(
         monitor,
     )
     .map_err(|error| match error {
-        CafleetError::App(_) | CafleetError::Usage(_) => error,
+        CafleetError::App(_)
+        | CafleetError::Usage(_)
+        | CafleetError::ActiveMonitorExists { .. } => error,
         other => CafleetError::App(format!("register failed: {}", other.message())),
     })?;
-    let member_id = registered["member_id"]
-        .as_i64()
-        .expect("registration returns the new member id");
-
-    // 7. Substitute the identity placeholders; on failure deregister and
-    //    re-raise the original error unwrapped.
-    let rendered = match substitute_spawn_placeholders(
+    let member_id = registered.member_id;
+    let mut registration = RegistrationGuard::new(conn, member_id);
+    let prompt = match crate::spawn_prompt::substitute_spawn_placeholders(
         &prompt_body,
         fleet_id,
         member_id,
         director_id,
         &agent_name,
     ) {
-        Ok(rendered) => rendered,
-        Err(original) => {
-            deregister_with_warning(&mut conn, member_id);
-            return Err(original);
-        }
+        Ok(prompt) => prompt,
+        Err(original) => return Err(registration.rollback(original)),
     };
-
-    // 8-9. Build the spawn argv and split the pane, forwarding only
-    //      CAFLEET_DATABASE_URL.
-    let argv = backend.build_spawn_argv(&rendered, name, model, effort);
-    let mut env = Vec::new();
-    if let Ok(url) = std::env::var("CAFLEET_DATABASE_URL") {
-        env.push(("CAFLEET_DATABASE_URL".to_string(), url));
-    }
+    let argv = backend.build_spawn_argv(&prompt, name, model, effort);
     let pane_id = match mux.split_window(&context, &env, &argv) {
         Ok(pane_id) => pane_id,
         Err(error) => {
-            return Err(rollback_register(
-                &mut conn,
-                member_id,
-                format!("tmux split-window failed: {error}"),
-            ));
+            return Err(registration.rollback(CafleetError::App(format!(
+                "tmux split-window failed: {error}"
+            ))));
         }
     };
+    let mut pane = PaneGuard::with_kill(pane_id.clone(), Box::new(|id| mux.kill_pane(id, true)));
 
-    // 10. Patch the pane id onto the placement.
-    let patched = match broker::update_placement_pane_id(&mut conn, member_id, &pane_id) {
-        Ok(patched) => patched,
-        Err(error) => {
-            let _ = mux.send_exit(&pane_id, true);
-            return Err(rollback_register(
-                &mut conn,
-                member_id,
-                format!("placement update failed: {}", error.message()),
-            ));
+    // 10. A failed placement patch compensates the pane before registration.
+    let patched = broker::update_placement_pane_id(registration.connection(), member_id, &pane_id);
+    let placement_view = match patched {
+        Ok(Some(placement)) => placement,
+        outcome => {
+            let primary = match outcome {
+                Err(error) => {
+                    CafleetError::App(format!("placement update failed: {}", error.message()))
+                }
+                _ => CafleetError::App("placement row vanished before pane-id patch".into()),
+            };
+            let primary = pane.rollback(primary);
+            return Err(registration.rollback(primary));
         }
     };
-    let Some(placement_view) = patched else {
-        let _ = mux.send_exit(&pane_id, true);
-        return Err(rollback_register(
-            &mut conn,
-            member_id,
-            "placement row vanished before pane-id patch".to_string(),
-        ));
-    };
+    pane.finish();
+    registration.finish();
 
     // 11. Emit with the placement view attached.
     let result = json!({
         "member_id": member_id,
         "name": name,
-        "registered_at": registered["registered_at"],
-        "placement": placement_view,
+        "registered_at": registered.registered_at,
+        "placement": presentation::placement(&placement_view),
     });
     emit(json, &result, || format_member(&result));
     Ok(())
 }
 
-fn delete(settings: &Settings, member_id: i64, json: bool) -> Result<(), CafleetError> {
-    let mut conn = connect(settings)?;
-
+fn delete(
+    conn: &mut Connection,
+    settings: &Settings,
+    member_id: i64,
+    json: bool,
+) -> Result<(), CafleetError> {
     // Root-Director guard, before any pane mutation.
-    let fleet_id = broker::active_member_fleet(&conn, member_id)?
+    let fleet_id = broker::active_member_fleet(conn, member_id)?
         .ok_or_else(|| CafleetError::App(format!("Member {member_id} not found")))?;
-    let fleet = broker::get_fleet(&conn, fleet_id)?
+    let fleet = broker::fleets::fetch_fleet(conn, fleet_id)?
         .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;
-    if fleet["director_member_id"].as_i64() == Some(member_id) {
+    if fleet.director_member_id == Some(member_id) {
         return Err(CafleetError::App(
             "cannot deregister the root Director; use 'cafleet fleet delete' instead".to_string(),
         ));
     }
 
-    let member = load_member(&conn, member_id, true)?;
-    let pane = member["placement"]["mux_pane_id"]
-        .as_str()
-        .map(str::to_string);
-    let pane_status = if member["placement"].is_null() {
+    let member = load_member(conn, member_id, true)?;
+    let pane = member
+        .placement
+        .as_ref()
+        .and_then(|p| p.mux_pane_id.clone());
+    let pane_status = if member.placement.is_none() {
         "(no placement)".to_string()
     } else if let Some(pane_id) = &pane {
         let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
@@ -449,7 +439,7 @@ fn delete(settings: &Settings, member_id: i64, json: bool) -> Result<(), Cafleet
     } else {
         "(pending — no pane)".to_string()
     };
-    broker::deregister_member(&mut conn, member_id)
+    broker::deregister_member(conn, member_id)
         .map_err(|e| CafleetError::App(format!("deregister failed: {}", e.message())))?;
 
     let result = json!({"member_id": member_id, "pane_status": pane_status});
@@ -459,16 +449,18 @@ fn delete(settings: &Settings, member_id: i64, json: bool) -> Result<(), Cafleet
     Ok(())
 }
 
-fn show(settings: &Settings, member_id: i64, json: bool) -> Result<(), CafleetError> {
-    let conn = connect(settings)?;
-    let member = load_member(&conn, member_id, true)?;
-    emit(json, &member, || format_member_detail(&member));
+fn show(conn: &mut Connection, member_id: i64, json: bool) -> Result<(), CafleetError> {
+    let member = load_member(conn, member_id, true)?;
+    let value = presentation::member(&member);
+    emit(json, &value, || format_member_detail(&value));
     Ok(())
 }
 
-fn list(settings: &Settings, fleet_id: i64, json: bool) -> Result<(), CafleetError> {
-    let conn = connect(settings)?;
-    let members = broker::list_members(&conn, fleet_id)?;
+fn list(conn: &mut Connection, fleet_id: i64, json: bool) -> Result<(), CafleetError> {
+    let members: Vec<Value> = broker::list_members(conn, fleet_id)?
+        .iter()
+        .map(presentation::member_activity)
+        .collect();
     emit(json, &Value::Array(members.clone()), || {
         format_member_list(&members)
     });
@@ -476,6 +468,7 @@ fn list(settings: &Settings, fleet_id: i64, json: bool) -> Result<(), CafleetErr
 }
 
 fn prompt(
+    conn: &mut Connection,
     settings: &Settings,
     member_id: i64,
     shell: bool,
@@ -494,13 +487,13 @@ fn prompt(
     let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
-    let conn = connect(settings)?;
-    let member = load_member(&conn, member_id, false)?;
+
+    let member = load_member(conn, member_id, false)?;
     let pane_id = require_pane(&member, member_id, "prompt")?;
     mux.send_prompt(&pane_id, trimmed, shell)
         .map_err(|e| CafleetError::App(format!("send failed: {e}")))?;
 
-    let name = member["name"].as_str().expect("members carry a name");
+    let name = member.name.as_str();
     let result = json!({
         "member_id": member_id,
         "pane_id": pane_id,
@@ -514,14 +507,22 @@ fn prompt(
     Ok(())
 }
 
-fn ping(settings: &Settings, member_id: i64, json: bool) -> Result<(), CafleetError> {
+fn ping(
+    conn: &mut Connection,
+    settings: &Settings,
+    member_id: i64,
+    json: bool,
+) -> Result<(), CafleetError> {
     let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
-    let conn = connect(settings)?;
-    let member = load_member(&conn, member_id, false)?;
-    let name = member["name"].as_str().expect("members carry a name");
-    let pane = member["placement"]["mux_pane_id"].as_str();
+
+    let member = load_member(conn, member_id, false)?;
+    let name = member.name.as_str();
+    let pane = member
+        .placement
+        .as_ref()
+        .and_then(|p| p.mux_pane_id.as_deref());
 
     let Some(pane_id) = pane else {
         // The pending-placement skip path: no keystroke, exit 0.
@@ -549,6 +550,7 @@ fn ping(settings: &Settings, member_id: i64, json: bool) -> Result<(), CafleetEr
 }
 
 fn capture(
+    conn: &mut Connection,
     settings: &Settings,
     member_id: i64,
     lines: i64,
@@ -558,30 +560,19 @@ fn capture(
     let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
-    let conn = connect(settings)?;
-    let member = load_member(&conn, member_id, false)?;
+
+    let member = load_member(conn, member_id, false)?;
     let pane_id = require_pane(&member, member_id, "capture")?;
     let raw = mux
         .capture_pane(&pane_id, lines)
         .map_err(|e| CafleetError::App(format!("capture failed: {e}")))?;
-    let content = if ansi { raw } else { strip_ansi(&raw) };
-    let captured_at = format_utc(now_utc());
-    let digest = Sha256::digest(content.as_bytes());
-    let content_sha256: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
-    let payload = json!({
-        "member_id": member_id,
-        "pane_id": pane_id,
-        "lines": lines,
-        "content": content,
-        "captured_at": captured_at,
-        "content_sha256": content_sha256,
-    });
-    if json {
-        emit(true, &payload, String::new);
-    } else {
-        print!("{content}");
-    }
-    Ok(())
+    let capture = MemberCapture {
+        member_id,
+        pane_id,
+        lines,
+        snapshot: CaptureSnapshot::from_raw(&raw, ansi, now_utc()),
+    };
+    write_member_capture(&mut std::io::stdout(), &capture, json)
 }
 
 #[cfg(test)]

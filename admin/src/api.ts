@@ -1,92 +1,54 @@
-import type {
-  MembersResponse,
-  TimelineResponse,
-  FleetListItem,
-  MonitorRuntime,
-} from "./types";
+import type { MembersResponse, TimelineResponse, FleetListItem, MonitorRuntime } from "./types";
 
-let fleetId: number | null = null;
-
-export function setFleetId(id: number | null): void {
-  fleetId = id;
-}
-
-async function request<T>(
-  path: string,
-  options: RequestInit = {},
-): Promise<T> {
-  const headers: Record<string, string> = {
-    ...(options.headers as Record<string, string>),
-  };
-
-  if (fleetId !== null) {
-    headers["X-Fleet-Id"] = String(fleetId);
+export interface RequestOptions { signal?: AbortSignal }
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
   }
-
-  if (options.body && typeof options.body === "string") {
-    headers["Content-Type"] = "application/json";
+}
+export interface FleetClient {
+  readonly fleetId: number;
+  getMembers(options?: RequestOptions): Promise<MembersResponse>;
+  fetchTimeline(options?: RequestOptions): Promise<TimelineResponse>;
+  fetchInbox(memberId: number, options?: RequestOptions): Promise<TimelineResponse>;
+  fetchSent(memberId: number, options?: RequestOptions): Promise<TimelineResponse>;
+  getMonitor(options?: RequestOptions): Promise<MonitorRuntime>;
+  sendMessage(fromMemberId: number, toMemberId: number | "*", text: string, options?: RequestOptions): Promise<void>;
+  patchMonitor(wakeIntervalSeconds: number, options?: RequestOptions): Promise<void>;
+  postMonitorWake(options?: RequestOptions): Promise<{ wake_requested_at: string }>;
+}
+async function request<T>(path: string, fleetId: number | null, options: RequestInit = {}): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (fleetId !== null) headers["X-Fleet-Id"] = String(fleetId);
+  if (typeof options.body === "string") headers["Content-Type"] = "application/json";
+  const response = await fetch(`/api${path}`, { ...options, headers });
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new ApiError(response.status, data?.error || data?.detail || `HTTP ${response.status}`);
   }
-
-  const resp = await fetch(`/api${path}`, { ...options, headers });
-
-  if (!resp.ok) {
-    const data = await resp.json().catch(() => ({}));
-    throw new Error(data.error || data.detail || `HTTP ${resp.status}`);
-  }
-
-  return resp.json() as Promise<T>;
+  return response.json() as Promise<T>;
 }
-
-export async function listFleets(): Promise<FleetListItem[]> {
-  return request<FleetListItem[]>("/fleets");
+export function listFleets(options: RequestOptions = {}): Promise<FleetListItem[]> {
+  return request("/fleets", null, options);
 }
-
-export async function getMembers(): Promise<MembersResponse> {
-  return request<MembersResponse>("/members");
-}
-
-export async function fetchTimeline(): Promise<TimelineResponse> {
-  return request<TimelineResponse>("/timeline");
-}
-
-export async function fetchInbox(memberId: number): Promise<TimelineResponse> {
-  return request<TimelineResponse>(`/members/${memberId}/inbox`);
-}
-
-export async function fetchSent(memberId: number): Promise<TimelineResponse> {
-  return request<TimelineResponse>(`/members/${memberId}/sent`);
-}
-
-export async function sendMessage(
-  fromMemberId: number,
-  toMemberId: number | "*",
-  text: string,
-): Promise<void> {
-  await request<unknown>("/messages/send", {
-    method: "POST",
-    body: JSON.stringify({
-      from_member_id: fromMemberId,
-      to_member_id: toMemberId,
-      text,
-    }),
-  });
-}
-
-export async function getMonitor(): Promise<MonitorRuntime> {
-  return request<MonitorRuntime>("/monitor");
-}
-
-export async function patchMonitor(wakeIntervalSeconds: number): Promise<void> {
-  await request<unknown>("/monitor", {
-    method: "PATCH",
-    body: JSON.stringify({ wake_interval_seconds: wakeIntervalSeconds }),
-  });
-}
-
-export async function postMonitorWake(): Promise<{
-  wake_requested_at: string;
-}> {
-  return request<{ wake_requested_at: string }>("/monitor/wake", {
-    method: "POST",
+export function createFleetClient(fleetId: number): FleetClient {
+  if (!Number.isSafeInteger(fleetId) || fleetId <= 0) throw new RangeError("Invalid fleet ID");
+  return Object.freeze({
+    fleetId,
+    getMembers: (options: RequestOptions = {}) => request<MembersResponse>("/members", fleetId, options),
+    fetchTimeline: (options: RequestOptions = {}) => request<TimelineResponse>("/timeline", fleetId, options),
+    fetchInbox: (memberId: number, options: RequestOptions = {}) => request<TimelineResponse>(`/members/${memberId}/inbox`, fleetId, options),
+    fetchSent: (memberId: number, options: RequestOptions = {}) => request<TimelineResponse>(`/members/${memberId}/sent`, fleetId, options),
+    getMonitor: (options: RequestOptions = {}) => request<MonitorRuntime>("/monitor", fleetId, options),
+    async sendMessage(fromMemberId: number, toMemberId: number | "*", text: string, options: RequestOptions = {}) {
+      await request("/messages/send", fleetId, { ...options, method: "POST", body: JSON.stringify({ from_member_id: fromMemberId, to_member_id: toMemberId, text }) });
+    },
+    async patchMonitor(wakeIntervalSeconds: number, options: RequestOptions = {}) {
+      await request("/monitor", fleetId, { ...options, method: "PATCH", body: JSON.stringify({ wake_interval_seconds: wakeIntervalSeconds }) });
+    },
+    postMonitorWake: (options: RequestOptions = {}) => request<{ wake_requested_at: string }>("/monitor/wake", fleetId, { ...options, method: "POST" }),
   });
 }

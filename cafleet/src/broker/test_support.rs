@@ -1,82 +1,17 @@
-//! Shared fixtures for the broker's colocated contract tests (SPEC §6.2).
+//! Shared fixtures for typed broker contract tests (SPEC §6.2).
 //!
-//! Expected public API pinned by the submodule test suites (all result shapes
-//! are `serde_json::Value` dicts with insertion-order keys; errors are
-//! `crate::error::CafleetError` `Value(String)` — translated by callers:
-//! CLI → exit 1, WebUI → HTTP status):
+//! Storage APIs return broker::records types: register_member returns
+//! RegisteredMember; get_member/list_roster return MemberRecord;
+//! list_members adds MemberActivity; update_placement_pane_id returns
+//! Placement. Message reads and ACK use MessageRecord, send_message
+//! returns SendOutcome with NotificationAttempt, and broadcast_message
+//! returns BroadcastOutcome. Monitor queries distinguish optional raw
+//! MonitorRuntime from MonitorRuntimeView, MonitorMember, and WakeTarget.
 //!
-//! ```text
-//! pub struct NewPlacement { pub backend: String, pub mux_session: String,
-//!     pub mux_window_id: String, pub mux_pane_id: Option<String>,
-//!     pub coding_agent: String }
-//! pub trait InlinePreviewSender {
-//!     fn send_inline_preview(&self, target_pane_id: &str, message_id: i64,
-//!         sender_id: i64, ts: &str, text: &str) -> Result<(), String>;
-//!     // Err carries the raw multiplexer error string, preserved verbatim
-//! }
-//! // fleets
-//! create_fleet(conn: &mut Connection, name: Option<&str>, mux_session: &str,
-//!     mux_window_id: &str, mux_pane_id: &str, coding_agent: &str,
-//!     backend: &str, monitor_name: &str, monitor_description: &str,
-//!     spawn_monitor: impl FnOnce(i64, i64, i64) -> Result<String>)
-//!     -> Result<Value>  // callback args: (fleet_id, director_id, monitor_id)
-//! list_fleets(conn: &Connection) -> Result<Vec<Value>>
-//! get_fleet(conn: &Connection, fleet_id: i64) -> Result<Option<Value>>
-//! delete_fleet(conn: &mut Connection, fleet_id: i64) -> Result<Value>
-//! // members
-//! register_member(conn: &mut Connection, fleet_id: i64, name: &str,
-//!     description: &str, skills: &[Value], placement: Option<&NewPlacement>,
-//!     monitor: bool) -> Result<Value>  // {member_id, name, registered_at}
-//! get_member(conn: &Connection, member_id: i64, fleet_id: i64) -> Result<Option<Value>>
-//! active_monitor_member_id(conn: &Connection, fleet_id: i64) -> Result<Option<i64>>
-//! deregister_member(conn: &mut Connection, member_id: i64) -> Result<bool>
-//! update_placement_pane_id(conn: &mut Connection, member_id: i64, pane_id: &str)
-//!     -> Result<Option<Value>>
-//! verify_member_fleet(conn: &Connection, member_id: i64, fleet_id: i64) -> Result<bool>
-//! get_member_names(conn: &Connection, member_ids: &[i64]) -> Result<BTreeMap<i64, String>>
-//! list_members(conn: &Connection, fleet_id: i64) -> Result<Vec<Value>>
-//! list_roster(conn: &Connection, fleet_id: i64, include_message_holders: bool)
-//!     -> Result<Vec<Value>>
-//! // messaging
-//! pub struct SendMessageOutcome {
-//!     pub(crate) payload: Value,                    // the unchanged {message, notification_sent}
-//!     pub(crate) notification_error: Option<String> // Some(raw) only for an attempted, failed preview
-//! }
-//! send_message(conn: &mut Connection, notifier: &dyn InlinePreviewSender,
-//!     max_text_len: usize, from_member_id: i64, to: &str, text: &str)
-//!     -> Result<SendMessageOutcome>  // Ok even when the attempted preview failed
-//! broadcast_message(conn: &mut Connection, notifier: &dyn InlinePreviewSender,
-//!     max_text_len: usize, from_member_id: i64, text: &str)
-//!     -> Result<Vec<Value>>  // [{message, recipients, delivered}]
-//! poll_messages(conn: &Connection, member_id: i64) -> Result<Vec<Value>>
-//! ack_message(conn: &mut Connection, message_id: i64) -> Result<Value>  // {message}
-//! // queries
-//! list_inbox(conn: &Connection, member_id: i64) -> Result<Vec<Value>>
-//! list_sent(conn: &Connection, member_id: i64) -> Result<Vec<Value>>
-//! list_timeline(conn: &Connection, fleet_id: i64, limit: usize) -> Result<Vec<Value>>
-//! get_message(conn: &Connection, message_id: i64) -> Result<Value> // {message}
-//! // monitor
-//! record_monitor_wake(conn: &mut Connection, fleet_id: i64, when: &str) -> Result<()>
-//! list_fleet_wake_targets(conn: &Connection, fleet_id: i64) -> Result<Vec<Value>>
-//! fleet_wake_director(conn: &Connection, fleet_id: i64) -> Result<Value>
-//! claim_monitor_runtime(conn: &mut Connection, fleet_id: i64, pid: i64,
-//!     tick_seconds: i64, wake_interval: i64, when: &str) -> Result<bool>
-//! set_monitor_wake_interval(conn: &mut Connection, fleet_id: i64,
-//!     wake_interval: i64) -> Result<bool>  // false ⇔ no row
-//! heartbeat_monitor_runtime(conn: &mut Connection, fleet_id: i64, pid: i64,
-//!     when: &str) -> Result<bool>
-//! clear_monitor_runtime(conn: &mut Connection, fleet_id: i64, pid: i64) -> Result<()>
-//! read_monitor_runtime(conn: &Connection, fleet_id: i64) -> Result<Option<Value>>
-//! monitor_is_live(conn: &Connection, fleet_id: i64, now: DateTime<Utc>) -> Result<bool>
-//! monitor_runtime_payload(conn: &Connection, fleet_id: i64, now: DateTime<Utc>) -> Result<Value>
-//! monitor_members_payload(conn: &Connection, fleet_id: i64, now: DateTime<Utc>)
-//!     -> Result<Vec<Value>>
-//! // asset_installs
-//! asset_installs_table_exists(conn: &Connection) -> bool
-//! list_asset_installs(conn: &Connection) -> Result<Vec<Value>>
-//! record_asset_install(conn: &mut Connection, coding_agent: &str,
-//!     path: &str, cafleet_version: &str) -> Result<()>
-//! ```
+//! Tests call explicit crate::presentation functions when asserting wire JSON.
+//! This fixture's send helper also presents the typed outcome for existing
+//! message setup; notification policy tests inspect NotificationAttempt directly.
+//! No fixture depends on the temporary production Value wrappers.
 #![allow(dead_code)]
 
 use std::cell::RefCell;
@@ -149,9 +84,8 @@ pub fn register(conn: &mut Connection, fleet_id: i64, name: &str, pane: Option<&
         Some(&placement(pane)),
         false,
     )
-    .unwrap()["member_id"]
-        .as_i64()
-        .unwrap()
+    .unwrap()
+    .member_id
 }
 
 pub fn register_monitor(
@@ -169,9 +103,8 @@ pub fn register_monitor(
         Some(&placement(pane)),
         true,
     )
-    .unwrap()["member_id"]
-        .as_i64()
-        .unwrap()
+    .unwrap()
+    .member_id
 }
 
 pub struct NotifyCall {
@@ -227,7 +160,7 @@ impl InlinePreviewSender for FakeNotifier {
 }
 
 /// Send and return the outcome's `{message, notification_sent}` payload;
-/// tests that assert `notification_error` call `broker::send_message` directly.
+/// tests that assert NotificationAttempt call broker::send_message directly.
 pub fn send(
     conn: &mut Connection,
     notifier: &FakeNotifier,
@@ -235,7 +168,7 @@ pub fn send(
     to: i64,
     text: &str,
 ) -> Value {
-    broker::send_message(conn, notifier, MAX_TEXT_LEN, from, &to.to_string(), text)
-        .unwrap()
-        .payload
+    let outcome =
+        broker::send_message(conn, notifier, MAX_TEXT_LEN, from, &to.to_string(), text).unwrap();
+    crate::presentation::send_outcome(&outcome)
 }

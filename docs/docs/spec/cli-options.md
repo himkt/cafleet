@@ -271,6 +271,19 @@ The command runs two halves, in order:
     | At head | No-op | `Already at head (<N>); nothing to do.` |
     | Tables present but no `refinery_schema_history` | Refused | `DB has existing tables but no refinery_schema_history. Refusing to migrate an unversioned database.` |
     | Version unknown to this CLI version | Refused | `DB schema is at version <M> which is unknown to this version of cafleet. Refusing to downgrade automatically.` |
+    | Pending migration with duplicate active monitors | Refused; DB rows, schema history, and panes preserved | `active monitor duplicates prevent migration: fleet <id>: members <ids>; ...` |
+
+   The unversioned and newer-schema refusals retain precedence. Before applying
+   pending migrations, check existing members using the active-monitor index
+   predicate; a new DB without members skips the diagnostic. Conflicting fleet
+   ids and member ids are ascending. Pending migrations use one grouped
+   transaction, so a failure rolls back every pending schema/history change.
+   The index also rejects a duplicate introduced after the diagnostic. If a
+   recheck after migration failure finds duplicates, use the same diagnostic;
+   otherwise retain the original migration error. The DB half never manipulates
+   panes or chooses which monitor survives. Recovery uses the prior compatible
+   binary and may require restoring its assets first; see
+   [duplicate-monitor recovery](../concepts/storage.md#duplicate-monitor-recovery).
 
 2. **assets half** — installs, from the data embedded in the binary at build
    time with no network access, each selected agent's two skill directories
@@ -297,7 +310,7 @@ halves joined by `' and '`.
 
 | Half | Trigger | Message | Effect |
 |---|---|---|---|
-| db | Either refusal state in the table above | The refusal message, as `db half failed: <msg>` | Exit 1 |
+| db | Any refusal state in the table above | The refusal message, as `db half failed: <msg>` | Exit 1 |
 | assets | The `asset_installs` table is missing as the half starts | `the database schema is missing or outdated; run 'cafleet setup' first` | Exit 1 |
 | assets | A resolved agent's config-path variable fails validation | `<VAR> must be an absolute path (got '<value>')` | Exit 1 |
 | assets | A skills install fails for a target | `failed to install skills into <skills_dir>: <error>` | Aborts the loop; rows recorded before the failure remain |
@@ -305,7 +318,9 @@ halves joined by `' and '`.
 
 The assets-half pre-flight can fire only after a db-half failure or an
 externally broken schema — the db half always runs first within the same
-command.
+command. A DB-half failure does not automatically fail or skip the assets
+half: if `asset_installs` remains usable, assets can be updated and recorded
+even when duplicate monitors prevent the schema upgrade.
 
 ### Config-dir resolution {#config-dir-resolution}
 
@@ -373,31 +388,29 @@ binary next to the skills; install targets resolve per
 | codex | `presets/codex/cafleet.rules` | `<codex base>/rules/cafleet.rules` (default `~/.codex/rules/cafleet.rules`) |
 | opencode | `presets/opencode/cafleet.md` | `<preset base>/agents/cafleet.md` (default `~/.opencode/agents/cafleet.md`) |
 
-Per target:
+Each backend replaces the two embedded skills sequentially, removes a leftover
+`cafleet-research` entry, then replaces its preset where present. Existing targets
+are deleted before their replacements are written. Unrelated skills remain
+untouched. A symlink target is unlinked as an entry;
+its referent is not deleted. Skills-operation errors retain `failed to install
+skills into <skills_dir>: <error>` and preset-operation errors retain `failed
+to install preset into <target>: <error>`.
 
-1. The two skill directories are delete-and-reinstalled into the agent's
-   resolved skills dir; after the copy, a leftover `<skills_dir>/cafleet-research`
-   entry is removed when present, using the same existing-target check order as
-   the preset install (a symlink is unlinked; else a directory is recursively
-   deleted; else an existing entry is unlinked) and producing no extra output.
-   A failure in either half aborts with `failed to install skills into
-   <skills_dir>: <error>`.
-2. For agents with a bundled preset (codex, opencode), the preset is installed
-   to its resolved target, overwriting whatever exists there — a regular file,
-   a directory, or a symlink. A filesystem error aborts with `failed to install
-   preset into <target>: <error>`.
-3. The agent's `asset_installs` row — keyed on `(coding_agent, path)`, `path`
-   being the agent's recorded identity path — is upserted only after both its
-   skills and its preset install successfully — the row attests skills +
-   preset — then the command echoes the resolved directories (the preset line
-   appears for codex and opencode targets only):
+The command prints each success line after that operation completes, then
+records the installed version after all operations succeed. The preset line
+appears only for codex and opencode:
 
 ```
 <agent>: installed cafleet, cafleet-design-doc (v<version>) -> <skills dir>
 <agent>: installed preset (v<version>) -> <target>
 ```
 
-An install failure aborts the loop; rows recorded before the failure remain.
+## Shared diagnosis and connection reuse {#diagnosis-reuse}
+
+Guards and command work share the invocation's SQLite connection. Setup
+attempts both halves and reuses an open connection; doctor reports every
+section and reads installed versions only at schema head. CLI presenters
+retain the documented output and guard order.
 
 ## Schema-version guard {#schema-version-guard}
 
@@ -433,7 +446,7 @@ the `monitor` command — validates the recorded assets installs after the
 [schema-version guard](#schema-version-guard) passes and before any
 subcommand body runs. The guard resolves each agent's identity path per
 [Config-dir resolution](#config-dir-resolution) and checks only the row at
-that path:
+that path. Apply the following precedence:
 
 | Recorded install state | Result | Exit |
 |---|---|---|
@@ -442,11 +455,9 @@ that path:
 | A row at a resolved path has `cafleet_version` ≠ the runtime CLI version (string inequality — either direction) | `Error: stale assets detected (<agent>=<recorded>[, ...]; CLI <runtime>); run 'cafleet setup' to reinstall`, stale agents in ascending order | 1 |
 | Every row at a resolved path matches | The command proceeds silently | 0 |
 
-Agents with no row at their currently-resolved path are not checked (they
-contribute nothing to staleness), and superseded rows at other paths are
-ignored everywhere in the guard. Plain `cafleet setup` remains the correct
-remedy for both errors: it installs all three agents at their resolved
-paths. Three surfaces are exempt:
+Staleness checks use version records at currently-resolved paths; agents without
+a matching row contribute nothing to staleness. Plain `cafleet setup` installs
+agents at their resolved paths. Three surfaces are exempt:
 
 | Exempt surface | Why exempt | Behavior under a stale/missing install |
 |---|---|---|
@@ -478,8 +489,9 @@ missing-required-argument error naming the flag.
 
 **Must be run inside a tmux or herdr session** — outside one it exits 1 with
 `Error: cafleet fleet create must be run inside a tmux or herdr session` and
-writes nothing. One invocation atomically creates the fleet, its root
-Director, and its monitor member — registration **and** pane spawn. The
+writes nothing. One invocation creates the fleet, its root Director, and its
+monitor member in a single DB transaction, with owned-pane compensation
+for a failed bootstrap. The
 Director and monitor identities are hardcoded (Director:
 `name="Director"`, `description="Root Director for this fleet"`; monitor:
 `name="monitor"`, `description="Monitor member for this fleet"`); there are
@@ -502,15 +514,23 @@ The command runs a single-transaction ladder — see
    (same substitution and error strings as
    [`member create`](#member-create)).
 6. Spawn the monitor pane (detached split, `CAFLEET_DATABASE_URL` as the
-   only forwarded environment variable).
+   only forwarded environment variable). On successful `split_window`,
+   immediately transfer pane ownership to the CLI guard and return the id
+   from the callback, without intervening fallible work.
 7. Insert the monitor placement row (same session/window context as the
-   Director), then commit.
+   Director), then commit. Disarm all creation guards before calling the
+   existing text/JSON output path.
 
-**Any failure rolls back the whole transaction** — no fleet row, no
-Director row, no monitor row, no placement rows. A failure after a
-successful pane spawn (placement insert or commit) also kills the spawned
-pane. The command is retryable as-is. Error strings are in
-[Error Messages](#error-messages).
+A bootstrap failure attempts rollback of the whole DB transaction. For a
+Herdr run failure inside the callback, the backend tries to kill the known
+pane before the callback returns an error and the broker rolls back. For
+placement insert or commit failure after a successful callback, the broker
+closes its transaction first; then the CLI kills its owned pane. Successful
+rollback leaves no fleet, Director, monitor, or placement rows. A failed
+cleanup is reported with the primary error; the command does not claim a
+complete rollback or unconditional retryability when cleanup is uncertain.
+The [creation failure contract](#creation-failure-compensation) specifies all
+orders and diagnostics. Error strings are in [Error Messages](#error-messages).
 
 Once its pane boots, the monitor member sends `ready`, launches the
 `cafleet monitor` wake loop, and sends `monitor live` (see
@@ -522,7 +542,8 @@ re-spawning a dead monitor.
 
 The only flag is the optional shared [`--json`](#json-output).
 
-Lists all non-soft-deleted fleets. Each row exposes `director_member_id` so
+Lists all non-soft-deleted fleets in `created_at DESC, fleet_id DESC` order
+(higher id first when timestamps tie). Each row exposes `director_member_id` so
 the Director's id can be recovered after `fleet create` output scrolls away.
 
 ### `fleet show`
@@ -613,7 +634,7 @@ coding-agents section, but the recorded rows are read only when the database
 report is `✓` (at head) AND the `asset_installs` table exists. Whenever the
 rows are not read — any non-head state, or an at-head ledger with a
 hand-dropped table — the section renders with no recorded-install data:
-every resolvable agent shows the `–` state, no superseded footnotes render,
+every resolvable agent shows the `–` state. No superseded footnotes render,
 and — in the non-head states — doctor exits 1 for the database issue;
 either way, never a raw SQLite error from `asset_installs`.
 
@@ -660,9 +681,8 @@ Mirrors the sections with `ok` booleans, unabbreviated absolute paths, and
 the issue count. `source` holds the winning env-var **name** (no `$`) or the
 literal `"default"`; `state` is `"ok" | "stale" | "not_installed" | "error"`
 (`"error"` is the per-agent resolution-error state; `"not_installed"` never
-contributes to `issues`). Every agent row carries the same keys; `error` is
-`null` except in the `"error"` state, where it holds the pinned validation
-message (without the `Error: ` prefix). Section `error` fields likewise hold
+contributes to `issues`). Every agent row carries the same keys. `error` is
+the validation message for `"error"`, and otherwise null, without an `Error: ` prefix. Section `error` fields likewise hold
 the detail text when `ok` is false, else `null`.
 
 ```json
@@ -708,9 +728,9 @@ agent resolution error the row is `{"coding_agent": "...", "path": null,
 raw invalid value appears only inside `error`; `path` stays `null` because
 no path resolved. `schema_version` is `null` when the ledger is absent.
 When the recorded rows are not read (a non-`ok` database report, or a
-missing `asset_installs` table), every agent row renders as the
-`"not_installed"` shape and `superseded` is empty — the JSON shape is
-unchanged. Exit-code semantics are identical to text mode.
+missing `asset_installs` table), resolved agents use `"not_installed"`
+and path errors remain
+`"error"`. Recorded fields are null and `superseded` is empty. Exit-code semantics are identical to text mode.
 
 ## `cafleet server` — Admin WebUI Server {#cafleet-server}
 
@@ -886,6 +906,22 @@ one root Director by construction, so no override flag exists.
 | `--file PATH` | one of | Path to a UTF-8 file whose contents are the spawn prompt (`-` = stdin). Inline prompts beyond a few KB exceed the multiplexer argv ceiling — use `--file` for long prompts. |
 | `--json` | no | Output as JSON |
 
+#### Concurrent monitor registration
+
+The CLI's one-per-fleet check remains before the monitor-first check and before
+registration or pane creation, preserving the existing validation order.
+Registration also opens an `IMMEDIATE` DB transaction and checks the active
+monitor slot inside it. The partial unique index enforces the same predicate
+for all writers, including direct broker calls and status/card/fleet updates.
+Only a conflict with that constraint maps to the typed
+`ActiveMonitorExists { fleet_id, member_id }` error; the CLI renders the
+existing `Error: fleet <fleet-id> already has an active monitor member
+(member <member-id>)`, exit 1, without the `register failed:` prefix.
+Other SQL failures keep their existing classification. The losing registration
+adds no member or placement and never creates a pane. Ordinary broker
+registration retains its existing behavior; requiring an active monitor
+before creating an ordinary pane remains the CLI's monitor-first policy.
+
 #### Spawn command per backend
 
 The per-backend spawn argv and auto-approval flags live in
@@ -893,7 +929,7 @@ The per-backend spawn argv and auto-approval flags live in
 
 #### Spawn-prompt substitution
 
-`cafleet member create` runs `str.format` over the resolved prompt body,
+`cafleet member create` uses the Rust spawn-placeholder mini-formatter on the resolved prompt body,
 substituting exactly four placeholders:
 
 | Placeholder | Substituted value | How the spawned member sees it |
@@ -905,14 +941,64 @@ substituting exactly four placeholders:
 
 Identity reaches the spawned member as literals rendered into its prompt; the
 only environment variable forwarded into the pane is `CAFLEET_DATABASE_URL`.
-A literal brace must be doubled (`{{` / `}}`); an unknown placeholder or
-malformed brace expression exits 2 and rolls back the just-registered member
+The formatter accepts only the four exact names above and doubled literal
+braces (`{{` / `}}`), not Python format specifications, conversions, or
+attribute/index access. An unknown placeholder or
+malformed brace expression exits 2 and attempts to deregister the just-registered
+member; any cleanup failure is reported after the primary error
 (see [Error Messages](#error-messages)).
 
 The spawn always creates the pane without stealing focus (tmux
 `split-window -d`): the Director's pane and active window stay active. In the
 default output, `pane` renders `(pending)` until the pane id is patched onto
 the placement.
+
+#### Creation failure compensation {#creation-failure-compensation}
+
+Member creation registers a pending placement, renders the prompt, creates a
+pane, and patches its id. The CLI owns a registration guard after successful
+registration and acquires a pane guard only when `split_window` succeeds.
+The backend owns the pane before that return; see
+[pane ownership](multiplexer-backends.md#pane-creation-ownership).
+
+| Failure point | Compensation order | DB result when compensation succeeds |
+|---|---|---|
+| Member registration | Broker rolls back registration; no pane guard exists | No new member or placement |
+| Member placeholder expansion | CLI deregisters; no pane was created | Member becomes deregistered and placement is removed |
+| Member Herdr run after split returned an id | Backend tries pane kill, returns the error, then CLI deregisters | Member deregistered and placement removed |
+| Member placement update error or missing row | After handling the failed SQL, CLI kills pane, then deregisters | Member deregistered and placement removed |
+| Fleet callback before pane creation | Broker rolls back bootstrap; no pane guard exists | No added fleet, Director, monitor, or placement |
+| Fleet callback Herdr run failure/timeout with known id | Backend tries pane kill, callback returns error, then broker rolls back bootstrap | No added bootstrap rows |
+| Fleet placement insert/commit after callback success | CLI holds the transferred guard; broker rolls back and closes its transaction, then CLI kills pane | No added bootstrap rows |
+| Fleet callback fails/times out before obtaining an id | Backend reports unknown pane compensation, then broker rolls back; no guessed pane kill | No added bootstrap rows; pane state unconfirmed |
+
+Continue remaining compensation even if an earlier cleanup fails. A backend
+`PaneCleanup::Attempted` result is never killed again by the CLI. A failed
+split with no confirmed id reports that the pane id is unknown and cleanup
+is unconfirmed, including for member creation; it does not infer which other
+pane should be closed. Creation rollback uses `kill_pane(id, true)` rather
+than `send_exit`.
+
+Keep the primary cause and its exit category. Member split failures retain
+the primary reason `tmux split-window failed: <error>`; placement errors retain
+`placement update failed: <error>` or `placement row vanished before pane-id
+patch`. Placeholder failures retain their usage error and exit 2. Append
+applicable cleanup diagnostics after the primary error, on stderr:
+
+- `cleanup failed for pane <id>: <detail>`
+- `cleanup failed for member <id>: <detail>`
+- `cleanup failed for fleet <id> transaction: <detail>`
+
+Report transaction rollback failures explicitly. Existing rollback-success
+suffixes may describe confirmed compensation; they must not claim success or
+complete rollback when cleanup failed or pane compensation is unconfirmed.
+Guards disarm through explicit `finish`/`rollback`, preventing repeated kill
+or deregistration; `Drop` handles only remaining unhandled ownership. Once a
+member placement is confirmed or fleet commit succeeds, disarm all creation
+guards before the existing `emit` call. Successful text/JSON output keeps its
+shape, ordering, and nulls. No new stdout-failure exit or diagnostic contract
+is introduced. Normal `member delete` behavior and persisted-message
+notification failures remain unchanged.
 
 ### `member delete` {#member-delete}
 
@@ -958,10 +1044,16 @@ prints `0 members.`.
 | `last_recv` | — | — | `last_recv` | ISO timestamp or `null` |
 | `last_ack` | — | — | `last_ack` | ISO timestamp or `null` |
 
-`idle` is the wall-time since the member's most recent message activity — the
-latest of `last_sent` (most recent outgoing message) and `last_recv` (most
-recent delivery), broadcast summaries excluded — humanized as `Ns` / `Nm` /
-`Nh` in text mode. `last_ack` is the most recent acknowledged delivery.
+Rows are ordered by `member_id ASC`. `last_sent` is the maximum creation time
+of every message sent by the member, including broadcast summaries;
+`last_recv` is the maximum creation time of owned unicast deliveries;
+`last_ack` is the maximum status timestamp of owned completed unicast
+deliveries. `idle` uses the greatest non-null string among all three, parsed
+with the existing lenient reader against one `now` for the list. All null or
+an unparseable selected value yields null; no older timestamp fallback is
+used. Text remains humanized as `Ns` / `Nm` / `Nh`.
+A zero clamp applies to the final whole-second idle result; it does not
+change stored future timestamps or parsing. See the [activity contract](data-model.md#query-and-activity-contracts).
 Per-member detail such as `description` and `registered_at` lives on
 [`member show`](#member-show).
 
@@ -1042,10 +1134,8 @@ still exit 1.
 `cafleet member capture MEMBER_ID [--lines N] [--ansi] [--json]` — the
 positional `MEMBER_ID` names the target member.
 
-| Argument | Required | Notes |
-|---|---|---|
-| `--lines` | no | Number of trailing lines to capture (default: **20**). |
-| `--ansi` | no | Preserve ANSI escapes in the raw capture. The default strips ANSI escapes and cleans carriage-return redraws. |
+- `--lines`: Number of trailing lines to capture (default: **20**).
+- `--ansi`: Preserve ANSI escapes in the raw capture. The default strips ANSI escapes and cleans carriage-return redraws.
 
 Output shapes are in [Output shapes](#output-shapes); target resolution is
 shared with the `member` keystroke verbs — see
@@ -1059,6 +1149,13 @@ clock at the capture read boundary and computes
 carriage-return-defragmented
 string; `--ansi` hashes the ANSI-preserving string. No normalization occurs
 after the selected mode, and capture content is never stored in SQLite.
+
+The shared `CaptureSnapshot::from_raw(raw, ansi, now)` supplies this
+content, timestamp, and lowercase SHA256 hex for both member capture and
+monitor scan. It hashes the final selected content's UTF-8 bytes, including
+Unicode and empty captures. Existing line validation/windowing and timestamp
+format stay unchanged. Text member capture prints content without adding a
+newline; JSON retains its existing fields and ordering.
 
 ## `cafleet monitor` — Supervision Scheduler {#cafleet-monitor}
 
@@ -1080,10 +1177,8 @@ is no stop subcommand — deleting the monitor member kills the pane hosting
 the loop, and a still-running loop self-terminates on its next tick after
 `fleet delete`.
 
-| Flag | Required | Notes |
-|---|---|---|
-| `--tick` | no | The scan-tick cadence in seconds (an integer ≥ 1, default **5**). The tick is the floor on interval precision — see [Monitoring](../concepts/monitoring.md#cadence-and-tick-precision). |
-| `--interval` | no | The wake interval in seconds (an integer ≥ 0); `0` disables the wake while the loop keeps heartbeating. When omitted, falls back to `CAFLEET_MONITOR_WAKE_INTERVAL` (default **600**). |
+- `--tick`: The scan-tick cadence in seconds (an integer ≥ 1, default **5**). The tick is the floor on interval precision — see [Monitoring](../concepts/monitoring.md#cadence-and-tick-precision).
+- `--interval`: The wake interval in seconds (an integer ≥ 0); `0` disables the wake while the loop keeps heartbeating. When omitted, falls back to `CAFLEET_MONITOR_WAKE_INTERVAL` (default **600**).
 
 The startup-resolved interval (`--interval` > `CAFLEET_MONITOR_WAKE_INTERVAL`
 > 600) is stamped into the fleet's `monitor_runtime` row at each start and
@@ -1112,6 +1207,24 @@ monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)
 | `1` | Multiplexer unreachable |
 | `2` | Usage errors |
 
+#### Monitor resource cleanup {#monitor-resource-cleanup}
+
+`MonitorLease` ownership begins immediately after a successful runtime
+claim. Each successful SIGTERM/SIGINT registration retains its own handle.
+Registration failure (including the second handler), startup write or flush
+failure, tick failure, normal stop, and owner displacement all release the
+registered handles and attempt the ownership-checked runtime clear. Startup
+still writes the exact line above after handler installation and before the
+first tick; a flush failure is an error rather than a successful startup.
+
+`clear_monitor_runtime(fleet_id, pid)` clears only that owner, preserving a
+replacement PID and the existing wake ledger. If work and clear both fail,
+retain the primary error/exit category and append the clear diagnostic. If
+only clear fails, return that error. SIGKILL or a crash cannot run cleanup;
+existing stale-owner reclaim remains the recovery path. Signal tests use
+per-call injected registration handles and a stop flag, without changing
+process-global signal handlers.
+
 ### `cafleet monitor scan` {#cafleet-monitor-scan}
 
 `cafleet monitor scan FLEET_ID [--lines N] [--ansi] [--json]` — a one-shot
@@ -1120,11 +1233,9 @@ member's pane, captured back-to-back and printed in a single invocation.
 No loop runs, no `monitor_runtime` row is claimed, the command performs no
 DB writes, and capture content is never stored in SQLite.
 
-| Flag | Required | Notes |
-|---|---|---|
-| `--lines` | no | Trailing lines captured per pane (an integer ≥ 1, default **20**). |
-| `--ansi` | no | Preserve ANSI escapes in every captured content. The default strips ANSI escapes, as in [`member capture`](#member-capture). |
-| `--json` | no | Emit the JSON array instead of the text sections. |
+- `--lines`: Trailing lines captured per pane (an integer ≥ 1, default **20**).
+- `--ansi`: Preserve ANSI escapes in every captured content. The default strips ANSI escapes, as in [`member capture`](#member-capture).
+- `--json`: Emit the JSON array instead of the text sections.
 
 **Roster.** The scan requires a live fleet (a soft-deleted or unknown fleet
 errors — see [Error Messages](#error-messages)) and a resolvable
@@ -1183,6 +1294,11 @@ mirroring [`member capture`](#member-capture)'s keys plus `name` / `kind` /
 }
 ```
 
+The shared capture path retains typed scan results until the output
+branch. Only the text presenter builds the section headings; JSON presentation
+does not construct or discard them. Both modes preserve the current roster
+order, raw member names, line count, error annotations, and success timestamps.
+
 On an annotated entry `content`, `captured_at`, and `content_sha256` are
 `null`; `error` carries the exact annotation string from text mode;
 `pane_id` is `null` for a pending placement and the real pane id for a
@@ -1207,6 +1323,7 @@ failed capture. `lines` always echoes the requested depth.
 | (any fleet-scoped command) | No agent has an `asset_installs` row at its currently-resolved path | `Error: no assets install is recorded at the resolved paths; run 'cafleet setup' to install` | 1 | See [Stale-assets guard](#stale-assets-guard) |
 | (any fleet-scoped command) | An `asset_installs` row at a resolved path differs from the runtime CLI version | `Error: stale assets detected (<agent>=<recorded>[, ...]; CLI <runtime>); run 'cafleet setup' to reinstall` | 1 | See [Stale-assets guard](#stale-assets-guard) |
 | `member create` | `--coding-agent opencode` with no agent preset at the resolved preset path | `Error: opencode agent preset not found at <preset>; run 'cafleet setup --coding-agent opencode' first` | 1 | `<preset>` is the resolved `<preset base>/agents/cafleet.md` — see [Config-dir resolution](#config-dir-resolution) |
+| `setup` | Existing duplicate active monitors prevent a pending migration | `active monitor duplicates prevent migration: fleet <id>: members <ids>; ...` | 1 | DB-half failure; see [duplicate-monitor recovery](../concepts/storage.md#duplicate-monitor-recovery) |
 | `setup` | The `asset_installs` table is missing as the assets half starts | `the database schema is missing or outdated; run 'cafleet setup' first` | 1 | An assets-half failure, after a db-half failure or an externally broken schema |
 | (any subject-taking command) | Missing positional subject id | The parser's native missing-required-argument error naming the positional | 2 | — |
 | (any id argument) | A non-integer id | The parser's native invalid-value error | 2 | — |
@@ -1215,14 +1332,14 @@ failed capture. `lines` always echoes the requested depth.
 | `fleet create` | `--monitor-file` resolution failure (empty, missing, unreadable, or non-UTF-8 file, or the empty-stdin variant via `-`) | The `--file` rejection strings with the flag label `--monitor-file` (e.g. `Error: --monitor-file <path>: file is empty.`) | 1 | The message names the flag the user typed; nothing written |
 | `fleet create` | Invalid `--monitor-model` for the `--coding-agent` backend | The `member create` `--model` validation string, verbatim | 2 | Nothing written — see [Model selection](coding-agent-backends.md#model-selection) |
 | `fleet create` | The `--coding-agent` binary missing from `PATH` | `Error: binary <name> not found on PATH` | 1 | Nothing written |
-| `fleet create` | `tmux split-window` fails during the monitor pane spawn | `Error: tmux split-window failed: <detail>. Rolled back fleet creation.` | 1 | Transaction rolled back — no rows persisted |
-| `fleet create` | Placement insert or commit fails after a successful pane spawn | The underlying error | 1 | Transaction unwound and the spawned pane killed; no rows persisted |
+| `fleet create` | Split fails during the monitor pane spawn | `Error: tmux split-window failed: <detail>` followed by the applicable rollback result/cleanup diagnostics | 1 | The primary reason is retained; rollback-success suffix requires confirmed compensation — see [creation failure compensation](#creation-failure-compensation) |
+| `fleet create` | Placement insert or commit fails after a successful pane spawn | The underlying error followed by applicable cleanup diagnostics | 1 | Broker attempts rollback and closes the transaction before the CLI attempts pane kill; successful rollback leaves no bootstrap rows |
 | `fleet show` / `fleet delete` | Unknown `FLEET_ID` | `Error: fleet 'X' not found.` | 1 | — |
 | `member create` | Unknown `--fleet-id` | `Error: Fleet '<fleet-id>' not found.` | 2 | Director auto-discovery runs first thing |
 | `member create` | Into a soft-deleted fleet | `Error: fleet X is deleted` | 1 | — |
 | `member create` | The fleet row has no `director_member_id` recorded | `Error: fleet <fleet-id> has no root Director recorded; re-create the fleet with 'cafleet fleet create'.` | 1 | Mid-bootstrap corruption |
 | `member create` | With a placement, when the fleet's root Director is not an active member | `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` | 1 | The `register_member` invariant guard |
-| `member create` | `--role monitor` when the fleet already has an active monitor member | `Error: fleet <fleet-id> already has an active monitor member (member <member-id>)` | 1 | The one-per-fleet guard; evaluated before the monitor-first guard, before any registration or pane effect |
+| `member create` | `--role monitor` when the fleet already has an active monitor member | `Error: fleet <fleet-id> already has an active monitor member (member <member-id>)` | 1 | The early check precedes the monitor-first guard; an in-transaction conflict returns the same error with no losing member, placement, or pane |
 | `member create` | Without `--role` when the fleet has no active monitor member | `Error: fleet <fleet-id> has no active monitor member; spawn one with --role monitor first` | 1 | The monitor-first placement guard, before any registration or pane effect — satisfied by the `fleet create` bootstrap; it fires only after a monitor death with no re-spawn |
 | `member delete` | Against the root Director's id | `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` | 1 | — |
 | `message poll` | An unknown or inactive `MEMBER_ID` | `Error: Member <member-id> not found` | 1 | — |
@@ -1250,8 +1367,8 @@ failed capture. `lines` always echoes the requested depth.
 | `member create` | `--effort` with a level unknown to the claude backend | `Error: --effort for the claude backend must be one of low, medium, high, xhigh, max (got '<value>').` | 2 | Fires before any side effect |
 | `member create` | `--coding-agent codex --effort` with an unknown level | `Error: --effort for the codex backend must be one of minimal, low, medium, high, xhigh (got '<value>').` | 2 | Fires before any side effect |
 | `member create` | `--coding-agent opencode --effort` with any value | `Error: opencode does not support reasoning effort.` | 2 | Fires before any side effect |
-| `member create` / `fleet create` | An unknown `{placeholder}` in the prompt | `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}. Double literal braces ({{, }}) to keep them as text.` | 2 | `member create` rolls back the just-registered member; `fleet create` unwinds the whole bootstrap transaction |
-| `member create` / `fleet create` | A malformed brace expression in the prompt | `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` | 2 | `member create` rolls back the just-registered member; `fleet create` unwinds the whole bootstrap transaction |
+| `member create` / `fleet create` | An unknown `{placeholder}` in the prompt | `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}. Double literal braces ({{, }}) to keep them as text.` | 2 | `member create` attempts deregistration; `fleet create` attempts bootstrap transaction rollback; cleanup failures follow the primary error |
+| `member create` / `fleet create` | A malformed brace expression in the prompt | `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` | 2 | `member create` attempts deregistration; `fleet create` attempts bootstrap transaction rollback; cleanup failures follow the primary error |
 | `member create` | `--coding-agent` omitted and the spawning Director not found in the fleet | `Error: cannot resolve the member's coding agent: Director <director-id> not found in fleet <fleet-id>. Re-run with an explicit --coding-agent.` | 1 | Nothing spawned |
 | `member create` | `--coding-agent` omitted and the spawning Director has no placement row | `Error: cannot resolve the member's coding agent: Director <director-id> has no placement row recording its backend. Re-run with an explicit --coding-agent.` | 1 | Nothing spawned |
 | `monitor` (loop form) | The fleet already has a live monitor | `Error: monitor already running for fleet <id>` | 1 | — |

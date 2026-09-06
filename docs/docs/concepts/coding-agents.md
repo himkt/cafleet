@@ -102,3 +102,9 @@ accepted levels, forwarding forms, and rejection strings are in
 `codex` and `opencode` panes do not display the member name, the `pane_id`
 column of `cafleet member list` is ground truth for all three. Operators who
 need kernel-enforced isolation should use the `codex` backend.
+
+## Complete monitor prompts {#complete-monitor-prompts}
+
+Use the [Quickstart monitor prompt](../quickstart.md#raw-cli-walkthrough),
+substituting the skill path for your backend. Codex uses
+`~/.codex/skills/cafleet`; Opencode uses `~/.config/opencode/skills/cafleet`.

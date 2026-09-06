@@ -2,110 +2,68 @@
 //! positional-`TEXT` / `--file` body reader, multiplexer resolution, and the
 //! JSON-vs-text emit fork.
 
-use std::path::PathBuf;
-use std::rc::Rc;
-
-use rusqlite::Connection;
 use serde_json::Value;
 
-use super::system::{SystemRunner, read_stdin};
-use crate::broker::{InlinePreviewSender, asset_installs_table_exists, list_asset_installs};
-use crate::config::Settings;
-use crate::config_dir::{claude_config_dir, codex_home, opencode_preset_base};
 use crate::error::CafleetError;
-use crate::multiplexer::{AnyMultiplexer, Multiplexer, MultiplexerError, resolve_multiplexer};
 use crate::output::format_json;
+pub use crate::runtime::resolve_mux;
+use crate::runtime::system::read_stdin;
 
-pub fn connect(settings: &Settings) -> Result<Connection, CafleetError> {
-    crate::db::connect(&settings.database_url)
-}
-
-/// Each agent's recorded-path identity (SPEC §6.3 *Config-dir resolution*),
-/// in the fixed `claude`, `codex`, `opencode` order.
-fn identity_paths() -> Result<[(&'static str, String); 3], CafleetError> {
-    let home = PathBuf::from(
-        std::env::var("HOME").map_err(|_| CafleetError::App("HOME is not set".to_string()))?,
-    );
-    let env = |name: &str| std::env::var(name).ok();
-    Ok([
-        ("claude", claude_config_dir(&env, &home)?.path),
-        ("codex", codex_home(&env, &home)?.path),
-        ("opencode", opencode_preset_base(&env, &home)?.path),
-    ]
-    .map(|(agent, path)| (agent, path.display().to_string())))
-}
-
-/// The schema-version guard (SPEC §6.3): classifies the database against the
-/// embedded head before any non-setup command body runs — ahead of the
-/// stale-assets guard, so no missing or outdated schema state reaches
-/// `asset_installs`. Connection-level failures keep their own errors.
-pub fn schema_guard(settings: &Settings) -> Result<(), CafleetError> {
-    let conn = connect(settings)?;
-    let head = crate::db::head_version();
-    match super::setup::recorded_version(&conn)? {
-        Some(recorded) if recorded == head => Ok(()),
-        Some(recorded) if recorded < head => Err(CafleetError::App(format!(
+/// Preserve the CLI guard's wording while sharing schema classification.
+pub(crate) fn schema_guard(schema: &crate::diagnosis::SchemaState) -> Result<(), CafleetError> {
+    use crate::diagnosis::SchemaState;
+    match schema {
+        SchemaState::Head { .. } => Ok(()),
+        SchemaState::Behind { recorded, head } => Err(CafleetError::App(format!(
             "database schema is outdated (schema {recorded}, head {head}); run 'cafleet setup'"
         ))),
-        Some(recorded) => Err(CafleetError::App(format!(
+        SchemaState::Ahead { recorded, head } => Err(CafleetError::App(format!(
             "database schema {recorded} is newer than this cafleet (head {head}); upgrade cafleet"
         ))),
-        None if super::setup::has_foreign_tables(&conn)? => Err(CafleetError::App(
-            "database has tables but no schema history — not a cafleet database?".to_string(),
+        SchemaState::Unversioned => Err(CafleetError::App(
+            "database has tables but no schema history — not a cafleet database?".into(),
         )),
-        None => Err(CafleetError::App(
-            "no cafleet database; run 'cafleet setup'".to_string(),
+        SchemaState::Missing => Err(CafleetError::App(
+            "no cafleet database; run 'cafleet setup'".into(),
         )),
+        SchemaState::Unreachable { cause } => Err(cause.clone()),
     }
 }
 
-/// The stale-assets guard (SPEC §6.3): resolves each agent's identity path
-/// and validates only the recorded rows at those paths before any
-/// fleet-scoped subcommand body runs; superseded rows at other paths are
-/// ignored.
-pub fn stale_assets_guard(settings: &Settings) -> Result<(), CafleetError> {
-    let identities = identity_paths()?;
-    let recorded = match connect(settings) {
-        Ok(conn) if asset_installs_table_exists(&conn) => list_asset_installs(&conn)?,
-        _ => Vec::new(),
-    };
-    let current: Vec<(&str, &Value)> = identities
-        .iter()
-        .filter_map(|(agent, path)| {
-            recorded
-                .iter()
-                .find(|row| row["coding_agent"] == *agent && row["path"] == path.as_str())
-                .map(|row| (*agent, row))
-        })
-        .collect();
-    if current.is_empty() {
+pub(crate) fn stale_assets_guard(
+    assets: &crate::diagnosis::AssetReport,
+    cli_version: &str,
+) -> Result<(), CafleetError> {
+    use crate::diagnosis::AssetState;
+    let mut current = 0;
+    let mut stale = Vec::new();
+    for agent in &assets.agents {
+        match &agent.state {
+            AssetState::PathError { cause, .. } => return Err(cause.clone()),
+            AssetState::Current { .. } => current += 1,
+            AssetState::Stale { install, .. } => {
+                current += 1;
+                stale.push(format!(
+                    "{}={}",
+                    agent.coding_agent, install.cafleet_version
+                ));
+            }
+            AssetState::NotInstalled { .. } => {}
+        }
+    }
+    if current == 0 {
         return Err(CafleetError::App(
-            "no assets install is recorded at the resolved paths; \
-             run 'cafleet setup' to install"
-                .to_string(),
+            "no assets install is recorded at the resolved paths; run 'cafleet setup' to install"
+                .into(),
         ));
     }
-    let stale: Vec<String> = current
-        .iter()
-        .filter(|(_, row)| row["cafleet_version"] != super::VERSION)
-        .map(|(agent, row)| {
-            format!(
-                "{agent}={}",
-                row["cafleet_version"]
-                    .as_str()
-                    .expect("rows carry the version")
-            )
-        })
-        .collect();
-    if stale.is_empty() {
-        Ok(())
-    } else {
-        Err(CafleetError::App(format!(
-            "stale assets detected ({}; CLI {}); run 'cafleet setup' to reinstall",
-            stale.join(", "),
-            super::VERSION
-        )))
+    if !stale.is_empty() {
+        return Err(CafleetError::App(format!(
+            "stale assets detected ({}; CLI {cli_version}); run 'cafleet setup' to reinstall",
+            stale.join(", ")
+        )));
     }
+    Ok(())
 }
 
 /// Render `path` with a `~` abbreviation when it sits under `home`.
@@ -176,54 +134,6 @@ pub fn resolve_body(
     }
 }
 
-/// The environment snapshot the backends read presence variables from.
-fn env_snapshot() -> std::collections::HashMap<String, String> {
-    std::env::vars().collect()
-}
-
-pub fn resolve_mux(settings: &Settings) -> Result<AnyMultiplexer, MultiplexerError> {
-    resolve_multiplexer(
-        settings.multiplexer.as_deref(),
-        env_snapshot(),
-        Rc::new(SystemRunner),
-    )
-}
-
-/// The broker-side preview notifier. Construction is infallible even though
-/// it runs before `broker::send_message`: a multiplexer-resolution failure is
-/// retained as its raw string and exposed only from an attempted
-/// `send_inline_preview`, so it can never preempt the insert or fail an
-/// intentional skip (SPEC §6.2).
-pub struct CliNotifier {
-    mux: Result<AnyMultiplexer, String>,
-}
-
-impl CliNotifier {
-    pub fn new(settings: &Settings) -> Self {
-        CliNotifier {
-            mux: resolve_mux(settings).map_err(|error| error.to_string()),
-        }
-    }
-}
-
-impl InlinePreviewSender for CliNotifier {
-    fn send_inline_preview(
-        &self,
-        target_pane_id: &str,
-        message_id: i64,
-        sender_id: i64,
-        ts: &str,
-        text: &str,
-    ) -> Result<(), String> {
-        match &self.mux {
-            Ok(mux) => mux
-                .send_inline_preview(target_pane_id, message_id, sender_id, ts, text)
-                .map_err(|error| error.to_string()),
-            Err(retained) => Err(retained.clone()),
-        }
-    }
-}
-
 /// The JSON-vs-text emit fork shared by every one-shot subcommand.
 pub fn emit(json: bool, payload: &Value, text: impl FnOnce() -> String) {
     if json {
@@ -235,9 +145,9 @@ pub fn emit(json: bool, payload: &Value, text: impl FnOnce() -> String) {
 
 #[cfg(test)]
 mod tests {
-    use super::CliNotifier;
     use crate::broker::InlinePreviewSender;
     use crate::config::Settings;
+    use crate::runtime::RuntimeNotifier;
 
     fn settings(multiplexer: Option<&str>) -> Settings {
         Settings {
@@ -252,7 +162,7 @@ mod tests {
 
     #[test]
     fn cli_notifier_construction_is_infallible_and_defers_the_resolution_error() {
-        let notifier = CliNotifier::new(&settings(Some("bogus")));
+        let notifier = RuntimeNotifier::new(&settings(Some("bogus")));
         let expected = "CAFLEET_MULTIPLEXER='bogus' is not a supported multiplexer \
                         (expected one of: herdr, tmux)";
 

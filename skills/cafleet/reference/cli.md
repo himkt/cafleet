@@ -1,6 +1,6 @@
 # CAFleet CLI — Fuller Command Catalog
 
-Read this file for the broker CLI surface beyond the core identity / poll / send / ack lifecycle in [`SKILL.md`](../SKILL.md). Exhaustive per-subcommand flags, exit codes, and error strings live in [`cli-options.md`](../../../docs/docs/spec/cli-options.md).
+Read this file for the broker CLI surface beyond the core identity / poll / send / ack lifecycle in [`SKILL.md`](../SKILL.md). Exhaustive per-subcommand flags, exit codes, and error strings live in [`cli-options.md`](runtime/spec/cli-options.md).
 
 ## Environment variables
 
@@ -19,13 +19,13 @@ cafleet message poll <my-member-id> --json
 
 ## Output switch — `--json`
 
-`--json` is cafleet's single output-control flag. Text output (the default) is the compact human/pane form — message bodies truncated to `CAFLEET_MAX_TEXT_LEN` codepoints (default `200`), suffixed with the single codepoint `…` (U+2026; see [`cli-options.md`](../../../docs/docs/spec/cli-options.md#message-body-truncation)). `--json` switches to compact single-line JSON (no whitespace; non-ASCII emitted as UTF-8) and is always the **complete, untruncated machine form** — full envelopes, full bodies — cheap to pipe into `jq` from a Director loop:
+`--json` is cafleet's single output-control flag. Text output (the default) is the compact human/pane form — message bodies truncated to `CAFLEET_MAX_TEXT_LEN` codepoints (default `200`), suffixed with the single codepoint `…` (U+2026; see [`cli-options.md`](runtime/spec/cli-options.md#message-body-truncation)). `--json` switches to compact single-line JSON (no whitespace; non-ASCII emitted as UTF-8) and is always the **complete, untruncated machine form** — full envelopes, full bodies — cheap to pipe into `jq` from a Director loop:
 
 ```bash
 cafleet message poll <my-member-id> --json
 ```
 
-The detailed member view (`kind`, `skills`, the placement sub-dict) is likewise `--json`-only — text `member show` is the compact one-line row. Per-surface shapes: [`cli-options.md`](../../../docs/docs/spec/cli-options.md#output-shapes).
+The detailed member view (`kind`, `skills`, the placement sub-dict) is likewise `--json`-only — text `member show` is the compact one-line row. Per-surface shapes: [`cli-options.md`](runtime/spec/cli-options.md#output-shapes).
 
 ## Coding-agent backends
 
@@ -66,7 +66,7 @@ Recipients ack their own delivery row exactly like a unicast message; the summar
 cafleet message ack <message-id>
 ```
 
-For the row schema, the `"Broadcast sent to N recipients"` summary string, and `origin_message_id` grouping/threading, see [`docs/docs/spec/data-model.md`](../../../docs/docs/spec/data-model.md#broadcast-grouping) and [`docs/docs/spec/message-envelope.md`](../../../docs/docs/spec/message-envelope.md).
+For the row schema, the `"Broadcast sent to N recipients"` summary string, and `origin_message_id` grouping/threading, see [`data-model.md`](runtime/spec/data-model.md#broadcast-grouping) and [`message-envelope.md`](runtime/spec/message-envelope.md).
 
 ## List Members
 
@@ -113,7 +113,7 @@ The loop form takes `--interval N` (the wake interval in seconds; omitted → `C
 cafleet member delete <target-member-id>
 ```
 
-The root Director cannot be deregistered (exit 1 — see [`cli-options.md`](../../../docs/docs/spec/cli-options.md#error-messages)). Use `cafleet fleet delete <fleet-id>` for fleet teardown.
+The root Director cannot be deregistered (exit 1 — see [`cli-options.md`](runtime/spec/cli-options.md#error-messages)). Use `cafleet fleet delete <fleet-id>` for fleet teardown.
 
 ## Fleet Delete
 
@@ -122,13 +122,13 @@ cafleet fleet delete <fleet-id>
 # → Deleted fleet <fleet-id>. Deregistered N members.
 ```
 
-Soft-deletes the fleet in one transaction (stamps `deleted_at`, deregisters every active member, deletes placement rows; messages preserved; idempotent). It does **not** close member panes — run `cafleet member delete` per member first, in the [`reference/recovery.md`](recovery.md) Shutdown order. Full behavior: [`cli-options.md`](../../../docs/docs/spec/cli-options.md#fleet-delete).
+Soft-deletes the fleet in one transaction (stamps `deleted_at`, deregisters every active member, deletes placement rows; messages preserved; idempotent). It does **not** close member panes — run `cafleet member delete` per member first, in the [`reference/recovery.md`](recovery.md) Shutdown order. Full behavior: [`cli-options.md`](runtime/spec/cli-options.md#fleet-delete).
 
 ## Typical Workflow
 
 0. **Verify pane env** (Director): run `cafleet doctor` — the canonical pane-identity probe, before `cafleet fleet create` and any `cafleet member create`. It renders the three-section diagnosis (multiplexer, database, coding agents) and exits non-zero on any rendered issue; a non-zero exit aborts the spawn protocol.
 
-1. **Create a fleet** (if none exists) — one atomic command creates the fleet, the root Director, and the monitor member (registration and pane); any failure rolls everything back:
+1. **Create a fleet** (if none exists) — one command creates the fleet, root Director, and monitor member using a DB transaction and owned-pane compensation. A failed or unconfirmed cleanup is reported; inspect that diagnostic before retrying:
    ```bash
    cafleet fleet create --name "my-project" --coding-agent <backend> \
      --monitor-file <abs path to monitor prompt> --monitor-model <model>
@@ -145,4 +145,4 @@ A `messages` row moves through two states: **input_required** (delivered, awaiti
 
 ## Error Handling
 
-Errors print to stderr and exit non-zero; `cafleet <cmd> … --json` emits them machine-parseably. The most common: a missing positional subject id (the parser's missing-required-argument error, exit 2), an unknown member on `message poll` (`Error: Member <member-id> not found`, exit 1), and `member *` pane commands outside a supported multiplexer session (exit 1). Full catalogue: [`cli-options.md`](../../../docs/docs/spec/cli-options.md#error-messages).
+Errors print to stderr and exit non-zero; `cafleet <cmd> … --json` emits them machine-parseably. The most common: a missing positional subject id (the parser's missing-required-argument error, exit 2), an unknown member on `message poll` (`Error: Member <member-id> not found`, exit 1), and `member *` pane commands outside a supported multiplexer session (exit 1). Full catalogue: [`cli-options.md`](runtime/spec/cli-options.md#error-messages).

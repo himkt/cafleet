@@ -7,6 +7,38 @@ mod common;
 use common::{Cli, code, stderr, stdout, write_file};
 
 #[test]
+fn step8_capture_mux_guard_precedes_unknown_member_lookup() {
+    let mut cli = Cli::new();
+    cli.with_fleet();
+    cli.set_env("CAFLEET_MULTIPLEXER", "invalid-step8-backend");
+    let output = cli.run(&["member", "capture", "999"]);
+    assert_eq!(code(&output), 1);
+    assert!(stderr(&output).contains("invalid-step8-backend"));
+    assert!(!stderr(&output).contains("member 999 not found"));
+}
+
+#[test]
+fn step8_scan_live_fleet_guard_precedes_invalid_mux_resolution() {
+    let mut cli = Cli::new();
+    let (fleet, _) = cli.with_fleet();
+    cli.set_env("CAFLEET_MULTIPLEXER", "invalid-step8-backend");
+    for id in [999, fleet] {
+        if id == fleet {
+            cli.sqlite()
+                .execute(
+                    "UPDATE fleets SET deleted_at='2026-09-06T00:00:00Z' WHERE fleet_id=?1",
+                    [fleet],
+                )
+                .unwrap();
+        }
+        let output = cli.run(&["monitor", "scan", &id.to_string()]);
+        assert_eq!(code(&output), 1);
+        assert!(stderr(&output).contains(&format!("fleet {id} not found")));
+        assert!(!stderr(&output).contains("invalid-step8-backend"));
+    }
+}
+
+#[test]
 fn member_create_spawns_patches_the_pane_and_substitutes_identity() {
     let cli = Cli::new();
     let (fleet_id, _) = cli.with_fleet();
@@ -178,7 +210,12 @@ fn member_create_split_failure_rolls_back_the_registration() {
     assert_eq!(code(&output), 1);
     let err = stderr(&output);
     assert!(err.contains("tmux split-window failed:"), "got: {err}");
-    assert!(err.contains("Rolled back registration of 3."), "got: {err}");
+    assert!(err.contains("forced failure"), "got: {err}");
+    assert!(
+        err.contains("unknown") && err.contains("unconfirmed"),
+        "got: {err}"
+    );
+    assert!(!err.contains("Rolled back registration"), "got: {err}");
 
     let members: i64 = cli
         .sqlite()
@@ -189,6 +226,22 @@ fn member_create_split_failure_rolls_back_the_registration() {
         )
         .unwrap();
     assert_eq!(members, 2, "no orphan row survives the ladder");
+    let placement_count: i64 = cli
+        .sqlite()
+        .query_row(
+            "SELECT COUNT(*) FROM member_placements WHERE member_id=3",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(placement_count, 0);
+    assert!(
+        !cli.shim_calls()
+            .iter()
+            .any(|line| line.starts_with("send-keys") || line.starts_with("kill-pane")),
+        "a failed split with no confirmed id must not guess a pane: {:?}",
+        cli.shim_calls()
+    );
 }
 
 #[test]
@@ -419,6 +472,15 @@ fn member_show_takes_the_positional_subject() {
     assert_eq!(
         payload["placement"]["mux_pane_id"], "%7",
         "the detailed view is JSON-only"
+    );
+
+    let registered = payload["registered_at"].as_str().unwrap();
+    let placed = payload["placement"]["created_at"].as_str().unwrap();
+    assert_eq!(
+        stdout(&output),
+        format!(
+            r#"{{"member_id":{member_id},"name":"worker","description":"test member","status":"active","registered_at":"{registered}","kind":"member","skills":[],"placement":{{"backend":"tmux","mux_session":"main","mux_window_id":"@1","mux_pane_id":"%7","coding_agent":"claude","created_at":"{placed}"}}}}"#
+        ) + "\n"
     );
 
     let output = cli.run(&["member", "show", "99"]);

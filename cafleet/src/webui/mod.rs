@@ -16,10 +16,10 @@ use rusqlite::Connection;
 use serde_json::{Value, json};
 
 use crate::broker;
-use crate::cli::helpers::CliNotifier;
 use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::output::format_json;
+use crate::runtime::RuntimeNotifier;
 use crate::time::{format_utc, now_utc};
 
 const RESERVED_PREFIXES: [&str; 2] = ["ui", "api"];
@@ -61,7 +61,7 @@ fn detail(status: StatusCode, message: &str) -> Response {
 }
 
 fn broker_500(error: CafleetError) -> Response {
-    detail(StatusCode::INTERNAL_SERVER_ERROR, error.message())
+    detail(StatusCode::INTERNAL_SERVER_ERROR, &error.message())
 }
 
 /// The sync-broker bridge: every handler body runs on the blocking pool with
@@ -109,7 +109,7 @@ fn fleet_header(headers: &HeaderMap) -> Result<i64, Box<Response>> {
 }
 
 fn require_fleet(conn: &Connection, fleet_id: i64) -> Result<(), Box<Response>> {
-    match broker::get_fleet(conn, fleet_id) {
+    match broker::fleets::fetch_fleet(conn, fleet_id) {
         Ok(Some(_)) => Ok(()),
         Ok(None) => Err(Box::new(detail(StatusCode::NOT_FOUND, "Fleet not found"))),
         Err(error) => Err(Box::new(broker_500(error))),
@@ -118,46 +118,37 @@ fn require_fleet(conn: &Connection, fleet_id: i64) -> Result<(), Box<Response>> 
 
 /// The `FormattedMessage` projection: names resolved by one bulk lookup with
 /// direct keyed access — a missing id is a hard 500, never a silent fallback.
-fn formatted_messages(conn: &Connection, rows: &[Value]) -> Result<Vec<Value>, CafleetError> {
-    let mut ids: BTreeSet<i64> = BTreeSet::new();
+fn formatted_message_records(
+    conn: &Connection,
+    rows: &[broker::records::MessageRecord],
+) -> Result<Vec<Value>, CafleetError> {
+    let mut ids = BTreeSet::new();
     for row in rows {
-        ids.insert(
-            row["from_member_id"]
-                .as_i64()
-                .expect("rows carry the sender"),
-        );
-        if let Some(to) = row["to_member_id"].as_i64() {
-            ids.insert(to);
-        }
+        ids.insert(row.from_member_id);
+        ids.extend(row.to_member_id);
     }
-    let ids: Vec<i64> = ids.into_iter().collect();
-    let names = broker::get_member_names(conn, &ids)?;
-    let name_of = |id: i64| -> Value {
-        json!(
-            names
-                .get(&id)
-                .unwrap_or_else(|| panic!("member {id} has a name row"))
-        )
-    };
-    Ok(rows
-        .iter()
-        .map(|row| {
-            let to_name = row["to_member_id"].as_i64().map(name_of);
-            json!({
-                "message_id": row["message_id"],
-                "from_member_id": row["from_member_id"],
-                "from_member_name": name_of(row["from_member_id"].as_i64().expect("sender id")),
-                "to_member_id": row["to_member_id"],
-                "to_member_name": to_name,
-                "type": row["type"],
-                "status": row["status_state"],
-                "created_at": row["created_at"],
-                "status_timestamp": row["status_timestamp"],
-                "origin_message_id": row["origin_message_id"],
-                "body": row["text"],
+    let names = broker::get_member_names(conn, &ids.into_iter().collect::<Vec<_>>())?;
+    let name_of = |id: i64| {
+        names
+            .get(&id)
+            .ok_or_else(|| CafleetError::InvalidStoredValue {
+                field: "message member name".into(),
+                value: id.to_string(),
             })
+    };
+    rows.iter()
+        .map(|row| {
+            let from_name = name_of(row.from_member_id)?;
+            let to_name = row.to_member_id.map(name_of).transpose()?;
+            Ok(json!({
+                "message_id":row.message_id,"from_member_id":row.from_member_id,
+                "from_member_name":from_name,"to_member_id":row.to_member_id,
+                "to_member_name":to_name,"type":row.kind.as_str(),"status":row.status.as_str(),
+                "created_at":row.created_at,"status_timestamp":row.status_timestamp,
+                "origin_message_id":row.origin_message_id,"body":row.text,
+            }))
         })
-        .collect())
+        .collect()
 }
 
 async fn list_fleets(State(state): State<AppState>) -> Response {
@@ -178,7 +169,7 @@ async fn roster(State(state): State<AppState>, headers: HeaderMap) -> Response {
             return *response;
         }
         match broker::list_roster(conn, fleet_id, true) {
-            Ok(members) => json_response(StatusCode::OK, &json!({"members": members})),
+            Ok(members) => json_response(StatusCode::OK, &json!({"members": members.iter().map(crate::presentation::roster_member).collect::<Vec<_>>()})),
             Err(error) => broker_500(error),
         }
     })
@@ -195,12 +186,15 @@ async fn monitor(State(state): State<AppState>, headers: HeaderMap) -> Response 
             return *response;
         }
         let now = now_utc();
-        let mut payload = match broker::monitor_runtime_payload(conn, fleet_id, now) {
-            Ok(payload) => payload,
+        let mut payload = match broker::monitor_runtime_view(conn, fleet_id, now) {
+            Ok(payload) => crate::presentation::monitor_runtime_view(&payload),
             Err(error) => return broker_500(error),
         };
-        let members = match broker::monitor_members_payload(conn, fleet_id, now) {
-            Ok(members) => members,
+        let members = match broker::monitor_member_records(conn, fleet_id, now) {
+            Ok(members) => members
+                .iter()
+                .map(crate::presentation::monitor_member)
+                .collect(),
             Err(error) => return broker_500(error),
         };
         payload["members"] = Value::Array(members);
@@ -306,7 +300,7 @@ async fn member_messages(state: AppState, fleet_id: i64, member_id: i64, sent: b
             Ok(rows) => rows,
             Err(error) => return broker_500(error),
         };
-        match formatted_messages(conn, &rows) {
+        match formatted_message_records(conn, &rows) {
             Ok(messages) => json_response(StatusCode::OK, &json!({"messages": messages})),
             Err(error) => broker_500(error),
         }
@@ -349,7 +343,7 @@ async fn timeline(State(state): State<AppState>, headers: HeaderMap) -> Response
             Ok(rows) => rows,
             Err(error) => return broker_500(error),
         };
-        match formatted_messages(conn, &rows) {
+        match formatted_message_records(conn, &rows) {
             Ok(messages) => json_response(StatusCode::OK, &json!({"messages": messages})),
             Err(error) => broker_500(error),
         }
@@ -409,12 +403,12 @@ async fn send(State(state): State<AppState>, headers: HeaderMap, body: Bytes) ->
             Ok(settings) => settings,
             Err(error) => return broker_500(error),
         };
-        let notifier = CliNotifier::new(&settings);
+        let notifier = RuntimeNotifier::new(&settings);
         let message = match recipient {
             SendRecipient::Broadcast => {
                 match broker::broadcast_message(conn, &notifier, settings.max_text_len, from, &text)
                 {
-                    Ok(result) => result[0]["message"].clone(),
+                    Ok(result) => result.message,
                     Err(error) => return broker_500(error),
                 }
             }
@@ -434,7 +428,7 @@ async fn send(State(state): State<AppState>, headers: HeaderMap, body: Bytes) ->
                 ) {
                     // Persistence alone decides the response; the outcome's
                     // notification_error is intentionally ignored (SPEC §6.8).
-                    Ok(outcome) => outcome.payload["message"].clone(),
+                    Ok(outcome) => outcome.message,
                     Err(error) => return broker_500(error),
                 }
             }
@@ -442,8 +436,8 @@ async fn send(State(state): State<AppState>, headers: HeaderMap, body: Bytes) ->
         json_response(
             StatusCode::OK,
             &json!({
-                "message_id": message["message_id"],
-                "status": message["status_state"],
+                "message_id": message.message_id,
+                "status": message.status.as_str(),
             }),
         )
     })
@@ -488,4 +482,47 @@ async fn spa_fallback(uri: Uri) -> Response {
             .expect("a plain 404 always builds");
     }
     embedded_file("index.html").expect("the dist is embedded at build time")
+}
+
+#[cfg(test)]
+mod integrity_regressions {
+    use super::*;
+    use crate::broker::test_support as common;
+
+    #[test]
+    fn required_message_names_return_errors_without_unwinding_in_the_presenter() {
+        for sender_missing in [false, true] {
+            let dir = tempfile::Builder::new()
+                .prefix(".missing-name-")
+                .tempdir_in(env!("CARGO_MANIFEST_DIR"))
+                .unwrap();
+            let mut conn = common::migrated_conn(&dir);
+            let (fleet, director) = common::create_fleet(&mut conn, "integrity");
+            let worker = common::register(&mut conn, fleet, "worker", None);
+            let sent = common::send(
+                &mut conn,
+                &common::FakeNotifier::succeeding(),
+                director,
+                worker,
+                "work",
+            );
+            let message =
+                broker::get_message(&conn, sent["message"]["message_id"].as_i64().unwrap())
+                    .unwrap();
+            conn.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+            conn.execute(
+                "DELETE FROM members WHERE member_id=?1",
+                [if sender_missing { director } else { worker }],
+            )
+            .unwrap();
+            conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                formatted_message_records(&conn, &[message])
+            }));
+            let error = result
+                .expect("the presenter must return an integrity error, never unwind")
+                .expect_err("missing required names cannot produce successful partial rows");
+            assert!(!error.to_string().trim().is_empty());
+        }
+    }
 }

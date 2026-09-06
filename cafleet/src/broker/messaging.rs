@@ -3,9 +3,11 @@
 //! see [`super::test_support`] for the API.
 
 use rusqlite::{Connection, OptionalExtension, params};
-use serde_json::{Value, json};
 
 use super::members::db_err;
+use super::records::{
+    BroadcastOutcome, MemberStatus, MessageRecord, MessageStatus, NotificationAttempt, SendOutcome,
+};
 use crate::error::CafleetError;
 use crate::output::truncate_text;
 use crate::time::{format_utc, now_utc};
@@ -24,21 +26,11 @@ pub trait InlinePreviewSender {
     ) -> Result<(), String>;
 }
 
-/// The unicast send outcome (SPEC §6.2): the unchanged
-/// `{message, notification_sent}` payload plus the retained raw error of an
-/// attempted, failed pane notification. `notification_error` is caller
-/// metadata — it never enters the payload JSON.
-#[derive(Debug)]
-pub struct SendMessageOutcome {
-    pub(crate) payload: Value,
-    pub(crate) notification_error: Option<String>,
-}
-
 /// Read one full typed-column message row in the pinned key order.
 pub(crate) fn message_row(
     conn: &Connection,
     message_id: i64,
-) -> Result<Option<Value>, CafleetError> {
+) -> Result<Option<MessageRecord>, CafleetError> {
     conn.query_row(
         "SELECT message_id, owner_member_id, from_member_id, to_member_id, type, \
                 created_at, status_state, status_timestamp, origin_message_id, text \
@@ -50,23 +42,28 @@ pub(crate) fn message_row(
     .map_err(db_err)
 }
 
-pub(crate) fn map_message_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
-    Ok(json!({
-        "message_id": row.get::<_, i64>(0)?,
-        "owner_member_id": row.get::<_, i64>(1)?,
-        "from_member_id": row.get::<_, i64>(2)?,
-        "to_member_id": row.get::<_, Option<i64>>(3)?,
-        "type": row.get::<_, String>(4)?,
-        "created_at": row.get::<_, String>(5)?,
-        "status_state": row.get::<_, String>(6)?,
-        "status_timestamp": row.get::<_, String>(7)?,
-        "origin_message_id": row.get::<_, Option<i64>>(8)?,
-        "text": row.get::<_, String>(9)?,
-    }))
+pub(crate) fn map_message_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageRecord> {
+    Ok(MessageRecord {
+        message_id: row.get(0)?,
+        owner_member_id: row.get(1)?,
+        from_member_id: row.get(2)?,
+        to_member_id: row.get(3)?,
+        kind: row.get(4)?,
+        created_at: row.get(5)?,
+        status: row.get(6)?,
+        status_timestamp: row.get(7)?,
+        origin_message_id: row.get(8)?,
+        text: row.get(9)?,
+    })
 }
 
-/// The sender's fleet, derived from the sender row (SPEC §6.2): no
-/// caller-supplied fleet exists.
+fn required_message_row(conn: &Connection, message_id: i64) -> Result<MessageRecord, CafleetError> {
+    message_row(conn, message_id)?.ok_or_else(|| CafleetError::InvalidStoredValue {
+        field: "messages.message_id".into(),
+        value: message_id.to_string(),
+    })
+}
+
 fn sender_fleet(conn: &Connection, from_member_id: i64) -> Result<i64, CafleetError> {
     super::members::active_member_fleet(conn, from_member_id)?.ok_or_else(|| {
         CafleetError::Value(format!(
@@ -98,12 +95,12 @@ pub fn send_message(
     from_member_id: i64,
     to: &str,
     text: &str,
-) -> Result<SendMessageOutcome, CafleetError> {
+) -> Result<SendOutcome, CafleetError> {
     let fleet_id = sender_fleet(conn, from_member_id)?;
     let to_id: i64 = to
         .parse()
         .map_err(|_| CafleetError::Value(format!("Invalid destination format: {to}")))?;
-    let recipient: Option<(i64, String)> = conn
+    let recipient: Option<(i64, MemberStatus)> = conn
         .query_row(
             "SELECT fleet_id, status FROM members WHERE member_id=?1",
             [to_id],
@@ -116,7 +113,7 @@ pub fn send_message(
             "Destination member not found: {to_id}"
         )));
     };
-    if recipient_status != "active" {
+    if recipient_status != MemberStatus::Active {
         return Err(CafleetError::Value(format!(
             "Destination member not found: {to_id}"
         )));
@@ -137,8 +134,7 @@ pub fn send_message(
     .map_err(db_err)?;
     let message_id = conn.last_insert_rowid();
 
-    let mut notification_sent = false;
-    let mut notification_error = None;
+    let mut notification = NotificationAttempt::Skipped;
     if to_id != from_member_id
         && let Some(pane) = pane_of(conn, to_id)?
     {
@@ -149,14 +145,14 @@ pub fn send_message(
             &now,
             &preview_text(text, max_text_len),
         ) {
-            Ok(()) => notification_sent = true,
-            Err(raw) => notification_error = Some(raw),
+            Ok(()) => notification = NotificationAttempt::Sent,
+            Err(error) => notification = NotificationAttempt::Failed { error },
         }
     }
-    let message = message_row(conn, message_id)?.expect("the just-inserted message exists");
-    Ok(SendMessageOutcome {
-        payload: json!({"message": message, "notification_sent": notification_sent}),
-        notification_error,
+    let message = required_message_row(conn, message_id)?;
+    Ok(SendOutcome {
+        message,
+        notification,
     })
 }
 
@@ -166,7 +162,7 @@ pub fn broadcast_message(
     max_text_len: usize,
     from_member_id: i64,
     text: &str,
-) -> Result<Vec<Value>, CafleetError> {
+) -> Result<BroadcastOutcome, CafleetError> {
     let fleet_id = sender_fleet(conn, from_member_id)?;
     let mut stmt = conn
         .prepare(
@@ -225,15 +221,18 @@ pub fn broadcast_message(
             delivered += 1;
         }
     }
-    let summary = message_row(conn, summary_id)?.expect("the just-inserted summary exists");
-    Ok(vec![json!({
-        "message": summary,
-        "recipients": recipients.len(),
-        "delivered": delivered,
-    })])
+    let message = required_message_row(conn, summary_id)?;
+    Ok(BroadcastOutcome {
+        message,
+        recipients: recipients.len(),
+        delivered,
+    })
 }
 
-pub fn poll_messages(conn: &Connection, member_id: i64) -> Result<Vec<Value>, CafleetError> {
+pub fn poll_messages(
+    conn: &Connection,
+    member_id: i64,
+) -> Result<Vec<MessageRecord>, CafleetError> {
     if super::members::active_member_fleet(conn, member_id)?.is_none() {
         return Err(CafleetError::Value(format!("Member {member_id} not found")));
     }
@@ -254,8 +253,8 @@ pub fn poll_messages(conn: &Connection, member_id: i64) -> Result<Vec<Value>, Ca
     Ok(rows)
 }
 
-pub fn ack_message(conn: &mut Connection, message_id: i64) -> Result<Value, CafleetError> {
-    let row: Option<String> = conn
+pub fn ack_message(conn: &mut Connection, message_id: i64) -> Result<MessageRecord, CafleetError> {
+    let row: Option<MessageStatus> = conn
         .query_row(
             "SELECT status_state FROM messages WHERE message_id=?1",
             [message_id],
@@ -268,9 +267,10 @@ pub fn ack_message(conn: &mut Connection, message_id: i64) -> Result<Value, Cafl
             "Message {message_id} not found"
         )));
     };
-    if status != "input_required" {
+    if status != MessageStatus::InputRequired {
         return Err(CafleetError::Value(format!(
-            "Cannot ACK message in state {status}"
+            "Cannot ACK message in state {}",
+            status.as_str()
         )));
     }
     let now = format_utc(now_utc());
@@ -279,8 +279,7 @@ pub fn ack_message(conn: &mut Connection, message_id: i64) -> Result<Value, Cafl
         params![now, message_id],
     )
     .map_err(db_err)?;
-    let message = message_row(conn, message_id)?.expect("the just-acked message exists");
-    Ok(json!({"message": message}))
+    required_message_row(conn, message_id)
 }
 
 #[cfg(test)]
@@ -289,6 +288,7 @@ mod tests {
     use tempfile::TempDir;
 
     use crate::broker;
+    use crate::broker::records::NotificationAttempt;
     use crate::broker::test_support as common;
     use crate::broker::test_support::{
         FakeNotifier, MAX_TEXT_LEN, MONITOR_PANE, PREVIEW_ERROR, bootstrap_monitor, create_fleet,
@@ -314,10 +314,11 @@ mod tests {
             "hi",
         )
         .unwrap();
-        let result = &outcome.payload;
+        let result = &crate::presentation::send_outcome(&outcome);
         assert_eq!(result["notification_sent"], true);
         assert_eq!(
-            outcome.notification_error, None,
+            outcome.notification,
+            NotificationAttempt::Sent,
             "a delivered preview carries no error"
         );
 
@@ -355,11 +356,10 @@ mod tests {
             &member_id.to_string(),
             &text,
         )
-        .unwrap()
-        .payload;
+        .unwrap();
 
         assert_eq!(
-            result["message"]["text"], text,
+            result.message.text, text,
             "persisted text is never truncated"
         );
         let calls = notifier.calls.borrow();
@@ -381,9 +381,13 @@ mod tests {
             "note",
         )
         .unwrap();
-        assert_eq!(outcome.payload["notification_sent"], false);
         assert_eq!(
-            outcome.notification_error, None,
+            crate::presentation::send_outcome(&outcome)["notification_sent"],
+            false
+        );
+        assert_eq!(
+            outcome.notification,
+            NotificationAttempt::Skipped,
             "an intentional skip is never a partial failure"
         );
         assert!(notifier.calls.borrow().is_empty());
@@ -405,9 +409,13 @@ mod tests {
             "hi",
         )
         .unwrap();
-        assert_eq!(outcome.payload["notification_sent"], false);
         assert_eq!(
-            outcome.notification_error, None,
+            crate::presentation::send_outcome(&outcome)["notification_sent"],
+            false
+        );
+        assert_eq!(
+            outcome.notification,
+            NotificationAttempt::Skipped,
             "an intentional skip is never a partial failure"
         );
         assert!(notifier.calls.borrow().is_empty());
@@ -430,9 +438,8 @@ mod tests {
             "hi",
         )
         .unwrap();
-        assert_eq!(
-            outcome.notification_error.as_deref(),
-            Some(PREVIEW_ERROR),
+        assert!(
+            matches!(&outcome.notification, NotificationAttempt::Failed { error } if error == PREVIEW_ERROR),
             "the raw multiplexer error is preserved verbatim"
         );
         assert_eq!(
@@ -441,19 +448,26 @@ mod tests {
             "exactly one notification attempt, no retry"
         );
 
-        let message = &outcome.payload["message"];
+        let message = &crate::presentation::send_outcome(&outcome)["message"];
         let message_id = message["message_id"].as_i64().unwrap();
         let ts = message["created_at"].as_str().unwrap().to_string();
         let expected = format!(
             r#"{{"message":{{"message_id":{message_id},"owner_member_id":{member_id},"from_member_id":{director_id},"to_member_id":{member_id},"type":"unicast","created_at":"{ts}","status_state":"input_required","status_timestamp":"{ts}","origin_message_id":null,"text":"hi"}},"notification_sent":false}}"#
         );
         assert_eq!(
-            format_json(&outcome.payload),
+            format_json(&crate::presentation::send_outcome(&outcome)),
             expected,
             "the payload keeps the exact envelope; notification_error never enters the JSON"
         );
 
-        let pending = broker::poll_messages(&conn, member_id).unwrap();
+        let pending = broker::poll_messages(&conn, member_id)
+            .map(|records| {
+                records
+                    .iter()
+                    .map(crate::presentation::message)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
         assert_eq!(
             pending.len(),
             1,
@@ -479,9 +493,13 @@ mod tests {
             "note",
         )
         .unwrap();
-        assert_eq!(outcome.payload["notification_sent"], false);
         assert_eq!(
-            outcome.notification_error, None,
+            crate::presentation::send_outcome(&outcome)["notification_sent"],
+            false
+        );
+        assert_eq!(
+            outcome.notification,
+            NotificationAttempt::Skipped,
             "self-send attempts nothing"
         );
 
@@ -494,8 +512,15 @@ mod tests {
             "hi",
         )
         .unwrap();
-        assert_eq!(outcome.payload["notification_sent"], false);
-        assert_eq!(outcome.notification_error, None, "no-pane attempts nothing");
+        assert_eq!(
+            crate::presentation::send_outcome(&outcome)["notification_sent"],
+            false
+        );
+        assert_eq!(
+            outcome.notification,
+            NotificationAttempt::Skipped,
+            "no-pane attempts nothing"
+        );
         assert!(
             notifier.calls.borrow().is_empty(),
             "a skip never reaches the notifier, so its error cannot surface"
@@ -576,6 +601,7 @@ mod tests {
 
         let result =
             broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, director_id, "all hands")
+                .map(|record| vec![crate::presentation::broadcast_outcome(&record)])
                 .unwrap();
         assert_eq!(result.len(), 1, "single-element result list");
         let envelope = &result[0];
@@ -602,7 +628,14 @@ mod tests {
             (member_a, "%2"),
             (member_b, "%3"),
         ] {
-            let pending = broker::poll_messages(&conn, recipient).unwrap();
+            let pending = broker::poll_messages(&conn, recipient)
+                .map(|records| {
+                    records
+                        .iter()
+                        .map(crate::presentation::message)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap();
             assert_eq!(pending.len(), 1);
             let delivery = &pending[0];
             assert_eq!(delivery["type"], "unicast");
@@ -636,6 +669,7 @@ mod tests {
 
         let result =
             broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, sender_id, "hello")
+                .map(|record| vec![crate::presentation::broadcast_outcome(&record)])
                 .unwrap();
         let envelope = &result[0];
         assert_eq!(
@@ -694,6 +728,7 @@ mod tests {
 
         let result =
             broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, director_id, "all hands")
+                .map(|record| vec![crate::presentation::broadcast_outcome(&record)])
                 .unwrap();
         assert_eq!(result.len(), 1, "still the single summary envelope");
         let envelope = &result[0];
@@ -719,7 +754,14 @@ mod tests {
         );
 
         for recipient in [monitor_id, member_a, member_b] {
-            let pending = broker::poll_messages(&conn, recipient).unwrap();
+            let pending = broker::poll_messages(&conn, recipient)
+                .map(|records| {
+                    records
+                        .iter()
+                        .map(crate::presentation::message)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap();
             assert_eq!(
                 pending.len(),
                 1,
@@ -753,18 +795,39 @@ mod tests {
         let first_id = first["message"]["message_id"].as_i64().unwrap();
         let second_id = second["message"]["message_id"].as_i64().unwrap();
 
-        let pending = broker::poll_messages(&conn, member_id).unwrap();
+        let pending = broker::poll_messages(&conn, member_id)
+            .map(|records| {
+                records
+                    .iter()
+                    .map(crate::presentation::message)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
         assert_eq!(pending.len(), 2);
         assert_eq!(pending[0]["message_id"], second_id, "newest first");
         assert_eq!(pending[1]["message_id"], first_id);
 
         broker::ack_message(&mut conn, first_id).unwrap();
-        let pending = broker::poll_messages(&conn, member_id).unwrap();
+        let pending = broker::poll_messages(&conn, member_id)
+            .map(|records| {
+                records
+                    .iter()
+                    .map(crate::presentation::message)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0]["message_id"], second_id);
 
         broker::broadcast_message(&mut conn, &notifier, 200, member_id, "fanout").unwrap();
-        let sender_pending = broker::poll_messages(&conn, member_id).unwrap();
+        let sender_pending = broker::poll_messages(&conn, member_id)
+            .map(|records| {
+                records
+                    .iter()
+                    .map(crate::presentation::message)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
         assert!(
             sender_pending.iter().all(|m| m["type"] == "unicast"),
             "broadcast_summary rows never appear in poll"
@@ -776,7 +839,14 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let _ = create_fleet(&mut conn, "alpha");
-        let err = broker::poll_messages(&conn, 999).expect_err("an unknown member must error");
+        let err = broker::poll_messages(&conn, 999)
+            .map(|records| {
+                records
+                    .iter()
+                    .map(crate::presentation::message)
+                    .collect::<Vec<_>>()
+            })
+            .expect_err("an unknown member must error");
         assert!(matches!(err, CafleetError::Value(_)));
         assert_eq!(err.message(), "Member 999 not found");
     }
@@ -795,7 +865,9 @@ mod tests {
             .unwrap()
             .to_string();
 
-        let acked = broker::ack_message(&mut conn, message_id).unwrap();
+        let acked = broker::ack_message(&mut conn, message_id)
+            .map(|record| crate::presentation::message_envelope(&record))
+            .unwrap();
         let message = &acked["message"];
         assert_eq!(message["status_state"], "completed");
         let acked_ts = message["status_timestamp"].as_str().unwrap();

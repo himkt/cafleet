@@ -75,8 +75,8 @@ write-up: <https://developers.openai.com/codex/agent-approvals-security>).
 
 Three `~/.codex/config.toml` prerequisites must be in place before the first
 codex spawn, covered in
-[Quickstart § Configure](../quickstart.md#codex) and
-[Quickstart § Trust the working directory](../quickstart.md#trust-the-working-directory):
+[Codex configuration](../quickstart.md#codex) and
+[Trust the working directory](../quickstart.md#trust-the-working-directory):
 
 | Setting | Required value | Why |
 |---|---|---|
