@@ -51,7 +51,7 @@ impl Fixture {
         checkpoint: &dyn Fn(&InstallEvent) -> Result<(), InstallFault>,
     ) -> (Result<(), CafleetError>, String, String) {
         let home = self.home();
-        let lookup = |_| None;
+        let lookup = |_: &str| None;
         let hooks = InstallHooks {
             lock_mode: LockMode::Wait,
             checkpoint,

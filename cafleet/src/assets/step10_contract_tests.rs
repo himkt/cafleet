@@ -17,6 +17,13 @@ const OLD_TIME: &str = "2001-02-03T04:05:06.123456+00:00";
 type Row = (String, String, String, String);
 type Tree = Vec<(PathBuf, String, Vec<u8>)>;
 
+fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 fn tree(path: &Path) -> Tree {
     fn visit(root: &Path, path: &Path, result: &mut Tree) {
         let metadata = match fs::symlink_metadata(path) {
@@ -178,11 +185,7 @@ impl Fixture {
                     continue;
                 }
                 assert_eq!(kind, "file", "new payload may not retain old symlinks");
-                observed.push((
-                    relative,
-                    bytes.len() as u64,
-                    format!("{:x}", Sha256::digest(&bytes)),
-                ));
+                observed.push((relative, bytes.len() as u64, sha256_hex(&bytes)));
             }
             let expected: Vec<_> = entry
                 .manifest
@@ -251,7 +254,7 @@ fn plan_is_read_only_with_exact_embedded_manifests_and_fixed_entry_order() {
                                 (
                                     PathBuf::from(relative),
                                     bytes.len() as u64,
-                                    format!("{:x}", Sha256::digest(bytes)),
+                                    sha256_hex(bytes),
                                 )
                             })
                         })
@@ -263,11 +266,7 @@ fn plan_is_read_only_with_exact_embedded_manifests_and_fixed_entry_order() {
                 EntryKind::Preset => {
                     let source = fixture.paths.preset.as_ref().unwrap().0;
                     let bytes = lookup(PRESETS, source).unwrap();
-                    vec![(
-                        PathBuf::new(),
-                        bytes.len() as u64,
-                        format!("{:x}", Sha256::digest(bytes)),
-                    )]
+                    vec![(PathBuf::new(), bytes.len() as u64, sha256_hex(bytes))]
                 }
                 EntryKind::ObsoleteResearch => vec![],
             };
