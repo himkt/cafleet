@@ -811,9 +811,9 @@ mod invocation_contracts {
         let dir = fixture_dir();
         let settings = settings(dir.path());
         let opens = Cell::new(0);
-        let connect = |_: &str| {
+        let connect = |url: &str| {
             opens.set(opens.get() + 1);
-            let conn = Connection::open_in_memory().unwrap();
+            let conn = crate::db::connect(url).unwrap();
             sentinel(&conn);
             Ok(conn)
         };
@@ -851,9 +851,10 @@ mod invocation_contracts {
         let dir = fixture_dir();
         let settings = settings(dir.path());
         let opens = Cell::new(0);
-        let connect = |_: &str| {
+        let connect = |url: &str| {
             opens.set(opens.get() + 1);
-            let conn = memory_head();
+            let mut conn = crate::db::connect(url).unwrap();
+            crate::db::migrate_to_head(&mut conn).unwrap();
             sentinel(&conn);
             Ok(conn)
         };
@@ -882,9 +883,10 @@ mod invocation_contracts {
         let dir = fixture_dir();
         let settings = settings(dir.path());
         let opens = Cell::new(0);
-        let connect = |_: &str| {
+        let connect = |url: &str| {
             opens.set(opens.get() + 1);
-            let conn = memory_head();
+            let mut conn = crate::db::connect(url).unwrap();
+            crate::db::migrate_to_head(&mut conn).unwrap();
             conn.execute(
                 "UPDATE refinery_schema_history SET version=?1 WHERE version=?2",
                 params![crate::db::head_version() + 1, crate::db::head_version()],
@@ -919,12 +921,13 @@ mod invocation_contracts {
         let dir = fixture_dir();
         let settings = settings(dir.path());
         let opens = Cell::new(0);
-        let connect = |_: &str| {
+        let connect = |url: &str| {
             opens.set(opens.get() + 1);
             if opens.get() == 1 {
                 return Err(CafleetError::App("first open failed".into()));
             }
-            let conn = memory_head();
+            let mut conn = crate::db::connect(url).unwrap();
+            crate::db::migrate_to_head(&mut conn).unwrap();
             sentinel(&conn);
             Ok(conn)
         };
