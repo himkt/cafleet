@@ -99,6 +99,24 @@ a fresh capture. The full pre-ping capture gate is part of the cafleet skill's
 supervision protocol. The capture-state taxonomy thus has two consumers: the
 monitor member's on-wake classification and the Director's pre-ping gate.
 
+For the Director, `finished` with no outstanding assignment is normal rest.
+Outstanding work may resume through the fresh-capture gate; a
+`stall_candidate` needs unchanged captures across consecutive facilitation
+turns. `working` and `awaiting_user` defer the entire send, including message
+persistence. Idle duration, unread counts, and monitor events alone do not
+authorize a ping. A captured prompt is not a relayed question: the Director
+answers explicit member questions through the broker. Immediate replies to
+reply-soliciting messages and explicitly requested shell dispatch retain
+their exceptions to the gate.
+
+An `unknown` capture calls for investigation, not a ping or an assumption
+that the pane died. Use `cafleet doctor` to diagnose the current connection and
+`cafleet member list` / `member show` to check the registered placement.
+Registry data does not prove physical pane presence or absence; retain
+`unknown` when disappearance is unproven. Ask the user for missing pane-state
+facts only if that uncertainty blocks the work. The skill's recovery reference
+owns the procedure.
+
 The scan both consumers use is a **read-only snapshot**:
 `cafleet monitor scan <fleet-id>` is a one-shot command that captures the
 Director's pane and every active member's pane in a single invocation —

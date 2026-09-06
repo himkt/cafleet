@@ -49,11 +49,11 @@ A push notification keystrokes the message into the member's pane (see the `cafl
 
 ### COMMENT Marker Handling
 
-The role taxonomy and marker rules are [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker*; the user-feedback scan procedure (scan immediately on selection, route the Drafter, the no-markers re-prompt) is owned by `create.md` Step 5.
+The role taxonomy and marker rules are [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker*. [create.md Step 5](../create.md#step-5-user-feedback-loop-director) owns marker scanning and ordinary-language feedback: you locate the affected pointer and record user requests as `COMMENT(user-relay)`, then route the Drafter and verify resolution.
 
 ### Free-form user replies
 
-Intent judgment and the Abort Flow follow the `cafleet` skill's `reference/supervision.md` § *User Delegation Protocol* → *Free-form replies — judging intent*. This workflow's feedback target: non-abort feedback goes into `COMMENT(` markers **in the design document**, after which you re-prompt with the same three-option pattern.
+Intent judgment and the Abort Flow follow the `cafleet` skill's `reference/supervision.md` § *User Delegation Protocol* → *Free-form replies — judging intent*. For non-abort feedback, apply [create.md Step 5](../create.md#step-5-user-feedback-loop-director); users need not edit markers themselves. Re-present only after the Drafter resolves the requests and the quality loop approves the revision.
 
 ## Progress Monitoring
 

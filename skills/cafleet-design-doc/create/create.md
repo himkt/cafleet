@@ -197,12 +197,16 @@ This step owns the user-feedback COMMENT-scan procedure. Process the user's sele
   cafleet message send --from-member-id <director-member-id> \
     --to-member-id <drafter-member-id> "ready (doc)"
   ```
-  After the Drafter replies `addressed (doc)` and removes the markers, verify with Grep that no `COMMENT(` markers remain, then re-enter the quality loop (Step 3) and re-present (Step 4). If no markers are found, explain the marker convention to the user (`# COMMENT(username): feedback` placed directly in the design document), show the file path so the user can edit it, then re-prompt with the same three-option pattern.
-- **Free-text response**: judge abort vs non-abort intent per [roles/director.md](roles/director.md) § *Free-form user replies* (LLM reasoning, not keyword matching). Abort intent → the Abort Flow (Shutdown Protocol, Step 6, without Drafter finalization); non-abort → explain the COMMENT-marker channel and re-prompt.
+  After the Drafter replies `addressed (doc)` and removes the markers, verify with Grep that no `COMMENT(` markers remain, then re-enter the quality loop (Step 3) and re-present (Step 4). If no markers are found, say so and invite the user to describe the requested changes in ordinary language; editing the document directly remains optional.
+- **Free-text response**: judge abort vs non-abort intent per [roles/director.md](roles/director.md) § *Free-form user replies* (LLM reasoning, not keyword matching). Abort intent → the Abort Flow (Shutdown Protocol, Step 6, without Drafter finalization). For revision feedback, identify the affected paragraph or document-wide pointer and record one `COMMENT(user-relay)` per issue, preserving the user's meaning per [coordination.md](../reference/coordination.md#commentrole-marker). Ask a concrete question only when meaning or scope is ambiguous; never require the user to supply marker syntax. Route the recorded requests to the Drafter with the same `ready (doc)` command above, then verify marker removal and repeat Steps 3–4. A question without a revision request receives an answer; it does not imply approval.
 
 No round limit — loop continues until approved or aborted.
 
 ### Step 6: Finalize & Clean Up (Director)
+
+Enter only after explicit user approval of the reviewed revision and verification
+that no unresolved `COMMENT(` markers remain. Ordinary feedback does not waive
+the review or approval gate.
 
 1. Instruct the Drafter to finalize. The Drafter's role definition spells out the finalize checklist (set Status to Approved, refresh Last Updated, bump the Progress header field if present, verify implementation steps are actionable); the cafleet body is just the verb + pointer poke:
    ```bash

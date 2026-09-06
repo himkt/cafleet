@@ -45,7 +45,7 @@ The loop never keystrokes an ordinary member's pane. There are three paths:
 **A member at rest between turns is normal, not a stall.** A member that finished its turn with no assigned work outstanding is doing exactly what it should — leave it. On each facilitation turn, capture and classify quiet members at your own discretion using the pre-ping capture gate below; the gate table's state → action rows govern what fires. The judgment the table cannot make:
 
 - **You alone judge whether assigned work remains.** A `finished` member with outstanding assigned work is NOT left alone: dispatch the next step or re-engage it through the gate via `cafleet message send` / `cafleet member ping`. A `finished` member with nothing outstanding is at expected rest — the broker's inline preview wakes it when you have new work (each such send still routes through the gate).
-- **Quiet member unchanged across two consecutive facilitation turns → re-engage it.** `stall_candidate` and `finished` are both quiet observations: when your fresh capture on this turn is byte-identical to the capture you took on the previous one, the member is confirmed quiet — fire `cafleet member ping` (or a specific `cafleet message send`) through the gate; your own conversation notes are the baseline between turns.
+- **Confirm a stall candidate across two consecutive facilitation turns.** `stall_candidate` and `finished` are both quiet observations: when your fresh capture on this turn is byte-identical to the capture you took on the previous one, the member is confirmed quiet. Re-engage a confirmed stall candidate through the gate; a finished member with no outstanding assignment remains at expected rest. Your own conversation notes are the baseline between turns. The monitor member's separate bounded-ping policy remains in its role file.
 - **Pending deliveries and monitor events are context, not proof.** A member's un-acked delivery count and the monitor member's event messages annotate your health check and never by themselves authorize a ping.
 - An immediate reply to a **reply-soliciting** message (a question or blocker) received from that member in the current facilitation turn is exempt from the gate: the member ended its turn to await this reply, so its pane is at rest with no live prompt — reply via `cafleet message send`. A reply to a progress-only status message ("still working", "ack") is NOT exempt — the member may still be mid-turn — and routes through the gate.
 
@@ -76,8 +76,8 @@ single-member `cafleet member capture` or a new scan).
 
 | Capture classifies | Director action |
 |---|---|
-| `finished` | Fire the ping/send. |
-| `stalled` (quiet, unchanged, no prompt, no in-flight work) | Fire the ping/send. |
+| `finished` | Fire the ping/send when assigned or newly queued work is ready; otherwise leave the member at rest. |
+| `stall_candidate`, confirmed quiet (`stalled`: unchanged, no prompt, no in-flight work) | Fire the ping/send. A first quiet observation only seeds the baseline. |
 | `awaiting_user` | **Skip this round.** Defer the entire send (nothing persisted, nothing keystroked). Do not relay the pane's prompt anywhere — the round is simply skipped. |
 | `working` | **Skip this round.** Defer the entire send. The member surfaces its own result via `cafleet message send` when done. |
 | `unknown` (dead / unreadable pane) | Do not ping. Enter the recovery path ([`reference/recovery.md`](recovery.md)) / § Stall Response → Escalation instead. |
@@ -219,7 +219,7 @@ CAFleet members never talk to the user directly — the Director relays. This is
 2. **Ask the user.** No preamble sentence above the question — the conversation context plus the question text carry it. One prompt per decision: batch multiple members' questions only when they are genuinely the same decision.
 3. **Relay the answer back** via `cafleet message send` to the originating member. Pass through the user's selection verbatim; do not substitute your own judgment. If the user provided free-form text instead of a listed option, send that text.
 
-A member that pauses on a decision-prompt pane frame awaiting a user reaction is the same delegation: put the decision to the user via {decision_surface}, then forward the answer with the decision-relay primitive your overlay describes, invoked through your own Bash tool — never printed as a fenced `bash` block for the user to paste; the coding agent's per-call permission prompt is the consent surface. The concrete surface, the three-beat workflow, and the pane-shapes table are backend deltas — see your overlay; the neutral pointer is [`reference/director.md`](director.md) § *Answering a member's relayed question*.
+A decision-prompt frame seen only in a capture is `awaiting_user`: defer this round under the pre-ping gate, without inferring or answering the prompt. An explicit question received through `cafleet message send` follows the relay above and the gate's reply-soliciting exception. The backend's decision surface remains defined by its overlay; the broker reply procedure is [`reference/director.md`](director.md#answering-a-members-relayed-question).
 
 ### Free-form replies — judging intent
 

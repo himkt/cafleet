@@ -87,7 +87,7 @@ Roles:
 
 | Role | Who writes it | When |
 |:--|:--|:--|
-| `user-relay` | The Director acting as user-mediator (existing convention from the interview workflow) | Carries user-derived clarifications. Existing usage unchanged. |
+| `user-relay` | The Director acting as user-mediator | Carries user-derived clarifications and ordinary-language revision requests, preserving the user's meaning. |
 | `director` | The Director | Spec resolution notes, Director judgments, ambiguity arbitration, Phase C code-review feedback in the execute workflow. |
 | `drafter` | The Drafter | Spec ambiguities the Drafter cannot resolve and needs Director input on. |
 | `reviewer` | The Reviewer | Design-doc review findings in the create workflow; code-review findings at `<file>:<line>` in the execute workflow — both tagged with the existing `[COMPLIANCE]` / `[GAP]` / `[UNCLEAR]` / `[INCORRECT]` / `[IMPROVEMENT]` taxonomy inside the marker body. |
@@ -100,6 +100,13 @@ Rules:
 - One marker per logical issue. Do not bundle.
 - Body must be actionable — state the issue and what should change.
 - Reviewer markers carry one of the 5 review tags inside the body: `COMMENT(reviewer): [GAP] Step 4 lacks a Phase D entry.`
+
+Users may give feedback in ordinary language; they need not write markers or
+choose a pointer. The Director identifies the affected paragraph (or `doc` for
+a document-wide issue), records each request as `COMMENT(user-relay)` there,
+and routes it through the workflow. Ask only about ambiguous meaning or scope.
+User-written markers remain accepted. This changes no member role obligations,
+verb/pointer pairing, marker removal, or approval preconditions.
 
 ## Issue Markers vs Status Markers (split)
 

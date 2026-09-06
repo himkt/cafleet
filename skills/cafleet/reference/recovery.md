@@ -6,29 +6,33 @@ Director reference for crash / disconnect / idle / wedged-pane recovery. Member-
 
 Before assuming a member is stalled, run the cheap check first — poll your own inbox, then capture the member's pane — per [`supervision.md`](supervision.md) § Stall Response. Recovery-specific detail: bump `cafleet member capture --lines` to show a member's full decision-prompt frame (the line count needed is a backend delta, see your overlay).
 
-## Routine monitoring via `member list`
+## Recovery entry conditions
 
-Use `member list` (see [`reference/director.md`](director.md) § *Member List*) for routine supervision ticks instead of capturing every member — its `idle` column is the stall signal. Heuristic: capture only members whose `idle > 5m` AND have an unread inbox — capture is the expensive operation, use it sparingly.
+[`supervision.md`](supervision.md#the-pre-ping-capture-gate) owns the Director's
+capture → action decision, including quiet confirmation, deferred sends and
+escalation. `member list` supplies registration and idle context; idle duration
+and unread counts do not establish a stall. A suspected missed inline preview
+still needs that fresh-capture gate before `cafleet member ping`.
 
-## Stalled member shapes
+A captured decision prompt is `awaiting_user`, not an instruction to answer
+it. Relay only a question explicitly sent by the member, per
+[`Answering a member's relayed question`](director.md#answering-a-members-relayed-question).
+For an explicit Bash-denied request, use the existing exception in
+[`prompt-routing.md`](prompt-routing.md): `cafleet member prompt --shell`,
+then immediately `cafleet member ping` after successful dispatch.
 
-Once you have a capture, classify the shape:
-
-| Shape | Recovery |
-|---|---|
-| **Decision-prompt paused** (capture shows the member waiting on a user reaction) | The member is relaying a question for the user. Delegate the decision to the user and forward the answer through the Director's decision surface — the concrete relay (and any pane-keystroke primitive) is a backend delta; see your overlay section (`coding-agent-overlays.md#<name>`) and [`reference/director.md`](director.md#answering-a-members-relayed-question). |
-| **Bash-denied** (member sent a CAFleet message asking the Director to run a command on its behalf) | Bash-via-Director protocol — see [`reference/prompt-routing.md`](prompt-routing.md). Dispatch via `cafleet member prompt --shell`, then immediately `cafleet member ping`. |
-| **Missed inline-preview keystroke** (the recipient's TUI was in a non-input state when the broker keystroked the message preview, so the preview landed elsewhere on the pane and was lost) | `cafleet member ping <member>` re-keystrokes the `cafleet message poll` command into the member's pane. The member runs `cafleet message poll` and drains whatever has accumulated. |
-| **REPL idle / mid tool-call** (capture shows a coding-agent prompt or active tool call, not a decision-prompt frame) | Wait. The member is doing work. Re-check `member list` next tick; only escalate if `idle` keeps growing AND there is unread inbox. |
-| **Pane crashed** (capture shows a shell prompt without the coding agent, or the pane is missing entirely) | `cafleet member delete` to tear down the registration cleanly, then `cafleet member create` to re-spawn. The previous member's `member_id` is gone — do not re-use it. |
-| **Truly wedged** (capture shows no progress over multiple ticks, no decision-prompt frame, no pending work explanation) | Soft escalation first — `cafleet member ping <member>`. If unchanged after 2–3 ticks, hard escalation: `cafleet member delete` then re-spawn. |
+Once inspection confirms the coding agent exited or its pane disappeared,
+use `cafleet member delete` to cleanly deregister it, then `cafleet member create`
+to re-spawn. The new registration has a new `member_id`. For an unresponsive
+but existing agent, use supervision's escalation procedure before deciding
+to re-spawn; elapsed ticks alone do not authorize deleting it.
 
 ## Recovering from a tmux disconnect
 
 If `cafleet member capture` exits with a multiplexer subprocess error (the multiplexer server is unreachable):
 
 1. Run `cafleet doctor` to confirm your own pane's multiplexer state. If it fails to resolve a backend, you are no longer attached to a supported multiplexer session and recovery is impossible from this shell — re-attach (on tmux, `tmux attach -t <session>`) and re-run.
-2. If `cafleet doctor` succeeds but `cafleet member capture` still fails, the target pane is gone (the multiplexer server killed it, or the user closed it manually). Treat as "Pane crashed" above — `cafleet member delete` then re-spawn.
+2. A successful `cafleet doctor` with a failed capture does not prove the target pane is gone. Use `cafleet member list <fleet-id> --json` or `cafleet member show <member-id> --json` to identify the registered backend and pane, then investigate the capture/connection error. The registry alone does not establish physical pane presence or absence: retain `unknown` and do not ping or delete the member on that evidence alone. Ask the user for missing facts about the target pane only when that uncertainty actually blocks the work, not after every failed capture.
 3. Never invoke raw tmux directly — cafleet's primitives encapsulate the fleet-isolation boundary that raw tmux bypasses.
 
 ## Shutdown Protocol
