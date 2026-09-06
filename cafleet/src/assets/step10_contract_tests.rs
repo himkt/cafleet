@@ -1706,3 +1706,599 @@ fn partial_swap_rollback_stage_cleanup_failure_or_interrupt_keeps_evidence_until
         }
     }
 }
+
+// Reinstall coverage starts after a real successful install, unlike the initial-install matrices.
+fn reinstall_intents(root: &Path) -> Vec<(PathBuf, serde_json::Value)> {
+    tree(root)
+        .into_iter()
+        .filter(|(relative, kind, _)| {
+            kind == "file"
+                && relative
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .ends_with(".intent")
+        })
+        .map(|(relative, _, bytes)| (root.join(relative), serde_json::from_slice(&bytes).unwrap()))
+        .collect()
+}
+
+struct ReinstallFixture {
+    fixture: Fixture,
+    entries: Vec<Tree>,
+    record: Option<Row>,
+    intent_paths: Vec<PathBuf>,
+    old_transaction: String,
+}
+impl ReinstallFixture {
+    fn new(agent: &'static str) -> Self {
+        let mut fixture = Fixture::new(agent, true, true);
+        fixture.install(&okay).unwrap();
+        fixture.assert_new(VERSION);
+        fixture.assert_finished();
+        let intents = reinstall_intents(fixture.dir.path());
+        assert!(intents.len() >= 4);
+        let old_transaction = intents[0].1["transaction_id"].as_str().unwrap().to_string();
+        for (_, value) in &intents {
+            assert_eq!(value["state"], "Finished");
+            assert_eq!(value["transaction_id"], old_transaction);
+        }
+        // Keep the installed version/row while making local bytes observably different.
+        for entry in fixture.plan().entries {
+            match entry.kind {
+                EntryKind::Skill(name) => {
+                    fs::write(
+                        entry.target.join("SKILL.md"),
+                        format!("local {name} changes"),
+                    )
+                    .unwrap();
+                    fs::write(entry.target.join("local-only.txt"), b"retain on rollback").unwrap();
+                }
+                EntryKind::Preset => fs::write(&entry.target, b"local preset changes").unwrap(),
+                EntryKind::ObsoleteResearch => {
+                    fs::create_dir_all(&entry.target).unwrap();
+                    fs::write(entry.target.join("local.txt"), b"local research").unwrap();
+                }
+            }
+        }
+        let entries = fixture.snapshot();
+        let record = fixture.record();
+        assert_eq!(record.as_ref().unwrap().2, VERSION);
+        Self {
+            fixture,
+            entries,
+            record,
+            intent_paths: intents.into_iter().map(|(path, _)| path).collect(),
+            old_transaction,
+        }
+    }
+    fn assert_restored(&self) {
+        self.fixture.assert_old(&self.entries, &self.record);
+        self.fixture.assert_finished();
+        assert!(matches!(
+            self.fixture.fresh_recover(&okay).unwrap(),
+            RecoveryOutcome::None
+        ));
+    }
+    fn interrupt(&mut self, boundary: &ReinstallBoundary) -> PathBuf {
+        let seen = Cell::new(0);
+        let hit = Cell::new(false);
+        let result = self.fixture.install(&|event| {
+            if boundary.matches(event, &seen) && !hit.replace(true) {
+                return Err(InstallFault::Interrupt);
+            }
+            Ok(())
+        });
+        assert!(hit.get(), "{boundary:?}");
+        let Err(InstallFailure::Interrupted(event)) = result else {
+            panic!("{result:?}")
+        };
+        let journal = read_journal(&event.journal).unwrap();
+        assert_eq!(journal.phase, InstallPhase::Prepared);
+        assert!(journal.pending.is_none());
+        assert!(
+            journal
+                .entries
+                .iter()
+                .all(|entry| entry.state == EntryState::Original)
+        );
+        assert_ne!(journal.transaction_id, self.old_transaction);
+        self.fixture.assert_old(&self.entries, &self.record);
+        event.journal
+    }
+    fn assert_read_only_incomplete(&self) {
+        let before = tree(self.fixture.dir.path());
+        assert!(inspect_install(&self.fixture.paths).unwrap().is_some());
+        let root = self.fixture.dir.path().canonicalize().unwrap();
+        let report = diagnosis::diagnose_assets(
+            Some(&self.fixture.conn),
+            &|_| None,
+            &root,
+            VERSION,
+            AssetMode::Report,
+        )
+        .unwrap();
+        let agent = report
+            .agents
+            .iter()
+            .find(|entry| entry.coding_agent == self.fixture.agent)
+            .unwrap();
+        assert!(matches!(&agent.state, AssetState::Incomplete { .. }));
+        assert!(
+            crate::cli::helpers::stale_assets_guard(&report, VERSION)
+                .unwrap_err()
+                .message()
+                .contains("incomplete assets install")
+        );
+        assert_eq!(tree(self.fixture.dir.path()), before);
+    }
+}
+
+#[derive(Debug)]
+enum ReinstallBoundary {
+    Prepared,
+    Intent { edge: Edge, ordinal: usize },
+}
+impl ReinstallBoundary {
+    fn matches(&self, event: &InstallEvent, seen: &Cell<usize>) -> bool {
+        match self {
+            Self::Prepared => {
+                event.operation == InstallOperation::JournalPersist
+                    && event.edge == Edge::After
+                    && event.phase == Some(InstallPhase::Prepared)
+            }
+            Self::Intent { edge, ordinal } => {
+                if event.operation != InstallOperation::IntentPersist
+                    || &event.edge != edge
+                    || event.phase != Some(InstallPhase::Prepared)
+                {
+                    return false;
+                }
+                let current = seen.get();
+                seen.set(current + 1);
+                current == *ordinal
+            }
+        }
+    }
+}
+fn reinstall_boundaries() -> Vec<ReinstallBoundary> {
+    vec![
+        ReinstallBoundary::Prepared,
+        ReinstallBoundary::Intent {
+            edge: Edge::Before,
+            ordinal: 0,
+        },
+        ReinstallBoundary::Intent {
+            edge: Edge::After,
+            ordinal: 0,
+        },
+        ReinstallBoundary::Intent {
+            edge: Edge::Before,
+            ordinal: 2,
+        },
+        ReinstallBoundary::Intent {
+            edge: Edge::After,
+            ordinal: 2,
+        },
+    ]
+}
+fn reinstall_assert_active(paths: &[PathBuf], journal: &InstallJournal) {
+    for path in paths {
+        let intent: serde_json::Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        assert_eq!(
+            intent["state"],
+            "Active",
+            "{} must normalize before rollback",
+            path.display()
+        );
+        assert_eq!(intent["transaction_id"], journal.transaction_id);
+    }
+}
+fn reinstall_assert_before_rollback(event: &InstallEvent, paths: &[PathBuf]) {
+    if event.operation == InstallOperation::JournalPersist
+        && event.edge == Edge::Before
+        && event.phase == Some(InstallPhase::RollingBack)
+    {
+        let persisted = read_journal(&event.journal).unwrap();
+        // Later rollback progress also persists RollingBack; the transition from
+        // Prepared is the point at which normalization must already be durable.
+        if persisted.phase == InstallPhase::Prepared {
+            assert!(persisted.pending.is_none());
+            assert!(
+                persisted
+                    .entries
+                    .iter()
+                    .all(|entry| entry.state == EntryState::Original)
+            );
+            reinstall_assert_active(paths, &persisted);
+        }
+    }
+}
+
+#[test]
+fn reinstall_prepared_interrupt_with_old_finished_intents_restores_changed_same_version_assets() {
+    let mut fixture = ReinstallFixture::new("codex");
+    fixture.interrupt(&ReinstallBoundary::Prepared);
+    let intents = reinstall_intents(fixture.fixture.dir.path());
+    assert!(intents.iter().all(|(_, value)| value["state"] == "Finished"
+        && value["transaction_id"] == fixture.old_transaction));
+    fixture.assert_read_only_incomplete();
+    assert!(matches!(
+        fixture
+            .fixture
+            .fresh_recover(&|event| {
+                reinstall_assert_before_rollback(event, &fixture.intent_paths);
+                Ok(())
+            })
+            .unwrap(),
+        RecoveryOutcome::RolledBack
+    ));
+    fixture.assert_restored();
+}
+
+#[test]
+fn reinstall_active_intent_first_and_middle_interruptions_recover_mixed_finished_and_active() {
+    let mut completed = 0;
+    for boundary in reinstall_boundaries().into_iter().skip(1) {
+        let mut fixture = ReinstallFixture::new("codex");
+        fixture.interrupt(&boundary);
+        fixture.assert_read_only_incomplete();
+        assert!(matches!(
+            fixture
+                .fixture
+                .fresh_recover(&|event| {
+                    reinstall_assert_before_rollback(event, &fixture.intent_paths);
+                    Ok(())
+                })
+                .unwrap(),
+            RecoveryOutcome::RolledBack
+        ));
+        fixture.assert_restored();
+        completed += 1;
+    }
+    assert_eq!(completed, 4);
+    eprintln!("Step 10 reinstall active-boundary completed cases: {completed}");
+}
+
+#[test]
+fn reinstall_normal_fail_at_prepared_or_active_boundary_normalizes_before_same_call_rollback() {
+    let mut completed = 0;
+    for boundary in reinstall_boundaries() {
+        let mut fixture = ReinstallFixture::new("codex");
+        let seen = Cell::new(0);
+        let hit = Cell::new(false);
+        let paths = &fixture.intent_paths;
+        let result = fixture.fixture.install(&|event| {
+            if !hit.get() && boundary.matches(event, &seen) {
+                hit.set(true);
+                return Err(InstallFault::Fail("reinstall boundary failure".into()));
+            }
+            if hit.get() {
+                reinstall_assert_before_rollback(event, paths);
+            }
+            Ok(())
+        });
+        assert!(hit.get(), "{boundary:?}");
+        failed(result, "reinstall boundary failure");
+        fixture.assert_restored();
+        completed += 1;
+    }
+    assert_eq!(completed, 5);
+    eprintln!("Step 10 reinstall same-call rollback completed cases: {completed}");
+}
+
+#[test]
+fn reinstall_fresh_recovery_normalization_can_fail_or_interrupt_before_and_after_intent_updates() {
+    let mut completed = 0;
+    for interrupt in [false, true] {
+        for boundary in reinstall_boundaries().into_iter().skip(1) {
+            let mut fixture = ReinstallFixture::new("codex");
+            let location = fixture.interrupt(&ReinstallBoundary::Prepared);
+            let seen = Cell::new(0);
+            let hit = Cell::new(false);
+            let result = fixture.fixture.fresh_recover(&|event| {
+                if boundary.matches(event, &seen) && !hit.replace(true) {
+                    return Err(if interrupt {
+                        InstallFault::Interrupt
+                    } else {
+                        InstallFault::Fail("normalization failed".into())
+                    });
+                }
+                Ok(())
+            });
+            assert!(
+                hit.get(),
+                "recovery must reach normalization {boundary:?}: {result:?}"
+            );
+            if interrupt {
+                assert!(matches!(result, Err(InstallFailure::Interrupted(_))));
+            } else {
+                assert!(
+                    matches!(result, Err(InstallFailure::Failed(ref e)) if e.message().contains("normalization failed"))
+                );
+            }
+            let journal = read_journal(&location).unwrap();
+            assert_eq!(journal.phase, InstallPhase::Prepared);
+            assert!(journal.pending.is_none());
+            assert!(
+                journal
+                    .entries
+                    .iter()
+                    .all(|entry| entry.state == EntryState::Original)
+            );
+            fixture.assert_read_only_incomplete();
+            fixture
+                .fixture
+                .fresh_recover(&|event| {
+                    reinstall_assert_before_rollback(event, &fixture.intent_paths);
+                    Ok(())
+                })
+                .unwrap();
+            fixture.assert_restored();
+            completed += 1;
+        }
+    }
+    assert_eq!(completed, 8);
+    eprintln!("Step 10 reinstall normalization retry completed cases: {completed}");
+}
+
+#[test]
+fn reinstall_fresh_recovery_rolling_back_persist_interrupt_keeps_only_current_active_intents() {
+    for initial in [
+        ReinstallBoundary::Prepared,
+        ReinstallBoundary::Intent {
+            edge: Edge::After,
+            ordinal: 2,
+        },
+    ] {
+        let mut fixture = ReinstallFixture::new("codex");
+        let location = fixture.interrupt(&initial);
+        let hit = Cell::new(false);
+        let result = fixture.fixture.fresh_recover(&|event| {
+            reinstall_assert_before_rollback(event, &fixture.intent_paths);
+            if event.operation == InstallOperation::JournalPersist
+                && event.edge == Edge::After
+                && event.phase == Some(InstallPhase::RollingBack)
+                && !hit.replace(true)
+            {
+                reinstall_assert_active(
+                    &fixture.intent_paths,
+                    &read_journal(&event.journal).unwrap(),
+                );
+                return Err(InstallFault::Interrupt);
+            }
+            Ok(())
+        });
+        assert!(hit.get(), "{result:?}");
+        assert!(matches!(result, Err(InstallFailure::Interrupted(_))));
+        assert_eq!(
+            read_journal(&location).unwrap().phase,
+            InstallPhase::RollingBack
+        );
+        fixture.assert_read_only_incomplete();
+        fixture.fixture.fresh_recover(&okay).unwrap();
+        fixture.assert_restored();
+    }
+}
+
+#[test]
+fn reinstall_same_call_failure_then_normalization_or_rolling_back_interrupt_recovers_fresh() {
+    let mut completed = 0;
+    for initial in reinstall_boundaries() {
+        for during_normalization in [false, true] {
+            let mut fixture = ReinstallFixture::new("codex");
+            let seen = Cell::new(0);
+            let primary = Cell::new(false);
+            let interrupted = Cell::new(false);
+            let normalization_seen = Cell::new(0);
+            let paths = &fixture.intent_paths;
+            let result = fixture.fixture.install(&|event| {
+                if !primary.get() && initial.matches(event, &seen) {
+                    primary.set(true);
+                    return Err(InstallFault::Fail("reinstall primary failure".into()));
+                }
+                if primary.get() {
+                    reinstall_assert_before_rollback(event, paths);
+                    let cut = if during_normalization {
+                        ReinstallBoundary::Intent {
+                            edge: Edge::After,
+                            ordinal: 2,
+                        }
+                        .matches(event, &normalization_seen)
+                    } else {
+                        event.operation == InstallOperation::JournalPersist
+                            && event.edge == Edge::After
+                            && event.phase == Some(InstallPhase::RollingBack)
+                    };
+                    if cut && !interrupted.replace(true) {
+                        return Err(InstallFault::Interrupt);
+                    }
+                }
+                Ok(())
+            });
+            assert!(
+                primary.get() && interrupted.get(),
+                "{initial:?}: {result:?}"
+            );
+            assert!(matches!(result, Err(InstallFailure::Interrupted(_))));
+            fixture.assert_read_only_incomplete();
+            fixture.fixture.fresh_recover(&okay).unwrap();
+            fixture.assert_restored();
+            completed += 1;
+        }
+    }
+    assert_eq!(completed, 10);
+    eprintln!("Step 10 reinstall failure/reinterrupt completed cases: {completed}");
+}
+
+#[test]
+fn reinstall_shared_skills_identity_discovers_and_recovers_old_finished_new_prepared_state() {
+    let mut fixture = ReinstallFixture::new("opencode");
+    let location = fixture.interrupt(&ReinstallBoundary::Prepared);
+    let root = fixture.fixture.dir.path().canonicalize().unwrap();
+    let alternate = root.join("alternate-opencode");
+    let paths = agent_paths(
+        &|_| Some(alternate.display().to_string()),
+        &root,
+        "opencode",
+    )
+    .unwrap();
+    assert_eq!(paths.skills_dir, fixture.fixture.paths.skills_dir);
+    let before = tree(&root);
+    assert_eq!(inspect_install(&paths).unwrap().unwrap().journal, location);
+    assert_eq!(tree(&root), before);
+    let mut conn = Connection::open(&fixture.fixture.database).unwrap();
+    assert!(matches!(
+        recover_install(
+            &mut conn,
+            &paths,
+            &hooks(&|event| {
+                reinstall_assert_before_rollback(event, &fixture.intent_paths);
+                Ok(())
+            })
+        )
+        .unwrap(),
+        RecoveryOutcome::RolledBack
+    ));
+    assert!(row(&conn, &paths, "opencode").is_none());
+    fixture.assert_restored();
+    assert!(inspect_install(&paths).unwrap().is_none());
+}
+
+#[test]
+fn reinstall_finished_exception_rejects_active_phase_pending_state_and_unverified_old_evidence() {
+    for damage in [
+        "active",
+        "swapping",
+        "recording",
+        "rolling-back",
+        "committed",
+        "pending",
+        "pending-record",
+        "entry-state",
+        "installed-state",
+        "restored-state",
+        "path",
+        "corrupt",
+        "fingerprint",
+        "backup",
+        "row",
+        "database",
+    ] {
+        let mut fixture = ReinstallFixture::new("codex");
+        let location = fixture.interrupt(&ReinstallBoundary::Prepared);
+        let journal = read_journal(&location).unwrap();
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&location).unwrap()).unwrap();
+        match damage {
+            "active" => {
+                let path = &fixture.intent_paths[0];
+                let mut intent: serde_json::Value =
+                    serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+                intent["state"] = "Active".into();
+                fs::write(path, serde_json::to_vec(&intent).unwrap()).unwrap();
+            }
+            "swapping" => value["phase"] = "Swapping".into(),
+            "recording" => value["phase"] = "Recording".into(),
+            "rolling-back" => value["phase"] = "RollingBack".into(),
+            "committed" => value["phase"] = "Committed".into(),
+            "pending" => {
+                value["pending"] = serde_json::json!({"operation":"BackupRename","entry":0})
+            }
+            "pending-record" => {
+                value["pending"] = serde_json::json!({"operation":"RestoreRecord","entry":null})
+            }
+            "entry-state" => value["entries"][0]["state"] = "BackedUp".into(),
+            "installed-state" => value["entries"][2]["state"] = "Installed".into(),
+            "restored-state" => value["entries"][3]["state"] = "Restored".into(),
+            "path" => {
+                value["entries"][0]["backup"] = fixture
+                    .fixture
+                    .dir
+                    .path()
+                    .join("untrusted-backup")
+                    .display()
+                    .to_string()
+                    .into()
+            }
+            "corrupt" => {}
+            "fingerprint" => fs::write(
+                journal.entries[0].target.join("SKILL.md"),
+                b"changed after Prepared",
+            )
+            .unwrap(),
+            "backup" => {
+                fs::create_dir_all(&journal.entries[0].backup).unwrap();
+                fs::write(journal.entries[0].backup.join("keep"), b"unverified backup").unwrap();
+            }
+            "row" => {
+                fixture
+                    .fixture
+                    .conn
+                    .execute(
+                        "UPDATE asset_installs SET installed_at='changed after Prepared'",
+                        [],
+                    )
+                    .unwrap();
+            }
+            "database" => {
+                let other = fixture.fixture.dir.path().join("other.sqlite3");
+                let mut conn = Connection::open(&other).unwrap();
+                crate::db::migrate_to_head(&mut conn).unwrap();
+                value["database_path"] = other.canonicalize().unwrap().display().to_string().into();
+            }
+            _ => unreachable!(),
+        }
+        fs::write(
+            &location,
+            if damage == "corrupt" {
+                b"{broken".to_vec()
+            } else {
+                serde_json::to_vec(&value).unwrap()
+            },
+        )
+        .unwrap();
+        let before = tree(fixture.fixture.dir.path());
+        let record = fixture.fixture.record();
+        fixture.assert_read_only_incomplete();
+        let result = fixture.fixture.fresh_recover(&okay);
+        assert!(
+            matches!(result, Err(InstallFailure::Failed(_))),
+            "must reject {damage}: {result:?}"
+        );
+        assert_eq!(
+            tree(fixture.fixture.dir.path()),
+            before,
+            "preserve {damage} evidence before normalization"
+        );
+        assert_eq!(fixture.fixture.record(), record);
+    }
+}
+
+#[test]
+fn reinstall_finished_pointer_to_valid_journal_without_its_lock_key_is_rejected() {
+    let mut fixture = ReinstallFixture::new("codex");
+    fixture.interrupt(&ReinstallBoundary::Prepared);
+    let mut foreign = ReinstallFixture::new("codex");
+    let foreign_location = foreign.interrupt(&ReinstallBoundary::Prepared);
+    assert!(read_journal(&foreign_location).is_ok());
+    let path = &fixture.intent_paths[0];
+    let mut intent: serde_json::Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+    intent["journal"] = foreign_location.display().to_string().into();
+    fs::write(path, serde_json::to_vec(&intent).unwrap()).unwrap();
+    let before = tree(fixture.fixture.dir.path());
+    let foreign_before = tree(foreign.fixture.dir.path());
+    fixture.assert_read_only_incomplete();
+    assert!(matches!(
+        fixture.fixture.fresh_recover(&okay),
+        Err(InstallFailure::Failed(_))
+    ));
+    assert_eq!(tree(fixture.fixture.dir.path()), before);
+    assert_eq!(tree(foreign.fixture.dir.path()), foreign_before);
+    fixture
+        .fixture
+        .assert_old(&fixture.entries, &fixture.record);
+    foreign
+        .fixture
+        .assert_old(&foreign.entries, &foreign.record);
+}
