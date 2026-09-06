@@ -22,6 +22,7 @@ tokio = { version = "1", default-features = false, features = ["net", "rt-multi-
 unicode-width = "0.2"
 
 [dev-dependencies]
+pulldown-cmark = { version = "0.13.4", default-features = false }
 sha2 = "0.11"
 tempfile = "3"
 tokio = { version = "1", default-features = false, features = ["macros"] }

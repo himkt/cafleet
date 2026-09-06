@@ -23,15 +23,15 @@ cafleet member create --fleet-id <fleet-id> \
 | `--name` | yes | Display name of the new member. |
 | `--description` | yes | One-sentence purpose |
 | `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; also recorded as `placement.coding_agent`. When omitted, the member — every role — inherits **your** (the spawning Director's) backend from your placement row, so an unflagged team runs on the same backend as its Director. An explicit value always wins. Exits 1 with `Error: binary <name> not found on PATH` when the binary is absent, or with `opencode agent preset not found at <preset>; run 'cafleet setup --coding-agent opencode' first` when the opencode agent preset is missing. |
-| `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). The model-name-to-backend inference table below maps a bare model name to its backend; the model list at [`model-list.md`](model-list.md) lists the models for each backend. See [`cli-options.md`](../../../docs/docs/spec/cli-options.md#member-create). |
+| `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). The model-name-to-backend inference table below maps a bare model name to its backend; the model list at [`model-list.md`](model-list.md) lists the models for each backend. See [`cli-options.md`](runtime/spec/cli-options.md#member-create). |
 | `--effort` | no | Reasoning-effort level forwarded to the backend binary (omitted → the binary's default; spawn-time only, never persisted). claude: `low`, `medium`, `high`, `xhigh`, `max` (spawned as `--effort <level>`); codex: `minimal`, `low`, `medium`, `high`, `xhigh` (spawned as `--config=model_reasoning_effort=<level>`); opencode: unsupported — any value exits 2 with `opencode does not support reasoning effort.`. An unknown level exits 2 before any side effect. The per-backend level set is your overlay's `{effort_levels}` value. |
 | `--role` | no | Sole accepted value `monitor` — registers the fleet's **monitor member** (recovery-only; see below). Any other value is the parser's invalid-value error (exit 2). |
 | positional `PROMPT` | one of | Inline spawn prompt. Exactly one of the positional and `--file` is required. |
-| `--file PATH` | one of | Path to a UTF-8 file used as the spawn prompt — absolute, or relative to CWD; `-` reads the whole prompt from stdin. Exactly one of the positional and `--file` is required. Path/file errors are catalogued in [`cli-options.md`](../../../docs/docs/spec/cli-options.md#error-messages). The canonical input mode for every team-skill spawn — see § *Member Create — Scratch and audit files*. |
+| `--file PATH` | one of | Path to a UTF-8 file used as the spawn prompt — absolute, or relative to CWD; `-` reads the whole prompt from stdin. Exactly one of the positional and `--file` is required. Path/file errors are catalogued in [`cli-options.md`](runtime/spec/cli-options.md#error-messages). The canonical input mode for every team-skill spawn — see § *Member Create — Scratch and audit files*. |
 
-`--role monitor` is recovery-only: the bootstrap monitor is spawned by `cafleet fleet create`; use the flag solely to re-spawn a dead monitor mid-run (`--model {monitor_model}`, omit `--coding-agent`; protocol in [`roles/monitor.md`](../roles/monitor.md)). The database enforces one active monitor member per fleet, including concurrent registrations; an ordinary `member create` requires one through its existing CLI guard. A dead pane alone does not free the slot: deregister the old monitor before re-spawning it. Both CLI guard error strings are in [`cli-options.md`](../../../docs/docs/spec/cli-options.md#error-messages).
+`--role monitor` is recovery-only: the bootstrap monitor is spawned by `cafleet fleet create`; use the flag solely to re-spawn a dead monitor mid-run (`--model {monitor_model}`, omit `--coding-agent`; protocol in [`roles/monitor.md`](../roles/monitor.md)). The database enforces one active monitor member per fleet, including concurrent registrations; an ordinary `member create` requires one through its existing CLI guard. A dead pane alone does not free the slot: deregister the old monitor before re-spawning it. Both CLI guard error strings are in [`cli-options.md`](runtime/spec/cli-options.md#error-messages).
 
-The per-backend spawn argv is in [`cli-options.md`](../../../docs/docs/spec/cli-options.md#member-create) § Spawn command per backend. In all three modes the member's Bash tool is enabled and routine permission prompts auto-resolve; the denied-command fallback is [`reference/prompt-routing.md`](prompt-routing.md). Per-backend deltas: [`claude`](coding-agent-overlays.md#claude) / [`codex`](coding-agent-overlays.md#codex) / [`opencode`](coding-agent-overlays.md#opencode).
+The per-backend spawn argv is in [`cli-options.md`](runtime/spec/cli-options.md#member-create) § Spawn command per backend. In all three modes the member's Bash tool is enabled and routine permission prompts auto-resolve; the denied-command fallback is [`reference/prompt-routing.md`](prompt-routing.md). Per-backend deltas: [`claude`](coding-agent-overlays.md#claude) / [`codex`](coding-agent-overlays.md#codex) / [`opencode`](coding-agent-overlays.md#opencode).
 
 ### Model-name-to-backend inference
 
@@ -115,7 +115,7 @@ Per-role delta slots (each consuming skill's spawn section fills these):
 
 **Backtick caveat (harness-dependent)**: some environments (including this project) run a Bash-validator hook that rejects any backtick in a `Bash` invocation. When in play, strip backticks from spawn-prompt bodies (plain text instead of code spans); path-by-reference keeps the body short enough that this is easy.
 
-**Pane discovery**: discover a member's pane via `cafleet member list` (the `pane_id` column is ground truth for all backends). Pane title: {pane_title}. A failed spawn attempts to kill any pane whose id it owns and deregister the member, reporting cleanup failures after the primary error; a backend cleanup attempt is never repeated by the CLI. An unknown pane id leaves pane cleanup unconfirmed. Creation uses `-d` so the Director keeps focus. See [`member-lifecycle.md`](../../../docs/docs/concepts/member-lifecycle.md).
+**Pane discovery**: discover a member's pane via `cafleet member list` (the `pane_id` column is ground truth for all backends). Pane title: {pane_title}. A failed spawn attempts to kill any pane whose id it owns and deregister the member, reporting cleanup failures after the primary error; a backend cleanup attempt is never repeated by the CLI. An unknown pane id leaves pane cleanup unconfirmed. Creation uses `-d` so the Director keeps focus. See [`member-lifecycle.md`](runtime/concepts/member-lifecycle.md).
 
 ## Model selection before member create
 
@@ -143,7 +143,7 @@ The CLI kills the pane immediately, then deregisters and rebalances the layout (
 cafleet member delete <member-id>
 ```
 
-An unknown or inactive `MEMBER_ID` exits 1 (`Error: Member <member-id> not found`); deleting the root Director stays blocked by the root-Director guard. Exit codes and the output shape: [`cli-options.md`](../../../docs/docs/spec/cli-options.md#member-delete).
+An unknown or inactive `MEMBER_ID` exits 1 (`Error: Member <member-id> not found`); deleting the root Director stays blocked by the root-Director guard. Exit codes and the output shape: [`cli-options.md`](runtime/spec/cli-options.md#member-delete).
 
 ## Member List
 
@@ -176,7 +176,7 @@ A fleet member never talks to the user. When it needs a recorded user reaction (
 
 ## Member Prompt
 
-Director-only keystroke primitive with two forms — `--shell` (bang dispatch) and plain (a submitted user turn); the two-forms semantics and follow-up rules are canonical in [`reference/prompt-routing.md`](prompt-routing.md) § *The two forms*. The positional `TEXT` is a single line (leading/trailing whitespace stripped; pipes / `&&` / `;` / `$(...)` / backticks not special-cased; empty or newline-containing text exits 2) — see [`cli-options.md`](../../../docs/docs/spec/cli-options.md#member-prompt) for validation.
+Director-only keystroke primitive with two forms — `--shell` (bang dispatch) and plain (a submitted user turn); the two-forms semantics and follow-up rules are canonical in [`reference/prompt-routing.md`](prompt-routing.md) § *The two forms*. The positional `TEXT` is a single line (leading/trailing whitespace stripped; pipes / `&&` / `;` / `$(...)` / backticks not special-cased; empty or newline-containing text exits 2) — see [`cli-options.md`](runtime/spec/cli-options.md#member-prompt) for validation.
 
 ```bash
 cafleet member prompt <member-id> --shell "git log -1 --oneline"
@@ -189,7 +189,7 @@ After every successful `cafleet member prompt --shell` (exit 0), the Director MU
 
 ## Member Ping (manual inbox-poll)
 
-Keystrokes **`Esc` → `cafleet message poll <member-id> — then resume your work if something was still running.` → `Enter`** into a member's pane, re-poking a member that missed the broker's auto-fired inline preview. The leading `Esc` dismisses any pending permission-approval prompt, so the trailing `Enter` cannot blindly confirm it; the trailing resume clause keeps a keystroke that lands mid-turn from stranding the member's in-progress work. Ownership is the Director **and the monitor member** — the monitor's fixed-ping exception (one automatic ping per confirmed quiet period, per [`roles/monitor.md`](../roles/monitor.md)) is the one non-manual use; ordinary members never invoke it. Permission split: [`reference/prompt-routing.md`](prompt-routing.md) § *The two primitives*. Keystroke mechanics: [`multiplexer-backends.md`](../../../docs/docs/spec/multiplexer-backends.md#esc-safeguard).
+Keystrokes **`Esc` → `cafleet message poll <member-id> — then resume your work if something was still running.` → `Enter`** into a member's pane, re-poking a member that missed the broker's auto-fired inline preview. The leading `Esc` dismisses any pending permission-approval prompt, so the trailing `Enter` cannot blindly confirm it; the trailing resume clause keeps a keystroke that lands mid-turn from stranding the member's in-progress work. Ownership is the Director **and the monitor member** — the monitor's fixed-ping exception (one automatic ping per confirmed quiet period, per [`roles/monitor.md`](../roles/monitor.md)) is the one non-manual use; ordinary members never invoke it. Permission split: [`reference/prompt-routing.md`](prompt-routing.md) § *The two primitives*. Keystroke mechanics: [`multiplexer-backends.md`](runtime/spec/multiplexer-backends.md#esc-safeguard).
 
 ```bash
 cafleet member ping <member-id>

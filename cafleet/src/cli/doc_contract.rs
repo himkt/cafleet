@@ -227,9 +227,11 @@ fn update(generate: bool) {
         }
         updates.insert(path, (original, rendered));
     }
+    super::runtime_docs::prepare(root, &mut updates);
     for (path, (original, rendered)) in updates {
         if generate {
             if original != rendered {
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
                 std::fs::write(&path, rendered).unwrap();
             }
         } else {
@@ -240,6 +242,9 @@ fn update(generate: bool) {
                 path.display()
             );
         }
+    }
+    if !generate {
+        super::runtime_docs::installed(root);
     }
 }
 

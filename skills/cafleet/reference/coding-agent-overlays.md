@@ -25,7 +25,7 @@ Every note names the base token/instruction it qualifies.
 | Note | Applies at |
 |------|-----------|
 | `AskUserQuestion` takes ≤ 4 options/question; the built-in "Other" is the free-text path (don't add an explicit "Other"). Question shapes → form: choice among ≤ 4 labeled options; approve-or-revise (two options); continue-or-abort (two options); open-ended draft-comparison (2–4 full candidate bodies). | `{decision_surface}` — `cafleet/SKILL.md` § Soliciting user reactions; `cafleet-design-doc/create/create.md` Step 2 question batch |
-| *Pane-state capture cues* (below) — the concrete claude-pane discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`. | the monitor member's on-wake classification (its role file's § *On each wake*) and the Director's pre-ping capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response; the pane-state taxonomy in `docs/docs/concepts/monitoring.md` (each reader applies the cues of the **target member's** backend overlay). |
+| *Pane-state capture cues* (below) — the concrete claude-pane discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`. | the monitor member's on-wake classification (its role file's § *On each wake*) and the Director's pre-ping capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response; the pane-state taxonomy in [Monitoring](runtime/concepts/monitoring.md) (each reader applies the cues of the **target member's** backend overlay). |
 
 ### Pane-state capture cues
 
@@ -70,7 +70,7 @@ Every note names the base token/instruction it qualifies.
 |------|-----------|
 | No in-pane prompt — a fleet member sends its question to the Director, which answers as a plain operator message. Ask a concrete, answerable question, not free-form prose. | `{decision_surface}` — `cafleet/SKILL.md` § Soliciting user reactions |
 | Run the monitor command without shell `&` and retain the active managed execution session's returned session ID. Inspect the initial output for `monitor loop started`; if the line is absent and the session remains active, perform one immediate poll. A missing session ID or an early exit is a failed start; if the session is active but unconfirmed after that poll, terminate it. Withhold `monitor live` and report startup failure unless the line was observed. Whenever a broker message reopens a later monitor-member turn, poll the retained session ID once before any other work. If it exited, relaunch with the same bounded confirmation and send `monitor restarted` only after the replacement is confirmed. The monitor member alone owns the session ID and polling; it never sends the ID to the Director or creates a timer or sleep loop. | `{bg_run}` / `{bg_stop}` — `cafleet/roles/monitor.md` § On spawn / § Standing obligation; `cafleet/reference/supervision.md` § Monitor-first Bootstrap / § Idle Semantics |
-| *Pane-state capture cues* (below) — the concrete codex-pane discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`. | the monitor member's on-wake classification (its role file's § *On each wake*) and the Director's pre-ping capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response; the pane-state taxonomy in `docs/docs/concepts/monitoring.md` (each reader applies the cues of the **target member's** backend overlay). |
+| *Pane-state capture cues* (below) — the concrete codex-pane discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`. | the monitor member's on-wake classification (its role file's § *On each wake*) and the Director's pre-ping capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response; the pane-state taxonomy in [Monitoring](runtime/concepts/monitoring.md) (each reader applies the cues of the **target member's** backend overlay). |
 
 ### Pane-state capture cues
 
@@ -114,7 +114,7 @@ Every note names the base token/instruction it qualifies.
 | Note | Applies at |
 |------|-----------|
 | No in-pane prompt — a fleet member sends its question to the Director, which answers as a plain operator message. The `--agent cafleet` safety floor shows no popup; if a popup ever appears it is a regression to escalate, not a decision point. | `{decision_surface}` — `cafleet/SKILL.md` § Soliciting user reactions |
-| *Pane-state capture cues* (below) — the concrete opencode-pane discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`. | the monitor member's on-wake classification (its role file's § *On each wake*) and the Director's pre-ping capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response; the pane-state taxonomy in `docs/docs/concepts/monitoring.md` (each reader applies the cues of the **target member's** backend overlay). |
+| *Pane-state capture cues* (below) — the concrete opencode-pane discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`. | the monitor member's on-wake classification (its role file's § *On each wake*) and the Director's pre-ping capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response; the pane-state taxonomy in [Monitoring](runtime/concepts/monitoring.md) (each reader applies the cues of the **target member's** backend overlay). |
 
 ### Pane-state capture cues
 
@@ -160,7 +160,7 @@ Required section. Convert every note (a constraint/caveat the inline value shoul
 | Note | Applies at |
 |------|-----------|
 | <the caveat, one row each> | `{token}` — `<skill>/<file>` § <base heading> |
-| *Pane-state capture cues* (below) — this backend's `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate` discriminators. | the monitor member's on-wake classification (its role file's § *On each wake*) and the Director's pre-ping capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response; the pane-state taxonomy in `docs/docs/concepts/monitoring.md` (each reader applies the cues of the **target member's** backend overlay). |
+| *Pane-state capture cues* (below) — this backend's `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate` discriminators. | the monitor member's on-wake classification (its role file's § *On each wake*) and the Director's pre-ping capture gate — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response; the pane-state taxonomy in [Monitoring](runtime/concepts/monitoring.md) (each reader applies the cues of the **target member's** backend overlay). |
 
 ### Pane-state capture cues
 

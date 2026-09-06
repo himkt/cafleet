@@ -12,6 +12,8 @@ pub(crate) mod helpers;
 pub(crate) mod member;
 mod message;
 pub(crate) mod monitor;
+#[cfg(test)]
+mod runtime_docs;
 mod server;
 mod setup;
 

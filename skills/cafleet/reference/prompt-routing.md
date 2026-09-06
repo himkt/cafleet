@@ -45,4 +45,4 @@ The `member ping` is required — `member prompt --shell` only stages the bang o
 
 **Serialize.** Process requests in poll order, one at a time: `prompt --shell → ping → ack → next`. Two `member prompt` dispatches firing concurrently against the same pane race the keystroke sequence and corrupt output. Within one member, `prompt --shell → ping → prompt --shell → ping`; never two concurrent prompt dispatches.
 
-**Targeting boundary.** `member prompt` reaches any active member by its `MEMBER_ID` (no caller-auth check); an unknown or inactive id returns "not found" (see [`cli-options.md`](../../../docs/docs/spec/cli-options.md#member-prompt)). A request naming a member you cannot serve is answered with a plain `cafleet message send` explaining the mismatch.
+**Targeting boundary.** `member prompt` reaches any active member by its `MEMBER_ID` (no caller-auth check); an unknown or inactive id returns "not found" (see [`cli-options.md`](runtime/spec/cli-options.md#member-prompt)). A request naming a member you cannot serve is answered with a plain `cafleet message send` explaining the mismatch.

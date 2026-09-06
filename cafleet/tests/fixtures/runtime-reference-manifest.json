@@ -1,0 +1,363 @@
+{
+  "references": [
+    {
+      "id": "L01",
+      "root": "skills/cafleet",
+      "source": "SKILL.md",
+      "heading": "Required reading",
+      "occurrence": 1,
+      "original": "../../docs/docs/spec/cli-options.md",
+      "form": "link",
+      "classification": "required",
+      "target": "reference/runtime/spec/cli-options.md"
+    },
+    {
+      "id": "L02",
+      "root": "skills/cafleet",
+      "source": "SKILL.md",
+      "heading": "Required ids",
+      "occurrence": 1,
+      "original": "../../docs/docs/spec/cli-options.md#positional-subject-ids",
+      "form": "link",
+      "classification": "required",
+      "target": "reference/runtime/spec/cli-options.md#positional-subject-ids"
+    },
+    {
+      "id": "L03",
+      "root": "skills/cafleet",
+      "source": "SKILL.md",
+      "heading": "Required ids",
+      "occurrence": 1,
+      "original": "../../docs/docs/spec/cli-options.md#permissionsallow-coverage",
+      "form": "link",
+      "classification": "required",
+      "target": "reference/runtime/spec/cli-options.md#permissionsallow-coverage"
+    },
+    {
+      "id": "L04",
+      "root": "skills/cafleet",
+      "source": "SKILL.md",
+      "heading": "Send (Unicast)",
+      "occurrence": 1,
+      "original": "../../docs/docs/spec/multiplexer-backends.md#push-notifications",
+      "form": "link",
+      "classification": "required",
+      "target": "reference/runtime/spec/multiplexer-backends.md#push-notifications"
+    },
+    {
+      "id": "L05",
+      "root": "skills/cafleet",
+      "source": "reference/cli.md",
+      "heading": "CAFleet CLI — Fuller Command Catalog",
+      "occurrence": 1,
+      "original": "../../../docs/docs/spec/cli-options.md",
+      "form": "link",
+      "classification": "required",
+      "target": "runtime/spec/cli-options.md"
+    },
+    {
+      "id": "L06",
+      "root": "skills/cafleet",
+      "source": "reference/cli.md",
+      "heading": "Output switch — `--json`",
+      "occurrence": 1,
+      "original": "../../../docs/docs/spec/cli-options.md#message-body-truncation",
+      "form": "link",
+      "classification": "required",
+      "target": "runtime/spec/cli-options.md#message-body-truncation"
+    },
+    {
+      "id": "L07",
+      "root": "skills/cafleet",
+      "source": "reference/cli.md",
+      "heading": "Output switch — `--json`",
+      "occurrence": 1,
+      "original": "../../../docs/docs/spec/cli-options.md#output-shapes",
+      "form": "link",
+      "classification": "required",
+      "target": "runtime/spec/cli-options.md#output-shapes"
+    },
+    {
+      "id": "L08",
+      "root": "skills/cafleet",
+      "source": "reference/cli.md",
+      "heading": "Broadcast — `cafleet message broadcast`",
+      "occurrence": 1,
+      "original": "../../../docs/docs/spec/data-model.md#broadcast-grouping",
+      "form": "link",
+      "classification": "required",
+      "target": "runtime/spec/data-model.md#broadcast-grouping"
+    },
+    {
+      "id": "L09",
+      "root": "skills/cafleet",
+      "source": "reference/cli.md",
+      "heading": "Broadcast — `cafleet message broadcast`",
+      "occurrence": 1,
+      "original": "../../../docs/docs/spec/message-envelope.md",
+      "form": "link",
+      "classification": "required",
+      "target": "runtime/spec/message-envelope.md"
+    },
+    {
+      "id": "L10",
+      "root": "skills/cafleet",
+      "source": "reference/cli.md",
+      "heading": "Deregister",
+      "occurrence": 1,
+      "original": "../../../docs/docs/spec/cli-options.md#error-messages",
+      "form": "link",
+      "classification": "required",
+      "target": "runtime/spec/cli-options.md#error-messages"
+    },
+    {
+      "id": "L11",
+      "root": "skills/cafleet",
+      "source": "reference/cli.md",
+      "heading": "Fleet Delete",
+      "occurrence": 1,
+      "original": "../../../docs/docs/spec/cli-options.md#fleet-delete",
+      "form": "link",
+      "classification": "required",
+      "target": "runtime/spec/cli-options.md#fleet-delete"
+    },
+    {
+      "id": "L12",
+      "root": "skills/cafleet",
+      "source": "reference/cli.md",
+      "heading": "Error Handling",
+      "occurrence": 1,
+      "original": "../../../docs/docs/spec/cli-options.md#error-messages",
+      "form": "link",
+      "classification": "required",
+      "target": "runtime/spec/cli-options.md#error-messages"
+    },
+    {
+      "id": "L13",
+      "root": "skills/cafleet",
+      "source": "reference/director.md",
+      "heading": "Member Create",
+      "occurrence": 1,
+      "original": "../../../docs/docs/spec/cli-options.md#member-create",
+      "form": "link",
+      "classification": "required",
+      "target": "runtime/spec/cli-options.md#member-create"
+    },
+    {
+      "id": "L14",
+      "root": "skills/cafleet",
+      "source": "reference/director.md",
+      "heading": "Member Create",
+      "occurrence": 1,
+      "original": "../../../docs/docs/spec/cli-options.md#error-messages",
+      "form": "link",
+      "classification": "required",
+      "target": "runtime/spec/cli-options.md#error-messages"
+    },
+    {
+      "id": "L15",
+      "root": "skills/cafleet",
+      "source": "reference/director.md",
+      "heading": "Member Create",
+      "occurrence": 2,
+      "original": "../../../docs/docs/spec/cli-options.md#error-messages",
+      "form": "link",
+      "classification": "required",
+      "target": "runtime/spec/cli-options.md#error-messages"
+    },
+    {
+      "id": "L16",
+      "root": "skills/cafleet",
+      "source": "reference/director.md",
+      "heading": "Member Create",
+      "occurrence": 2,
+      "original": "../../../docs/docs/spec/cli-options.md#member-create",
+      "form": "link",
+      "classification": "required",
+      "target": "runtime/spec/cli-options.md#member-create"
+    },
+    {
+      "id": "L17",
+      "root": "skills/cafleet",
+      "source": "reference/director.md",
+      "heading": "Canonical spawn-prompt skeleton",
+      "occurrence": 1,
+      "original": "../../../docs/docs/concepts/member-lifecycle.md",
+      "form": "link",
+      "classification": "required",
+      "target": "runtime/concepts/member-lifecycle.md"
+    },
+    {
+      "id": "L18",
+      "root": "skills/cafleet",
+      "source": "reference/director.md",
+      "heading": "Member Delete",
+      "occurrence": 1,
+      "original": "../../../docs/docs/spec/cli-options.md#member-delete",
+      "form": "link",
+      "classification": "required",
+      "target": "runtime/spec/cli-options.md#member-delete"
+    },
+    {
+      "id": "L19",
+      "root": "skills/cafleet",
+      "source": "reference/director.md",
+      "heading": "Member Prompt",
+      "occurrence": 1,
+      "original": "../../../docs/docs/spec/cli-options.md#member-prompt",
+      "form": "link",
+      "classification": "required",
+      "target": "runtime/spec/cli-options.md#member-prompt"
+    },
+    {
+      "id": "L20",
+      "root": "skills/cafleet",
+      "source": "reference/director.md",
+      "heading": "Member Ping (manual inbox-poll)",
+      "occurrence": 1,
+      "original": "../../../docs/docs/spec/multiplexer-backends.md#esc-safeguard",
+      "form": "link",
+      "classification": "required",
+      "target": "runtime/spec/multiplexer-backends.md#esc-safeguard"
+    },
+    {
+      "id": "L21",
+      "root": "skills/cafleet",
+      "source": "reference/prompt-routing.md",
+      "heading": "Director-side dispatch",
+      "occurrence": 1,
+      "original": "../../../docs/docs/spec/cli-options.md#member-prompt",
+      "form": "link",
+      "classification": "required",
+      "target": "runtime/spec/cli-options.md#member-prompt"
+    },
+    {
+      "id": "L22",
+      "root": "skills/cafleet",
+      "source": "reference/recovery.md",
+      "heading": "Shutdown Protocol",
+      "occurrence": 1,
+      "original": "../../../docs/docs/concepts/monitoring.md",
+      "form": "link",
+      "classification": "required",
+      "target": "runtime/concepts/monitoring.md"
+    },
+    {
+      "id": "L23",
+      "root": "skills/cafleet",
+      "source": "reference/supervision.md",
+      "heading": "Communication Model",
+      "occurrence": 1,
+      "original": "../../../docs/docs/spec/multiplexer-backends.md#push-notifications",
+      "form": "link",
+      "classification": "required",
+      "target": "runtime/spec/multiplexer-backends.md#push-notifications"
+    },
+    {
+      "id": "L24",
+      "root": "skills/cafleet",
+      "source": "reference/supervision.md",
+      "heading": "Spawn Protocol",
+      "occurrence": 1,
+      "original": "../../../docs/docs/spec/cli-options.md#member-create",
+      "form": "link",
+      "classification": "required",
+      "target": "runtime/spec/cli-options.md#member-create"
+    },
+    {
+      "id": "L25",
+      "root": "skills/cafleet",
+      "source": "reference/coding-agent-overlays.md",
+      "heading": "claude",
+      "occurrence": 1,
+      "original": "docs/docs/concepts/monitoring.md",
+      "form": "inline-code",
+      "classification": "required",
+      "target": "runtime/concepts/monitoring.md"
+    },
+    {
+      "id": "L26",
+      "root": "skills/cafleet",
+      "source": "reference/coding-agent-overlays.md",
+      "heading": "codex",
+      "occurrence": 1,
+      "original": "docs/docs/concepts/monitoring.md",
+      "form": "inline-code",
+      "classification": "required",
+      "target": "runtime/concepts/monitoring.md"
+    },
+    {
+      "id": "L27",
+      "root": "skills/cafleet",
+      "source": "reference/coding-agent-overlays.md",
+      "heading": "opencode",
+      "occurrence": 1,
+      "original": "docs/docs/concepts/monitoring.md",
+      "form": "inline-code",
+      "classification": "required",
+      "target": "runtime/concepts/monitoring.md"
+    },
+    {
+      "id": "L28",
+      "root": "skills/cafleet",
+      "source": "reference/coding-agent-overlays.md",
+      "heading": "Template",
+      "occurrence": 1,
+      "original": "docs/docs/concepts/monitoring.md",
+      "form": "inline-code",
+      "classification": "required",
+      "target": "runtime/concepts/monitoring.md"
+    },
+    {
+      "id": "L29",
+      "root": "docs/docs",
+      "source": "spec/data-model.md",
+      "heading": "Data model",
+      "occurrence": 1,
+      "original": "SPEC.md",
+      "form": "inline-code",
+      "classification": "optional",
+      "target": "https://github.com/himkt/cafleet/blob/main/SPEC.md"
+    }
+  ],
+  "pages": [
+    "spec/cli-options.md",
+    "spec/multiplexer-backends.md",
+    "spec/data-model.md",
+    "spec/message-envelope.md",
+    "spec/coding-agent-backends.md",
+    "spec/webui-api.md",
+    "concepts/member-lifecycle.md",
+    "concepts/monitoring.md",
+    "concepts/coding-agents.md",
+    "concepts/storage.md",
+    "how-to/mixed-backend-team.md",
+    "quickstart.md"
+  ],
+  "optional_runtime_references": [
+    {
+      "id": "R01",
+      "source": "spec/cli-options.md",
+      "original": "../contributing.md#assets-installer-tests",
+      "target": "https://github.com/himkt/cafleet/blob/main/docs/docs/contributing.md",
+      "reason": "Developer fixture guidance; operational setup and recovery remain in cli-options.",
+      "label": "optional developer reference"
+    },
+    {
+      "id": "R02",
+      "source": "spec/data-model.md",
+      "original": "../contributing.md#rust-boundaries-and-compatibility",
+      "target": "https://github.com/himkt/cafleet/blob/main/docs/docs/contributing.md",
+      "label": "optional contributor reference",
+      "reason": "Developer boundaries supplement; typed and wire contracts remain in the bundled data-model and webui-api."
+    },
+    {
+      "id": "R03",
+      "source": "spec/webui-api.md",
+      "original": "../how-to/use-the-webui.md#loading-and-retrying",
+      "target": "https://github.com/himkt/cafleet/blob/main/docs/docs/how-to/use-the-webui.md",
+      "label": "optional UI walkthrough",
+      "reason": "Human UI examples supplement the loading/retry contract already present in webui-api."
+    }
+  ]
+}
