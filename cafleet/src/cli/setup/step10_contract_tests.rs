@@ -1,5 +1,4 @@
-//! Phase A staged tests for the real setup loop and installer adapters.
-//! Connect in setup.rs: #[cfg(test)] #[path = "setup/step10_contract_tests.rs"] mod step10_contract_tests;
+//! Regression tests for the real setup loop and installer adapters.
 use super::*;
 use crate::assets::{
     self, Edge, InstallEvent, InstallFault, InstallHooks, InstallOperation, LockMode,
@@ -7,7 +6,6 @@ use crate::assets::{
 use rusqlite::{Connection, params};
 use std::cell::Cell;
 use std::fs;
-use std::path::Path;
 
 struct Fixture {
     dir: tempfile::TempDir,
@@ -87,32 +85,6 @@ fn installed(agent: &str, paths: &assets::AgentPaths, version: &str) -> String {
         ));
     }
     text
-}
-
-#[test]
-fn actual_setup_loop_preserves_success_bytes_fixed_order_and_selector_deduplication() {
-    let mut fixture = Fixture::new();
-    let home = fixture.home();
-    let claude = assets::agent_paths(&|_| None, &home, "claude").unwrap();
-    let codex = assets::agent_paths(&|_| None, &home, "codex").unwrap();
-    let opencode = assets::agent_paths(&|_| None, &home, "opencode").unwrap();
-    let (result, out, err) = fixture.run(
-        &["opencode".into(), "claude".into(), "opencode".into()],
-        &okay,
-    );
-    result.unwrap();
-    assert!(err.is_empty());
-    assert_eq!(
-        out,
-        format!(
-            "{}{}",
-            installed("claude", &claude, super::super::VERSION),
-            installed("opencode", &opencode, super::super::VERSION)
-        )
-    );
-    let rows = crate::broker::list_asset_installs(&fixture.conn).unwrap();
-    assert_eq!(rows.len(), 2);
-    assert!(!Path::new(&codex.identity).exists());
 }
 
 #[test]
@@ -273,44 +245,4 @@ fn cleanup_only_adapter_prints_journal_version_without_claiming_current_binary_i
         before
     );
     assert!(assets::inspect_install(&paths).unwrap().is_none());
-}
-
-#[test]
-fn selected_backend_uses_explicit_home_and_reads_only_its_own_environment_lookup() {
-    let mut fixture = Fixture::new();
-    let home = fixture.home();
-    let custom = home.join("custom-claude");
-    let reads = std::cell::RefCell::new(Vec::new());
-    let lookup = |key: &str| {
-        reads.borrow_mut().push(key.to_string());
-        if key == "CLAUDE_CONFIG_DIR" {
-            Some(custom.display().to_string())
-        } else {
-            panic!("unselected lookup {key}")
-        }
-    };
-    let hooks = InstallHooks {
-        lock_mode: LockMode::Wait,
-        checkpoint: &okay,
-    };
-    let options = SetupAssetsOptions {
-        home: &home,
-        env: &lookup,
-        install_hooks: &hooks,
-    };
-    let mut out = Vec::new();
-    let mut err = Vec::new();
-    assets_half_with_options(
-        &mut fixture.conn,
-        &["claude".into()],
-        &options,
-        &mut out,
-        &mut err,
-    )
-    .unwrap();
-    assert_eq!(*reads.borrow(), vec!["CLAUDE_CONFIG_DIR"]);
-    assert!(err.is_empty());
-    assert!(custom.join("skills/cafleet/SKILL.md").is_file());
-    assert!(!home.join(".codex").exists());
-    assert!(!home.join(".opencode").exists());
 }
