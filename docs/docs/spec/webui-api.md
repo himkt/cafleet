@@ -311,7 +311,7 @@ Returns messages sent by the member (see the comparison table above). Consumed b
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
-Same response format and [limit contract](#member-history-limits) as inbox.
+Same response format as inbox; both endpoints return the full history.
 
 ### GET /api/timeline — Unified Fleet Timeline
 

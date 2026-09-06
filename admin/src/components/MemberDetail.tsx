@@ -89,8 +89,8 @@ export default function MemberDetail({
   onClose,
 }: MemberDetailProps) {
   const id = member.member_id;
-  const loadInbox = useCallback((signal: AbortSignal) => client.fetchInbox(id, { signal }), [client, id]);
-  const loadSent = useCallback((signal: AbortSignal) => client.fetchSent(id, { signal }), [client, id]);
+  const loadInbox = useCallback((signal: AbortSignal) => client.fetchInbox(id, { signal }).then(({ messages }) => selectHistory(messages)), [client, id]);
+  const loadSent = useCallback((signal: AbortSignal) => client.fetchSent(id, { signal }).then(({ messages }) => selectHistory(messages)), [client, id]);
   const inbox = useResource({ key: `${client.fleetId}:${id}:inbox`, load: loadInbox, refreshKey });
   const sent = useResource({ key: `${client.fleetId}:${id}:sent`, load: loadSent, refreshKey });
 
@@ -161,11 +161,11 @@ export default function MemberDetail({
         </Tabs.List>
         <Tabs.Content value="inbox" className="min-h-0 flex-1 overflow-y-auto">
           <ResourceNotice state={inbox.state} name="inbox" retry={inbox.refresh} />
-          {inbox.state.status === "success" && <MessageList history={selectHistory(inbox.state.data.messages)} direction="inbox" />}
+          {inbox.state.status === "success" && <MessageList history={inbox.state.data} direction="inbox" />}
         </Tabs.Content>
         <Tabs.Content value="sent" className="min-h-0 flex-1 overflow-y-auto">
           <ResourceNotice state={sent.state} name="sent" retry={sent.refresh} />
-          {sent.state.status === "success" && <MessageList history={selectHistory(sent.state.data.messages)} direction="sent" />}
+          {sent.state.status === "success" && <MessageList history={sent.state.data} direction="sent" />}
         </Tabs.Content>
       </Tabs.Root>
     </aside>

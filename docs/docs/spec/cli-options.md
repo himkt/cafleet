@@ -388,15 +388,17 @@ binary next to the skills; install targets resolve per
 | codex | `presets/codex/cafleet.rules` | `<codex base>/rules/cafleet.rules` (default `~/.codex/rules/cafleet.rules`) |
 | opencode | `presets/opencode/cafleet.md` | `<preset base>/agents/cafleet.md` (default `~/.opencode/agents/cafleet.md`) |
 
-Each backend installs the two embedded skills, its preset where present, and
-removes a leftover `cafleet-research` entry as one recoverable plan. Unrelated
-skills remain untouched. A symlink target is moved or unlinked as an entry;
+Each backend replaces the two embedded skills sequentially, removes a leftover
+`cafleet-research` entry, then replaces its preset where present. Existing targets
+are deleted before their replacements are written. Unrelated skills remain
+untouched. A symlink target is unlinked as an entry;
 its referent is not deleted. Skills-operation errors retain `failed to install
 skills into <skills_dir>: <error>` and preset-operation errors retain `failed
 to install preset into <target>: <error>`.
 
-After durable success, the command prints the existing lines (the preset line
-appears only for codex and opencode):
+The command prints each success line after that operation completes, then
+records the installed version after all operations succeed. The preset line
+appears only for codex and opencode:
 
 ```
 <agent>: installed cafleet, cafleet-design-doc (v<version>) -> <skills dir>
@@ -444,7 +446,7 @@ the `monitor` command — validates the recorded assets installs after the
 [schema-version guard](#schema-version-guard) passes and before any
 subcommand body runs. The guard resolves each agent's identity path per
 [Config-dir resolution](#config-dir-resolution) and checks only the row at
-that path plus recovery evidence. Apply the following precedence:
+that path. Apply the following precedence:
 
 | Recorded install state | Result | Exit |
 |---|---|---|
@@ -453,12 +455,9 @@ that path plus recovery evidence. Apply the following precedence:
 | A row at a resolved path has `cafleet_version` ≠ the runtime CLI version (string inequality — either direction) | `Error: stale assets detected (<agent>=<recorded>[, ...]; CLI <runtime>); run 'cafleet setup' to reinstall`, stale agents in ascending order | 1 |
 | Every row at a resolved path matches | The command proceeds silently | 0 |
 
-After recovery checks, agents with no row at their currently-resolved path
-are not checked for staleness (they
-contribute nothing to staleness), and superseded rows at other paths are
-ignored everywhere in the guard. Plain `cafleet setup` remains the correct
-remedy for these errors: it recovers or installs agents at their resolved
-paths. Three surfaces are exempt:
+Staleness checks use version records at currently-resolved paths; agents without
+a matching row contribute nothing to staleness. Plain `cafleet setup` installs
+agents at their resolved paths. Three surfaces are exempt:
 
 | Exempt surface | Why exempt | Behavior under a stale/missing install |
 |---|---|---|

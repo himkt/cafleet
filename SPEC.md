@@ -1789,9 +1789,11 @@ absolute-path validation):
 ##### Shared helpers (the assets half)
 
 **resolve-targets** selects the explicitly named agents, or all three in the
-fixed order `claude`, `codex`, `opencode`. Each backend is one recoverable
-install plan: the two embedded skills `cafleet`, `cafleet-design-doc`, its
-preset where present, and removal of `<skills_dir>/cafleet-research`.
+fixed order `claude`, `codex`, `opencode`. Each backend sequentially replaces
+the two embedded skills `cafleet`, `cafleet-design-doc`, removes
+`<skills_dir>/cafleet-research`, then replaces its preset where present.
+Each target is deleted before writing its replacement. Success output follows
+each operation; the installed version is recorded after all operations succeed.
 Skills resolve to `<claude base>/skills`, `<codex home>/skills`, and the fixed
 `~/.config/opencode/skills`. Presets map embedded
 `presets/codex/cafleet.rules` to `<codex home>/rules/cafleet.rules`, and
@@ -1867,11 +1869,9 @@ recorded assets installs at those paths:
 
 5. Otherwise proceed silently.
 
-After recovery checks, agents with no row at their currently-resolved path
-are not checked for staleness (they
-contribute nothing to staleness); superseded rows at other paths are ignored
-everywhere in the guard. Plain `cafleet setup` remains the correct remedy
-for these errors: it recovers or installs agents at their resolved paths.
+Staleness checks use version records at currently-resolved paths; agents without
+a matching row contribute nothing to staleness. Plain `cafleet setup` installs
+agents at their resolved paths.
 Exempt surfaces: `setup` (must remain runnable to
 repair), `doctor`
 (reports instead of blocking), and `server` (human-facing WebUI, not
