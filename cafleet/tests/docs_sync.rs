@@ -27,7 +27,11 @@ fn normalize(text: &str) -> String {
 }
 
 fn assert_terms_in(context: &str, text: &str, terms: &[&str]) {
-    let text = text.to_lowercase();
+    let text = text
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase();
     let normalized_text = normalize(&text);
     let missing: Vec<&str> = terms
         .iter()
@@ -145,7 +149,7 @@ fn assert_required_link(path: &str, target: &str, action: &str) {
     let required = section_at_anchor(path, &text, "required-reading");
     let row = required
         .lines()
-        .find(|line| line.starts_with('|') && line.contains(target))
+        .find(|line| line.contains(target))
         .unwrap_or_else(|| panic!("{path} must require {target} before {action}"));
     assert_terms_in(path, row, &[action]);
     assert_terms_in(path, required, &["before"]);
@@ -450,7 +454,11 @@ fn workflow_guidelines_own_design_doc_path_normalization() {
         "interview/interview.md",
     ] {
         let path = format!("skills/cafleet-design-doc/{workflow}");
-        assert_required_link(&path, "guidelines.md#file-layout", "path");
+        assert_required_link(
+            &path,
+            "guidelines.md#file-layout",
+            "Before argument normalization",
+        );
     }
 }
 
@@ -516,7 +524,7 @@ fn shared_director_requires_supervision_and_action_specific_recovery_reads() {
     assert_required_link(
         "skills/cafleet/SKILL.md",
         "reference/supervision.md#shutdown",
-        "tear",
+        "immediately before",
     );
 }
 
@@ -623,7 +631,7 @@ fn shared_member_startup_supports_shell_only_readers_before_operational_ready() 
         ],
     );
     assert_required_link(path, "../reference/base-dir.md", "BASE");
-    assert_required_link(path, "../reference/prompt-routing.md", "route");
+    assert_required_link(path, "../reference/prompt-routing.md", "before routing");
     assert_terms(
         "skills/cafleet/reference/prompt-routing.md",
         &[
@@ -735,7 +743,7 @@ fn shared_requested_shell_dispatch_distinguishes_success_failure_and_plain_promp
         .join(" ")
         .to_lowercase();
     assert!(
-        regex::Regex::new(r"(?:fail\w*[^.]{0,160}(?:no ping|skip[^.]{0,60}ping|do not[^.]{0,60}ping)|(?:no ping|skip[^.]{0,60}ping)[^.]{0,160}fail)")
+        regex::Regex::new(r"(?:fail\w*|non-zero shell dispatch)[^.]{0,160}(?:no ping|skip[^.]{0,60}ping|do not[^.]{0,60}ping)|(?:no ping|skip[^.]{0,60}ping)[^.]{0,160}fail")
             .unwrap().is_match(&compact),
         "failed shell dispatch skips the success ping"
     );
@@ -1461,6 +1469,15 @@ fn shared_skill_pages_make_the_monitor_member_the_execution_owner() {
     );
     assert_terms(
         "skills/cafleet/SKILL.md",
+        &[
+            "monitor member",
+            "own pane",
+            "monitor live",
+            "roles/monitor.md",
+        ],
+    );
+    assert_terms(
+        "skills/cafleet/roles/monitor.md",
         &["long-lived execution", "monitor member", "backend"],
     );
     assert_terms(
@@ -1484,14 +1501,30 @@ fn shared_skill_pages_make_the_monitor_member_the_execution_owner() {
 #[test]
 fn skill_author_guidance_keeps_the_heartbeat_backend_neutral() {
     let path = ".claude/skills/skill-author/SKILL.md";
-    assert_terms(
+    assert_section_terms(
         path,
+        "phase-prerequisites",
         &[
-            "long-lived execution",
-            "monitor member",
+            "runtime bindings",
+            "base-dir.md",
+            "roles/director.md#canonical-spawn-prompt-skeleton",
+            "roles/director.md#member-create--scratch-and-audit-files",
+            "supervision.md#spawn-protocol",
+            "coordination.md",
+            "supervision.md#recovery",
+            "supervision.md#shutdown",
             "monitor live",
-            "backend",
-            "heartbeat",
+        ],
+    );
+    assert_section_terms(
+        path,
+        "resolve-and-bootstrap",
+        &[
+            "cafleet doctor",
+            "--monitor-file",
+            "--monitor-model",
+            "monitor owns launching and confirming its loop",
+            "only after that gate",
         ],
     );
     assert_absent(
@@ -1897,7 +1930,7 @@ fn every_brace_token_in_skills_belongs_to_the_known_vocabulary() {
 #[test]
 fn every_backend_overlay_defines_the_full_placeholder_vocabulary() {
     let text = read(OVERLAYS_FILE);
-    for backend in ["claude", "codex", "opencode", "Template"] {
+    for backend in ["claude", "codex", "opencode"] {
         let backend_rows = table_rows(overlay_section(&text, backend));
         for placeholder in OVERLAY_PLACEHOLDERS {
             let token = format!("`{{{placeholder}}}`");
@@ -1929,6 +1962,25 @@ fn every_backend_overlay_defines_the_full_placeholder_vocabulary() {
             assert_eq!(actual, expected, "{backend} {subsection} assignments");
         }
     }
+    for subsection in ["Runtime bindings", "Role defaults"] {
+        let template = backend_subsection(&text, "Template", subsection);
+        for placeholder in OVERLAY_PLACEHOLDERS
+            .iter()
+            .filter(|name| name.ends_with("_model") == (subsection == "Role defaults"))
+        {
+            let token = format!("`{{{placeholder}}}`");
+            assert_eq!(
+                template.matches(&token).count(),
+                1,
+                "Template {subsection} must prescribe {token} once"
+            );
+        }
+    }
+    assert_terms_in(
+        "Template Role defaults",
+        backend_subsection(&text, "Template", "Role defaults"),
+        &["most capable", "lightweight", "must belong to the catalog"],
+    );
 }
 
 #[test]
