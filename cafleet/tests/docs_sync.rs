@@ -47,7 +47,7 @@ fn assert_terms(relative_path: &str, terms: &[&str]) {
     assert_terms_in(relative_path, &read(relative_path), terms);
 }
 
-const OVERLAYS_FILE: &str = "skills/cafleet/reference/coding-agent-overlays.md";
+const OVERLAYS_FILE: &str = "skills/cafleet/reference/coding-agents.md";
 
 /// Slice a markdown file at top-level `## ` boundaries.
 /// Panics (test failure) when the named section is missing.
@@ -70,6 +70,27 @@ fn markdown_section<'a>(context: &str, text: &'a str, name: &str) -> &'a str {
 
 fn overlay_section<'a>(text: &'a str, name: &str) -> &'a str {
     markdown_section(OVERLAYS_FILE, text, name)
+}
+
+fn backend_subsection<'a>(text: &'a str, backend: &str, name: &str) -> &'a str {
+    let body = overlay_section(text, backend);
+    let heading = format!("### {name}\n");
+    let start = body
+        .find(&heading)
+        .unwrap_or_else(|| panic!("{OVERLAYS_FILE} § {backend} is missing subsection {name}"))
+        + heading.len();
+    let remainder = &body[start..];
+    match remainder.find("\n### ") {
+        Some(end) => &remainder[..end],
+        None => remainder,
+    }
+}
+
+fn table_rows(text: &str) -> Vec<Vec<&str>> {
+    text.lines()
+        .filter(|line| line.starts_with('|'))
+        .map(|line| line.trim_matches('|').split('|').map(str::trim).collect())
+        .collect()
 }
 
 fn assert_absent(relative_path: &str, terms: &[&str]) {
@@ -867,17 +888,115 @@ fn every_brace_token_in_skills_belongs_to_the_known_vocabulary() {
 #[test]
 fn every_backend_overlay_defines_the_full_placeholder_vocabulary() {
     let text = read(OVERLAYS_FILE);
-    for section in ["claude", "codex", "opencode", "Template"] {
-        let body = overlay_section(&text, section);
-        let missing: Vec<&str> = OVERLAY_PLACEHOLDERS
-            .iter()
-            .filter(|placeholder| !body.contains(&format!("{{{placeholder}}}")))
-            .copied()
+    for backend in ["claude", "codex", "opencode", "Template"] {
+        let backend_rows = table_rows(overlay_section(&text, backend));
+        for placeholder in OVERLAY_PLACEHOLDERS {
+            let token = format!("`{{{placeholder}}}`");
+            assert_eq!(
+                backend_rows.iter().filter(|row| row[0] == token).count(),
+                1,
+                "{backend} requires one authoritative assignment for {token}"
+            );
+        }
+        for subsection in ["Runtime bindings", "Role defaults"] {
+            let rows = table_rows(backend_subsection(&text, backend, subsection));
+            assert!(rows.len() >= 2, "{backend} {subsection} requires a table");
+            assert_eq!(rows[0], ["Placeholder", "Value"], "{backend} {subsection}");
+            let assignments = &rows[2..];
+            assert!(
+                assignments
+                    .iter()
+                    .all(|row| row.len() == 2 && !row[1].is_empty()),
+                "{backend} {subsection} requires a value for every placeholder"
+            );
+            let mut actual: Vec<_> = assignments.iter().map(|row| row[0]).collect();
+            actual.sort_unstable();
+            let mut expected: Vec<_> = OVERLAY_PLACEHOLDERS
+                .iter()
+                .filter(|name| name.ends_with("_model") == (subsection == "Role defaults"))
+                .map(|name| format!("`{{{name}}}`"))
+                .collect();
+            expected.sort_unstable();
+            assert_eq!(actual, expected, "{backend} {subsection} assignments");
+        }
+    }
+}
+
+#[test]
+fn coding_agent_sections_expose_the_complete_backend_lookup_contract() {
+    let text = read(OVERLAYS_FILE);
+    let backends = ["claude", "codex", "opencode", "Template"];
+    let actual: Vec<_> = text
+        .lines()
+        .filter_map(|line| line.strip_prefix("## "))
+        .collect();
+    assert_eq!(
+        actual, backends,
+        "backend anchors and order must remain stable"
+    );
+    for backend in backends {
+        let actual: Vec<_> = overlay_section(&text, backend)
+            .lines()
+            .filter_map(|line| line.strip_prefix("### "))
             .collect();
-        assert!(
-            missing.is_empty(),
-            "{OVERLAYS_FILE} § {section} leaves placeholders undefined: {missing:?}"
+        assert_eq!(
+            actual,
+            [
+                "Runtime bindings",
+                "Role defaults",
+                "Model catalog",
+                "Note → applies at",
+                "Pane-state capture cues",
+                "Worked resolution",
+            ],
+            "{backend} must provide each lookup in the documented order"
         );
+    }
+}
+
+#[test]
+fn backend_role_defaults_resolve_to_local_catalog_models_or_aliases() {
+    let text = read(OVERLAYS_FILE);
+    for backend in ["claude", "codex", "opencode"] {
+        let catalog = table_rows(backend_subsection(&text, backend, "Model catalog"));
+        assert!(
+            catalog.len() > 2,
+            "{backend} requires a populated model catalog"
+        );
+        let token_columns: Vec<_> = catalog[0]
+            .iter()
+            .enumerate()
+            .filter_map(|(index, name)| matches!(*name, "Model" | "Alias").then_some(index))
+            .collect();
+        assert_eq!(
+            catalog[0][0], "Model",
+            "{backend} catalog starts with the spawn token"
+        );
+        for row in &catalog[2..] {
+            assert_eq!(
+                row.len(),
+                catalog[0].len(),
+                "{backend} catalog row: {row:?}"
+            );
+        }
+        for row in table_rows(backend_subsection(&text, backend, "Role defaults"))
+            .iter()
+            .skip(2)
+        {
+            assert_eq!(row.len(), 2, "{backend} role assignment: {row:?}");
+            let model = row[1].trim_matches('`');
+            assert!(
+                !model.is_empty()
+                    && model != "—"
+                    && catalog[2..].iter().any(|entry| {
+                        token_columns
+                            .iter()
+                            .any(|&column| entry[column].trim_matches('`') == model)
+                    }),
+                "{backend} {} must resolve to its own catalog: {model}",
+                row[0]
+            );
+        }
     }
 }
 
