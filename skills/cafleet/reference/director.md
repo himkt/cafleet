@@ -23,15 +23,15 @@ cafleet member create --fleet-id <fleet-id> \
 | `--name` | yes | Display name of the new member. |
 | `--description` | yes | One-sentence purpose |
 | `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; also recorded as `placement.coding_agent`. When omitted, the member — every role — inherits **your** (the spawning Director's) backend from your placement row, so an unflagged team runs on the same backend as its Director. An explicit value always wins. Exits 1 with `Error: binary <name> not found on PATH` when the binary is absent, or with `opencode agent preset not found at <preset>; run 'cafleet setup --coding-agent opencode' first` when the opencode agent preset is missing. |
-| `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). The model-name-to-backend inference table below maps a bare model name to its backend; the model list at [`model-list.md`](model-list.md) lists the models for each backend. See [`cli-options.md`](runtime/spec/cli-options.md#member-create). |
-| `--effort` | no | Reasoning-effort level forwarded to the backend binary (omitted → the binary's default; spawn-time only, never persisted). claude: `low`, `medium`, `high`, `xhigh`, `max` (spawned as `--effort <level>`); codex: `minimal`, `low`, `medium`, `high`, `xhigh` (spawned as `--config=model_reasoning_effort=<level>`); opencode: unsupported — any value exits 2 with `opencode does not support reasoning effort.`. An unknown level exits 2 before any side effect. The per-backend level set is your overlay's `{effort_levels}` value. |
+| `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). The model-name-to-backend inference table below maps a bare model name to its backend; the model list at [`coding-agents.md`](coding-agents.md) lists the models for each backend. See [`cli-options.md`](runtime/spec/cli-options.md#member-create). |
+| `--effort` | no | Reasoning-effort level forwarded to the backend binary (omitted → the binary's default; spawn-time only, never persisted). claude: `low`, `medium`, `high`, `xhigh`, `max` (spawned as `--effort <level>`); codex: `minimal`, `low`, `medium`, `high`, `xhigh` (spawned as `--config=model_reasoning_effort=<level>`); opencode: unsupported — any value exits 2 with `opencode does not support reasoning effort.`. An unknown level exits 2 before any side effect. Validate the selected member backend's `{effort_levels}` value in its Runtime bindings table. |
 | `--role` | no | Sole accepted value `monitor` — registers the fleet's **monitor member** (recovery-only; see below). Any other value is the parser's invalid-value error (exit 2). |
 | positional `PROMPT` | one of | Inline spawn prompt. Exactly one of the positional and `--file` is required. |
 | `--file PATH` | one of | Path to a UTF-8 file used as the spawn prompt — absolute, or relative to CWD; `-` reads the whole prompt from stdin. Exactly one of the positional and `--file` is required. Path/file errors are catalogued in [`cli-options.md`](runtime/spec/cli-options.md#error-messages). The canonical input mode for every team-skill spawn — see § *Member Create — Scratch and audit files*. |
 
 `--role monitor` is recovery-only: the bootstrap monitor is spawned by `cafleet fleet create`; use the flag solely to re-spawn a dead monitor mid-run (`--model {monitor_model}`, omit `--coding-agent`; protocol in [`roles/monitor.md`](../roles/monitor.md)). The database enforces one active monitor member per fleet, including concurrent registrations; an ordinary `member create` requires one through its existing CLI guard. A dead pane alone does not free the slot: deregister the old monitor before re-spawning it. Both CLI guard error strings are in [`cli-options.md`](runtime/spec/cli-options.md#error-messages).
 
-The per-backend spawn argv is in [`cli-options.md`](runtime/spec/cli-options.md#member-create) § Spawn command per backend. In all three modes the member's Bash tool is enabled and routine permission prompts auto-resolve; the denied-command fallback is [`reference/prompt-routing.md`](prompt-routing.md). Per-backend deltas: [`claude`](coding-agent-overlays.md#claude) / [`codex`](coding-agent-overlays.md#codex) / [`opencode`](coding-agent-overlays.md#opencode).
+The per-backend spawn argv is in [`cli-options.md`](runtime/spec/cli-options.md#member-create) § Spawn command per backend. In all three modes the member's Bash tool is enabled and routine permission prompts auto-resolve; the denied-command fallback is [`reference/prompt-routing.md`](prompt-routing.md). Per-backend deltas: [`claude`](coding-agents.md#claude) / [`codex`](coding-agents.md#codex) / [`opencode`](coding-agents.md#opencode).
 
 ### Model-name-to-backend inference
 
@@ -48,7 +48,7 @@ The rows apply as ordered precedence — the first match wins. This matters for 
 
 ### Model list
 
-Model availability, reviewed capability classes, standard token prices, and the official source links live in the model list at [`reference/model-list.md`](model-list.md), maintained via the `cafleet-model-list-refresh` skill. Consult the model list for the current model set and its spawn tokens; pass a listed model name or alias to `--model` exactly as written there.
+Model availability, reviewed capability classes, standard token prices, and the official source links live in the model list at [`reference/coding-agents.md`](coding-agents.md), maintained via the `cafleet-model-list-refresh` skill. Consult the model list for the current model set and its spawn tokens; pass a listed model name or alias to `--model` exactly as written there.
 
 The routing rule above accepts any `<provider-id>/<model-id>` for the `opencode` backend, including direct-provider forms such as `anthropic/claude-sonnet-4-6` or `openai/gpt-5.5`.
 
@@ -119,7 +119,7 @@ Per-role delta slots (each consuming skill's spawn section fills these):
 
 ## Model selection before member create
 
-The selection policy — the reviewer choice, cost efficiency mode and its exact trigger, the pick-backend-first / within-backend comparison rule, and the override and fail-closed rules — is canonical in [`roles/director.md`](../roles/director.md) § *Model selection*. Apply it against the model list of the exact `cafleet` skill root you loaded ([`reference/model-list.md`](model-list.md)) and pass the chosen pair to `member create`. A user-pinned model is never deleted and replaced automatically.
+The selection policy — the reviewer choice, cost efficiency mode and its exact trigger, the pick-backend-first / within-backend comparison rule, and the override and fail-closed rules — is canonical in [`roles/director.md`](../roles/director.md) § *Model selection*. Apply it against the selected backend's Model catalog and Role defaults in the unified reference of the exact `cafleet` skill root you loaded ([`reference/coding-agents.md`](coding-agents.md)) and pass the chosen pair to `member create`. A user-pinned model is never deleted and replaced automatically.
 
 ### Underpowered-member replacement
 
@@ -172,7 +172,7 @@ cafleet member capture <member-id> --lines 200
 
 ## Answering a member's relayed question
 
-A fleet member never talks to the user. When it needs a recorded user reaction (approve / choose / confirm / continue-or-abort), it relays the question to the Director via `cafleet message send`, and the Director asks the user through {decision_surface}. The Director forwards the user's answer back to the member as an ordinary `cafleet message send` (which the member consumes on its next poll) — not a pane keystroke. The question-shape taxonomy is a backend delta — see your overlay section (`coding-agent-overlays.md#<name>`). The canonical user-reaction rule is the `cafleet` skill § *Soliciting user reactions*.
+A fleet member never talks to the user. When it needs a recorded user reaction (approve / choose / confirm / continue-or-abort), it relays the question to the Director via `cafleet message send`, and the Director asks the user through {decision_surface}. The Director forwards the user's answer back to the member as an ordinary `cafleet message send` (which the member consumes on its next poll) — not a pane keystroke. The question-shape taxonomy is a backend delta — see your overlay section (`coding-agents.md#<name>`). The canonical user-reaction rule is the `cafleet` skill § *Soliciting user reactions*.
 
 ## Member Prompt
 

@@ -22,7 +22,7 @@ spawn prompt's `CODING AGENT:` line names it.
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay section [`reference/coding-agent-overlays.md#<name>`](../reference/coding-agent-overlays.md) — read **and resolve** it (see *Resolve your overlay* in [`SKILL.md`](../SKILL.md)) | unresolved `{token}`s, guessed values, ignored backend notes |
+| 1 | your overlay section [`reference/coding-agents.md#<name>`](../reference/coding-agents.md) — read **and resolve** it (see *Resolve your overlay* in [`SKILL.md`](../SKILL.md)) | unresolved `{token}`s, guessed values, ignored backend notes |
 
 You are a **cross-section reader** (shared with the Director): on each wake
 you classify panes of members on any backend, so for capture cues you read
@@ -143,8 +143,8 @@ environment variable supplies them; do not ask the operator for them.
 This role's prompt follows the canonical spawn-prompt skeleton in
 [`reference/director.md`](../reference/director.md) § *Canonical
 spawn-prompt skeleton*. At bootstrap it is delivered via `cafleet fleet
-create --monitor-file <path> --monitor-model {monitor_model}` (the overlay
-value mirroring the model list's *Monitor and reviewer defaults* table); on
+create --monitor-file <path> --monitor-model {monitor_model}` (the monitor default from the Director backend's canonical Role defaults
+table in the unified reference); on
 a mid-run re-spawn, via `cafleet member create --role monitor --model
 {monitor_model}`, omitting `--coding-agent` so the monitor inherits the
 Director's backend (the bootstrap inherits it by construction).
