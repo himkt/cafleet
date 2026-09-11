@@ -1,7 +1,7 @@
 ---
 name: cafleet-model-list-refresh
 description: >-
-  Refresh the CAFleet model list at skills/cafleet/reference/model-list.md
+  Refresh the CAFleet model list at skills/cafleet/reference/coding-agents.md
   from the approved official pricing and capability sources. Use when a
   maintainer asks to refresh, update, or re-verify the model list, its token
   prices, its context windows, or its freshness, or when a Director reports
@@ -11,11 +11,13 @@ description: >-
 
 # CAFleet Model List Refresh
 
-Refresh the repository's model list — the per-backend model tables of
-`skills/cafleet/reference/model-list.md` — from the approved official
+Refresh the repository's model catalogs and canonical Role defaults in
+`skills/cafleet/reference/coding-agents.md` — from the approved official
 sources, under explicit maintainer review. The repository file is the release
 source: a running Director reads only its deployed skill replica, so a refresh
 reaches Directors exclusively through the release/deployment transaction below.
+
+This skill maintains each backend's Model catalog, its provenance/context notes, its canonical Role defaults table, and the shared freshness metadata. Preserve Runtime bindings, bound runtime notes, pane-state capture cues, and worked resolutions as runtime documentation owned outside model refreshes. The common catalog preamble specifies maintainer-owned refresh at least every 30 days, a last-refreshed date for model data, standard provider USD per MTok as planning estimates, reviewed capability ordering, and Director ownership of selection policy.
 
 ## Approved sources (exhaustive allowlist)
 
@@ -59,10 +61,9 @@ is never used to price a model.
    and the most-to-least-capable row ordering are reviewed maintainer
    judgment, not provider benchmark claims; changing a class or the ordering
    requires reviewed policy approval in the same pull request. Every row
-   carries both prices from its approved source. Re-derive the *Monitor and
-   reviewer defaults* table from the refreshed backend tables, and mirror its
-   values into each backend section's `{monitor_model}` and `{reviewer_model}`
-   rows (`skills/cafleet/reference/coding-agent-overlays.md`).
+   carries both prices from its approved source. Update each backend's canonical Role defaults table directly from its
+   refreshed Model catalog: assign `{monitor_model}` and `{reviewer_model}`
+   to local catalog entries or aliases under the Director's selection policy.
 5. **Re-verify every `claude` row's context window on every refresh**, even
    when the prices are unchanged. Take each window from the Claude Code model
    configuration page's *Extended context* section and record it in the
@@ -85,11 +86,12 @@ is never used to price a model.
    A suffixed value must be single-quoted everywhere it appears in a command,
    because `[1m]` is a glob pattern that fails an unquoted zsh invocation.
 6. **Propose, then apply atomically.** Generate a concise proposed diff and
-   require explicit maintainer approval before rewriting the tables in
-   `skills/cafleet/reference/model-list.md`. Preserve the prescribed preamble
-   verbatim; update the preamble's *last refreshed* date only after approval.
-   That date is part of the page contract — the Director's staleness check
-   reads it, so every refresh keeps it present and current. A failed refresh
+   require explicit maintainer approval before applying the model-data changes in
+   `skills/cafleet/reference/coding-agents.md`. Preserve the common catalog
+   preamble contract described above. Apply catalogs, provenance/context notes,
+   Role defaults, and the *last refreshed* date together after approval and
+   successful validation. The Director's staleness check reads that date, so
+   every successful refresh keeps it present and current. A failed refresh
    makes **no** edit.
 
 ## OpenCode Zen procedure (the `opencode` table)
@@ -138,14 +140,16 @@ maintainer:
 
 1. Bumps the CAFleet release version.
 2. Builds the wheel and `cafleet-assets-v<version>.zip` containing the
-   repository `skills/` tree — the model list rides inside
-   `skills/cafleet/reference/` like every other reference page.
+   repository `skills/` tree — the unified reference ships at
+   `skills/cafleet/reference/coding-agents.md` like every other reference page.
 3. Publishes the release. Each active backend upgrades to that CLI version and
    runs `cafleet setup`, which overwrites its installed `cafleet` skill
-   replica, model list included.
+   replica, unified reference included.
 
 ## Ownership boundary
 
-This skill owns model-list maintenance; the CAFleet Director owns per-spawn
-selection by reading the list; `cafleet member create` remains the execution
+This skill owns model catalogs, provenance/context notes, canonical Role defaults,
+and freshness metadata in the unified reference. Runtime documentation maintenance
+owns Runtime bindings, bound notes, pane cues, and worked resolutions. The CAFleet
+Director owns per-spawn selection under `skills/cafleet/roles/director.md`; `cafleet member create` remains the execution
 boundary.

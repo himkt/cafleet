@@ -15,13 +15,13 @@ Use the `cafleet` CLI to register as a member, send and receive messages, and di
 
 ## Required reading
 
-Before your first action other than these Reads, Read every file in the **Load-bearing** table below, in order (row #2 applies only if you write files). Identify your coding agent first: your spawn prompt's `CODING AGENT:` line names it; a standalone agent uses its own identity. After reading the overlays file, **resolve** only your backend's section before acting — see *Resolve your overlay* below.
+Before your first action other than these Reads, Read every file in the **Load-bearing** table below, in order (row #2 applies only if you write files). Identify your coding agent first: your spawn prompt's `CODING AGENT:` line names it; a standalone agent uses its own identity. After reading the unified reference, **resolve** your executing backend's runtime bindings before acting — see *Resolve your overlay* below.
 
 **Load-bearing — Read in order before acting:**
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay section [`reference/coding-agent-overlays.md#<name>`](reference/coding-agent-overlays.md) — read **and resolve** it (see *Resolve your overlay*) | unresolved `{token}`s, guessed values, ignored backend notes |
+| 1 | your overlay section [`reference/coding-agents.md#<name>`](reference/coding-agents.md) — read **and resolve** it (see *Resolve your overlay*) | unresolved `{token}`s, guessed values, ignored backend notes |
 | 2 | [`reference/base-dir.md`](reference/base-dir.md) — if you write any scratch / audit / figure file | the no-bypass write protocol and the `<unset>` contract — you mis-root every write or fall back to `/tmp` |
 
 **Load-bearing on trigger — Read at the named moment, before that action:**
@@ -44,13 +44,14 @@ Exhaustive per-subcommand flags, exit codes, and error strings live in [`cli-opt
 
 ## Resolve your overlay
 
-You have read `reference/coding-agent-overlays.md` (Required-reading row #1). Before your first action, resolve **only your backend's section** of it:
+You have read `reference/coding-agents.md` (Required-reading row #1). Resolve values by the subject of the action:
 
-1. **Materialize values.** For every `{placeholder}` token you will use this session, take the concrete value from your backend section's table and use that literal value — never the brace token. Resolution order for each token: (i) your backend section's value; (ii) the documented default below, only if your section omits the token or you cannot identify your backend. Never a literal `{token}`, never an ad-hoc guess — and never a value from another backend's section, which is a resolution defect of the same class as emitting a literal `{token}`.
-2. **Apply notes.** When you reach a base instruction named in your backend section's *Note → applies at* table, follow that note's caveat there (e.g. on codex, coordinate via cafleet messages, not a harness task list; on opencode, treat a permission popup as a regression to escalate, not a decision point).
-3. **Self-check at emission.** A literal `{token}` in any command you run, any message you send, or anything you show the user is a defect — stop and resolve it before emitting.
+1. **Select the subject.** For your current instructions, use your `CODING AGENT:` identity (your own identity when standalone) and its Runtime bindings. For a member spawn, select the backend under [Director model-selection policy](roles/director.md#model-selection), then read that backend's Model catalog and Role defaults and validate target effort and launch capabilities against its Runtime bindings. For captured panes, use the observed member's recorded backend and its Pane-state capture cues. Keep the observer's own tools and decision surface.
+2. **Materialize values.** Resolve the seven runtime placeholders from Runtime bindings for the relevant operation, and `{monitor_model}` / `{reviewer_model}` from the selected spawn backend's Role defaults. A Director's local long-lived work uses its own execution primitive. Monitor bootstrap and recovery inherit the Director's backend; reviewer selection may use a different backend. Use the documented neutral defaults below only for their explicitly allowed missing/unknown-backend cases. Report a missing required supported-backend section, malformed table, or broken reference as a documentation defect.
+3. **Apply notes.** At each instruction named in the selected backend's *Note → applies at* table, follow that note's caveat. An ordinary member resolves its own runtime section; it acquires no model-selection duty.
+4. **Self-check at emission.** Emit concrete values in commands and messages. Resolve any remaining literal `{token}` before emitting it.
 
-These steps close the three failure modes of an unresolved overlay: a literal `{token}` emitted in output, a wrong or guessed value acted on, and a backend note ignored.
+For example, a Codex Director spawning an OpenCode reviewer reads OpenCode Role defaults and effort capability while retaining Codex decision and execution tools. A Claude monitor observing Codex applies Codex capture cues while its own loop uses Claude execution.
 
 ### Documented defaults
 

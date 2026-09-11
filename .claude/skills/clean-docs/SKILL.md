@@ -25,6 +25,8 @@ workflow body (`<workflow>/<workflow>.md`) carries only its own trigger
 scenario, scan mechanics, artifact spec, and guarantees, citing the spine here
 rather than restating it.
 
+Resolve runtime tools from the executing agent's backend. For spawns, read the selected member backend's Model catalog and Role defaults under the CAFleet Director's model-selection policy; validate its effort and launch capabilities there. Monitor bootstrap and recovery inherit the Director's backend. Interpret captured panes using the observed member's backend cues.
+
 ## Required reading
 
 Identify your coding agent first — a member's spawn prompt names it on the
@@ -35,16 +37,17 @@ Read your overlay and **resolve** it before your first action.
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay section [`../../../skills/cafleet/reference/coding-agent-overlays.md#<name>`](../../../skills/cafleet/reference/coding-agent-overlays.md) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you emit a literal `{bg_run}` / `{reviewer_model}` / `{skill_loader}` / `{decision_surface}`, guess a wrong value, or ignore a backend note |
+| 1 | your overlay section [`../../../skills/cafleet/reference/coding-agents.md#<name>`](../../../skills/cafleet/reference/coding-agents.md) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you emit a literal `{bg_run}` / `{reviewer_model}` / `{skill_loader}` / `{decision_surface}`, guess a wrong value, or ignore a backend note |
 | 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../skills/cafleet/reference/base-dir.md) | the task-scope BASE resolution, the no-bypass write protocol, and the `<unset>` contract — you mis-root run artifacts or fall back to `/tmp` |
 | 3 | the `cafleet-design-doc` skill's [`reference/coordination.md`](../../../skills/cafleet-design-doc/reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema and this skill's extensions (`scanner` role, per-workflow run pointer) — your status hops mis-route |
 
 The workflow body you route into carries its own Required-reading block for the
 workflow's reference pages (rubric, pattern catalog, shared review format).
 
-Before acting, resolve every `{token}` you will use to its overlay value (or the
-documented default); a literal `{token}` in any command, message, or user-facing
-string is a defect.
+Before acting, resolve runtime tokens from the executing backend's Runtime bindings
+and model tokens from the selected spawn backend's Role defaults, applying the
+core skill's documented defaults only in their allowed cases. Emit concrete values
+in commands, messages, and user-facing strings.
 
 ## Dispatch
 
@@ -257,7 +260,7 @@ When you see cafleet message poll output with a message from the Director, act o
 `SKILL.md`, the workflow bodies, and every `<workflow>/roles/*.md` are
 backend-neutral: they use `{bg_run}` / `{reviewer_model}` /
 `{skill_loader}` / `{decision_surface}` / `{permission_flags}` tokens resolved
-from the member's backend section of `../../../skills/cafleet/reference/coding-agent-overlays.md`, and
+from the executing agent's Runtime bindings or, for model placeholders, the selected spawn backend's Role defaults in `../../../skills/cafleet/reference/coding-agents.md`. Capture interpretation uses the observed member's backend cues, and
 every member's spawn-prompt identity block carries a
 `CODING AGENT: {coding_agent}` line so the member resolves its overlay. Role
 files are referenced by absolute path in spawn prompts (never inlined); spawns

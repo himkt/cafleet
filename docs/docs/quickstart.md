@@ -110,7 +110,7 @@ Keep the four identity placeholders: fleet creation fills them in.
 ```text
 You are the monitor member in a CAFleet team.
 ROLE DEFINITION: Open /home/cafleet-demo/.claude/skills/cafleet/roles/monitor.md BEFORE any other action. Follow that role definition.
-Read /home/cafleet-demo/.claude/skills/cafleet/reference/coding-agent-overlays.md and resolve your own backend section, then load /home/cafleet-demo/.claude/skills/cafleet/SKILL.md as a member. Read /home/cafleet-demo/.claude/skills/cafleet/reference/base-dir.md before writing files. Do not start a nested workflow or team.
+Read /home/cafleet-demo/.claude/skills/cafleet/reference/coding-agents.md and resolve your own backend section, then load /home/cafleet-demo/.claude/skills/cafleet/SKILL.md as a member. Read /home/cafleet-demo/.claude/skills/cafleet/reference/base-dir.md before writing files. Do not start a nested workflow or team.
 FLEET ID: {fleet_id}
 DIRECTOR MEMBER ID: {director_member_id}
 YOUR MEMBER ID: {member_id}
