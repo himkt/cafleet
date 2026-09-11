@@ -93,6 +93,365 @@ fn table_rows(text: &str) -> Vec<Vec<&str>> {
         .collect()
 }
 
+fn section_at_anchor<'a>(path: &str, text: &'a str, anchor: &str) -> &'a str {
+    let heading = regex::Regex::new(r"^(#{1,6}) +(.+?)\s*$").unwrap();
+    let explicit_id = regex::Regex::new(r"\{#([^}]+)\}\s*$").unwrap();
+    let mut offset = 0;
+    let mut start = None;
+    let mut inside_fence = false;
+    for line in text.split_inclusive('\n') {
+        if line.trim_start().starts_with("```") {
+            inside_fence = !inside_fence;
+        }
+        if !inside_fence && let Some(captures) = heading.captures(line.trim_end()) {
+            let depth = captures[1].len();
+            if let Some((begin, parent_depth)) = start {
+                if depth <= parent_depth {
+                    return &text[begin..offset];
+                }
+            } else {
+                let title = &captures[2];
+                let id = match explicit_id.captures(title) {
+                    Some(id) => id[1].to_string(),
+                    None => title
+                        .to_lowercase()
+                        .chars()
+                        .filter(|c| c.is_alphanumeric() || c.is_whitespace() || *c == '-')
+                        .map(|c| if c.is_whitespace() { '-' } else { c })
+                        .collect(),
+                };
+                if id == anchor {
+                    start = Some((offset, depth));
+                }
+            }
+        }
+        offset += line.len();
+    }
+    let (begin, _) = start.unwrap_or_else(|| panic!("{path} has no heading for #{anchor}"));
+    &text[begin..]
+}
+
+fn assert_section_terms(path: &str, anchor: &str, terms: &[&str]) {
+    let text = read(path);
+    let section = section_at_anchor(path, &text, anchor)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert_terms_in(&format!("{path}#{anchor}"), &section, terms);
+}
+
+#[test]
+fn public_manual_lifecycle_contains_a_complete_installed_monitor_prompt() {
+    let path = "docs/docs/how-to/mixed-backend-team.md";
+    let text = read(path);
+    assert_eq!(text.lines().next(), Some("# Run a fleet"));
+    let section = section_at_anchor(path, &text, "manual-lifecycle");
+    let prompt = regex::Regex::new(r"(?s)```text\n(.*?)\n```")
+        .unwrap()
+        .captures_iter(section)
+        .find(|capture| capture[1].contains("ROLE DEFINITION:"))
+        .expect("the manual lifecycle includes the complete monitor role prompt");
+    assert_terms_in(
+        path,
+        &prompt[1],
+        &[
+            "ROLE DEFINITION: Open /",
+            "/skills/cafleet/roles/monitor.md",
+            "/skills/cafleet/reference/coding-agents.md",
+            "/skills/cafleet/SKILL.md",
+            "/skills/cafleet/reference/base-dir.md",
+            "FLEET ID: {fleet_id}",
+            "DIRECTOR MEMBER ID: {director_member_id}",
+            "YOUR MEMBER ID: {member_id}",
+            "CODING AGENT: {coding_agent}",
+            "BASE: /",
+            "monitor live",
+        ],
+    );
+    assert_section_terms(
+        path,
+        "manual-lifecycle",
+        &[
+            "cafleet doctor",
+            "config-dir-resolution",
+            "claude",
+            "codex",
+            "opencode",
+        ],
+    );
+}
+
+#[test]
+fn public_manual_lifecycle_gates_work_on_live_ready_and_fresh_capture() {
+    assert_section_terms(
+        "docs/docs/how-to/mixed-backend-team.md",
+        "manual-lifecycle",
+        &[
+            "cafleet fleet create",
+            "--monitor-file",
+            "startup",
+            "monitor live",
+            "before",
+            "ordinary member",
+            "cafleet member create --fleet-id 1",
+            "ready",
+            "fresh capture",
+            "cafleet message send --from-member-id 2 --to-member-id 4",
+            "cafleet message poll 2",
+            "cafleet message ack",
+        ],
+    );
+}
+
+#[test]
+fn public_manual_lifecycle_verifies_monitor_first_shutdown() {
+    let path = "docs/docs/how-to/mixed-backend-team.md";
+    let text = read(path);
+    let section = section_at_anchor(path, &text, "manual-lifecycle");
+    let commands = [
+        "cafleet member delete 3",
+        "cafleet member delete 4",
+        "cafleet member list 1",
+        "cafleet fleet delete 1",
+        "cafleet fleet list",
+    ];
+    let mut remainder = section;
+    for command in commands {
+        let position = remainder
+            .find(command)
+            .unwrap_or_else(|| panic!("{path} must include {command:?} in teardown order"));
+        remainder = &remainder[position + command.len()..];
+    }
+    assert_terms_in(path, section, &["monitor", "first", "only", "Director"]);
+}
+
+#[test]
+fn public_quickstart_keeps_install_configure_trust_and_routes_to_manual_lifecycle() {
+    let path = "docs/docs/quickstart.md";
+    assert_section_terms(
+        path,
+        "install",
+        &["brew install himkt/tap/cafleet", "cafleet setup"],
+    );
+    assert_section_terms(
+        path,
+        "configure",
+        &[
+            "CLAUDE_CONFIG_DIR",
+            "CODEX_HOME",
+            "OPENCODE_CONFIG_DIR",
+            ".config/opencode/skills",
+        ],
+    );
+    assert_section_terms(
+        path,
+        "trust-the-working-directory",
+        &["directory", "trust", "worktree"],
+    );
+    assert_terms(path, &["how-to/mixed-backend-team.md#manual-lifecycle"]);
+}
+
+#[test]
+fn public_concept_navigation_orders_the_five_current_owners() {
+    let path = "docs/docs/concepts/_meta.json";
+    let entries: serde_json::Value = serde_json::from_str(&read(path)).unwrap();
+    let actual: Vec<_> = entries
+        .as_array()
+        .expect("concept navigation is an array")
+        .iter()
+        .map(|entry| {
+            (
+                entry["name"].as_str().expect("navigation entry has a name"),
+                entry["label"]
+                    .as_str()
+                    .expect("navigation entry has a label"),
+            )
+        })
+        .collect();
+    assert_eq!(
+        actual,
+        [
+            ("overview", "Overview"),
+            ("coding-agents", "Coding agents"),
+            ("member-lifecycle", "Member lifecycle"),
+            ("monitoring", "Monitoring"),
+            ("storage", "Storage"),
+        ]
+    );
+}
+
+#[test]
+fn public_overview_owns_fleet_routing_and_non_authentication() {
+    assert_section_terms(
+        "docs/docs/concepts/overview.md",
+        "fleet-isolation",
+        &["fleet_id", "routing", "authentication", "non-secret"],
+    );
+}
+
+#[test]
+fn public_coding_agents_owns_model_choice_and_manual_prompt_navigation() {
+    let path = "docs/docs/concepts/coding-agents.md";
+    assert_section_terms(
+        path,
+        "model-choice",
+        &[
+            "Director",
+            "--coding-agent",
+            "--model",
+            "cost efficiency mode",
+            "monitor",
+            "reviewer",
+        ],
+    );
+    assert_terms(path, &["mixed-backend-team.md#manual-lifecycle"]);
+}
+
+#[test]
+fn public_spec_pages_keep_their_contract_owner_anchors() {
+    for (path, anchors) in [
+        (
+            "docs/docs/spec/cli-options.md",
+            &[
+                "subcommand-summary",
+                "environment-variables",
+                "output-shapes",
+                "error-messages",
+                "creation-failure-compensation",
+            ][..],
+        ),
+        (
+            "docs/docs/spec/data-model.md",
+            &["tables", "message-visibility-rules", "broadcast-grouping"][..],
+        ),
+        (
+            "docs/docs/spec/message-envelope.md",
+            &["persisted-shape", "rendered-shape"][..],
+        ),
+        (
+            "docs/docs/spec/multiplexer-backends.md",
+            &[
+                "pane-creation-ownership",
+                "push-notifications",
+                "inline-preview-errors",
+                "esc-safeguard",
+            ][..],
+        ),
+        (
+            "docs/docs/spec/coding-agent-backends.md",
+            &["spawn-argv", "claude", "codex", "opencode"][..],
+        ),
+        (
+            "docs/docs/spec/webui-api.md",
+            &["request-headers", "endpoints", "error-format"][..],
+        ),
+    ] {
+        let text = read(path);
+        for anchor in anchors {
+            assert!(!section_at_anchor(path, &text, anchor).is_empty());
+        }
+    }
+    assert_terms(
+        "docs/docs/spec/message-envelope.md",
+        &["cli-options.md#output-shapes"],
+    );
+}
+
+#[test]
+fn public_monitoring_keeps_quiet_state_and_director_dispatch_conditions_inline() {
+    assert_section_terms(
+        "docs/docs/concepts/monitoring.md",
+        "the-monitor-members-wake-protocol",
+        &[
+            "cafleet monitor scan",
+            "content_sha256",
+            "two consecutive wakes",
+            "baseline",
+            "re-arms",
+            "at most once per quiet period",
+            "Director",
+            "unacked",
+            "greater than 0",
+            "unknown",
+            "fresh capture",
+            "working",
+            "awaiting_user",
+            "defer",
+            "persistence",
+            "captured prompt",
+        ],
+    );
+}
+
+#[test]
+fn public_monitoring_cadence_keeps_forced_scheduled_and_restart_distinctions() {
+    assert_section_terms(
+        "docs/docs/concepts/monitoring.md",
+        "cadence-and-tick-precision",
+        &[
+            "600s",
+            "5s",
+            "--interval 0",
+            "heartbeating",
+            "first wake",
+            "last delivered wake",
+            "one tick",
+            "coalesce",
+            "pending",
+            "same write",
+            "no ordinary members",
+            "no timestamp",
+            "loop restarts",
+            "never been woken",
+            "failed wake",
+            "retries",
+        ],
+    );
+}
+
+#[test]
+fn public_storage_keeps_the_four_step_compatible_binary_recovery() {
+    let path = "docs/docs/concepts/storage.md";
+    let text = read(path);
+    let section = section_at_anchor(path, &text, "duplicate-monitor-recovery");
+    let steps: Vec<_> = regex::Regex::new(r"(?m)^([1-4])\. ")
+        .unwrap()
+        .captures_iter(section)
+        .map(|captures| captures[1].to_string())
+        .collect();
+    assert_eq!(steps, ["1", "2", "3", "4"]);
+    assert_section_terms(
+        path,
+        "duplicate-monitor-recovery",
+        &[
+            "Stop new registrations",
+            "retain",
+            "preceding release",
+            "old schema",
+            "separate binary path",
+            "CAFLEET_DATABASE_URL",
+            "backend configuration",
+            "assets",
+            "independently",
+            "restore",
+            "compatible",
+            "member delete <surplus-id>",
+            "isolated invocation",
+            "new binary",
+            "setup",
+            "downgrade",
+        ],
+    );
+    let restore = section.find("restore").expect("restore compatible assets");
+    let delete = section
+        .find("member delete <surplus-id>")
+        .expect("delete surplus monitor");
+    assert!(
+        restore < delete,
+        "restore compatible assets before deleting surplus monitors"
+    );
+}
+
 fn assert_absent(relative_path: &str, terms: &[&str]) {
     let text = read(relative_path).to_lowercase();
     let present: Vec<&str> = terms
