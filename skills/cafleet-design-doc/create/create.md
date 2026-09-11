@@ -95,7 +95,7 @@ Substitute these absolute paths into the spawn prompts below.
 
 **Gate**: do not spawn the Drafter until the monitor member's `monitor live` signal (1b) has arrived.
 
-**Drafter spawn prompt** — render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the per-role delta below (two-stage rendering + brace rules at the skeleton). Keep the prompt under ~2 KB (path-by-reference). Use the normal-mode column by default; the resume-mode column when Step 0 detected resume mode.
+**Drafter spawn prompt** — render the canonical [spawn-prompt skeleton](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with the per-role delta below (two-stage rendering + brace rules at the skeleton). Keep the prompt under ~2 KB (path-by-reference). Use the normal-mode column by default; the resume-mode column when Step 0 detected resume mode.
 
 | Slot | Drafter (normal mode) | Drafter (resume mode) |
 |---|---|---|
@@ -117,7 +117,7 @@ Spawn per the Step 1c spawn frame (both normal and resume modes). Worked example
 
 #### 1e. Spawn the Reviewer
 
-**Reviewer spawn prompt** — the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with this delta:
+**Reviewer spawn prompt** — the canonical [spawn-prompt skeleton](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with this delta:
 
 | Slot | Reviewer |
 |---|---|

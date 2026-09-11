@@ -83,7 +83,7 @@ Wait for the monitor member's `ready` then `monitor live` signals per the `cafle
 
 #### 2c. Locate the Analyzer role file (path-by-reference)
 
-Resolve the absolute path of `<this skill>/roles/analyzer.md`. The spawn prompt below references it by **absolute path**; the spawned Analyzer opens it with `Read` on its first turn. Do NOT inline the role content (spawn prompt size limit — `skills/cafleet/reference/director.md` § *Spawn prompt size limit*).
+Resolve the absolute path of `<this skill>/roles/analyzer.md`. The spawn prompt below references it by **absolute path**; the spawned Analyzer opens it with `Read` on its first turn. Do NOT inline the role content (spawn prompt size limit — `skills/cafleet/roles/director.md` § *Spawn prompt size limit*).
 
 > **Spawn-prompt audit file**: the spawn below renders the prompt to `${BASE}/.prompts/analyzer-<UTC-compact>.md` and spawns from that file, per the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol*.
 
@@ -91,7 +91,7 @@ Resolve the absolute path of `<this skill>/roles/analyzer.md`. The spawn prompt 
 
 **Gate**: do not spawn the Analyzer until the monitor member's `monitor live` signal (2b) has arrived.
 
-Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Analyzer delta below (two-stage rendering + brace rules at the skeleton):
+Render the canonical [spawn-prompt skeleton](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with the Analyzer delta below (two-stage rendering + brace rules at the skeleton):
 
 | Slot | Analyzer |
 |---|---|

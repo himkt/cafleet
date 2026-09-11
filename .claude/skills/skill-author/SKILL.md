@@ -122,7 +122,7 @@ Use `--file` for every spawn — § 3.4 explains the `command too long` cliff; t
 Do NOT inline a role definition (5–15 KB markdown file describing a member's accountability, communication protocol, role-specific workflow, escalation rules) into the spawn prompt. Instead, reference the role file by absolute path:
 
 ```
-ROLE DEFINITION: Open <abs path to roles/<role>.md> with the Read tool BEFORE any other action.
+ROLE DEFINITION: Open <abs path to roles/<role>.md> with an available text reader BEFORE any other action.
 ```
 
 The spawned member opens its role file with `Read` on its first turn. The role file lives in your skill's `roles/` directory and is stable, so this is safe. This pattern keeps the spawn prompt small (under the tmux limit), makes role updates take effect without a respawn, and concentrates role-specific accountability in a single canonical file rather than smearing it across the spawn prompt.
@@ -146,7 +146,7 @@ Every member spawn prompt follows the same skeleton. Read this section as the ca
 ```
 You are <role> in a <skill> team (CAFleet-native).
 
-ROLE DEFINITION: Open [INSERT abs path to roles/<role>.md] with the Read tool BEFORE any other action. That file is your authoritative role definition. Re-read it whenever you are unsure of protocol.
+ROLE DEFINITION: Open [INSERT abs path to roles/<role>.md] with an available text reader BEFORE any other action. That file is your authoritative role definition. Re-read it whenever you are unsure of protocol.
 
 Load these skills at startup:
 - the cafleet skill — for the broker primitives and bash-via-Director routing
@@ -162,7 +162,9 @@ CODING AGENT: {coding_agent}
 
 <role-specific instructions — every IMPORTANT: line and poll-handling line>
 
-On spawn, as your first Bash call, send the ready signal: cafleet message send --from-member-id {member_id} --to-member-id {director_member_id} "ready"
+Use an available non-shell text reader for prerequisites; shell file reads may precede ready when shell is the only reader.
+
+On spawn, as your first operational broker shell command, send the ready signal: cafleet message send --from-member-id {member_id} --to-member-id {director_member_id} "ready"
 
 <start cue>
 ```
@@ -232,7 +234,7 @@ The phrasing deliberately omits parentheses so the Director reading the broker l
 
 The ready-signal line is part of the skeleton's **fixed frame**, not a role-specific slot: every spawn prompt carries it as written in the anatomy skeleton above (§ 3), between the role-specific instructions and the start cue. Do not vary its wording per role and do not fold it into a start cue.
 
-Its `{member_id}` / `{director_member_id}` tokens are two of the CLI's four `str.format` identity placeholders (§ 3.2), so `cafleet member create` renders the line into a copy-pastable command with literal integers at spawn — the member executes it verbatim as its first Bash call.
+Its `{member_id}` / `{director_member_id}` tokens are two of the CLI's four `str.format` identity placeholders (§ 3.2), so `cafleet member create` renders the line into a copy-pastable command with literal integers at spawn — the member executes it verbatim as its first operational broker shell command.
 
 The resulting `ready` message is the only evidence that the coding agent inside the pane actually booted (pane placement proves only that the pane exists), and the Director dispatches the member's first task on that signal. A spawn prompt missing the line is a spawn defect — fix the prompt and re-spawn.
 
@@ -380,7 +382,7 @@ The Director creates this spawn prompt body (with the `[INSERT …]` marker subs
 ```
 You are the Summarizer in a summarize-pr team (CAFleet-native).
 
-ROLE DEFINITION: Open [INSERT abs path to roles/summarizer.md] with the Read tool BEFORE any other action. That file is your authoritative role definition.
+ROLE DEFINITION: Open [INSERT abs path to roles/summarizer.md] with an available text reader BEFORE any other action. That file is your authoritative role definition.
 
 Load these skills at startup:
 - the cafleet skill — for the broker primitives and bash-via-Director routing
@@ -396,7 +398,9 @@ OUTPUT FILE: /repo/researches/pr-1234/summary.md
 
 When you see cafleet message poll output with a message from the Director, capture the id: from each entry as the task id and ack it via cafleet message ack, then act on the instructions.
 
-On spawn, as your first Bash call, send the ready signal: cafleet message send --from-member-id {member_id} --to-member-id {director_member_id} "ready"
+Use an available non-shell text reader for prerequisites; shell file reads may precede ready when shell is the only reader.
+
+On spawn, as your first operational broker shell command, send the ready signal: cafleet message send --from-member-id {member_id} --to-member-id {director_member_id} "ready"
 
 Read INPUT FILE, write a 200-word summary highlighting the top 3 risk areas to OUTPUT FILE, then send complete (doc) to the Director.
 ```

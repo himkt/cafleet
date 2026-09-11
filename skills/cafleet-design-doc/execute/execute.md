@@ -159,7 +159,7 @@ Resolve the absolute path of each role file you will reference by path-by-refere
 
 #### 3e. Spawn each member via `cafleet member create`
 
-Each member is spawned from the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the per-role delta below (two-stage rendering + brace rules at the skeleton). All three roles load `cafleet` + `cafleet-design-doc` and take `DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]` as their only context line; each delta below gives the role's title, role-file, IMPORTANT lines (verbatim), and start cue.
+Each member is spawned from the canonical [spawn-prompt skeleton](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with the per-role delta below (two-stage rendering + brace rules at the skeleton). All three roles load `cafleet` + `cafleet-design-doc` and take `DESIGN DOCUMENT: [INSERT DESIGN DOC PATH]` as their only context line; each delta below gives the role's title, role-file, IMPORTANT lines (verbatim), and start cue.
 
 > **Spawn frame (two-step pattern)**: render each spawn prompt to `${BASE}/.prompts/<role>-<UTC-compact>.md` per the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol*, spawn with `cafleet member create --fleet-id <fleet-id> --name <name> --description <desc> --file <abs path> --json`, and parse `member_id` from the JSON response, substituting it for that role's `<x-member-id>` in every subsequent command.
 
@@ -301,7 +301,7 @@ This verification is **mandatory** and must not be skipped. Only when every crit
 
 This is the first and only time the Reviewer exists in the fleet (never in the Step 3 initial composition), so its context holds no memory of the implementation's compromises.
 
-**Reviewer spawn prompt** (built from the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton), like the 3e roles):
+**Reviewer spawn prompt** (built from the canonical [spawn-prompt skeleton](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton), like the 3e roles):
 
 | Slot | Reviewer |
 |---|---|

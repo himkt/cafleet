@@ -228,7 +228,7 @@ literal brace as `{{` / `}}`:
 ```
 You are the <role> in a clean-docs <workflow> team (CAFleet-native).
 
-ROLE DEFINITION: Open [INSERT abs path to <workflow>/roles/<role>.md] with the Read tool BEFORE any other action.
+ROLE DEFINITION: Open [INSERT abs path to <workflow>/roles/<role>.md] with an available text reader BEFORE any other action.
 
 Load these skills at startup:
 - the clean-docs skill — for the shared spine and your workflow's mechanics
@@ -244,11 +244,14 @@ CODING AGENT: {coding_agent}
  or the reviewer's merged-artifact path>
 
 IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.
+Host-rule source: [INSERT equivalent session instructions for any absent optional host files]. Apply those supplied equivalents; route an essential unknown prerequisite to the Director before dependent work.
 IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.
 IMPORTANT: Do NOT edit any repository file until the Director relays the reviewer's approved (<run pointer>). The scan phase is read + propose only.
 IMPORTANT: Do NOT commit code or run git write operations — the Director handles all git.
 
-On spawn, as your first Bash call, send the ready signal: cafleet message send --from-member-id {member_id} --to-member-id {director_member_id} "ready"
+Use an available non-shell text reader for prerequisites; shell file reads may precede ready when shell is the only reader.
+
+On spawn, as your first operational broker shell command, send the ready signal: cafleet message send --from-member-id {member_id} --to-member-id {director_member_id} "ready"
 
 When you see cafleet message poll output with a message from the Director, act on those instructions.
 
