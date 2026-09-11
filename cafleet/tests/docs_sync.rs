@@ -783,8 +783,15 @@ fn skill_files_reference_no_path_that_is_missing_from_disk() {
 #[test]
 fn every_role_file_gates_its_overlay_as_required_reading_row_one() {
     let heading = regex::Regex::new(r"(?m)^#+[ \t]+Required[ -]reading").unwrap();
+    let reference = regex::Regex::new(r"\]\(([^)#]*coding-agents\.md)(?:#([^)]*))?\)").unwrap();
+    let expected_path = root()
+        .join(OVERLAYS_FILE)
+        .canonicalize()
+        .expect("the unified coding-agent reference exists");
+    let mut files = skill_markdown_files();
+    collect_markdown(&root().join(".claude/skills/clean-docs"), &mut files);
     let mut offenders = Vec::new();
-    for relative_path in skill_markdown_files() {
+    for relative_path in files {
         let text = read(&relative_path);
         // A role file must *have* the block: folding content out of one must
         // never carry the gated overlay read away with it. Other skill pages
@@ -803,12 +810,42 @@ fn every_role_file_gates_its_overlay_as_required_reading_row_one() {
             .find(|line| line.trim_start().starts_with("| 1 |"))
         {
             None => offenders.push(format!("{relative_path} → no row #1 in the block")),
-            Some(row) if !row.contains("overlay") => {
-                offenders.push(format!(
-                    "{relative_path} → row #1 does not name the overlay"
-                ));
+            Some(row) => {
+                let Some(link) = reference.captures(row) else {
+                    offenders.push(format!(
+                        "{relative_path} → row #1 must link to the unified coding-agent reference"
+                    ));
+                    continue;
+                };
+                let parent = root().join(&relative_path);
+                let target = parent
+                    .parent()
+                    .expect("a skill file has a parent directory")
+                    .join(&link[1]);
+                match target.canonicalize() {
+                    Ok(path) if path == expected_path => {}
+                    _ => offenders.push(format!(
+                        "{relative_path} → row #1 link must resolve to {OVERLAYS_FILE}"
+                    )),
+                }
+                if let Some(anchor) = link.get(2) {
+                    let names: Vec<_> = match anchor.as_str() {
+                        "<name>" => vec!["claude", "codex", "opencode"],
+                        name => vec![name],
+                    };
+                    let reference_text = read(OVERLAYS_FILE);
+                    for name in names {
+                        if !reference_text
+                            .lines()
+                            .any(|line| line == format!("## {name}"))
+                        {
+                            offenders.push(format!(
+                                "{relative_path} → row #1 backend anchor #{name} must exist"
+                            ));
+                        }
+                    }
+                }
             }
-            Some(_) => {}
         }
     }
     assert!(
