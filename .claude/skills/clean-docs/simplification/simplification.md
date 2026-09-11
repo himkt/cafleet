@@ -21,26 +21,14 @@ verbose prose, de-duplicate documentation, or remove redundant comments.
 
 ## Required reading
 
-Identify your coding agent first — a member's spawn prompt names it on the
-`CODING AGENT:` line; the Director (main session) uses its own identity — then
-Read your overlay and **resolve** it before your first action.
-
-**Load-bearing — Read in order before acting:**
-
-| # | Read | What you lose if you skip it |
-|---|------|------------------------------|
-| 1 | your overlay section [`../../../../skills/cafleet/reference/coding-agents.md#<name>`](../../../../skills/cafleet/reference/coding-agents.md) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you emit a literal `{reviewer_model}` / `{skill_loader}` / `{decision_surface}`, guess a wrong value, or ignore a backend note |
-| 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../../skills/cafleet/reference/base-dir.md) | the task-scope BASE resolution, the no-bypass write protocol, and the `<unset>` contract — you mis-root run artifacts or fall back to `/tmp` |
-| 3 | the `cafleet-design-doc` skill's [`reference/coordination.md`](../../../../skills/cafleet-design-doc/reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema and the clean-docs extensions (`scanner` role, `findings` pointer) — your status hops mis-route |
-| 4 | this workflow's [`reference/rubric.md`](reference/rubric.md) | the P3/P5 classes, the 30%+ baseline, and the style-only-churn drop rule — you propose churn or mis-scope voice rewrites |
-| 5 | the shared [`reference/review-format.md`](../reference/review-format.md) | the apply-ready row format, KEEP guardrails, decision procedure, and verdict flow — your proposals are unreviewable or unsafe |
+Read the umbrella [startup and shared orchestration](../SKILL.md#required-reading) once, then this complete workflow before scanning or reviewing. Read the shared [row format, KEEP guardrails and verdict flow](../reference/review-format.md). Use supplied session equivalents for absent optional host-rule files; route an essential unknown prerequisite to the Director before dependent work.
 
 ## Judgment mechanics
 
 This is a **judgment review, not a grep**: each scanner reads every file in its
 slice in full and proposes exact replacement text — a grep-only pass misses the
 redundancy findings that are the point of the run. Classify each finding P3 /
-P5 per [`reference/rubric.md`](reference/rubric.md) and write apply-ready rows
+P5 per [Finding classes](#finding-classes) and write apply-ready rows
 per the shared [`reference/review-format.md`](../reference/review-format.md).
 
 ## Artifact: `findings.md`
@@ -59,3 +47,12 @@ Beyond the spine's green `mise` gates, the reviewer confirms the git diff is
 confined to the approved rows (umbrella `SKILL.md` § *Workflow parameter
 table*): only deletions of redundancy and word reductions, voice and behavior
 unchanged, no runtime surface or live assertion touched.
+
+## Finding classes
+
+| Class | Definition | Action |
+|---|---|---|
+| **P3 redundant prose** | A sentence, comment, or docstring that restates what an adjacent sentence, table, code block, linked reference, or the code itself already says. | Delete, or merge into the surviving statement. A code comment survives only if it states a constraint the code cannot show. |
+| **P5 verbose phrasing** | Prose rewritable materially shorter with zero meaning loss. Aggressive baseline: a paragraph that can lose **30%+** of its words with no loss of constraint or precision qualifies. | Propose the exact tighter text. |
+
+Drop style-only churn that neither shrinks nor clarifies. P5 changes verbosity only; voice changes belong to affirmative P2 and past-state narration to residue, recorded as Observations. Both classes preserve voice and behavior; source edits cover comments and docstrings only.

@@ -1,391 +1,70 @@
 ---
 name: skill-author
 description: >
-  Teach an author how to integrate the CAFleet-orchestrated team pattern into a
-  new skill they are writing. Auto-load when the author intends to create a new
-  CAFleet-orchestrated skill, write a skill that spawns cafleet members, add a
-  Director/Member team skill, design a multi-agent broker-coordinated skill,
-  build a CAFleet-team-driven skill, or write a skill that uses
-  `cafleet member create`. This skill is project-local to the cafleet repo and
-  is fully self-contained — no `cafleet` `reference/base-dir.md` cross-reference
-  is required to follow the guide.
+  Integrate a CAFleet-orchestrated Director/member team into a new skill, with
+  role files, broker coordination and supervision. Use when authoring a skill
+  that spawns cafleet members or adding a CAFleet team to an existing skill.
+  Project-local integration guide; load the linked CAFleet prerequisites at
+  their phase triggers.
 ---
 
-# Skill Author — Integrating the CAFleet-Orchestrated Pattern
+# Authoring a CAFleet team skill
 
-You are about to write a new skill that drives a Director and one or more spawned members through the CAFleet message broker. This guide walks you through every sub-system you need to wire up, explains why each step exists, and finishes with a worked example you can read end-to-end. It is a teaching document — not a paste-this template — because the canonical rules drift quickly and skills that copy a prefab spawn prompt rot the fastest.
+Use a CAFleet team when the work needs separate persistent coding-agent processes, specialized roles or parallel slices coordinated through the broker. Use a single-session skill or an in-process subagent for a small transformation that needs none of those properties. A team consists of the Director, its monitor, and ordinary members; the Director coordinates the work and owns user communication.
 
-Read this whole document before you start writing your `SKILL.md`. The rules are short individually but the failure modes when any of them is missed are loud, and most of them have already bitten earlier authors.
+Write the new skill's workflow and role responsibilities locally. Reuse the shared protocols through required reads at the phases below, so their exact mechanics have one owner.
 
----
+## Phase prerequisites
 
-## 1. What "CAFleet-orchestrated" means
+| Before | Read and apply | Local skill responsibility |
+|---|---|---|
+| Designing the workflow | [CAFleet core](../../../skills/cafleet/SKILL.md), [backend-neutrality rule](../../rules/coding-agent-overlay.md) and the executing backend's [runtime bindings](../../../skills/cafleet/reference/coding-agents.md) | State the outcome, role boundaries, disjoint write ownership, artifact locations and approval gates; resolve concrete local tools. |
+| Resolving output paths or writing | [BASE contract](../../../skills/cafleet/reference/base-dir.md) | Declare a task-folder convention and normalize the input to that folder before resolution. Members consume the supplied BASE. |
+| Bootstrapping or spawning | [Director role](../../../skills/cafleet/roles/director.md) and [supervision](../../../skills/cafleet/reference/supervision.md#spawn-protocol) | Gate on doctor and monitor live; select models under the Director policy and inspect failed compensation before retrying. |
+| Rendering a prompt | [Canonical frame](../../../skills/cafleet/roles/director.md#canonical-spawn-prompt-skeleton), [audit protocol](../../../skills/cafleet/roles/director.md#member-create--scratch-and-audit-files), selected backend's Model catalog/Role defaults | Supply role path, identity block, assignment, all IMPORTANT obligations, ready and start cue. |
+| Coordinating work | [Coordination](../../../skills/cafleet-design-doc/reference/coordination.md), including payload exemptions and marker pairing | Declare artifact pointers and any local role extension; make substance readable at the routed pointer. |
+| Recovering or finishing | [Recovery](../../../skills/cafleet/reference/supervision.md#recovery) and [Shutdown](../../../skills/cafleet/reference/supervision.md#shutdown) | Keep authorized work moving, then delete monitor first, remaining members, confirm cleanup and delete the fleet. |
 
-A CAFleet-orchestrated skill is one where the Director (the main Claude session running your slash command) bootstraps a fresh CAFleet fleet, spawns one or more **members** as separate `claude` (or `codex`) processes inside dedicated tmux panes, and coordinates the work through the CAFleet message broker (`cafleet message send` / `cafleet message poll` / `cafleet message ack`). Members are real, isolated coding-agent processes — not in-process subagents — and the broker delivers each message as a 2-line keystroke preview into the recipient's tmux pane.
+Load a shared prerequisite once and return to its relevant section when its trigger occurs. The new member's role file requires its own backend resolution, CAFleet member startup and local workflow reads. Use an available text reader; when shell is the only reader, prerequisite reads may precede ready. Ready remains the first operational broker command. Supply equivalent session instructions for absent optional host-rule files and route an essential unknown prerequisite before dependent work.
 
-The shape always looks like this:
+## Integration decisions
 
-```
-User
- +-- Director (main Claude — runs cafleet fleet create / member create; coordinates via the broker)
-      +-- member-1 (claude pane)
-      +-- member-2 (claude pane)
-      +-- ...
-```
+Choose `researches/<topic-slug>` for research-shaped tasks or `design-docs/<NNNNNNN>-<slug>` for design documents. Strip a supplied deliverable filename before resolving the task folder; relative arguments use the skill's bucket, absolute arguments keep their location. The BASE owner defines no-repository errors, `<unset>`, guarded writes and the missing-BASE member status. Agent-only artifacts use hidden directories such as `.prompts/`; user deliverables use visible paths. A caller's explicit output path follows the BASE contract, and a failed resolution receives its specified error rather than an ad-hoc temporary fallback.
 
-Use this pattern when:
+Render each prompt to a unique `.prompts/<lowercase-member-name>-<UTC-compact>.md`, retaining that pre-spawn file as the immutable audit input. Resolve every `[INSERT …]` marker and model/runtime token before writing; leave only `{fleet_id}`, `{member_id}`, `{director_member_id}` and `{coding_agent}` for the CLI formatter. Double all other literal braces. Both creation commands format identities after allocating them. Take returned IDs as literal integers in subsequent broker calls.
 
-- The work needs **parallelism that the harness cannot provide on its own** — multiple members drafting in parallel, multiple researchers investigating sub-topics, multiple verifiers running on different slide ranges.
-- The work needs **role specialization** — Director / Drafter / Reviewer / Programmer / Tester are roles that justify separate processes with separate role files.
-- The work needs **persistent inter-member memory** — the broker stores every message in SQLite and the audit-file path under `${BASE}/prompts/` is a permanent record.
+Reference role files by absolute path. `--file` provides a durable input artifact and avoids an oversized caller shell command; the resolved prompt still reaches the backend spawn argv and remains subject to transport limits. Keep the frame compact and move role instructions into their owner file. Follow the BASE owner's guarded `<unset>` branch: omit `BASE:`, skip the audit write, use the supported inline ordinary-member or stdin monitor form, and report the anchorless audit-disabled status. An unsupported or failed transport is an error to surface.
 
-Do **not** use this pattern when:
+Broker sends persist messages and attempt automatic previews. A missed preview leaves the message pending until poll/ACK; members end idle when no work remains and wake on broker events. `member prompt` is the separate Director-controlled keystroke operation, with its shell follow-up governed by prompt-routing. A successful placement establishes pane existence; ready establishes that the member booted, and monitor live gates the first ordinary spawn.
 
-- The work fits inside one `Agent` tool subagent run. A subagent is cheaper and faster than a full CAFleet team.
-- The work is a single-shot transformation (file edit, search, summarize). A normal slash command running inside the Director's session is enough.
-- You only need the harness `TaskList` for tracking — you do not need cross-pane coordination.
+Keep base skills and roles backend-neutral. Resolve runtime bindings for the executing agent, models and effort for the selected spawn backend, and pane cues for the observed member. Monitor bootstrap and recovery inherit the Director backend. The [unified reference](../../../skills/cafleet/reference/coding-agents.md) owns each backend's six ordered sections: Runtime bindings, Role defaults, Model catalog, Note → applies at, Pane-state capture cues, Worked resolution. Use its Template when adding a backend; the model-refresh skill owns catalog/default/freshness data while runtime maintenance owns bindings, notes and cues. Agent and public operator documentation remain independent homes per the overlay rule.
 
-If you are unsure: write the simpler version first. The CAFleet team pattern is overkill for most tasks and the orchestration overhead (`cafleet doctor`, `cafleet fleet create`, `cafleet member create`, `cafleet monitor`, `member delete`, `fleet delete`) costs the user real seconds and real cognitive load.
+## Worked example: summarize-pr
 
----
+This illustrative skill accepts a PR number, gives one Summarizer a read-only diff, and produces a 200-word summary with three risk areas. The paths, timestamp and returned IDs below are example values; resolve real paths, current model defaults and returned IDs for an actual run. Each shell command is a separate invocation.
 
-## 2. The five-part integration checklist
+### Resolve and bootstrap
 
-Every CAFleet-orchestrated skill must wire up these five sub-systems, in this order, in its `SKILL.md`. The first three are setup; the fourth is the per-member spawn pattern; the fifth is teardown. Skip any one of them and the skill will fail silently in production.
+For `/summarize-pr 1234` in `/repo`, normalize `researches/pr-1234` and resolve BASE to `/repo/researches/pr-1234`. Fetch the PR diff through the host's approved GitHub workflow and write this agent-only input with the file writer to `.inputs/diff.patch` under BASE. Supply a `roles/summarizer.md` defining read-only input, summary-only output, revision handling, broker reporting and immediate escalation of blockers; it loads CAFleet member startup and coordination.
 
-### 2.1 Resolve the task-scoped BASE
-
-Before any other work, the Director resolves the task-scoped output directory by following the `cafleet` skill's `reference/base-dir.md` task-scope resolution procedure with a `TASK_NAME` derived from the skill's per-task convention. The procedure uses only `git rev-parse --show-toplevel` (via Bash) and writes nothing at resolution time — there is no `cafleet` CLI subcommand for it.
-
-`<task-relpath>` is a path under the inferred repo root that describes the per-task folder. The two recognized buckets are:
-
-- `researches/<topic-slug>` — for research-style skills (one folder per research run).
-- `design-docs/<NNNNNNN>-<slug>` — for design-doc-style skills (one folder per design document, with a 7-digit zero-padded number prefix per `.claude/rules/design-doc-numbering.md`).
-
-The procedure:
-
-1. Walks up from CWD (`git rev-parse --show-toplevel`) to infer the repo root.
-2. Joins `<task-relpath>` against the repo root and resolves it to the absolute task folder.
-3. Yields `base = <abs task-folder>`; the folder is created lazily on the first consumer write.
-
-Use the resolved `base` as `${BASE}` for the rest of the run. **Every** scratch / audit / figure / spawn-prompt-render write the skill performs MUST live under `${BASE}` — never `/tmp`, never the repo root.
-
-The procedure's positional branch also accepts an absolute path. If the path lies strictly under the inferred repo root, it is used verbatim as the task folder — the resolver does NOT walk ancestors or match skill-specific bucket patterns. If the path lies outside the repo root (or equals the repo root), the resolver yields the literal sentinel `<unset>` for `${BASE}`. **Consumer-strips contract**: because the resolver does not fold child paths, each consuming skill MUST canonicalize its argument to the actual task-folder path (relative or absolute) BEFORE resolving. For a **relative** argument: strip trailing filenames like `/design-doc.md`, strip leading bucket prefixes like `design-docs/`, then prepend its own bucket. For an **absolute** argument: apply only the trailing-filename strip — it is used verbatim as the task folder when it lies strictly under the repo root (no bucket prepend), otherwise it yields `<unset>`. When `${BASE}` is `<unset>`, the skill MUST guard every BASE-derived write with an explicit `${BASE} != <unset>` check, omit the `BASE:` line from any spawn prompt entirely, and never fall back to `/tmp`. The standardized loud-error message is `Error: BASE is <unset>; refusing to fall back to /tmp`.
-
-When CWD has no `.git` ancestor (typical when CWD is `$HOME` or under a coding agent's user-level config directory, per base-dir.md's table) AND a `TASK_NAME` is supplied, the resolution fails with `cannot resolve task-scope base-dir: no .git ancestor found from CWD <cwd>. cd to the repo root and retry.` — surface this error to the user and stop.
-
-### 2.2 Bootstrap a CAFleet fleet (monitor included)
-
-The Director first writes the monitor member's spawn prompt to `${BASE}/prompts/monitor-<UTC-compact>.md` (the standard pre-spawn audit convention, § 2.4), then creates the fleet inside a tmux pane:
+Run `cafleet doctor`. On success, resolve the Director backend and its monitor default. For this example the resolved pair is `claude` and `haiku`. Render the canonical monitor frame referencing `/repo/skills/cafleet/roles/monitor.md` to `/repo/researches/pr-1234/.prompts/monitor-20260911T100000Z.md`, with BASE, all identity lines, resolved startup prerequisites and the monitor start cue. Bootstrap:
 
 ```bash
-cafleet fleet create --name "<fleet-name>" --coding-agent <backend> \
-  --monitor-file ${BASE}/prompts/monitor-<UTC-compact>.md --monitor-model {monitor_model} --json
+cafleet fleet create --name summarize-pr-1234 --coding-agent claude --monitor-file /repo/researches/pr-1234/.prompts/monitor-20260911T100000Z.md --monitor-model haiku --json
 ```
 
-The CLI atomically (1) creates a `fleets` row, (2) registers a root Director bound to the current tmux pane, and (3) registers the fleet's monitor member and spawns its coding-agent pane. Any failure rolls everything back — no fleet row, no Director row, no monitor row, no pane — and the command is retryable as-is. Capture `fleet_id`, `director.member_id`, and `monitor.member_id` from the JSON response and substitute them as **literal id strings** into every subsequent `cafleet ...` call.
+Suppose the result provides fleet 7, Director 8 and monitor 9. Carry those literal IDs thereafter. Read and ACK the monitor's ready and monitor live messages; the monitor owns launching and confirming its loop. Spawn the Summarizer only after that gate.
 
-Never store these IDs in shell variables (`export FLEET=...`). The Claude Code harness's `permissions.allow` matches Bash invocations as literal command strings; an exported shell variable you reference yourself breaks the literal match and forces per-invocation permission prompts that interrupt the agent loop.
+### Render and spawn
 
-If the user is not inside a tmux session, `cafleet fleet create` exits 1 with `Error: cafleet fleet create must be run inside a tmux session` and writes nothing. Surface this and stop — do NOT try to start a tmux session yourself.
-
-### 2.3 Wait for the monitor gate
-
-CAFleet members do not auto-poll. The broker delivers a 2-line inline preview into the recipient's pane via `tmux.send_inline_preview` keystroke; that preview is the trigger that wakes the recipient. If the keystroke is missed (pane buffered, recipient mid-Bash, etc.), the message just sits in `INPUT_REQUIRED` until the recipient runs `cafleet message poll` themselves.
-
-Every CAFleet-orchestrated skill runs the monitor-member heartbeat — it is a session-level requirement, not a per-skill choice. The `cafleet fleet create` bootstrap (§ 2.2) registers and spawns the monitor member; the monitor inherits the Director's backend by construction. At startup the monitor member sends `ready`, launches `cafleet monitor <fleet-id>` as a backend-resolved long-lived execution in its own pane, confirms the loop's startup line — `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` — and sends the gate signal `monitor live` to the Director. **That message gates the first ordinary `member create`** (the CLI's monitor-first guard backstops a Director that skips the wait). `cafleet member create --role monitor` is the mid-run recovery path for re-spawning a dead monitor — never the bootstrap path. Once per wake interval (default 600 s; `--interval` / `CAFLEET_MONITOR_WAKE_INTERVAL`, `0` disables the wake) the loop keystrokes one `Esc`-safeguarded fleet-level wake into the monitor member's own pane; on each wake the monitor scans the fleet's panes, classifies them, pings a confirmed-quiet member once per quiet period, and messages the Director only when something needs attention. The loop never keystrokes an ordinary member's pane or the Director's. The heartbeat protocol is backend-neutral, while each backend's overlay defines how the monitor member hosts and observes its long-lived execution.
-
-### 2.4 Spawn members with `cafleet member create --file <abs path>`
-
-For each member you spawn, follow the **two-step render-to-file pattern**:
-
-1. **Render the spawn prompt locally**. Substitute every `[INSERT …]` marker with the concrete value, and keep the four `{fleet_id}` / `{member_id}` / `{director_member_id}` / `{coding_agent}` identity placeholders as written — `cafleet member create` runs `str.format` over the prompt at spawn and renders them to literals (§ 3.2). Any literal brace in the prompt body must be doubled (`{{` / `}}`) to survive `.format()`; leave no other stray single braces. By the time you write the file, every `[INSERT …]` marker must be replaced with its concrete literal value.
-
-2. **Write the rendered text** to `${BASE}/prompts/<role>-<UTC-compact>.md` where `<UTC-compact>` is `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")` (Python). Create `${BASE}/prompts/` on first write via `(Path(BASE) / "prompts").mkdir(parents=True, exist_ok=True)`. On same-second collisions, append `_2`, `_3`, … to the filename until it is unique — never overwrite. **The pre-spawn file IS the audit artifact.** There is no second post-spawn re-render; the file is both the CLI input and the permanent record of what was spawned, carrying the four `{...}` identity placeholders pre-substitution (which is expected).
-
-3. **Spawn with `--file`** pointing at the absolute path of the rendered file (the acting Director is auto-resolved from the fleet row — no identity flag):
-
-   ```bash
-   cafleet member create --fleet-id <fleet-id> \
-     --name "<member-name>" \
-     --description "<one-sentence purpose>" \
-     --file ${BASE}/prompts/<role>-<UTC-compact>.md \
-     --json
-   ```
-
-   Capture the printed `member_id` from the JSON response and substitute it for the member's id in every subsequent `cafleet ...` call **the Director** makes that targets it. (The member itself learns its own id from the literal `YOUR MEMBER ID:` line the CLI rendered into its prompt — § 3.2.)
-
-Use `--file` for every spawn — § 3.4 explains the `command too long` cliff; the inline positional `PROMPT` is the documented fallback only for the `${BASE} == <unset>` case (§ 3.5, § 4).
-
-#### Path-by-reference for role files
-
-Do NOT inline a role definition (5–15 KB markdown file describing a member's accountability, communication protocol, role-specific workflow, escalation rules) into the spawn prompt. Instead, reference the role file by absolute path:
-
-```
-ROLE DEFINITION: Open <abs path to roles/<role>.md> with an available text reader BEFORE any other action.
-```
-
-The spawned member opens its role file with `Read` on its first turn. The role file lives in your skill's `roles/` directory and is stable, so this is safe. This pattern keeps the spawn prompt small (under the tmux limit), makes role updates take effect without a respawn, and concentrates role-specific accountability in a single canonical file rather than smearing it across the spawn prompt.
-
-### 2.5 Tear down per the Shutdown Protocol
-
-When the work is done, the Director MUST tear down in this exact order:
-
-1. **Delete the monitor member first (first-out).** `cafleet member delete <monitor-member-id>` — the pane kill takes the loop process down with it, ending the wake source before any other member disappears. The killed loop leaves a stale `monitor_runtime` row that reads as dead on both liveness axes; `fleet delete` (step 3) removes it unconditionally.
-2. **`cafleet member delete <id>`** for every remaining member. This sends the backend exit keystroke to the member's pane and waits up to 15 s for the pane to disappear. Surviving member coding-agent processes are NOT auto-closed by `cafleet fleet delete` — call `member delete` per member.
-3. **`cafleet fleet delete <fleet-id>`**. Soft-deletes the fleet (sets `deleted_at`), deregisters every active member in the fleet (root Director + remaining members), and physically deletes every associated `member_placements` row. Messages are preserved. `fleet delete` makes any still-running loop self-terminate on its next tick, so step 1 is belt-and-suspenders.
-
-Order matters. Delete the monitor member before the others so a wake cannot land mid-teardown. If you call `fleet delete` before `member delete`, the member panes orphan (the `claude` process keeps running but has no broker to talk to).
-
----
-
-## 3. Spawn-prompt anatomy
-
-Every member spawn prompt follows the same skeleton. Read this section as the canonical anatomy — it explains every section, why it is there, and the substitution rules.
-
-```
-You are <role> in a <skill> team (CAFleet-native).
-
-ROLE DEFINITION: Open [INSERT abs path to roles/<role>.md] with an available text reader BEFORE any other action. That file is your authoritative role definition. Re-read it whenever you are unsure of protocol.
-
-Load these skills at startup:
-- the cafleet skill — for the broker primitives and bash-via-Director routing
-- <other skills as needed>
-
-FLEET ID: {fleet_id}
-DIRECTOR MEMBER ID: {director_member_id}
-YOUR MEMBER ID: {member_id}
-BASE: [INSERT abs BASE path the Director resolved via the `cafleet` skill's `reference/base-dir.md`]
-CODING AGENT: {coding_agent}
-
-<role-specific assignment text — e.g. CURRENT DATE, USER REQUEST, OUTPUT PATH, YOUR TASK ID>
-
-<role-specific instructions — every IMPORTANT: line and poll-handling line>
-
-Use an available non-shell text reader for prerequisites; shell file reads may precede ready when shell is the only reader.
-
-On spawn, as your first operational broker shell command, send the ready signal: cafleet message send --from-member-id {member_id} --to-member-id {director_member_id} "ready"
-
-<start cue>
-```
-
-There is no `COMMUNICATION PROTOCOL` command-example block: the member learns the poll/send/ack command shapes from the `cafleet` skill and its role file, and takes its ids from the literal identity lines above.
-
-### 3.1 The identity block
-
-```
-FLEET ID: {fleet_id}
-DIRECTOR MEMBER ID: {director_member_id}
-YOUR MEMBER ID: {member_id}
-BASE: <abs task-folder path>
-CODING AGENT: {coding_agent}
-```
-
-These lines are the member's grounding identity. The brace tokens are the CLI's `str.format` placeholders — `cafleet member create` renders each to a literal at spawn (§ 3.2), so the member reads e.g. `FLEET ID: 7` / `YOUR MEMBER ID: 11` and substitutes those integers into its `cafleet ...` commands. The `BASE:` line is the resolved task-scoped BASE the Director computed in § 2.1 — the member uses this verbatim and MUST NOT re-resolve BASE on its own (members that re-resolve risk drift from the Director's resolved BASE). The `CODING AGENT:` line names the member's backend so it can read its overlay (§ 8).
-
-### 3.2 Identity via `str.format` substitution
-
-`cafleet member create` runs `str.format` over the resolved spawn prompt, substituting exactly four placeholders to literals at spawn time:
-
-- **`{fleet_id}`** — the spawned member's fleet id.
-- **`{member_id}`** — the spawned member's **own** id, allocated by cafleet during the spawn (so the Director cannot know it at render time — this is exactly why the spawn prompt carries the placeholder rather than a Director-rendered literal; only the CLI can fill it).
-- **`{director_member_id}`** — the spawned member's Director id.
-- **`{coding_agent}`** — the resolved backend name (`claude` / `codex` / `opencode`).
-
-An unknown placeholder raises a `UsageError` listing the four supported names; a malformed brace expression raises the "double literal braces" `UsageError` (both exit 2, with the just-registered member rolled back). **Any literal brace in prompt text must be doubled** (`{{` / `}}`) to survive `.format()`.
-
-This substitution is the **sole** identity-delivery mechanism — no identity environment variable is injected into the pane (the only forwarded env var is `CAFLEET_DATABASE_URL`). The member takes the literal integers from its prompt's identity lines and passes them explicitly:
-
-- a poll is `cafleet message poll <my-member-id>`;
-- a self-attributed send is `cafleet message send --from-member-id <my-member-id> --to-member-id <director-member-id> "..."`.
-
-A Director may *also* embed the literal `fleet_id` and `director_member_id` (which it knows at render time) directly instead of the placeholders; the member's own id always comes from the CLI-rendered `{member_id}`. The `cafleet` skill documents the convention for spawned members.
-
-### 3.3 The `[INSERT ...]` render-time substitution rules
-
-`[INSERT …]` markers are placeholders for **you** (the skill author writing the SKILL.md) to direct the Director on what to substitute when rendering. The Director performs every `[INSERT …]` substitution in step 1 of § 2.4 (local rendering) before writing the file. By the time the file lands at `${BASE}/prompts/<role>-<UTC-compact>.md`, no `[INSERT …]` marker should remain. The four `{...}` identity placeholders are NOT `[INSERT …]` markers — they are the CLI's `str.format` tokens, rendered at spawn time (§ 3.2), so leave them as written and leave no other stray single braces around them.
-
-A common mistake is to leave a literal `[INSERT abs path to roles/<role>.md]` in the rendered file because the Director forgot to compute the absolute path. The member then opens a file that does not exist on its first turn. Spot-check the rendered files in `${BASE}/prompts/` before continuing.
-
-### 3.4 The `command too long` cliff and `--file`
-
-`tmux split-window` accepts the spawn prompt as a single positional argument. Linux's `ARG_MAX` (the `execve()` argument-list size limit) and tmux's own command parser combine to fail with `command too long` once the shell-quoted prompt grows past a few KB. Even with role content not inlined, a prompt with multiple `[INSERT …]` substitutions + the identity block + role-specific assignment text often exceeds the limit.
-
-`--file <abs path>` sidesteps this. cafleet reads the file inside its own process and writes the text to the new pane through a separate path that is not size-limited. **Use `--file` for every spawn.** The inline positional `PROMPT` is the documented fallback only for the `${BASE} == <unset>` case where the file write is impossible.
-
-### 3.5 The `${BASE} == <unset>` skip semantics
-
-When the base-dir resolution yields the `unset` outcome (absolute-path argument outside the repo root, or equal to the repo root itself), `${BASE}` is the literal sentinel string `<unset>`. The skill MUST:
-
-- **Skip the audit-file write.** Do not try to write `<unset>/prompts/<role>-<UTC-compact>.md` — that is a literal path with a `<` in it, which most filesystems reject. The guard is `if BASE != "<unset>"`.
-- **Omit the `BASE:` line from the spawn prompt.** The spawn prompt does NOT include the literal string `BASE: <unset>` — the line is dropped entirely. The member's existence-check naturally treats audit-file features as disabled.
-- **Fall back to the inline positional `PROMPT`** for the `cafleet member create` call (the file-write path is gone, so the only way to get the prompt to cafleet is inline). Be aware that this risks the `command too long` failure mode for prompts above the tmux limit; surface that as a hard error to the user, not as a silent retry.
-- **Loud-error on unguarded BASE-derivation.** If a code path under `${BASE} == <unset>` reaches an unguarded `Path(BASE) / …` computation, abort with the standardized error: `Error: BASE is <unset>; refusing to fall back to /tmp`.
-
-The member, after spawn, emits a single CAFleet message back to the Director as a parens-free anchorless status:
-
-```
-audit-disabled no BASE in spawn prompt
-```
-
-The phrasing deliberately omits parentheses so the Director reading the broker log does not misinterpret it as a malformed `<verb> (<pointer>)` hop.
-
-### 3.6 The ready-signal line
-
-The ready-signal line is part of the skeleton's **fixed frame**, not a role-specific slot: every spawn prompt carries it as written in the anatomy skeleton above (§ 3), between the role-specific instructions and the start cue. Do not vary its wording per role and do not fold it into a start cue.
-
-Its `{member_id}` / `{director_member_id}` tokens are two of the CLI's four `str.format` identity placeholders (§ 3.2), so `cafleet member create` renders the line into a copy-pastable command with literal integers at spawn — the member executes it verbatim as its first operational broker shell command.
-
-The resulting `ready` message is the only evidence that the coding agent inside the pane actually booted (pane placement proves only that the pane exists), and the Director dispatches the member's first task on that signal. A spawn prompt missing the line is a spawn defect — fix the prompt and re-spawn.
-
----
-
-## 4. Audit-file write protocol
-
-Every spawn-prompt render is also the spawn-prompt audit artifact. The protocol:
-
-1. **Path**: `${BASE}/prompts/<role>-<UTC-compact>.md` where `<UTC-compact>` is `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")`. `<role>` matches the lowercased value of the `--name` flag passed to `cafleet member create` (e.g., `manager`, `scout-1`, `researcher-04`, `programmer`).
-
-2. **Mkdir on first write**: `(Path(BASE) / "prompts").mkdir(parents=True, exist_ok=True)`. Use `pathlib`, not `subprocess.run(["mkdir", ...])`. This is enforced by the no-bypass write protocol.
-
-3. **Same-second collisions**: When two spawns happen in the same UTC second (rare but possible — a Director spawning multiple Researchers in a single tick), append `_2`, `_3`, … to the filename until it is unique. **Never overwrite.** The audit record must be permanent.
-
-4. **The pre-spawn file IS the audit artifact**. There is no second post-spawn re-render. After `cafleet member create` succeeds, the file at `${BASE}/prompts/<role>-<UTC-compact>.md` is the permanent record of what was spawned and is never touched again. It carries the four `{...}` identity placeholders pre-substitution — that is expected; the CLI renders them at spawn.
-
-5. **Every write under `${BASE}`**. Audit files, scratch notes, figure artifacts, intermediate working files — every output the skill produces lands under `${BASE}` or a consumer-supplied absolute path. **Never `/tmp`** unless `${BASE}` itself is `/tmp/cafleet` (which is a legitimate base-dir choice when the user picked it via the `{decision_surface}` prompt).
-
-6. **`${BASE} == <unset>` is a hard stop**, not a fallback. See § 3.5.
-
-This protocol is the most easily violated rule in CAFleet-orchestrated skills. Authors routinely forget the same-second collision rule and overwrite the previous member's audit file when spawning two members in a tick. Authors routinely forget the `<unset>` sentinel and crash with a Path-with-`<`-in-it error. Read the rules above before writing any file write code.
-
----
-
-## 5. Coordination protocol summary
-
-Inter-member communication uses the **verb + pointer** schema. This is the longest section in this guide because it is the most easily miswired surface.
-
-### 5.1 The cafleet message body shape
-
-Every cafleet message body looks like:
-
-```
-<verb> (<pointer>) [— <optional summary up to 80 codepoints, ≤ 3-item enumeration>]
-```
-
-The body MUST be short. Substantive content (rationale, evidence, file lists, test names, error stacks) lives as **inline `COMMENT(role)` markers** in the document being edited at the same pointer the cafleet body references. The body is the routing hop; the marker is the substance.
-
-### 5.2 The canonical 6-verb list
-
-There are exactly six verbs:
-
-| Verb | Meaning | Sender | Recipient |
-|:--|:--|:--|:--|
-| `ready` | The pointer is ready for the recipient to act on (next step assigned, or feedback awaiting addressing). | Director | Member |
-| `complete` | The pointer is done from the sender's side; the recipient should review or proceed. | Member | Director |
-| `addressed` | The recipient has applied the requested fix at the pointer; the sender should re-verify. | Member | Director |
-| `blocked` | The sender cannot proceed at the pointer because something is missing / ambiguous; an inline `COMMENT(role)` marker carries the explanation. | Member | Director |
-| `escalating` | The sender suspects a defect outside their authority (test defect, spec ambiguity) and is handing off to the Director for arbitration. | Member | Director |
-| `approved` | The Director gives final authorization for a milestone (typically `approved (doc)` for a finished design doc, or per-step approval). | Director | Member |
-
-Do NOT invent new verbs. Do NOT use English synonyms ("done", "ack", "ok", "fixed"). The 6-verb list is the entire protocol; broker log parsers look for these literal words.
-
-### 5.3 The pointer forms
-
-Three pointer shapes:
-
-| Pointer | When |
-|:--|:--|
-| `paragraph-<HeadingPath>` | A specific section of the document — e.g. `paragraph-Implementation > Step 5`, `paragraph-Specification > 3. Anchor schema`. Use the literal heading text from the document with `>` separators. |
-| `<file>:<line>` | A specific file location — e.g. `cafleet/src/cafleet/broker/messaging.py:142`, `docs/docs/concepts/overview.md:178`. |
-| `doc` | The whole document; used for top-level milestones (`complete (doc)`, `approved (doc)`) and document-wide blocks (`blocked (doc) — test framework ambiguous`). |
-
-### 5.4 The pointer-marker pairing rule
-
-When a sender includes substantive content in a `COMMENT(role)` marker, the marker MUST live at the same pointer the cafleet body references. Examples:
-
-- `blocked (paragraph-Implementation > Step 5)` + `COMMENT(programmer): test X expects Y but design doc says Z` at `paragraph-Implementation > Step 5` in the design doc.
-- `ready (cafleet/src/cafleet/broker/messaging.py:142)` + `COMMENT(director): use pathlib.Path.mkdir(parents=True, exist_ok=True), not subprocess.run(["mkdir", ...])` at line 142 of the file.
-
-The recipient reads the cafleet body, navigates to the pointer, reads the standing marker, applies the fix or arbitration, removes the marker, and replies with the next-step verb (`addressed (...)` for member-side fixes, `ready (...)` for director-side arbitration handoffs).
-
-### 5.5 The role taxonomy
-
-The marker role identifier in `COMMENT(<role>)` is one of: `user-relay` (user-derived clarifications baked into the doc), `director`, `programmer`, `tester`, `reviewer`, `verifier`, `analyzer`, `drafter`. New roles for new skills SHOULD be added to this list; do not abbreviate. The `user-relay` role is reserved for the `cafleet-design-doc` skill's interview-workflow user-derived clarifications and its execute-workflow test-framework arbitration; do not use it for arbitrary relayed content.
-
-### 5.6 Anchorless status
-
-A small handful of statuses do not pair with a pointer because the condition is global. These are emitted as parens-free anchorless strings:
-
-- `audit-disabled no BASE in spawn prompt` — emitted by a member whose spawn prompt lacks the `BASE:` line entirely (the `${BASE} == <unset>` branch).
-- (Other anchorless statuses are documented per-skill; do not invent new ones casually.)
-
-The phrasing deliberately omits parentheses so a parser does not misinterpret it as a malformed `<verb> (<pointer>)` hop.
-
-### 5.7 Acking messages
-
-After acting on a polled message, the recipient MUST `cafleet message ack` it. Un-acked messages stay in `INPUT_REQUIRED` and re-surface on every subsequent `message poll` cycle, polluting the recipient's context with stale work.
-
-```bash
-cafleet message ack <message-id>
-```
-
-The `<message-id>` is the full id returned by `cafleet message poll <my-member-id> --json`. The default text-mode poll output truncates the body; pass `--json` when you need the untruncated envelope.
-
----
-
-## 6. Worked example — `summarize-pr`
-
-This is a tiny end-to-end CAFleet-orchestrated skill called `summarize-pr` (single Director + one ordinary member named Summarizer). The example uses fake `<slug>`, `<fleet-id>`, etc. and is read-only — it is illustrative, not a template you copy. Read it to understand how all five sub-systems fit together; then write your own skill from scratch.
-
-### Skill purpose
-
-The user invokes `/summarize-pr <pr-number>`. The Director:
-
-1. Fetches the PR diff via `gh pr diff <pr-number>`.
-2. Bootstraps the fleet (the `fleet create` command spawns the monitor member), waits for `monitor live`, then spawns a Summarizer member to digest the diff, identify the top 3 risk areas, and write a 200-word summary to a file.
-3. Reviews the summary, asks the user for approval, then tears down.
-
-### Resolved task-relpath
-
-The skill's task convention is `researches/pr-<pr-number>` (PR summaries are research-shaped — one folder per PR with the diff + summary inside).
+Write the following complete prompt to `/repo/researches/pr-1234/.prompts/summarizer-20260911T100100Z.md`. This is the pre-substitution audit input:
 
 ```text
-# Resolve task-scope BASE for researches/pr-1234 (cafleet reference/base-dir.md procedure, built-in tools):
-#   git rev-parse --show-toplevel → /repo
-#   task folder → /repo/researches/pr-1234  (auto-created)
-```
-
-`${BASE} = /repo/researches/pr-1234`. The Director writes the diff to `${BASE}/diff.patch` (a non-audit working file) and the summary will land at `${BASE}/summary.md` (also a working file, not under `prompts/`).
-
-### Fleet bootstrap
-
-The Director writes the monitor spawn prompt to `${BASE}/prompts/monitor-20260213T143000Z.md` first, then bootstraps the fleet, Director, and monitor member in one atomic command:
-
-```bash
-cafleet fleet create --name "summarize-pr-1234" --coding-agent claude \
-  --monitor-file ${BASE}/prompts/monitor-20260213T143000Z.md --monitor-model haiku --json
-# → {"fleet_id": 7, "director": {"member_id": 8, ...}, "monitor": {"member_id": 9, ...}}
-```
-
-Substitute `7`, `8`, and `9` literally into every subsequent call the Director makes.
-
-### Supervision model
-
-Like every CAFleet-orchestrated skill, `summarize-pr` has its monitor member live **before** the Summarizer spawn (§ 2.3): the bootstrap above spawned it, and the Director waits for its `ready`, then its `monitor live` gate signal — the monitor member launches `cafleet monitor 7` in its own pane and confirms the startup line itself. Each periodic wake lands in the monitor member's pane; it health-checks the Summarizer and messages the Director only on events — the heartbeat backstop that surfaces a stall even when the Summarizer never replies.
-
-Wait for the `monitor live` message before spawning the Summarizer (the CLI's monitor-first guard backstops).
-
-### Render the Summarizer spawn prompt
-
-The Director creates this spawn prompt body (with the `[INSERT …]` marker substituted before writing); the four `{...}` identity placeholders are left as written for the CLI to render at spawn:
-
-```
 You are the Summarizer in a summarize-pr team (CAFleet-native).
 
-ROLE DEFINITION: Open [INSERT abs path to roles/summarizer.md] with an available text reader BEFORE any other action. That file is your authoritative role definition.
+ROLE DEFINITION: Open /repo/skills/summarize-pr/roles/summarizer.md with an available text reader BEFORE any other action. That file is your authoritative role definition. Re-read it whenever unsure of protocol.
 
-Load these skills at startup:
-- the cafleet skill — for the broker primitives and bash-via-Director routing
+Load the cafleet skill at startup for broker and member protocols, resolving the backend named below. Read the summarize-pr workflow and CAFleet design-doc coordination before substantive work.
 
 FLEET ID: {fleet_id}
 DIRECTOR MEMBER ID: {director_member_id}
@@ -393,152 +72,73 @@ YOUR MEMBER ID: {member_id}
 BASE: /repo/researches/pr-1234
 CODING AGENT: {coding_agent}
 
-INPUT FILE: /repo/researches/pr-1234/diff.patch
+INPUT FILE: /repo/researches/pr-1234/.inputs/diff.patch
 OUTPUT FILE: /repo/researches/pr-1234/summary.md
 
-When you see cafleet message poll output with a message from the Director, capture the id: from each entry as the task id and ack it via cafleet message ack, then act on the instructions.
+IMPORTANT: Keep the input and repository source unchanged; write only the summary and task-local audit artifacts.
+IMPORTANT: The Director owns all Git operations and user communication.
+IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.
+IMPORTANT: Follow CAFleet member Bash and prompt-routing protocols plus the supplied host Bash rules: one command per call, literal arguments and a file writer for output.
+
+When you see cafleet message poll output from the Director, read and ACK each message, then act on its instructions. Retrieve full payloads with JSON when needed.
 
 Use an available non-shell text reader for prerequisites; shell file reads may precede ready when shell is the only reader.
 
 On spawn, as your first operational broker shell command, send the ready signal: cafleet message send --from-member-id {member_id} --to-member-id {director_member_id} "ready"
 
-Read INPUT FILE, write a 200-word summary highlighting the top 3 risk areas to OUTPUT FILE, then send complete (doc) to the Director.
+Read INPUT FILE, write a 200-word summary highlighting three risk areas to OUTPUT FILE, then send complete (doc) to the Director. Handle revisions at standing COMMENT(director) markers and reply addressed (doc).
 ```
-
-The Director writes this rendered text to `/repo/researches/pr-1234/prompts/summarizer-20260516T003344Z.md` (UTC-compact timestamp) — the audit artifact, carrying the identity placeholders pre-substitution.
-
-### Spawn the Summarizer
 
 ```bash
-cafleet member create --fleet-id 7 \
-  --name "summarizer" \
-  --description "Digests a PR diff into a 200-word risk summary" \
-  --file /repo/researches/pr-1234/prompts/summarizer-20260516T003344Z.md \
-  --json
-# → {"member_id": 11, ...}
+cafleet member create --fleet-id 7 --name summarizer --description "Summarizes a PR diff and three risks" --file /repo/researches/pr-1234/.prompts/summarizer-20260911T100100Z.md --json
 ```
 
-Capture `11` as the Summarizer's id for the rest of the run (the Summarizer itself reads its own id from the `YOUR MEMBER ID: 11` line the CLI rendered into its prompt).
+Suppose the returned member ID is 11. The CLI renders that member's own identity; the Director uses 11 for later calls and follows the placement/ready checks in supervision.
 
-### Coordination
+### Review and revisions
 
-The Summarizer reads the diff, writes the summary, and sends (from inside its pane, using the literal ids from its prompt):
+After writing the summary, member 11 sends:
 
 ```bash
-cafleet message send --from-member-id 11 --to-member-id 8 \
-  "complete (doc) — summary 198 words, 3 risk areas"
+cafleet message send --from-member-id 11 --to-member-id 8 "complete (doc) — summary and three risk areas ready"
 ```
 
-The Director polls, acks, reads `${BASE}/summary.md`, presents it to the user via the `{decision_surface}` prompt. If the user approves, the Director tears down. If the user requests revisions, the Director sends:
+The Director polls and ACKs that message, reads `summary.md` and presents the result to the user. A requested revision becomes a `COMMENT(director)` at the top of that document, paired with:
 
 ```bash
-cafleet message send --from-member-id 8 --to-member-id 11 \
-  "ready (doc)"
+cafleet message send --from-member-id 8 --to-member-id 11 "ready (doc)"
 ```
 
-(with a `COMMENT(director): <revision request>` marker at the top of `summary.md`) and waits for `addressed (doc)`.
+The Summarizer reads the marker, revises the summary, removes the addressed marker and sends `addressed (doc)`. The Director reviews the revised artifact. Full clarification payloads follow coordination's exemptions; routing summaries stay short and substance stays at its pointer.
 
 ### Teardown
 
+Once the authorized work is complete, run each command separately:
+
 ```bash
-# Delete the monitor member FIRST (the pane kill takes the loop down),
-# then the Summarizer, then the fleet.
 cafleet member delete 9
+```
+
+```bash
 cafleet member delete 11
+```
+
+```bash
+cafleet member list 7
+```
+
+After confirming that only the root Director remains in the registry, delete the fleet:
+
+```bash
 cafleet fleet delete 7
 ```
 
-Order matters: delete the monitor member first (first-out — the pane kill ends the wake source), then the ordinary Summarizer, then the fleet (see § 2.5).
+Confirm closure with:
 
-### What this example demonstrates
+```bash
+cafleet fleet list
+```
 
-- All five integration sub-systems fire (resolve BASE → bootstrap fleet → spawn the monitor member → spawn the member → monitor-first-out teardown).
-- The audit file at `${BASE}/prompts/summarizer-<ts>.md` lives under the task folder, not the repo root.
-- The cafleet body uses the verb + pointer schema (`complete (doc)`, `ready (doc)`, `addressed (doc)`).
-- The substantive revision request rides as a `COMMENT(director)` marker in the document, not in the cafleet body.
-- Teardown is in the correct order.
+Confirm fleet 7 is absent from the active fleet list before reporting teardown complete.
 
----
-
-## 7. Common failure modes
-
-These are the failures that have bitten earlier authors. Read them before writing your skill, not after debugging.
-
-### 7.1 Forgetting to ack messages
-
-Symptom: every `cafleet message poll` returns the same message over and over, the Director's context fills with stale "ready" hops, and the Director's on-tick health check flags the recipient as not-progressing.
-
-Fix: every message you act on, ack it. Acking moves the task from `INPUT_REQUIRED` to `COMPLETED` and removes it from subsequent poll output.
-
-### 7.2 Inlining role-file content into the spawn prompt
-
-Symptom: `cafleet member create` exits non-zero with `Error: tmux split-window failed: command too long`, the member registration is rolled back, no member pane appears.
-
-Fix: use `--file` (always) and reference the role file by absolute path inside the spawn prompt, not by inlining the content.
-
-### 7.3 Shell-variable-substituting the Director's own literal ids
-
-Symptom: every `cafleet ...` call the Director makes triggers a permission prompt that interrupts the agent loop. The user complains that the skill is "asking me about every single command."
-
-Fix: in the **Director's own** commands, substitute the literal ids printed by `cafleet fleet create` / `cafleet member create` directly. The Claude Code harness's `permissions.allow` matches Bash invocations as literal command strings; an exported shell variable you reference yourself (`export MEMBER_ID=…; cafleet member show $MEMBER_ID`) breaks the literal match. Never `export` IDs and reference them via `$VAR`.
-
-### 7.4 Writing audit files under the repo root
-
-Symptom: `git status` shows untracked `prompts/` directory at the repo root after running the skill. Operators add `/prompts/` to `.gitignore`. Per-task evidence is scattered across the repo root instead of co-located with the task folder.
-
-Fix: resolve BASE via the `cafleet` skill's `reference/base-dir.md` task-scope procedure with a `<task-relpath>` (per § 2.1). The resolved `base` IS the task folder; `${BASE}/prompts/` lives inside the task folder. Do NOT resolve the shared-root BASE (no task-relpath) and then write `${BASE}/researches/<slug>/prompts/...` — that pattern produces the stale repo-root artifacts.
-
-### 7.5 Forgetting to omit the `BASE:` line under `${BASE} == <unset>`
-
-Symptom: a member's spawn prompt contains the literal string `BASE: <unset>`, the member tries to compute `Path(BASE) / "prompts" / "..."`, and the file write fails with `OSError: [Errno 22] Invalid argument` (most filesystems reject `<` in paths) or the path appears literally in `git status` as `<unset>/prompts/...`.
-
-Fix: when `${BASE} == <unset>`, drop the `BASE:` line from the spawn prompt body entirely. The member's existence-check (`grep '^BASE:'` on its own prompt) naturally treats audit-file features as disabled. The member emits the parens-free anchorless status `audit-disabled no BASE in spawn prompt` once.
-
-### 7.6 Falling back to `/tmp` when BASE resolution fails
-
-Symptom: scratch and audit files appear under `/tmp/<random>/prompts/...` instead of under `${BASE}`. The user cannot find their per-task evidence after the run.
-
-Fix: never fall back to `/tmp` silently. The `<unset>` sentinel is a hard stop, not a fallback. If `${BASE}` is `<unset>`, abort with the standardized error `Error: BASE is <unset>; refusing to fall back to /tmp` (or, for spawned members, follow the skip + inline-fallback branch in § 3.5).
-
-### 7.7 Calling `cafleet fleet delete` before `cafleet member delete`
-
-Symptom: orphan `claude` processes lingering in tmux panes after the skill completes. The user closes the panes manually. On the next `cafleet fleet create`, the panes are rebound and the orphan members re-emerge.
-
-Fix: tear down in this exact order — `cafleet member delete` the monitor member first (first-out), then `cafleet member delete` for every remaining member, then `cafleet fleet delete`. See § 2.5.
-
-### 7.8 Spawning ordinary members before `monitor live`
-
-Symptom: ordinary members are spawned before the monitor member has sent its `monitor live` gate signal, so the heartbeat backstop is not yet running when they begin work — or the spawn fails outright on the CLI's monitor-first guard (`fleet <fleet-id> has no active monitor member; spawn one with --role monitor first`).
-
-Fix: the `cafleet fleet create` bootstrap spawns the monitor member (§ 2.2); wait for its `ready` then `monitor live` messages before any ordinary `cafleet member create`. Re-spawn with `cafleet member create --role monitor` only after a monitor death.
-
-### 7.9 Leaving stray single braces in the spawn prompt
-
-Symptom: `cafleet member create` exits 2 with `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}. Double literal braces ({{, }}) to keep them as text.` or `Error: Malformed custom prompt: ...`, and the just-registered member is rolled back.
-
-Fix: the only single-brace tokens allowed in a spawn prompt are the four identity placeholders. Double every literal brace (`{{` / `}}`) — including braces inside code snippets or JSON examples the prompt quotes.
-
----
-
-## 8. Keep the base neutral; put backend deltas in the overlay
-
-CAFleet runs members on three coding-agent backends — `claude`, `codex`, `opencode`. When a skill hardcodes one backend's idioms — the permission-mode flags, the `AskUserQuestion` decision surface, the harness `Task*` tools, the long-lived-execution primitive, the "load via the Skill tool" recipe — it drifts the moment a member runs on another backend, and forces every non-`claude` reader to mentally subtract the `claude`-only parts. Keep your skill backend-neutral and push the backend specifics into the overlay.
-
-The split:
-
-- **Base — your `SKILL.md` and `roles/*.md`.** Write these so they read the same on any backend. State *what* to do in backend-agnostic terms; wherever behavior varies by backend, state the neutral behavior and point the agent at its overlay.
-- **Overlay — the per-backend sections of `skills/cafleet/reference/coding-agents.md`.** This is the single canonical home for every backend delta. The deltas that vary by backend: the decision surface (the `AskUserQuestion` analog or the plain-message fallback), the auto-approval / permission flags, the long-lived-execution + task-list primitives, pane discovery / pane title, the reasoning-effort levels, and the skill-loading recipe. Put each backend's concrete realization in its own `## <name>` section; a new backend section starts by copying the file's `## Template` section. Supply all six subsections in order: Runtime bindings, Role defaults, Model catalog, Note → applies at, Pane-state capture cues, and Worked resolution. Each Role defaults table assigns its backend's monitor/reviewer defaults once from its own catalog. The refresh skill owns catalogs, provenance/context notes, canonical Role defaults, and shared freshness metadata; runtime documentation maintenance owns runtime bindings, notes, capture cues, and worked resolutions. Selection policy lives in `skills/cafleet/roles/director.md` § Model selection.
-
-Resolve by action subject: use the executing agent's Runtime bindings and bound notes for local tools; use the selected spawn backend's Model catalog and Role defaults, validating its effort and launch capabilities, for member selection; use the observed member's backend cues for captured panes. A Codex Director selecting an OpenCode reviewer keeps Codex decision and execution tools while resolving the OpenCode reviewer default. Monitor bootstrap/recovery inherit the Director's backend. Ordinary members need only their own runtime lookup. Apply the core skill's documented neutral defaults only in their explicitly allowed missing/unknown-backend cases; report missing required supported-backend sections, malformed tables, and broken references as documentation defects.
-
-Wire it up:
-
-1. **Point at the overlay.** `skills/cafleet/SKILL.md` carries the canonical "apply your coding-agent overlay" instruction; every sibling family `SKILL.md` carries a one-line pointer to `../cafleet/reference/coding-agents.md#<name>`. A new family skill places it at Required-reading row #1 and requires read-and-resolve before acting; substitute a concrete backend anchor when using the pointer.
-2. **Stamp the backend into the spawn prompt.** Add a `CODING AGENT: {coding_agent}` line to the spawn prompt's identity block (next to `FLEET ID` / `BASE`). The CLI renders it to the resolved backend name at spawn — no Director-side substitution and no CLI change — so a spawned member knows which overlay to read. A standalone agent uses its own identity instead.
-3. **Keep the homes independent.** The agent-facing overlay home and the human-facing `docs/docs/spec/coding-agent-backends.md` operator docs never cross-link in either direction. Restating an operational fact in both is fine; linking between them is not.
-
-See `.claude/rules/coding-agent-overlay.md` for the convention in brief.
-
----
-
-You now have everything you need to write a CAFleet-orchestrated skill. Re-read § 2 (the integration checklist) and § 5 (the coordination protocol) once more before you start writing the SKILL.md, and keep the worked example in § 6 open as a reference shape — but write the skill yourself, do not paste the example.
+Member deletion kills its pane immediately; deleting the monitor first ends the wake source. Inspect any cleanup error before claiming teardown complete. Fleet deletion handles registry/runtime cleanup and preserves messages; member deletion handles panes. The summary and immutable prompt inputs remain under the task folder.

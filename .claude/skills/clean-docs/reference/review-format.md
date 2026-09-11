@@ -3,9 +3,7 @@
 Canonical for the two judgment workflows: the apply-ready row format every
 scanner writes, the KEEP guardrails every proposal must clear, the
 per-candidate decision procedure, and the reviewer's per-row verdict flow. Each
-judgment workflow's `reference/rubric.md` defines its classes and cites this
-page. The residue workflow is self-contained — its rubric and pattern catalog
-carry their own guardrails and procedure.
+judgment workflow defines its [affirmative](../affirmative/affirmative.md#finding-classes) or [simplification](../simplification/simplification.md#finding-classes) classes. Residue owns its [classification](../residue/residue.md#classification) and pattern catalog.
 
 ## Apply-ready row format
 

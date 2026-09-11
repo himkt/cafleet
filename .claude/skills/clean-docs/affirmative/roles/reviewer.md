@@ -13,22 +13,17 @@ coordination, per-run process — is canonical in the umbrella
 
 ## Required reading
 
-Identify your coding agent first — your spawn prompt's `CODING AGENT:` line
-names it — then Read every file below, in order, before your first substantive
-action.
+Identify `CODING AGENT` from your spawn prompt, then read in this order before substantive work:
 
-| # | Read | What you lose if you skip it |
-|---|------|------------------------------|
-| 1 | your overlay section [`../../../../../skills/cafleet/reference/coding-agents.md#<name>`](../../../../../skills/cafleet/reference/coding-agents.md) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you emit a literal `{skill_loader}` / `{permission_flags}`, guess a wrong value, or ignore a backend note |
-| 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../../../skills/cafleet/reference/base-dir.md) | the no-bypass write protocol — you mis-root your verdict notes |
-| 3 | the `cafleet-design-doc` skill's [`reference/coordination.md`](../../../../../skills/cafleet-design-doc/reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema (and the clean-docs `findings` pointer) — your sign-off mis-routes |
-| 4 | this workflow's [`reference/rubric.md`](../reference/rubric.md) | the P1/P2/P4 classes — you cannot judge a proposal |
-| 5 | the shared [`reference/review-format.md`](../../reference/review-format.md) | the KEEP guardrails and your verdict flow — your review is unanchored |
-| 6 | `~/.claude/rules/affirmative-writing.md` and `.claude/rules/code-quality.md` | the two rules the run enforces, including their "What's legitimate" carve-outs — you reject compliant text or approve violations |
-| 7 | `.claude/rules/documentation-maintenance.md` and `.claude/rules/coding-agent-overlay.md` | the contract obligations of SPEC.md/docs/skills and the base/overlay neutrality that must survive |
+| # | Read | Required action and timing |
+|---|---|---|
+| 1 | Your backend's [runtime bindings](../../../../../skills/cafleet/reference/coding-agents.md#<name>) | Resolve the named backend and its loader before loading skills or using tokens. |
+| 2 | [CAFleet core](../../../../../skills/cafleet/SKILL.md), [BASE](../../../../../skills/cafleet/reference/base-dir.md) and [member startup](../../../../../skills/cafleet/roles/member.md) | Load `cafleet` via the resolved loader; follow BASE/member states and role-first prerequisites, with ready as the first operational broker command. |
+| 3 | [Clean-docs shared spine](../../SKILL.md) | Load `clean-docs`; read coordination and the review/application gates. |
+| 4 | Complete [affirmative workflow](../affirmative.md#required-reading) and its phase prerequisites | Read the workflow's classes and required references before scanning or reviewing. |
+| 5 | [Documentation maintenance](../../../../../.claude/rules/documentation-maintenance.md) and [backend-neutrality rule](../../../../../.claude/rules/coding-agent-overlay.md) | Read before judging contract or backend-neutrality changes. |
 
-Load the `clean-docs` and `cafleet` skills at startup via `{skill_loader}`.
-Resolve every `{token}` you will use before acting.
+Review the merged artifact when the Director sends ready. Resolve tokens before use; apply supplied host-rule equivalents and route essential unknown prerequisites to the Director.
 
 ## Your checks, per finding row
 

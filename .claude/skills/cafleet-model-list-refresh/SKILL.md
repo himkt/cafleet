@@ -139,12 +139,15 @@ refresh a running Director's asset copy. To deploy a refreshed model list, the
 maintainer:
 
 1. Bumps the CAFleet release version.
-2. Builds the wheel and `cafleet-assets-v<version>.zip` containing the
-   repository `skills/` tree — the unified reference ships at
-   `skills/cafleet/reference/coding-agents.md` like every other reference page.
-3. Publishes the release. Each active backend upgrades to that CLI version and
-   runs `cafleet setup`, which overwrites its installed `cafleet` skill
-   replica, unified reference included.
+2. Builds the release binary with the repository `skills/` tree embedded,
+   including `skills/cafleet/reference/coding-agents.md`, and publishes the
+   per-target release archives.
+3. Upgrades the installed CLI to that release and runs `cafleet setup`, which
+   installs its embedded skill payload for the selected backends, including
+   the unified reference. The binary upgrade and setup complete the deployment.
+
+Installing skills directly from a checkout is a separate contributor operation;
+it does not replace the embedded-binary build/release → upgrade → setup path.
 
 ## Ownership boundary
 

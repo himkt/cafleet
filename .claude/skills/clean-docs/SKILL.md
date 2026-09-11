@@ -6,7 +6,7 @@ description: >
   per run. Use the residue workflow when the user asks to clean up historical
   narration or historical residue, remove deprecation notes / "this replaces X"
   / "renamed from Y" / "previously … now …" prose, drop design-number
-  provenance citations, or delete removal-sentinel tests. Use the affirmative
+  provenance citations, or remove historical sentinel framing while preserving current absence tests. Use the affirmative
   workflow when the user asks to run an affirmative-writing sweep, fix
   prohibition-only rule sections, pair prohibitions with affirmatives, remove
   meaningless fallbacks, or make code fail fast. Use the simplification
@@ -29,25 +29,7 @@ Resolve runtime tools from the executing agent's backend. For spawns, read the s
 
 ## Required reading
 
-Identify your coding agent first — a member's spawn prompt names it on the
-`CODING AGENT:` line; the Director (main session) uses its own identity — then
-Read your overlay and **resolve** it before your first action.
-
-**Load-bearing — Read in order before acting:**
-
-| # | Read | What you lose if you skip it |
-|---|------|------------------------------|
-| 1 | your overlay section [`../../../skills/cafleet/reference/coding-agents.md#<name>`](../../../skills/cafleet/reference/coding-agents.md) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you emit a literal `{bg_run}` / `{reviewer_model}` / `{skill_loader}` / `{decision_surface}`, guess a wrong value, or ignore a backend note |
-| 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../skills/cafleet/reference/base-dir.md) | the task-scope BASE resolution, the no-bypass write protocol, and the `<unset>` contract — you mis-root run artifacts or fall back to `/tmp` |
-| 3 | the `cafleet-design-doc` skill's [`reference/coordination.md`](../../../skills/cafleet-design-doc/reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema and this skill's extensions (`scanner` role, per-workflow run pointer) — your status hops mis-route |
-
-The workflow body you route into carries its own Required-reading block for the
-workflow's reference pages (rubric, pattern catalog, shared review format).
-
-Before acting, resolve runtime tokens from the executing backend's Runtime bindings
-and model tokens from the selected spawn backend's Role defaults, applying the
-core skill's documented defaults only in their allowed cases. Emit concrete values
-in commands, messages, and user-facing strings.
+Identify the executing backend (members use `CODING AGENT`), resolve its [runtime bindings](../../../skills/cafleet/reference/coding-agents.md), and load `cafleet` for BASE, member startup or Director orchestration. Read [coordination](../../../skills/cafleet-design-doc/reference/coordination.md) for verbs, pointers and marker pairing, then this shared spine once. A workflow's Required reading adds only its phase-specific prerequisites. Resolve model tokens from the selected spawn backend's Role defaults, runtime tokens from the executing backend, and capture cues from the observed backend; use documented defaults only in their allowed cases.
 
 ## Dispatch
 
@@ -59,18 +41,18 @@ workflow, the Director asks the user which single workflow to run via
 
 | When the user wants to… | Run |
 |:--|:--|
-| Clean up historical narration / historical residue; remove deprecation notes, "this replaces X" / "renamed from Y" / "previously … now …" prose; drop design-number provenance citations; delete removal-sentinel tests | the **residue** workflow ([residue/residue.md](residue/residue.md)) |
+| Clean up historical narration / historical residue; remove deprecation notes, "this replaces X" / "renamed from Y" / "previously … now …" prose; drop design-number provenance citations; remove historical sentinel framing while preserving current absence tests | the **residue** workflow ([residue/residue.md](residue/residue.md)) |
 | Run an affirmative-writing sweep; fix prohibition-only rule sections; pair prohibitions with affirmatives; remove meaningless fallbacks; make code fail fast | the **affirmative** workflow ([affirmative/affirmative.md](affirmative/affirmative.md)) |
 | Simplify the docs / comments; tighten verbose prose; de-duplicate documentation; remove redundant comments | the **simplification** workflow ([simplification/simplification.md](simplification/simplification.md)) |
 
 ### Class-to-workflow split
 
 Every candidate a scanner may act on belongs to exactly one workflow. The class
-identifiers are canonical in each workflow's rubric; ownership is:
+identifiers are canonical in each workflow's classification section; ownership is:
 
 | Workflow | Owns | Fix character |
 |---|---|---|
-| **residue** | (a) sentinel test, (b) narration/citation/trajectory, (c) keep + known-benign | Delete sentinel framing; reword narration to present tense. Strictly zero behavior change. |
+| **residue** | (a) sentinel framing, (b) narration/citation/trajectory, (c) keep + known-benign | Remove historical framing; preserve current absence tests and reword narration to present tense. Strictly zero behavior change. |
 | **affirmative** | **P1** prohibition-pile, **P2** unpaired prohibition (including negatively-phrased instructions rewritable in affirmative voice), **P4** meaningless fallback / swallowed error | Fixes that change prohibition structure, voice, or code behavior. P4 rows are BEHAVIOR-AFFECTING — the only permitted behavior change in any workflow (invariant 1). |
 | **simplification** | **P3** redundant prose, **P5** verbose phrasing (verbosity only — the 30%+ word-reduction baseline; voice rewrites belong to P2) | Fixes that only delete redundancy or reduce words, with voice and behavior unchanged. Strictly zero behavior change. |
 
@@ -96,7 +78,7 @@ workflow.
    Residue and simplification runs are strictly zero-behavior-change.
 2. **No live test coverage lost.** Test logic, assertions, fixtures, and
    parametrizations are untouchable; only comments, docstrings, and sentinel
-   framing are in scope. A mixed sentinel test keeps its live assertion.
+   framing are in scope. Preserve current-behavior absence tests, including native parser rejection; a framing edit retains all test logic and assertions.
 3. **No new narration (R1).** Every edit reads as a clean present-tense
    statement of current behavior — no "previously / now / formerly", no "this
    replaces X", no "renamed from Y".
@@ -130,7 +112,7 @@ User → /clean-docs (one workflow)
 
 | Role | Responsibility |
 |---|---|
-| **Director** | Resolve task-scoped `${BASE}`; bootstrap the fleet with the monitor member included (`cafleet fleet create --monitor-file <abs path> --monitor-model {monitor_model}`) and gate the first ordinary spawn on its `monitor live` message (the CLI monitor-first guard backstops); partition the in-scope tree into **disjoint file-ownership** slices (one file → one scanner, whole surfaces per scanner); merge partial artifacts into the run's canonical artifact; route it to the reviewer and **hold the apply until the reviewer's approval**; relay approval to scanners; apply any edit a scanner's harness denies (verify the staged diff first); run verification; escalate observations to the user; delete the monitor member first (first-out) at teardown. |
+| **Director** | Resolve task-scoped `${BASE}`; bootstrap the fleet with the monitor member included (`cafleet fleet create --monitor-file <abs path> --monitor-model {monitor_model}`) and gate the first ordinary spawn on its `monitor live` message (the CLI monitor-first guard backstops); partition the in-scope tree into **disjoint file-ownership** slices (one file → one scanner, whole surfaces per scanner); merge partial artifacts into the run's canonical artifact; route it to the reviewer and **hold the apply until the reviewer's approval**; relay approval to scanners; apply a denied write through the full-file staging protocol; run verification; escalate observations to the user; delete the monitor member first (first-out) at teardown. |
 | **scanner** (×N) | For its slice: run the workflow's scan mechanics, propose actions per the workflow's rubric, record observations separately, write its partial artifact under `${BASE}`. After approval is relayed: apply its own slice's approved rows exactly as written, re-verify its diff, route harness-denied writes to the Director. |
 | **reviewer** | Validate the merged artifact **before** any edit, per the workflow's guarantees and guardrails. After apply: run the workflow verification (parameter table below). |
 
@@ -177,10 +159,7 @@ extensions, since a run produces a run artifact, not a design document:
    `ready (<run pointer>)`. **No repository edit happens before the reviewer's
    `approved (<run pointer>)`.**
 6. **Apply** — the Director relays approval; each scanner applies its own
-   slice's approved rows exactly as written. A scanner whose harness denies a
-   write (commonly `.claude/`) stages the full target file under
-   `${BASE}/.apply/` and routes to the Director, who diff-reviews the staged
-   file and applies it.
+   slice's approved rows exactly as written. Use the full-file staging protocol for a denied write.
 7. **Verify** — `mise //cafleet:test`, `mise //cafleet:lint`,
    `mise //cafleet:typecheck` green, plus the **workflow verification**
    (parameter table below).
@@ -189,6 +168,12 @@ extensions, since a run produces a run artifact, not a design document:
    (delete the monitor member first — the pane kill takes the loop down —
    → delete the remaining members → verify via `member list` →
    `fleet delete`).
+
+### Full-file staging
+
+Every scanner reads this protocol before application. For a harness-denied target write, stage the **complete replacement file** under `${BASE}/.apply/`, retaining its relative target path. Compare it with the current repository file: the diff must contain exactly the Director-relayed approved rows, including reviewer REVISE text. Send the Director the target and staged paths; continue independent approved work in the rest of your slice.
+
+The Director reads the staged file and diff, checks both against approved rows **and current user authorization**, then applies that exact file. A mismatch or changed authorization returns to review/arbitration before writing. Staging preserves the gate; it is not approval. Scanners and reviewer perform the normal post-apply checks after the Director's write.
 
 ### Workflow parameter table
 
@@ -280,16 +265,13 @@ use `--file`.
     residue.md                    # workflow body — sweep mechanics + completeness guarantee
     roles/scanner.md              # sweep → hand-inspect → classify → apply own slice
     roles/reviewer.md             # over-deletion / lost-coverage / R1 guard
-    reference/rubric.md           # (a)/(b)/(c) + known-benign — canonical
     reference/patterns.md         # pattern catalog + exempt-set exclusion — canonical
   affirmative/
     affirmative.md                # workflow body — P1/P2/P4 judgment review
     roles/scanner.md              # full read → propose → apply own slice after the gate
     roles/reviewer.md             # lost-meaning / lost-contract / behavior-change guard
-    reference/rubric.md           # P1, P2, P4 classes — canonical
   simplification/
     simplification.md             # workflow body — P3/P5 judgment review
     roles/scanner.md
     roles/reviewer.md
-    reference/rubric.md           # P3, P5 classes — canonical
 ```
