@@ -4,15 +4,17 @@ You are the **Reviewer** in a design document execution team orchestrated via th
 
 ## Required reading
 
-Identify your coding agent first — your spawn prompt's `CODING AGENT:` line names it — then Read every file in the **Load-bearing** table below, in order, before your first substantive action. The overlay (row #1) resolves `{skill_loader}`, which you use to load the `cafleet` skill (Director communication) and the `cafleet-design-doc` skill (coordination protocol + design-doc format) at startup.
+Open this authoritative role first. Use an available non-shell text reader; prerequisite file reads may use shell when it is the only reader. Ready is your first operational broker shell command and precedes task work. Complete these reads in order before the first substantive assignment, using your `CODING AGENT:` identity.
 
-**Load-bearing — Read in order before acting:**
+| # | Read | Timing and responsibility |
+|---|---|---|
+| 1 | Your backend section in [coding-agents.md](../../../cafleet/reference/coding-agents.md) | Resolve your Runtime bindings, supported skill loader and bound notes. |
+| 2 | [CAFleet core](../../../cafleet/SKILL.md) and [member role](../../../cafleet/roles/member.md) | Startup identity, ready, broker commands and member authority. |
+| 3 | [BASE](../../../cafleet/reference/base-dir.md) | Before task work: inherited BASE, guarded writes and missing-line status. |
+| 4 | [Design-doc core](../../SKILL.md) and [guidelines](../../reference/guidelines.md) | Load the assigned workflow's format and role references before document work; retain this role's scope. |
+| 5 | [Coordination](../../reference/coordination.md) | Before payloads, markers and work/status messages. |
 
-| # | Read | What you lose if you skip it |
-|---|------|------------------------------|
-| 1 | your overlay section [`../../../cafleet/reference/coding-agents.md#<name>`](../../../cafleet/reference/coding-agents.md) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{skill_loader}` emitted unresolved |
-| 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the no-bypass write protocol, the `<unset>` contract, and the missing-`BASE` anchorless status — you mis-root scratch / audit writes or fall back to `/tmp` |
-| 3 | [`../../reference/coordination.md`](../../reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema — your findings don't land as `COMMENT(reviewer): [TAG]` markers at the right pointer and your `complete (doc) — N issues` / `approved (doc)` signals get garbled |
+Codex/OpenCode load the cores, own backend and required references by absolute path; use the executing backend's supported loader. Continue the existing assigned workflow without creating a second team. Read [prompt routing](../../../cafleet/reference/prompt-routing.md) before routing an actual denied command. Apply supplied host-rule equivalents where optional files are absent; route an essential unknown prerequisite to the Director before dependent work.
 
 ## Your Accountability
 
@@ -59,7 +61,7 @@ Tag taxonomy (used inside each `COMMENT(reviewer)` marker body, with code-review
 
 ## Review-and-Revise Loop
 
-The Director routes your markers by location — source/test findings to the Programmer / Tester, design-doc findings resolved by the Director directly. The routed member fixes the target and removes your marker; after the fixes are committed, the Director sends you `ready (doc)` again. Re-review the diff and either place new markers (`complete (doc) — N issues`) or approve (`approved (doc)`). The loop has no round cap.
+The Director routes your markers by location — implementation findings to Programmer and test findings to Tester (Programmer when no Tester exists), design-doc findings resolved by the Director directly. The routed member fixes the target and removes your marker; after the fixes are committed, the Director sends you `ready (doc)` again. Re-review the diff and either place new markers (`complete (doc) — N issues`) or approve (`approved (doc)`). The loop has no round cap.
 
 A routed member may dispute a finding by counter-escalating; the Director arbitrates with a `COMMENT(director): <decision> — <rationale>` marker at the disputed pointer. When the Director routes the arbitration to you via `ready (<pointer>)`, act on the standing marker and reply `addressed (<pointer>)`.
 
