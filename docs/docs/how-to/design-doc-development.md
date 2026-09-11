@@ -1,28 +1,31 @@
-# Design-doc-driven development
+# Design document workflow
 
-CAFleet ships two skills (`cafleet`, `cafleet-design-doc`) that run
-spec-driven development as CAFleet-orchestrated teams. Give your coding agent one prompt per stage, in
-order.
+Develop a feature through a reviewed design, an interview and an implementation.
+The `cafleet` and `cafleet-design-doc` skills coordinate the teams; give your
+coding agent one prompt per stage.
 
 ## Prompts {#prompts}
 
 Each prompt triggers one `cafleet-design-doc` workflow:
 
-| Stage | Prompt | Workflow | Team |
+| Stage | Prompt | Outcome | Team |
 |---|---|---|---|
-| 1. Draft | `Create a design doc for <one-line feature description>.` | create | Director + Drafter + Reviewer |
-| 2. Refine | `Interview me about design-docs/NNNNNNN-<slug>.` | interview | Director + Analyzer, annotating the document with your answers |
-| 3. Implement | `Implement design-docs/NNNNNNN-<slug>.` | execute | Director + Programmer + Tester + optional Verifier, with a fresh Reviewer before your approval |
+| 1. Draft | `Create a design doc for <one-line feature description>.` | Clarification, drafting and review, followed by your approval | Director + Drafter + Reviewer |
+| 2. Refine | `Interview me about design-docs/NNNNNNN-<slug>.` | Questions and persisted answers, with document annotations for revision | Director + Analyzer |
+| 3. Implement | `Implement design-docs/NNNNNNN-<slug>.` | Implementation and checks, fresh review, then your approval | Director + Programmer + Tester for code, optional Verifier, then a fresh Reviewer |
 
-The contributor-facing description of this loop, including what to pass to
-each skill, lives in [Contributing](../contributing.md).
+These stages invoke create, interview and execute respectively. After an
+interview, resume creation to incorporate its annotations and review the
+revised design before implementation. Documentation/configuration work may
+use a Programmer without a Tester. Contributor setup is in
+[Contributing](../contributing.md).
 
 ## Where output lands
 
-Each run produces `design-docs/NNNNNNN-<slug>/design-doc.md` in your
-repository. The CAFleet repo's own
-[`design-docs/`](https://github.com/himkt/cafleet/tree/main/design-docs)
-folder holds real examples produced by this loop.
+Creation writes `design-docs/NNNNNNN-<slug>/design-doc.md` in your repository.
+The interview keeps questions and answers in `question.md` beside it and
+annotates the design; execution updates the design's task progress while
+implementing the approved work.
 
 ## Watch the team work
 

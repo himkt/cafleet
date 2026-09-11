@@ -29,10 +29,9 @@ Shared contract:
   [Model selection](#model-selection).
 - `--effort <level>` from `cafleet member create` forwards a reasoning-effort
   level, emitted immediately after the model tokens (before the prompt).
-  Unlike `--model`, the accepted level set is validated per backend at create
-  time — an unknown level exits 2 before any registration or multiplexer side
-  effect. Omitted, no effort tokens are emitted and the argv is byte-identical
-  to the no-effort form. Per-backend levels and rejection strings are in
+  Create-time validation uses the backend-specific accepted set before
+  registration or multiplexer effects. Omission emits no effort tokens,
+  leaving argv byte-identical to the no-effort form. Levels and exact errors are in
   [Reasoning effort](#reasoning-effort).
 - A missing binary fails the spawn: exit 1 with
   `Error: binary <name> not found on PATH`.
@@ -96,8 +95,8 @@ trust_level = "trusted"
 `~/.codex/rules/cafleet.rules` grants the auto-approval posture for `cafleet`
 commands (`CODEX_HOME` relocates the `~/.codex` base — see
 [Config-dir resolution](cli-options.md#config-dir-resolution)). It ships as
-a static file in the assets release archive (`presets/codex/cafleet.rules`)
-and is installed by `cafleet setup`:
+an embedded static asset (`presets/codex/cafleet.rules`) in the released
+binary and is installed offline by `cafleet setup`:
 
 ```text
 prefix_rule(pattern = ["cafleet"], decision = "allow")
@@ -135,9 +134,9 @@ long-lived, observable pane like the other backends. The prompt is passed via
 (`OPENCODE_CONFIG_DIR` relocates the `~/.opencode` base — see
 [Config-dir resolution](cli-options.md#config-dir-resolution); the spawn
 precondition checks the same resolved path `setup` installs to). The
-preset ships as a static file in the assets release archive
-(`presets/opencode/cafleet.md`) and is installed — overwriting any existing
-copy — by `cafleet setup`; to refresh after a CAFleet upgrade, re-run it. The
+preset is embedded in the released binary (`presets/opencode/cafleet.md`).
+`cafleet setup` installs it offline, replacing any existing copy; rerun setup
+after upgrading CAFleet to refresh it. The
 preset is a spawn precondition: the spawn argv references `--agent cafleet`,
 so `cafleet member create --coding-agent opencode` fails with `opencode agent
 preset not found at <preset>; run 'cafleet setup --coding-agent opencode'

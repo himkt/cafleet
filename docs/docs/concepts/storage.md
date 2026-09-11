@@ -47,22 +47,11 @@ with guidance naming `cafleet setup` — never a raw SQLite error; `doctor`
 reports instead of blocking. The exact rules and error strings are in
 [CLI options](../spec/cli-options.md#schema-version-guard).
 
-Pending migrations run together in one grouped transaction. A failed index
-creation rolls back the entire pending group, including its schema-history
-entries. Before migrating, after refusing unversioned or newer schemas,
-`setup` checks existing members for duplicate active monitors using the
-[index predicate](../spec/data-model.md#members). A fresh database without a
-members table skips this check. It reports conflicting fleets and their
-member ids in ascending order:
-
-```text
-active monitor duplicates prevent migration: fleet <id>: members <ids>; ...
-```
-
-No member or pane is selected or removed automatically. If a writer introduces
-a duplicate after the diagnostic, index creation still rejects it. Following
-a migration failure, a successful recheck that finds duplicates reports the
-same diagnostic; otherwise the original migration error is retained.
+Duplicate-monitor detection reports the conflicting fleet and member ids;
+the operator chooses which monitor to retain. The complete diagnostic,
+transaction rollback and concurrent-write behavior are owned by
+[setup's migration contract](../spec/cli-options.md#cafleet-setup), using
+the [active-monitor index predicate](../spec/data-model.md#members).
 
 ### Recovering duplicate active monitors {#duplicate-monitor-recovery}
 
