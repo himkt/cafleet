@@ -151,6 +151,309 @@ fn assert_required_link(path: &str, target: &str, action: &str) {
     assert_terms_in(path, required, &["before"]);
 }
 
+fn assert_contract_pattern(context: &str, text: &str, pattern: &str) {
+    let compact = text
+        .replace('`', "")
+        .replace("**", "")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let regex = regex::RegexBuilder::new(pattern)
+        .case_insensitive(true)
+        .build()
+        .unwrap();
+    assert!(
+        regex.is_match(&compact),
+        "{context} must state the contract matching {pattern:?}"
+    );
+}
+
+#[test]
+fn workflow_create_finalization_requires_the_exact_director_approval_route() {
+    let route = "ready (doc) — user approved; finalize";
+    let create = "skills/cafleet-design-doc/create/create.md";
+    let drafter = "skills/cafleet-design-doc/create/roles/drafter.md";
+    for path in [create, drafter] {
+        assert!(
+            read(path).contains(route),
+            "{path} must use the explicit finalization route"
+        );
+    }
+    assert_section_terms(
+        create,
+        "step-6-finalize--clean-up-director",
+        &["Reviewer", "user approval", "COMMENT(", "addressed (doc)"],
+    );
+    let text = read(drafter);
+    let workflow = section_at_anchor(drafter, &text, "workflow");
+    assert_contract_pattern(
+        drafter,
+        workflow,
+        r"finaliz.{0,700}(?:marker.free|no.{0,30}COMMENT|absence.{0,30}marker)",
+    );
+    assert_terms_in(
+        drafter,
+        workflow,
+        &[
+            "Approved",
+            "Last Updated",
+            "Progress",
+            "actionable",
+            "addressed (doc)",
+        ],
+    );
+}
+
+#[test]
+fn workflow_plain_ready_with_markers_routes_drafter_revision() {
+    let path = "skills/cafleet-design-doc/create/roles/drafter.md";
+    let text = read(path);
+    let workflow = section_at_anchor(path, &text, "workflow");
+    assert_contract_pattern(
+        path,
+        workflow,
+        r"plain.{0,60}ready \(doc\).{0,350}(?:marker|COMMENT).{0,350}(?:revise|resolv|process).{0,350}addressed \(doc\)",
+    );
+}
+
+#[test]
+fn workflow_plain_ready_without_markers_preserves_metadata_and_ends_the_turn() {
+    let path = "skills/cafleet-design-doc/create/roles/drafter.md";
+    let text = read(path);
+    let workflow = section_at_anchor(path, &text, "workflow");
+    assert_contract_pattern(
+        path,
+        workflow,
+        r"(?:no|without).{0,40}(?:marker|COMMENT).{0,300}(?:(?:preserv|unchanged).{0,100}(?:metadata|Status)|(?:metadata|Status).{0,100}unchanged)",
+    );
+    assert_contract_pattern(
+        path,
+        workflow,
+        r"(?:no|without).{0,40}(?:marker|COMMENT).{0,500}(?:end.{0,30}turn|idle)",
+    );
+    assert_contract_pattern(
+        path,
+        workflow,
+        r"plain.{0,60}ready \(doc\).{0,900}(?:acknowledge|ACK)",
+    );
+}
+
+#[test]
+fn workflow_create_resume_and_review_only_modes_rejoin_the_quality_loop() {
+    let path = "skills/cafleet-design-doc/create/create.md";
+    let text = read(path);
+    let review = section_at_anchor(path, &text, "step-3-internal-quality-loop-director");
+    assert_terms_in(
+        path,
+        review,
+        &[
+            "complete (doc)",
+            "addressed (doc)",
+            "resume",
+            "QUALITY_REVIEW_ONLY",
+        ],
+    );
+    assert_contract_pattern(
+        path,
+        &text,
+        r"review.only.{0,400}(?:wait.{0,60}revision|revision.{0,60}wait)",
+    );
+    let drafter = "skills/cafleet-design-doc/create/roles/drafter.md";
+    assert_section_terms(
+        drafter,
+        "resume-mode",
+        &["entire document", "markers", "addressed (doc)"],
+    );
+}
+
+#[test]
+fn workflow_specialized_role_roster_keeps_seven_independent_startup_contracts() {
+    let expected = [
+        "create/roles/drafter.md",
+        "create/roles/reviewer.md",
+        "execute/roles/programmer.md",
+        "execute/roles/reviewer.md",
+        "execute/roles/tester.md",
+        "execute/roles/verifier.md",
+        "interview/roles/analyzer.md",
+    ];
+    let prefix = "skills/cafleet-design-doc/";
+    let actual: Vec<_> = skill_markdown_files()
+        .into_iter()
+        .filter_map(|path| {
+            path.strip_prefix(prefix)
+                .filter(|path| path.contains("/roles/"))
+                .map(str::to_owned)
+        })
+        .collect();
+    assert_eq!(actual, expected);
+    for relative in expected {
+        let path = format!("{prefix}{relative}");
+        assert_required_link(&path, "coding-agents.md", "resolve");
+        assert_required_link(&path, "base-dir.md", "BASE");
+        assert_required_link(&path, "coordination.md", "coordination");
+    }
+}
+
+#[test]
+fn workflow_director_owners_keep_diagnostics_composition_and_separate_phase_commits() {
+    for path in [
+        "skills/cafleet-design-doc/create/create.md",
+        "skills/cafleet-design-doc/execute/execute.md",
+    ] {
+        assert_section_terms(
+            path,
+            "director-responsibilities",
+            &["Director", "review", "approval"],
+        );
+        let text = read(path);
+        assert!(text.contains("cafleet member capture <member-id> --lines 200"));
+        assert_contract_pattern(
+            path,
+            &text,
+            r"(?:silently|disclos|inform|tell).{0,160}(?:re.spawn|replac)|(?:re.spawn|replac).{0,160}(?:silently|disclos|inform|tell)",
+        );
+    }
+    let execute = "skills/cafleet-design-doc/execute/execute.md";
+    assert_section_terms(
+        execute,
+        "team-composition",
+        &["Programmer", "Tester", "Verifier", "documentation"],
+    );
+    assert_section_terms(
+        execute,
+        "commit-protocol",
+        &[
+            "Director",
+            "tests",
+            "implementation",
+            "separate",
+            "eligible",
+        ],
+    );
+}
+
+#[test]
+fn workflow_payload_receivers_require_json_for_all_three_exemptions() {
+    let coordination = "skills/cafleet-design-doc/reference/coordination.md";
+    let text = read(coordination);
+    for pattern in [
+        r"clarification.{0,500}(?:exempt|free.form)|(?:exempt|free.form).{0,500}clarification",
+        r"Analyzer",
+        r"Verifier.{0,120}tool.discovery|tool.discovery.{0,120}Verifier",
+        r"--json.{0,300}(?:full|complete)|(?:full|complete).{0,300}--json",
+    ] {
+        assert_contract_pattern(coordination, &text, pattern);
+    }
+    for (path, anchor) in [
+        (
+            "skills/cafleet-design-doc/create/create.md",
+            "step-2-clarification-phase-director",
+        ),
+        (
+            "skills/cafleet-design-doc/interview/interview.md",
+            "2e-wait-for-the-analyzers-question-list",
+        ),
+    ] {
+        assert_section_terms(path, anchor, &["--json", "cafleet message", "ack"]);
+    }
+    let execute = "skills/cafleet-design-doc/execute/execute.md";
+    assert_contract_pattern(
+        execute,
+        &read(execute),
+        r"(?:tool.discovery.{0,600}--json|--json.{0,600}tool.discovery)",
+    );
+}
+
+#[test]
+fn workflow_no_tester_composition_routes_test_findings_in_both_review_loops() {
+    let path = "skills/cafleet-design-doc/execute/execute.md";
+    let text = read(path);
+    for anchor in ["review-loop", "revision-loop-comment-marker-based-feedback"] {
+        let section = section_at_anchor(path, &text, anchor);
+        assert_contract_pattern(
+            path,
+            section,
+            r"(?:no Tester|Tester.{0,30}not spawned).{0,180}Programmer|Programmer.{0,180}(?:no Tester|Tester.{0,30}not spawned)",
+        );
+        assert_terms_in(path, section, &["test", "ready ("]);
+    }
+}
+
+#[test]
+fn workflow_local_approval_survives_upstream_tracking_at_finalization() {
+    let path = "skills/cafleet-design-doc/execute/execute.md";
+    let text = read(path);
+    let finalization = section_at_anchor(path, &text, "step-8-finalize--clean-up-director");
+    assert_contract_pattern(
+        path,
+        finalization,
+        r"approve.local.{0,400}(?:skip|no|without).{0,80}push",
+    );
+    assert_contract_pattern(
+        path,
+        finalization,
+        r"(?:regardless|even|despite).{0,100}(?:upstream|track)|(?:upstream|track).{0,100}(?:regardless|even|despite)",
+    );
+    assert_contract_pattern(
+        path,
+        finalization,
+        r"(?:remote|push).{0,80}authoriz|authoriz.{0,80}(?:remote|push)",
+    );
+}
+
+#[test]
+fn workflow_user_revisions_require_reviewer_approval_before_representation() {
+    let create = "skills/cafleet-design-doc/create/create.md";
+    assert_section_terms(
+        create,
+        "step-5-user-feedback-loop-director",
+        &["COMMENT(user-relay)", "quality loop", "re-present"],
+    );
+    let execute = "skills/cafleet-design-doc/execute/execute.md";
+    let text = read(execute);
+    let revisions = section_at_anchor(
+        execute,
+        &text,
+        "revision-loop-comment-marker-based-feedback",
+    );
+    assert_terms_in(
+        execute,
+        revisions,
+        &["COMMENT(user-relay)", "ready (doc)", "approved (doc)"],
+    );
+    assert_contract_pattern(
+        execute,
+        revisions,
+        r"(?:revision|revised).{0,600}Reviewer.{0,400}(?:before|only after)",
+    );
+}
+
+#[test]
+fn workflow_guidelines_own_design_doc_path_normalization() {
+    let path = "skills/cafleet-design-doc/reference/guidelines.md";
+    assert_section_terms(
+        path,
+        "file-layout",
+        &[
+            "/design-doc.md",
+            "design-docs/",
+            "strip",
+            "prepend",
+            "absolute",
+            "base-dir.md",
+        ],
+    );
+    for workflow in [
+        "create/create.md",
+        "execute/execute.md",
+        "interview/interview.md",
+    ] {
+        let path = format!("skills/cafleet-design-doc/{workflow}");
+        assert_required_link(&path, "guidelines.md#file-layout", "path");
+    }
+}
+
 #[test]
 fn shared_director_role_owns_spawn_and_action_headings() {
     let path = "skills/cafleet/roles/director.md";
@@ -1794,10 +2097,6 @@ fn supervision_pins_the_asynchronous_turn_boundary() {
 fn design_doc_workflows_resume_on_notifications_not_recurring_polls() {
     assert_terms(
         "skills/cafleet-design-doc/create/create.md",
-        &["turn boundary"],
-    );
-    assert_terms(
-        "skills/cafleet-design-doc/create/roles/director.md",
         &["turn boundary"],
     );
     assert_terms(
