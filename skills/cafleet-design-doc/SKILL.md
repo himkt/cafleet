@@ -8,8 +8,8 @@ description: >-
   → TDD team). Also the standardized format spec — consult the template and
   guidelines when editing a design doc. Always invoke this skill and route into
   the matching workflow, orchestrated as a CAFleet team. Teammates in member teams
-  load this skill by its name cafleet-design-doc via their backend's
-  skill-loader.
+  load the core and assigned references through their backend's supported
+  skill-loader without starting another team.
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, AskUserQuestion
 ---
 
@@ -17,7 +17,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, AskUser
 
 This skill is the umbrella for the full design-document lifecycle: the standardized **format spec** plus three CAFleet-native **orchestration workflows** (create, validate/interview, implement/execute). It is a dispatcher — consult a reference page for the format, or route to the matching workflow body to run a team.
 
-**Teammates in member teams** must always load this skill by its name `cafleet-design-doc` via their backend's skill-loader — never by reading the skill files directly.
+**Assigned teammates** load this skill through the executing backend's supported loader. Codex/OpenCode use absolute paths for this core, CAFleet core, their own backend section and required role references. Continue the existing assigned workflow; loading this umbrella as a member creates no second team. Main-session user requests follow Dispatch below.
 
 ## Required reading
 
@@ -40,7 +40,7 @@ Each workflow body (create / interview / execute) carries its own Required-readi
 
 ## Dispatch
 
-When the user's request matches a scenario below, invoke this skill and run the linked workflow as a full CAFleet team — proactively, the moment the request matches, without waiting for the user to say "use cafleet".
+For a main-session user request matching a scenario below, invoke this skill and run the linked workflow as a full CAFleet team — proactively, the moment the request matches, without waiting for the user to say "use cafleet".
 
 **Routing into a workflow means executing its entire orchestration.** The Director bootstraps the fleet and its monitor member in one command (`cafleet fleet create --monitor-file <path>`; the monitor member launches the wake loop in its own pane and reports `monitor live`, gating the ordinary spawns), then spawns the role team, then the workflow body's review and revision rounds run through to approval. The linked workflow body is the authoritative procedure.
 

@@ -23,27 +23,14 @@ meaningless fallbacks, or make code fail fast.
 
 ## Required reading
 
-Identify your coding agent first — a member's spawn prompt names it on the
-`CODING AGENT:` line; the Director (main session) uses its own identity — then
-Read your overlay and **resolve** it before your first action.
-
-**Load-bearing — Read in order before acting:**
-
-| # | Read | What you lose if you skip it |
-|---|------|------------------------------|
-| 1 | your overlay section [`../../../../skills/cafleet/reference/coding-agents.md#<name>`](../../../../skills/cafleet/reference/coding-agents.md) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you emit a literal `{reviewer_model}` / `{skill_loader}` / `{decision_surface}`, guess a wrong value, or ignore a backend note |
-| 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../../skills/cafleet/reference/base-dir.md) | the task-scope BASE resolution, the no-bypass write protocol, and the `<unset>` contract — you mis-root run artifacts or fall back to `/tmp` |
-| 3 | the `cafleet-design-doc` skill's [`reference/coordination.md`](../../../../skills/cafleet-design-doc/reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema and the clean-docs extensions (`scanner` role, `findings` pointer) — your status hops mis-route |
-| 4 | this workflow's [`reference/rubric.md`](reference/rubric.md) | the P1/P2/P4 classes — you mis-classify or miss the P2 voice absorption |
-| 5 | the shared [`reference/review-format.md`](../reference/review-format.md) | the apply-ready row format, KEEP guardrails, decision procedure, and verdict flow — your proposals are unreviewable or unsafe |
-| 6 | `~/.claude/rules/affirmative-writing.md` and `.claude/rules/code-quality.md` | the two rules this workflow enforces, including their legitimacy carve-outs — you reject compliant text or approve violations |
+Read the umbrella [startup and shared orchestration](../SKILL.md#required-reading) once, then this complete workflow before scanning or reviewing. Read the shared [row format, KEEP guardrails and verdict flow](../reference/review-format.md). Read `~/.claude/rules/affirmative-writing.md` and `.claude/rules/code-quality.md`, including their legitimacy carve-outs. Use supplied session equivalents for absent optional host-rule files; route an essential unknown prerequisite to the Director before dependent work.
 
 ## Judgment mechanics
 
 This is a **judgment review, not a grep**: each scanner reads every file in its
 slice in full and proposes exact replacement text — a grep-only pass misses the
 structural findings that are the point of the run. Classify each finding P1 /
-P2 / P4 per [`reference/rubric.md`](reference/rubric.md) and write apply-ready
+P2 / P4 per [Finding classes](#finding-classes) and write apply-ready
 rows per the shared [`reference/review-format.md`](../reference/review-format.md).
 
 ## Artifact: `findings.md`
@@ -82,3 +69,13 @@ Per `affirmative-writing.md` § *What's legitimate* and `code-quality.md`:
   an expected, valid absence — is compliant, not a P4 finding.
 
 A row that "fixes" either is itself a defect the reviewer rejects.
+
+## Finding classes
+
+| Class | Definition | Action |
+|---|---|---|
+| **P1 prohibition-pile** | A section that is mostly DO-NOT/NEVER bullets with no statement of the desired behavior the don'ts protect. | Rewrite affirmatively: state what to do and what correct looks like; keep every genuine hard constraint, paired with its affirmative counterpart. |
+| **P2 unpaired prohibition** | A "never X" with no "instead do Y" — or any negatively-phrased instruction rewritable in affirmative voice carrying the same constraint. | Add the affirmative pairing, or rephrase as a pure affirmative instruction carrying the same constraint. |
+| **P4 meaningless fallback / swallowed error** | Code: `dict.get` with a default where the key is guaranteed, `value or fallback` masking an invariant, a `try/except` returning a placeholder that hides a condition the caller needs. | Replace with direct access or a raised error. **BEHAVIOR-AFFECTING**: the row must name the guaranteed invariant and the covering test(s), or state "uncovered" explicitly — protocol in [the P4 protocol](#the-p4-behavior-affecting-protocol). |
+
+The umbrella class-to-workflow split routes word-only changes to simplification and past-state narration to residue; record these as Observations. A fallback qualifies as P4 when absence signals a bug or corrupt state and the fallback hides it. Expected, well-specified absence retains its correct default.

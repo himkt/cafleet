@@ -75,6 +75,8 @@
 
 ## File Layout
 
+Normalize the design-doc argument to the task folder before invoking the generic [BASE resolver](../../cafleet/reference/base-dir.md#procedure): strip a trailing `/design-doc.md`; for a relative argument, strip a leading `design-docs/` if present and prepend `design-docs/` once. For an absolute argument, only strip the trailing filename and use that absolute folder directly. BASE owns containment and disabled-audit decisions; the invoking workflow owns document discovery and its explicit output target.
+
 Design documents use a directory-based structure:
 
 - Path: `design-docs/{slug}/design-doc.md`

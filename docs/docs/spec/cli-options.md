@@ -12,42 +12,29 @@ the subject stay as flags. "Id flags" are `member create`'s `--fleet-id` (the
 fleet the new member joins) and the two-party pair `--from-member-id`
 (sender) + `--to-member-id` (recipient) on the message commands.
 
-| Subcommand | Purpose | Positional subject | Id flags | Section |
-|---|---|---|---|---|
-| `setup` | Migrate the database schema + install the coding-agent assets (skills and presets) | — | — | [setup](#cafleet-setup) |
-| `doctor` | Print the three-section environment diagnosis (multiplexer, database, coding agents) | — | — | [doctor](#cafleet-doctor) |
-| `server` | Start the admin WebUI server | — | — | [server](#cafleet-server) |
-| `monitor` | Run the per-fleet scheduler loop in-process as a long-lived execution owned by the monitor member | `FLEET_ID` | — | [monitor](#cafleet-monitor) |
-| `monitor scan` | Capture the Director's pane and every active member's pane once | `FLEET_ID` | — | [monitor scan](#cafleet-monitor-scan) |
-| `fleet create` | Create a fleet with its root Director and monitor member | — | — | [fleet create](#fleet-create) |
-| `fleet list` | List non-deleted fleets | — | — | [fleet list](#fleet-list) |
-| `fleet show` | Show one fleet (soft-deleted included) | `FLEET_ID` | — | [fleet show](#fleet-show) |
-| `fleet delete` | Soft-delete a fleet and deregister its members | `FLEET_ID` | — | [fleet delete](#fleet-delete) |
-| `message send` | Send a unicast message | — | `--from-member-id` + `--to-member-id` | [message send](#message-send) |
-| `message broadcast` | Broadcast a message to all fleet members | — | `--from-member-id` | [message broadcast](#message-broadcast) |
-| `message poll` | Fetch un-acked incoming messages | `MEMBER_ID` | — | [message poll](#message-poll) |
-| `message ack` | Acknowledge a received message | `MESSAGE_ID` | — | [message ack](#message-ack) |
-| `message show` | Show one message | `MESSAGE_ID` | — | [message show](#message-show) |
-| `member create` | Register a member and spawn its coding-agent pane | — | `--fleet-id` (Director auto-resolved) | [member create](#member-create) |
-| `member delete` | Tear down a member's pane (when one exists) and deregister it | `MEMBER_ID` | — | [member delete](#member-delete) |
-| `member show` | Show one member's detail | `MEMBER_ID` | — | [member show](#member-show) |
-| `member list` | List every active registry entry of the fleet | `FLEET_ID` | — | [member list](#member-list) |
-| `member prompt` | Keystroke a prompt (or, with `--shell`, a shell command) into a member's pane | `MEMBER_ID` | — | [member prompt](#member-prompt) |
-| `member ping` | Inject an inbox-poll keystroke into a member's pane | `MEMBER_ID` | — | [member ping](#member-ping) |
-| `member capture` | Capture the tail of a member's pane | `MEMBER_ID` | — | [member capture](#member-capture) |
-
-## Option Source Matrix
-
-Each parameter has exactly one input source:
-
-| Parameter | Source |
-|---|---|
-| Subject id (fleet / member / message) | The required positional argument (placed after the subcommand name) |
-| Database URL | `CAFLEET_DATABASE_URL` env var (optional) — defaults to `sqlite:///` + `~/.local/share/cafleet/cafleet_v6.db` (home expanded at startup); a user-supplied value must be an absolute-path `sqlite:///` URL. |
-| Multiplexer backend | `CAFLEET_MULTIPLEXER` env var (optional) — unset ⇒ auto-detect. See [Multiplexer backends](multiplexer-backends.md#backend-selection). |
-| New member's fleet | `--fleet-id <int>` on `member create` |
-| Sender / recipient member IDs | `--from-member-id <int>` / `--to-member-id <int>` on two-party subcommands |
-| JSON output | `--json` per-subcommand option (trailing canonical position — placed after all other arguments) |
+| Subcommand | Purpose | Positional subject | Id flags | JSON | Section |
+|---|---|---|---|---|---|
+| `setup` | Migrate the database schema + install the coding-agent assets (skills and presets) | — | — | no | [setup](#cafleet-setup) |
+| `doctor` | Print the three-section environment diagnosis (multiplexer, database, coding agents) | — | — | yes | [doctor](#cafleet-doctor) |
+| `server` | Start the admin WebUI server | — | — | no | [server](#cafleet-server) |
+| `monitor` | Run the per-fleet scheduler loop in-process as a long-lived execution owned by the monitor member | `FLEET_ID` | — | no | [monitor](#cafleet-monitor) |
+| `monitor scan` | Capture the Director's pane and every active member's pane once | `FLEET_ID` | — | yes | [monitor scan](#cafleet-monitor-scan) |
+| `fleet create` | Create a fleet with its root Director and monitor member | — | — | yes | [fleet create](#fleet-create) |
+| `fleet list` | List non-deleted fleets | — | — | yes | [fleet list](#fleet-list) |
+| `fleet show` | Show one fleet (soft-deleted included) | `FLEET_ID` | — | yes | [fleet show](#fleet-show) |
+| `fleet delete` | Soft-delete a fleet and deregister its members | `FLEET_ID` | — | yes | [fleet delete](#fleet-delete) |
+| `message send` | Send a unicast message | — | `--from-member-id` + `--to-member-id` | yes | [message send](#message-send) |
+| `message broadcast` | Broadcast a message to all fleet members | — | `--from-member-id` | yes | [message broadcast](#message-broadcast) |
+| `message poll` | Fetch un-acked incoming messages | `MEMBER_ID` | — | yes | [message poll](#message-poll) |
+| `message ack` | Acknowledge a received message | `MESSAGE_ID` | — | yes | [message ack](#message-ack) |
+| `message show` | Show one message | `MESSAGE_ID` | — | yes | [message show](#message-show) |
+| `member create` | Register a member and spawn its coding-agent pane | — | `--fleet-id` (Director auto-resolved) | yes | [member create](#member-create) |
+| `member delete` | Tear down a member's pane (when one exists) and deregister it | `MEMBER_ID` | — | yes | [member delete](#member-delete) |
+| `member show` | Show one member's detail | `MEMBER_ID` | — | yes | [member show](#member-show) |
+| `member list` | List every active registry entry of the fleet | `FLEET_ID` | — | yes | [member list](#member-list) |
+| `member prompt` | Keystroke a prompt (or, with `--shell`, a shell command) into a member's pane | `MEMBER_ID` | — | yes | [member prompt](#member-prompt) |
+| `member ping` | Inject an inbox-poll keystroke into a member's pane | `MEMBER_ID` | — | yes | [member ping](#member-ping) |
+| `member capture` | Capture the tail of a member's pane | `MEMBER_ID` | — | yes | [member capture](#member-capture) |
 
 ## Environment variables
 
@@ -64,6 +51,10 @@ Every `CAFLEET_`-prefixed variable cafleet reads:
 
 A flag wins over its environment variable, and the environment variable wins
 over the hardcoded default.
+
+The default database URL expands the home directory at startup. An explicit
+`CAFLEET_DATABASE_URL` must be an absolute-path `sqlite:///` URL; a literal
+`~` in an override is not expanded.
 
 ## Global Options
 
@@ -104,6 +95,77 @@ notification fails after persistence, the command instead exits 1 through
 stderr — see
 [Notification outcome and partial failure](#message-send-partial-failure).
 
+### Member list output {#member-list-output}
+
+| Field | Text column | Text rendering when absent | JSON key | JSON type |
+|---|---|---|---|---|
+| `member_id` | yes | — | `member_id` | integer |
+| `name` | yes | — | `name` | string |
+| `kind` | yes (`director` / `monitor` / `member`) | — | `kind` | string |
+| `backend` | yes | `-` for a placementless row | — (inside `placement`) | — |
+| `pane_id` | yes | `-` placementless; `(pending)` before the pane id is patched | — (inside `placement`) | — |
+| `idle` | yes | `-` when the member has no message activity | `idle` | integer seconds or `null` |
+| `placement` | — | — | `placement` | the placement sub-dict, `null` for a placementless row |
+| `last_sent` | — | — | `last_sent` | ISO timestamp or `null` |
+| `last_recv` | — | — | `last_recv` | ISO timestamp or `null` |
+| `last_ack` | — | — | `last_ack` | ISO timestamp or `null` |
+
+### Member ping output {#member-ping-output}
+
+| Mode | Normal success | Pending-placement skip |
+|---|---|---|
+| text | `Pinged member <name> (<pane_id>) — poll keystroke dispatched.` | `Member <name> has no pane yet (pending placement) — ping skipped; it will poll its inbox on spawn.` |
+| `--json` | `{"member_id": <id>, "pane_id": "<pane_id>", "skipped": false}` | `{"member_id": <id>, "pane_id": null, "skipped": true}` |
+
+### Monitor scan output {#monitor-scan-output}
+
+**Text mode** — one section per roster entry, separated by one blank line.
+`<name>` is the raw DB value (stdout is not a keystroke path, so no
+sanitization). `kind` uses the [three-value member discriminator](data-model.md#members):
+`director`, `monitor`, or `member`. The Director remains first.
+
+```text
+=== <member-id> (<name>; kind=<kind>; coding_agent=<coding_agent>; pane=<pane-id>; captured_at=<ts>) ===
+<content>
+```
+
+An annotated entry (the pane token is `—` when no pane exists; a failed
+capture keeps its real pane id):
+
+```text
+=== <member-id> (<name>; kind=<kind>; coding_agent=<coding_agent>; pane=—) ===
+pane not available (pending placement)
+```
+
+**JSON mode** — a top-level array, same order, one object per entry
+mirroring [`member capture`](#member-capture)'s keys plus `name` / `kind` /
+`coding_agent` / `error`, in this pinned key order:
+
+```json
+{
+  "member_id": 4,
+  "name": "drafter",
+  "kind": "member",
+  "coding_agent": "claude",
+  "pane_id": "%2",
+  "lines": 20,
+  "content": "…",
+  "captured_at": "2026-08-04T11:20:00.000000+00:00",
+  "content_sha256": "…",
+  "error": null
+}
+```
+
+The shared capture path retains typed scan results until the output
+branch. Only the text presenter builds the section headings; JSON presentation
+does not construct or discard them. Both modes preserve the current roster
+order, raw member names, line count, error annotations, and success timestamps.
+
+On an annotated entry `content`, `captured_at`, and `content_sha256` are
+`null`; `error` carries the exact annotation string from text mode;
+`pane_id` is `null` for a pending placement and the real pane id for a
+failed capture. `lines` always echoes the requested depth.
+
 ## JSON output (`--json`) {#json-output}
 
 `--json` is the single output switch — a shared per-subcommand flag, placed
@@ -123,30 +185,9 @@ message bodies; text output is always truncated per
 keeps JSON invocations inside the existing per-subcommand allow patterns (see
 [`permissions.allow` coverage](#permissionsallow-coverage)).
 
-Subcommands accepting `--json`, one row per subcommand:
+The [command index](#subcommand-summary) records JSON availability.
 
-| Subcommand | Group |
-|---|---|
-| `doctor` | (root) |
-| `fleet create` | `fleet` |
-| `fleet list` | `fleet` |
-| `fleet show` | `fleet` |
-| `fleet delete` | `fleet` |
-| `message send` | `message` |
-| `message broadcast` | `message` |
-| `message poll` | `message` |
-| `message ack` | `message` |
-| `message show` | `message` |
-| `member create` | `member` |
-| `member delete` | `member` |
-| `member show` | `member` |
-| `member list` | `member` |
-| `member prompt` | `member` |
-| `member ping` | `member` |
-| `member capture` | `member` |
-| `monitor scan` | `monitor` |
-
-All other subcommands reject `--json` with the parser's unknown-argument
+Commands marked `no` reject `--json` with the parser's unknown-argument
 error (exit 2) — including the root group itself, so a
 pre-subcommand `cafleet --json <grp> <cmd>` does not parse.
 
@@ -227,8 +268,9 @@ positional argument (`TEXT`; named `PROMPT` on `member create`) with `--file
 PATH` as the alternative. Exactly one of the positional and `--file` must be
 supplied — supplying neither or both is the parser's native
 argument-group error (exit 2). `--file -` reads the body from stdin; use
-`--file` for bodies that would exceed the shell's `ARG_MAX` or the
-multiplexer argv ceiling. The body is used verbatim (no stripping); an empty
+`--file` to avoid placing the body in the initial CAFleet invocation. A
+resolved spawn prompt still enters downstream backend/multiplexer argv, so
+keep role-by-path prompts compact. The body is used verbatim (no stripping); an empty
 or whitespace-only body is rejected uniformly across inline / file / stdin —
 the error strings are in [Error Messages](#error-messages).
 
@@ -521,16 +563,9 @@ The command runs a single-transaction ladder — see
    Director), then commit. Disarm all creation guards before calling the
    existing text/JSON output path.
 
-A bootstrap failure attempts rollback of the whole DB transaction. For a
-Herdr run failure inside the callback, the backend tries to kill the known
-pane before the callback returns an error and the broker rolls back. For
-placement insert or commit failure after a successful callback, the broker
-closes its transaction first; then the CLI kills its owned pane. Successful
-rollback leaves no fleet, Director, monitor, or placement rows. A failed
-cleanup is reported with the primary error; the command does not claim a
-complete rollback or unconditional retryability when cleanup is uncertain.
-The [creation failure contract](#creation-failure-compensation) specifies all
-orders and diagnostics. Error strings are in [Error Messages](#error-messages).
+Failures follow the shared [creation compensation order](#creation-failure-compensation),
+including transaction rollback, pane ownership and uncertain-cleanup diagnostics.
+Exact errors are in [Error Messages](#error-messages).
 
 Once its pane boots, the monitor member sends `ready`, launches the
 `cafleet monitor` wake loop, and sends `monitor live` (see
@@ -903,7 +938,7 @@ one root Director by construction, so no override flag exists.
 | `--effort` | no | Reasoning-effort level forwarded to the backend binary, validated per backend before any side effect. Accepted levels, forwarding forms, and rejection strings are in [Reasoning effort](coding-agent-backends.md#reasoning-effort). |
 | `--role` | no | The sole accepted value is `monitor` — registers the member as the fleet's monitor member (see [Monitoring](../concepts/monitoring.md)); any other value is the parser's invalid-value error (exit 2). The bootstrap monitor is spawned by [`fleet create`](#fleet-create); this flag is the mid-run recovery path for re-spawning a dead monitor. A fleet holds at most one active monitor member, and an ordinary `member create` requires one — both guards are in [Error Messages](#error-messages). |
 | positional `PROMPT` | one of | Inline spawn prompt (backend-neutral template). Exactly one of `PROMPT` / `--file`. |
-| `--file PATH` | one of | Path to a UTF-8 file whose contents are the spawn prompt (`-` = stdin). Inline prompts beyond a few KB exceed the multiplexer argv ceiling — use `--file` for long prompts. |
+| `--file PATH` | one of | Path to a UTF-8 file whose contents are the spawn prompt (`-` = stdin). Follow the shared [body-input and transport contract](#text-body-input). |
 | `--json` | no | Output as JSON |
 
 #### Concurrent monitor registration
@@ -929,8 +964,8 @@ The per-backend spawn argv and auto-approval flags live in
 
 #### Spawn-prompt substitution
 
-`cafleet member create` uses the Rust spawn-placeholder mini-formatter on the resolved prompt body,
-substituting exactly four placeholders:
+`member create` and `fleet create` render their resolved spawn prompt bodies
+with the same formatter, substituting exactly four placeholders:
 
 | Placeholder | Substituted value | How the spawned member sees it |
 |---|---|---|
@@ -944,8 +979,8 @@ only environment variable forwarded into the pane is `CAFLEET_DATABASE_URL`.
 The formatter accepts only the four exact names above and doubled literal
 braces (`{{` / `}}`), not Python format specifications, conversions, or
 attribute/index access. An unknown placeholder or
-malformed brace expression exits 2 and attempts to deregister the just-registered
-member; any cleanup failure is reported after the primary error
+malformed brace expression exits 2. Member creation attempts deregistration;
+fleet creation attempts bootstrap transaction rollback. Cleanup failures follow the primary error
 (see [Error Messages](#error-messages)).
 
 The spawn always creates the pane without stealing focus (tmux
@@ -1019,7 +1054,7 @@ placementless target and `(pending — no pane)` for a pending placement.
 any active registry entry — placed or placementless (root Director included).
 
 Registry read — no multiplexer requirement. Text is the compact one-line row;
-the detailed view — `kind` (`director` or `member`), `skills`, and the
+the detailed view — `kind` ([`director` / `monitor` / `member`](data-model.md#members)), `skills`, and the
 placement sub-dict — is the `--json` payload (see
 [Output shapes](#output-shapes)).
 
@@ -1031,29 +1066,10 @@ registry entry of the fleet —
 the root Director, ordinary members, and placementless rows. An empty roster
 prints `0 members.`.
 
-| Field | Text column | Text rendering when absent | JSON key | JSON type |
-|---|---|---|---|---|
-| `member_id` | yes | — | `member_id` | integer |
-| `name` | yes | — | `name` | string |
-| `kind` | yes (`director` / `member`) | — | `kind` | string |
-| `backend` | yes | `-` for a placementless row | — (inside `placement`) | — |
-| `pane_id` | yes | `-` placementless; `(pending)` before the pane id is patched | — (inside `placement`) | — |
-| `idle` | yes | `-` when the member has no message activity | `idle` | integer seconds or `null` |
-| `placement` | — | — | `placement` | the placement sub-dict, `null` for a placementless row |
-| `last_sent` | — | — | `last_sent` | ISO timestamp or `null` |
-| `last_recv` | — | — | `last_recv` | ISO timestamp or `null` |
-| `last_ack` | — | — | `last_ack` | ISO timestamp or `null` |
+Field projection and absent values are in [Member list output](#member-list-output).
 
-Rows are ordered by `member_id ASC`. `last_sent` is the maximum creation time
-of every message sent by the member, including broadcast summaries;
-`last_recv` is the maximum creation time of owned unicast deliveries;
-`last_ack` is the maximum status timestamp of owned completed unicast
-deliveries. `idle` uses the greatest non-null string among all three, parsed
-with the existing lenient reader against one `now` for the list. All null or
-an unparseable selected value yields null; no older timestamp fallback is
-used. Text remains humanized as `Ns` / `Nm` / `Nh`.
-A zero clamp applies to the final whole-second idle result; it does not
-change stored future timestamps or parsing. See the [activity contract](data-model.md#query-and-activity-contracts).
+Rows and activity follow the [data-model query contract](data-model.md#query-and-activity-contracts).
+Text idle values render as `Ns` / `Nm` / `Nh`.
 Per-member detail such as `description` and `registered_at` lives on
 [`member show`](#member-show).
 
@@ -1121,10 +1137,7 @@ member's inbox is intact and it polls it on spawn, so there is nothing a ping
 would add. Exit code 0 on both success paths in every mode; the `skipped`
 JSON key is present on **both** paths (stable schema).
 
-| Mode | Normal success | Pending-placement skip |
-|---|---|---|
-| text | `Pinged member <name> (<pane_id>) — poll keystroke dispatched.` | `Member <name> has no pane yet (pending placement) — ping skipped; it will poll its inbox on spawn.` |
-| `--json` | `{"member_id": <id>, "pane_id": "<pane_id>", "skipped": false}` | `{"member_id": <id>, "pane_id": null, "skipped": true}` |
+Both success projections are in [Member ping output](#member-ping-output).
 
 A keystroke non-delivery, an unknown member, and a missing placement row all
 still exit 1.
@@ -1257,52 +1270,8 @@ an annotated entry. A fleet with no members scans the Director's pane only.
 The scan always completes: an annotated entry never aborts the remaining
 captures, and a scan whose every entry is annotated still exits 0.
 
-**Text mode** — one section per roster entry, separated by one blank line.
-`<name>` is the raw DB value (stdout is not a keystroke path, so no
-sanitization). `kind` is `director` or `member`, making the Director row
-self-identifying beyond its first position.
-
-```text
-=== <member-id> (<name>; kind=<kind>; coding_agent=<coding_agent>; pane=<pane-id>; captured_at=<ts>) ===
-<content>
-```
-
-An annotated entry (the pane token is `—` when no pane exists; a failed
-capture keeps its real pane id):
-
-```text
-=== <member-id> (<name>; kind=<kind>; coding_agent=<coding_agent>; pane=—) ===
-pane not available (pending placement)
-```
-
-**JSON mode** — a top-level array, same order, one object per entry
-mirroring [`member capture`](#member-capture)'s keys plus `name` / `kind` /
-`coding_agent` / `error`, in this pinned key order:
-
-```json
-{
-  "member_id": 4,
-  "name": "drafter",
-  "kind": "member",
-  "coding_agent": "claude",
-  "pane_id": "%2",
-  "lines": 20,
-  "content": "…",
-  "captured_at": "2026-08-04T11:20:00.000000+00:00",
-  "content_sha256": "…",
-  "error": null
-}
-```
-
-The shared capture path retains typed scan results until the output
-branch. Only the text presenter builds the section headings; JSON presentation
-does not construct or discard them. Both modes preserve the current roster
-order, raw member names, line count, error annotations, and success timestamps.
-
-On an annotated entry `content`, `captured_at`, and `content_sha256` are
-`null`; `error` carries the exact annotation string from text mode;
-`pane_id` is `null` for a pending placement and the real pane id for a
-failed capture. `lines` always echoes the requested depth.
+Text/JSON layouts, key order and annotated-entry nulls are in
+[Monitor scan output](#monitor-scan-output).
 
 | Exit | Meaning |
 |---|---|
@@ -1313,15 +1282,20 @@ failed capture. `lines` always echoes the requested depth.
 
 ## Error Messages
 
+Application errors print as text on stderr, including with `--json`; the flag
+selects successful output only. Shared guards and backend validation own their
+exact strings at the linked sections. The rows below retain command applicability
+and exit categories, and define the remaining exact diagnostics.
+
 | Command | Situation | Error message | Exit | Notes |
 |---|---|---|---|---|
-| (any surface resolving a config dir) | A set config-path variable holds a non-absolute value (empty string and relative paths included) | `Error: <VAR> must be an absolute path (got '<value>')` | 1 | See [Config-dir resolution](#config-dir-resolution); `doctor` renders it as a per-agent issue instead |
-| (any non-setup command) | The recorded schema version is behind the embedded head | `Error: database schema is outdated (schema <M>, head <N>); run 'cafleet setup'` | 1 | See [Schema-version guard](#schema-version-guard) |
-| (any non-setup command) | No schema ledger and no app tables (missing or empty DB file) | `Error: no cafleet database; run 'cafleet setup'` | 1 | See [Schema-version guard](#schema-version-guard) |
-| (any non-setup command) | No schema ledger but app tables present | `Error: database has tables but no schema history — not a cafleet database?` | 1 | See [Schema-version guard](#schema-version-guard) |
-| (any non-setup command) | The recorded schema version is ahead of the embedded head | `Error: database schema <M> is newer than this cafleet (head <N>); upgrade cafleet` | 1 | See [Schema-version guard](#schema-version-guard) |
-| (any fleet-scoped command) | No agent has an `asset_installs` row at its currently-resolved path | `Error: no assets install is recorded at the resolved paths; run 'cafleet setup' to install` | 1 | See [Stale-assets guard](#stale-assets-guard) |
-| (any fleet-scoped command) | An `asset_installs` row at a resolved path differs from the runtime CLI version | `Error: stale assets detected (<agent>=<recorded>[, ...]; CLI <runtime>); run 'cafleet setup' to reinstall` | 1 | See [Stale-assets guard](#stale-assets-guard) |
+| (any surface resolving a config dir) | A set config-path variable holds a non-absolute value (empty string and relative paths included) | [Config-path validation](#config-dir-resolution) | 1 | See [Config-dir resolution](#config-dir-resolution); `doctor` renders it as a per-agent issue instead |
+| (any non-setup command) | The recorded schema version is behind the embedded head | [Schema-version guard](#schema-version-guard) | 1 | See [Schema-version guard](#schema-version-guard) |
+| (any non-setup command) | No schema ledger and no app tables (missing or empty DB file) | [Schema-version guard](#schema-version-guard) | 1 | See [Schema-version guard](#schema-version-guard) |
+| (any non-setup command) | No schema ledger but app tables present | [Schema-version guard](#schema-version-guard) | 1 | See [Schema-version guard](#schema-version-guard) |
+| (any non-setup command) | The recorded schema version is ahead of the embedded head | [Schema-version guard](#schema-version-guard) | 1 | See [Schema-version guard](#schema-version-guard) |
+| (any fleet-scoped command) | No agent has an `asset_installs` row at its currently-resolved path | [Stale-assets guard](#stale-assets-guard) | 1 | See [Stale-assets guard](#stale-assets-guard) |
+| (any fleet-scoped command) | An `asset_installs` row at a resolved path differs from the runtime CLI version | [Stale-assets guard](#stale-assets-guard) | 1 | See [Stale-assets guard](#stale-assets-guard) |
 | `member create` | `--coding-agent opencode` with no agent preset at the resolved preset path | `Error: opencode agent preset not found at <preset>; run 'cafleet setup --coding-agent opencode' first` | 1 | `<preset>` is the resolved `<preset base>/agents/cafleet.md` — see [Config-dir resolution](#config-dir-resolution) |
 | `setup` | Existing duplicate active monitors prevent a pending migration | `active monitor duplicates prevent migration: fleet <id>: members <ids>; ...` | 1 | DB-half failure; see [duplicate-monitor recovery](../concepts/storage.md#duplicate-monitor-recovery) |
 | `setup` | The `asset_installs` table is missing as the assets half starts | `the database schema is missing or outdated; run 'cafleet setup' first` | 1 | An assets-half failure, after a db-half failure or an externally broken schema |
@@ -1348,7 +1322,7 @@ failed capture. `lines` always echoes the requested depth.
 | `message send` / `message broadcast` | The sender is unknown or inactive | `Error: Sender member not found or not active: <from-member-id>` | 1 | — |
 | `message send` | The recipient is unknown or inactive | `Error: Destination member not found: <to-member-id>` | 1 | — |
 | `message send` | Sender and recipient in different fleets | `Error: members <from-member-id> and <to-member-id> are not in the same fleet.` | 1 | — |
-| `message send` | The row was persisted but the attempted pane notification failed | `Error: Message <message-id> was persisted, but pane notification failed: <raw backend error>. Do not resend this message. Recover the recipient pane, then run 'cafleet member ping <recipient-id>' or have the recipient run 'cafleet message poll <recipient-id>'.` | 1 | The row stays `input_required`; self-send and no-pane skips stay exit 0 — see [message send](#message-send-partial-failure) |
+| `message send` | The row was persisted but the attempted pane notification failed | [Exact partial-failure diagnostic](#message-send-partial-failure) | 1 | The row stays `input_required`; self-send and no-pane skips stay exit 0 — see [message send](#message-send-partial-failure) |
 | `member prompt` | Missing positional `TEXT` | `Error: Missing argument 'TEXT'.` | 2 | — |
 | `member prompt` | `\n` or `\r` in the text | `Error: text may not contain newlines.` | 2 | Checked first, against the original text — a `"\n"`-only input raises this, not the empty-text error |
 | `member prompt` | Empty / whitespace-only text | `Error: text may not be empty.` | 2 | — |
@@ -1363,10 +1337,10 @@ failed capture. `lines` always echoes the requested depth.
 | `message send` / `message broadcast` / `member create` | `--file <path>` to a non-existent path or non-regular file | `Error: --file <path>: file does not exist or is not a regular file.` | 1 | — |
 | `message send` / `message broadcast` / `member create` | `--file <path>` to an unreadable file | `Error: --file <path>: file is not readable.` | 1 | — |
 | `message send` / `message broadcast` / `member create` | `--file <path>` to a file containing invalid UTF-8 | `Error: --file <path>: file is not valid UTF-8.` | 1 | — |
-| `member create` | `--coding-agent opencode --model` violating the `<provider-id>/<model-id>` format | `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').` | 2 | Fires before any side effect |
-| `member create` | `--effort` with a level unknown to the claude backend | `Error: --effort for the claude backend must be one of low, medium, high, xhigh, max (got '<value>').` | 2 | Fires before any side effect |
-| `member create` | `--coding-agent codex --effort` with an unknown level | `Error: --effort for the codex backend must be one of minimal, low, medium, high, xhigh (got '<value>').` | 2 | Fires before any side effect |
-| `member create` | `--coding-agent opencode --effort` with any value | `Error: opencode does not support reasoning effort.` | 2 | Fires before any side effect |
+| `member create` | `--coding-agent opencode --model` violating the `<provider-id>/<model-id>` format | [Backend model error](coding-agent-backends.md#model-selection) | 2 | Fires before any side effect |
+| `member create` | `--effort` with a level unknown to the claude backend | [Backend effort errors](coding-agent-backends.md#reasoning-effort) | 2 | Fires before any side effect |
+| `member create` | `--coding-agent codex --effort` with an unknown level | [Backend effort errors](coding-agent-backends.md#reasoning-effort) | 2 | Fires before any side effect |
+| `member create` | `--coding-agent opencode --effort` with any value | [Backend effort errors](coding-agent-backends.md#reasoning-effort) | 2 | Fires before any side effect |
 | `member create` / `fleet create` | An unknown `{placeholder}` in the prompt | `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}. Double literal braces ({{, }}) to keep them as text.` | 2 | `member create` attempts deregistration; `fleet create` attempts bootstrap transaction rollback; cleanup failures follow the primary error |
 | `member create` / `fleet create` | A malformed brace expression in the prompt | `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` | 2 | `member create` attempts deregistration; `fleet create` attempts bootstrap transaction rollback; cleanup failures follow the primary error |
 | `member create` | `--coding-agent` omitted and the spawning Director not found in the fleet | `Error: cannot resolve the member's coding agent: Director <director-id> not found in fleet <fleet-id>. Re-run with an explicit --coding-agent.` | 1 | Nothing spawned |

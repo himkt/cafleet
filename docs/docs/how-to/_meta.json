@@ -1,5 +1,5 @@
 [
-  { "type": "file", "name": "mixed-backend-team", "label": "Mixed-backend Team" },
-  { "type": "file", "name": "design-doc-development", "label": "Spec Driven Dev" },
+  { "type": "file", "name": "mixed-backend-team", "label": "Run a fleet" },
+  { "type": "file", "name": "design-doc-development", "label": "Design document workflow" },
   { "type": "file", "name": "use-the-webui", "label": "Admin WebUI" }
 ]

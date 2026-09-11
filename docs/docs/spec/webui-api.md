@@ -33,6 +33,49 @@ HTTP presenters convert typed broker records to the response shapes below.
 Preserve nulls and field names; invalid stored values or missing required
 member names return a 500 detail response.
 
+## Message responses {#message-responses}
+
+The three message endpoints compare as follows (this table owns their row-selection, exclusion, ordering, and cap attributes):
+
+| Endpoint | Rows returned | Excluded | Ordering | Row cap |
+|---|---|---|---|---|
+| `GET /api/members/{member_id}/inbox` | Messages where `owner_member_id = member_id` | `type == "broadcast_summary"` | `status_timestamp DESC, message_id DESC` (newest status update first; id breaks ties) | unbounded |
+| `GET /api/members/{member_id}/sent` | Messages where `from_member_id = member_id` | `type == "broadcast_summary"` | `status_timestamp DESC, message_id DESC` (newest status update first; id breaks ties) | unbounded |
+| `GET /api/timeline` | `type == "unicast"` deliveries, scoped through the owning member join | All non-delivery rows, including `broadcast_summary` | `status_timestamp DESC, message_id DESC` (newest status update first; id breaks ties) | SQL limit of 200 delivery rows, applied after filtering; may split a broadcast group; no pagination |
+
+**Response** (200 OK):
+
+```json
+{
+  "messages": [
+    {
+      "message_id": 42,
+      "from_member_id": 4,
+      "from_member_name": "Member A",
+      "to_member_id": 5,
+      "to_member_name": "Member B",
+      "type": "unicast",
+      "status": "input_required",
+      "created_at": "2026-03-29T10:00:00+00:00",
+      "status_timestamp": "2026-03-29T10:00:00+00:00",
+      "origin_message_id": null,
+      "body": "Hello, Member B!"
+    }
+  ]
+}
+```
+
+All three endpoints share this row formatter and `messages` wrapper.
+`status_timestamp` changes on ACK; `created_at` stays fixed. The timeline
+uses these differently for API selection and client display, as described
+[below](#get-apitimeline--unified-fleet-timeline).
+
+The wire `type` distinguishes `unicast` deliveries, with non-null `to_member_id` and `to_member_name`, from `broadcast_summary` rows, whose recipient id and name are null. The frontend models this distinction and narrows inbox, sent, and timeline data to delivery rows. Existing response keys and envelopes are preserved.
+
+The `body` field is the message's `text` column.
+
+**Status values**: `input_required` (Pending), `completed` (Acknowledged).
+
 ## Endpoints
 
 | Method | Path | Returns | X-Fleet-Id required |
@@ -211,18 +254,16 @@ there is no application-level cap below `i64::MAX`.
 {"wake_interval_seconds": 300}
 ```
 
-**Errors** (all `{"detail": <string>}`-shaped):
+**Errors**, in addition to [Request Headers](#request-headers), use the
+shared [error format](#error-format):
 
 | Status | `detail` | Trigger |
 |---|---|---|
-| 400 | `X-Fleet-Id header required` | The `X-Fleet-Id` header is missing or empty |
-| 400 | `X-Fleet-Id must be an integer` | The header value is not an integer |
 | 422 | `invalid JSON body: <parse error>` | The request body is not parsable JSON |
 | 422 | `wake_interval_seconds must be a non-negative integer` | `wake_interval_seconds` is missing, or not an integer in `0..=i64::MAX` |
-| 404 | `Fleet not found` | The header names a fleet id that does not exist |
 | 404 | `monitor has never run for this fleet` | The fleet has no `monitor_runtime` row |
 
-Resolution order (the table's row order): header errors, then body
+Resolution order: shared header errors, then body
 validation, then the fleet check, then the row update — matching
 `POST /api/messages/send`, whose body parse likewise precedes the fleet
 check, so an unknown fleet plus an invalid body yields 422 on both
@@ -254,113 +295,52 @@ ignored.
 {"wake_requested_at": "2026-06-13T04:52:00+00:00"}
 ```
 
-**Errors** (all `{"detail": <string>}`-shaped):
+**Errors**, in addition to [Request Headers](#request-headers), use the
+shared [error format](#error-format):
 
-| Status | `detail` | Trigger |
-|---|---|---|
-| 400 | `X-Fleet-Id header required` | The `X-Fleet-Id` header is missing or empty |
-| 400 | `X-Fleet-Id must be an integer` | The header value is not an integer |
-| 404 | `Fleet not found` | The header names a fleet id that does not exist |
-| 404 | `monitor is not running for this fleet` | The fleet's monitor loop is not live — no runtime row, a cleared slot, or a stale heartbeat — or the row vanished between the liveness check and the write (e.g. a concurrent fleet delete) |
+After header validation and fleet lookup, a non-live loop (no runtime row,
+a cleared slot or stale heartbeat), or a row that vanishes between the
+liveness check and write, returns 404 with
+`monitor is not running for this fleet`.
 
 ### GET /api/members/{member_id}/inbox — Inbox Messages
 
 Returns messages received by the member. Consumed by the member detail view's **Inbox** tab in the admin WebUI.
 
-The three message endpoints compare as follows (this table owns their row-selection, exclusion, ordering, and cap attributes):
-
-| Endpoint | Rows returned | Excluded | Ordering | Row cap |
-|---|---|---|---|---|
-| `GET /api/members/{member_id}/inbox` | Messages where `owner_member_id = member_id` | `type == "broadcast_summary"` | `status_timestamp DESC, message_id DESC` (newest status update first; id breaks ties) | unbounded |
-| `GET /api/members/{member_id}/sent` | Messages where `from_member_id = member_id` | `type == "broadcast_summary"` | `status_timestamp DESC, message_id DESC` (newest status update first; id breaks ties) | unbounded |
-| `GET /api/timeline` | `type == "unicast"` deliveries, scoped through the owning member join | All non-delivery rows, including `broadcast_summary` | `status_timestamp DESC, message_id DESC` (newest status update first; id breaks ties) | SQL limit of 200 delivery rows, applied after filtering; may split a broadcast group; no pagination |
-
-**Response** (200 OK):
-
-```json
-{
-  "messages": [
-    {
-      "message_id": 42,
-      "from_member_id": 4,
-      "from_member_name": "Member A",
-      "to_member_id": 5,
-      "to_member_name": "Member B",
-      "type": "unicast",
-      "status": "input_required",
-      "created_at": "2026-03-29T10:00:00+00:00",
-      "status_timestamp": "2026-03-29T10:00:00+00:00",
-      "origin_message_id": null,
-      "body": "Hello, Member B!"
-    }
-  ]
-}
-```
-
-All message endpoints (inbox, sent, timeline) share the same row formatter, so the field set is identical to `GET /api/timeline` — including `status_timestamp` and `origin_message_id` (see the timeline section below for their semantics).
-
-The wire `type` distinguishes `unicast` deliveries, with non-null `to_member_id` and `to_member_name`, from `broadcast_summary` rows, whose recipient id and name are null. The frontend models this distinction and narrows inbox, sent, and timeline data to delivery rows. Existing response keys and envelopes are preserved.
-
-The `body` field is the message's `text` column.
-
-**Status values**: `input_required` (Pending), `completed` (Acknowledged).
+Returns the shared [message response](#message-responses), with the inbox
+selection defined there.
 
 ### GET /api/members/{member_id}/sent — Sent Messages
 
-Returns messages sent by the member (see the comparison table above). Consumed by the member detail view's **Sent** tab in the admin WebUI.
+Returns messages sent by the member, using the [shared selection and response](#message-responses). Consumed by the member detail view's **Sent** tab in the admin WebUI.
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
-Same response format as inbox; both endpoints return the full history.
+Inbox and sent both return full history, without the timeline cap.
 
 ### GET /api/timeline — Unified Fleet Timeline
 
-Returns the fleet's unified message timeline (see the comparison table above). Consumed by the Discord-style admin dashboard, which groups delivery rows sharing an `origin_message_id` into a single broadcast entry client-side.
+Returns the fleet's unified message timeline, using the [shared selection and response](#message-responses). Consumed by the Discord-style admin dashboard, which groups delivery rows sharing an `origin_message_id` into a single broadcast entry client-side.
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
 
 Fleet scoping follows `messages.owner_member_id → members.member_id → members.fleet_id`. Only delivery rows whose **owning member** belongs to the header fleet are returned. SQL selects `type = 'unicast'` before ordering and applying the 200-row cap.
 
-**Response** (200 OK):
-
-```json
-{
-  "messages": [
-    {
-      "message_id": 50,
-      "from_member_id": 4,
-      "from_member_name": "Claude-A",
-      "to_member_id": 5,
-      "to_member_name": "reviewer-bot",
-      "type": "unicast",
-      "status": "input_required",
-      "created_at": "2026-04-11T10:00:00+00:00",
-      "status_timestamp": "2026-04-11T10:00:00+00:00",
-      "origin_message_id": null,
-      "body": "Please review PR #42"
-    }
-  ]
-}
-```
+**Response** (200 OK): the shared [message response](#message-responses).
 
 The frontend orders the returned entries by creation time, ascending for newest-at-bottom chat rendering. This is distinct from the API's selection by most recent status update: an ACK updates `status_timestamp` but leaves `created_at` unchanged.
 
 **Exclusions**: `broadcast_summary` rows never enter the timeline response or consume its row cap. They remain stored and accessible through `message show` and the broadcast command's result. A summary is created in the `completed` state; that state is not a recipient ACK. The frontend also ignores summary rows defensively before grouping if they appear in its input.
 
-**Broadcast grouping**: Every row carries an `origin_message_id` field:
-
-| Case | `origin_message_id` |
-|---|---|
-| Unicast delivery | `null` |
-| Broadcast delivery | The broadcast's summary message id (shared across all N delivery rows in the same broadcast) |
-
+**Broadcast grouping** uses the [durable origin relationships](data-model.md#broadcast-grouping).
 The client groups delivery rows by `origin_message_id` using an explicit null check: non-null rows sharing a value form one broadcast entry; null rows are standalone unicast entries. Each broadcast entry's sort key is the minimum `created_at` among its returned delivery rows. A standalone unicast uses its own `created_at`.
 
 **Partial groups and counts**: the cap applies to delivery rows, not whole broadcasts. It can omit some recipients of a group. Recipient counts and the ReactionBar's ACK indicators describe only the returned deliveries; the UI explains this limit and does not present them as a whole-broadcast completion rate. Omitted recipients are not fetched to complete a group.
 
 For two pending broadcast deliveries and their stored summary, the timeline shows two recipients and zero ACKs. Acknowledging one delivery produces one ACK; acknowledging both produces two. The summary contributes neither a recipient nor an ACK. Empty or summary-only input produces no timeline entries.
 
-**ACK timestamps**: Per-recipient ACK time is read from the `status_timestamp` of a `completed` delivery row. Delivery messages make exactly one state transition over their lifetime (`input_required → completed` on ACK), so for `status == "completed"` rows `status_timestamp` IS the ACK moment. See [Data model § Broadcast Grouping](data-model.md#broadcast-grouping).
+**ACK timestamps** use each completed delivery's `status_timestamp`, per
+[Data model § Broadcast Grouping](data-model.md#broadcast-grouping).
 
 ### POST /api/messages/send — Send Message
 

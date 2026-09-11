@@ -6,8 +6,8 @@ The bash-via-Director protocol is the **fallback** for a harness-denied command.
 
 | Primitive | Purpose | Permission gate |
 |---|---|---|
-| [`cafleet member prompt`](director.md#member-prompt) | Keystroke dispatch with an operator-controlled `TEXT` body. `--shell` keystrokes `! <cmd>` + `Enter`; the plain form keystrokes `TEXT` + `Enter` as a submitted user turn. | `permissions.ask` |
-| [`cafleet member ping`](director.md#member-ping-manual-inbox-poll) | Fixed-action inbox-poll; no operator-controlled body. | `permissions.allow` |
+| [`cafleet member prompt`](../roles/director.md#member-prompt) | Keystroke dispatch with an operator-controlled `TEXT` body. `--shell` keystrokes `! <cmd>` + `Enter`; the plain form keystrokes `TEXT` + `Enter` as a submitted user turn. | `permissions.ask` |
+| [`cafleet member ping`](../roles/director.md#member-ping-manual-inbox-poll) | Fixed-action inbox-poll; no operator-controlled body. | `permissions.allow` |
 
 ## The two forms: shell vs plain
 
@@ -29,7 +29,7 @@ Reconsider first (per-backend denial semantics above): most denials are a wrong 
 2. **Wait** for the Director's `member prompt --shell` dispatch to land in your pane; the bang-shortcut output appears in your next-turn context.
 3. Process the output; reply to the Director if a follow-up is expected.
 
-The forbidden behaviors (never fake `<bash-input>` markup or fabricate output, never answer from stale context, never assume Bash is denied without trying) are canonical in [`roles/member.md`](../roles/member.md#what-you-must-never-do). One routing-specific addition: never offer the operator a list of routing options — the operator already asked for the command to run; routing is implementation. If your `cafleet message send` is *also* harness-denied, tell the operator both are denied (the only time you ask the operator for help); otherwise route silently.
+Observed-result reporting and actual-command attempts are required by [`roles/member.md`](../roles/member.md#command-execution). One routing-specific addition: never offer the operator a list of routing options — the operator already asked for the command to run; routing is implementation. If your `cafleet message send` is *also* harness-denied, tell the operator both are denied (the only time you ask the operator for help); otherwise route silently.
 
 ## Director-side dispatch
 
@@ -41,7 +41,7 @@ cafleet member ping <member-id>
 cafleet message ack <message-id>
 ```
 
-The `member ping` is required — `member prompt --shell` only stages the bang output; the ping advances the member's turn so it consumes the output.
+After a successful `member prompt --shell`, `member ping` advances the member's turn to consume the staged output; then ACK the request. This entire requested `prompt --shell → ping → ACK` sequence is the explicit capture-gate exception in [Supervision](supervision.md#the-pre-ping-capture-gate). Run each command in its own shell invocation. A non-zero shell dispatch skips the success ping: report the observed failure and close or route the request. Plain prompt has no follow-up ping.
 
 **Serialize.** Process requests in poll order, one at a time: `prompt --shell → ping → ack → next`. Two `member prompt` dispatches firing concurrently against the same pane race the keystroke sequence and corrupt output. Within one member, `prompt --shell → ping → prompt --shell → ping`; never two concurrent prompt dispatches.
 

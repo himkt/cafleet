@@ -14,15 +14,13 @@ conflict, this file wins.
 
 ## Required reading
 
-Before your first action other than these Reads, Read every file in the
-**Load-bearing** table below, in order. Identify your coding agent first: your
-spawn prompt's `CODING AGENT:` line names it.
+Use an available non-shell text reader; prerequisite file reads may use shell when it is the only reader. Complete the following before ready and loop launch. Your `CODING AGENT:` line selects your local backend.
 
-**Load-bearing — Read in order before acting:**
-
-| # | Read | What you lose if you skip it |
-|---|------|------------------------------|
-| 1 | your overlay section [`reference/coding-agents.md#<name>`](../reference/coding-agents.md) — read **and resolve** it (see *Resolve your overlay* in [`SKILL.md`](../SKILL.md)) | unresolved `{token}`s, guessed values, ignored backend notes |
+| # | Read | Responsibility |
+|---|---|---|
+| 1 | Your backend section in [coding-agents.md](../reference/coding-agents.md) | Resolve Runtime bindings and lifecycle notes before startup. |
+| 2 | [CAFleet core](../SKILL.md) | Load through the backend-supported loader; use the core broker and command-isolation contract. |
+| 3 | [BASE member states](../reference/base-dir.md#member-input-and-write-states) | Apply inherited-path/disabled-audit rules if your prompt supplies output work. |
 
 You are a **cross-section reader** (shared with the Director): on each wake
 you classify panes of members on any backend, so for capture cues you read
@@ -141,7 +139,7 @@ environment variable supplies them; do not ask the operator for them.
 ## Spawn-prompt skeleton delta (Director-side note)
 
 This role's prompt follows the canonical spawn-prompt skeleton in
-[`reference/director.md`](../reference/director.md) § *Canonical
+[`roles/director.md`](director.md) § *Canonical
 spawn-prompt skeleton*. At bootstrap it is delivered via `cafleet fleet
 create --monitor-file <path> --monitor-model {monitor_model}` (the monitor default from the Director backend's canonical Role defaults
 table in the unified reference); on

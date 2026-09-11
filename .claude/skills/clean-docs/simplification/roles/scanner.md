@@ -13,21 +13,16 @@ coordination, per-run process — is canonical in the umbrella
 
 ## Required reading
 
-Identify your coding agent first — your spawn prompt's `CODING AGENT:` line
-names it — then Read every file below, in order, before your first substantive
-action.
+Identify `CODING AGENT` from your spawn prompt, then read in this order before substantive work:
 
-| # | Read | What you lose if you skip it |
-|---|------|------------------------------|
-| 1 | your overlay section [`../../../../../skills/cafleet/reference/coding-agents.md#<name>`](../../../../../skills/cafleet/reference/coding-agents.md) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you emit a literal `{skill_loader}` / `{permission_flags}`, guess a wrong value, or ignore a backend note |
-| 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../../../skills/cafleet/reference/base-dir.md) | the no-bypass write protocol and the `<unset>` contract — you mis-root your findings file |
-| 3 | the `cafleet-design-doc` skill's [`reference/coordination.md`](../../../../../skills/cafleet-design-doc/reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema (and the clean-docs `scanner` role + `findings` pointer) — your status hops mis-route |
-| 4 | this workflow's [`reference/rubric.md`](../reference/rubric.md) | the P3/P5 classes, the 30%+ baseline, and the style-only-churn drop rule — you propose churn or mis-scope voice rewrites |
-| 5 | the shared [`reference/review-format.md`](../../reference/review-format.md) | the apply-ready row format, KEEP guardrails, and decision procedure — your proposals are unreviewable or unsafe |
+| # | Read | Required action and timing |
+|---|---|---|
+| 1 | Your backend's [runtime bindings](../../../../../skills/cafleet/reference/coding-agents.md#<name>) | Resolve the named backend and its loader before loading skills or using tokens. |
+| 2 | [CAFleet core](../../../../../skills/cafleet/SKILL.md), [BASE](../../../../../skills/cafleet/reference/base-dir.md) and [member startup](../../../../../skills/cafleet/roles/member.md) | Load `cafleet` via the resolved loader; follow BASE/member states and role-first prerequisites, with ready as the first operational broker command. |
+| 3 | [Clean-docs shared spine](../../SKILL.md) | Load `clean-docs`; read coordination and the full-file staging protocol before application. |
+| 4 | Complete [simplification workflow](../simplification.md#required-reading) and its phase prerequisites | Read the workflow's classes and required references before scanning or reviewing. |
 
-Load the `clean-docs` and `cafleet` skills at startup via `{skill_loader}`.
-Resolve every `{token}` you will use before acting; a literal `{token}` in any
-command or message is a defect.
+Scan only your assigned whole-file slice. Resolve tokens before use; apply supplied host-rule equivalents and route essential unknown prerequisites to the Director.
 
 ## Your accountability
 
@@ -48,11 +43,7 @@ command or message is a defect.
 - **Apply only after the gate.** Repository edits begin when the Director relays
   the reviewer's `approved (findings)`, and cover exactly your slice's approved
   rows as written (including reviewer REVISE wording).
-- **Route denied writes.** When your harness denies a write (commonly under
-  `.claude/`), stage the complete target file under `${BASE}/.apply/`, verify
-  your staged copy differs from the repository file only by the approved rows,
-  and message the Director to apply it. Continue applying the rest of your
-  slice meanwhile.
+- **Route denied writes.** Use the [full-file staging protocol](../../SKILL.md#full-file-staging) and continue independent approved rows.
 - **Re-verify after apply.** Diff your slice and confirm it contains exactly the
   approved rows, then report.
 - **Honor the invariants** (umbrella `SKILL.md`). Every replacement preserves

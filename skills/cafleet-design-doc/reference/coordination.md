@@ -2,7 +2,21 @@
 
 Mechanics for inter-member coordination. The design document is the substantive communication medium; the `cafleet message send` body carries only a single-line **verb + pointer** poke. Substantive content (feedback, reports, escalation reasons, review items) lives in inline `COMMENT(role)` markers in the design doc — except for source-anchored review findings, which are annotated in the source file at `<file>:<line>` because that is where the finding lives.
 
-**Scope.** The verb + pointer schema applies to the create and execute workflows. Two exchanges are **exempt** and ride as free-form multi-line bodies: the create workflow's **Step-2 clarification exchange** (the Drafter's clarifying questions + the Director's user-answers relay, before the design doc exists), and the interview workflow's Director-Analyzer messages (which share only the inline `COMMENT(user-relay)` marker convention — the Analyzer's question-list deliverable is a multi-line payload).
+## Payload exemptions
+
+Create and execute iterative coordination uses the verb/pointer schema. Exactly three exchanges use free-form complete payloads:
+
+| Exchange | Producer and receiver | Boundary |
+|---|---|---|
+| Create pre-draft clarification | Drafter questions and Director user-answer relay | Before design-document content exists; normal coordination resumes with the first draft. |
+| Interview Director/Analyzer exchange | Assignment, numbered question list and corrective replies | Analyzer remains read-only; Director persists questions and answers. |
+| Execute Verifier tool discovery | Verifier's initial tool-and-MCP inventory to Director | First substantive payload after ready; Phase 2 findings use ordinary paired markers. |
+
+Every producer and receiver retrieves the full body using `cafleet message poll <member-id> --json` or `cafleet message show <message-id> --json`, then ACKs the consumed delivery. Text previews and text polls truncate bodies; use complete JSON for questions, answers and inventories. Long or multiline bodies use `message send --file <path>` or `--file -`, preserving the exact payload.
+
+Fresh-Drafter clarification permits hidden BASE-rooted broker-payload artifacts before drafting; these contain questions, not design-document content. The substantive clarification gate remains: receive answers before creating or writing the design document. Apply the BASE write guards and explicit-output-path rules to payload files.
+
+The Analyzer's no-file-edit boundary remains intact. Send long Analyzer payloads with `message send --file -`, supplying stdin through the backend's supported execution tool to one isolated CAFleet invocation. This uses file input without a filesystem artifact. If that input mechanism is unavailable, route the concrete transport limitation to the Director through the existing permitted path, preserve the complete payload, and report delivery only from observed results. This is not permission to create a payload file or persist Analyzer state. Other read-only producers use this same transport branch when filesystem writes are outside their scope.
 
 ## Core Principle
 
@@ -45,7 +59,7 @@ Exactly 3 canonical forms. Use the tightest one that locates the target.
 
 ## Message Format
 
-Every `cafleet message send` body, when used to coordinate within a create or execute workflow team, MUST match:
+Outside [payload exemptions](#payload-exemptions) and anchorless statuses, every create/execute coordination body must match:
 
 ```
 <verb> (<pointer>)
@@ -105,7 +119,7 @@ Users may give feedback in ordinary language; they need not write markers or
 choose a pointer. The Director identifies the affected paragraph (or `doc` for
 a document-wide issue), records each request as `COMMENT(user-relay)` there,
 and routes it through the workflow. Ask only about ambiguous meaning or scope.
-User-written markers remain accepted. This changes no member role obligations,
+For source/test feedback, the Director selects the affected file/line pointer; the workflow chooses its owner, including Programmer routing when no Tester exists. User-written markers remain accepted. This changes no member role obligations,
 verb/pointer pairing, marker removal, or approval preconditions.
 
 ## Issue Markers vs Status Markers (split)

@@ -16,9 +16,19 @@ Minted ids are **never reused** and real ids are always `>= 1`.
 
 CLI member lists include send/receive/ACK activity; WebUI rosters query member
 and placement data directly. Include deregistered roster members only when
-they own messages. Idle uses the latest activity timestamp and clamps future
-activity to zero. Name lookup deduplicates ids and binds batches of at most
+they own messages. Name lookup deduplicates ids and binds batches of at most
 500, returning known active or deregistered members in id order.
+
+Rows are ordered by `member_id ASC`. `last_sent` is the maximum creation time
+of every message sent by the member, including broadcast summaries;
+`last_recv` is the maximum creation time of owned unicast deliveries;
+`last_ack` is the maximum status timestamp of owned completed unicast
+deliveries. `idle` uses the greatest non-null string among all three, parsed
+with the existing lenient reader against one `now` for the list. All null or
+an unparseable selected value yields null; no older timestamp fallback is
+used.
+A zero clamp applies to the final whole-second idle result; it does not
+change stored future timestamps or parsing.
 
 ## Tables
 
@@ -36,17 +46,11 @@ activity to zero. Name lookup deduplicates ids and binds batches of at most
 `cafleet fleet create` writes the fleet row, the root Director (and its
 placement), the `director_member_id` back-reference, and the monitor member
 (its row, its monitor card marker, and — after the pane spawn — its
-placement) in one all-or-nothing transaction — which is why
-`director_member_id` is DB-nullable despite the post-bootstrap NOT NULL
-invariant. The pane spawn happens **inside** the transaction, between the
-monitor registration and its placement insert. A failure attempts to roll
-back every added row; rollback failure is explicitly reported rather than
-claimed as complete cancellation. A Herdr run failure is compensated by the
-backend before the callback error causes DB rollback. After a successful
-callback, placement-insert or commit failure closes the broker transaction
-before the CLI kills its owned pane. A split failure with no confirmed id
-leaves pane compensation unconfirmed. See the
-[creation failure order](cli-options.md#creation-failure-compensation). The connection holds
+placement) in one all-or-nothing transaction. The `director_member_id`
+back-reference is nullable during bootstrap and required afterward. The pane
+spawn occurs inside the transaction, between monitor registration and placement
+insertion. The [CLI compensation contract](cli-options.md#creation-failure-compensation)
+owns failure ordering and diagnostics. The connection holds
 SQLite's write lock across the pane-spawn subprocess call, so a concurrent
 cafleet writer on the shared database blocks for the duration of the
 multiplexer call, backstopped by the connection's `busy_timeout=5000`
@@ -91,6 +95,8 @@ Broadcast deliveries also have type `unicast`; their summary has type
 historical messages may outlive their sender. `status_timestamp` is updated on
 every state change and drives `ORDER BY DESC` listing. The rendered envelope is specified in
 [Message envelope](message-envelope.md).
+
+Deliveries transition once from `input_required → completed` on ACK.
 
 ### `member_placements`
 

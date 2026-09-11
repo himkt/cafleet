@@ -5,13 +5,13 @@ commands and the admin WebUI access SQLite directly through a shared broker
 package — no HTTP server is needed for member operations. Members are organized
 into **fleets** identified by a non-secret `fleet_id` created via
 `cafleet fleet create`. Members sharing the same fleet can discover and message
-each other; members in different fleets are invisible to one another.
+each other through fleet-scoped routing.
 
 ## Core terms
 
 | Term | Definition | Links to |
 |---|---|---|
-| fleet | isolated namespace partitioning members; identified by a non-secret integer `fleet_id` | [Fleet isolation](fleet-isolation.md) |
+| fleet | isolated namespace partitioning members; identified by a non-secret integer `fleet_id` | [Fleet isolation](#fleet-isolation) |
 | root Director | the member created by the `fleet create` bootstrap; the only member that may own other members | [Member lifecycle](member-lifecycle.md) |
 | member | a registry entry spawned by the Director via `cafleet member create`, bound to a multiplexer pane (tmux or herdr) | [Member lifecycle](member-lifecycle.md) |
 | placement | the row linking a member to its multiplexer session/window/pane and backend | [Data model](../spec/data-model.md) |
@@ -21,6 +21,21 @@ each other; members in different fleets are invisible to one another.
 | poll / ack | how a recipient fetches and then confirms consumption of a message | [CLI options](../spec/cli-options.md) |
 | coding-agent backend | the binary in a member pane: `claude`, `codex`, or `opencode` | [Coding agents](coding-agents.md) |
 | monitor member | the dedicated watcher member spawned by the `fleet create` bootstrap (re-spawned mid-run via `cafleet member create --role monitor`); it hosts the fleet's wake loop, classifies member panes on each wake, and contacts the Director only when attention is needed | [Monitoring](monitoring.md) |
+
+## Fleet isolation
+
+The non-secret `fleet_id` partitions members for routing. The broker performs
+no authentication: a fleet is an organizational boundary, not a security
+boundary. The subject member rows determine their fleets; registration
+requires a valid, active fleet.
+
+Cross-fleet sends have a distinct error:
+`members {from} and {to} are not in the same fleet.` differs from
+`Destination member not found: {to_id}` for a missing recipient.
+[Fleet creation](../spec/cli-options.md#fleet-create) registers the root
+Director and monitor atomically. [Fleet deletion](../spec/cli-options.md#fleet-delete)
+soft-deletes the fleet; the root Director is protected from individual
+member deletion.
 
 ## CLI
 
@@ -61,8 +76,9 @@ wake of the `cafleet monitor` loop and contacts the Director only when
 something needs attention; the Director owns every supervision action.
 See [Monitoring](monitoring.md).
 
-## Design-document orchestration
+## Design document workflow
 
 CAFleet ships design-document skills that coordinate a Director and members
 entirely through `cafleet message send`, so every inter-member message is
-persisted and auditable. See [Quickstart](../quickstart.md).
+persisted and auditable. Follow the
+[Design document workflow](../how-to/design-doc-development.md).

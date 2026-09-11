@@ -72,13 +72,39 @@ still contains only that monitor process, but the monitor member hosts it with
 its backend-resolved long-lived-execution mechanism — see
 [Monitoring](monitoring.md) for the monitor lifecycle.
 
-## Model selection
+## Model choice
 
-`cafleet member create --model <string>` forwards the value to the spawned
-backend's own `--model` flag — e.g. `--model opus` for a `claude` member;
-omit it and the binary uses its own default. Per-backend accepted formats and
+Before each spawn, the Director reads the selected backend's model catalog
+and policy in the installed CAFleet skill, then passes the chosen
+`--coding-agent` and `--model` values. The CLI forwards the model; selection
+is a Director responsibility. The catalog provides exact spawn tokens,
+Claude aliases, reviewed capability classes, standard input/output prices
+and official sources, ordered from most to least capable within each backend.
+OpenCode's curated models retain their `opencode/` prefix.
+
+Only the exact phrase `cost efficiency mode` in the originating user request
+activates cheapest-capable selection for ordinary members. The Director
+chooses a backend first and compares models within that backend. Otherwise,
+the workflow's model policy applies. The monitor uses the backend's monitor
+default and the reviewer uses its most capable listed model regardless of
+that trigger.
+
+Explicit backend, model and effort values remain overrides. A mismatch or
+missing suitable model is relayed to the operator. The catalog is maintained
+through the model-refresh workflow and refreshed at least every 30 days;
+staleness disables cost efficiency mode until a maintainer refreshes and
+ships it. Prices are planning estimates and capability classes are reviewed
+judgments, rather than invoice guarantees or provider benchmark claims.
+
+Evidence of insufficient capability can trigger a strictly stronger
+same-backend replacement, at most twice per task and without repeating a
+model. The installed Director policy owns evidence, handoff and selection;
+a user-pinned model requires an operator decision before replacement.
+
+`cafleet member create --model <string>` forwards the value to the backend's
+own model flag; omission uses that binary's default. Accepted formats and
 create-time validation are in
-[Coding-agent backends § Model selection](../spec/coding-agent-backends.md#model-selection).
+[Model selection](../spec/coding-agent-backends.md#model-selection).
 
 ## Reasoning effort
 
@@ -105,6 +131,6 @@ need kernel-enforced isolation should use the `codex` backend.
 
 ## Complete monitor prompts {#complete-monitor-prompts}
 
-Use the [Quickstart monitor prompt](../quickstart.md#raw-cli-walkthrough),
+Use the [Run a fleet monitor prompt](../how-to/mixed-backend-team.md#manual-lifecycle),
 substituting the skill path for your backend. Codex uses
 `~/.codex/skills/cafleet`; Opencode uses `~/.config/opencode/skills/cafleet`.

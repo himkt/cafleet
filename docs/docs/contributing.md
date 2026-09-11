@@ -105,18 +105,14 @@ preview while editing pages, run `mise //docs:dev`.
 
 ## Contributing changes
 
-CAFleet uses its own design-doc-driven development skills to evolve the
-codebase. Each workflow's prompt, team, and output is in
-[Spec Driven Dev § Prompts](how-to/design-doc-development.md#prompts); run them
-in that order — create, then interview, then execute.
+Follow the [Design document workflow](how-to/design-doc-development.md#prompts)
+for the create, interview and execute prompts, teams and outcomes.
 
 One detail matters to contributors specifically: the interview pass annotates
 the doc with `COMMENT(user-relay)` markers that the create workflow's resume
 mode absorbs.
 
 See your coding-agent's skill documentation for the literal invocation syntax.
-Existing design documents under [`design-docs/`](https://github.com/himkt/cafleet/tree/main/design-docs)
-are real examples produced by this loop.
 
 ## Documentation style
 

@@ -6,35 +6,70 @@ Resolve runtime tools from the executing agent's backend. For spawns, read the s
 
 ## Required reading
 
-Before any orchestration action — fleet create, spawn, or message — Read every file in the **Load-bearing** table below, in order. Each carries a protocol you cannot reconstruct from this page. Identify your coding agent first: your spawn prompt's `CODING AGENT:` line names it; as main session, use your own identity.
+Read these prerequisites in order before orchestration. Your `CODING AGENT:` identity selects your executing backend; a main session uses its own identity.
 
-**Load-bearing — Read in order before acting:**
+| # | Read | Timing and responsibility |
+|---|---|---|
+| 1 | Your backend section in [coding-agents.md](../../cafleet/reference/coding-agents.md) | Resolve local Runtime bindings and bound notes before acting. |
+| 2 | [Generic Director role](../../cafleet/roles/director.md) | Before setup; obey its selected-backend, spawn skeleton, audit, size and action-triggered reads. |
+| 3 | [Guidelines File Layout](../reference/guidelines.md#file-layout), then [BASE](../../cafleet/reference/base-dir.md) | Before argument normalization and output-root resolution. |
+| 4 | [Supervision](../../cafleet/reference/supervision.md) | Before orchestration; monitor bootstrap/live, capture, dispatch and authorization gates. |
+| 5 | [Coordination](../reference/coordination.md) | Before messages, payload retrieval or markers. |
+| 6 | [Guidelines](../reference/guidelines.md) | Before document-format or phase-completion actions. |
 
-| # | Read | What you lose if you skip it |
-|---|------|------------------------------|
-| 1 | your overlay section [`../../cafleet/reference/coding-agents.md#<name>`](../../cafleet/reference/coding-agents.md) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{bg_run}` emitted unresolved |
-| 2 | the `cafleet` skill's [`reference/base-dir.md`](../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root every spawn-prompt audit file or fall back to `/tmp` |
-| 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (the monitor-first spawn, the `monitor live` gate, Authorization-Scope Guard, the 5-step facilitation loop) — you spawn an unsupervised team |
-| 4 | [`../reference/coordination.md`](../reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema (and the Step-2 clarification exemption) — you coordinate in free-form bodies and findings get lost / mis-routed |
+Read [Recovery](../../cafleet/reference/supervision.md#recovery) immediately before recovery and [Shutdown](../../cafleet/reference/supervision.md#shutdown) immediately before teardown. The executing backend owns local tools; selected member backend owns spawn model/capabilities; observed backend owns pane cues.
 
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
-| **Director** | Main agent | Register with CAFleet fleet, spawn members via `cafleet member create`, relay user answers, enforce clarification gate, orchestrate internal quality loop, present polished draft to user | Write the document, review it in detail | [roles/director.md](roles/director.md) |
+| **Director** | Main agent | Register with CAFleet fleet, spawn members via `cafleet member create`, relay user answers, enforce clarification gate, orchestrate internal quality loop, present polished draft to user | Write the document, review it in detail | [Director responsibilities](#director-responsibilities) |
 | **Drafter** | Member | Ask clarifying questions (via Director relay), read target codebase, write and revise the design document | Communicate with user directly (goes through Director), review own work | [roles/drafter.md](roles/drafter.md) |
 | **Reviewer** | Member | Critically review drafts for rule compliance, readability, completeness, correctness | Write the document, communicate with user | [roles/reviewer.md](roles/reviewer.md) |
+
+## Director responsibilities
+
+Own the document's quality and fidelity to user intent. Bootstrap and supervise the fleet, enforce fresh-Drafter clarification before document content, relay questions and answers faithfully, and route Drafter/Reviewer revisions until Reviewer approval. Present that reviewed revision for explicit user approval, process feedback through Step 5, and send the Step 6 finalization handoff before teardown. The Drafter writes the document; the Reviewer independently evaluates it.
+
+Store literal fleet and member IDs from CLI JSON and use them on every broker command. Retrieve full payloads with `message poll --json`, ACK each consumed message, and dispatch through the shared capture/turn-boundary rules. Coordination owns marker placement and file-detail recovery; the process below owns each phase transition.
+
+### Diagnostics and progress
+
+Each inbound member reply or monitor event/ping resumes the full supervision loop. Inspect a suspected stall with `cafleet member capture <member-id> --lines 200`; disclose deletion and re-spawn to the user rather than silently replacing a member. Apply [generic replacement](../../cafleet/roles/director.md#model-replacement) with that local disclosure constraint. Elapsed time supplies no completion signal.
+
+### Free-form user replies
+
+Judge intent from meaning rather than keywords. Abort runs [Shutdown](../../cafleet/reference/supervision.md#shutdown) without Drafter finalization. Ordinary-language feedback follows [Step 5](#step-5-user-feedback-loop-director); users may describe revisions without writing markers. Re-present after revision and Reviewer approval.
+
+### Skill-specific milestones
+
+Every `ready (doc)` action below is a re-sent stall-nudge — the recipient interprets it contextually per [coordination](../reference/coordination.md): same target, same expected action. The two clarification-phase nudges use the pre-draft payload exemption.
+
+| Phase | Expected event | Stall indicator | Director action |
+|:--|:--|:--|:--|
+| Clarification | Drafter sends clarifying questions via `cafleet message send` | Drafter goes idle without sending questions or a draft | `cafleet message send --from-member-id <director-member-id> --to-member-id <drafter-member-id> "Please send your clarifying questions so I can relay them to the user."` |
+| Drafting | Drafter writes the design document | Drafter goes idle after receiving user answers without producing a draft | `cafleet message send --from-member-id <director-member-id> --to-member-id <drafter-member-id> "You have received the user's answers. Please proceed with writing the design document."` |
+| Review | Reviewer sends review feedback via `cafleet message send` | Reviewer goes idle without sending feedback | `cafleet message send --from-member-id <director-member-id> --to-member-id <reviewer-member-id> "ready (doc)"` |
+| Revision | Drafter revises based on feedback | Drafter goes idle without sending revised draft | `cafleet message send --from-member-id <director-member-id> --to-member-id <drafter-member-id> "ready (doc)"` (the Drafter resolves the standing `COMMENT(reviewer)` markers in the doc) |
+
 
 ## Coordination Protocol
 
 This skill's Director, Drafter, and Reviewer coordinate via the verb + pointer schema and `COMMENT(role)` markers defined canonically in [../reference/coordination.md](../reference/coordination.md) — the single source of truth for the 6 verbs, the 3 pointer forms, the message format, the `COMMENT(role)` marker grammar, the issue/status split, anchorless status, finalize-time cleanup, and Director per-file detail recovery.
 
-Two skill-specific notes layer on top of that canonical protocol:
-
-- **Roles in play**: this skill uses only the `director`, `drafter`, `reviewer`, and `user-relay` marker roles — never `programmer`, `tester`, or `verifier` (those belong to the execute workflow). Finalize happens at `Status: Approved` (Step 6).
-- **Clarification Exemption**: Director-to-Drafter messages during the **Step 2 clarification phase** are exempt from the verb + pointer schema. At clarification time the design doc does not yet exist (the Drafter is forbidden from creating any file before clarifying), so the Director's "User answers: ..." relay rides as a free-form multi-line cafleet body. From Step 3 onward (once the initial draft exists) every message falls back under the schema.
+Use `director`, `drafter`, `reviewer` and `user-relay` markers; finalization sets `Status: Approved`. Read [Payload exemptions](../reference/coordination.md#payload-exemptions) before pre-draft questions/answers and retrieve complete JSON at both ends.
 
 ## Prerequisites
 
 The Director MUST be running inside a tmux or herdr session and pass the gating `cafleet doctor` env-check before spawning anyone, per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol*.
+
+## Shared spawn deltas
+
+Render ordinary-member prompts from the required [shared frame](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton), with the per-role tables below. Supply absolute installed role and skill paths, the CAFleet load purpose `for communication with the Director`, and the workflow's team name. Every role and mode carries this poll-handling line verbatim:
+
+```text
+When you see cafleet message poll output with a message from the Director, act on those instructions.
+```
+
+The shared frame supplies identity placeholders, reader/startup ordering, complete backend-supported skill loading and the supplied host-rule source. Preserve each table's hard lines and start cue verbatim. The role opens first, sends operational ready and loads its prerequisites before substantive work. Selected roles load both `cafleet` and `cafleet-design-doc`; members continue this assigned workflow. The monitor retains its own startup delta.
 
 ## Process
 
@@ -44,7 +79,7 @@ The Director MUST be running inside a tmux or herdr session and pass the gating 
 
 Apply the no-bypass write protocol and `<unset>` sentinel contract from the `cafleet` skill's `reference/base-dir.md` (§ Required reading above). Then canonicalize `$ARGUMENTS` and resolve the task-scoped BASE:
 
-Canonicalize `$ARGUMENTS` per the `cafleet` skill's `reference/base-dir.md` § *Consumer contract* row for this skill (relative forms get `design-docs/` prepended and a trailing `/design-doc.md` stripped; absolute paths are used verbatim after the filename strip), then run its **Step 0 (task-scope resolution)** with the result.
+Read and apply [Guidelines File Layout](../reference/guidelines.md#file-layout) to normalize the task-folder path, then run [BASE Step 0](../../cafleet/reference/base-dir.md#step-0-task-scope-resolution) on that folder.
 
 Branch on Step 0's outcome: when it **resolves**, set `${BASE}` to the resolved task folder and `${DOC_PATH} = ${BASE}/design-doc.md` (the task folder IS the design-doc directory; no further `${BASE}/design-docs/...` concatenation). When it yields **`<unset>`** (absolute `$ARGUMENTS` outside the repo root, or equal to the repo root), set `${DOC_PATH}` to the **canonicalized** absolute task-folder path with `/design-doc.md` appended (unless `$ARGUMENTS` already names `design-doc.md`, in which case use it verbatim) so the Drafter receives a writable doc file path rather than a directory, and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per the `cafleet` skill's `reference/base-dir.md` § *The `<unset>` sentinel*.
 
@@ -82,7 +117,7 @@ Wait for the monitor member's `ready` then `monitor live` signals per the `cafle
 
 #### 1c. Locate role definitions (path-by-reference)
 
-The Director references each role definition by **absolute path** in the spawn prompt — the spawned member opens its role doc with `Read` at startup. Do NOT inline the role content. Resolve the absolute paths for:
+The Director references each role definition by **absolute path** in the spawn prompt — the spawned member opens its role doc with an available text reader at startup. Do NOT inline the role content. Resolve the absolute paths for:
 
 - `<abs path to this skill>/roles/drafter.md`
 - `<abs path to this skill>/roles/reviewer.md`
@@ -95,7 +130,7 @@ Substitute these absolute paths into the spawn prompts below.
 
 **Gate**: do not spawn the Drafter until the monitor member's `monitor live` signal (1b) has arrived.
 
-**Drafter spawn prompt** — render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the per-role delta below (two-stage rendering + brace rules at the skeleton). Keep the prompt under ~2 KB (path-by-reference). Use the normal-mode column by default; the resume-mode column when Step 0 detected resume mode.
+**Drafter spawn prompt** — render the canonical [spawn-prompt skeleton](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with the per-role delta below (two-stage rendering + brace rules at the skeleton). Keep the prompt compact and reference installed roles by path. Use the normal-mode column for fresh creation, the resume column for interview-marker resolution, and the review-only delta below when `QUALITY_REVIEW_ONLY=true`.
 
 | Slot | Drafter (normal mode) | Drafter (resume mode) |
 |---|---|---|
@@ -104,6 +139,16 @@ Substitute these absolute paths into the spawn prompts below.
 | EXTRA SKILL LOADS | `cafleet-design-doc` (template + guidelines) | same |
 | CONTEXT LINES | `OUTPUT PATH: [INSERT DOC PATH]` + a blank line + `The user's request: [INSERT USER'S ORIGINAL REQUEST]` | `DESIGN DOCUMENT: [INSERT DOC PATH]` |
 | IMPORTANT / start cue (verbatim) | `IMPORTANT: You MUST ask clarifying questions BEFORE writing any design document file.` / `Send your questions to the Director who will relay them to the user.` / `Start by reading the target codebase for context, then send your clarifying questions.` / `Do NOT create any design document file until you have received answers.` | `This is a RESUME run. The document contains COMMENT markers from a previous interview. Follow the Resume Mode instructions in your role definition.` / `Do NOT ask clarifying questions — the COMMENTs contain the needed information.` / `Start by reading the design document.` |
+
+For **review-only mode**, retain the Drafter in the initial roster with this explicit wait-for-revision delta. Skip fresh clarification and drafting; route the existing document to the ready Reviewer in Step 3.
+
+| Slot | Drafter (review-only mode) |
+|---|---|
+| ROLE TITLE / TEAM / role-file | `the Drafter` / `design document creation` / `roles/drafter.md` |
+| ROLE-DEF suffix | `Follow the Review-only Mode section in particular.` |
+| EXTRA SKILL LOADS / CONTEXT LINES | `cafleet-design-doc` / `DESIGN DOCUMENT: [INSERT DOC PATH]` |
+| Mode constraint | `This is a REVIEW-ONLY run. Preserve the existing document and wait for the Director to route revision markers.` |
+| START CUE | `Read the design document, then wait for a revision assignment. Skip fresh clarification and drafting.` |
 
 Spawn per the Step 1c spawn frame (both normal and resume modes). Worked example — the one full command block of this file; the Reviewer spawn reuses the frame with its own literals:
 
@@ -117,7 +162,7 @@ Spawn per the Step 1c spawn frame (both normal and resume modes). Worked example
 
 #### 1e. Spawn the Reviewer
 
-**Reviewer spawn prompt** — the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with this delta:
+**Reviewer spawn prompt** — the canonical [spawn-prompt skeleton](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with this delta:
 
 | Slot | Reviewer |
 |---|---|
@@ -142,15 +187,15 @@ Placement-audit semantics — non-gating, retry a missing or pending row, dispat
 
 **Skip this step entirely when `SKIP_CLARIFICATION=true`** (set by Step 0 in resume mode or quality-review-only mode). Resume mode: the COMMENT markers serve as the clarification and the Drafter already has all the information needed. Quality-review-only mode: the Drafter is not producing a new draft at all — proceed directly to Step 3 by routing the existing `${DOC_PATH}` to the Reviewer.
 
-> **Clarification Exemption** ([Coordination Protocol above](#coordination-protocol)): Director-to-Drafter messages in this step ride as free-form multi-line cafleet bodies — the design doc does not yet exist. From Step 3 onward every message falls back under the schema.
+> Read [Payload exemptions](../reference/coordination.md#payload-exemptions) for this pre-draft exchange. Both ends use `--json` for complete questions and answers and `--file` for long bodies. Hidden question payload artifacts are allowed; design-document content waits for answers.
 
-1. The Drafter's clarification work is a turn boundary: end or yield your turn. The broker's inline-preview keystroke on the Drafter's `message send` re-opens a later turn once the questions arrive; retrieve the full body there with one on-demand `cafleet message poll <director-member-id>`.
+1. The Drafter's clarification work is a turn boundary: end or yield your turn. The broker's inline-preview keystroke on the Drafter's `message send` re-opens a later turn once the questions arrive; retrieve the full body there with one on-demand `cafleet message poll <director-member-id> --json`.
 2. `cafleet message ack <message-id>` each received message after reading it.
 3. Relay the questions to the user via {decision_surface}. If {decision_surface} caps how many questions it shows at once (your overlay states the cap) and the number exceeds it, split them into multiple sequential calls to relay all questions without omission.
 4. Relay the user's answers back to the Drafter (free-form, per the Clarification Exemption above):
    ```bash
    cafleet message send --from-member-id <director-member-id> \
-     --to-member-id <drafter-member-id> "User answers: ..."
+     --to-member-id <drafter-member-id> --file <absolute-path-to-answer-payload>
    ```
 5. **Gate check**: If the Drafter produces a draft without prior questions, reject it and instruct them to ask first (also free-form, per the Clarification Exemption):
    ```bash
@@ -161,7 +206,7 @@ Placement-audit semantics — non-gating, retry a missing or pending row, dispat
 
 ### Step 3: Internal Quality Loop (Director)
 
-Enter this step after the Drafter reports `complete (doc)`, **or immediately** when `QUALITY_REVIEW_ONLY=true` (the existing `${DOC_PATH}` is treated as the "completed draft" — no waiting for a Drafter report):
+Enter this step after a fresh Drafter reports `complete (doc)` or a resume Drafter reports `addressed (doc)`, **or immediately** when `QUALITY_REVIEW_ONLY=true` (the existing `${DOC_PATH}` is treated as the "completed draft" — no waiting for a Drafter report):
 
 1. **Route to Reviewer**. The Reviewer reads `${DOC_PATH}` directly; no path needs to be embedded in the cafleet body.
    ```bash
@@ -188,7 +233,7 @@ Only after the Reviewer explicitly approves, present a summary (including file p
 | 2 | **Scan for COMMENT markers** | Immediately scan the document for `COMMENT(name): feedback` markers and process them | Scan immediately and process markers (see Step 5) |
 | 3 | *(Other — built-in)* | *(Free text input)* | Interpret user intent (see Step 5) |
 
-Intent judgment and abort detection for free-text replies: [roles/director.md](roles/director.md) § *Free-form user replies*.
+Intent judgment and abort detection for free-text replies: [Free-form user replies](#free-form-user-replies).
 
 ### Step 5: User Feedback Loop (Director)
 
@@ -200,7 +245,7 @@ This step owns the user-feedback COMMENT-scan procedure. Process the user's sele
     --to-member-id <drafter-member-id> "ready (doc)"
   ```
   After the Drafter replies `addressed (doc)` and removes the markers, verify with Grep that no `COMMENT(` markers remain, then re-enter the quality loop (Step 3) and re-present (Step 4). If no markers are found, say so and invite the user to describe the requested changes in ordinary language; editing the document directly remains optional.
-- **Free-text response**: judge abort vs non-abort intent per [roles/director.md](roles/director.md) § *Free-form user replies* (LLM reasoning, not keyword matching). Abort intent → the Abort Flow (Shutdown Protocol, Step 6, without Drafter finalization). For revision feedback, identify the affected paragraph or document-wide pointer and record one `COMMENT(user-relay)` per issue, preserving the user's meaning per [coordination.md](../reference/coordination.md#commentrole-marker). Ask a concrete question only when meaning or scope is ambiguous; never require the user to supply marker syntax. Route the recorded requests to the Drafter with the same `ready (doc)` command above, then verify marker removal and repeat Steps 3–4. A question without a revision request receives an answer; it does not imply approval.
+- **Free-text response**: judge abort vs non-abort intent per [Free-form user replies](#free-form-user-replies) (LLM reasoning, not keyword matching). Abort intent → the Abort Flow (Shutdown Protocol, Step 6, without Drafter finalization). For revision feedback, identify the affected paragraph or document-wide pointer and record one `COMMENT(user-relay)` per issue, preserving the user's meaning per [coordination.md](../reference/coordination.md#commentrole-marker). Ask a concrete question only when meaning or scope is ambiguous; never require the user to supply marker syntax. Route the recorded requests to the Drafter with the same `ready (doc)` command above, then verify marker removal and repeat Steps 3–4. A question without a revision request receives an answer; it does not imply approval.
 
 No round limit — loop continues until approved or aborted.
 
@@ -210,13 +255,12 @@ Enter only after explicit user approval of the reviewed revision and verificatio
 that no unresolved `COMMENT(` markers remain. Ordinary feedback does not waive
 the review or approval gate.
 
-1. Instruct the Drafter to finalize. The Drafter's role definition spells out the finalize checklist (set Status to Approved, refresh Last Updated, bump the Progress header field if present, verify implementation steps are actionable); the cafleet body is just the verb + pointer poke:
+1. Record Reviewer approval and explicit user approval of the current marker-free document, then send the exact finalization handoff:
    ```bash
-   cafleet message send --from-member-id <director-member-id> \
-     --to-member-id <drafter-member-id> "ready (doc)"
+   cafleet message send --from-member-id <director-member-id> --to-member-id <drafter-member-id> "ready (doc) — user approved; finalize"
    ```
-   Wait for the Drafter's `addressed (doc)` confirmation.
+   The Drafter rechecks marker absence, sets Status to Approved, refreshes Last Updated and Progress consistently, verifies actionable implementation steps, and returns `addressed (doc)`. End/yield until that confirmation arrives. Plain `ready (doc)` routes revision or a work nudge; neither that message nor a marker-free document alone authorizes finalization.
 
-2. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (the monitor member goes first, first-out). Workflow delta: then delete the Drafter and Reviewer.
+2. Run the canonical teardown after reading [Shutdown](../../cafleet/reference/supervision.md#shutdown) immediately before teardown (the monitor member goes first, first-out). Workflow delta: then delete the Drafter and Reviewer.
 
 The fleet row is soft-deleted and `messages` rows are preserved so the message trail remains inspectable in the broker database.

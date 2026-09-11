@@ -6,16 +6,18 @@ Resolve runtime tools from the executing agent's backend. For spawns, read the s
 
 ## Required reading
 
-Before any orchestration action — fleet create, spawn, or message — Read every file in the **Load-bearing** table below, in order. Each carries a protocol you cannot reconstruct from this page. Identify your coding agent first: your spawn prompt's `CODING AGENT:` line names it; as main session, use your own identity.
+Read these prerequisites in order before orchestration. Your `CODING AGENT:` identity selects your executing backend; a main session uses its own identity.
 
-**Load-bearing — Read in order before acting:**
+| # | Read | Timing and responsibility |
+|---|---|---|
+| 1 | Your backend section in [coding-agents.md](../../cafleet/reference/coding-agents.md) | Resolve local Runtime bindings and bound notes before acting. |
+| 2 | [Generic Director role](../../cafleet/roles/director.md) | Before setup; obey its selected-backend, spawn skeleton, audit, size and action-triggered reads. |
+| 3 | [Guidelines File Layout](../reference/guidelines.md#file-layout), then [BASE](../../cafleet/reference/base-dir.md) | Before argument normalization and output-root resolution. |
+| 4 | [Supervision](../../cafleet/reference/supervision.md) | Before orchestration; monitor bootstrap/live, capture, dispatch and authorization gates. |
+| 5 | [Coordination](../reference/coordination.md) | Before messages, payload retrieval or markers. |
+| 6 | [Guidelines](../reference/guidelines.md) | Before document-format or phase-completion actions. |
 
-| # | Read | What you lose if you skip it |
-|---|------|------------------------------|
-| 1 | your overlay section [`../../cafleet/reference/coding-agents.md#<name>`](../../cafleet/reference/coding-agents.md) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{bg_run}` emitted unresolved |
-| 2 | the `cafleet` skill's [`reference/base-dir.md`](../../cafleet/reference/base-dir.md) | the no-bypass write protocol + `<unset>` contract — you mis-root the spawn-prompt audit file and `question.md` or fall back to `/tmp` |
-| 3 | the `cafleet` skill's [`reference/supervision.md`](../../cafleet/reference/supervision.md) | the governance + heartbeat (the monitor-first spawn, the `monitor live` gate, Authorization-Scope Guard, Stall Response) — you spawn an unsupervised Analyzer |
-| 4 | [`../reference/coordination.md`](../reference/coordination.md) | the `COMMENT(user-relay)` marker grammar and anchorless-status rules — your inline annotations are malformed |
+Read [Recovery](../../cafleet/reference/supervision.md#recovery) immediately before recovery and [Shutdown](../../cafleet/reference/supervision.md#shutdown) immediately before teardown. The executing backend owns local tools; selected member backend owns spawn model/capabilities; observed backend owns pane cues.
 
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
@@ -24,7 +26,7 @@ Before any orchestration action — fleet create, spawn, or message — Read eve
 
 ## Coordination Protocol
 
-This skill writes only `COMMENT(user-relay)` markers in the design document; the Director-Analyzer cafleet messages are exempt from the verb + pointer schema (the Analyzer's question list is a one-time multi-line payload, and the Director's user relay goes through {decision_surface}, not cafleet). The `COMMENT(role)` marker format, the `user-relay` role (the Director as user-mediator, carrying user-derived clarifications), and the one-per-issue / actionable rules are canonical in [../reference/coordination.md](../reference/coordination.md) § *COMMENT(role) Marker*.
+This workflow writes only `COMMENT(user-relay)` markers. Read [Payload exemptions](../reference/coordination.md#payload-exemptions) before the Director/Analyzer exchange; preserve Analyzer no-file-edit scope with tool-provided stdin for long payloads and retrieve complete JSON at the receiver. Coordination owns marker grammar and one actionable issue per marker.
 
 Interview-specific: place each `COMMENT(user-relay)` marker on its own line immediately before the section it refers to (e.g. above `### Retry Strategy`); markers persist until the create workflow's resume mode resolves them (reads each marker, applies the fix, removes it).
 
@@ -39,13 +41,23 @@ Two mechanisms prevent context compaction:
 1. **Member offloading**: The Analyzer member performs the heavy document analysis (reading, reasoning, question generation) and returns only a compact numbered question list. The Director never reads the entire design document for question generation — it only reads it for resume-mode progress detection (Step 1) and for inserting COMMENT annotations (Step 4).
 2. **Multi-session splitting**: Each invocation covers a batch of sections. The Director tracks progress via `question.md` in the design document's directory, so subsequent invocations skip already-reviewed sections.
 
+## Shared spawn deltas
+
+Render ordinary-member prompts from the required [shared frame](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton), with the per-role tables below. Supply absolute installed role and skill paths, the CAFleet load purpose `for communication with the Director`, and the workflow's team name. Every role and mode carries this poll-handling line verbatim:
+
+```text
+When you see cafleet message poll output with a message from the Director, act on those instructions.
+```
+
+The shared frame supplies identity placeholders, reader/startup ordering, complete backend-supported skill loading and the supplied host-rule source. Preserve each table's hard lines and start cue verbatim. The role opens first, sends operational ready and loads its prerequisites before substantive work. Selected roles load both `cafleet` and `cafleet-design-doc`; members continue this assigned workflow. The monitor retains its own startup delta.
+
 ## Process
 
 ### Step 0: Path Resolution & Doc Validation (Director)
 
 1. Apply the no-bypass write protocol and `<unset>` sentinel contract from the `cafleet` skill's `reference/base-dir.md` (§ Required reading above). Then canonicalize `$ARGUMENTS` and resolve the task-scoped BASE:
 
-   Canonicalize `$ARGUMENTS` per the `cafleet` skill's `reference/base-dir.md` § *Consumer contract* row for this skill (relative forms get `design-docs/` prepended and a trailing `/design-doc.md` stripped; absolute paths are used verbatim after the filename strip), then run its **Step 0 (task-scope resolution)** with the result.
+   Read and apply [Guidelines File Layout](../reference/guidelines.md#file-layout) to normalize the task-folder path, then run [BASE Step 0](../../cafleet/reference/base-dir.md#step-0-task-scope-resolution) on that folder.
 
    Branch on Step 0's outcome: when it **resolves**, set `${BASE}` to the resolved task folder, `dir_path = ${BASE}`, and `doc_path = ${BASE}/design-doc.md` (the task folder IS the design-doc directory; no further `${BASE}/design-docs/...` concatenation). When it yields **`<unset>`** (absolute `$ARGUMENTS` outside the repo root, or equal to the repo root), set `dir_path` to the **canonicalized** absolute task-folder path and `doc_path = dir_path / "design-doc.md"` (unless `$ARGUMENTS` already names `design-doc.md`, in which case use it verbatim and derive `dir_path = dirname(doc_path)`), and set `${BASE}` to the `<unset>` sentinel so audit-file writes guard-skip per the `cafleet` skill's `reference/base-dir.md` § *The `<unset>` sentinel*.
 2. Read the design document at `doc_path`. If missing or empty, report the error and stop.
@@ -83,7 +95,7 @@ Wait for the monitor member's `ready` then `monitor live` signals per the `cafle
 
 #### 2c. Locate the Analyzer role file (path-by-reference)
 
-Resolve the absolute path of `<this skill>/roles/analyzer.md`. The spawn prompt below references it by **absolute path**; the spawned Analyzer opens it with `Read` on its first turn. Do NOT inline the role content (spawn prompt size limit — `skills/cafleet/reference/director.md` § *Spawn prompt size limit*).
+Resolve the absolute path of `<this skill>/roles/analyzer.md`. The spawn prompt below references it by **absolute path**; the spawned Analyzer opens it through an available text reader on its first turn. Do NOT inline the role content (spawn prompt size limit — `skills/cafleet/roles/director.md` § *Spawn prompt size limit*).
 
 > **Spawn-prompt audit file**: the spawn below renders the prompt to `${BASE}/.prompts/analyzer-<UTC-compact>.md` and spawns from that file, per the `cafleet` skill's `reference/base-dir.md` § *No-bypass write protocol*.
 
@@ -91,13 +103,13 @@ Resolve the absolute path of `<this skill>/roles/analyzer.md`. The spawn prompt 
 
 **Gate**: do not spawn the Analyzer until the monitor member's `monitor live` signal (2b) has arrived.
 
-Render the canonical [spawn-prompt skeleton](../../cafleet/reference/director.md#canonical-spawn-prompt-skeleton) with the Analyzer delta below (two-stage rendering + brace rules at the skeleton):
+Render the canonical [spawn-prompt skeleton](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with the Analyzer delta below (two-stage rendering + brace rules at the skeleton):
 
 | Slot | Analyzer |
 |---|---|
 | ROLE TITLE / TEAM | `the Analyzer` / `design document interview` |
 | role-file | `roles/analyzer.md` |
-| EXTRA SKILL LOADS | none (the `cafleet` skill only) |
+| EXTRA SKILL LOADS | `cafleet-design-doc` (assigned role, format and coordination references) |
 | CONTEXT LINES | `DESIGN DOCUMENT: [INSERT doc_path]` + `ALREADY-REVIEWED SECTIONS: [INSERT JSON array from interview-progress, or "none" on fresh start]` |
 | start cue (verbatim) | `Read the design document, generate a numbered question list per the role definition, send it to the Director via cafleet message send, then idle pending shutdown.` |
 
@@ -117,11 +129,11 @@ Render the prompt to `${BASE}/.prompts/analyzer-<UTC-compact>.md` per the 2c aud
 
 The Analyzer dispatch is a turn boundary: end or yield your turn, and the broker notification re-opens a later turn when the Analyzer's reply arrives. In that later turn run one `cafleet message poll <director-member-id> --json`. **The `--json` flag is required**: text-mode `cafleet message poll` truncates each message body to 200 codepoints + `…`, which would silently mangle the Analyzer's numbered question list — `--json` carries the complete body. Acknowledge with `cafleet message ack <message-id>`.
 
-The reply must be a flat numbered list following the format specified in [roles/analyzer.md](roles/analyzer.md), terminated by a `Total: N questions` line. If the Analyzer returns a malformed list, send a single corrective `cafleet message send` requesting the canonical format — a fresh turn boundary; when the corrected reply re-opens a later turn, run `cafleet message poll <director-member-id> --json` again. After 2 corrective rounds, escalate to the user via {decision_surface} (options: retry the Analyzer once more / abort the interview / proceed with the partial list).
+The Analyzer follows the read-only stdin branch in [Payload exemptions](../reference/coordination.md#payload-exemptions); a concrete unavailable transport is routed to the Director, and no delivery is inferred. The reply must be a flat numbered list following the format specified in [roles/analyzer.md](roles/analyzer.md), terminated by a `Total: N questions` line. If the Analyzer returns a malformed list, send a single corrective `cafleet message send` requesting the canonical format — a fresh turn boundary; when the corrected reply re-opens a later turn, run `cafleet message poll <director-member-id> --json` again. After 2 corrective rounds, escalate to the user via {decision_surface} (options: retry the Analyzer once more / abort the interview / proceed with the partial list).
 
 #### 2f. Tear down the monitor member and the Analyzer
 
-The Analyzer is stateless and the heavy supervision work is done once its question list arrives — keeping it alive through the Q&A rounds wastes a pane. Run the canonical teardown per the `cafleet` skill § *Shutdown Protocol* (the monitor member goes first, first-out). Workflow delta: teardown fires immediately after the question list is acked; then delete the Analyzer.
+The Analyzer is stateless and the heavy supervision work is done once its question list arrives — keeping it alive through the Q&A rounds wastes a pane. Run the canonical teardown after reading [Shutdown](../../cafleet/reference/supervision.md#shutdown) immediately before teardown (the monitor member goes first, first-out). Workflow delta: teardown fires immediately after the question list is acked; then delete the Analyzer.
 
 #### 2g. Persist the question list to `question.md`
 

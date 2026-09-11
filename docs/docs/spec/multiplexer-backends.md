@@ -17,7 +17,7 @@ persisting a message — see [Push notifications](#push-notifications).
 
 ## Backend matrix {#backend-matrix}
 
-Where the two backends differ, behavior by behavior:
+Each backend invokes its CLI from PATH. Their behavior differs as follows:
 
 | Behavior | tmux | herdr |
 |---|---|---|
@@ -59,9 +59,6 @@ The outcomes of that order:
 | unset | truthy | unset | herdr |
 | unset | not truthy | set | tmux |
 | unset | not truthy | unset | Error — run cafleet inside a tmux or herdr session, or set `CAFLEET_MULTIPLEXER` |
-
-The four override-set combinations collapse into the first two rows because an
-explicit override wins outright, whatever the environment holds.
 
 Auto-detect (an unset `CAFLEET_MULTIPLEXER`) is the default. `cafleet doctor`
 reports the resolved backend and its
@@ -182,11 +179,6 @@ Anything a member needs from the Director travels as a plain
 `cafleet message send` — the same persisted queue and Esc-safeguarded
 inline-preview path every fleet message uses.
 
-## Access mechanism
-
-Each backend's access mechanism is in the [backend matrix](#backend-matrix);
-the backend's binary is expected on `PATH` — no other dependency.
-
 ## Pane spawn working directory {#pane-spawn-cwd}
 
 A member pane spawned by `cafleet member create` starts in the invoking
@@ -280,9 +272,6 @@ so Member → Director notifications work automatically. The recipient acks via
 Body truncation in the preview (`…` at `CAFLEET_MAX_TEXT_LEN` codepoints) is
 documented in [CLI options](cli-options.md#message-body-truncation).
 
-A member's Director-bound messages ride this same ordinary path — a plain
-`cafleet message send` per event, with no monitor-specific delivery state.
-
 ### The `Esc` safeguard {#esc-safeguard}
 
 Every keystroke path presses `Escape`, lets the pane settle ~0.1 s, then types
@@ -296,30 +285,22 @@ the payload and `Enter`.
 | Exit-command helper (`send_exit`) | `/exit` + `Enter` | Uses the same safeguard, with pane-gone tolerance covering the leading `Esc` when `ignore_missing` is enabled; creation rollback uses `kill_pane` |
 | Monitor-loop wake trigger (`send_wake_trigger`) | The `[cafleet] tick:` wake + `Enter` | It targets the monitor member's pane, which can be parked on a permission prompt (see [Monitoring](../concepts/monitoring.md)) |
 
-### Design principles
+### Delivery outcomes
 
-- **Queue first**: the message queue remains the sole source of truth; a failed
-  push leaves the message available for normal polling, and the persisted row
-  is never rolled back.
-- **Intentional skips stay silent**: a self-send and a recipient whose
-  placement has no pane id suppress the notification without an attempt; both
-  succeed with `notification_sent: false`.
-- **Attempted failures surface**: an attempted preview that fails — a dead
-  pane, an absent multiplexer binary, an unavailable or ambiguous multiplexer
-  environment — propagates its raw error to the caller, consumed per the
-  [caller table](#inline-preview-errors). The notification is attempted at
-  most once; no layer retries it.
-- **No multiplexer env var required**: the keystroke targets the pane by id
-  (tmux `send-keys -t <pane>`, herdr `pane send-*`), which works from any
-  process on the same host as long as the multiplexer's server is reachable.
+The persisted queue remains authoritative. Notification is attempted at most
+once; a failed push leaves the existing row available for polling and ACK.
+The recipient pane comes from its placement, so member-to-Director messages
+use the same path. Backend resolution follows [Backend selection](#backend-selection);
+keystrokes target the opaque pane id on the same host with a reachable server.
+Direct targeting uses tmux `send-keys -t <pane>` or herdr `pane send-*`.
 
-### Response annotations
+| Notification outcome | Unicast success field | Persistence |
+|---|---|---|
+| Self-send or recipient placement has no pane id | `notification_sent: false`; no attempt or warning | Message remains available |
+| Attempted preview lands | `notification_sent: true` | Message remains available |
+| Attempted preview fails | No success payload; [caller-specific failure](#inline-preview-errors) | Existing row remains available; no retry |
 
-Unicast success responses include a top-level `notification_sent` boolean —
-`true` only when an attempted preview landed, `false` on the intentional
-skips; an attempted failure exits 1 with the partial-failure error instead of
-printing the success payload (see
-[CLI options](cli-options.md#message-send-partial-failure)). Broadcast
-responses expose `recipients` (the real recipient count) and `delivered` (how
-many recipient panes were successfully triggered) as top-level wrapper fields.
-Neither count is persisted — they live only in the broker return value.
+Broadcast wrapper fields `recipients` and `delivered` count intended recipients
+and successful previews. Neither count is persisted. CLI wrappers and exact
+partial-failure output are owned by [Output shapes](cli-options.md#output-shapes)
+and [message send](cli-options.md#message-send-partial-failure).

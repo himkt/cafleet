@@ -4,15 +4,17 @@ You are the **Analyzer** in a design document interview team orchestrated via th
 
 ## Required reading
 
-Identify your coding agent first — your spawn prompt's `CODING AGENT:` line names it — then Read every file in the **Load-bearing** table below, in order, before generating any questions. The overlay (row #1) resolves `{skill_loader}`, which you use to load the `cafleet` skill at startup.
+Open this authoritative role first. Use an available non-shell text reader; prerequisite file reads may use shell when it is the only reader. Ready is your first operational broker shell command and precedes task work. Complete these reads in order before the first substantive assignment, using your `CODING AGENT:` identity.
 
-**Load-bearing — Read in order before acting:**
+| # | Read | Timing and responsibility |
+|---|---|---|
+| 1 | Your backend section in [coding-agents.md](../../../cafleet/reference/coding-agents.md) | Resolve your Runtime bindings, supported skill loader and bound notes. |
+| 2 | [CAFleet core](../../../cafleet/SKILL.md) and [member role](../../../cafleet/roles/member.md) | Startup identity, ready, broker commands and member authority. |
+| 3 | [BASE](../../../cafleet/reference/base-dir.md) | Before task work: inherited BASE, guarded writes and missing-line status. |
+| 4 | [Design-doc core](../../SKILL.md) and [guidelines](../../reference/guidelines.md) | Load the assigned workflow's format and role references before document work; retain this role's scope. |
+| 5 | [Coordination](../../reference/coordination.md) | Before payloads, markers and work/status messages. |
 
-| # | Read | What you lose if you skip it |
-|---|------|------------------------------|
-| 1 | your overlay section [`../../../cafleet/reference/coding-agents.md#<name>`](../../../cafleet/reference/coding-agents.md) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{skill_loader}` emitted unresolved |
-| 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the missing-`BASE` anchorless-status convention and the no-bypass write protocol — you mishandle a `BASE`-less spawn |
-| 3 | [`../../reference/coordination.md`](../../reference/coordination.md) | the anchorless-status and message-exemption rules — your one-time question-list payload and any status hop get mis-formatted |
+Codex/OpenCode load the cores, own backend and required references by absolute path; use the executing backend's supported loader. Continue the existing assigned workflow without creating a second team. Read [prompt routing](../../../cafleet/reference/prompt-routing.md) before routing an actual denied command. Apply supplied host-rule equivalents where optional files are absent; route an essential unknown prerequisite to the Director before dependent work.
 
 ## Your Accountability
 
@@ -76,7 +78,7 @@ Rules:
 1. **Read** the design document at the path supplied in your spawn prompt. Read it in full before writing any questions.
 2. **Identify uncovered sections** by removing the already-reviewed sections list from the document's heading set.
 3. **Generate** a fine-grained question list for the uncovered sections, applying the categories and priority order above.
-4. **Send** the numbered list to the Director via `cafleet message send`. Terminate the message body with `Total: N questions`.
+4. **Send** the numbered list following [Payload exemptions](../../reference/coordination.md#payload-exemptions): long payloads use `message send --file -` with tool-provided stdin to one isolated invocation. Preserve the no-file-edit boundary; if that transport is unavailable, route the concrete limitation to the Director. Terminate the complete body with `Total: N questions` and claim delivery only from observed results.
 5. **Idle** pending shutdown. The Director will tear you down via `cafleet member delete` once the list is acknowledged. If the Director sends a corrective request, reformat and resend the list, then idle again.
 
 ## Shutdown

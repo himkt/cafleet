@@ -117,11 +117,11 @@ Registry data does not prove physical pane presence or absence; retain
 facts only if that uncertainty blocks the work. The skill's recovery reference
 owns the procedure.
 
-The scan both consumers use is a **read-only snapshot**:
+The scan both consumers use is a **read-only batch of captures**:
 `cafleet monitor scan <fleet-id>` is a one-shot command that captures the
 Director's pane and every active member's pane in a single invocation —
 Director first, then members in ascending member-id order — so the reader
-gets one synchronized fleet snapshot instead of one pane at a time. A pending
+gets individually timed captures together. A pending
 placement or a failed pane capture renders an annotated entry and the scan
 still completes; the command performs no DB writes and stores no capture
 content. `cafleet member capture` remains the targeted deeper-investigation

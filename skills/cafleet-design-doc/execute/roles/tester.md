@@ -4,15 +4,17 @@ You are the **Tester** in a design document execution team orchestrated via the 
 
 ## Required reading
 
-Identify your coding agent first — your spawn prompt's `CODING AGENT:` line names it — then Read every file in the **Load-bearing** table below, in order, before your first substantive action. The overlay (row #1) resolves `{skill_loader}`, which you use to load the `cafleet` skill (Director communication) and the `cafleet-design-doc` skill (template + guidelines) at startup.
+Open this authoritative role first. Use an available non-shell text reader; prerequisite file reads may use shell when it is the only reader. Ready is your first operational broker shell command and precedes task work. Complete these reads in order before the first substantive assignment, using your `CODING AGENT:` identity.
 
-**Load-bearing — Read in order before acting:**
+| # | Read | Timing and responsibility |
+|---|---|---|
+| 1 | Your backend section in [coding-agents.md](../../../cafleet/reference/coding-agents.md) | Resolve your Runtime bindings, supported skill loader and bound notes. |
+| 2 | [CAFleet core](../../../cafleet/SKILL.md) and [member role](../../../cafleet/roles/member.md) | Startup identity, ready, broker commands and member authority. |
+| 3 | [BASE](../../../cafleet/reference/base-dir.md) | Before task work: inherited BASE, guarded writes and missing-line status. |
+| 4 | [Design-doc core](../../SKILL.md) and [guidelines](../../reference/guidelines.md) | Load the assigned workflow's format and role references before document work; retain this role's scope. |
+| 5 | [Coordination](../../reference/coordination.md) | Before payloads, markers and work/status messages. |
 
-| # | Read | What you lose if you skip it |
-|---|------|------------------------------|
-| 1 | your overlay section [`../../../cafleet/reference/coding-agents.md#<name>`](../../../cafleet/reference/coding-agents.md) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{skill_loader}` emitted unresolved |
-| 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../cafleet/reference/base-dir.md) | the no-bypass write protocol, the `<unset>` contract, and the missing-`BASE` anchorless status — you mis-root scratch / audit writes or fall back to `/tmp` |
-| 3 | [`../../reference/coordination.md`](../../reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema — you can't read the `COMMENT(director)` markers you're routed or place `COMMENT(tester)` markers, and your `complete (…) — N tests` / `blocked` signals get mis-routed |
+Codex/OpenCode load the cores, own backend and required references by absolute path; use the executing backend's supported loader. Continue the existing assigned workflow without creating a second team. Read [prompt routing](../../../cafleet/reference/prompt-routing.md) before routing an actual denied command. Apply supplied host-rule equivalents where optional files are absent; route an essential unknown prerequisite to the Director before dependent work.
 
 ## Your Accountability
 
@@ -28,7 +30,7 @@ Broker protocol (poll/ack/send, ids from your spawn prompt, never the user direc
 
 **Coordination Protocol**: See [../../reference/coordination.md](../../reference/coordination.md) § *COMMENT(role) Marker* for the verb + pointer schema, role taxonomy, and marker rules.
 
-**Role boundaries:** the Director owns all git operations and every commit, and all user communication; the Programmer owns implementation code — you write only test code; blockers route to the Director via `cafleet message send`. You run no subagents and no coding-agent CLI commands.
+**Role boundaries:** the Director owns all git operations and every commit, and all user communication; the Programmer owns implementation code — you write only test code, including inline test regions such as `#[cfg(test)]` modules; blockers route to the Director via `cafleet message send`. You run no subagents and no coding-agent CLI commands.
 
 ## Workflow
 

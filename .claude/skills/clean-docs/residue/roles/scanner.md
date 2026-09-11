@@ -13,30 +13,23 @@ coordination, per-run process — is canonical in the umbrella
 
 ## Required reading
 
-Identify your coding agent first — your spawn prompt's `CODING AGENT:` line names
-it — then Read every file below, in order, before your first substantive action.
+Identify `CODING AGENT` from your spawn prompt, then read in this order before substantive work:
 
-**Load-bearing — Read in order before acting:**
+| # | Read | Required action and timing |
+|---|---|---|
+| 1 | Your backend's [runtime bindings](../../../../../skills/cafleet/reference/coding-agents.md#<name>) | Resolve the named backend and its loader before loading skills or using tokens. |
+| 2 | [CAFleet core](../../../../../skills/cafleet/SKILL.md), [BASE](../../../../../skills/cafleet/reference/base-dir.md) and [member startup](../../../../../skills/cafleet/roles/member.md) | Load `cafleet` via the resolved loader; follow BASE/member states and role-first prerequisites, with ready as the first operational broker command. |
+| 3 | [Clean-docs shared spine](../../SKILL.md) | Load `clean-docs`; read coordination and the full-file staging protocol before application. |
+| 4 | Complete [residue workflow](../residue.md#required-reading) and its phase prerequisites | Read the workflow's classes and required references before scanning or reviewing. |
 
-| # | Read | What you lose if you skip it |
-|---|------|------------------------------|
-| 1 | your overlay section [`../../../../../skills/cafleet/reference/coding-agents.md#<name>`](../../../../../skills/cafleet/reference/coding-agents.md) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you emit a literal `{skill_loader}` / `{permission_flags}`, guess a wrong value, or ignore a backend note |
-| 2 | the `cafleet` skill's [`reference/base-dir.md`](../../../../../skills/cafleet/reference/base-dir.md) | the no-bypass write protocol and the `<unset>` contract — you mis-root your partial inventory or fall back to `/tmp` |
-| 3 | the `cafleet-design-doc` skill's [`reference/coordination.md`](../../../../../skills/cafleet-design-doc/reference/coordination.md) | the verb + pointer + `COMMENT(role)` schema (and the clean-docs `scanner` role + `inventory` pointer) — your status hops mis-route |
-| 4 | this workflow's [`reference/rubric.md`](../reference/rubric.md) | the fixed classification rubric — you mis-classify hits or over-delete |
-| 5 | this workflow's [`reference/patterns.md`](../reference/patterns.md) | the multi-pass pattern catalog and the exempt-set exclusion — your sweep is shallow, breaking the multi-pass discipline |
-
-Load the `clean-docs` and `cafleet` skills at startup via `{skill_loader}`.
-Resolve every `{token}` you will use to its overlay value (or the documented
-default) before acting; a literal `{token}` in any command or message is a
-defect.
+Scan only your assigned whole-file slice. Resolve tokens before use; apply supplied host-rule equivalents and route essential unknown prerequisites to the Director.
 
 ## Your accountability
 
 - **Sweep your slice thoroughly.** Run *every* pass in `reference/patterns.md`
   over your assigned files. A single grep is never sufficient.
 - **Hand-inspect every hit.** Read each hit with its surrounding context (the whole
-  sentence / docstring / test body) and classify it with `reference/rubric.md`.
+  sentence / docstring / test body) and classify it with [Classification](../residue.md#classification).
   Never classify from the matched substring alone.
 - **Write a partial inventory.** Record every hit — including KEEP and known-benign
   — as a `COMMENT(scanner)` marker at the hit's `<file>:<line>` in the run's
@@ -47,6 +40,7 @@ defect.
 - **Apply only after approval.** Do NOT edit any file until the Director relays the
   reviewer's `approved (inventory)` for the merged inventory. Then apply your
   slice's edits and re-run the sweep over your slice.
+- **Route denied writes.** Use the [full-file staging protocol](../../SKILL.md#full-file-staging) and continue independent approved rows.
 - **Preserve the three invariants** (umbrella `SKILL.md`). No runtime behavior
   removed (every flag / table / column / code path survives); no live coverage
   lost (a mixed sentinel test keeps its live assertion; a reworded narration keeps
@@ -74,18 +68,12 @@ spawn prompt. Poll with `cafleet message poll`, ack each message with
   would lose coverage) → `blocked (<file>:<line>)` + a `COMMENT(scanner)` marker at
   the same pointer carrying the rationale. STOP and wait for the Director.
 
-## Do NOT
+## Authority
 
-- Edit any file before the reviewer's `approved (inventory)` is relayed.
-- Edit a file outside your assigned slice, or any file in the exempt set.
-- Remove a runtime flag / table / column / code path, or a live test assertion.
-- Introduce new narration in a reworded string (R1).
-- Commit code or run git write operations — the Director handles all git.
-- Continue with assumptions when blocked — message the Director instead.
+Git writes and user communication belong to the Director. Apply only the relayed approved rows in your slice, preserving the exempt set, runtime behavior, current absence coverage and all test logic. Route blockers immediately and wait for arbitration.
 
 ## Shutdown
 
-The Director terminates you via `cafleet member delete`. When the exit keystroke
-arrives your process exits immediately — nothing is required of you. If the
+The Director terminates you via `cafleet member delete`. The pane kill terminates your process immediately — nothing is required of you. If the
 Director instead messages you to wrap up first, send one final `complete
 (inventory)` (or `blocked`) report, then return to the prompt.

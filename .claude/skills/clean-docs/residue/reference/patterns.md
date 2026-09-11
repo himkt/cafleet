@@ -27,9 +27,15 @@ umbrella's canonical exempt-set list — one authority, no second list to drift:
 
 ```
 git grep -nIiP -e '<pattern>' -- \
-  ':(exclude)design-docs/**' \
-  ':(exclude)*.lock' ':(exclude)uv.lock' ':(exclude)pnpm-lock.yaml'
+  ':(exclude)design-docs/**' ':(exclude)researches/**' \
+  ':(exclude)*.lock' ':(exclude)**/*.lock' \
+  ':(exclude)pnpm-lock.yaml' ':(exclude)**/pnpm-lock.yaml' \
+  ':(exclude)package-lock.json' ':(exclude)**/package-lock.json' \
+  ':(exclude)npm-shrinkwrap.json' ':(exclude)**/npm-shrinkwrap.json' \
+  ':(exclude)bun.lockb' ':(exclude)**/bun.lockb'
 ```
+
+Extend the pathspec with every other lockfile present in the slice before running any pass; the complete exempt set governs, including tracked research files.
 
 Run every pass with **`-i` and `-P`**. `-i` (case-insensitive) is required — a
 capital-`Design 0000NNN` or `Legacy` citation is missed without it. `-P` (Perl
@@ -42,7 +48,7 @@ matches nothing without `-P`. `-n` prints line numbers; `-I` skips binary files.
 | Pattern (regex) | Catches |
 |---|---|
 | `deprecat` | deprecation notices |
-| `no longer\|formerly\|previously\|used to` | past-state narration (hand-filter the known-benign present-tense `no longer` / `used to` cases — see `rubric.md`) |
+| `no longer\|formerly\|previously\|used to` | past-state narration (hand-filter the known-benign present-tense `no longer` / `used to` cases — see [classification](../residue.md#classification)) |
 | `\blegacy\b` | "legacy" framing (hand-filter arbitrary fixture names like `legacy_squat`) |
 | `sentinel` | removal-sentinel framing |
 | `historical` | "historical rows / narration" |
@@ -57,7 +63,7 @@ matches nothing without `-P`. `-n` prints line numbers; `-I` skips binary files.
 
 - Run **every** pass over the slice — a single grep is never sufficient.
 - Hand-inspect **every** hit with its surrounding context before classifying
-  (`rubric.md` § Decision procedure). Never classify from the matched substring.
+  ([classification](../residue.md#classification) § Decision procedure). Never classify from the matched substring.
 - Record every hit in the partial inventory with its `<file>:<line>` anchor, the
   quoted text, and the rubric class — including KEEP and known-benign hits, so the
   merged inventory can prove the sweep is complete (zero unaccounted matches).
