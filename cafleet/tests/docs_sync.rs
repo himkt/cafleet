@@ -140,6 +140,309 @@ fn assert_section_terms(path: &str, anchor: &str, terms: &[&str]) {
     assert_terms_in(&format!("{path}#{anchor}"), &section, terms);
 }
 
+fn assert_required_link(path: &str, target: &str, action: &str) {
+    let text = read(path);
+    let required = section_at_anchor(path, &text, "required-reading");
+    let row = required
+        .lines()
+        .find(|line| line.starts_with('|') && line.contains(target))
+        .unwrap_or_else(|| panic!("{path} must require {target} before {action}"));
+    assert_terms_in(path, row, &[action]);
+    assert_terms_in(path, required, &["before"]);
+}
+
+#[test]
+fn shared_director_role_owns_spawn_and_action_headings() {
+    let path = "skills/cafleet/roles/director.md";
+    let text = read(path);
+    for anchor in [
+        "model-selection",
+        "model-name-to-backend-inference",
+        "canonical-spawn-prompt-skeleton",
+        "spawn-prompt-size-limit",
+        "member-create--scratch-and-audit-files",
+        "model-replacement",
+        "member-prompt",
+        "member-ping-manual-inbox-poll",
+        "answering-a-members-relayed-question",
+    ] {
+        section_at_anchor(path, &text, anchor);
+    }
+    assert_section_terms(
+        path,
+        "canonical-spawn-prompt-skeleton",
+        &[
+            "ROLE DEFINITION:",
+            "FLEET ID: {fleet_id}",
+            "DIRECTOR MEMBER ID: {director_member_id}",
+            "YOUR MEMBER ID: {member_id}",
+            "CODING AGENT: {coding_agent}",
+            "IMPORTANT:",
+            "verbatim",
+        ],
+    );
+    assert_section_terms(
+        path,
+        "member-create--scratch-and-audit-files",
+        &[".prompts/", "UTC", "suffix", "substitution", "--file"],
+    );
+    assert_section_terms(
+        path,
+        "spawn-prompt-size-limit",
+        &["--file", "argv", "cleanup"],
+    );
+    assert_section_terms(
+        path,
+        "model-replacement",
+        &["same backend", "two", "user", "pinned", "evidence"],
+    );
+}
+
+#[test]
+fn shared_director_requires_supervision_and_action_specific_recovery_reads() {
+    let path = "skills/cafleet/roles/director.md";
+    assert_required_link(path, "../reference/supervision.md", "supervision");
+    assert_required_link(path, "../reference/supervision.md#recovery", "recover");
+    assert_required_link(path, "../reference/supervision.md#shutdown", "tear");
+    assert_required_link(path, "../reference/prompt-routing.md", "request");
+    assert_required_link(
+        "skills/cafleet/SKILL.md",
+        "reference/supervision.md#recovery",
+        "recover",
+    );
+    assert_required_link(
+        "skills/cafleet/SKILL.md",
+        "reference/supervision.md#shutdown",
+        "tear",
+    );
+}
+
+#[test]
+fn shared_supervision_recovery_preserves_uncertainty_and_role_authority() {
+    assert_section_terms(
+        "skills/cafleet/reference/supervision.md",
+        "recovery",
+        &[
+            "cafleet doctor",
+            "cafleet member capture",
+            "--lines",
+            "unknown",
+            "registry",
+            "physical pane",
+            "awaiting_user",
+            "explicit",
+            "question",
+            "prompt-routing.md",
+            "member delete",
+            "member create",
+            "new",
+            "member_id",
+        ],
+    );
+}
+
+#[test]
+fn shared_supervision_shutdown_checks_closure_within_authorized_scope() {
+    let path = "skills/cafleet/reference/supervision.md";
+    assert_section_terms(
+        path,
+        "shutdown",
+        &[
+            "monitor member",
+            "first",
+            "remaining member",
+            "member list",
+            "root Director",
+            "fleet delete",
+            "fleet list",
+            "authorized",
+            "scope",
+        ],
+    );
+    let text = read(path);
+    let section = section_at_anchor(path, &text, "shutdown");
+    let mut remainder = section;
+    for command in ["member delete", "member list", "fleet delete", "fleet list"] {
+        let position = remainder
+            .find(command)
+            .unwrap_or_else(|| panic!("{path}#shutdown must place {command} in cleanup order"));
+        remainder = &remainder[position + command.len()..];
+    }
+}
+
+#[test]
+fn shared_core_broadcast_owns_usage_and_runtime_delivery_references() {
+    assert_section_terms(
+        "skills/cafleet/SKILL.md",
+        "broadcast",
+        &[
+            "cafleet message broadcast",
+            "--from-member-id",
+            "--file",
+            "--json",
+            "origin_message_id",
+            "broadcast_summary",
+            "recipient",
+            "ack",
+            "runtime/spec/cli-options.md#message-broadcast",
+            "runtime/spec/message-envelope.md",
+        ],
+    );
+}
+
+#[test]
+fn shared_member_startup_supports_shell_only_readers_before_operational_ready() {
+    let path = "skills/cafleet/roles/member.md";
+    let text = read(path);
+    let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert_terms_in(
+        path,
+        &compact,
+        &[
+            "role",
+            "prerequisite",
+            "non-shell",
+            "only text reader",
+            "first operational",
+            "ready",
+        ],
+    );
+    assert_section_terms(
+        path,
+        "command-execution",
+        &[
+            "Bash",
+            "directly",
+            "output",
+            "denied",
+            "Director",
+            "prompt-routing.md",
+        ],
+    );
+    assert_required_link(path, "../reference/base-dir.md", "BASE");
+    assert_required_link(path, "../reference/prompt-routing.md", "route");
+    assert_terms(
+        "skills/cafleet/reference/prompt-routing.md",
+        &[
+            "../roles/member.md#command-execution",
+            "../roles/director.md#member-prompt",
+            "../roles/director.md#member-ping-manual-inbox-poll",
+        ],
+    );
+}
+
+#[test]
+fn shared_base_contract_presents_member_write_states_before_the_resolver() {
+    let path = "skills/cafleet/reference/base-dir.md";
+    let text = read(path);
+    let protocol = section_at_anchor(path, &text, "no-bypass-write-protocol");
+    let procedure = section_at_anchor(path, &text, "procedure");
+    let protocol_offset = text
+        .find(protocol)
+        .expect("protocol section belongs to this file");
+    let procedure_offset = text
+        .find(procedure)
+        .expect("procedure section belongs to this file");
+    assert!(
+        protocol_offset < procedure_offset,
+        "members read their input/write contract before Director resolution"
+    );
+    let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert_terms_in(
+        path,
+        &compact,
+        &[
+            "Members",
+            "literal",
+            "BASE:",
+            "re-resolv",
+            "<unset>",
+            "audit-disabled no BASE in spawn prompt",
+            "${BASE} != <unset>",
+            "Error: BASE is <unset>; refusing to fall back to /tmp",
+            "consumer-supplied",
+            ".prompts/",
+            "dot-prefixed",
+        ],
+    );
+}
+
+#[test]
+fn shared_send_failure_routes_ordinary_members_and_preserves_failed_relay_evidence() {
+    assert_section_terms(
+        "skills/cafleet/SKILL.md",
+        "send-unicast",
+        &[
+            "persisted",
+            "not resend",
+            "ordinary member",
+            "Director",
+            "message poll",
+            "relay",
+            "failure",
+            "id",
+        ],
+    );
+    let path = "skills/cafleet/SKILL.md";
+    let text = read(path);
+    let section = section_at_anchor(path, &text, "send-unicast")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase();
+    assert!(
+        regex::Regex::new(r"(?:no|not|never|without)[^.!\n]{0,120}(?:recursive|recurs|duplicate)")
+            .unwrap()
+            .is_match(&section),
+        "secondary failure reporting must preserve evidence without recursive duplicate reports"
+    );
+}
+
+#[test]
+fn shared_requested_shell_dispatch_distinguishes_success_failure_and_plain_prompt() {
+    let path = "skills/cafleet/reference/prompt-routing.md";
+    assert_section_terms(
+        path,
+        "director-side-dispatch",
+        &[
+            "successful",
+            "failure",
+            "ping",
+            "ack",
+            "Serialize",
+            "poll order",
+        ],
+    );
+    let text = read(path);
+    let section = section_at_anchor(path, &text, "director-side-dispatch");
+    let mut remainder = section;
+    for command in [
+        "cafleet member prompt",
+        "cafleet member ping",
+        "cafleet message ack",
+    ] {
+        let position = remainder.find(command).unwrap_or_else(|| {
+            panic!("{path} must preserve requested-shell success order: {command}")
+        });
+        remainder = &remainder[position + command.len()..];
+    }
+    let compact = section
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase();
+    assert!(
+        regex::Regex::new(r"(?:fail\w*[^.]{0,160}(?:no ping|skip[^.]{0,60}ping|do not[^.]{0,60}ping)|(?:no ping|skip[^.]{0,60}ping)[^.]{0,160}fail)")
+            .unwrap().is_match(&compact),
+        "failed shell dispatch skips the success ping"
+    );
+    assert_section_terms(
+        path,
+        "the-two-forms-shell-vs-plain",
+        &["successful", "No ping follows the plain form"],
+    );
+}
+
 #[test]
 fn public_manual_lifecycle_contains_a_complete_installed_monitor_prompt() {
     let path = "docs/docs/how-to/mixed-backend-team.md";
@@ -854,7 +1157,7 @@ fn shared_skill_pages_make_the_monitor_member_the_execution_owner() {
         ],
     );
     assert_terms(
-        "skills/cafleet/reference/cli.md",
+        "skills/cafleet/SKILL.md",
         &["long-lived execution", "monitor member", "backend"],
     );
     assert_terms(
@@ -866,7 +1169,7 @@ fn shared_skill_pages_make_the_monitor_member_the_execution_owner() {
         &["just a backgrounded command"],
     );
     assert_absent(
-        "skills/cafleet/reference/cli.md",
+        "skills/cafleet/SKILL.md",
         &["as a background task in its own pane"],
     );
     assert_absent(
@@ -940,7 +1243,7 @@ fn the_bootstrap_docs_carry_the_monitor_file_contract() {
 #[test]
 fn the_director_and_member_roles_keep_the_ping_protocol() {
     assert_terms(
-        "skills/cafleet/reference/director.md",
+        "skills/cafleet/roles/director.md",
         &[
             "## Member Ping (manual inbox-poll)",
             "member ping",
@@ -952,7 +1255,7 @@ fn the_director_and_member_roles_keep_the_ping_protocol() {
     let mut absent = vec!["(manual inbox-poll nudge)", "pre-nudge"];
     absent.extend(OLD_CLI_SURFACE);
     absent.extend(REMOVED_VOCABULARY);
-    assert_absent("skills/cafleet/reference/director.md", &absent);
+    assert_absent("skills/cafleet/roles/director.md", &absent);
 
     assert_terms(
         "skills/cafleet/roles/member.md",
@@ -1004,13 +1307,20 @@ fn fixed_ping_surfaces_carry_no_nudge_vocabulary() {
     // The Director's message-level stall-nudge concept lives only in the
     // cafleet-design-doc skill's coordination protocol.
     for relative_path in [
-        "skills/cafleet/reference/recovery.md",
         "skills/cafleet/reference/prompt-routing.md",
-        "skills/cafleet/reference/director.md",
+        "skills/cafleet/roles/director.md",
         "docs/docs/concepts/overview.md",
     ] {
         assert_absent(relative_path, &["nudge"]);
     }
+    let path = "skills/cafleet/reference/supervision.md";
+    let text = read(path);
+    assert!(
+        !section_at_anchor(path, &text, "recovery")
+            .to_lowercase()
+            .contains("nudge"),
+        "fixed-ping recovery uses the current command vocabulary"
+    );
 }
 
 #[test]
