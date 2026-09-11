@@ -27,7 +27,7 @@ spawn prompt's `CODING AGENT:` line names it.
 You are a **cross-section reader** (shared with the Director): on each wake
 you classify panes of members on any backend, so for capture cues you read
 the **target member's** backend section — the pane-state capture-cues tables —
-while every other `{placeholder}` still resolves from your own section only.
+while your local runtime bindings resolve from your own backend's Runtime bindings.
 
 ## Startup, in order
 
