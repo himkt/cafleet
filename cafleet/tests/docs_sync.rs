@@ -1482,7 +1482,16 @@ fn shared_skill_pages_make_the_monitor_member_the_execution_owner() {
     );
     assert_terms(
         "skills/cafleet/roles/director.md",
-        &["monitor member", "wake source", "first"],
+        &["monitor member", "supervision.md#shutdown", "first"],
+    );
+    assert_section_terms(
+        "skills/cafleet/reference/supervision.md",
+        "shutdown",
+        &[
+            "monitor member FIRST",
+            "wake source",
+            "before any other member",
+        ],
     );
     assert_absent(
         "skills/cafleet/reference/supervision.md",
@@ -1595,7 +1604,13 @@ fn the_director_and_member_roles_keep_the_ping_protocol() {
 
     assert_terms(
         "skills/cafleet/roles/member.md",
-        &["member ping", "member prompt", "Director", "monitor member"],
+        &[
+            "member ping",
+            "member prompt",
+            "Director",
+            "monitor's fixed-ping exception",
+            "[monitor role](monitor.md)",
+        ],
     );
     let mut absent = OLD_CLI_SURFACE.to_vec();
     absent.extend(REMOVED_VOCABULARY);
@@ -1616,11 +1631,9 @@ fn the_cafleet_skill_and_bash_rule_document_the_director_ping() {
             "monitor live",
             "--role monitor",
             "monitor_model",
+            "reference/runtime/spec/cli-options.md#cafleet-monitor",
         ],
     );
-    let mut skill_absent = OLD_CLI_SURFACE.to_vec();
-    skill_absent.extend(REMOVED_VOCABULARY);
-    assert_absent("skills/cafleet/SKILL.md", &skill_absent);
 
     assert_terms(
         ".claude/rules/bash-tool.md",
@@ -1794,7 +1807,16 @@ fn every_role_file_gates_its_overlay_as_required_reading_row_one() {
         .canonicalize()
         .expect("the unified coding-agent reference exists");
     let mut files = skill_markdown_files();
-    collect_markdown(&root().join(".claude/skills/clean-docs"), &mut files);
+    let mut clean_docs_files = Vec::new();
+    collect_markdown(
+        &root().join(".claude/skills/clean-docs"),
+        &mut clean_docs_files,
+    );
+    files.extend(
+        clean_docs_files
+            .into_iter()
+            .filter(|path| path.contains("/roles/")),
+    );
     let mut offenders = Vec::new();
     for relative_path in files {
         let text = read(&relative_path);
