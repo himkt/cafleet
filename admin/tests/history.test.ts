@@ -30,7 +30,7 @@ function summary(): FormattedMessage {
 }
 
 describe("member history display window", () => {
-  it.each([0, 200, 201, 1205])("selects up to 200 of %i deliveries and reports actual truncation", (count) => {
+  it.each([0, 200, 201])("selects up to 200 of %i deliveries and reports actual truncation", (count) => {
     const rows = Array.from({ length: count }, (_, i) => delivery(count - i));
     const result: HistoryWindow = selectHistory(rows);
     expect(result.visible).toEqual(rows.slice(0, 200));

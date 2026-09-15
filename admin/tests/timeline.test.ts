@@ -62,25 +62,20 @@ describe("delivery-only timeline grouping", () => {
     expect(groupMessages([summary(10), summary(20, null)])).toEqual([]);
   });
 
-  it.each([0, 1, 2])(
-    "counts two fetched recipients and %i ACKs despite a completed summary",
-    (acked) => {
-      const rows: FormattedMessage[] = [
-        delivery(11, 2, 10, acked >= 1 ? "completed" : "input_required"),
-        summary(10),
-        delivery(12, 3, 10, acked >= 2 ? "completed" : "input_required"),
-      ];
-      const group = onlyBroadcast(groupMessages(rows));
-      expect(ids(group)).toEqual([11, 12]);
-      expect(group.rows.map((row) => row.to_member_id).sort()).toEqual([2, 3]);
-      expect(group.rows.map((row) => row.to_member_name).sort()).toEqual([
-        "member-2",
-        "member-3",
-      ]);
-      expect(group.rows.every((row) => row.type === "unicast")).toBe(true);
-      expect(group.rows.filter((row) => row.status === "completed")).toHaveLength(acked);
-    },
-  );
+  it("preserves two mixed-status deliveries and excludes the completed summary", () => {
+    const completed = delivery(11, 2, 10, "completed");
+    const pending = delivery(12, 3, 10, "input_required");
+    const rows: FormattedMessage[] = [completed, summary(10), pending];
+    const group = onlyBroadcast(groupMessages(rows));
+    expect(ids(group)).toEqual([11, 12]);
+    expect(group.rows.map((row) => row.to_member_id).sort()).toEqual([2, 3]);
+    expect(group.rows.map((row) => row.to_member_name).sort()).toEqual([
+      "member-2",
+      "member-3",
+    ]);
+    expect(group.rows.every((row) => row.type === "unicast")).toBe(true);
+    expect(group.rows).toEqual([completed, pending]);
+  });
 
   it("keeps different broadcast origins separate even for equal bodies and senders", () => {
     const entries = groupMessages([

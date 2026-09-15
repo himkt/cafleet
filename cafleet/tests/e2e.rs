@@ -5,13 +5,126 @@
 
 mod common;
 
-use std::time::Duration;
+use std::io;
+use std::process::{Child, Output};
+use std::time::{Duration, Instant};
 
 use common::{Cli, code, stderr, stdout, text};
 
+const DEADLINE: Duration = Duration::from_secs(10);
+const POLL_INTERVAL: Duration = Duration::from_millis(20);
+
+struct MonitorChild<'a> {
+    child: Option<Child>,
+    cli: &'a Cli,
+    name: &'static str,
+}
+
+impl<'a> MonitorChild<'a> {
+    fn spawn(cli: &'a Cli, name: &'static str, args: &[&str]) -> Self {
+        Self {
+            child: Some(cli.spawn(args)),
+            cli,
+            name,
+        }
+    }
+
+    fn id(&self) -> u32 {
+        self.child.as_ref().expect("uncollected child").id()
+    }
+
+    fn reap(&mut self) -> io::Result<Output> {
+        let child = self.child.as_mut().expect("collect each child once");
+        if child.try_wait()?.is_none() {
+            child.kill()?;
+        }
+        self.child.take().unwrap().wait_with_output()
+    }
+
+    fn fail(&mut self, reason: &str) -> ! {
+        let output = self.reap().expect("terminate and reap failed monitor");
+        panic!(
+            "{}: {reason}; status={}; stdout={}; stderr={}; shim={:?}",
+            self.name,
+            output.status,
+            stdout(&output),
+            stderr(&output),
+            self.cli.shim_calls()
+        );
+    }
+
+    fn wait_until(&mut self, description: &str, mut observed: impl FnMut() -> bool) {
+        let deadline = Instant::now() + DEADLINE;
+        loop {
+            if self.child.as_mut().unwrap().try_wait().unwrap().is_some() {
+                self.fail(&format!("exited before {description}"));
+            }
+            if observed() {
+                return;
+            }
+            if Instant::now() >= deadline {
+                self.fail(&format!("deadline waiting for {description}"));
+            }
+            std::thread::sleep(POLL_INTERVAL);
+        }
+    }
+
+    fn wait_for_exit(&mut self) -> Output {
+        let deadline = Instant::now() + DEADLINE;
+        loop {
+            if self.child.as_mut().unwrap().try_wait().unwrap().is_some() {
+                return self.reap().expect("collect completed monitor");
+            }
+            if Instant::now() >= deadline {
+                self.fail("deadline waiting for second monitor refusal");
+            }
+            std::thread::sleep(POLL_INTERVAL);
+        }
+    }
+}
+
+impl Drop for MonitorChild<'_> {
+    fn drop(&mut self) {
+        if self.child.is_none() {
+            return;
+        }
+        match self.reap() {
+            Ok(output) => eprintln!(
+                "{} reaped after assertion failure: status={}; stdout={}; stderr={}; shim={:?}",
+                self.name,
+                output.status,
+                stdout(&output),
+                stderr(&output),
+                self.cli.shim_calls()
+            ),
+            Err(error) if std::thread::panicking() => {
+                eprintln!("{} cleanup failed: {error}", self.name)
+            }
+            Err(error) => panic!("{} cleanup failed: {error}", self.name),
+        }
+    }
+}
+
+fn install_distinct_pane_shim(cli: &Cli) {
+    std::fs::write(
+        cli.shim_dir.join("tmux"),
+        r#"#!/bin/sh
+printf '%s\n' "$*" >> "$CAFLEET_TEST_TMUX_LOG"
+case "$1" in
+    display-message) printf 'main|@1|%%0\n' ;;
+    split-window) printf '%s\n' "${CAFLEET_TEST_NEXT_PANE:?required next pane}" ;;
+    list-panes) printf '%%0\n%%7\n%%8\n%%9\n' ;;
+esac
+"#,
+    )
+    .unwrap();
+}
+
 #[test]
 fn end_to_end_lifecycle_with_one_monitor_tick() {
-    let cli = Cli::new();
+    let mut cli = Cli::new();
+    install_distinct_pane_shim(&cli);
+    cli.set_env("CAFLEET_TEST_NEXT_PANE", "%7");
     cli.install();
 
     let output = cli.run(&[
@@ -28,8 +141,27 @@ fn end_to_end_lifecycle_with_one_monitor_tick() {
     assert_eq!(stdout(&output), "1 director=1 monitor=2\n");
 
     let monitor_id = Cli::BOOTSTRAP_MONITOR_ID;
+    cli.set_env("CAFLEET_TEST_NEXT_PANE", "%8");
     let worker_id = cli.create_member(1, "worker");
+    cli.set_env("CAFLEET_TEST_NEXT_PANE", "%9");
     let helper_id = cli.create_member(1, "helper");
+    let conn = cli.sqlite();
+    for (member, pane) in [
+        (1, "%0"),
+        (monitor_id, "%7"),
+        (worker_id, "%8"),
+        (helper_id, "%9"),
+    ] {
+        assert_eq!(
+            conn.query_row(
+                "SELECT mux_pane_id FROM member_placements WHERE member_id=?1",
+                [member],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            pane
+        );
+    }
 
     let output = cli.run(&[
         "message",
@@ -51,6 +183,7 @@ fn end_to_end_lifecycle_with_one_monitor_tick() {
         .unwrap();
 
     let output = cli.run(&["message", "poll", &worker_id.to_string()]);
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     assert!(
         stdout(&output).contains("e2e task"),
         "got: {}",
@@ -58,34 +191,12 @@ fn end_to_end_lifecycle_with_one_monitor_tick() {
     );
 
     let output = cli.run(&["message", "ack", &message_id.to_string()]);
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     assert!(stdout(&output).starts_with("Message acknowledged.\n"));
 
     let output = cli.run(&["message", "poll", &worker_id.to_string()]);
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     assert!(stdout(&output).contains("No messages found."));
-
-    let mut child = cli.spawn(&["monitor", "1", "--tick", "1", "--interval", "1"]);
-    std::thread::sleep(Duration::from_secs(1));
-
-    let second = cli.run(&["monitor", "1", "--tick", "1"]);
-    assert_eq!(code(&second), 1, "the atomic claim refuses a second loop");
-    assert!(
-        stderr(&second).contains("Error: monitor already running for fleet 1"),
-        "got: {}",
-        stderr(&second)
-    );
-
-    std::thread::sleep(Duration::from_secs(2));
-    child.kill().unwrap();
-    let loop_output = child.wait_with_output().unwrap();
-    let loop_stdout = text(&loop_output.stdout);
-    assert!(
-        loop_stdout.contains("monitor loop started (fleet 1, tick 1s, pid "),
-        "the startup confirmation line, got: {loop_stdout}"
-    );
-    assert!(
-        loop_stdout.contains(&format!("tick -> wake monitor {monitor_id} (2 members)")),
-        "got: {loop_stdout}"
-    );
 
     let payload = format!(
         "[cafleet] tick: fleet 1 — health-check your 2 members: \
@@ -95,31 +206,77 @@ fn end_to_end_lifecycle_with_one_monitor_tick() {
          Follow your monitor role protocol. \
          Resume your work if something was still running."
     );
-    assert!(
-        cli.shim_calls()
-            .iter()
-            .any(|line| line.contains("send-keys -t %7 -l") && line.contains(&payload)),
-        "the wake keystroke reached the monitor member's pane, got: {:?}",
-        cli.shim_calls()
+
+    let mut child = MonitorChild::spawn(
+        &cli,
+        "primary monitor",
+        &["monitor", "1", "--tick", "1", "--interval", "1"],
+    );
+    let pid = i64::from(child.id());
+    child.wait_until("owned live runtime slot", || conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM monitor_runtime WHERE fleet_id=1 AND pid=?1 AND last_tick_at IS NOT NULL)",
+        [pid], |row| row.get::<_, bool>(0),
+    ).unwrap());
+
+    let mut second = MonitorChild::spawn(&cli, "second monitor", &["monitor", "1", "--tick", "1"]);
+    let output = second.wait_for_exit();
+    assert_eq!(
+        code(&output),
+        1,
+        "the atomic claim refuses a second loop; stderr: {}",
+        stderr(&output)
     );
     assert!(
-        !cli.shim_calls()
-            .iter()
-            .any(|line| line.contains("-t %0") && line.contains("[cafleet] tick:")),
-        "no code path keystrokes the Director's pane on a timer, got: {:?}",
-        cli.shim_calls()
+        stderr(&output).contains("Error: monitor already running for fleet 1"),
+        "got: {}",
+        stderr(&output)
     );
 
-    let conn = cli.sqlite();
-    let last_wake: Option<String> = conn
+    let wake_keystroke = format!("send-keys -t %7 -l {payload}");
+    child.wait_until("committed monitor-directed wake", || {
+        let committed = conn
+            .query_row(
+                "SELECT last_wake_at FROM monitor_runtime WHERE fleet_id=1",
+                [],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .unwrap()
+            .is_some_and(|timestamp| !timestamp.is_empty());
+        let calls = cli.shim_calls();
+        committed && calls.iter().any(|line| line == &wake_keystroke)
+    });
+    let loop_output = child.reap().expect("terminate and reap primary monitor");
+    let loop_stdout = text(&loop_output.stdout);
+    let calls = cli.shim_calls();
+    assert!(
+        loop_stdout.contains(&format!(
+            "monitor loop started (fleet 1, tick 1s, pid {pid})"
+        )),
+        "stdout: {loop_stdout}; stderr: {}; shim: {calls:?}",
+        stderr(&loop_output)
+    );
+    assert!(
+        loop_stdout.contains(&format!("tick -> wake monitor {monitor_id} (2 members)")),
+        "stdout: {loop_stdout}; stderr: {}; shim: {calls:?}",
+        stderr(&loop_output)
+    );
+    assert!(
+        calls.iter().any(|line| line == &wake_keystroke),
+        "monitor-directed wake: {calls:?}"
+    );
+    assert!(
+        calls
+            .iter()
+            .filter(|line| line.contains("[cafleet] tick:"))
+            .all(|line| line == &wake_keystroke),
+        "every wake targets the monitor, including no Director-directed wake: {calls:?}"
+    );
+    let last_wake: String = conn
         .query_row(
             "SELECT last_wake_at FROM monitor_runtime WHERE fleet_id=1",
             [],
             |row| row.get(0),
         )
         .unwrap();
-    assert!(
-        last_wake.is_some(),
-        "the successful wake stamped the fleet's last_wake_at"
-    );
+    chrono::DateTime::parse_from_rfc3339(&last_wake).expect("successful wake timestamp");
 }

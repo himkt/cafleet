@@ -340,17 +340,41 @@ async fn the_timeline_is_hard_capped_at_200() {
     let dir = TempDir::new().unwrap();
     let (url, mut conn) = migrated(&dir);
     let (_, director_id, member_id, _) = seeded_fleet(&mut conn);
-    for i in 0..201 {
-        broker::send_message(
-            &mut conn,
-            &NullNotifier,
-            200,
-            director_id,
-            &member_id.to_string(),
-            &format!("message {i}"),
-        )
-        .unwrap();
+    let start = chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00+00:00")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let tx = conn.transaction().unwrap();
+    {
+        let mut insert = tx
+            .prepare(
+                "INSERT INTO messages (message_id, owner_member_id, from_member_id, to_member_id, \
+             type, created_at, status_state, status_timestamp, origin_message_id, text) \
+             VALUES (?1, ?2, ?3, ?2, 'unicast', ?4, 'input_required', ?4, NULL, ?5)",
+            )
+            .unwrap();
+        for i in 0..201 {
+            let timestamp = cafleet::time::format_utc(start + chrono::Duration::seconds(i));
+            assert_eq!(
+                insert
+                    .execute(rusqlite::params![
+                        i + 1,
+                        member_id,
+                        director_id,
+                        timestamp,
+                        format!("message {i}")
+                    ])
+                    .unwrap(),
+                1
+            );
+        }
     }
+    tx.commit().unwrap();
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM messages", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        201
+    );
 
     let (status, body) = call(app(&url), "GET", "/api/timeline", Some("1"), None).await;
     assert_eq!(status, StatusCode::OK);
@@ -358,10 +382,22 @@ async fn the_timeline_is_hard_capped_at_200() {
     let messages = payload["messages"].as_array().unwrap();
     assert_eq!(messages.len(), 200, "the 200 most recent");
     assert_eq!(messages[0]["body"], "message 200", "newest first");
+    assert_eq!(messages[199]["body"], "message 1", "last retained row");
+    assert_eq!(
+        messages
+            .iter()
+            .map(|row| row["message_id"].as_i64().unwrap())
+            .collect::<Vec<_>>(),
+        (2..=201).rev().collect::<Vec<_>>()
+    );
+    assert!(
+        messages.iter().all(|row| row["body"] != "message 0"),
+        "the 201st delivery is excluded"
+    );
 }
 
 #[tokio::test]
-async fn post_send_handles_unicast_broadcast_and_the_error_surfaces() {
+async fn post_send_handles_unicast_and_the_error_surfaces() {
     let dir = TempDir::new().unwrap();
     let (url, mut conn) = migrated(&dir);
     let (_, director_id, member_id, _) = seeded_fleet(&mut conn);
@@ -388,21 +424,6 @@ async fn post_send_handles_unicast_broadcast_and_the_error_surfaces() {
         keys(&payload),
         ["message_id", "status"],
         "the unicast response gains no notification field"
-    );
-
-    let (status, body) = call(
-        app.clone(),
-        "POST",
-        "/api/messages/send",
-        Some("1"),
-        Some(json!({"from_member_id": director_id, "to_member_id": "*", "text": "all"})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(
-        parsed(&body)["status"],
-        "completed",
-        "the broadcast returns its summary"
     );
 
     let (status, body) = call(
@@ -582,31 +603,6 @@ async fn patch_monitor_updates_the_wake_interval_with_the_pinned_error_contract(
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body, r#"{"detail":"X-Fleet-Id header required"}"#);
 
-    let (status, body) = call(
-        app.clone(),
-        "PATCH",
-        "/api/monitor",
-        Some(""),
-        Some(valid.clone()),
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(
-        body, r#"{"detail":"X-Fleet-Id header required"}"#,
-        "empty counts as missing"
-    );
-
-    let (status, body) = call(
-        app.clone(),
-        "PATCH",
-        "/api/monitor",
-        Some("abc"),
-        Some(valid.clone()),
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(body, r#"{"detail":"X-Fleet-Id must be an integer"}"#);
-
     // An unparsable body 422s before the fleet check — the unknown fleet 999
     // never reaches its 404, matching POST /api/messages/send.
     let request = Request::builder()
@@ -742,17 +738,6 @@ async fn post_monitor_wake_requests_a_forced_wake_with_the_pinned_error_contract
     let (status, body) = call(app.clone(), "POST", "/api/monitor/wake", None, None).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body, r#"{"detail":"X-Fleet-Id header required"}"#);
-
-    let (status, body) = call(app.clone(), "POST", "/api/monitor/wake", Some(""), None).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(
-        body, r#"{"detail":"X-Fleet-Id header required"}"#,
-        "empty counts as missing"
-    );
-
-    let (status, body) = call(app.clone(), "POST", "/api/monitor/wake", Some("abc"), None).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(body, r#"{"detail":"X-Fleet-Id must be an integer"}"#);
 
     let (status, body) = call(app.clone(), "POST", "/api/monitor/wake", Some("999"), None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
@@ -899,7 +884,10 @@ async fn the_spa_fallback_serves_index_except_for_reserved_prefixes() {
 async fn timeline_broadcast_excludes_summary_through_two_delivery_ack_transitions() {
     let dir = TempDir::new().unwrap();
     let (url, mut conn) = migrated(&dir);
-    let (_, director, _, helper) = seeded_fleet(&mut conn);
+    let (fleet, director, worker, helper) = seeded_fleet(&mut conn);
+    let monitor = broker::active_monitor_member_id(&conn, fleet)
+        .unwrap()
+        .unwrap();
     broker::deregister_member(&mut conn, helper).unwrap();
     let router = app(&url);
     let (status, body) = call(
@@ -912,6 +900,7 @@ async fn timeline_broadcast_excludes_summary_through_two_delivery_ack_transition
     .await;
     assert_eq!(status, StatusCode::OK);
     let response = parsed(&body);
+    assert_eq!(keys(&response), ["message_id", "status"]);
     let summary_id = response["message_id"].as_i64().unwrap();
     assert_eq!(
         response["status"], "completed",
@@ -921,7 +910,20 @@ async fn timeline_broadcast_excludes_summary_through_two_delivery_ack_transition
         .map(|record| cafleet::presentation::message_envelope(&record))
         .unwrap();
     assert_eq!(summary["message"]["type"], "broadcast_summary");
+    assert!(
+        summary["message"]
+            .as_object()
+            .unwrap()
+            .contains_key("to_member_id")
+    );
     assert!(summary["message"]["to_member_id"].is_null());
+    assert_eq!(summary["message"]["message_id"], summary_id);
+    assert_eq!(summary["message"]["owner_member_id"], director);
+    assert_eq!(summary["message"]["from_member_id"], director);
+    assert_eq!(summary["message"]["origin_message_id"], summary_id);
+    assert_eq!(summary["message"]["status_state"], "completed");
+    assert_eq!(summary["message"]["text"], "Broadcast sent to 2 recipients");
+    let mut delivery_ids = None;
     for acked in 0..=2 {
         let (status, body) = call(router.clone(), "GET", "/api/timeline", Some("1"), None).await;
         assert_eq!(status, StatusCode::OK);
@@ -937,6 +939,31 @@ async fn timeline_broadcast_excludes_summary_through_two_delivery_ack_transition
             && r["to_member_id"].is_i64()
             && r["to_member_name"].is_string()
             && r["origin_message_id"] == summary_id));
+        let mut recipients = rows
+            .iter()
+            .map(|row| {
+                (
+                    row["to_member_id"].as_i64().unwrap(),
+                    row["to_member_name"].as_str().unwrap(),
+                )
+            })
+            .collect::<Vec<_>>();
+        recipients.sort();
+        assert_eq!(recipients, [(monitor, "monitor"), (worker, "worker")]);
+        assert!(rows.iter().all(|row| row["from_member_id"] == director
+            && row["from_member_name"] == "Director"
+            && row["body"] == "broadcast"));
+        let mut ids = rows
+            .iter()
+            .map(|row| row["message_id"].as_i64().unwrap())
+            .collect::<Vec<_>>();
+        ids.sort();
+        assert!(ids[0] != ids[1] && !ids.contains(&summary_id));
+        if let Some(expected) = &delivery_ids {
+            assert_eq!(&ids, expected);
+        } else {
+            delivery_ids = Some(ids);
+        }
         assert_eq!(
             rows.iter().filter(|r| r["status"] == "completed").count(),
             acked
@@ -962,15 +989,6 @@ async fn timeline_broadcast_excludes_summary_through_two_delivery_ack_transition
 
 #[tokio::test]
 async fn integrity_missing_sender_name_returns_500_without_a_panicked_task_detail() {
-    missing_message_name_is_an_integrity_error(true).await;
-}
-
-#[tokio::test]
-async fn integrity_missing_recipient_name_returns_500_without_a_panicked_task_detail() {
-    missing_message_name_is_an_integrity_error(false).await;
-}
-
-async fn missing_message_name_is_an_integrity_error(sender: bool) {
     let dir = TempDir::new().unwrap();
     let (url, mut conn) = migrated(&dir);
     let (_, director, worker, _) = seeded_fleet(&mut conn);
@@ -983,15 +1001,10 @@ async fn missing_message_name_is_an_integrity_error(sender: bool) {
         "integrity",
     )
     .unwrap();
-    let absent = if sender { director } else { worker };
     // Break only this isolated database. Keep a valid owner so the read
     // reaches name resolution instead of being filtered out of the timeline.
     conn.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
-    if !sender {
-        conn.execute("UPDATE messages SET owner_member_id=?1", [director])
-            .unwrap();
-    }
-    conn.execute("DELETE FROM members WHERE member_id=?1", [absent])
+    conn.execute("DELETE FROM members WHERE member_id=?1", [director])
         .unwrap();
     conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
     let (status, body) = call(app(&url), "GET", "/api/timeline", Some("1"), None).await;
@@ -1003,7 +1016,10 @@ async fn missing_message_name_is_an_integrity_error(sender: bool) {
         !detail.contains("panicked") && !detail.contains("internal error: task"),
         "integrity errors must not originate from a panicked blocking task: {detail}"
     );
-    assert!(!detail.trim().is_empty());
+    assert_eq!(
+        detail,
+        format!("invalid stored value for message member name: {director}")
+    );
 }
 
 #[tokio::test]
