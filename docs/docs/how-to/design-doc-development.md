@@ -23,6 +23,9 @@ use a Programmer without a Tester. Contributor setup is in
 ## Where output lands
 
 Creation writes `design-docs/NNNNNNN-<slug>/design-doc.md` in your repository.
+CAFleet assigns a seven-digit, zero-padded number one above the highest existing
+number in that repository's `design-docs/`, starting at `0000001`. The slug is a
+short kebab-case description, such as `add-search`, giving `0000001-add-search`.
 The interview keeps questions and answers in `question.md` beside it and
 annotates the design; execution updates the design's task progress while
 implementing the approved work.
