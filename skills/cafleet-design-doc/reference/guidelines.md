@@ -77,11 +77,15 @@
 
 Normalize the design-doc argument to the task folder before invoking the generic [BASE resolver](../../cafleet/reference/base-dir.md#procedure): strip a trailing `/design-doc.md`; for a relative argument, strip a leading `design-docs/` if present and prepend `design-docs/` once. For an absolute argument, only strip the trailing filename and use that absolute folder directly. BASE owns containment and disabled-audit decisions; the invoking workflow owns document discovery and its explicit output target.
 
-Design documents use a directory-based structure:
+Design documents use `design-docs/{NNNNNNN}-{slug}/design-doc.md` in every repository using CAFleet. The directory may also contain related artifacts, such as `question.md` from interviews. Use a short kebab-case feature description for `{slug}`.
 
-- Path: `design-docs/{slug}/design-doc.md`
-- The directory may contain related artifacts (e.g., `question.md` from interviews)
-- The cafleet-design-doc skill's create, interview, and execute workflows (which operate on a single document) accept a slug name (e.g., `my-feature`) as argument. The `design-docs/` prefix is auto-prepended via the `cafleet` skill's `reference/base-dir.md` integration
+### Numbering
+
+Before choosing a new document's folder, inspect the target repository's `design-docs/` directories. Take the highest existing numeric prefix, add 1, and format it with seven-digit zero-padding. Start at `0000001` when there are no numbered directories. Count existing numbered directories even when their document is unfinished, so their numbers remain reserved.
+
+For fresh creation from a topic or an unnumbered slug such as `my-feature`, choose the next number and use a folder such as `0000001-my-feature`. Resolve that numbered folder through BASE before writing any document or audit artifacts. Recheck availability before creating the folder; if another task has taken the number, select the next available number.
+
+The create, interview, and execute workflows accept an existing directory name such as `0000001-my-feature` or a document path. Preserve existing targets when resuming, interviewing, or executing. Honor an explicit user-supplied output path; numbering supplies the default location when the workflow chooses a new folder.
 
 ## What "Comprehensive" Means
 

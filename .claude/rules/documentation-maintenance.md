@@ -2,7 +2,7 @@
 
 Rules for keeping the project's documentation in sync with its code. These apply
 to every change that touches a user- or contract-facing surface; the design-doc
-numbering/format rules live separately in `design-doc-numbering.md`.
+numbering/format rules live in the shared [design-document guidelines](../../skills/cafleet-design-doc/reference/guidelines.md#file-layout).
 
 ## Implementation Order
 
