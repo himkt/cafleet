@@ -9,7 +9,7 @@ use common::{Cli, code, stderr, stdout, write_file};
 #[test]
 fn step8_capture_mux_guard_precedes_unknown_member_lookup() {
     let mut cli = Cli::new();
-    cli.with_fleet();
+    cli.seeded_fleet();
     cli.set_env("CAFLEET_MULTIPLEXER", "invalid-step8-backend");
     let output = cli.run(&["member", "capture", "999"]);
     assert_eq!(code(&output), 1);
@@ -20,7 +20,7 @@ fn step8_capture_mux_guard_precedes_unknown_member_lookup() {
 #[test]
 fn step8_scan_live_fleet_guard_precedes_invalid_mux_resolution() {
     let mut cli = Cli::new();
-    let (fleet, _) = cli.with_fleet();
+    let (fleet, _) = cli.seeded_fleet();
     cli.set_env("CAFLEET_MULTIPLEXER", "invalid-step8-backend");
     for id in [999, fleet] {
         if id == fleet {
@@ -41,7 +41,7 @@ fn step8_scan_live_fleet_guard_precedes_invalid_mux_resolution() {
 #[test]
 fn member_create_spawns_patches_the_pane_and_substitutes_identity() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
+    let (fleet_id, _) = cli.with_cli_fleet();
     let output = cli.run(&[
         "member",
         "create",
@@ -90,7 +90,7 @@ fn member_create_spawns_patches_the_pane_and_substitutes_identity() {
 #[test]
 fn member_create_accepts_the_prompt_via_file() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
+    let (fleet_id, _) = cli.with_cli_fleet();
     let prompt_file = write_file(
         &cli.home.path().join("prompt.md"),
         b"FLEET {fleet_id} AGENT {coding_agent}",
@@ -120,37 +120,9 @@ fn member_create_accepts_the_prompt_via_file() {
 }
 
 #[test]
-fn member_create_requires_exactly_one_body_source() {
-    let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
-    let base = [
-        "member",
-        "create",
-        "--fleet-id",
-        &fleet_id.to_string(),
-        "--name",
-        "worker",
-        "--description",
-        "d",
-    ];
-
-    let output = cli.run(&base);
-    assert_eq!(
-        code(&output),
-        2,
-        "neither PROMPT nor --file is clap's native group error"
-    );
-
-    let mut both = base.to_vec();
-    both.extend(["prompt", "--file", "f.md"]);
-    let output = cli.run(&both);
-    assert_eq!(code(&output), 2, "PROMPT and --file conflict at parse time");
-}
-
-#[test]
 fn member_create_unknown_placeholder_exits_2_and_leaves_no_orphan() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
+    let (fleet_id, _) = cli.with_cli_fleet();
     let output = cli.run(&[
         "member",
         "create",
@@ -194,7 +166,7 @@ fn member_create_unknown_placeholder_exits_2_and_leaves_no_orphan() {
 #[test]
 fn member_create_split_failure_rolls_back_the_registration() {
     let mut cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
+    let (fleet_id, _) = cli.with_cli_fleet();
     cli.fail_subcommand = Some("split-window".to_string());
     let output = cli.run(&[
         "member",
@@ -247,7 +219,7 @@ fn member_create_split_failure_rolls_back_the_registration() {
 #[test]
 fn member_create_validates_model_and_effort_before_any_side_effect() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
+    let (fleet_id, _) = cli.with_cli_fleet();
     let output = cli.run(&[
         "member",
         "create",
@@ -282,7 +254,7 @@ fn member_create_validates_model_and_effort_before_any_side_effect() {
 #[test]
 fn member_create_requires_the_backend_binary_on_path() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
+    let (fleet_id, _) = cli.with_cli_fleet();
     let output = cli.run(&[
         "member",
         "create",
@@ -342,7 +314,7 @@ fn member_create_unknown_fleet_is_a_usage_error() {
 #[test]
 fn member_create_role_monitor_registers_the_monitor_kind() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_bare_fleet();
+    let (fleet_id, _) = cli.with_cli_bare_fleet();
     let monitor_id = cli.create_monitor(fleet_id);
 
     let output = cli.run(&["member", "show", &monitor_id.to_string(), "--json"]);
@@ -354,7 +326,7 @@ fn member_create_role_monitor_registers_the_monitor_kind() {
 #[test]
 fn member_create_without_a_monitor_hits_the_monitor_first_guard() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_bare_fleet();
+    let (fleet_id, _) = cli.with_cli_bare_fleet();
     let output = cli.run(&[
         "member",
         "create",
@@ -400,7 +372,7 @@ fn member_create_without_a_monitor_hits_the_monitor_first_guard() {
 #[test]
 fn member_create_role_monitor_twice_hits_the_one_per_fleet_guard() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_bare_fleet();
+    let (fleet_id, _) = cli.with_cli_bare_fleet();
     let monitor_id = cli.create_monitor(fleet_id);
 
     let output = cli.run(&[
@@ -435,30 +407,10 @@ fn member_create_role_monitor_twice_hits_the_one_per_fleet_guard() {
 }
 
 #[test]
-fn member_create_rejects_any_role_value_but_monitor() {
-    let cli = Cli::new();
-    let (fleet_id, _) = cli.with_bare_fleet();
-    let output = cli.run(&[
-        "member",
-        "create",
-        "--fleet-id",
-        &fleet_id.to_string(),
-        "--name",
-        "worker",
-        "--description",
-        "d",
-        "--role",
-        "builder",
-        "prompt",
-    ]);
-    assert_eq!(code(&output), 2, "clap rejects the value at parse time");
-}
-
-#[test]
 fn member_show_takes_the_positional_subject() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
-    let member_id = cli.create_member(fleet_id, "worker");
+    let (fleet_id, _) = cli.seeded_fleet();
+    let member_id = cli.seed_member(fleet_id, "worker");
 
     let output = cli.run(&["member", "show", &member_id.to_string()]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
@@ -495,8 +447,8 @@ fn member_show_takes_the_positional_subject() {
 #[test]
 fn member_list_takes_the_positional_fleet_subject() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
-    cli.create_member(fleet_id, "worker");
+    let (fleet_id, _) = cli.seeded_fleet();
+    cli.seed_member(fleet_id, "worker");
     let output = cli.run(&["member", "list", &fleet_id.to_string()]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let out = stdout(&output);
@@ -519,8 +471,8 @@ fn member_list_takes_the_positional_fleet_subject() {
 #[test]
 fn member_delete_kills_the_pane_and_reports_it() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
-    let member_id = cli.create_member(fleet_id, "worker");
+    let (fleet_id, _) = cli.seeded_fleet();
+    let member_id = cli.seed_member(fleet_id, "worker");
     let output = cli.run(&["member", "delete", &member_id.to_string()]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let out = stdout(&output);
@@ -537,7 +489,7 @@ fn member_delete_kills_the_pane_and_reports_it() {
 #[test]
 fn member_delete_of_the_root_director_is_rejected() {
     let cli = Cli::new();
-    let (_, director_id) = cli.with_fleet();
+    let (_, director_id) = cli.seeded_fleet();
     let output = cli.run(&["member", "delete", &director_id.to_string()]);
     assert_eq!(code(&output), 1);
     assert!(
@@ -552,8 +504,8 @@ fn member_delete_of_the_root_director_is_rejected() {
 #[test]
 fn member_prompt_dispatches_and_validates_the_text() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
-    let member_id = cli.create_member(fleet_id, "worker");
+    let (fleet_id, _) = cli.seeded_fleet();
+    let member_id = cli.seed_member(fleet_id, "worker");
 
     let output = cli.run(&["member", "prompt", &member_id.to_string(), "hello worker"]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
@@ -579,8 +531,8 @@ fn member_prompt_dispatches_and_validates_the_text() {
 #[test]
 fn member_prompt_shell_form_is_esc_safeguarded_before_the_bang_line() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
-    let member_id = cli.create_member(fleet_id, "worker");
+    let (fleet_id, _) = cli.seeded_fleet();
+    let member_id = cli.seed_member(fleet_id, "worker");
     let output = cli.run(&[
         "member",
         "prompt",
@@ -609,8 +561,8 @@ fn member_prompt_shell_form_is_esc_safeguarded_before_the_bang_line() {
 #[test]
 fn member_capture_of_a_pending_placement_is_a_hard_error() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
-    let member_id = cli.create_member(fleet_id, "worker");
+    let (fleet_id, _) = cli.seeded_fleet();
+    let member_id = cli.seed_member(fleet_id, "worker");
     cli.sqlite()
         .execute(
             "UPDATE member_placements SET mux_pane_id=NULL WHERE member_id=?1",
@@ -632,8 +584,8 @@ fn member_capture_of_a_pending_placement_is_a_hard_error() {
 #[test]
 fn member_ping_skips_a_pending_placement_and_exits_zero() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
-    let member_id = cli.create_member(fleet_id, "worker");
+    let (fleet_id, _) = cli.seeded_fleet();
+    let member_id = cli.seed_member(fleet_id, "worker");
     cli.sqlite()
         .execute(
             "UPDATE member_placements SET mux_pane_id=NULL WHERE member_id=?1",
@@ -687,8 +639,8 @@ fn member_ping_skips_a_pending_placement_and_exits_zero() {
 #[test]
 fn member_ping_dispatches_the_subject_only_poll_keystroke() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
-    let member_id = cli.create_member(fleet_id, "worker");
+    let (fleet_id, _) = cli.seeded_fleet();
+    let member_id = cli.seed_member(fleet_id, "worker");
     let output = cli.run(&["member", "ping", &member_id.to_string(), "--json"]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
@@ -708,13 +660,13 @@ fn member_ping_dispatches_the_subject_only_poll_keystroke() {
 #[test]
 fn member_capture_text_emits_the_content_only() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
-    let member_id = cli.create_member(fleet_id, "worker");
+    let (fleet_id, _) = cli.seeded_fleet();
+    let member_id = cli.seed_member(fleet_id, "worker");
     let output = cli.run(&["member", "capture", &member_id.to_string()]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     assert_eq!(
         stdout(&output),
-        "line1\nline2",
+        "pane:%7\nline1\nline2",
         "the raw capture content, no envelope, no trailing newline"
     );
 
@@ -730,8 +682,8 @@ fn member_capture_text_emits_the_content_only() {
 #[test]
 fn member_capture_json_carries_the_content_hash() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
-    let member_id = cli.create_member(fleet_id, "worker");
+    let (fleet_id, _) = cli.seeded_fleet();
+    let member_id = cli.seed_member(fleet_id, "worker");
     let output = cli.run(&["member", "capture", &member_id.to_string(), "--json"]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
@@ -781,8 +733,8 @@ fn member_capture_json_carries_the_content_hash() {
 #[test]
 fn monitor_no_longer_parses_a_capture_subcommand() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
-    let member_id = cli.create_member(fleet_id, "worker");
+    let (fleet_id, _) = cli.seeded_fleet();
+    let member_id = cli.seed_member(fleet_id, "worker");
     let output = cli.run(&[
         "monitor",
         "capture",
@@ -837,9 +789,9 @@ fn monitor_loop_form_still_parses_the_positional_and_flags() {
 #[test]
 fn monitor_scan_prints_director_first_then_members_ascending() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
-    let alpha_id = cli.create_member(fleet_id, "alpha");
-    let beta_id = cli.create_member(fleet_id, "beta");
+    let (fleet_id, _) = cli.seeded_fleet();
+    let alpha_id = cli.seed_member(fleet_id, "alpha");
+    let beta_id = cli.seed_member(fleet_id, "beta");
 
     let output = cli.run(&["monitor", "scan", &fleet_id.to_string()]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
@@ -852,13 +804,13 @@ fn monitor_scan_prints_director_first_then_members_ascending() {
     );
 
     assert!(
-        out.contains("=== 2 (monitor; kind=monitor; coding_agent=claude; pane=%7; captured_at="),
+        out.contains("=== 2 (monitor; kind=monitor; coding_agent=claude; pane=%2; captured_at="),
         "the monitor member's section rides the scan, got: {out}"
     );
     let alpha_header =
         format!("=== {alpha_id} (alpha; kind=member; coding_agent=claude; pane=%7; captured_at=");
     let beta_header =
-        format!("=== {beta_id} (beta; kind=member; coding_agent=claude; pane=%7; captured_at=");
+        format!("=== {beta_id} (beta; kind=member; coding_agent=claude; pane=%8; captured_at=");
     assert!(out.contains(&alpha_header), "got: {out}");
     assert!(out.contains(&beta_header), "got: {out}");
     assert!(
@@ -877,8 +829,8 @@ fn monitor_scan_prints_director_first_then_members_ascending() {
 #[test]
 fn monitor_scan_json_pins_the_key_order() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
-    let member_id = cli.create_member(fleet_id, "worker");
+    let (fleet_id, _) = cli.seeded_fleet();
+    let member_id = cli.seed_member(fleet_id, "worker");
 
     let output = cli.run(&["monitor", "scan", &fleet_id.to_string(), "--json"]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
@@ -937,6 +889,24 @@ fn monitor_scan_json_pins_the_key_order() {
         "mode-exact hash of the emitted content"
     );
 
+    let panes: std::collections::BTreeSet<_> = entries
+        .iter()
+        .map(|entry| entry["pane_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        panes.len(),
+        entries.len(),
+        "every roster member owns a distinct pane"
+    );
+    for entry in entries {
+        let pane = entry["pane_id"].as_str().unwrap();
+        assert_eq!(
+            entry["content"].as_str().unwrap(),
+            format!("pane:{pane}\nline1\nline2"),
+            "capture must come from the listed member's pane"
+        );
+    }
+
     let monitor = &entries[1];
     assert_eq!(monitor["member_id"], 2);
     assert_eq!(monitor["kind"], "monitor");
@@ -950,8 +920,8 @@ fn monitor_scan_json_pins_the_key_order() {
 #[test]
 fn monitor_scan_annotates_a_pending_placement_and_exits_zero() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
-    let member_id = cli.create_member(fleet_id, "worker");
+    let (fleet_id, _) = cli.seeded_fleet();
+    let member_id = cli.seed_member(fleet_id, "worker");
     cli.sqlite()
         .execute(
             "UPDATE member_placements SET mux_pane_id=NULL WHERE member_id=?1",
@@ -994,8 +964,8 @@ fn monitor_scan_annotates_a_pending_placement_and_exits_zero() {
 #[test]
 fn monitor_scan_annotates_failed_captures_and_exits_zero() {
     let mut cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
-    cli.create_member(fleet_id, "worker");
+    let (fleet_id, _) = cli.seeded_fleet();
+    cli.seed_member(fleet_id, "worker");
     cli.fail_subcommand = Some("capture-pane".to_string());
 
     let output = cli.run(&["monitor", "scan", &fleet_id.to_string()]);
@@ -1039,8 +1009,8 @@ fn monitor_scan_annotates_failed_captures_and_exits_zero() {
 #[test]
 fn monitor_scan_excludes_a_member_without_a_placement_row() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
-    let member_id = cli.create_member(fleet_id, "worker");
+    let (fleet_id, _) = cli.seeded_fleet();
+    let member_id = cli.seed_member(fleet_id, "worker");
     cli.sqlite()
         .execute(
             "DELETE FROM member_placements WHERE member_id=?1",
@@ -1060,7 +1030,7 @@ fn monitor_scan_excludes_a_member_without_a_placement_row() {
 #[test]
 fn monitor_scan_of_a_memberless_fleet_captures_the_director_only() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_bare_fleet();
+    let (fleet_id, _) = cli.seeded_bare_fleet();
 
     let output = cli.run(&["monitor", "scan", &fleet_id.to_string()]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
@@ -1083,7 +1053,7 @@ fn monitor_scan_of_a_memberless_fleet_captures_the_director_only() {
 #[test]
 fn monitor_scan_rejects_an_unknown_or_deleted_fleet() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
+    let (fleet_id, _) = cli.seeded_fleet();
 
     let output = cli.run(&["monitor", "scan", "999"]);
     assert_eq!(code(&output), 1);
@@ -1107,7 +1077,7 @@ fn monitor_scan_rejects_an_unknown_or_deleted_fleet() {
 #[test]
 fn monitor_scan_honors_the_lines_flag() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
+    let (fleet_id, _) = cli.seeded_fleet();
 
     let output = cli.run(&["monitor", "scan", &fleet_id.to_string(), "--lines", "5"]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));

@@ -39,7 +39,7 @@ fn write_shim(cli: &Cli, binary: &str, body: &str) {
 fn fixture(with_fleet: bool) -> Cli {
     let cli = Cli::new();
     if with_fleet {
-        cli.with_fleet();
+        cli.with_cli_fleet();
     } else {
         cli.ready();
     }

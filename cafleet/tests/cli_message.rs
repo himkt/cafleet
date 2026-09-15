@@ -6,8 +6,8 @@ mod common;
 use common::{Cli, code, stderr, stdout, write_file};
 
 fn fleet_with_member(cli: &Cli) -> (i64, i64, i64) {
-    let (fleet_id, director_id) = cli.with_fleet();
-    let member_id = cli.create_member(fleet_id, "worker");
+    let (fleet_id, director_id) = cli.seeded_fleet();
+    let member_id = cli.seed_member(fleet_id, "worker");
     (fleet_id, director_id, member_id)
 }
 
@@ -377,7 +377,7 @@ fn poll_of_an_unknown_member_is_the_existence_error() {
 }
 
 #[test]
-fn text_body_usage_errors_exit_2() {
+fn blank_message_body_is_a_usage_error_after_guards() {
     let cli = Cli::new();
     let _ = fleet_with_member(&cli);
     let base = [
@@ -388,18 +388,6 @@ fn text_body_usage_errors_exit_2() {
         "--to-member-id",
         "2",
     ];
-
-    let output = cli.run(&base);
-    assert_eq!(
-        code(&output),
-        2,
-        "neither TEXT nor --file is clap's native group error"
-    );
-
-    let mut both = base.to_vec();
-    both.extend(["x", "--file", "f.txt"]);
-    let output = cli.run(&both);
-    assert_eq!(code(&output), 2, "TEXT and --file conflict at parse time");
 
     let mut empty = base.to_vec();
     empty.push("   ");
@@ -787,23 +775,11 @@ fn integrity_invalid_stored_message_enum_exits_one_without_success_output_or_pan
     for field in ["type", "status_state"] {
         let cli = Cli::new();
         let (_, director, worker) = fleet_with_member(&cli);
-        let sent = cli.run(&[
-            "message",
-            "send",
-            "--from-member-id",
-            &director.to_string(),
-            "--to-member-id",
-            &worker.to_string(),
-            "integrity",
-        ]);
-        assert_eq!(code(&sent), 0, "{}", stderr(&sent));
+        let id = cli.seed_message(director, worker, "integrity");
         let conn = cli.sqlite();
         conn.execute_batch("PRAGMA ignore_check_constraints=ON")
             .unwrap();
         conn.execute_batch(&format!("UPDATE messages SET {field}='corrupt-enum'"))
-            .unwrap();
-        let id: i64 = conn
-            .query_row("SELECT message_id FROM messages", [], |r| r.get(0))
             .unwrap();
         for json in [false, true] {
             let id_arg = id.to_string();

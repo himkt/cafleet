@@ -310,7 +310,7 @@ fn setup_sorts_duplicate_diagnostics_preserves_data_and_still_installs_assets() 
 #[test]
 fn duplicate_cli_guard_keeps_error_and_performs_no_registration_or_pane_creation() {
     let cli = Cli::new();
-    let (fleet, _) = cli.with_fleet();
+    let (fleet, _) = cli.with_cli_fleet();
     let conn = cli.sqlite();
     let before = records(&conn);
     let log = std::fs::read_to_string(&cli.shim_log).unwrap();

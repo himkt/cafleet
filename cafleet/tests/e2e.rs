@@ -12,7 +12,7 @@ use common::{Cli, code, stderr, stdout, text};
 #[test]
 fn end_to_end_lifecycle_with_one_monitor_tick() {
     let cli = Cli::new();
-    cli.ready();
+    cli.install();
 
     let output = cli.run(&[
         "fleet",
