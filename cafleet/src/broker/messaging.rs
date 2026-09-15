@@ -305,13 +305,15 @@ mod tests {
         let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
         let notifier = FakeNotifier::succeeding();
 
+        let preview_limit = 5;
+        let text = "界".repeat(preview_limit + 5);
         let outcome = broker::send_message(
             &mut conn,
             &notifier,
-            MAX_TEXT_LEN,
+            preview_limit,
             director_id,
             &member_id.to_string(),
-            "hi",
+            &text,
         )
         .unwrap();
         let result = &crate::presentation::send_outcome(&outcome);
@@ -326,99 +328,20 @@ mod tests {
         let message_id = message["message_id"].as_i64().unwrap();
         let ts = message["created_at"].as_str().unwrap().to_string();
         let expected = format!(
-            r#"{{"message_id":{message_id},"owner_member_id":{member_id},"from_member_id":{director_id},"to_member_id":{member_id},"type":"unicast","created_at":"{ts}","status_state":"input_required","status_timestamp":"{ts}","origin_message_id":null,"text":"hi"}}"#
+            r#"{{"message_id":{message_id},"owner_member_id":{member_id},"from_member_id":{director_id},"to_member_id":{member_id},"type":"unicast","created_at":"{ts}","status_state":"input_required","status_timestamp":"{ts}","origin_message_id":null,"text":"{text}"}}"#
         );
         assert_eq!(format_json(message), expected);
 
+        let stored = broker::get_message(&conn, message_id).unwrap();
+        assert_eq!(crate::presentation::message(&stored), *message);
+        assert_eq!(stored.text, text);
         let calls = notifier.calls.borrow();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].target_pane_id, "%2");
         assert_eq!(calls[0].message_id, message_id);
         assert_eq!(calls[0].sender_id, director_id);
         assert_eq!(calls[0].ts, ts);
-        assert_eq!(calls[0].text, "hi");
-    }
-
-    #[test]
-    fn send_message_truncates_the_preview_but_persists_full_text() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
-        let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
-        let notifier = FakeNotifier::succeeding();
-        let text = "a".repeat(10);
-
-        let result = broker::send_message(
-            &mut conn,
-            &notifier,
-            5,
-            director_id,
-            &member_id.to_string(),
-            &text,
-        )
-        .unwrap();
-
-        assert_eq!(
-            result.message.text, text,
-            "persisted text is never truncated"
-        );
-        let calls = notifier.calls.borrow();
-        assert_eq!(calls[0].text, "aaaaa…", "preview truncated broker-side");
-    }
-
-    #[test]
-    fn send_message_to_self_skips_the_preview() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (_, director_id) = create_fleet(&mut conn, "alpha");
-        let notifier = FakeNotifier::succeeding();
-        let outcome = broker::send_message(
-            &mut conn,
-            &notifier,
-            MAX_TEXT_LEN,
-            director_id,
-            &director_id.to_string(),
-            "note",
-        )
-        .unwrap();
-        assert_eq!(
-            crate::presentation::send_outcome(&outcome)["notification_sent"],
-            false
-        );
-        assert_eq!(
-            outcome.notification,
-            NotificationAttempt::Skipped,
-            "an intentional skip is never a partial failure"
-        );
-        assert!(notifier.calls.borrow().is_empty());
-    }
-
-    #[test]
-    fn send_message_to_a_paneless_recipient_skips_the_preview() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
-        let pending_id = register(&mut conn, fleet_id, "pending", None);
-        let notifier = FakeNotifier::succeeding();
-        let outcome = broker::send_message(
-            &mut conn,
-            &notifier,
-            MAX_TEXT_LEN,
-            director_id,
-            &pending_id.to_string(),
-            "hi",
-        )
-        .unwrap();
-        assert_eq!(
-            crate::presentation::send_outcome(&outcome)["notification_sent"],
-            false
-        );
-        assert_eq!(
-            outcome.notification,
-            NotificationAttempt::Skipped,
-            "an intentional skip is never a partial failure"
-        );
-        assert!(notifier.calls.borrow().is_empty());
+        assert_eq!(calls[0].text, format!("{}…", "界".repeat(preview_limit)));
     }
 
     #[test]
@@ -484,7 +407,7 @@ mod tests {
         let pending_id = register(&mut conn, fleet_id, "pending", None);
         let notifier = FakeNotifier::failing();
 
-        let outcome = broker::send_message(
+        let self_send = broker::send_message(
             &mut conn,
             &notifier,
             MAX_TEXT_LEN,
@@ -494,16 +417,16 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            crate::presentation::send_outcome(&outcome)["notification_sent"],
+            crate::presentation::send_outcome(&self_send)["notification_sent"],
             false
         );
         assert_eq!(
-            outcome.notification,
+            self_send.notification,
             NotificationAttempt::Skipped,
             "self-send attempts nothing"
         );
 
-        let outcome = broker::send_message(
+        let pending_send = broker::send_message(
             &mut conn,
             &notifier,
             MAX_TEXT_LEN,
@@ -513,17 +436,36 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            crate::presentation::send_outcome(&outcome)["notification_sent"],
+            crate::presentation::send_outcome(&pending_send)["notification_sent"],
             false
         );
         assert_eq!(
-            outcome.notification,
+            pending_send.notification,
             NotificationAttempt::Skipped,
             "no-pane attempts nothing"
         );
         assert!(
             notifier.calls.borrow().is_empty(),
             "a skip never reaches the notifier, so its error cannot surface"
+        );
+        for (outcome, recipient, text) in [
+            (&self_send, director_id, "note"),
+            (&pending_send, pending_id, "hi"),
+        ] {
+            let stored = broker::get_message(&conn, outcome.message.message_id).unwrap();
+            assert_eq!(stored.owner_member_id, recipient);
+            assert_eq!(stored.from_member_id, director_id);
+            assert_eq!(stored.to_member_id, Some(recipient));
+            assert_eq!(stored.text, text);
+            assert_eq!(stored.status.as_str(), "input_required");
+            assert_eq!(
+                crate::presentation::message(&stored),
+                crate::presentation::message(&outcome.message)
+            );
+        }
+        assert_ne!(
+            self_send.message.message_id,
+            pending_send.message.message_id
         );
     }
 

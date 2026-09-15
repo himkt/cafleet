@@ -109,28 +109,19 @@ mod tests {
         let installed_at = rows[0]["installed_at"].as_str().unwrap();
         assert_eq!(installed_at.len(), 32, "canonical fixed-width timestamp");
         assert!(crate::time::parse_lenient(installed_at).is_ok());
-    }
-
-    #[test]
-    fn record_asset_install_upserts_on_the_composite_key() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        broker::record_asset_install(&mut conn, "claude", "/x/.claude", "0.21.0").unwrap();
-        broker::record_asset_install(&mut conn, "claude", "/x/.claude", "0.22.0").unwrap();
-
-        let rows = broker::list_asset_installs(&conn).unwrap();
-        assert_eq!(rows.len(), 1, "same (coding_agent, path) upserts in place");
-        assert_eq!(rows[0]["cafleet_version"], "0.22.0");
-    }
-
-    #[test]
-    fn the_same_agent_records_distinct_rows_at_distinct_paths() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        broker::record_asset_install(&mut conn, "claude", "/old/.claude", "0.21.0").unwrap();
-        broker::record_asset_install(&mut conn, "claude", "/new/.claude", "0.22.0").unwrap();
-
-        let rows = broker::list_asset_installs(&conn).unwrap();
-        assert_eq!(rows.len(), 2, "a new path is a new row, not an upsert");
+        conn.execute("UPDATE asset_installs SET installed_at='2000-01-01T00:00:00.000000+00:00' WHERE coding_agent='codex' AND path='/a/.codex'", []).unwrap();
+        let before = broker::list_asset_installs(&conn).unwrap();
+        broker::record_asset_install(&mut conn, "codex", "/a/.codex", "0.23.0").unwrap();
+        let after = broker::list_asset_installs(&conn).unwrap();
+        assert_eq!(after.len(), 3);
+        assert_eq!(after[0], before[0]);
+        assert_eq!(after[2], before[2]);
+        assert_eq!(after[1]["coding_agent"], "codex");
+        assert_eq!(after[1]["path"], "/a/.codex");
+        assert_eq!(after[1]["cafleet_version"], "0.23.0");
+        assert_ne!(after[1]["installed_at"], before[1]["installed_at"]);
+        let stamp = after[1]["installed_at"].as_str().unwrap();
+        assert_eq!(stamp.len(), 32);
+        assert!(crate::time::parse_lenient(stamp).is_ok());
     }
 }

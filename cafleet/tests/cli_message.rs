@@ -43,33 +43,10 @@ fn only_unicast_row(cli: &Cli) -> (i64, String, String) {
 }
 
 #[test]
-fn send_prints_the_header_and_the_compact_echo() {
-    let cli = Cli::new();
-    let (_, director_id, member_id) = fleet_with_member(&cli);
-    let output = cli.run(&[
-        "message",
-        "send",
-        "--from-member-id",
-        &director_id.to_string(),
-        "--to-member-id",
-        &member_id.to_string(),
-        "hello worker",
-    ]);
-    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
-    let out = stdout(&output);
-    assert!(out.starts_with("Message sent.\n"), "got: {out}");
-    assert!(
-        out.contains(&format!("| from:{director_id} |")),
-        "got: {out}"
-    );
-    assert!(out.contains("hello worker"), "got: {out}");
-}
-
-#[test]
 fn send_truncates_the_echo_but_never_the_persisted_text() {
     let cli = Cli::new();
     let (_, director_id, member_id) = fleet_with_member(&cli);
-    let long_text = "a".repeat(250);
+    let long_text = "界".repeat(250);
     let output = cli.run(&[
         "message",
         "send",
@@ -81,8 +58,10 @@ fn send_truncates_the_echo_but_never_the_persisted_text() {
     ]);
     assert_eq!(code(&output), 0);
     let out = stdout(&output);
+    assert!(out.starts_with("Message sent.\n"), "{out}");
+    assert!(out.contains(&format!("| from:{director_id} |")), "{out}");
     assert!(
-        out.contains(&format!("{}…", "a".repeat(200))),
+        out.contains(&format!("{}…", "界".repeat(200))),
         "the echo truncates at max_text_len (200), got: {out}"
     );
     assert!(
@@ -106,75 +85,57 @@ fn send_partial_failure_reports_the_persisted_id_and_recovery() {
     let mut cli = Cli::new();
     let (_, director_id, member_id) = fleet_with_member(&cli);
     cli.fail_subcommand = Some("send-keys".to_string());
-    let calls_before = cli.shim_calls().len();
-
-    let output = cli.run(&[
-        "message",
-        "send",
-        "--from-member-id",
-        &director_id.to_string(),
-        "--to-member-id",
-        &member_id.to_string(),
-        "payload one",
-    ]);
-    assert_eq!(code(&output), 1);
-    assert_eq!(
-        stdout(&output),
-        "",
-        "the partial failure prints nothing on stdout"
-    );
-
-    let (message_id, status, text) = only_unicast_row(&cli);
-    assert_eq!(status, "input_required", "the row stays recoverable");
-    assert_eq!(text, "payload one", "the full body is persisted");
-
-    let raw = "tmux command failed: tmux send-keys -t %7 Escape\nstderr: forced failure";
-    assert!(
-        stderr(&output).contains(&partial_error(message_id, member_id, raw)),
-        "got: {}",
-        stderr(&output)
-    );
-
-    let calls = cli.shim_calls();
-    assert_eq!(
-        calls.len() - calls_before,
-        1,
-        "one notification attempt, no retry: {calls:?}"
-    );
-    assert_eq!(calls.last().unwrap(), "send-keys -t %7 Escape");
-}
-
-#[test]
-fn send_partial_failure_json_uses_the_same_text_error_channel() {
-    let mut cli = Cli::new();
-    let (_, director_id, member_id) = fleet_with_member(&cli);
-    cli.fail_subcommand = Some("send-keys".to_string());
-
-    let output = cli.run(&[
-        "message",
-        "send",
-        "--from-member-id",
-        &director_id.to_string(),
-        "--to-member-id",
-        &member_id.to_string(),
-        "payload two",
-        "--json",
-    ]);
-    assert_eq!(code(&output), 1);
-    assert_eq!(
-        stdout(&output),
-        "",
-        "--json selects successful output only — no JSON error envelope"
-    );
-
-    let (message_id, status, _) = only_unicast_row(&cli);
-    assert_eq!(status, "input_required");
-    let raw = "tmux command failed: tmux send-keys -t %7 Escape\nstderr: forced failure";
-    assert!(
-        stderr(&output).contains(&partial_error(message_id, member_id, raw)),
-        "got: {}",
-        stderr(&output)
-    );
+    let mut expected_rows = Vec::new();
+    for (body, json) in [("payload one", false), ("payload two", true)] {
+        let from = director_id.to_string();
+        let to = member_id.to_string();
+        let mut args = vec![
+            "message",
+            "send",
+            "--from-member-id",
+            &from,
+            "--to-member-id",
+            &to,
+            body,
+        ];
+        if json {
+            args.push("--json");
+        }
+        let calls_before = cli.shim_calls().len();
+        let output = cli.run(&args);
+        assert_eq!(code(&output), 1);
+        assert_eq!(stdout(&output), "");
+        let conn = cli.sqlite();
+        let mut statement = conn.prepare("SELECT message_id, status_state, text FROM messages WHERE type='unicast' ORDER BY message_id").unwrap();
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .unwrap()
+            .map(Result::unwrap)
+            .collect::<Vec<_>>();
+        assert_eq!(rows.len(), expected_rows.len() + 1);
+        let new_row = rows.last().unwrap();
+        assert_eq!(new_row.1, "input_required");
+        assert_eq!(new_row.2, body);
+        if let Some((previous_id, _, _)) = expected_rows.last() {
+            assert!(new_row.0 > *previous_id);
+        }
+        expected_rows.push(new_row.clone());
+        assert_eq!(rows, expected_rows);
+        let raw = "tmux command failed: tmux send-keys -t %7 Escape\nstderr: forced failure";
+        assert!(
+            stderr(&output).contains(&partial_error(new_row.0, member_id, raw)),
+            "{}",
+            stderr(&output)
+        );
+        let calls = cli.shim_calls();
+        assert_eq!(&calls[calls_before..], &["send-keys -t %7 Escape"]);
+    }
 }
 
 #[test]
@@ -321,7 +282,14 @@ fn broadcast_keeps_exit_zero_and_counts_when_previews_fail() {
 fn poll_and_ack_walk_the_delivery_lifecycle_with_subject_ids_only() {
     let cli = Cli::new();
     let (_, director_id, member_id) = fleet_with_member(&cli);
-    cli.run(&[
+    let missing = cli.run(&["message", "ack", "999"]);
+    assert_eq!(code(&missing), 1);
+    assert!(
+        stderr(&missing).contains("Error: Message 999 not found"),
+        "{}",
+        stderr(&missing)
+    );
+    let sent = cli.run(&[
         "message",
         "send",
         "--from-member-id",
@@ -331,6 +299,7 @@ fn poll_and_ack_walk_the_delivery_lifecycle_with_subject_ids_only() {
         "task one",
     ]);
 
+    assert_eq!(code(&sent), 0, "{}", stderr(&sent));
     let output = cli.run(&["message", "poll", &member_id.to_string()]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     assert!(
@@ -355,7 +324,16 @@ fn poll_and_ack_walk_the_delivery_lifecycle_with_subject_ids_only() {
         stdout(&output)
     );
 
+    let repeated = cli.run(&["message", "ack", &message_id.to_string()]);
+    assert_eq!(code(&repeated), 1);
+    assert!(
+        stderr(&repeated).contains("Error: Cannot ACK message in state completed"),
+        "{}",
+        stderr(&repeated)
+    );
+
     let output = cli.run(&["message", "poll", &member_id.to_string()]);
+    assert_eq!(code(&output), 0);
     assert!(
         stdout(&output).contains("No messages found."),
         "got: {}",
@@ -556,49 +534,6 @@ fn send_rejects_a_missing_destination() {
 }
 
 #[test]
-fn ack_guards_are_existence_and_state_only() {
-    let cli = Cli::new();
-    let (_, director_id, member_id) = fleet_with_member(&cli);
-
-    let output = cli.run(&["message", "ack", "999"]);
-    assert_eq!(code(&output), 1);
-    assert!(
-        stderr(&output).contains("Error: Message 999 not found"),
-        "got: {}",
-        stderr(&output)
-    );
-
-    cli.run(&[
-        "message",
-        "send",
-        "--from-member-id",
-        &director_id.to_string(),
-        "--to-member-id",
-        &member_id.to_string(),
-        "task",
-    ]);
-    let message_id: i64 = cli
-        .sqlite()
-        .query_row(
-            "SELECT message_id FROM messages WHERE type='unicast'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-
-    let output = cli.run(&["message", "ack", &message_id.to_string()]);
-    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
-
-    let output = cli.run(&["message", "ack", &message_id.to_string()]);
-    assert_eq!(code(&output), 1, "input_required is the only ackable state");
-    assert!(
-        stderr(&output).contains("Error: Cannot ACK message in state completed"),
-        "got: {}",
-        stderr(&output)
-    );
-}
-
-#[test]
 fn show_of_an_unknown_message_is_the_existence_error() {
     let cli = Cli::new();
     let _ = fleet_with_member(&cli);
@@ -630,7 +565,7 @@ fn json_is_untruncated_on_every_message_subcommand() {
         &long_text,
         "--json",
     ]);
-    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
     let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
     assert_eq!(
         payload["message"]["text"], long_text,
@@ -645,10 +580,12 @@ fn json_is_untruncated_on_every_message_subcommand() {
         .expect("the send envelope names the message id");
 
     let output = cli.run(&["message", "poll", &member_id.to_string(), "--json"]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
     let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
     assert_eq!(payload[0]["text"], long_text, "poll --json is complete");
 
     let output = cli.run(&["message", "poll", &member_id.to_string()]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
     let out = stdout(&output);
     assert!(
         out.contains(&format!("{}…", "a".repeat(200))),
@@ -660,13 +597,26 @@ fn json_is_untruncated_on_every_message_subcommand() {
     );
 
     let output = cli.run(&["message", "show", &message_id.to_string(), "--json"]);
-    let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let raw = stdout(&output);
+    let shown: serde_json::Value = serde_json::from_str(raw.trim()).unwrap();
+    let ts = shown["message"]["created_at"].as_str().unwrap();
+    let body = serde_json::to_string(&long_text).unwrap();
+    let expected = format!(
+        r#"{{"message":{{"message_id":{message_id},"owner_member_id":{member_id},"from_member_id":{director_id},"to_member_id":{member_id},"type":"unicast","created_at":"{ts}","status_state":"input_required","status_timestamp":"{ts}","origin_message_id":null,"text":{body}}}}}"#
+    );
     assert_eq!(
-        payload["message"]["text"], long_text,
+        raw.trim(),
+        expected,
+        "compact JSON with the pinned key order"
+    );
+    assert_eq!(
+        shown["message"]["text"], long_text,
         "show --json is complete"
     );
 
     let output = cli.run(&["message", "ack", &message_id.to_string(), "--json"]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
     let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
     assert_eq!(
         payload["message"]["text"], long_text,
@@ -730,43 +680,6 @@ fn broadcast_json_summary_carries_the_null_recipient() {
     assert_eq!(
         fetched["message"], *summary,
         "show retains the complete summary, including null recipient"
-    );
-}
-
-#[test]
-fn show_json_pins_the_typed_column_envelope() {
-    let cli = Cli::new();
-    let (_, director_id, member_id) = fleet_with_member(&cli);
-    cli.run(&[
-        "message",
-        "send",
-        "--from-member-id",
-        &director_id.to_string(),
-        "--to-member-id",
-        &member_id.to_string(),
-        "hi",
-    ]);
-    let message_id: i64 = cli
-        .sqlite()
-        .query_row(
-            "SELECT message_id FROM messages WHERE type='unicast'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-
-    let output = cli.run(&["message", "show", &message_id.to_string(), "--json"]);
-    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
-    let raw = stdout(&output);
-    let payload: serde_json::Value = serde_json::from_str(raw.trim()).unwrap();
-    let ts = payload["message"]["created_at"].as_str().unwrap();
-    let expected = format!(
-        r#"{{"message":{{"message_id":{message_id},"owner_member_id":{member_id},"from_member_id":{director_id},"to_member_id":{member_id},"type":"unicast","created_at":"{ts}","status_state":"input_required","status_timestamp":"{ts}","origin_message_id":null,"text":"hi"}}}}"#
-    );
-    assert_eq!(
-        raw.trim(),
-        expected,
-        "compact JSON with the pinned key order"
     );
 }
 

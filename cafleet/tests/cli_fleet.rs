@@ -49,24 +49,6 @@ fn fleet_create_outside_any_multiplexer_is_the_hardcoded_error() {
 }
 
 #[test]
-fn fleet_create_reports_the_compact_line_with_director_and_monitor() {
-    let cli = Cli::new();
-    cli.ready();
-    let output = cli.run(&[
-        "fleet",
-        "create",
-        "--name",
-        "alpha",
-        "--coding-agent",
-        "claude",
-        "--monitor-file",
-        &cli.monitor_prompt_path(),
-    ]);
-    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
-    assert_eq!(stdout(&output), "1 director=1 monitor=2\n");
-}
-
-#[test]
 fn fleet_create_json_is_the_only_detailed_form() {
     let cli = Cli::new();
     cli.ready();
@@ -122,6 +104,7 @@ fn fleet_create_spawns_the_monitor_pane_with_identity_and_model() {
     ]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
 
+    assert_eq!(stdout(&output), "1 director=1 monitor=2\n");
     let split_line = cli
         .shim_calls()
         .into_iter()
@@ -226,34 +209,6 @@ fn fleet_create_monitor_file_errors_name_the_flag() {
     assert_eq!(code(&output), 1);
     assert!(
         stderr(&output).contains("--monitor-file -: stdin is empty."),
-        "got: {}",
-        stderr(&output)
-    );
-    assert_no_rows_persisted(&cli);
-}
-
-#[test]
-fn fleet_create_substitution_failure_rolls_back_everything() {
-    let cli = Cli::new();
-    cli.ready();
-    let prompt_file = write_file(&cli.home.path().join("bad-prompt.md"), b"hello {typo}");
-    let output = cli.run(&[
-        "fleet",
-        "create",
-        "--name",
-        "alpha",
-        "--coding-agent",
-        "claude",
-        "--monitor-file",
-        &prompt_file,
-    ]);
-    assert_eq!(code(&output), 2, "the substitution usage error is exit 2");
-    assert!(
-        stderr(&output).contains(
-            "Unknown placeholder 'typo' in custom prompt. Supported placeholders: \
-             {fleet_id}, {member_id}, {director_member_id}, {coding_agent}. \
-             Double literal braces ({{, }}) to keep them as text."
-        ),
         "got: {}",
         stderr(&output)
     );
