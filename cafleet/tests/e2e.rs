@@ -69,14 +69,21 @@ impl<'a> MonitorChild<'a> {
         }
     }
 
-    fn wait_for_exit(&mut self) -> Output {
+    fn stop(&mut self) -> Output {
+        let pid = nix::unistd::Pid::from_raw(i32::try_from(self.id()).expect("child PID fits i32"));
+        nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGTERM)
+            .expect("request graceful monitor shutdown");
+        self.wait_for_exit("graceful monitor shutdown")
+    }
+
+    fn wait_for_exit(&mut self, description: &str) -> Output {
         let deadline = Instant::now() + DEADLINE;
         loop {
             if self.child.as_mut().unwrap().try_wait().unwrap().is_some() {
                 return self.reap().expect("collect completed monitor");
             }
             if Instant::now() >= deadline {
-                self.fail("deadline waiting for second monitor refusal");
+                self.fail(&format!("deadline waiting for {description}"));
             }
             std::thread::sleep(POLL_INTERVAL);
         }
@@ -219,7 +226,7 @@ fn end_to_end_lifecycle_with_one_monitor_tick() {
     ).unwrap());
 
     let mut second = MonitorChild::spawn(&cli, "second monitor", &["monitor", "1", "--tick", "1"]);
-    let output = second.wait_for_exit();
+    let output = second.wait_for_exit("second monitor refusal");
     assert_eq!(
         code(&output),
         1,
@@ -245,9 +252,15 @@ fn end_to_end_lifecycle_with_one_monitor_tick() {
         let calls = cli.shim_calls();
         committed && calls.iter().any(|line| line == &wake_keystroke)
     });
-    let loop_output = child.reap().expect("terminate and reap primary monitor");
+    let loop_output = child.stop();
     let loop_stdout = text(&loop_output.stdout);
     let calls = cli.shim_calls();
+    assert_eq!(
+        code(&loop_output),
+        0,
+        "stdout: {loop_stdout}; stderr: {}; shim: {calls:?}",
+        stderr(&loop_output)
+    );
     assert!(
         loop_stdout.contains(&format!(
             "monitor loop started (fleet 1, tick 1s, pid {pid})"
