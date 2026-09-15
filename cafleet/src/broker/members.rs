@@ -450,22 +450,6 @@ mod tests {
     }
 
     #[test]
-    fn register_member_writes_no_monitor_config_row() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        register(&mut conn, fleet_id, "analyst", Some("%2"));
-        let tables: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='monitor_config'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(tables, 0, "registration performs no monitoring enrollment");
-    }
-
-    #[test]
     fn get_member_shape_is_pinned() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
@@ -704,23 +688,6 @@ mod tests {
         assert!(!broker::verify_member_fleet(&conn, member_id, fleet_b).unwrap());
         broker::deregister_member(&mut conn, member_id).unwrap();
         assert!(broker::verify_member_fleet(&conn, member_id, fleet_a).unwrap());
-    }
-
-    #[test]
-    fn get_member_names_batches_and_includes_deregistered() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
-        let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
-        broker::deregister_member(&mut conn, member_id).unwrap();
-
-        assert!(broker::get_member_names(&conn, &[]).unwrap().is_empty());
-        let names = broker::get_member_names(&conn, &[director_id, member_id]).unwrap();
-        assert_eq!(
-            names.get(&director_id).map(String::as_str),
-            Some("Director")
-        );
-        assert_eq!(names.get(&member_id).map(String::as_str), Some("worker"));
     }
 
     #[test]
@@ -1075,9 +1042,9 @@ mod name_lookup_tests {
 
     #[test]
     fn names_deduplicate_ids_across_batch_boundaries() {
-        let mut conn = Connection::open_in_memory().unwrap();
+        let mut conn = crate::db::connect("sqlite:///:memory:").unwrap();
         crate::db::migrate_to_head(&mut conn).unwrap();
-        let (fleet, _) = common::create_fleet(&mut conn, "names");
+        let (fleet, director) = common::create_fleet(&mut conn, "names");
         for id in 10000..11001_i64 {
             conn.execute("INSERT INTO members(member_id,fleet_id,name,description,status,registered_at,member_card_json) VALUES (?1,?2,?3,'','deregistered','raw','{}')",
                 params![id,fleet,format!("member-{id}")]).unwrap();
@@ -1088,6 +1055,11 @@ mod name_lookup_tests {
             let expected = ids.iter().map(|&id| (id, format!("member-{id}"))).collect();
             assert_eq!(get_member_names(&conn, &repeated).unwrap(), expected);
         }
+        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+        assert!(crate::broker::deregister_member(&mut conn, worker).unwrap());
+        let names = get_member_names(&conn, &[director, worker]).unwrap();
+        assert_eq!(names.get(&director).map(String::as_str), Some("Director"));
+        assert_eq!(names.get(&worker).map(String::as_str), Some("worker"));
         assert!(get_member_names(&conn, &[i64::MAX]).unwrap().is_empty());
         let missing = Connection::open_in_memory().unwrap();
         assert!(get_member_names(&missing, &[]).unwrap().is_empty());

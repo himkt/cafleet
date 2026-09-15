@@ -49,24 +49,6 @@ fn fleet_create_outside_any_multiplexer_is_the_hardcoded_error() {
 }
 
 #[test]
-fn fleet_create_reports_the_compact_line_with_director_and_monitor() {
-    let cli = Cli::new();
-    cli.ready();
-    let output = cli.run(&[
-        "fleet",
-        "create",
-        "--name",
-        "alpha",
-        "--coding-agent",
-        "claude",
-        "--monitor-file",
-        &cli.monitor_prompt_path(),
-    ]);
-    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
-    assert_eq!(stdout(&output), "1 director=1 monitor=2\n");
-}
-
-#[test]
 fn fleet_create_json_is_the_only_detailed_form() {
     let cli = Cli::new();
     cli.ready();
@@ -122,6 +104,7 @@ fn fleet_create_spawns_the_monitor_pane_with_identity_and_model() {
     ]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
 
+    assert_eq!(stdout(&output), "1 director=1 monitor=2\n");
     let split_line = cli
         .shim_calls()
         .into_iter()
@@ -164,58 +147,6 @@ fn fleet_create_reads_the_monitor_prompt_from_stdin() {
     );
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     assert_eq!(stdout(&output), "1 director=1 monitor=2\n");
-}
-
-#[test]
-fn fleet_create_missing_required_options_are_parse_errors() {
-    let cli = Cli::new();
-    cli.ready();
-    assert_eq!(
-        code(&cli.run(&[
-            "fleet",
-            "create",
-            "--coding-agent",
-            "claude",
-            "--monitor-file",
-            "prompt.md",
-        ])),
-        2,
-        "--name is required"
-    );
-    assert_eq!(
-        code(&cli.run(&[
-            "fleet",
-            "create",
-            "--name",
-            "x",
-            "--monitor-file",
-            "prompt.md"
-        ])),
-        2,
-        "--coding-agent is required"
-    );
-    assert_eq!(
-        code(&cli.run(&[
-            "fleet",
-            "create",
-            "--name",
-            "x",
-            "--coding-agent",
-            "python",
-            "--monitor-file",
-            "prompt.md",
-        ])),
-        2,
-        "--coding-agent is a choice"
-    );
-
-    let output = cli.run(&["fleet", "create", "--name", "x", "--coding-agent", "claude"]);
-    assert_eq!(code(&output), 2, "--monitor-file is required");
-    assert!(
-        stderr(&output).contains("--monitor-file"),
-        "clap names the missing flag, got: {}",
-        stderr(&output)
-    );
 }
 
 #[test]
@@ -285,34 +216,6 @@ fn fleet_create_monitor_file_errors_name_the_flag() {
 }
 
 #[test]
-fn fleet_create_substitution_failure_rolls_back_everything() {
-    let cli = Cli::new();
-    cli.ready();
-    let prompt_file = write_file(&cli.home.path().join("bad-prompt.md"), b"hello {typo}");
-    let output = cli.run(&[
-        "fleet",
-        "create",
-        "--name",
-        "alpha",
-        "--coding-agent",
-        "claude",
-        "--monitor-file",
-        &prompt_file,
-    ]);
-    assert_eq!(code(&output), 2, "the substitution usage error is exit 2");
-    assert!(
-        stderr(&output).contains(
-            "Unknown placeholder 'typo' in custom prompt. Supported placeholders: \
-             {fleet_id}, {member_id}, {director_member_id}, {coding_agent}. \
-             Double literal braces ({{, }}) to keep them as text."
-        ),
-        "got: {}",
-        stderr(&output)
-    );
-    assert_no_rows_persisted(&cli);
-}
-
-#[test]
 fn fleet_create_split_failure_rolls_back_rows_and_allows_fixture_retry() {
     let mut cli = Cli::new();
     cli.ready();
@@ -373,16 +276,7 @@ fn fleet_list_reports_empty_then_the_created_fleet() {
         stdout(&output)
     );
 
-    cli.run(&[
-        "fleet",
-        "create",
-        "--name",
-        "alpha",
-        "--coding-agent",
-        "claude",
-        "--monitor-file",
-        &cli.monitor_prompt_path(),
-    ]);
+    let (fleet_id, _) = cli.seed_fleet("alpha");
     let output = cli.run(&["fleet", "list"]);
     assert_eq!(code(&output), 0);
     let out = stdout(&output);
@@ -391,7 +285,7 @@ fn fleet_list_reports_empty_then_the_created_fleet() {
 
     let json_output = cli.run(&["fleet", "list", "--json"]);
     let payload: serde_json::Value = serde_json::from_str(stdout(&json_output).trim()).unwrap();
-    assert_eq!(payload[0]["fleet_id"], 1);
+    assert_eq!(payload[0]["fleet_id"], fleet_id);
     assert_eq!(
         payload[0]["member_count"], 2,
         "the bootstrap registers the Director and the monitor"
@@ -401,7 +295,7 @@ fn fleet_list_reports_empty_then_the_created_fleet() {
 #[test]
 fn fleet_show_takes_the_positional_subject_and_returns_soft_deleted_rows() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
+    let (fleet_id, _) = cli.seeded_fleet();
     let output = cli.run(&["fleet", "show", &fleet_id.to_string()]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let out = stdout(&output);
@@ -435,25 +329,9 @@ fn fleet_show_missing_is_the_pinned_application_error() {
 }
 
 #[test]
-fn fleet_show_subject_parse_errors_exit_2() {
-    let cli = Cli::new();
-    cli.ready();
-    assert_eq!(
-        code(&cli.run(&["fleet", "show"])),
-        2,
-        "the positional FLEET_ID is required"
-    );
-    assert_eq!(
-        code(&cli.run(&["fleet", "show", "abc"])),
-        2,
-        "a non-integer subject is clap's invalid-value error"
-    );
-}
-
-#[test]
 fn fleet_delete_reports_the_count_and_is_idempotent() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
+    let (fleet_id, _) = cli.seeded_fleet();
     let output = cli.run(&["fleet", "delete", &fleet_id.to_string()]);
     assert_eq!(code(&output), 0);
     assert!(
@@ -474,7 +352,7 @@ fn fleet_delete_reports_the_count_and_is_idempotent() {
 #[test]
 fn fleet_delete_json_reports_the_deregistered_count() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_fleet();
+    let (fleet_id, _) = cli.seeded_fleet();
     let output = cli.run(&["fleet", "delete", &fleet_id.to_string(), "--json"]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();

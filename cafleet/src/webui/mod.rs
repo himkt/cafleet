@@ -522,7 +522,13 @@ mod integrity_regressions {
             let error = result
                 .expect("the presenter must return an integrity error, never unwind")
                 .expect_err("missing required names cannot produce successful partial rows");
-            assert!(!error.to_string().trim().is_empty());
+            assert_eq!(
+                error.message(),
+                format!(
+                    "invalid stored value for message member name: {}",
+                    if sender_missing { director } else { worker }
+                )
+            );
         }
     }
 }
