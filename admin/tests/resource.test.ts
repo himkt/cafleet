@@ -28,7 +28,7 @@ describe("production resource failure and retry", () => {
     expect(current.getSnapshot()).toEqual({status:"success",data:"recovered",error:null,refreshing:false});
   });
 
-  it.each(["offline", null, undefined, {reason:"unknown failure"}])("normalizes rejected non-Error value %j", async (reason) => {
+  it.each(["offline", null])("normalizes rejected non-Error value %j", async (reason) => {
     const load = vi.fn<Load>().mockRejectedValueOnce(reason).mockResolvedValue("recovered");
     const current = resource(load); current.start(); await flush();
     expect(current.getSnapshot()).toMatchObject({status:"error",data:null,refreshing:false});

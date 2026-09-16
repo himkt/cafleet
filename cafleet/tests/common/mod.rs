@@ -1,18 +1,11 @@
-//! Shared fixture for the CLI integration tests (Step 6, SPEC §6.3/§10):
-//! drives the compiled `cafleet` binary against a temp `CAFLEET_DATABASE_URL`,
-//! a temp `HOME`, and a fake `tmux` shim on `PATH` that records every argv
-//! line to a log (SPEC §9 *CLI conformance*).
-//!
-//! The shim answers `display-message` with `main|@1|%0`, `split-window` with
-//! `%7`, `capture-pane` with a canned two-line buffer, and `list-panes` with
-//! `%0`/`%7`; setting `fail_subcommand` makes exactly that tmux subcommand
-//! exit non-zero (for rollback-path tests).
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 use tempfile::TempDir;
+
+use cafleet::broker::{self, InlinePreviewSender, NewPlacement};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -25,7 +18,17 @@ fi
 case "$1" in
     display-message) printf 'main|@1|%%0\n' ;;
     split-window) printf '%%7\n' ;;
-    capture-pane) printf 'line1\nline2\n' ;;
+    capture-pane)
+        while [ "$#" -gt 0 ]; do
+            if [ "$1" = "-t" ]; then
+                shift
+                printf 'pane:%s\nline1\nline2\n' "$1"
+                exit 0
+            fi
+            shift
+        done
+        exit 2
+        ;;
     list-panes) printf '%%0\n%%7\n' ;;
 esac
 exit 0
@@ -125,26 +128,17 @@ impl Cli {
         rusqlite::Connection::open(self.db_path()).unwrap()
     }
 
-    /// Migrate to head via plain `cafleet setup`, then strip the recorded
-    /// installs and installed asset dirs so every fixture starts from a
-    /// records-free database regardless of setup's install-all-agents
-    /// assets half.
     pub fn migrate(&self) {
-        let output = self.run(&["setup"]);
-        assert!(
-            output.status.success(),
-            "plain setup must succeed: {}",
-            text(&output.stderr)
+        let mut conn = cafleet::db::connect(&self.db_url()).unwrap();
+        assert_eq!(
+            cafleet::db::migrate_to_head(&mut conn).unwrap(),
+            cafleet::db::head_version()
         );
-        self.sqlite()
-            .execute("DELETE FROM asset_installs", [])
-            .unwrap();
-        for dir in [".claude", ".codex", ".config/opencode", ".opencode"] {
-            let path = self.home.path().join(dir);
-            if path.exists() {
-                std::fs::remove_dir_all(&path).unwrap();
-            }
-        }
+    }
+
+    pub fn install(&self) {
+        let output = self.run(&["setup"]);
+        assert!(output.status.success(), "setup: {}", text(&output.stderr));
     }
 
     /// The agent's recorded-path identity at its default (no env override)
@@ -261,7 +255,7 @@ impl Cli {
     /// `ready()` + a fleet via the atomic `fleet create` bootstrap: fleet 1,
     /// Director member 1, and monitor member [`Self::BOOTSTRAP_MONITOR_ID`]
     /// spawned from `--monitor-file`.
-    pub fn with_fleet(&self) -> (i64, i64) {
+    pub fn with_cli_fleet(&self) -> (i64, i64) {
         self.ready();
         let output = self.run(&[
             "fleet",
@@ -272,27 +266,114 @@ impl Cli {
             "claude",
             "--monitor-file",
             &self.monitor_prompt_path(),
+            "--json",
         ]);
         assert!(
             output.status.success(),
             "fleet create must succeed: {}",
             text(&output.stderr)
         );
-        (1, 1)
+        let fleet: serde_json::Value = serde_json::from_str(text(&output.stdout).trim()).unwrap();
+        (
+            fleet["fleet_id"].as_i64().expect("created fleet id"),
+            fleet["director"]["member_id"]
+                .as_i64()
+                .expect("created Director id"),
+        )
     }
 
-    /// `with_fleet()` with its monitor member deleted — the dead-monitor
-    /// state the monitor-first / one-per-fleet guard tests and the
-    /// `member create --role monitor` recovery path start from.
-    pub fn with_bare_fleet(&self) -> (i64, i64) {
-        let ids = self.with_fleet();
-        let output = self.run(&["member", "delete", &Self::BOOTSTRAP_MONITOR_ID.to_string()]);
+    pub fn with_cli_bare_fleet(&self) -> (i64, i64) {
+        let ids = self.with_cli_fleet();
+        let monitor = broker::active_monitor_member_id(&self.sqlite(), ids.0)
+            .unwrap()
+            .expect("bootstrap monitor");
+        let output = self.run(&["member", "delete", &monitor.to_string()]);
         assert!(
             output.status.success(),
-            "monitor delete must succeed: {}",
+            "monitor delete: {}",
             text(&output.stderr)
         );
         ids
+    }
+
+    pub fn seeded_fleet(&self) -> (i64, i64) {
+        self.ready();
+        self.seed_fleet("testfleet")
+    }
+
+    pub fn seed_fleet(&self, name: &str) -> (i64, i64) {
+        let mut conn = cafleet::db::connect(&self.db_url()).unwrap();
+        let fleet = broker::create_fleet(
+            &mut conn,
+            Some(name),
+            "main",
+            "@1",
+            "%0",
+            "claude",
+            "tmux",
+            "monitor",
+            "Monitor member for this fleet",
+            |_, _, monitor| Ok(format!("%{monitor}")),
+        )
+        .unwrap();
+        (
+            fleet["fleet_id"].as_i64().expect("seeded fleet id"),
+            fleet["director"]["member_id"]
+                .as_i64()
+                .expect("seeded Director id"),
+        )
+    }
+
+    pub fn seeded_bare_fleet(&self) -> (i64, i64) {
+        let ids = self.seeded_fleet();
+        let mut conn = cafleet::db::connect(&self.db_url()).unwrap();
+        let monitor = broker::active_monitor_member_id(&conn, ids.0)
+            .unwrap()
+            .expect("seeded monitor");
+        broker::deregister_member(&mut conn, monitor).unwrap();
+        ids
+    }
+
+    pub fn seed_member(&self, fleet_id: i64, name: &str) -> i64 {
+        let mut conn = cafleet::db::connect(&self.db_url()).unwrap();
+        let member = broker::register_member(
+            &mut conn,
+            fleet_id,
+            name,
+            "test member",
+            &[],
+            Some(&NewPlacement {
+                backend: "tmux".into(),
+                mux_session: "main".into(),
+                mux_window_id: "@1".into(),
+                mux_pane_id: None,
+                coding_agent: "claude".into(),
+            }),
+            false,
+        )
+        .unwrap();
+        let pane_id = format!("%{}", member.member_id + 4);
+        let placement = broker::update_placement_pane_id(&mut conn, member.member_id, &pane_id)
+            .unwrap()
+            .expect("seeded member placement");
+        assert_eq!(placement.mux_pane_id.as_deref(), Some(pane_id.as_str()));
+        member.member_id
+    }
+
+    pub fn seed_message(&self, sender: i64, recipient: i64, body: &str) -> i64 {
+        let mut conn = cafleet::db::connect(&self.db_url()).unwrap();
+        let outcome = broker::send_message(
+            &mut conn,
+            &SeedNotifier,
+            200,
+            sender,
+            &recipient.to_string(),
+            body,
+        )
+        .unwrap();
+        assert_eq!(outcome.message.owner_member_id, recipient);
+        assert_eq!(outcome.message.text, body);
+        outcome.message.message_id
     }
 
     /// Spawn the fleet's monitor member through `member create --role monitor`.
@@ -350,8 +431,6 @@ impl Cli {
             .expect("the first token is the member id")
     }
 
-    /// Spawn a long-running command (e.g. `monitor start`) inside the fake
-    /// tmux context, with stdout/stderr piped for later collection.
     pub fn spawn(&self, args: &[&str]) -> std::process::Child {
         self.command(args, true)
             .stdout(Stdio::piped())
@@ -361,11 +440,11 @@ impl Cli {
     }
 
     pub fn shim_calls(&self) -> Vec<String> {
-        std::fs::read_to_string(&self.shim_log)
-            .unwrap_or_default()
-            .lines()
-            .map(str::to_string)
-            .collect()
+        match std::fs::read_to_string(&self.shim_log) {
+            Ok(log) => log.lines().map(str::to_owned).collect(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(error) => panic!("cannot read shim log {}: {error}", self.shim_log.display()),
+        }
     }
 }
 
@@ -397,4 +476,19 @@ pub fn code(output: &Output) -> i32 {
 pub fn write_file(path: &Path, contents: &[u8]) -> String {
     std::fs::write(path, contents).unwrap();
     path.to_str().unwrap().to_string()
+}
+
+struct SeedNotifier;
+
+impl InlinePreviewSender for SeedNotifier {
+    fn send_inline_preview(
+        &self,
+        _pane: &str,
+        _message: i64,
+        _sender: i64,
+        _timestamp: &str,
+        _body: &str,
+    ) -> Result<(), String> {
+        Ok(())
+    }
 }

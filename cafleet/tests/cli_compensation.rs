@@ -39,7 +39,7 @@ fn write_shim(cli: &Cli, binary: &str, body: &str) {
 fn fixture(with_fleet: bool) -> Cli {
     let cli = Cli::new();
     if with_fleet {
-        cli.with_fleet();
+        cli.with_cli_fleet();
     } else {
         cli.ready();
     }
@@ -185,7 +185,15 @@ fn member_placeholder_failure_keeps_usage_exit_and_deregisters_without_a_pane() 
     let cli = fixture(true);
     let output = member_create(&cli, "{unknown}", false);
     assert_eq!(code(&output), 2);
-    assert!(stderr(&output).contains("Unknown placeholder 'unknown'"));
+    assert!(
+        stderr(&output).contains(
+            "Unknown placeholder 'unknown' in custom prompt. Supported placeholders: \
+         {fleet_id}, {member_id}, {director_member_id}, {coding_agent}. \
+         Double literal braces ({{, }}) to keep them as text."
+        ),
+        "{}",
+        stderr(&output)
+    );
     assert_member_compensated(&cli);
     assert!(
         calls(&cli)
@@ -274,7 +282,15 @@ fn fleet_placeholder_failure_rolls_back_without_creating_or_killing_panes() {
     std::fs::write(cli.monitor_prompt_path(), "{unknown}").unwrap();
     let output = fleet_create(&cli, false);
     assert_eq!(code(&output), 2);
-    assert!(stderr(&output).contains("Unknown placeholder 'unknown'"));
+    assert!(
+        stderr(&output).contains(
+            "Unknown placeholder 'unknown' in custom prompt. Supported placeholders: \
+         {fleet_id}, {member_id}, {director_member_id}, {coding_agent}. \
+         Double literal braces ({{, }}) to keep them as text."
+        ),
+        "{}",
+        stderr(&output)
+    );
     assert_fleet_compensated(&cli);
     assert!(
         calls(&cli)

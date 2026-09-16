@@ -306,22 +306,30 @@ mod timeline_regressions {
     fn timeline_filters_summaries_before_cap_and_keeps_partial_broadcast_as_rows() {
         let (_dir, mut conn, fleet, director, worker) = fixture();
         let notifier = FakeNotifier::succeeding();
-        broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, director, "broadcast")
-            .unwrap();
-        for _ in 0..199 {
-            common::send(&mut conn, &notifier, director, worker, "single");
-        }
+        let broadcast =
+            broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, director, "broadcast")
+                .unwrap();
+        let single = common::send(&mut conn, &notifier, director, worker, "single");
+        let single_id = single["message"]["message_id"].as_i64().unwrap();
+        let mut statement = conn.prepare("SELECT message_id FROM messages WHERE origin_message_id=?1 AND type='unicast' ORDER BY message_id DESC").unwrap();
+        let deliveries = statement
+            .query_map([broadcast.message.message_id], |row| row.get::<_, i64>(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect::<Vec<_>>();
+        assert_eq!(deliveries.len(), 2);
+        drop(statement);
         conn.execute_batch("UPDATE messages SET status_timestamp='2026-01-01T00:00:00+00:00';
             UPDATE messages SET status_timestamp='2099-01-01T00:00:00+00:00' WHERE type='broadcast_summary';").unwrap();
-        let rows = list_timeline(&conn, fleet, 200).unwrap();
+        let rows = list_timeline(&conn, fleet, 2).unwrap();
         assert_eq!(
             rows.len(),
-            200,
-            "filter before limit, not after fetching 200 mixed rows"
+            2,
+            "filter summaries before applying the two-row limit"
         );
         assert_eq!(
             rows.iter().map(|r| r.message_id).collect::<Vec<_>>(),
-            (3..=202).rev().collect::<Vec<_>>()
+            vec![single_id, deliveries[0]]
         );
         let partial: Vec<_> = rows
             .iter()
@@ -333,9 +341,29 @@ mod timeline_regressions {
             "row cap must not be widened to complete a group"
         );
         assert_eq!(partial[0].status.as_str(), "input_required");
-        assert_eq!(list_timeline(&conn, fleet, 201).unwrap().len(), 201);
         assert_eq!(
-            get_message(&conn, 1)
+            partial[0].origin_message_id,
+            Some(broadcast.message.message_id)
+        );
+        let full = list_timeline(&conn, fleet, 3).unwrap();
+        assert_eq!(
+            full.iter().map(|row| row.message_id).collect::<Vec<_>>(),
+            vec![single_id, deliveries[0], deliveries[1]]
+        );
+        assert_eq!(
+            full.iter()
+                .filter(|row| row.origin_message_id == Some(broadcast.message.message_id))
+                .count(),
+            2
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM messages", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            4
+        );
+        assert_eq!(
+            get_message(&conn, broadcast.message.message_id)
                 .map(|record| crate::presentation::message_envelope(&record))
                 .unwrap()["message"]["type"],
             "broadcast_summary"

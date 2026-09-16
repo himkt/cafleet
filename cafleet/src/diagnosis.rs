@@ -213,8 +213,19 @@ mod tests {
 
     #[test]
     fn schema_states_preserve_versions_and_sql_failures() {
-        let conn = Connection::open_in_memory().unwrap();
+        let conn = crate::db::connect("sqlite:///:memory:").unwrap();
         assert!(matches!(classify_schema(&conn, 8), SchemaState::Missing));
+        conn.execute_batch("CREATE TABLE refinery_schema_history(version INTEGER)")
+            .unwrap();
+        assert!(matches!(classify_schema(&conn, 8), SchemaState::Missing));
+        conn.execute_batch("CREATE TABLE foreign_data(value TEXT)")
+            .unwrap();
+        assert!(matches!(
+            classify_schema(&conn, 8),
+            SchemaState::Unversioned
+        ));
+        conn.execute_batch("DROP TABLE foreign_data; DROP TABLE refinery_schema_history")
+            .unwrap();
         conn.execute_batch("CREATE TABLE app_data(value TEXT)")
             .unwrap();
         assert!(matches!(

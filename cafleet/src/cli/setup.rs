@@ -390,3 +390,75 @@ mod tests {
         assert_eq!(snapshot(&observer), after_interference.unwrap());
     }
 }
+
+#[cfg(test)]
+mod parser_contracts {
+    use crate::cli::{CliArgs, Command};
+    use clap::Parser;
+
+    #[test]
+    fn setup_selections_preserve_order_and_duplicates_across_flag_forms() {
+        let cases: &[(&[&str], &[&str])] = &[
+            (&["cafleet", "setup"], &[]),
+            (&["cafleet", "setup", "--coding-agent", "codex"], &["codex"]),
+            (
+                &["cafleet", "setup", "--coding-agent", "claude", "codex"],
+                &["claude", "codex"],
+            ),
+            (
+                &[
+                    "cafleet",
+                    "setup",
+                    "--coding-agent",
+                    "claude",
+                    "--coding-agent",
+                    "codex",
+                ],
+                &["claude", "codex"],
+            ),
+            (
+                &[
+                    "cafleet",
+                    "setup",
+                    "--coding-agent",
+                    "claude",
+                    "--coding-agent",
+                    "codex",
+                    "--coding-agent",
+                    "opencode",
+                ],
+                &["claude", "codex", "opencode"],
+            ),
+            (
+                &[
+                    "cafleet",
+                    "setup",
+                    "--coding-agent",
+                    "claude",
+                    "codex",
+                    "--coding-agent",
+                    "opencode",
+                ],
+                &["claude", "codex", "opencode"],
+            ),
+            (
+                &[
+                    "cafleet",
+                    "setup",
+                    "--coding-agent",
+                    "opencode",
+                    "claude",
+                    "--coding-agent",
+                    "claude",
+                ],
+                &["opencode", "claude", "claude"],
+            ),
+        ];
+        for (argv, expected) in cases {
+            let Command::Setup(args) = CliArgs::try_parse_from(*argv).unwrap().command else {
+                panic!("{argv:?} must parse as setup");
+            };
+            assert_eq!(args.coding_agent, *expected, "{argv:?}");
+        }
+    }
+}

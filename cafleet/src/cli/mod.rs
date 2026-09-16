@@ -237,3 +237,372 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod parser_contracts {
+    use super::*;
+    use clap::error::ErrorKind;
+
+    fn parse(args: &[&str]) -> Command {
+        CliArgs::try_parse_from(std::iter::once("cafleet").chain(args.iter().copied()))
+            .unwrap_or_else(|error| panic!("{args:?}: {error}"))
+            .command
+    }
+
+    fn assert_error(args: &[&str], kind: ErrorKind, input: &str) {
+        let error =
+            match CliArgs::try_parse_from(std::iter::once("cafleet").chain(args.iter().copied())) {
+                Err(error) => error,
+                Ok(_) => panic!("{args:?} must reject {input}"),
+            };
+        assert_eq!(error.kind(), kind, "{args:?}: {error}");
+        assert!(error.to_string().contains(input), "{args:?}: {error}");
+    }
+
+    #[test]
+    fn command_options_are_scoped_to_their_subcommands() {
+        let cases: &[(&[&str], &str)] = &[
+            (&["--json", "fleet", "list"], "--json"),
+            (&["setup", "--fleet-id", "1"], "--fleet-id"),
+            (
+                &[
+                    "fleet",
+                    "create",
+                    "--fleet-id",
+                    "1",
+                    "--name",
+                    "x",
+                    "--coding-agent",
+                    "claude",
+                ],
+                "--fleet-id",
+            ),
+            (&["fleet", "list", "--fleet-id", "1"], "--fleet-id"),
+            (&["fleet", "show", "1", "--fleet-id", "1"], "--fleet-id"),
+            (&["member", "list", "1", "--fleet-id", "1"], "--fleet-id"),
+            (&["member", "show", "1", "--fleet-id", "1"], "--fleet-id"),
+            (&["message", "poll", "1", "--fleet-id", "1"], "--fleet-id"),
+            (&["message", "ack", "1", "--fleet-id", "1"], "--fleet-id"),
+            (&["monitor", "1", "--fleet-id", "1"], "--fleet-id"),
+            (&["member", "show", "--member-id", "1"], "--member-id"),
+            (&["member", "ping", "--member-id", "1"], "--member-id"),
+            (&["message", "poll", "--member-id", "1"], "--member-id"),
+            (&["message", "ack", "--message-id", "1"], "--message-id"),
+            (&["message", "show", "--message-id", "1"], "--message-id"),
+            (
+                &[
+                    "fleet",
+                    "create",
+                    "--name",
+                    "x",
+                    "--coding-agent",
+                    "claude",
+                    "--full",
+                ],
+                "--full",
+            ),
+            (&["fleet", "show", "1", "--full"], "--full"),
+            (&["member", "show", "1", "--full"], "--full"),
+            (&["member", "list", "1", "--full"], "--full"),
+            (&["message", "show", "1", "--full"], "--full"),
+            (&["message", "poll", "1", "--full"], "--full"),
+            (
+                &[
+                    "message",
+                    "broadcast",
+                    "--from-member-id",
+                    "1",
+                    "hi",
+                    "--full",
+                ],
+                "--full",
+            ),
+            (
+                &[
+                    "message",
+                    "send",
+                    "--from-member-id",
+                    "1",
+                    "--to-member-id",
+                    "2",
+                    "hi",
+                    "--quiet",
+                ],
+                "--quiet",
+            ),
+            (&["message", "ack", "1", "--quiet"], "--quiet"),
+            (&["member", "ping", "1", "--quiet"], "--quiet"),
+            (&["member", "capture", "1", "--no-ansi"], "--no-ansi"),
+            (
+                &[
+                    "message",
+                    "send",
+                    "--from-member-id",
+                    "1",
+                    "--to-member-id",
+                    "2",
+                    "--text",
+                    "hi",
+                ],
+                "--text",
+            ),
+            (
+                &[
+                    "message",
+                    "broadcast",
+                    "--from-member-id",
+                    "1",
+                    "--text-file",
+                    "f.txt",
+                ],
+                "--text-file",
+            ),
+            (
+                &[
+                    "member",
+                    "create",
+                    "--fleet-id",
+                    "1",
+                    "--name",
+                    "w",
+                    "--description",
+                    "d",
+                    "--text",
+                    "prompt",
+                ],
+                "--text",
+            ),
+        ];
+        for (args, input) in cases {
+            assert_error(args, ErrorKind::UnknownArgument, input);
+        }
+        assert!(matches!(
+            parse(&["fleet", "list", "--json"]),
+            Command::Fleet(fleet::FleetCommand::List { json: true })
+        ));
+        assert!(matches!(
+            parse(&["fleet", "show", "41", "--json"]),
+            Command::Fleet(fleet::FleetCommand::Show {
+                fleet_id: 41,
+                json: true
+            })
+        ));
+        assert!(matches!(
+            parse(&["member", "show", "42", "--json"]),
+            Command::Member(member::MemberCommand::Show {
+                member_id: 42,
+                json: true
+            })
+        ));
+        assert!(matches!(
+            parse(&["message", "poll", "43", "--json"]),
+            Command::Message(message::MessageCommand::Poll {
+                member_id: 43,
+                json: true
+            })
+        ));
+        assert!(matches!(
+            parse(&["message", "ack", "44", "--json"]),
+            Command::Message(message::MessageCommand::Ack {
+                message_id: 44,
+                json: true
+            })
+        ));
+    }
+
+    #[test]
+    fn fleet_creation_requires_named_options_and_integer_subjects() {
+        let cases: &[(&[&str], ErrorKind, &str)] = &[
+            (
+                &[
+                    "fleet",
+                    "create",
+                    "--coding-agent",
+                    "claude",
+                    "--monitor-file",
+                    "prompt.md",
+                ],
+                ErrorKind::MissingRequiredArgument,
+                "--name",
+            ),
+            (
+                &[
+                    "fleet",
+                    "create",
+                    "--name",
+                    "x",
+                    "--monitor-file",
+                    "prompt.md",
+                ],
+                ErrorKind::MissingRequiredArgument,
+                "--coding-agent",
+            ),
+            (
+                &["fleet", "create", "--name", "x", "--coding-agent", "claude"],
+                ErrorKind::MissingRequiredArgument,
+                "--monitor-file",
+            ),
+            (
+                &[
+                    "fleet",
+                    "create",
+                    "--name",
+                    "x",
+                    "--coding-agent",
+                    "python",
+                    "--monitor-file",
+                    "prompt.md",
+                ],
+                ErrorKind::InvalidValue,
+                "python",
+            ),
+            (
+                &["fleet", "show"],
+                ErrorKind::MissingRequiredArgument,
+                "FLEET_ID",
+            ),
+            (&["fleet", "show", "abc"], ErrorKind::ValueValidation, "abc"),
+        ];
+        for (args, kind, input) in cases {
+            assert_error(args, *kind, input);
+        }
+        let Command::Fleet(fleet::FleetCommand::Create {
+            name,
+            coding_agent,
+            monitor_file,
+            monitor_model,
+            json,
+        }) = parse(&[
+            "fleet",
+            "create",
+            "--name",
+            "alpha",
+            "--coding-agent",
+            "codex",
+            "--monitor-file",
+            "-",
+            "--monitor-model",
+            "chosen",
+            "--json",
+        ])
+        else {
+            panic!("expected fleet creation")
+        };
+        assert_eq!(name, "alpha");
+        assert_eq!(coding_agent, "codex");
+        assert_eq!(monitor_file, "-");
+        assert_eq!(monitor_model.as_deref(), Some("chosen"));
+        assert!(json);
+    }
+
+    #[test]
+    fn body_sources_are_exclusive_and_monitor_is_the_creation_role() {
+        let member = [
+            "member",
+            "create",
+            "--fleet-id",
+            "17",
+            "--name",
+            "worker",
+            "--description",
+            "work",
+        ];
+        let send = [
+            "message",
+            "send",
+            "--from-member-id",
+            "17",
+            "--to-member-id",
+            "18",
+        ];
+        let broadcast = ["message", "broadcast", "--from-member-id", "17"];
+        for base in [member.as_slice(), send.as_slice(), broadcast.as_slice()] {
+            assert_error(base, ErrorKind::MissingRequiredArgument, "--file");
+            let both: Vec<_> = base
+                .iter()
+                .copied()
+                .chain(["payload", "--file", "body.txt"])
+                .collect();
+            assert_error(&both, ErrorKind::ArgumentConflict, "--file");
+            for source in [
+                vec!["payload"],
+                vec!["--file", "body.txt"],
+                vec!["--file", "-"],
+            ] {
+                let args: Vec<_> = base.iter().copied().chain(source).collect();
+                match (base[0], parse(&args)) {
+                    (
+                        "member",
+                        Command::Member(member::MemberCommand::Create { fleet_id, role, .. }),
+                    ) => {
+                        assert_eq!(fleet_id, 17);
+                        assert_eq!(role, None);
+                    }
+                    (
+                        "message",
+                        Command::Message(message::MessageCommand::Send {
+                            from_member_id,
+                            to_member_id,
+                            ..
+                        }),
+                    ) => {
+                        assert_eq!((from_member_id, to_member_id), (17, 18));
+                    }
+                    (
+                        "message",
+                        Command::Message(message::MessageCommand::Broadcast {
+                            from_member_id, ..
+                        }),
+                    ) => assert_eq!(from_member_id, 17),
+                    _ => panic!("{args:?} must preserve its command variant"),
+                }
+            }
+        }
+        let invalid: Vec<_> = member
+            .iter()
+            .copied()
+            .chain(["--role", "builder", "prompt"])
+            .collect();
+        assert_error(&invalid, ErrorKind::InvalidValue, "builder");
+        let valid: Vec<_> = member
+            .iter()
+            .copied()
+            .chain(["--role", "monitor", "prompt"])
+            .collect();
+        let Command::Member(member::MemberCommand::Create { role, .. }) = parse(&valid) else {
+            panic!("expected member creation");
+        };
+        assert_eq!(role.as_deref(), Some("monitor"));
+    }
+
+    #[test]
+    fn setup_rejects_unknown_options_positionals_and_agent_values() {
+        let cases: &[(&[&str], ErrorKind, &str)] = &[
+            (&["setup", "extra"], ErrorKind::UnknownArgument, "extra"),
+            (&["setup", "claude"], ErrorKind::UnknownArgument, "claude"),
+            (
+                &["setup", "--skip", "claude"],
+                ErrorKind::UnknownArgument,
+                "--skip",
+            ),
+            (
+                &["setup", "--coding-agent", "python"],
+                ErrorKind::InvalidValue,
+                "python",
+            ),
+            (
+                &["setup", "--coding-agent", "claude", "python"],
+                ErrorKind::InvalidValue,
+                "python",
+            ),
+            (
+                &["setup", "--coding-agent", "claude", "extra"],
+                ErrorKind::InvalidValue,
+                "extra",
+            ),
+        ];
+        for (args, kind, input) in cases {
+            assert_error(args, *kind, input);
+        }
+    }
+}
