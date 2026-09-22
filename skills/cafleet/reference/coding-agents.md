@@ -12,7 +12,7 @@ Resolve the seven runtime placeholders from Runtime bindings for the relevant op
 
 For example, a Codex Director selecting an OpenCode reviewer uses the OpenCode catalog, reviewer default, and effort capability with the Codex decision surface and local execution tools. A Claude monitor observing a Codex member uses Codex capture cues and Claude background execution for its own loop. Monitor bootstrap and recovery select the Director's backend by construction: use its monitor default for `--monitor-model` at bootstrap and `--model` at recovery, retaining backend inheritance. User overrides and selection decisions follow [Director model-selection policy](../roles/director.md#model-selection).
 
-Model catalogs, their provenance/context notes, canonical Role defaults, and shared freshness metadata are maintained exclusively by the `cafleet-model-list-refresh` skill from the official sources in each backend section, refreshed at least every 30 days (last refreshed: 2026-09-05). Runtime bindings, bound runtime notes, pane cues, and worked resolutions belong to runtime documentation maintenance. The freshness date applies to model data; structural reorganization preserves that date.
+Model catalogs, their provenance/context notes, canonical Role defaults, and shared freshness metadata are maintained exclusively by the `cafleet-model-list-refresh` skill from the official sources in each backend section, refreshed at least every 30 days (last refreshed: 2026-09-23). Runtime bindings, bound runtime notes, pane cues, and worked resolutions belong to runtime documentation maintenance. The freshness date applies to model data; structural reorganization preserves that date.
 
 Prices are standard provider USD rates per MTok and are planning estimates, not an invoice guarantee. Each backend's catalog is ordered most → least capable as reviewed judgment. Context windows are listed for the `claude` backend, whose model strings are the ones a context-window suffix can apply to. Selection policy, including cost efficiency mode and monitor/reviewer rules, lives in [Director model selection](../roles/director.md#model-selection).
 
@@ -45,18 +45,14 @@ Either the model name or its alias is a valid `--model` token.
 |---|---|---|---|---|---|
 | claude-fable-5-1 | fable | Mythos-class frontier; highest capability on every dimension | 1M | 10.00 | 50.00 |
 | claude-fable-5 | — | Prior Mythos-class generation at the same price tier | 1M | 10.00 | 50.00 |
-| claude-opus-5 | opus | Everyday frontier; strong coding, planning, and review | 1M | 5.00 | 25.00 |
-| claude-opus-4-8 | — | Prior frontier generation at the same price tier | 1M | 5.00 | 25.00 |
+| claude-opus-5-5 | opus | Everyday frontier; strong coding, planning, and review | 1M | 4.00 | 20.00 |
+| claude-opus-5 | — | Prior frontier generation at a higher price | 1M | 5.00 | 25.00 |
 | claude-sonnet-5 | sonnet | Efficient mid tier for routine work | 1M | 2.00 | 10.00 |
 | claude-haiku-4-5 | haiku | Fast low-cost tier; monitoring and quick bounded tasks | 200K | 1.00 | 5.00 |
 
-Every 1M row above runs at that window by default on the Anthropic API, so
-its `--model` value needs no `[1m]` suffix; `claude-haiku-4-5` has no 1M
-variant and never takes one. The one case that calls for the suffix is an
-Opus spawn on a Pro plan, where the 1M window is opt-in and billed to usage
-credits — there the Director passes `--model 'claude-opus-5[1m]'`, quoted,
-because the brackets otherwise glob in zsh. Confirm the operator's plan
-before spending their credits that way.
+Every 1M row above runs at that window on every plan on the Anthropic API,
+so its `--model` value needs no `[1m]` suffix; `claude-haiku-4-5` has no 1M
+variant and never takes one.
 
 Sources: [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing.md) and [Claude Code model configuration](https://code.claude.com/docs/en/model-config.md) — context windows and `[1m]` applicability.
 
@@ -103,16 +99,15 @@ Launch `cafleet monitor <fleet-id>` via the Bash tool with `run_in_background: t
 | Placeholder | Value |
 |---|---|
 | `{reviewer_model}` | `gpt-6-astra` |
-| `{monitor_model}` | `gpt-5.6-luna` |
+| `{monitor_model}` | `gpt-6-luna` |
 
 ### Model catalog
 
 | Model | Class | Input $/MTok | Output $/MTok |
 |---|---|---|---|
 | gpt-6-astra | Latest frontier tier across code, apps, and research; strongest reviewer | 10.00 | 50.00 |
-| gpt-5.6-sol | Most capable GPT-5.6 tier for complex coding and research | 4.00 | 20.00 |
-| gpt-5.6-terra | Balanced agentic coding tier for everyday work | 2.00 | 12.00 |
-| gpt-5.6-luna | Fast affordable agentic coding tier | 0.20 | 1.20 |
+| gpt-6-sol | Complex coding and agentic workflows tier for everyday work | 2.00 | 10.00 |
+| gpt-6-luna | Fast efficient tier for focused, high-volume tasks | 0.10 | 0.50 |
 
 Sources: [OpenAI pricing](https://developers.openai.com/api/docs/pricing) and [Codex model availability](https://learn.chatgpt.com/docs/models.md).
 
