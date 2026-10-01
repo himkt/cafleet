@@ -40,7 +40,7 @@ Use the [command index](#command-index) on demand for exact runtime flags, outpu
 You have read `reference/coding-agents.md` (Required-reading row #1). Resolve values by the subject of the action:
 
 1. **Select the subject.** For your current instructions, use your `CODING AGENT:` identity (your own identity when standalone) and its Runtime bindings. For a member spawn, select the backend under [Director model-selection policy](roles/director.md#model-selection), then read that backend's Model catalog and Role defaults and validate target effort and launch capabilities against its Runtime bindings. For captured panes, use the observed member's recorded backend and its Pane-state capture cues. Keep the observer's own tools and decision surface.
-2. **Materialize values.** Resolve the seven runtime placeholders from Runtime bindings for the relevant operation, and `{monitor_model}` / `{reviewer_model}` from the selected spawn backend's Role defaults. A Director's local long-lived work uses its own execution primitive. Monitor bootstrap and recovery inherit the Director's backend; reviewer selection may use a different backend. Use the documented neutral defaults below only for their explicitly allowed missing/unknown-backend cases. Report a missing required supported-backend section, malformed table, or broken reference as a documentation defect.
+2. **Materialize values.** Resolve the seven runtime placeholders from Runtime bindings for the relevant operation, and the role's model and effort from the selected spawn backend's Role defaults. A Director's local long-lived work uses its own execution primitive. Monitor bootstrap and recovery inherit the Director's backend; reviewer selection may use a different backend. Use the documented neutral defaults below only for their explicitly allowed missing/unknown-backend cases. Report a missing required supported-backend section, malformed table, or broken reference as a documentation defect.
 3. **Apply notes.** At each instruction named in the selected backend's *Note → applies at* table, follow that note's caveat. An ordinary member resolves its own runtime section; it acquires no model-selection duty.
 4. **Self-check at emission.** Emit concrete values in commands and messages. Resolve any remaining literal `{token}` before emitting it.
 
@@ -54,7 +54,11 @@ Used only when your backend's section omits a token or your backend is unknown. 
 |-------|-------------------------------------------------------|
 | `{decision_surface}` | a Director-relayed operator message (a member always routes to the Director) |
 | `{reviewer_model}` | the spawning Director's own model (inherit the parent) — a safe floor, possibly intelligence-suboptimal |
+| `{reviewer_effort}` | omit `--effort` to use the backend default |
 | `{monitor_model}` | the spawning Director's own model (inherit the parent) — a safe floor, possibly cost-suboptimal |
+| `{monitor_effort}` | omit `--monitor-effort` or `--effort` to use the backend default |
+| `{other_model}` | the spawning Director's own model (inherit the parent) |
+| `{other_effort}` | omit `--effort` to use the backend default |
 | `{permission_flags}` | describe the mode neutrally as "workspace-scoped auto-approval" — for prose uses only; spawn-flag construction never falls here |
 | `{bg_run}` | a backgrounded `!` shell command |
 | `{bg_stop}` | killing the recorded background process |

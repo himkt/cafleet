@@ -84,7 +84,7 @@ In resume mode where Step 2 IS run, parse the JSON array from the existing `inte
 Bootstrap the fleet per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap (monitor included)* — write the monitor member's spawn prompt first and pass it via `--monitor-file`:
 
 ```bash
-cafleet fleet create --name "design-doc-interview-{slug}" --coding-agent <backend> --monitor-file <abs path to ${BASE}/.prompts/monitor-<UTC-compact>.md> --monitor-model {monitor_model} --json
+cafleet fleet create --name "design-doc-interview-{slug}" --coding-agent <backend> --monitor-file <abs path to ${BASE}/.prompts/monitor-<UTC-compact>.md> --monitor-model {monitor_model} [--monitor-effort {monitor_effort}] --json
 ```
 
 Capture `fleet_id` and `director.member_id` from the JSON response and substitute them for `<fleet-id>` and `<director-member-id>` in every subsequent command.

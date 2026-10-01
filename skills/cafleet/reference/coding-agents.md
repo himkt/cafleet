@@ -8,9 +8,9 @@ Each backend section is self-contained. Select the backend by the subject of the
 | Select/configure a spawned member | The backend selected under [Director model-selection policy](../roles/director.md#model-selection) | Its Model catalog and Role defaults; validate target effort and launch capabilities against its Runtime bindings. |
 | Interpret a captured member pane | The observed member's recorded backend | Its Pane-state capture cues, while retaining the observer's own execution tools and decision surface. |
 
-Resolve the seven runtime placeholders from Runtime bindings for the relevant operation and the two model placeholders from the selected spawn backend's Role defaults. Apply notes at their named instructions and emit concrete command values using the core skill's [Resolve your overlay](../SKILL.md#resolve-your-overlay) procedure and its documented neutral defaults for explicitly allowed missing/unknown-backend cases. Report a missing required backend section, malformed table, or broken supported-backend reference as a documentation defect.
+Resolve the seven runtime placeholders from Runtime bindings for the relevant operation and the model and effort placeholders from the selected spawn backend's Role defaults. Apply notes at their named instructions and emit concrete command values using the core skill's [Resolve your overlay](../SKILL.md#resolve-your-overlay) procedure and its documented neutral defaults for explicitly allowed missing/unknown-backend cases. Report a missing required backend section, malformed table, or broken supported-backend reference as a documentation defect.
 
-For example, a Codex Director selecting an OpenCode reviewer uses the OpenCode catalog, reviewer default, and effort capability with the Codex decision surface and local execution tools. A Claude monitor observing a Codex member uses Codex capture cues and Claude background execution for its own loop. Monitor bootstrap and recovery select the Director's backend by construction: use its monitor default for `--monitor-model` at bootstrap and `--model` at recovery, retaining backend inheritance. User overrides and selection decisions follow [Director model-selection policy](../roles/director.md#model-selection).
+For example, a Codex Director selecting an OpenCode reviewer uses the OpenCode catalog and reviewer defaults with the Codex decision surface and local execution tools. A Claude monitor observing a Codex member uses Codex capture cues and Claude background execution for its own loop. Monitor bootstrap and recovery select the Director's backend by construction: pass its monitor model and supported effort at bootstrap and recovery, retaining backend inheritance. User overrides and selection decisions follow [Director model-selection policy](../roles/director.md#model-selection).
 
 Model catalogs, their provenance/context notes, canonical Role defaults, and shared freshness metadata are maintained exclusively by the `cafleet-model-list-refresh` skill from the official sources in each backend section, refreshed at least every 30 days (last refreshed: 2026-09-29). Runtime bindings, bound runtime notes, pane cues, and worked resolutions belong to runtime documentation maintenance. The freshness date applies to model data; structural reorganization preserves that date.
 
@@ -34,8 +34,12 @@ Prices are standard provider USD rates per MTok and are planning estimates, not 
 
 | Placeholder | Value |
 |---|---|
-| `{reviewer_model}` | `fable` |
+| `{reviewer_model}` | `claude-opus-5-5` |
+| `{reviewer_effort}` | `high` |
 | `{monitor_model}` | `haiku` |
+| `{monitor_effort}` | `low` |
+| `{other_model}` | `claude-opus-5-5` |
+| `{other_effort}` | `high` |
 
 ### Model catalog
 
@@ -100,7 +104,11 @@ Launch `cafleet monitor <fleet-id>` via the Bash tool with `run_in_background: t
 | Placeholder | Value |
 |---|---|
 | `{reviewer_model}` | `gpt-6-astra` |
+| `{reviewer_effort}` | `high` |
 | `{monitor_model}` | `gpt-6-luna` |
+| `{monitor_effort}` | `low` |
+| `{other_model}` | `gpt-6-sol` |
+| `{other_effort}` | `medium` |
 
 ### Model catalog
 
@@ -155,8 +163,12 @@ Launch `cafleet monitor <fleet-id>` without shell `&` as a Codex-managed executi
 
 | Placeholder | Value |
 |---|---|
-| `{reviewer_model}` | `opencode/glm-5.2` |
+| `{reviewer_model}` | `opencode/muse-spark-1.3-contributor-free` |
+| `{reviewer_effort}` | `—` |
 | `{monitor_model}` | `opencode/big-pickle` |
+| `{monitor_effort}` | `—` |
+| `{other_model}` | `opencode/mimo-v2.5-free` |
+| `{other_effort}` | `—` |
 
 ### Model catalog
 
@@ -173,6 +185,7 @@ time.
 | opencode/kimi-k2.7-code | Strong agentic tier tuned for code | 0.95 | 4.00 |
 | opencode/muse-spark-1.2 | Mid-price general coding tier | 1.25 | 4.25 |
 | opencode/muse-spark-1.3-contributor-free | Muse Spark 1.3 free for contributors | 0.00 | 0.00 |
+| opencode/mimo-v2.5-free | MiMo-V2.5 free general model | 0.00 | 0.00 |
 | opencode/qwen3.5-plus | Efficient mid tier for routine work | 0.20 | 1.20 |
 | opencode/big-pickle | Stealth preview model; capability unverified | 0.00 | 0.00 |
 
@@ -212,7 +225,7 @@ Supply all seven tokens: `{decision_surface}` (recorded user-reaction surface; m
 
 ### Role defaults
 
-Set `{reviewer_model}` to the most capable catalog token/alias and `{monitor_model}` to the lightweight monitoring token/alias. Both must belong to the catalog.
+Set `{reviewer_model}`, `{monitor_model}`, and `{other_model}` to catalog tokens or aliases. Set their matching effort placeholders to a supported level or `—` when the backend does not support effort.
 
 ### Model catalog
 

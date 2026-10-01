@@ -50,7 +50,7 @@ For `/summarize-pr 1234` in `/repo`, normalize `researches/pr-1234` and resolve 
 Run `cafleet doctor`. On success, resolve the Director backend and its monitor default. For this example the resolved pair is `claude` and `haiku`. Render the canonical monitor frame referencing `/repo/skills/cafleet/roles/monitor.md` to `/repo/researches/pr-1234/.prompts/monitor-20260911T100000Z.md`, with BASE, all identity lines, resolved startup prerequisites and the monitor start cue. Bootstrap:
 
 ```bash
-cafleet fleet create --name summarize-pr-1234 --coding-agent claude --monitor-file /repo/researches/pr-1234/.prompts/monitor-20260911T100000Z.md --monitor-model haiku --json
+cafleet fleet create --name summarize-pr-1234 --coding-agent claude --monitor-file /repo/researches/pr-1234/.prompts/monitor-20260911T100000Z.md --monitor-model haiku --monitor-effort low --json
 ```
 
 Suppose the result provides fleet 7, Director 8 and monitor 9. Carry those literal IDs thereafter. Read and ACK the monitor's ready and monitor live messages; the monitor owns launching and confirming its loop. Spawn the Summarizer only after that gate.

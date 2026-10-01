@@ -7,7 +7,7 @@ Write CAFleet base instructions so they read the same on every backend: family `
 `skills/cafleet/reference/coding-agents.md` is the canonical backend reference. Each self-contained `## claude`, `## codex`, or `## opencode` section contains these six subsections in order:
 
 1. **Runtime bindings**: the seven runtime placeholders for decision surface, permission flags, background run/stop, pane title, skill loader, and effort levels.
-2. **Role defaults**: the sole concrete assignments of `{monitor_model}` and `{reviewer_model}` for that backend, drawn from its catalog.
+2. **Role defaults**: the concrete model and effort assignments for monitors, reviewers, and other members; models come from the backend catalog and effort matches its runtime capability.
 3. **Model catalog**: exact spawn tokens, aliases, reviewed capability classes/order, prices, context notes, and official provenance.
 4. **Note → applies at**: constraints bound to their tokens and consuming instructions.
 5. **Pane-state capture cues**: the four states and the supervision tie-break pointer.
@@ -31,7 +31,7 @@ For example, a Codex Director selecting an OpenCode reviewer resolves the OpenCo
 
 Each reader entry point places its runtime overlay at **row #1 of the Required-reading block**, gated before action. Link `coding-agents.md#<name>`, substituting the reader's concrete backend anchor when used. The row requires **read-and-resolve**: identify the executing backend, read its Runtime bindings, and apply the core skill's resolution procedure before acting. Directors additionally read the selected spawn backend when selecting a member.
 
-1. **Materialize values.** Use the seven runtime bindings for the relevant operation and the selected spawn backend's two Role defaults.
+1. **Materialize values.** Use the seven runtime bindings for the relevant operation and the selected spawn backend's model and effort Role defaults.
 2. **Apply notes.** Follow each caveat at the instruction named in Note → applies at.
 3. **Self-check at emission.** Emit concrete command and message values; resolve any remaining literal `{token}` first.
 

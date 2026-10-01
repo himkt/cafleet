@@ -1190,7 +1190,9 @@ subcommands take the shared `--json` flag and emit JSON when it is set.
   naming the flag label `--monitor-file`; no inline positional form),
   `--monitor-model MODEL` (optional; validated by the `--coding-agent`
   backend exactly as `member create --model`; omitted → the backend's own
-  default model), `--json` (shared). Omitting any required flag → clap's
+  default model), `--monitor-effort LEVEL` (optional; validated by the
+  `--coding-agent` backend exactly as `member create --effort`; omitted →
+  the backend's own default effort), `--json` (shared). Omitting any required flag → clap's
   native missing-required-argument error naming the flag, exit 2.
   One invocation creates fleet/Director/monitor rows transactionally and
   compensates an owned pane on failure. Ladder: (1) multiplexer
@@ -1198,11 +1200,12 @@ subcommands take the shared `--json` flag and emit JSON when it is set.
   fleet create must be run inside a tmux or herdr session` (exit 1, no DB
   writes); (2) resolve the monitor prompt body from `--monitor-file`;
   (3) backend checks before any write — backend lookup, `validate_model`
-  on `--monitor-model`, `ensure_available`; (4) broker `create_fleet`
+  on `--monitor-model`, `validate_effort` on `--monitor-effort`,
+  `ensure_available`; (4) broker `create_fleet`
   (§6.2) with a callback that substitutes the four identity placeholders
   (substitution errors → the two `member create` primary strings, exit 2,
   transaction rollback attempted with any failure reported) and spawns the monitor pane detached
-  (`display_name="monitor"`, the `--monitor-model` value, no effort,
+  (`display_name="monitor"`, the `--monitor-model` and `--monitor-effort` values,
   `CAFLEET_DATABASE_URL` as the only forwarded environment variable;
   `split_window` failure → application error with primary reason
   `tmux split-window failed: <detail>`, exit 1). On split success the callback
@@ -3555,7 +3558,7 @@ The shared trailing `--json` flag (§6.3) is listed per row below.
 
 **`fleet`:**
 
-- [ ] `cafleet fleet create` (`--name`, `--coding-agent`, `--monitor-file PATH` required, `--monitor-model` optional, `--json`; §6.3 fleet group)
+- [ ] `cafleet fleet create` (`--name`, `--coding-agent`, `--monitor-file PATH` required, `--monitor-model` and `--monitor-effort` optional, `--json`; §6.3 fleet group)
 - [ ] `cafleet fleet list` (`--json`)
 - [ ] `cafleet fleet show FLEET_ID` (`--json`)
 - [ ] `cafleet fleet delete FLEET_ID` (`--json`)

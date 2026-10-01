@@ -26,7 +26,14 @@ mod structural_contracts {
         "skill_loader",
         "effort_levels",
     ];
-    const DEFAULTS: [&str; 2] = ["reviewer_model", "monitor_model"];
+    const DEFAULTS: [&str; 6] = [
+        "reviewer_model",
+        "reviewer_effort",
+        "monitor_model",
+        "monitor_effort",
+        "other_model",
+        "other_effort",
+    ];
     const IDENTITIES: [&str; 4] = [
         "fleet_id",
         "member_id",
@@ -620,6 +627,15 @@ mod structural_contracts {
             );
             for (key, value) in defaults {
                 let value = value.trim_matches('`');
+                if key.ends_with("_effort") {
+                    let valid = if backend == "opencode" {
+                        value == "—"
+                    } else {
+                        matches!(value, "low" | "medium" | "high" | "xhigh" | "max")
+                    };
+                    assert!(valid, "{backend} {key} has unsupported value {value}");
+                    continue;
+                }
                 assert!(
                     value != "—"
                         && rows.iter().skip(2).any(|(_, row)| columns

@@ -20,6 +20,11 @@ use crate::runtime::system::SystemProbe;
 const MONITOR_NAME: &str = "monitor";
 const MONITOR_DESCRIPTION: &str = "Monitor member for this fleet";
 
+struct MonitorSelection<'a> {
+    model: Option<&'a str>,
+    effort: Option<&'a str>,
+}
+
 #[derive(Subcommand)]
 pub enum FleetCommand {
     /// Create a fleet with its root Director and monitor member.
@@ -36,6 +41,9 @@ pub enum FleetCommand {
         /// Model passed to the monitor's backend binary.
         #[arg(long = "monitor-model", value_name = "MODEL")]
         monitor_model: Option<String>,
+        /// Reasoning effort passed to the monitor's backend binary.
+        #[arg(long = "monitor-effort", value_name = "LEVEL")]
+        monitor_effort: Option<String>,
         /// Output in JSON format.
         #[arg(long)]
         json: bool,
@@ -77,6 +85,7 @@ pub fn run(
             coding_agent,
             monitor_file,
             monitor_model,
+            monitor_effort,
             json,
         } => create(
             slot,
@@ -84,7 +93,10 @@ pub fn run(
             &name,
             &coding_agent,
             &monitor_file,
-            monitor_model.as_deref(),
+            MonitorSelection {
+                model: monitor_model.as_deref(),
+                effort: monitor_effort.as_deref(),
+            },
             json,
         ),
         FleetCommand::List { json } => {
@@ -114,7 +126,7 @@ fn create(
     name: &str,
     agent_name: &str,
     monitor_file: &str,
-    monitor_model: Option<&str>,
+    monitor: MonitorSelection<'_>,
     json: bool,
 ) -> Result<(), CafleetError> {
     let inside_session = || {
@@ -130,7 +142,8 @@ fn create(
 
     let backend = coding_agent(agent_name)
         .unwrap_or_else(|| panic!("'{agent_name}' is a registry-validated backend"));
-    backend.validate_model(monitor_model)?;
+    backend.validate_model(monitor.model)?;
+    backend.validate_effort(monitor.effort)?;
     backend.ensure_available(&SystemProbe)?;
 
     let env: Vec<_> = std::env::var("CAFLEET_DATABASE_URL")
@@ -160,7 +173,8 @@ fn create(
                 director_id,
                 agent_name,
             )?;
-            let argv = backend.build_spawn_argv(&prompt, MONITOR_NAME, monitor_model, None);
+            let argv =
+                backend.build_spawn_argv(&prompt, MONITOR_NAME, monitor.model, monitor.effort);
             let pane_id = mux
                 .split_window(&context, &env, &argv)
                 .map_err(|error| CafleetError::App(format!("tmux split-window failed: {error}")))?;
@@ -268,16 +282,17 @@ mod tests {
         Harness::try_parse_from(args).map(|harness| harness.command)
     }
 
-    fn create_monitor_flags(command: FleetCommand) -> (String, Option<String>) {
+    fn create_monitor_flags(command: FleetCommand) -> (String, Option<String>, Option<String>) {
         let FleetCommand::Create {
             monitor_file,
             monitor_model,
+            monitor_effort,
             ..
         } = command
         else {
             panic!("parsed a non-create command");
         };
-        (monitor_file, monitor_model)
+        (monitor_file, monitor_model, monitor_effort)
     }
 
     #[test]
@@ -312,9 +327,10 @@ mod tests {
             "prompt.md",
         ])
         .unwrap();
-        let (monitor_file, monitor_model) = create_monitor_flags(command);
+        let (monitor_file, monitor_model, monitor_effort) = create_monitor_flags(command);
         assert_eq!(monitor_file, "prompt.md");
         assert_eq!(monitor_model, None);
+        assert_eq!(monitor_effort, None);
     }
 
     #[test]
@@ -330,10 +346,13 @@ mod tests {
             "-",
             "--monitor-model",
             "haiku",
+            "--monitor-effort",
+            "low",
         ])
         .unwrap();
-        let (monitor_file, monitor_model) = create_monitor_flags(command);
+        let (monitor_file, monitor_model, monitor_effort) = create_monitor_flags(command);
         assert_eq!(monitor_file, "-", "the stdin sentinel is an ordinary value");
         assert_eq!(monitor_model.as_deref(), Some("haiku"));
+        assert_eq!(monitor_effort.as_deref(), Some("low"));
     }
 }

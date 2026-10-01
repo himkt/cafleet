@@ -57,14 +57,21 @@ is never used to price a model.
    `config.toml`) is removed from the table even when the pricing page
    still prices it; legacy models remain manual pass-through `--model`
    values.
-4. **Reapply the capability classes explicitly.** The `Class` descriptions
+4. **Ask the maintainer for role defaults.** Show the current and available
+   catalog tokens for reviewer, monitor, and other members on each backend.
+   Ask which model each role should use and, for Claude and Codex, which
+   supported effort level should accompany it. Record the maintainer's
+   choices in the proposed diff. OpenCode omits effort because its backend
+   does not support it. A refresh keeps the existing role defaults only when
+   the maintainer explicitly chooses to keep them.
+5. **Reapply the capability classes explicitly.** The `Class` descriptions
    and the most-to-least-capable row ordering are reviewed maintainer
    judgment, not provider benchmark claims; changing a class or the ordering
    requires reviewed policy approval in the same pull request. Every row
-   carries both prices from its approved source. Update each backend's canonical Role defaults table directly from its
-   refreshed Model catalog: assign `{monitor_model}` and `{reviewer_model}`
-   to local catalog entries or aliases under the Director's selection policy.
-5. **Re-verify every `claude` row's context window on every refresh**, even
+   carries both prices from its approved source. Set the six Role defaults
+   from the maintainer's choices, using local catalog entries or aliases and
+   effort levels accepted by the selected backend.
+6. **Re-verify every `claude` row's context window on every refresh**, even
    when the prices are unchanged. Take each window from the Claude Code model
    configuration page's *Extended context* section and record it in the
    `claude` table's `Context` column. That page is also the authority for
@@ -85,7 +92,7 @@ is never used to price a model.
 
    A suffixed value must be single-quoted everywhere it appears in a command,
    because `[1m]` is a glob pattern that fails an unquoted zsh invocation.
-6. **Propose, then apply atomically.** Generate a concise proposed diff and
+7. **Propose, then apply atomically.** Generate a concise proposed diff and
    require explicit maintainer approval before applying the model-data changes in
    `skills/cafleet/reference/coding-agents.md`. Preserve the common catalog
    preamble contract described above. Apply catalogs, provenance/context notes,

@@ -112,7 +112,7 @@ User → /clean-docs (one workflow)
 
 | Role | Responsibility |
 |---|---|
-| **Director** | Resolve task-scoped `${BASE}`; bootstrap the fleet with the monitor member included (`cafleet fleet create --monitor-file <abs path> --monitor-model {monitor_model}`) and gate the first ordinary spawn on its `monitor live` message (the CLI monitor-first guard backstops); partition the in-scope tree into **disjoint file-ownership** slices (one file → one scanner, whole surfaces per scanner); merge partial artifacts into the run's canonical artifact; route it to the reviewer and **hold the apply until the reviewer's approval**; relay approval to scanners; apply a denied write through the full-file staging protocol; run verification; escalate observations to the user; delete the monitor member first (first-out) at teardown. |
+| **Director** | Resolve task-scoped `${BASE}`; bootstrap the fleet with the monitor member included (`cafleet fleet create --monitor-file <abs path> --monitor-model {monitor_model}` plus supported monitor effort) and gate the first ordinary spawn on its `monitor live` message (the CLI monitor-first guard backstops); partition the in-scope tree into **disjoint file-ownership** slices (one file → one scanner, whole surfaces per scanner); merge partial artifacts into the run's canonical artifact; route it to the reviewer and **hold the apply until the reviewer's approval**; relay approval to scanners; apply a denied write through the full-file staging protocol; run verification; escalate observations to the user; delete the monitor member first (first-out) at teardown. |
 | **scanner** (×N) | For its slice: run the workflow's scan mechanics, propose actions per the workflow's rubric, record observations separately, write its partial artifact under `${BASE}`. After approval is relayed: apply its own slice's approved rows exactly as written, re-verify its diff, route harness-denied writes to the Director. |
 | **reviewer** | Validate the merged artifact **before** any edit, per the workflow's guarantees and guardrails. After apply: run the workflow verification (parameter table below). |
 
@@ -144,12 +144,12 @@ extensions, since a run produces a run artifact, not a design document:
    per run).
 2. **Bootstrap** — `cafleet doctor` (gating), then `cafleet fleet create
    --monitor-file <abs path to ${BASE}/.prompts/monitor-<UTC-compact>.md>
-   --monitor-model {monitor_model}` (one atomic command: fleet + Director +
+   --monitor-model {monitor_model} [--monitor-effort {monitor_effort}]` (one atomic command: fleet + Director +
    monitor member; members spawned `{permission_flags}`); gate the first
    ordinary spawn on the monitor's `monitor live` message (the CLI
    monitor-first guard backstops).
-3. **Spawn workers** — scanners (one per disjoint slice) and the reviewer
-   (`--model {reviewer_model}`), each from a rendered prompt at
+3. **Spawn workers** — scanners (one per disjoint slice, using the other-member defaults) and the reviewer
+   (`--model {reviewer_model}` with supported reviewer effort), each from a rendered prompt at
    `${BASE}/.prompts/<role>-<UTC-compact>.md`.
 4. **Scan (fan-out)** — each scanner runs the workflow's **scan mechanics**
    (parameter table below) over its slice and writes its partial artifact under

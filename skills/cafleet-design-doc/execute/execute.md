@@ -182,7 +182,7 @@ Load the `cafleet` skill; its `reference/supervision.md` governance is § Requir
 Bootstrap the fleet per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap (monitor included)* (write the monitor's spawn prompt first and pass it via `--monitor-file`; the reuse-a-running-fleet rule is there too). Use `--json` so the IDs are machine-parseable:
 
 ```bash
-cafleet fleet create --name "design-doc-execute-{slug}" --coding-agent <backend> --monitor-file <abs path to ${BASE}/.prompts/monitor-<UTC-compact>.md> --monitor-model {monitor_model} --json
+cafleet fleet create --name "design-doc-execute-{slug}" --coding-agent <backend> --monitor-file <abs path to ${BASE}/.prompts/monitor-<UTC-compact>.md> --monitor-model {monitor_model} [--monitor-effort {monitor_effort}] --json
 # → { "fleet_id": <int>, "director": { "member_id": <int>, ... }, "monitor": { "member_id": <int>, ... } }
 ```
 
@@ -382,9 +382,9 @@ This is the first and only time the Reviewer exists in the fleet (never in the S
 | poll-handling line (verbatim) | `When you see cafleet message poll output with a message from the Director, act on those instructions.` |
 | IMPORTANT (verbatim) | `IMPORTANT: You are a fresh reviewer with no implementation context — judge only what you can verify from the design document, the diff, and the checks you run.` / `IMPORTANT: Do NOT write or modify implementation or test code. Your only edits are COMMENT(reviewer) markers.` / `IMPORTANT: Do NOT commit. The Director handles all git operations.` / `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` / `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md and reference/prompt-routing.md), which you load at startup.` |
 | start cue | `Read the design document and the branch diff. Then act on the Director's ready (doc) assignment.` |
-| `--name` / `--description` / `--model` | `Reviewer` / `Fresh post-implementation review` / `{reviewer_model}` (the selected member backend's Role defaults value) |
+| `--name` / `--description` / `--model` / `--effort` | `Reviewer` / `Fresh post-implementation review` / `{reviewer_model}` / `{reviewer_effort}` (the selected member backend's Role defaults; omit effort for OpenCode) |
 
-Spawn per the 3e spawn frame (audit file `${BASE}/.prompts/reviewer-<UTC-compact>.md`), adding `--model {reviewer_model}`. Verify `status: active` via `cafleet member list <fleet-id>` before assigning.
+Spawn per the 3e spawn frame (audit file `${BASE}/.prompts/reviewer-<UTC-compact>.md`), adding `--model {reviewer_model}` and, for Claude or Codex, `--effort {reviewer_effort}`. Verify `status: active` via `cafleet member list <fleet-id>` before assigning.
 
 #### Review loop
 
