@@ -20,6 +20,11 @@ use crate::runtime::system::SystemProbe;
 const MONITOR_NAME: &str = "monitor";
 const MONITOR_DESCRIPTION: &str = "Monitor member for this fleet";
 
+struct MonitorSelection<'a> {
+    model: Option<&'a str>,
+    effort: Option<&'a str>,
+}
+
 #[derive(Subcommand)]
 pub enum FleetCommand {
     /// Create a fleet with its root Director and monitor member.
@@ -88,8 +93,10 @@ pub fn run(
             &name,
             &coding_agent,
             &monitor_file,
-            monitor_model.as_deref(),
-            monitor_effort.as_deref(),
+            MonitorSelection {
+                model: monitor_model.as_deref(),
+                effort: monitor_effort.as_deref(),
+            },
             json,
         ),
         FleetCommand::List { json } => {
@@ -119,8 +126,7 @@ fn create(
     name: &str,
     agent_name: &str,
     monitor_file: &str,
-    monitor_model: Option<&str>,
-    monitor_effort: Option<&str>,
+    monitor: MonitorSelection<'_>,
     json: bool,
 ) -> Result<(), CafleetError> {
     let inside_session = || {
@@ -136,8 +142,8 @@ fn create(
 
     let backend = coding_agent(agent_name)
         .unwrap_or_else(|| panic!("'{agent_name}' is a registry-validated backend"));
-    backend.validate_model(monitor_model)?;
-    backend.validate_effort(monitor_effort)?;
+    backend.validate_model(monitor.model)?;
+    backend.validate_effort(monitor.effort)?;
     backend.ensure_available(&SystemProbe)?;
 
     let env: Vec<_> = std::env::var("CAFLEET_DATABASE_URL")
@@ -168,7 +174,7 @@ fn create(
                 agent_name,
             )?;
             let argv =
-                backend.build_spawn_argv(&prompt, MONITOR_NAME, monitor_model, monitor_effort);
+                backend.build_spawn_argv(&prompt, MONITOR_NAME, monitor.model, monitor.effort);
             let pane_id = mux
                 .split_window(&context, &env, &argv)
                 .map_err(|error| CafleetError::App(format!("tmux split-window failed: {error}")))?;
