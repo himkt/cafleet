@@ -72,7 +72,7 @@ Complete the role's prerequisite reads, send ready to the Director, then launch 
 ```
 
 ```bash
-cafleet fleet create --name demo --coding-agent claude --monitor-model haiku --monitor-file /home/cafleet-demo/work/demo/.prompts/monitor.md
+cafleet fleet create --name demo --coding-agent claude --monitor-model haiku --monitor-effort low --monitor-file /home/cafleet-demo/work/demo/.prompts/monitor.md
 ```
 
 For example, the command returns `1 director=2 monitor=3`. The

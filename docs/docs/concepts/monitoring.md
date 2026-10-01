@@ -215,7 +215,8 @@ reclaim.
 fleet bootstrap: one command creates the fleet, root Director, and monitor
 rows in a DB transaction and takes ownership of the spawned pane, with the
 Director-authored monitor prompt passed via `--monitor-file` and the
-backend's monitor-default model via `--monitor-model` (see
+backend's monitor-default model via `--monitor-model` and supported effort via
+`--monitor-effort` (see
 [CLI options](../spec/cli-options.md#fleet-create)). Failed bootstrap attempts
 DB rollback and known-pane cleanup. A cleanup failure or unknown pane id is
 reported with the primary error; inspect those diagnostics before retrying. At startup the monitor member sends the standard `ready`

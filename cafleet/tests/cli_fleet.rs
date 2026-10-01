@@ -101,6 +101,8 @@ fn fleet_create_spawns_the_monitor_pane_with_identity_and_model() {
         &prompt_file,
         "--monitor-model",
         "haiku",
+        "--monitor-effort",
+        "low",
     ]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
 
@@ -123,9 +125,38 @@ fn fleet_create_spawns_the_monitor_pane_with_identity_and_model() {
         "--monitor-model reaches the backend argv, got: {split_line}"
     );
     assert!(
+        split_line.contains("--effort low"),
+        "--monitor-effort reaches the backend argv, got: {split_line}"
+    );
+    assert!(
         split_line.contains("FLEET 1 ME 2 DIRECTOR 1 AGENT claude"),
         "the rendered prompt carries the monitor's own literal identity, got: {split_line}"
     );
+}
+
+#[test]
+fn fleet_create_rejects_unsupported_monitor_effort_before_writing() {
+    let cli = Cli::new();
+    cli.ready();
+    let output = cli.run(&[
+        "fleet",
+        "create",
+        "--name",
+        "alpha",
+        "--coding-agent",
+        "opencode",
+        "--monitor-file",
+        &cli.monitor_prompt_path(),
+        "--monitor-effort",
+        "low",
+    ]);
+    assert_eq!(code(&output), 2);
+    assert!(
+        stderr(&output).contains("opencode does not support reasoning effort."),
+        "got: {}",
+        stderr(&output)
+    );
+    assert_no_rows_persisted(&cli);
 }
 
 #[test]

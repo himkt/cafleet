@@ -82,12 +82,20 @@ Claude aliases, reviewed capability classes, standard input/output prices
 and official sources, ordered from most to least capable within each backend.
 OpenCode's curated models retain their `opencode/` prefix.
 
+| Backend | Reviewer | Monitor | Other members |
+|---|---|---|---|
+| Codex | `gpt-6-astra` (high) | `gpt-6-luna` (low) | `gpt-6-sol` (medium) |
+| Claude Code | `claude-opus-5-5` (high) | `haiku` (low) | `claude-opus-5-5` (high) |
+| OpenCode | `opencode/muse-spark-1.3-contributor-free` | `opencode/big-pickle` | `opencode/mimo-v2.5-free` |
+
+OpenCode spawns omit effort because the backend does not offer an effort setting.
+
 Only the exact phrase `cost efficiency mode` in the originating user request
 activates cheapest-capable selection for ordinary members. The Director
 chooses a backend first and compares models within that backend. Otherwise,
-the workflow's model policy applies. The monitor uses the backend's monitor
-default and the reviewer uses its most capable listed model regardless of
-that trigger.
+ordinary members use the backend's other-member default. Monitors and
+reviewers use their respective role defaults, including supported effort
+levels.
 
 Explicit backend, model and effort values remain overrides. A mismatch or
 missing suitable model is relayed to the operator. The catalog is maintained

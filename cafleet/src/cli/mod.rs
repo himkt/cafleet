@@ -471,6 +471,7 @@ mod parser_contracts {
             coding_agent,
             monitor_file,
             monitor_model,
+            monitor_effort,
             json,
         }) = parse(&[
             "fleet",
@@ -483,6 +484,8 @@ mod parser_contracts {
             "-",
             "--monitor-model",
             "chosen",
+            "--monitor-effort",
+            "low",
             "--json",
         ])
         else {
@@ -492,6 +495,7 @@ mod parser_contracts {
         assert_eq!(coding_agent, "codex");
         assert_eq!(monitor_file, "-");
         assert_eq!(monitor_model.as_deref(), Some("chosen"));
+        assert_eq!(monitor_effort.as_deref(), Some("low"));
         assert!(json);
     }
 

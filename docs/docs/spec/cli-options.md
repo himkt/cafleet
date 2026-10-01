@@ -524,6 +524,7 @@ Fleet lifecycle; writes directly to SQLite — no server required.
 | `--coding-agent` | yes | One of `claude`, `codex`, or `opencode`, recorded as the root Director's placement `coding_agent` — the operator declares the backend the Director is actually running on; see [Coding agents](../concepts/coding-agents.md). The monitor member inherits this backend by construction — there is no `--monitor-coding-agent`. |
 | `--monitor-file PATH` | yes | UTF-8 file whose contents are the monitor member's spawn prompt (`-` = stdin). Same body semantics as `member create --file` (empty / non-UTF-8 rejection); there is no inline positional form. |
 | `--monitor-model MODEL` | no | Model forwarded to the monitor's backend binary, validated by the `--coding-agent` backend exactly as `member create --model`. When omitted the backend spawns on its own default model. |
+| `--monitor-effort LEVEL` | no | Reasoning effort forwarded to the monitor's backend binary, validated by the `--coding-agent` backend exactly as `member create --effort`. Omit for OpenCode. |
 | `--json` | no | Output as JSON |
 
 Omitting a required flag exits 2 with the parser's native
@@ -537,7 +538,7 @@ for a failed bootstrap. The
 Director and monitor identities are hardcoded (Director:
 `name="Director"`, `description="Root Director for this fleet"`; monitor:
 `name="monitor"`, `description="Monitor member for this fleet"`); there are
-no name / description / effort flags for either. Output shapes are in
+no name / description flags for either. The Director's effort remains its own session setting. Output shapes are in
 [Output shapes](#output-shapes).
 
 The command runs a single-transaction ladder — see
@@ -547,7 +548,7 @@ The command runs a single-transaction ladder — see
 2. Resolve the monitor prompt body from `--monitor-file` (file, or stdin
    via `-`).
 3. Backend checks before any write: backend lookup,
-   `--monitor-model` validation, and the binary-on-`PATH` availability
+   `--monitor-model` and `--monitor-effort` validation, and the binary-on-`PATH` availability
    check (`Error: binary <name> not found on PATH`, exit 1).
 4. In one SQLite transaction: insert the fleet row, the Director member +
    placement, backfill `fleets.director_member_id`, and insert the monitor
@@ -1305,6 +1306,7 @@ and exit categories, and define the remaining exact diagnostics.
 | `fleet create` | Run outside a supported multiplexer | `Error: cafleet fleet create must be run inside a tmux or herdr session` | 1 | No DB writes |
 | `fleet create` | `--monitor-file` resolution failure (empty, missing, unreadable, or non-UTF-8 file, or the empty-stdin variant via `-`) | The `--file` rejection strings with the flag label `--monitor-file` (e.g. `Error: --monitor-file <path>: file is empty.`) | 1 | The message names the flag the user typed; nothing written |
 | `fleet create` | Invalid `--monitor-model` for the `--coding-agent` backend | The `member create` `--model` validation string, verbatim | 2 | Nothing written — see [Model selection](coding-agent-backends.md#model-selection) |
+| `fleet create` | Invalid `--monitor-effort` for the `--coding-agent` backend | The `member create` `--effort` validation string, verbatim | 2 | Nothing written — see [Reasoning effort](coding-agent-backends.md#reasoning-effort) |
 | `fleet create` | The `--coding-agent` binary missing from `PATH` | `Error: binary <name> not found on PATH` | 1 | Nothing written |
 | `fleet create` | Split fails during the monitor pane spawn | `Error: tmux split-window failed: <detail>` followed by the applicable rollback result/cleanup diagnostics | 1 | The primary reason is retained; rollback-success suffix requires confirmed compensation — see [creation failure compensation](#creation-failure-compensation) |
 | `fleet create` | Placement insert or commit fails after a successful pane spawn | The underlying error followed by applicable cleanup diagnostics | 1 | Broker attempts rollback and closes the transaction before the CLI attempts pane kill; successful rollback leaves no bootstrap rows |

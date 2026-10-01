@@ -141,11 +141,12 @@ environment variable supplies them; do not ask the operator for them.
 This role's prompt follows the canonical spawn-prompt skeleton in
 [`roles/director.md`](director.md) § *Canonical
 spawn-prompt skeleton*. At bootstrap it is delivered via `cafleet fleet
-create --monitor-file <path> --monitor-model {monitor_model}` (the monitor default from the Director backend's canonical Role defaults
+create --monitor-file <path> --monitor-model {monitor_model} [--monitor-effort {monitor_effort}]` (the monitor defaults from the Director backend's canonical Role defaults
 table in the unified reference); on
 a mid-run re-spawn, via `cafleet member create --role monitor --model
-{monitor_model}`, omitting `--coding-agent` so the monitor inherits the
+{monitor_model} [--effort {monitor_effort}]`, omitting `--coding-agent` so the monitor inherits the
 Director's backend (the bootstrap inherits it by construction).
+Include effort for Claude or Codex; omit it for OpenCode.
 
 ## Shutdown
 
