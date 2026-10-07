@@ -84,8 +84,8 @@ OpenCode's curated models retain their `opencode/` prefix.
 
 | Backend | Reviewer | Monitor | Other members |
 |---|---|---|---|
-| Codex | `gpt-6-astra` (high) | `gpt-6-luna` (low) | `gpt-6-sol` (medium) |
-| Claude Code | `claude-opus-5-5` (high) | `haiku` (low) | `claude-opus-5-5` (high) |
+| Codex | `gpt-6-astra` (high) | `gpt-6-luna` (low) | `gpt-6.1-sol` (medium) |
+| Claude Code | `claude-opus-5-5` (high) | `claude-haiku-5-5` (low) | `claude-opus-5-5` (high) |
 | OpenCode | `opencode/muse-spark-1.3-contributor-free` | `opencode/big-pickle` | `opencode/mimo-v2.5-free` |
 
 OpenCode spawns omit effort because the backend does not offer an effort setting.
