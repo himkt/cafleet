@@ -30,7 +30,7 @@ is never used to price a model.
 | Source | What it feeds | URL |
 |---|---|---|
 | Anthropic pricing | `claude` prices | `https://platform.claude.com/docs/en/about-claude/pricing.md` |
-| OpenAI pricing | `codex` prices | `https://developers.openai.com/api/docs/pricing` |
+| OpenAI pricing | `codex` prices | `https://developers.openai.com/api/docs/pricing.md` |
 | Codex model availability | `codex` availability | `https://learn.chatgpt.com/docs/models.md` |
 | OpenCode Zen models and pricing | `opencode` prices and availability | `https://opencode.ai/docs/zen.md` |
 | Claude Code model configuration | `claude` context windows and `[1m]` applicability | `https://code.claude.com/docs/en/model-config.md` |
