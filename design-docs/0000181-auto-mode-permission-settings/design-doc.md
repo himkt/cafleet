@@ -1,7 +1,7 @@
 # Recommended Permission Settings for Auto Mode and Other Modes
 
 **Status**: Approved
-**Progress**: 6/27 tasks complete
+**Progress**: 12/27 tasks complete
 **Last Updated**: 2026-10-10
 
 ## Overview
@@ -520,12 +520,12 @@ Documentation only. Follow the project order: `docs/` pages first, then skills, 
 
 ### Step 3: Backend spec and concepts
 
-- [ ] Update the two `claude` cells of the per-backend capabilities table in `docs/docs/spec/coding-agent-backends.md` <!-- completed: -->
-- [ ] Replace the § Claude lead paragraph with the `dontAsk` allow-list paragraph, leaving § Spawn-time allow rules unchanged <!-- completed: -->
-- [ ] Add § What each profile entry is for after § Spawn-time allow rules, with its table and the three paragraphs beneath it <!-- completed: -->
-- [ ] Add § What members can run with its paragraph and the symptom table <!-- completed: -->
-- [ ] Append § Minimum rule set to § The `cafleet` rules file, with the five `prefix_rule` blocks and the two closing paragraphs <!-- completed: -->
-- [ ] Update the `claude` Sandbox isolation cell in `docs/docs/concepts/coding-agents.md` <!-- completed: -->
+- [x] Update the two `claude` cells of the per-backend capabilities table in `docs/docs/spec/coding-agent-backends.md` <!-- completed: 2026-10-10T16:51 -->
+- [x] Replace the § Claude lead paragraph with the `dontAsk` allow-list paragraph, leaving § Spawn-time allow rules unchanged <!-- completed: 2026-10-10T16:51 -->
+- [x] Add § What each profile entry is for after § Spawn-time allow rules, with its table and the three paragraphs beneath it <!-- completed: 2026-10-10T16:51 -->
+- [x] Add § What members can run with its paragraph and the symptom table <!-- completed: 2026-10-10T16:51 -->
+- [x] Append § Minimum rule set to § The `cafleet` rules file, with the five `prefix_rule` blocks and the two closing paragraphs <!-- completed: 2026-10-10T16:51 -->
+- [x] Update the `claude` Sandbox isolation cell in `docs/docs/concepts/coding-agents.md` <!-- completed: 2026-10-10T16:51 -->
 
 ### Step 4: Skill pages
 

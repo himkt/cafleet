@@ -126,7 +126,7 @@ accepted levels, forwarding forms, and rejection strings are in
 |---|---|---|---|
 | Reasoning effort | supported | supported | not supported |
 | Pane title | supported, via `--name` | not supported | not supported |
-| Sandbox isolation | not supported — a deny-list safety floor | supported — OS-level, kernel-enforced | not supported — a deny-by-default bash allowlist |
+| Sandbox isolation | not supported — the operator's allow list is the safety floor | supported — OS-level, kernel-enforced | not supported — a deny-by-default bash allowlist |
 
 `--effort` with the `opencode` backend exits 2 with
 `opencode does not support reasoning effort.` before any side effect. Because
