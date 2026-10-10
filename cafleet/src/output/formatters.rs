@@ -64,13 +64,15 @@ pub fn format_member_detail(member: &Value) -> String {
     )
 }
 
-/// `<fleet_id> director=<id> monitor=<id>` — the only text form (SPEC §6.4).
+/// `<fleet_id> director=<id> monitor=<id>`, then `monitor loop: pid <pid>` —
+/// the only text form (SPEC §6.4).
 pub fn format_fleet_create(data: &Value) -> String {
     format!(
-        "{} director={} monitor={}",
+        "{} director={} monitor={}\nmonitor loop: pid {}",
         scalar(&data["fleet_id"]),
         scalar(&data["director"]["member_id"]),
         scalar(&data["monitor"]["member_id"]),
+        scalar(&data["monitor_loop"]["pid"]),
     )
 }
 

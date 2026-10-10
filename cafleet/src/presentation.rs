@@ -117,12 +117,12 @@ pub fn message_envelope(row: &MessageRecord) -> Value {
     json!({"message":message(row)})
 }
 
-pub fn send_outcome(outcome: &SendOutcome) -> Value {
-    json!({"message":message(&outcome.message),"notification_sent":outcome.notification == NotificationAttempt::Sent})
+pub fn send_outcome(row: &MessageRecord, notification_sent: bool) -> Value {
+    json!({"message":message(row),"notification_sent":notification_sent})
 }
 
-pub fn broadcast_outcome(outcome: &BroadcastOutcome) -> Value {
-    json!({"message":message(&outcome.message),"recipients":outcome.recipients,"delivered":outcome.delivered})
+pub fn broadcast_outcome(summary: &MessageRecord, recipients: usize, delivered: usize) -> Value {
+    json!({"message":message(summary),"recipients":recipients,"delivered":delivered})
 }
 
 pub fn monitor_runtime(row: &MonitorRuntime) -> Value {

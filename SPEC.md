@@ -2915,7 +2915,7 @@ of `AgentStateAware` native status.
   `started_at` as the baseline: parsable → due iff `now − started_at`, in
   whole seconds, is `>= wake_interval_seconds`; `NULL` or unparsable →
   immediately due.
-- **`monitor_tick(fleet_id, now) -> CONTINUE | STOP`** —
+- **`monitor_tick(fleet_id, now) -> CONTINUE | STOP | MUX_UNREACHABLE`** —
   one tick: heartbeat → fleet liveness → delivery pass → wake schedule. Takes
   no interval parameter — each pass re-reads
   `wake_interval_seconds` from the fleet's runtime row.
@@ -2928,8 +2928,10 @@ of `AgentStateAware` native status.
   module: start the detached loop when none is live (§ *Loop start*).
 - **`MUX_FAILURE_LIMIT = 3`** — consecutive failing `list_pane_ids` ticks
   after which a running loop exits.
-- **`CONTINUE` / `STOP`** — tick-result markers distinguishing "keep looping"
-  from "self-terminate".
+- **`CONTINUE` / `STOP` / `MUX_UNREACHABLE`** — tick-result markers
+  distinguishing "keep looping" from "self-terminate" and from "this tick
+  could not list the multiplexer's panes"; the last carries the backend error
+  for the driver's consecutive-failure count.
 - **`DEFAULT_TICK_SECONDS = 5`** — default scan cadence (seconds).
 - **`DEFAULT_WAKE_INTERVAL_SECONDS = 600`** — default wake interval
   (seconds), re-exported from `settings.monitor_wake_interval` (§7.1) so the
@@ -2984,9 +2986,10 @@ One tick, steps in order:
 3. **Delivery pass.** Runs on every tick, including when the wake interval is
    `0`:
    1. Read the live pane set once (`list_pane_ids`) and reuse it for the wake
-      (step 8). A failure increments the driver's consecutive-failure count
-      and ends the tick with `CONTINUE`, or stops the loop at
-      `MUX_FAILURE_LIMIT`; a success resets the count. If the root Director's
+      (step 8). A failure ends the tick with `MUX_UNREACHABLE`: the driver
+      increments its consecutive-failure count and keeps looping, or stops
+      the loop at `MUX_FAILURE_LIMIT`; a tick that returns `CONTINUE` resets
+      the count. If the root Director's
       pane is not in the set, print `<iso> director pane <pane_id> is gone;
       stopping` and return `STOP`.
    2. **Close lost execs.** For every exec that is dispatched but not started
@@ -3105,9 +3108,10 @@ artifact (no PID file); identity throughout is the OS process id.
 4. **Loop** while the stop flag is false: if `monitor_tick(fleet_id, now)`
    (each pass stamps `now` fresh as tz-aware UTC)
    returns `STOP` → break; else call `interruptible_sleep(tick_seconds)`. The
-   driver counts consecutive ticks whose `list_pane_ids` fails; at
-   `MUX_FAILURE_LIMIT = 3` it breaks, so cleanup clears the runtime row and
-   the next caller starts a replacement. A success resets the count.
+   driver counts consecutive ticks that return `MUX_UNREACHABLE`; at
+   `MUX_FAILURE_LIMIT = 3` it breaks with the backend's error as an
+   application error (exit 1), so cleanup clears the runtime row and
+   the next caller starts a replacement. A `CONTINUE` resets the count.
 5. **Cleanup (always, including partial startup failure):** unregister every retained signal handler, then perform the broker's ownership-checked clear
    `(fleet_id, pid)` — nulls the slot's `pid` / `started_at` / `last_tick_at`
    only if this pid still owns the slot (`last_wake_at` is preserved, §6.2), so

@@ -6,6 +6,7 @@ pub mod coding_agent;
 pub mod config;
 pub mod config_dir;
 pub mod db;
+pub mod delivery;
 pub(crate) mod diagnosis;
 pub mod embedded;
 pub mod error;

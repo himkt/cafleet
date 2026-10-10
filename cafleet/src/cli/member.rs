@@ -13,10 +13,12 @@ use crate::broker::{self, NewPlacement};
 use crate::capture::{CaptureSnapshot, MemberCapture, write_member_capture};
 use crate::coding_agent::coding_agent;
 use crate::config::Settings;
+use crate::delivery::DELIVERY_CAPTURE_LINES;
 use crate::error::CafleetError;
 
 use crate::multiplexer::Multiplexer;
-use crate::output::{format_member, format_member_detail, format_member_list};
+use crate::output::{format_member, format_member_detail, format_member_list, strip_ansi};
+use crate::pane_state::{PaneState, classify};
 use crate::presentation;
 use crate::runtime::system::SystemProbe;
 use crate::time::now_utc;
@@ -91,8 +93,7 @@ pub enum MemberCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Keystroke a prompt (or, with --shell, a shell command) into a
-    /// member's pane.
+    /// Keystroke a prompt into a member's pane.
     Prompt {
         /// The target member.
         #[arg(value_name = "MEMBER_ID")]
@@ -100,9 +101,6 @@ pub enum MemberCommand {
         /// Single line of text to dispatch.
         #[arg(value_name = "TEXT")]
         text: String,
-        /// Dispatch `! <text>` via the coding agent's shell shortcut.
-        #[arg(long)]
-        shell: bool,
         /// Output in JSON format.
         #[arg(long)]
         json: bool,
@@ -243,9 +241,8 @@ pub fn run(
         MemberCommand::Prompt {
             member_id,
             text,
-            shell,
             json,
-        } => prompt(conn, settings, member_id, shell, &text, json),
+        } => prompt(conn, settings, member_id, &text, json),
         MemberCommand::Ping { member_id, json } => ping(conn, settings, member_id, json),
         MemberCommand::Capture {
             member_id,
@@ -471,7 +468,6 @@ fn prompt(
     conn: &mut Connection,
     settings: &Settings,
     member_id: i64,
-    shell: bool,
     text: &str,
     json: bool,
 ) -> Result<(), CafleetError> {
@@ -490,7 +486,12 @@ fn prompt(
 
     let member = load_member(conn, member_id, false)?;
     let pane_id = require_pane(&member, member_id, "prompt")?;
-    mux.send_prompt(&pane_id, trimmed, shell)
+    if !broker::claim_pane(conn, member_id, now_utc())? {
+        return Err(CafleetError::App(format!(
+            "member {member_id}'s pane is receiving another keystroke; retry in a few seconds."
+        )));
+    }
+    mux.send_prompt(&pane_id, trimmed)
         .map_err(|e| CafleetError::App(format!("send failed: {e}")))?;
 
     let name = member.name.as_str();
@@ -498,13 +499,21 @@ fn prompt(
         "member_id": member_id,
         "pane_id": pane_id,
         "text": trimmed,
-        "shell": shell,
     });
     emit(json, &result, || {
-        let form = if shell { "shell prompt" } else { "prompt" };
-        format!("Sent {form} {trimmed:?} to member {name} ({pane_id}).")
+        format!("Sent prompt {trimmed:?} to member {name} ({pane_id}).")
     });
     Ok(())
+}
+
+/// Why a gated ping sends no keystroke into a pane in `state`; `None` when
+/// the state lets the ping through.
+fn ping_hold_reason(state: PaneState) -> Option<&'static str> {
+    match state {
+        PaneState::AwaitingUser => Some("awaiting_user"),
+        PaneState::Working => Some("working"),
+        PaneState::Finished | PaneState::Unclassified => None,
+    }
 }
 
 fn ping(
@@ -519,14 +528,19 @@ fn ping(
 
     let member = load_member(conn, member_id, false)?;
     let name = member.name.as_str();
-    let pane = member
+    let placement = member
         .placement
         .as_ref()
-        .and_then(|p| p.mux_pane_id.as_deref());
+        .expect("load_member requires a placement row");
 
-    let Some(pane_id) = pane else {
+    let Some(pane_id) = placement.mux_pane_id.as_deref() else {
         // The pending-placement skip path: no keystroke, exit 0.
-        let result = json!({"member_id": member_id, "pane_id": Value::Null, "skipped": true});
+        let result = json!({
+            "member_id": member_id,
+            "pane_id": Value::Null,
+            "skipped": true,
+            "reason": "pending_placement",
+        });
         emit(json, &result, || {
             format!(
                 "Member {name} has no pane yet (pending placement) — ping skipped; \
@@ -536,13 +550,39 @@ fn ping(
         return Ok(());
     };
 
+    let content = mux
+        .capture_pane(pane_id, DELIVERY_CAPTURE_LINES)
+        .map_err(|e| CafleetError::App(format!("capture failed: {e}")))?;
+    let state = classify(&placement.coding_agent, &strip_ansi(&content));
+    let hold_reason = match ping_hold_reason(state) {
+        Some(reason) => Some(reason),
+        None => (!broker::claim_pane(conn, member_id, now_utc())?).then_some("busy"),
+    };
+    if let Some(reason) = hold_reason {
+        let result = json!({
+            "member_id": member_id,
+            "pane_id": pane_id,
+            "skipped": true,
+            "reason": reason,
+        });
+        emit(json, &result, || {
+            format!("Member {name} ({pane_id}) is {reason} — ping skipped.")
+        });
+        return Ok(());
+    }
+
     if !mux.send_poll_trigger(pane_id, member_id) {
         return Err(CafleetError::App(format!(
             "send failed: tmux send-keys did not deliver the poll-trigger keystroke \
              to pane {pane_id}."
         )));
     }
-    let result = json!({"member_id": member_id, "pane_id": pane_id, "skipped": false});
+    let result = json!({
+        "member_id": member_id,
+        "pane_id": pane_id,
+        "skipped": false,
+        "reason": Value::Null,
+    });
     emit(json, &result, || {
         format!("Pinged member {name} ({pane_id}) — poll keystroke dispatched.")
     });

@@ -7,6 +7,7 @@ pub mod fleets;
 pub mod members;
 pub mod messaging;
 pub mod monitor;
+pub mod panes;
 pub mod queries;
 pub mod records;
 #[cfg(test)]
@@ -17,4 +18,5 @@ pub use fleets::*;
 pub use members::*;
 pub use messaging::*;
 pub use monitor::*;
+pub use panes::*;
 pub use queries::*;

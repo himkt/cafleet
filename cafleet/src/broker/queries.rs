@@ -5,7 +5,7 @@
 use rusqlite::{Connection, params};
 
 use super::members::db_err;
-use super::messaging::{map_message_row, message_row};
+use super::messaging::{MESSAGE_COLUMNS, map_message_row, message_row};
 use super::records::MessageRecord;
 use crate::error::CafleetError;
 
@@ -22,9 +22,6 @@ fn message_list(
         .map_err(db_err)?;
     Ok(rows)
 }
-
-const MESSAGE_COLUMNS: &str = "message_id, owner_member_id, from_member_id, to_member_id, \
-     type, created_at, status_state, status_timestamp, origin_message_id, text";
 
 pub fn list_inbox(conn: &Connection, member_id: i64) -> Result<Vec<MessageRecord>, CafleetError> {
     history_records(conn, "owner_member_id", member_id)

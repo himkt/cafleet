@@ -22,12 +22,11 @@ pub struct MonitorArgs {
     /// Fleet whose scheduler loop to run.
     #[arg(value_name = "FLEET_ID", required = true)]
     fleet_id: Option<i64>,
-    /// Scan-tick cadence in seconds.
-    #[arg(long, default_value_t = crate::monitor::DEFAULT_TICK_SECONDS,
-          value_parser = clap::value_parser!(i64).range(1..))]
-    tick: i64,
-    /// Wake interval in seconds (0 disables the wake) [default:
-    /// CAFLEET_MONITOR_WAKE_INTERVAL, 600].
+    /// Scan-tick cadence in seconds [default: the fleet's stored tick, else 5].
+    #[arg(long, value_parser = clap::value_parser!(i64).range(1..))]
+    tick: Option<i64>,
+    /// Wake interval in seconds (0 disables the wake) [default: the fleet's
+    /// stored interval, else CAFLEET_MONITOR_WAKE_INTERVAL, 600].
     #[arg(long, value_parser = clap::value_parser!(i64).range(0..))]
     interval: Option<i64>,
 }
@@ -93,7 +92,7 @@ fn run_loop(
     conn: &mut Connection,
     settings: &Settings,
     fleet_id: i64,
-    tick: i64,
+    tick: Option<i64>,
     interval: Option<i64>,
 ) -> Result<(), CafleetError> {
     require_live_fleet(conn, fleet_id)?;
@@ -101,14 +100,7 @@ fn run_loop(
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
     let mut out = std::io::stdout();
-    crate::monitor::run_monitor_loop(
-        conn,
-        &mux,
-        &mut out,
-        fleet_id,
-        tick,
-        interval.unwrap_or(settings.monitor_wake_interval),
-    )
+    crate::monitor::run_monitor_loop(conn, &mux, &mut out, settings, fleet_id, tick, interval)
 }
 
 /// One-shot batch capture (SPEC §6.3 *monitor scan*): the Director's pane

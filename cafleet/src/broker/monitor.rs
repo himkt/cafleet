@@ -168,26 +168,35 @@ pub fn fleet_wake_director(conn: &Connection, fleet_id: i64) -> Result<WakeTarge
 }
 
 /// Atomically claim the fleet's single-instance runtime slot. A live slot —
-/// fresh heartbeat AND an alive owning process — is never stolen.
+/// fresh heartbeat AND an alive owning process — is never stolen. An absent
+/// `tick_seconds` or `wake_interval` keeps the stored value; the caller
+/// supplies one whenever nothing is stored.
 pub fn claim_monitor_runtime(
     conn: &mut Connection,
     fleet_id: i64,
     pid: i64,
-    tick_seconds: i64,
-    wake_interval: i64,
+    tick_seconds: Option<i64>,
+    wake_interval: Option<i64>,
     when: &str,
 ) -> Result<bool, CafleetError> {
     let now = parse_lenient(when)?;
+    let nothing_stored = |field: &str| {
+        CafleetError::App(format!(
+            "monitor runtime for fleet {fleet_id} stores no {field}; the claim must supply one"
+        ))
+    };
     let tx = conn.transaction().map_err(db_err)?;
     let existing = tx
         .query_row(
-            "SELECT pid, last_tick_at, tick_seconds FROM monitor_runtime WHERE fleet_id=?1",
+            "SELECT pid, last_tick_at, tick_seconds, wake_interval_seconds \
+             FROM monitor_runtime WHERE fleet_id=?1",
             [fleet_id],
             |row| {
                 Ok((
                     row.get::<_, Option<i64>>(0)?,
                     row.get::<_, Option<String>>(1)?,
                     row.get::<_, i64>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
                 ))
             },
         )
@@ -195,6 +204,9 @@ pub fn claim_monitor_runtime(
         .map_err(db_err)?;
     match existing {
         None => {
+            let tick_seconds = tick_seconds.ok_or_else(|| nothing_stored("tick_seconds"))?;
+            let wake_interval =
+                wake_interval.ok_or_else(|| nothing_stored("wake_interval_seconds"))?;
             tx.execute(
                 "INSERT INTO monitor_runtime \
                  (fleet_id, pid, started_at, last_tick_at, tick_seconds, wake_interval_seconds) \
@@ -203,13 +215,17 @@ pub fn claim_monitor_runtime(
             )
             .map_err(db_err)?;
         }
-        Some((owner_pid, last_tick_at, row_tick)) => {
+        Some((owner_pid, last_tick_at, row_tick, row_wake_interval)) => {
             let live = owner_pid.is_some_and(|owner| {
                 heartbeat_fresh(last_tick_at.as_deref(), row_tick, now) && process_alive(owner)
             });
             if live {
                 return Ok(false);
             }
+            let tick_seconds = tick_seconds.unwrap_or(row_tick);
+            let wake_interval = wake_interval
+                .or(row_wake_interval)
+                .ok_or_else(|| nothing_stored("wake_interval_seconds"))?;
             tx.execute(
                 "UPDATE monitor_runtime \
                  SET pid=?1, started_at=?2, last_tick_at=?2, tick_seconds=?3, \

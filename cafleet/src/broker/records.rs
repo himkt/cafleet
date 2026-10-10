@@ -116,24 +116,29 @@ pub struct MonitorRuntime {
     pub wake_requested_at: Option<String>,
 }
 
+/// The rows one broadcast persisted: the sender's summary plus one
+/// `(member_id, message_id)` pair per delivery, in recipient order.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum NotificationAttempt {
-    Skipped,
-    Sent,
-    Failed { error: String },
+pub struct BroadcastRows {
+    pub summary: MessageRecord,
+    pub deliveries: Vec<(i64, i64)>,
+}
+
+/// What a keystroke into one member's pane needs to know about it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaneTarget {
+    pub member_id: i64,
+    pub name: String,
+    pub pane_id: String,
+    pub coding_agent: String,
+    pub forced_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SendOutcome {
-    pub message: MessageRecord,
-    pub notification: NotificationAttempt,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BroadcastOutcome {
-    pub message: MessageRecord,
-    pub recipients: usize,
-    pub delivered: i64,
+pub struct SilentMember {
+    pub member_id: i64,
+    pub name: String,
+    pub spawned_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

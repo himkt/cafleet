@@ -249,21 +249,16 @@ impl TmuxMultiplexer {
         sender_id: i64,
         ts: &str,
         text: &str,
+        note: Option<&str>,
     ) -> Result<(), MultiplexerError> {
         if !self.runner.binary_exists("tmux") {
             return Err(MultiplexerError::new("tmux binary not found on PATH"));
         }
-        let sanitized = text.replace("\r\n", "⏎").replace(['\n', '\r'], "⏎");
-        let payload = format!("[cafleet msg {message_id} from {sender_id} {ts}]\n{sanitized}");
+        let payload = super::inline_preview_payload(message_id, sender_id, ts, text, note);
         self.send_literal_then_enter(target_pane_id, &payload, Some(5), false, true)
     }
 
-    pub fn send_prompt(
-        &self,
-        target_pane_id: &str,
-        text: &str,
-        shell: bool,
-    ) -> Result<(), MultiplexerError> {
+    pub fn send_prompt(&self, target_pane_id: &str, text: &str) -> Result<(), MultiplexerError> {
         let stripped = text.trim();
         if stripped.is_empty() {
             return Err(MultiplexerError::new("send_prompt: text may not be empty"));
@@ -273,12 +268,7 @@ impl TmuxMultiplexer {
                 "send_prompt: text may not contain newlines",
             ));
         }
-        let payload = if shell {
-            format!("! {stripped}")
-        } else {
-            stripped.to_string()
-        };
-        self.send_literal_then_enter(target_pane_id, &payload, None, false, true)
+        self.send_literal_then_enter(target_pane_id, stripped, None, false, true)
     }
 
     /// Capture the last `lines` drawn lines of the pane buffer via the shared

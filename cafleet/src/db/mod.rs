@@ -22,14 +22,19 @@ pub fn migration_chain() -> Vec<(u32, String)> {
     chain
 }
 
-/// Open a connection to `database_url` (the `sqlite:///<path>` form only) and
-/// apply the mandatory per-connection PRAGMAs (SPEC §6.1).
-pub fn connect(database_url: &str) -> Result<Connection, CafleetError> {
-    let path = database_url.strip_prefix("sqlite:///").ok_or_else(|| {
+/// The file path a `sqlite:///<path>` database URL names.
+pub fn database_path(database_url: &str) -> Result<&str, CafleetError> {
+    database_url.strip_prefix("sqlite:///").ok_or_else(|| {
         CafleetError::App(format!(
             "database URL must use the sqlite scheme (sqlite:///<path>); got '{database_url}'"
         ))
-    })?;
+    })
+}
+
+/// Open a connection to `database_url` (the `sqlite:///<path>` form only) and
+/// apply the mandatory per-connection PRAGMAs (SPEC §6.1).
+pub fn connect(database_url: &str) -> Result<Connection, CafleetError> {
+    let path = database_path(database_url)?;
     let conn = Connection::open(path)
         .map_err(|e| CafleetError::App(format!("failed to open database at '{path}': {e}")))?;
     conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;")
