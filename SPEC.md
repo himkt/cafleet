@@ -18,8 +18,8 @@ in full in [§6](#6-module-specifications).
 | Broker | synchronous data-access layer |
 | CLI | the whole `cafleet` command tree |
 | Output | text/JSON formatting, truncation, ANSI strip |
-| Multiplexer | tmux + herdr integration, keystroke injection |
-| Monitor | heartbeat supervision loop |
+| Multiplexer | tmux + herdr integration, keystroke injection, pane-state classification, held delivery |
+| Monitor | delivery pass + heartbeat supervision loop |
 | Coding agents | claude/codex/opencode backends |
 | WebUI + Config | HTTP API + `CAFLEET_*` settings |
 
@@ -34,8 +34,9 @@ CAFleet is a message broker and member registry for coding agents. A single
 SQLite database holds fleets, members, their tmux placements, messages,
 and a per-fleet monitor runtime row. The `cafleet` CLI is the primary surface:
 it creates fleets, spawns coding-agent members into tmux panes, routes messages
-between them by keystroke-injecting inline previews, and runs a heartbeat loop
-that periodically wakes the fleet's dedicated monitor member to health-check
+between them by keystroke-injecting inline previews once the recipient's pane
+is at rest, and runs a per-fleet loop that delivers held keystrokes and
+periodically wakes the fleet's dedicated monitor member to health-check
 the team. An admin WebUI exposes a read-mostly JSON API over the same broker.
 
 **Goal:** specify the **redesigned** `cafleet` command surface end-to-end so any
@@ -58,9 +59,8 @@ What is part of the contract (must be reproduced):
   contract, and status code of the WebUI API.
 - **Observable semantics:** the message status lifecycle, the soft-delete +
   cascade rules, the monitor claim/heartbeat/clear protocol, the message
-  routing and notification behavior (including the unicast partial-failure
-  surfacing, §6.3), and the stdout-vs-stderr stream
-  choice for each emitted line.
+  routing and held-delivery behavior (§6.5 *Held delivery*), and the
+  stdout-vs-stderr stream choice for each emitted line.
 
 What is **not** required (the relaxation):
 
@@ -122,9 +122,11 @@ cafleet
 ├── multiplexer     Multiplexer interface, tmux + herdr backends, resolver, keystrokes
 ├── coding-agent    coding-agent interface + claude/codex/opencode
 ├── output          render + formatter layers
-├── broker          typed data-access layer and notification traits
-├── runtime         concrete process/probe/notifier adapters
-├── monitor         heartbeat loop
+├── broker          typed data-access layer (persistence only)
+├── pane-state      pane-state classifier over captured text
+├── delivery        the pane delivery step and its PaneIo trait
+├── runtime         concrete process/probe adapters, monitor-loop launcher
+├── monitor         delivery pass + heartbeat loop
 ├── webui           server half: HTTP app, /api router, SPA fallback
 └── cli             command tree + handlers; the cafleet entry point
 ```
@@ -137,14 +139,16 @@ it.
 
 ## 4. Architecture & module dependency graph
 
-The diagram shows the process and notification boundary; the edge list defines
+The diagram shows the process and delivery boundary; the edge list defines
 the remaining dependencies. Arrows point from callers to their dependencies.
 
 ```text
-CLI / HTTP presenters ─────────────► broker ──► db
-        │                              ▲
-        ▼                              │ notification traits
-     runtime adapters ─────────────────┘
+CLI / HTTP presenters / monitor ──► delivery ──► broker ──► db
+        │                              │
+        │                              ├──► pane-state
+        │                              └──► PaneIo trait ◄── multiplexer
+        ▼
+     runtime adapters
         │
         ├──► multiplexer ──► injected CommandRunner
         └──► coding-agent ─► injected SpawnProbe
@@ -158,21 +162,26 @@ Edges (who depends on whom):
 - **output** — pure string/structure transforms, using configuration-derived
   text limits where required.
 - **multiplexer / coding-agent** — backend protocols, using injectable runner
-  and probe interfaces. Inline-preview truncation remains broker-side.
-- **broker** — depends on DB/domain types and pure formatting helpers. It owns
-  the notification trait and policy, not a concrete multiplexer or process
-  launcher. It neither starts subprocesses nor imports HTTP or CLI handlers.
-  The existing monitor liveness semantics, including the signal-0 probe, stay
-  unchanged by this boundary refactor.
-- **runtime** — owns `SystemRunner`, `SystemProbe`, and the concrete notifier
-  adapter. It implements the broker's notification trait using multiplexer and
-  coding-agent interfaces, and may consume configuration. It imports neither
-  CLI handlers nor HTTP handlers.
-- **monitor** — uses broker monitor operations and injected multiplexer
-  operations for pane discovery and wake delivery.
-- **webui** — uses broker types, runtime adapters, and configuration. HTTP
-  presenters construct the existing wire payloads; webui never imports cli.
-- **cli** — composes broker, runtime adapters, output, multiplexer,
+  and probe interfaces. Inline-preview truncation is done by the delivery
+  step, before the keystroke.
+- **broker** — depends on DB/domain types and pure formatting helpers. It
+  persists and queries; it sends no keystroke, owns no notification trait, and
+  neither starts subprocesses nor imports HTTP or CLI handlers. Monitor
+  liveness, including the signal-0 probe, is a broker read.
+- **pane-state** — leaf. A pure function from a coding-agent name and captured
+  pane text to a pane state (§6.5 *Pane-state classifier*).
+- **delivery** — depends on broker, pane-state, and config. It owns the
+  `PaneIo` trait and the one pane delivery step every caller runs
+  (§6.5 *Held delivery*). Every `Multiplexer` implements `PaneIo`.
+- **runtime** — owns `SystemRunner`, `SystemProbe`, and `ensure_monitor_loop`
+  (§6.6). It may consume configuration and broker liveness reads. It imports
+  neither CLI handlers nor HTTP handlers.
+- **monitor** — uses broker monitor operations, the delivery step, and
+  injected multiplexer operations for pane discovery and wake delivery.
+- **webui** — uses broker types, the delivery step, runtime adapters, and
+  configuration. HTTP presenters construct the existing wire payloads; webui
+  never imports cli.
+- **cli** — composes broker, delivery, runtime adapters, output, multiplexer,
   coding-agent, monitor, config, db, and webui for the single `cafleet` entry
   point. CLI presenters retain their existing output and error contracts.
 
@@ -180,7 +189,8 @@ Edges (who depends on whom):
 
 | Boundary | Complete inline owner |
 |---|---|
-| Persist → preview, skips, no retry and caller-specific failure | Broker §6.2 `send_message`, `broadcast_message`, `_try_notify_recipient`; CLI §6.3 message handlers; multiplexer §6.5 delivery methods. |
+| Persist → delivery attempt → hold or fire → loop retry | Broker §6.2 `send_message`, `broadcast_message`; the delivery step §6.5 *Held delivery*; CLI §6.3 message handlers; monitor §6.6 delivery pass. |
+| Queue exec → dispatch → pane-side run → notice → resume | CLI §6.3 `member exec` / `member exec-run`; broker §6.2 *Member execs*; the delivery step §6.5; monitor §6.6 lost-exec closing. |
 | Validation → registration → identity render → argv → pane transfer → placement → emit | CLI §6.3 `member create` and Creation ownership and compensation; agent argv §6.7; multiplexer split ownership §6.5. |
 | Claim/heartbeat/clear and wake ledger versus signals/sleep/delivery | Broker §6.2 runtime operations; monitor §6.6 driver and tick. The broker owns the single-instance guard; the loop consumes its results. |
 
@@ -196,7 +206,8 @@ boolean); map them to the target language's natural types.
 ### 5.1 Timestamps (resolved)
 
 Every timestamp column (`created_at`, `registered_at`, `deregistered_at`,
-`status_timestamp`, `deleted_at`, `last_ping_at`, `started_at`, `last_tick_at`)
+`status_timestamp`, `deleted_at`, `last_ping_at`, `started_at`, `last_tick_at`,
+and the delivery and exec timestamps of §5.2)
 is stored as an **ISO-8601 string** in UTC with an explicit `+00:00` offset and
 **fixed-width 6-digit microsecond precision**
 (`YYYY-MM-DDTHH:MM:SS.ffffff+00:00`).
@@ -259,6 +270,34 @@ The unified shapes:
 | `backend` | string | DDL default `"tmux"`; the resolved `mux.name` (`"tmux"`/`"herdr"`) that produced the pane ids |
 | `coding_agent` | string | NOT NULL, no DDL default |
 | `created_at` | string | ISO timestamp |
+| `keystroke_at` | optional string | the last pane claim (§6.5 *Pane claim*) |
+| `forced_at` | optional string | the pane's last forced delivery; null until one happens |
+| `silence_notice_at` | optional string | when the ready watchdog reported this member (§6.6); null until then |
+
+**MemberExec** (one row per `cafleet member exec`)
+
+| Field | Type | Notes |
+|---|---|---|
+| `exec_id` | integer | PK, AUTOINCREMENT |
+| `member_id` | integer | FK→members, ON DELETE RESTRICT |
+| `command` | string | the command body, stored verbatim |
+| `created_at` | string | ISO timestamp; the exec is queued |
+| `dispatched_at` | optional string | the dispatch keystroke landed |
+| `started_at` | optional string | `member exec-run` claimed the row |
+| `pid` | optional integer | the `member exec-run` process id, set with `started_at` |
+| `finished_at` | optional string | the command ended, or the loop closed a lost exec |
+| `exit_code` | optional integer | the command's exit status; `128 + signal` for a signal death; null for a lost exec |
+| `resumed_at` | optional string | the member was resumed or observed working; the exec is closed |
+
+Exec states are derived from the timestamps:
+
+| State | Condition | Pane effect |
+|---|---|---|
+| queued | `dispatched_at` is null | The dispatch is the pane's next item |
+| dispatched | `dispatched_at` set, `started_at` null | Every other item holds |
+| running | `started_at` set, `finished_at` null | Every other item holds |
+| finished | `finished_at` set, `resumed_at` null | The resume observation is the pane's next item |
+| closed | `resumed_at` set | none |
 
 **Message** (the message record)
 
@@ -274,15 +313,23 @@ The unified shapes:
 | `status_timestamp` | string | ISO timestamp |
 | `origin_message_id` | optional integer | NO FK; broadcast deliveries point at the summary; summary points at itself |
 | `text` | string | never truncated at persistence |
+| `notified_at` | optional string | null while the inline preview is owed; the UTC timestamp of the keystroke once it landed. Storage-only — absent from the message envelope |
+
+A **pending preview** is a row with `type = 'unicast'`,
+`status_state = 'input_required'`, and `notified_at IS NULL` whose recipient
+is active and owns a pane. An ACK settles a preview without a keystroke,
+because the row leaves `input_required`. A fleet has **owed work** while any
+of its members has a pending preview or a `member_execs` row whose
+`resumed_at` is null.
 
 **MonitorRuntime** (1:1 with Fleet; `fleet_id` is PK = FK, not autoincrement)
 
 - `fleet_id`: integer, FK→fleets, ON DELETE RESTRICT
 - `pid`: optional integer, the claiming process
 - `started_at`, `last_tick_at`: optional timestamp strings
-- `tick_seconds`: DDL default 5
+- `tick_seconds`: DDL default 5; a claim without an explicit tick keeps the stored value
 - `last_wake_at`: nullable; the UTC ISO timestamp of the last successfully delivered wake, durable across loop restarts; preserved by the runtime clear
-- `wake_interval_seconds`: nullable; the live mirror of the running loop's wake interval — stamped at every claim/reclaim, re-read per tick, overwritten by `PATCH /api/monitor`, preserved by the runtime clear; `NULL` only in rows that predate the column and were never re-claimed
+- `wake_interval_seconds`: nullable; the live mirror of the running loop's wake interval — stamped at every claim/reclaim with the value resolved by the §6.3 `monitor` precedence (a claim without an explicit interval keeps the stored value), re-read per tick, overwritten by `PATCH /api/monitor`, preserved by the runtime clear; `NULL` only in rows that predate the column and were never re-claimed
 - `wake_requested_at`: nullable; the UTC ISO timestamp of the latest pending forced-wake request (`POST /api/monitor/wake`) — `NULL` when none is pending; repeat requests overwrite the timestamp (coalesce into a single wake); cleared by a delivered wake (`record_monitor_wake`) and by the reclaim reset in `claim_monitor_runtime`
 
 A missing runtime row differs from null fields on an existing row. Clear
@@ -343,7 +390,7 @@ sentinel.
 Broker queries decode rows into typed records. CLI and HTTP presenters build
 wire JSON, preserving field names, order, nulls, and existing envelopes.
 Invalid stored enums and missing required message names are integrity errors.
-Concrete subprocess and notification adapters live in `runtime/`.
+Concrete subprocess adapters and the monitor-loop launcher live in `runtime/`.
 
 ## 6. Module specifications
 
@@ -353,7 +400,7 @@ contract error string.
 
 ### 6.1 Persistence & Schema
 
-**Scope:** the nine data models (§5.2), the connection factory, and the
+**Scope:** the data models (§5.2), the connection factory, and the
 migration-managed SQLite schema. This module owns **no** CRUD/query logic and no
 HTTP surface; all reads/writes/joins live in the broker (§6.2). Schema
 management is detailed in §8; this section covers the connection factory, the
@@ -400,7 +447,8 @@ not a no-op. Both must run on every connection the reimplementation opens.
 
 #### Structural invariants
 
-- **AUTOINCREMENT on exactly three tables** — `fleets`, `members`, `messages` —
+- **AUTOINCREMENT on every id-minting table** — `fleets`, `members`,
+  `messages`, `member_execs` —
   guaranteeing monotonically increasing ids that are never reused. The 1:1
   state tables deliberately do not use it; each reuses its parent's id as PK/FK.
 - **Create-order / forward-reference quirk.** `fleets.fleet_id` and
@@ -422,7 +470,9 @@ not a no-op. Both must run on every connection the reimplementation opens.
   (nullable; stamped by every claim), and
   `monitor_runtime.wake_requested_at` carries no DDL default (nullable;
   set by `POST /api/monitor/wake`, cleared by a delivered wake and by the
-  reclaim reset).
+  reclaim reset). The delivery columns — `messages.notified_at`,
+  `member_placements.keystroke_at` / `forced_at` / `silence_notice_at` — and
+  every nullable `member_execs` column carry no DDL default.
 - **No-FK message columns.** `messages.from_member_id`, `messages.to_member_id`, and
   `messages.origin_message_id` are plain integer columns with **no** FK constraint;
   only `messages.owner_member_id` is FK-constrained (ON DELETE RESTRICT).
@@ -436,13 +486,15 @@ not a no-op. Both must run on every connection the reimplementation opens.
 
 **Scope:** the synchronous data-access layer shared by CLI and WebUI; the only
 module that reads/writes the operational tables (fleets, members, placements,
-messages, monitor schedule/runtime, message queries). Owns
+messages, member execs, monitor schedule/runtime, message queries). Owns
 transaction boundaries, the member-kind predicates, soft-delete + cascade, the
-message status lifecycle, and the monitor single-instance claim/heartbeat/clear. It
-delegates attempted inline-preview delivery through its notification trait;
-the runtime adapter owns the concrete multiplexer call (§4). The broker does
-not start subprocesses or depend on HTTP/CLI handlers. Its existing
-process-liveness probe (signal-0) retains the monitor claim semantics.
+message status lifecycle, the delivery state (preview stamps, pane claims,
+exec rows, broker notices), and the monitor single-instance
+claim/heartbeat/clear. **The broker persists; the caller delivers:** no broker
+function sends a keystroke or takes a notifier, and every caller runs the
+delivery step (§6.5 *Held delivery*) after its broker write. The broker does
+not start subprocesses or depend on HTTP/CLI handlers. Its
+process-liveness probe (signal-0) carries the monitor claim semantics.
 
 #### Session semantics
 
@@ -638,8 +690,8 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
 
 #### Messaging
 
-- **`send_message(from_member_id, to, text)`** — one unicast message + at most
-  one attempted notify, one write_session. Coerce `to` to int; on failure → value error
+- **`send_message(from_member_id, to, text)`** — persists one unicast message
+  in one write_session; persistence only. Coerce `to` to int; on failure → value error
   `Invalid destination format: {to}`. If the sender is not an active member →
   value error `Sender member not found or not active: {from_member_id}`. The
   sender's fleet is **derived from the sender row** — no caller-supplied fleet
@@ -649,30 +701,15 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
   `members {from_member_id} and {to_id} are not in the same
   fleet.`. Build the unicast message (`owner_member_id = to_id`,
   `from_member_id = from_member_id`, `to_member_id = to_id`, `type = "unicast"`,
-  `status_state = "input_required"`, `origin_message_id = null`), insert, then
-  attempt the inline-preview notification via `_try_notify_recipient`. The
-  persisted row holds the **full untruncated text**. Returns the send outcome:
-  the unchanged `{message, notification_sent}` payload plus a separate
-  `notification_error` — the retained raw multiplexer error string, present
-  only when a pane notification was attempted and failed. `notification_error`
-  is out-of-band caller metadata and is never inserted into the payload. The
-  four cases:
-
-  | Recipient/notification state | `notification_sent` | `notification_error` | Row state |
-  |---|---|---|---|
-  | Self-send | `false` | absent | `input_required` |
-  | Recipient has no pane id | `false` | absent | `input_required` |
-  | Pane notification succeeds | `true` | absent | `input_required` |
-  | Pane notification is attempted and fails | `false` | the raw error | `input_required` |
-
-  `send_message` still returns success for the attempted-failure row because
-  the durable insert — the operation the broker owns — succeeded. The unicast
-  CLI alone interprets `notification_error` as a sender-facing partial failure
-  (§6.3); broadcast discards individual preview errors (below); the WebUI send
-  handler ignores the field (§6.8).
-- **`broadcast_message(from_member_id, text)`** — fan out one unicast
+  `status_state = "input_required"`, `origin_message_id = null`) and insert
+  it. `notified_at` is `NULL` — the preview is owed — except on a self-send
+  (`to_id == from_member_id`), which inserts `notified_at = created_at` so
+  nothing is ever owed for it. The persisted row holds the **full untruncated
+  text**. Returns the message record; the caller computes `notification_sent`
+  from its own delivery attempt (§6.3 *`message` group*).
+- **`broadcast_message(from_member_id, text)`** — persists one unicast
   delivery per active peer plus one `broadcast_summary` owned by the
-  sender. Sender not active → value error `Sender member not found or not
+  sender; persistence only. Sender not active → value error `Sender member not found or not
   active: {from_member_id}`. The fleet is **derived from the sender row**.
   Recipients = active members in that fleet, **excluding
   the sender** (the Director **is** included); let `N` = the count of these
@@ -681,31 +718,35 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
   NULL`**, `type = "broadcast_summary"`, `status_state = "completed"`, `text =
   "Broadcast sent to {N} recipients"`), insert it, set its `origin_message_id` to
   its own `message_id` (self-referential), then insert each delivery with
-  `origin_message_id = summary.message_id`. **After all deliveries are inserted (still
-  inside the same write_session), call `_try_notify_recipient` once per delivery
-  and set `delivered` = the count of those calls whose attempted preview
-  succeeded** (a paneless or self-recipient delivery contributes 0; an
-  attempted preview's individual error is discarded — only the count reflects
-  it, and broadcast keeps exit 0 with no per-recipient failure schema).
-  Returns a **single-element list** `[{message: <summary>,
-  recipients: N, delivered}]` — `recipients` is the real recipient count `N` and
-  `delivered` is the preview success count; the two diverge when any
-  preview fails to land. The two values are kept as **separate fields** and never
-  conflated; the CLI surfaces both (§6.3).
-- **`_try_notify_recipient`** — the single inline-preview attempt, classified
-  three ways: **skipped** (recipient == sender, or a paneless recipient — no
-  attempt is made), **delivered** (the attempted keystroke landed), or
-  **failed** (the attempted keystroke or the multiplexer resolution failed —
-  the raw error string is retained). Multiplexer resolution failure (an
-  unavailable or ambiguous environment, §6.5) is deferred: it is retained and
-  exposed only when a pane preview is actually attempted after the insert, so
-  it can never preempt the insert and never turns a self-send or no-pane skip
-  into an error. On a non-skip, **truncate** the preview text to
-  `settings.max_text_len` codepoints (+ a single U+2026 `…` suffix when over
-  the limit) and call the multiplexer's inline-preview keystroke exactly once.
-  Truncation is broker-side. The notification outcome never rolls back the
-  insert and triggers no retry; it flows only into `notification_sent` +
-  `notification_error` (unicast) or the broadcast `delivered` count.
+  `origin_message_id = summary.message_id` and `notified_at = NULL`. Returns
+  `BroadcastRows { summary, deliveries }` — the summary record plus one
+  `(member_id, message_id)` pair per delivery, in recipient order. The caller
+  derives `recipients` (the real recipient count `N`) from `deliveries` and
+  computes `delivered` from its own delivery attempts (§6.3); the two values
+  are kept as **separate fields** and never conflated.
+- **Pending-preview queries.** A pending preview is defined in §5.2. The
+  broker exposes: the oldest pending preview of one member (by `created_at`,
+  then `message_id`); whether a fleet has owed work (§5.2); the stamp
+  `notified_at = when` for one message; and the clear `notified_at = NULL`
+  for one message, used when its keystroke failed. All four read or write
+  only the named row set.
+- **`post_notice(fleet_id, text)`** — inserts a broker notice: a `unicast` row
+  whose `owner_member_id`, `from_member_id`, and `to_member_id` are all the
+  fleet's root Director, `status_state = "input_required"`, `notified_at`
+  `NULL`. A notice is delivered, polled, and ACKed like any message. Every
+  notice body starts with `[cafleet] `; the four texts are in §6.6 *Broker
+  notices*.
+- **The pane claim** — one statement, returning `true` iff exactly one row
+  changed (§6.5 *Pane claim*):
+
+  ```sql
+  UPDATE member_placements SET keystroke_at = :now
+  WHERE member_id = :member_id
+    AND (keystroke_at IS NULL OR keystroke_at <= :now_minus_spacing);
+  ```
+
+  The broker also stamps `forced_at` for one placement (a forced delivery)
+  and `silence_notice_at` for one placement (the ready watchdog).
 - **`poll_messages(member_id)`** — un-acked deliveries for an existing member.
   If the member is not an active registry row → value error
   `Member {member_id} not found`. Then: `owner_member_id = member_id` AND
@@ -719,6 +760,33 @@ member card's `$.cafleet.kind` marker, shared by `get_member`,
   `input_required` → value error `Cannot ACK message in state {status_state}`.
   Set `status_state = "completed"` and `status_timestamp = now`.
   `input_required` is the only state a message may transition from.
+
+#### Member execs
+
+One `member_execs` row per `cafleet member exec` (§5.2 states). Every
+operation is one statement or one write_session:
+
+- **Queue** — insert `{member_id, command, created_at}`; returns `exec_id`.
+- **Per-pane reads** — the pane's exec in flight (`dispatched_at` set,
+  `finished_at` null), its oldest finished exec not yet resumed, its oldest
+  queued exec (each by `exec_id` ascending), and the `finished_at` of its
+  latest exec.
+- **Dispatch stamp** — `dispatched_at = when` for one exec, and its clear
+  back to `NULL` when the dispatch keystroke failed.
+- **Start claim** — `UPDATE member_execs SET started_at = :now, pid = :pid
+  WHERE exec_id = :id AND dispatched_at IS NOT NULL AND started_at IS NULL
+  AND finished_at IS NULL`; `true` iff exactly one row changed.
+- **Finish** — `finished_at = when`, `exit_code = code` for one exec.
+- **Resume stamp** — `resumed_at = when` for one exec, and its clear when the
+  resume keystroke failed.
+- **Lost-exec selection and close** — every exec of a fleet that is
+  dispatched but not started after `EXEC_START_GRACE_SECONDS = 30`, or
+  running; the close sets `finished_at = resumed_at = now` and leaves
+  `exit_code` `NULL`.
+- **Ready-watchdog selection** — every active non-Director member of a fleet
+  that owns a pane, whose placement `created_at` is at least
+  `READY_GRACE_SECONDS = 180` old, that has never sent a message (no row with
+  `from_member_id = member_id`), and whose `silence_notice_at` is `NULL`.
 
 #### Queries
 
@@ -777,19 +845,23 @@ The `monitor_runtime` table holds **exactly one row per fleet** (PK = fleet_id)
   authoritative; the process probe corroborates.
 - **`claim_monitor_runtime(fleet_id, pid, tick_seconds, wake_interval_seconds,
   when)`** — atomically
-  claim the slot (the SQLite write lock serializes concurrent claims). No row →
+  claim the slot (the SQLite write lock serializes concurrent claims).
+  `tick_seconds` and `wake_interval_seconds` are both **optional**: an absent
+  value keeps the stored one, and the caller's default applies only when no
+  row or no stored value exists (§6.3 `monitor` precedence). No row →
   insert (with `last_wake_at` and `wake_requested_at` null) and return `true`;
   row exists and **live**
   → return `false`; row exists but **stale** → overwrite `pid` / `started_at` /
-  `tick_seconds` / `wake_interval_seconds`, reset `wake_requested_at = NULL`,
+  `tick_seconds` / `wake_interval_seconds` with the resolved values, reset
+  `wake_requested_at = NULL`,
   and return `true` (reclaim) —
   **`last_wake_at` is left
   untouched by a reclaim**, so an immediately-restarted loop honors the
   remaining wake cadence instead of firing an instant wake, while the
   `wake_requested_at` reset guarantees a pending request never survives into
   a later loop instance.
-  `wake_interval_seconds` is stamped in both the insert and the reclaim
-  overwrite, exactly like `tick_seconds`.
+  The resolved `wake_interval_seconds` and `tick_seconds` are stamped in both
+  the insert and the reclaim overwrite.
 - **`heartbeat_monitor_runtime(fleet_id, pid, when)`** — update `last_tick_at =
   when` **only where the current pid equals the caller's pid**; returns `true`
   iff exactly one row matched. **Ownership-checked** — `false` when the slot was
@@ -857,7 +929,8 @@ The `monitor_runtime` table holds **exactly one row per fleet** (PK = fleet_id)
   `status="deregistered"` / `deleted_at` set.
 - Placements and the fleet's `monitor_runtime` row are hard-deleted by their
   explicit lifecycle owners.
-- **Messages are never deleted** — audit history is permanent.
+- **Messages and member execs are never deleted** — audit history is
+  permanent.
 - Deregistered members remain visible via `verify_member_fleet`,
   `get_member_names` (both status-agnostic), and
   `list_roster(include_message_holders=True)` (when they still own messages); they
@@ -890,7 +963,7 @@ HTTP status). The exit-code policy is
 
 ### 6.3 CLI
 
-**Scope:** the entire `cafleet` command tree (16 subcommands across 3 groups +
+**Scope:** the entire `cafleet` command tree (18 subcommands across 3 groups +
 4 top-level commands, `monitor` two-form — §1, §10), the shared argument
 rules, and the `member
 create` spawn orchestration + rollback ladder. Orchestration glue only — it
@@ -926,9 +999,10 @@ flags. The positional subjects:
 - `FLEET_ID` — on `fleet show`, `fleet delete`, `member list`, and both
   `monitor` forms (the fleet is the subject of the listing / the supervision
   loop / the batch scan).
-- `MEMBER_ID` — on `member show` / `delete` / `prompt` / `ping` / `capture`
-  (the target) and `message poll` (the requester).
+- `MEMBER_ID` — on `member show` / `delete` / `prompt` / `exec` / `ping` /
+  `capture` (the target) and `message poll` (the requester).
 - `MESSAGE_ID` — on `message ack` and `message show`.
+- `EXEC_ID` — on `member exec-run`; the exec row names its member.
 
 Every positional subject is an integer: a non-integer value is clap's native
 invalid-value usage error, a missing subject its native
@@ -959,7 +1033,7 @@ error (exit 2).
 - `--json` — boolean, default `false`, help `Output in JSON format.`; a shared
   per-subcommand flag, canonically written **trailing**, after all other
   arguments. On every `message` subcommand; `member create` / `delete` /
-  `show` / `list` / `prompt` / `ping` / `capture`; `fleet create` / `list` /
+  `show` / `list` / `prompt` / `exec` / `ping` / `capture`; `fleet create` / `list` /
   `show` / `delete`; `monitor scan`; and `doctor`. Emits compact single-line
   JSON instead of
   text. JSON is always the **complete, untruncated machine form** — full
@@ -997,6 +1071,11 @@ The body is returned **verbatim** (no stripping). Empty-body rejection is
 multi-line bodies use `--file` (or `-` stdin) to bypass the shell's
 `ARG_MAX` limit.
 
+`member exec` takes its command as a positional `COMMAND` or `--file PATH`
+under the same exactly-one argument group and the same `--file` reader. Its
+empty-body rejection is its own usage error (exit 2) `command may not be
+empty.` (§6.3 *`member exec`*).
+
 #### Shared `message` handler sequence
 
 Every `message` leaf handler (which returns a broker result) follows one
@@ -1017,8 +1096,8 @@ fleet-gate runs CLI-side. Per invocation, in order:
 Only the shared `--json` flag. A full-environment diagnosis that renders
 **all** sections even when the multiplexer is unavailable or the database is
 missing or stale — no early abort. Diagnosis order: multiplexer, database,
-coding agents. `doctor` is exempt from the schema-version and stale-assets
-guards — it reports instead of blocking.
+coding agents, member permissions. `doctor` is exempt from the schema-version
+and stale-assets guards — it reports instead of blocking.
 
 **Text layout.** The first output line of the whole report is `cafleet
 <version>`. Each section is led by a single-width verdict glyph (`✓` U+2713 /
@@ -1045,6 +1124,8 @@ cafleet 0.22.0
   │ opencode     │ ~/.opencode  │ default            │ – cafleet setup --coding-agent opencode       │
   └──────────────┴──────────────┴────────────────────┴───────────────────────────────────────────────┘
   note: codex was previously set up at ~/.codex-old
+✓ member permissions
+  claude: no setting blocks the member broker commands
 1 issue found
 ```
 
@@ -1110,6 +1191,56 @@ note: <agent> was previously set up at <path>
 
 Footnotes are informational — they never count as issues.
 
+**Member permissions section.** Reports every Claude Code setting that would
+stop a claude member from running its broker commands. It runs for `claude`
+when the claude assets are installed (a current `asset_installs` row), and
+reads each of these files that exists:
+
+| File | Location |
+|---|---|
+| User settings | `<claude config dir>/settings.json`, via *Config-dir resolution* (`CLAUDE_CONFIG_DIR`) |
+| Project settings | `<cwd>/.claude/settings.json` and `<cwd>/.claude/settings.local.json` |
+| Managed settings | `/Library/Application Support/ClaudeCode/managed-settings.json` on macOS, `/etc/claude-code/managed-settings.json` on Linux |
+
+Probe commands:
+
+```
+cafleet message send --from-member-id 1 --to-member-id 2 x
+cafleet message broadcast --from-member-id 1 x
+cafleet message poll 1
+cafleet message ack 1
+cafleet message show 1
+cafleet monitor scan 1
+cafleet member ping 1
+```
+
+A rule matches a probe when it is `Bash`, or `Bash(<pattern>)` whose pattern
+matches the probe. `*` matches any text; a trailing ` *` or the legacy `:*`
+also matches the bare command.
+
+| Finding | Condition |
+|---|---|
+| Blocking rule | A `permissions.deny` or `permissions.ask` rule in any file matches a probe. |
+| Managed rules only | The managed file sets `allowManagedPermissionRulesOnly` to `true` and its own `permissions.allow` does not match every probe. |
+| Unreadable file | A settings file exists but does not parse as JSON. A missing file is expected and is not a finding. |
+
+```
+✓ member permissions
+  claude: no setting blocks the member broker commands
+
+✗ member permissions
+  claude: ~/.claude/settings.json permissions.deny "Bash(cafleet *)" matches "cafleet message send --from-member-id 1 --to-member-id 2 x"
+  claude: <file> allowManagedPermissionRulesOnly is true and its permissions.allow does not match "<command>"
+  claude: <file> is not valid JSON
+```
+
+The three `✗` lines are, in order, the blocking-rule, managed-rules-only, and
+unreadable-file findings; `<command>` on the second is the first unmatched
+probe.
+
+When the claude assets are not installed the row reads
+`claude: – not installed` and never counts. Each finding is one issue.
+
 **Footer and exit code.** Last line: `no issues found`, `1 issue found`, or
 `<N> issues found` (proper pluralization). Exit code: 0 when no issues, 1
 otherwise — the `–` state and footnotes never count. No failure exits before
@@ -1155,9 +1286,20 @@ else `null`.
       {"coding_agent": "codex", "path": "/Users/x/.codex-old", "recorded_version": "0.20.0", "installed_at": "2026-07-01T00:00:00.000000+00:00"}
     ]
   },
+  "member_permissions": {
+    "ok": true,
+    "findings": []
+  },
   "issues": 1
 }
 ```
+
+`member_permissions` sits between `coding_agents` and `issues`:
+`{"ok": <bool>, "findings": [{"coding_agent", "file", "list", "rule",
+"command"}]}`. `list` is `deny`, `ask`, or `allowManagedPermissionRulesOnly`;
+`rule` is `null` for the managed-rules-only finding, whose `command` is the
+first unmatched probe; `list`, `rule`, and `command` are all `null` for an
+unreadable file. Each finding adds one to `issues`.
 
 On a multiplexer failure the `multiplexer` object is `{"ok": false,
 "backend": null, "session": null, "window_id": null, "pane_id": null,
@@ -1216,8 +1358,15 @@ subcommands take the shared `--json` flag and emit JSON when it is set.
   diagnostics follow the primary reason; `Rolled back fleet creation.` is
   a confirmed-compensation suffix, never an unconditional failure claim.
   If the pane id was not obtained, report unknown/unconfirmed pane cleanup
-  and never guess a pane to kill. After commit success, disarm every creation
-  guard before the existing text/JSON `emit` boundary. Full failure ordering
+  and never guess a pane to kill. (5) After commit success, call
+  `ensure_monitor_loop` (§6.6) and wait until the loop is live. When it does
+  not start, kill the monitor pane the command spawned, soft-delete the
+  committed fleet (`delete_fleet`), print no ids, and exit 1 with the
+  loop-start error `monitor loop for fleet <fleet_id> did not start; see <log
+  path>`, appending any cleanup diagnostic in the existing form. On success,
+  disarm every creation guard before the text/JSON `emit` boundary: `--json`
+  gains a trailing `monitor_loop` object, `{"pid": <int>}`, and the text
+  output gains the line `monitor loop: pid <pid>`. Full failure ordering
   and rollback-failure reporting are in § *Creation ownership and compensation*.
 
 - **list** — `--json` (shared). Empty → `No fleets found.`; else a header plus
@@ -1251,36 +1400,46 @@ on `send` / `broadcast`, the recipient and fleet from the message row on
   `members <from> and <to> are not in the same fleet.` (exit 1). Text:
   `Message sent.\n` + the formatted message.
 
-  **Partial failure.** Before the success emit, the handler checks the send
-  outcome's `notification_error` (§6.2). When present — the row was persisted
-  but the attempted pane notification failed — it raises an application error
+  **Delivery.** After the broker persists the row, the handler runs
+  `deliver_pane` for the recipient (§6.5 *Held delivery*) — skipped when no
+  multiplexer resolves, which leaves the row owed — and then, when the fleet
+  has owed work (§5.2), calls `ensure_monitor_loop` (§6.6). The result is
+  `{message, notification_sent}`: `notification_sent` is `true` iff the
+  outcome is `Fired` with `Item::Preview` carrying this message's id. A held
+  preview exits 0 with `notification_sent: false`; so do a self-send and a
+  send to a member without a pane, which never call `ensure_monitor_loop`
+  unless other work is owed. A command that leaves nothing owed exits 0
+  without a loop and without a multiplexer.
+
+  When `ensure_monitor_loop` fails, the handler raises an application error
   (exit 1) with this cafleet-authored message (the top-level handler supplies
-  the `Error: ` prefix):
+  the `Error: ` prefix), where `<error>` is the loop-start error (§6.6):
 
   ```
-  Message <message-id> was persisted, but pane notification failed: <raw backend error>. Do not resend this message. Recover the recipient pane, then run 'cafleet member ping <recipient-id>' or have the recipient run 'cafleet message poll <recipient-id>'.
+  Message <message-id> was persisted, but <error>. Do not resend this message; run 'cafleet doctor'.
   ```
 
-  `<raw backend error>` is inserted verbatim and may contain the backend
-  command, its payload argv, and a newline-delimited stderr detail (§6.5); the
-  formatter adds no separate copy of the sent message body. stdout stays
-  empty; `--json` follows the global error contract — it selects successful
-  command output only and creates no JSON error envelope, so both modes emit
-  the same stderr text. The intentional skips (self-send, no-pane recipient)
-  keep their exit-0 success output with `notification_sent: false`, and a
-  successful attempted notification keeps the byte-identical success contract
-  in both modes. No layer retries the notification.
+  stdout stays empty; `--json` follows the global error contract — it selects
+  successful command output only and creates no JSON error envelope, so both
+  modes emit the same stderr text. A keystroke failure is not an error: it
+  leaves the preview owed and the loop retries it.
 - **broadcast** — `--from-member-id` and the shared body input (positional
-  `TEXT` or `--file PATH`; §6.3 [text-body input](#text-body-input)). The
-  result is a list; text is `broadcast
-  id=<message_id> recipients=<N> delivered=<k>`, where `<N>` is the result's
-  `recipients` (the real recipient count, matching `Broadcast sent to {N}
-  recipients`) and `<k>` is the result's `delivered` (the count of attempted
-  inline previews that landed; individual preview errors are discarded, §6.2).
-  The two diverge when any preview fails to deliver;
-  they are reported as **separate fields**, not conflated (the broker computes
-  both, §6.2). In JSON mode the result object carries both `recipients` and
-  `delivered`.
+  `TEXT` or `--file PATH`; §6.3 [text-body input](#text-body-input)). After
+  the broker persists all rows, the handler runs `deliver_pane` once per
+  recipient and then, when the fleet has owed work, calls
+  `ensure_monitor_loop`. The result is a single-element list
+  `[{message: <summary>, recipients: N, delivered}]`; text is `broadcast
+  id=<message_id> recipients=<N> delivered=<k>`, where `<N>` is the real
+  recipient count (matching `Broadcast sent to {N} recipients`) and `<k>` is
+  the number of recipients whose outcome is `Fired` with `Item::Preview`
+  carrying that recipient's delivery id. The other previews are held; the two
+  counts are reported as **separate fields**, not conflated. When
+  `ensure_monitor_loop` fails the handler raises an application error (exit
+  1):
+
+  ```
+  Broadcast <summary-id> was persisted, but <error>. Do not resend it; run 'cafleet doctor'.
+  ```
 - **poll** — positional `MEMBER_ID`; an unknown or inactive requester → the
   broker's existence error `Member <member_id> not found` (exit 1); indexed
   message list; empty `No messages found.`.
@@ -1299,7 +1458,7 @@ the positional `MEMBER_ID` subject (§6.3 *Positional subject ids*); the fleet
 is derived from the member row.
 
 - **Require-pane** — given a placement and an action label
-  (`capture`/`prompt`), no pane id → application error `member
+  (`capture`/`prompt`/`exec`), no pane id → application error `member
   <member_id> has no pane yet (pending placement) — nothing to <action>.`.
   `member ping` does not use it — a pending placement takes ping's skip path.
 - **Load-member** — fetch the member by id: not found →
@@ -1433,6 +1592,7 @@ for the fleet's single root Director bootstrapped by `fleet create` — no
 | Successful backend return | Transfer pane ownership immediately to CLI. |
 | Member placement patch fails or row vanished | Handle failed SQL, kill the owned pane with `kill_pane(id, true)`, then deregister and remove placement. |
 | Fleet bootstrap fails | Roll back and close its database connection before CLI pane cleanup. |
+| Fleet monitor loop does not start after the commit | Kill the monitor pane, then soft-delete the committed fleet with `delete_fleet`; print no ids and return the loop-start error plus any cleanup failure. |
 | Successful creation | Disarm pane and registration guards after confirmed placement and before output. |
 
 Preserve the primary error's category/message and append cleanup failures on stderr. `Rolled back registration of <new_member_id>.` describes confirmed compensation only. Explicit finish/rollback disarms a guard; neither a failed cleanup nor an unknown pane permits a success claim.
@@ -1498,22 +1658,72 @@ when placementless — `last_sent`, `last_recv`, `last_ack`, `idle`).
 #### `member prompt`
 
 Arguments: positional `MEMBER_ID` (first), **positional** `TEXT` (string,
-required, second), `--shell` (boolean flag, default
-`false`), and the shared `--json`. `TEXT` has no `--file` alternative — its
-body is a one-line keystroke by contract. A newline/CR → usage error
-`text may not contain newlines.`; empty after trim → usage error `text may not
-be empty.`; then trim. Ensure tmux, load the member, require a pane (`prompt`).
-Dispatch via the multiplexer's `send_prompt` (§6.5): the plain form delivers
-the text Esc-safeguarded as a submitted user turn; the `--shell` form delivers
-`! <text>` with the same Esc safeguard via the coding agent's `!` shell shortcut
-(a tmux error →
-application error `send failed: <error>`). The flag performs no content
-inspection — plain-form text beginning with `!` is delivered verbatim. JSON:
-`{member_id, pane_id, text, shell}`; text: `Sent prompt <quoted-text> to
-member <name> (<pane_id>).`, or with `--shell` `Sent shell prompt
-<quoted-text> to member <name> (<pane_id>).` (the text rendered with
-human-readable quoting/escaping — reproducing the quoted intent is
+required, second), and the shared `--json`. `TEXT` has no `--file`
+alternative — its body is a one-line keystroke by contract. A newline/CR →
+usage error `text may not contain newlines.`; empty after trim → usage error
+`text may not be empty.`; then trim. Ensure tmux, load the member, require a
+pane (`prompt`). Take the pane claim (§6.5 *Pane claim*); a refused claim →
+application error `member <member_id>'s pane is receiving another keystroke;
+retry in a few seconds.`. Dispatch via the multiplexer's `send_prompt`
+(§6.5), which delivers the text Esc-safeguarded as a submitted user turn (a
+tmux error → application error `send failed: <error>`). The command is not
+gated on pane state — it is the Director's deliberate direct turn — and
+performs no content inspection. JSON: `{member_id, pane_id, text}`; text:
+`Sent prompt <quoted-text> to member <name> (<pane_id>).` (the text rendered
+with human-readable quoting/escaping — reproducing the quoted intent is
 sufficient).
+
+#### `member exec`
+
+```
+cafleet member exec MEMBER_ID (COMMAND | --file PATH) [--wait] [--json]
+```
+
+Runs a command to completion in a member's pane and resumes the member.
+Arguments: positional `MEMBER_ID` (the **target**); exactly one of positional
+`COMMAND` / `--file PATH` (`--file -` reads stdin; the body may span lines
+and is stored verbatim; an empty body → usage error `command may not be
+empty.`, exit 2); `--wait` (boolean); the shared `--json`.
+
+1. Ensure tmux, load the member, require a pane (`exec`). The fleet's root
+   Director → application error `cannot exec in the Director's own pane`.
+2. Insert the `member_execs` row (§6.2 *Member execs*).
+3. Run `deliver_pane` for the member (§6.5). The dispatch keystroke is the
+   fixed line `! cafleet member exec-run <exec_id>`, sent through
+   `send_prompt`, so no part of the command passes through the keystroke.
+4. Call `ensure_monitor_loop` (§6.6) — the new exec is itself owed work. A
+   failure → application error `Exec <id> was queued, but <error>`.
+
+Text: `Queued exec <exec_id> for member <name> (<pane_id>): dispatched.` when
+the outcome is `Fired` with `Item::ExecDispatch` carrying this exec's id,
+else `Queued exec <exec_id> for member <name> (<pane_id>): held.`. JSON keys,
+in order: `exec_id`, `member_id`, `pane_id`, `dispatched`.
+
+With `--wait` the command polls the row every second until the exec is
+closed, then additionally prints `exec <exec_id> exited <code> after <n> s.`
+and exits 0; for an exec closed as lost (`exit_code` null) it prints the
+matching lost-exec notice text (§6.6 *Broker notices*) and exits 1.
+
+#### `member exec-run`
+
+```
+cafleet member exec-run EXEC_ID
+```
+
+The pane-side half of `member exec`, typed into the member's pane by cafleet.
+No `--json`.
+
+1. Claim the row with the start claim (§6.2 *Member execs*). Zero rows →
+   application error `exec <exec_id> is not runnable` (exit 1).
+2. Run `sh -c <command>` with inherited stdio in the pane's working
+   directory, so the output becomes the `!` command's output in the member's
+   context.
+3. Record `finished_at` and `exit_code` (`128 +` the signal number for a
+   signal death).
+4. Post the exec-finished notice to the Director (`post_notice`, §6.2) and
+   run `deliver_pane` for the Director.
+5. Print `[cafleet] exec <exec_id> exited <code>` and exit with the command's
+   code.
 
 #### `member ping`
 
@@ -1524,7 +1734,23 @@ still the hard error of the shared loader). A **pending placement** (a
 placement row with no pane id) takes the **skip path**: no keystroke is sent
 and the command exits 0 — text `Member <name> has no pane yet (pending
 placement) — ping skipped; it will poll its inbox on spawn.`, JSON
-`{"member_id": <id>, "pane_id": null, "skipped": true}`. With a pane, inject
+`{"member_id": <id>, "pane_id": null, "skipped": true, "reason":
+"pending_placement"}`.
+
+With a pane, the ping is **gated**: capture and classify the pane (§6.5
+*Pane-state classifier*) and decide in this order:
+
+| Condition | Outcome | `reason` |
+|---|---|---|
+| An exec is in flight in the pane (dispatched or running) | Skip | `exec_running` |
+| The pane is `awaiting_user` | Skip | `awaiting_user` |
+| The pane is `working` | Skip | `working` |
+| The pane claim is refused (§6.5 *Pane claim*) | Skip | `busy` |
+| `finished` or unclassified, claim held | Keystroke | `null` |
+
+A gated skip exits 0 with text `Member <name> (<pane_id>) is <reason> — ping
+skipped.` and JSON `{"member_id": <id>, "pane_id": "<pane_id>", "skipped":
+true, "reason": "<reason>"}`. Otherwise inject
 the inbox-poll keystroke via the multiplexer's
 `send_poll_trigger`, which is **best-effort** (§6.5) — it returns a boolean and
 never raises. The keystroked payload carries a resume clause: `cafleet message
@@ -1533,8 +1759,9 @@ something was still running.`. A returned `false` (non-delivery) → application
 error `send failed: tmux send-keys did not deliver the poll-trigger keystroke
 to pane <pane_id>.`. Because `send_poll_trigger` swallows its own `TmuxError`
 and returns `false`, the only reachable failure surface is the non-delivery
-message above. JSON: `{member_id, pane_id, skipped}` — the `skipped` key is
-present on **both** success paths (`false` on a dispatched ping); text: `Pinged
+message above. JSON: `{member_id, pane_id, skipped, reason}` — every key is
+present on **every** success path (`skipped: false`, `reason: null` on a
+dispatched ping); text: `Pinged
 member <name> (<pane_id>) — poll keystroke dispatched.`.
 
 #### `member capture`
@@ -1565,23 +1792,31 @@ cannot collide).
 with the positional `FLEET_ID` subject. A
 `_require_live_fleet` guard fetches the fleet; missing or soft-deleted
 → application error `fleet <fleet_id> not found`.
-`--tick` (integer ≥1, default 5, shown in help) and `--interval`
+`--tick` (integer ≥1, optional) and `--interval`
 (a non-negative 64-bit integer, parser-enforced `0..=i64::MAX` — a negative
 or above-`i64::MAX` value fails the parser's standard invalid-value error,
-exit 2; optional; when omitted, falls back to
-`CAFLEET_MONITOR_WAKE_INTERVAL` §7.1, default 600). `--interval 0` disables
-the wake while the loop keeps heartbeating every tick. The
-startup-resolved interval is stamped into the fleet's `monitor_runtime` row
-by the claim and re-read on every tick (§6.6), so a `PATCH /api/monitor`
-edit (§6.8) changes a running loop's cadence within one tick. Requires a
-live fleet, then tmux. Runs the monitor loop in-process (blocking). The fleet's
-monitor member hosts that command as a backend-resolved long-lived execution
-in its own pane immediately after the pane boots (the pane is spawned by the
-`cafleet fleet create` bootstrap, before any ordinary member; `cafleet member
-create --role monitor` is the mid-run re-spawn path).
-The §6.6 driver owns claim → signal registration → startup write/flush → first
-tick ordering. The monitor confirms its startup line before sending the
-`monitor live` signal that gates the Director's first ordinary member creation.
+exit 2; optional). `--interval 0` disables
+the wake while the loop keeps heartbeating and running its delivery pass
+every tick. Each value is resolved in this order, and `claim_monitor_runtime`
+(§6.2) takes both as optional so that an absent flag keeps the stored value:
+
+| Value | Precedence |
+|---|---|
+| Wake interval | `--interval` → the fleet's stored `wake_interval_seconds` when a runtime row exists → `CAFLEET_MONITOR_WAKE_INTERVAL` (§7.1) → `600` |
+| Tick | `--tick` → the stored `tick_seconds` when a runtime row exists → `5` |
+
+A restart therefore preserves a value set through `PATCH /api/monitor`
+(§6.8). The resolved interval is stamped into the fleet's `monitor_runtime`
+row by the claim and re-read on every tick (§6.6), so a `PATCH` edit changes
+a running loop's cadence within one tick. Requires a live fleet, then tmux.
+Runs the monitor loop in-process (blocking). cafleet itself starts this
+command as a detached process through `ensure_monitor_loop` (§6.6) — from
+`fleet create`, and from a `message send`, `message broadcast`, or `member
+exec` that leaves work owed; no member launches it. The foreground form
+fails with `monitor already running for fleet <fleet_id>` when a loop is
+live.
+The §6.6 driver owns multiplexer probe → claim → signal registration →
+startup write/flush → first tick ordering.
 
 ##### `monitor scan`
 
@@ -2013,7 +2248,8 @@ Every field is read with required access unless marked optional; required access
   the broker `get_member` dict, emitted by `--json` (§6.3).
 - **Fleet-create** (`format_fleet_create`): `fleet_id` (req), `director` (req
   nested) → `member_id` (req), `monitor` (req nested, after `director`, the
-  identical member shape) → `member_id` (req).
+  identical member shape) → `member_id` (req), `monitor_loop` (req nested,
+  the trailing key) → `pid` (req).
 - **Member-create** (`format_member`): `member_id` (req), `name` (req),
   `placement` (req) → `coding_agent` (req), `mux_pane_id` (req key; `(pending)`
   when falsy).
@@ -2050,8 +2286,8 @@ the **only** text form; the full envelope is `--json` (§6.3).
 `format_member_detail` — `<member_id> <name> <status>` (single spaces, no
 labels). The detailed view is `--json` (the broker `get_member` dict, §6.3).
 
-`format_fleet_create` — `<fleet_id> director=<director.member_id>
-monitor=<monitor.member_id>`.
+`format_fleet_create` — two lines: `<fleet_id> director=<director.member_id>
+monitor=<monitor.member_id>`, then `monitor loop: pid <monitor_loop.pid>`.
 
 `format_member` — `<member_id> <name> backend=<coding_agent> pane=<pane>`
 (`pane` = `mux_pane_id` or `(pending)`).
@@ -2084,8 +2320,10 @@ The ordering of `env` entries passed to `split_window` is not behaviorally signi
 **Scope:** the `Multiplexer` interface, the frozen `MultiplexerContext`, the
 optional `AgentStateAware` capability, the
 `MultiplexerError` exception taxonomy, the `MULTIPLEXERS` registry with the
-`resolve_multiplexer()` resolver, and the two shipped backends `TmuxMultiplexer`
-and `HerdrMultiplexer`. Each backend owns all subprocess invocation and
+`resolve_multiplexer()` resolver, the two shipped backends `TmuxMultiplexer`
+and `HerdrMultiplexer`, and — built on their capture and keystroke methods —
+the pane-state classifier, the `PaneIo` trait, and the held-delivery step.
+Each backend owns all subprocess invocation and
 keystroke injection for its multiplexer. The `MULTIPLEXERS` registry maps
 `"tmux"` and `"herdr"` each to a single shared stateless backend instance. Every
 method invokes its multiplexer binary as an **argv list without a shell** (no
@@ -2180,9 +2418,9 @@ space. A blank tail deeper than the requested window is why capture over-fetches
   **Esc-first=YES**, any error → `false`. Used only by `member ping`.
 - **`send_wake_trigger(*, target_pane_id, fleet_id, members, director) ->
   bool`** —
-  best-effort; the **sole** keystroke the monitor loop fires, targeted at the
-  fleet's **monitor member's own pane** (the loop never keystrokes any other
-  pane — not the Director's, not an ordinary member's). `members` is the wake
+  best-effort; the monitor loop's wake keystroke, targeted at the
+  fleet's **monitor member's own pane**. The loop's other keystrokes are the
+  held deliveries of § *Held delivery*. `members` is the wake
   roster (§6.2 `list_fleet_wake_targets`, excluding the Director and the
   monitor member); `director` is a single descriptor carrying the Director's
   own `member_id`, `name`, `coding_agent`, and `pending_count`, rendered as
@@ -2218,9 +2456,12 @@ space. A blank tail deeper than the requested window is why capture over-fetches
   **Esc-first=YES** (a wake landing on a pending permission prompt clears it
   instead of answering it); any error returns false. It contains no backtick,
   command-substitution sequence, or pipe.
-- **`send_inline_preview(*, target_pane_id, message_id, sender_id, ts, text)`**
-  — result-returning; the broker's inline-preview path (the broker truncates
-  `text` first). A missing tmux binary (the existing `binary_exists` precheck —
+- **`send_inline_preview(*, target_pane_id, message_id, sender_id, ts, text,
+  note)`**
+  — result-returning; the inline-preview path (the delivery step truncates
+  `text` first). `note` is an optional extra line, appended after the two
+  payload lines with a single `\n` separator when present (§ *Preview
+  payloads*). A missing tmux binary (the existing `binary_exists` precheck —
   not `ensure_available`, whose extra environment/session validation is not
   part of inline delivery) fails with exactly `tmux binary not found on PATH`;
   cosmetic CR/LF strip on `text`
@@ -2236,14 +2477,13 @@ space. A blank tail deeper than the requested window is why capture over-fetches
   raw `MultiplexerError` with the existing subprocess-runner formatting (the
   failed argv and trimmed stderr) — no boolean wrapper. Under
   `send-keys -l` the `\n` is a soft line break inside one keystroke; the single
-  trailing Enter submits the whole 2-line payload as one recipient turn.
-- **`send_prompt(*, target_pane_id, text, shell=False)`** — fail-fast. Strip
+  trailing Enter submits the whole payload as one recipient turn.
+- **`send_prompt(*, target_pane_id, text)`** — fail-fast. Strip
   surrounding whitespace; empty after strip → `send_prompt: text may not
   be empty`; the **original** text with a newline or CR → `send_prompt:
-  text may not contain newlines`. literal-then-Enter with `payload = "! " +
-  stripped_text` when `shell` else `stripped_text`, and `esc_first=true` — both
-  forms share the same Esc safeguard and failure semantics; `shell` changes only
-  the `! ` payload prefix.
+  text may not contain newlines`. literal-then-Enter with `payload =
+  stripped_text` and `esc_first=true`. `member prompt`, the exec dispatch
+  line, and the exec resume line all use it.
 - **`capture_pane(*, target_pane_id, lines=20) -> str`** — fail-fast. Validate
   lines, run `tmux capture-pane -p -t <target_pane_id> -S -<lines + 1000>`,
   then apply the shared Capture windowing contract above.
@@ -2266,9 +2506,8 @@ space. A blank tail deeper than the requested window is why capture over-fetches
 - **Result-returning** (the raw error is the contract): `send_inline_preview`.
   It applies the exact missing-binary precheck string, then propagates any
   Escape/payload/Enter failure as the raw `MultiplexerError` — no boolean
-  wrapper. The broker consumes the result as the unicast
-  `notification_sent` + `notification_error` pair and the broadcast
-  `delivered` count (§6.2).
+  wrapper. The delivery step consumes the result: a failure clears the item
+  stamp and holds with `KeystrokeFailed` (§ *Held delivery*).
 
 #### `MultiplexerContext` (frozen value type)
 
@@ -2296,7 +2535,7 @@ The shared literal-then-Enter primitive (used by `send_exit`,
 An embedded `\n` in `payload` is a **soft** newline within the single keystroke
 sequence — it does NOT fragment into a second submit. Esc-first matrix:
 `send_poll_trigger` **YES**, `send_inline_preview` **YES**, `send_wake_trigger`
-**YES**, `send_exit` **YES**, and both `send_prompt` forms **YES**.
+**YES**, `send_exit` **YES**, and `send_prompt` **YES**.
 
 #### Subprocess core, timeout, and pane-gone tolerance
 
@@ -2448,16 +2687,16 @@ Each method's herdr realization:
 - **`send_inline_preview(...)`** — result-returning. A missing herdr binary
   (the existing `binary_exists` precheck — not `ensure_available`) fails with
   exactly `herdr binary not found on PATH`. Then `herdr pane send-keys
-  <id> esc`, then `herdr pane send-text <id> "<2-line payload>"` (raw, no Enter —
-  the embedded newline is literal), then a sleep of `_SUBMIT_DELAY` (`1.0`s),
+  <id> esc`, then `herdr pane send-text <id> "<payload>"` (raw, no Enter —
+  the embedded newlines are literal; the payload is the two preview lines
+  plus the optional `note` line), then a sleep of `_SUBMIT_DELAY` (`1.0`s),
   then a single `herdr pane send-keys <id> enter`, keeping the tmux contract of
-  "one submit for the whole 2-line payload". A failure from whichever of those
+  "one submit for the whole payload". A failure from whichever of those
   operations failed propagates as the raw `HerdrError` with the existing
   `_run()` formatting — no boolean wrapper.
-- **`send_prompt(*, target_pane_id, text, shell=False)`** — `herdr pane
-  send-keys <id> esc`, then `herdr pane run <id> "<payload>"`, where `<payload>`
-  is `! <text>` for the shell form and `<text>` for the plain form. Both forms
-  mirror `send_poll_trigger`'s esc-then-run shape and differ only in the prefix.
+- **`send_prompt(*, target_pane_id, text)`** — `herdr pane
+  send-keys <id> esc`, then `herdr pane run <id> "<text>"`, mirroring
+  `send_poll_trigger`'s esc-then-run shape.
 - **`capture_pane(*, target_pane_id, lines=20) -> str`** — fail-fast. Validate
   lines, run `herdr pane read <id> --source recent-unwrapped --lines <lines + 1000>`,
   then apply the shared Capture windowing contract above, including its
@@ -2473,7 +2712,7 @@ post-paste suppression window, which would otherwise leave the preview stuck in
 the recipient's composer. The Esc safeguard maps to a discrete `herdr pane
 send-keys <id> esc` before the payload on every keystroke path:
 `send_poll_trigger`, `send_wake_trigger`, `send_inline_preview`, `send_exit`,
-and both `send_prompt` forms.
+and `send_prompt`.
 
 #### `AgentStateAware` capability (herdr only)
 
@@ -2487,25 +2726,179 @@ A **separate optional** `@runtime_checkable` Protocol, kept off the base
 
 `HerdrMultiplexer` implements it; `TmuxMultiplexer` does **not** implement
 `AgentStateAware` (an `isinstance(mux, AgentStateAware)` guard is therefore
-false on the tmux backend). No DB column backs the native status, and the
-monitor loop (§6.6) does not consume this capability — the loop's wake is
-unconditional and interval-driven, on both backends.
+false on the tmux backend). No DB column backs the native status, and neither
+the monitor loop (§6.6) nor the pane-state classifier consumes this
+capability — the loop's wake is unconditional and interval-driven, and the
+classifier reads captured text only, on both backends.
+
+#### Pane-state classifier
+
+```rust
+pub enum PaneState { AwaitingUser, Working, Finished, Unclassified }
+
+pub fn classify(coding_agent: &str, content: &str) -> PaneState
+```
+
+`content` is the ANSI-stripped tail of the pane, `DELIVERY_CAPTURE_LINES =
+40` lines, taken with `capture_pane`. The same function serves tmux and herdr
+because it reads captured text only.
+
+Each coding agent contributes one cue table: three lists of regular
+expressions, each matched line by line. Evaluation order is fixed:
+
+1. Any `awaiting_user` cue matches in its region → `AwaitingUser`.
+2. Any `working` cue matches in its region → `Working`.
+3. Any `finished` cue matches in its region → `Finished`.
+4. Otherwise → `Unclassified`. An unknown coding agent is `Unclassified`.
+
+**Regions.** A cue reads only the bottom of the pane. Blank lines are dropped
+first; a region is the last N remaining lines.
+
+| Cue | Region | Reason for the size |
+|---|---|---|
+| `awaiting_user` | Last `AWAITING_REGION_LINES = 20` lines | A selection list with descriptions is tall |
+| `working` | Last `WORKING_REGION_LINES = 10` lines | The activity line sits directly above the composer |
+| `finished` | Last `FINISHED_REGION_LINES = 6` lines | The composer and its status lines only |
+
+A false `awaiting_user` or `working` only delays a delivery, bounded by the
+hold timeout. A false `finished` sends the `Escape` that held delivery
+withholds, so that cue reads the smallest region and is evaluated last.
+
+| Coding agent | `awaiting_user` cue | `working` cue | `finished` cue |
+|---|---|---|---|
+| `claude` | A numbered option under the selection cursor: `^[\s│]*❯\s+\d+\.\s` | `esc to interrupt` | The composer prompt line: `^[\s│]*[>❯](\s.*)?$` |
+| `codex` | A numbered option under the cursor, `^\s*›\s+\d+\.\s`, or a `\[y/n\]` approval line | `esc to interrupt` | The composer prompt line: `^\s*[›▌](\s.*)?$` |
+| `opencode` | The permission popup title: `Permission required` | `esc\s+(to\s+)?interrupt` | The prompt box line: `^\s*┃(\s.*)?$` |
+
+`finished` means the composer is visible with no prompt box and no
+active-work cue. Text already typed into the composer does not change the
+result; a keystroke then appends to it.
+
+#### Held delivery
+
+A **broker delivery** is a keystroke owed to a pane: a message preview, an
+exec dispatch, or an exec resume. It fires only into a pane classified
+`finished`, except as a forced delivery.
+
+| Term | Meaning |
+|---|---|
+| Ordinary delivery | A delivery into a pane classified `finished` |
+| Forced delivery | A delivery into any other pane, made because the hold age reached the timeout |
+| Base payload | For a preview, the two lines `[cafleet msg <id> from <sender> <ts>]` and the truncated text (`settings.max_text_len` codepoints + a single U+2026 `…` when over the limit) |
+| Owed work | For a fleet: a pending preview, or a `member_execs` row with `resumed_at` null, for any of its members (§5.2) |
+
+Both kinds use the same keystroke shape: `Escape`, settle, payload, `Enter`.
+The `Escape` stays on an ordinary delivery because a prompt can open between
+the capture and the keystroke; in that window the keystroke rejects the
+prompt instead of confirming it.
+
+```rust
+pub trait PaneIo {
+    fn capture_pane(&self, pane_id: &str, lines: i64) -> Result<String, String>;
+    fn send_inline_preview(&self, pane_id: &str, message_id: i64, sender_id: i64,
+                           ts: &str, text: &str, note: Option<&str>) -> Result<(), String>;
+    fn send_prompt(&self, pane_id: &str, text: &str) -> Result<(), String>;
+}
+
+pub fn deliver_pane(conn: &mut Connection, io: &dyn PaneIo, settings: &Settings,
+                    member_id: i64, now: DateTime<Utc>) -> Result<PaneOutcome, CafleetError>
+
+pub enum PaneOutcome { Fired { item: Item, forced: bool }, Held(HoldReason), Idle }
+pub enum Item { Preview { message_id: i64 }, ExecDispatch { exec_id: i64 }, ExecResume { exec_id: i64 } }
+pub enum HoldReason { ExecRunning, ResumeGrace, AwaitingUser, Working, Unclassified,
+                      CaptureFailed(String), Busy, KeystrokeFailed(String) }
+```
+
+`PaneIo` is implemented for every `Multiplexer`. A caller that cannot resolve
+a multiplexer skips `deliver_pane` and leaves the row owed. `deliver_pane`
+performs at most one keystroke into one member's pane:
+
+1. **Exec in flight.** If the pane has a `member_execs` row with
+   `dispatched_at` set and `finished_at` null → `Held(ExecRunning)`. No
+   timeout applies while a command is running.
+2. **Select one item**, in this priority: a finished exec not yet resumed,
+   else the oldest queued exec, else the oldest pending preview. No item →
+   `Idle`.
+3. **Capture and classify** the pane. A capture error →
+   `Held(CaptureFailed)`.
+4. **Exec resume by observation**, when the item is a finished exec:
+
+   | Observation | Action |
+   |---|---|
+   | The pane is `working` | The harness answered. Stamp `resumed_at`; no keystroke. |
+   | Not `working`, and less than `EXEC_RESUME_GRACE_SECONDS = 10` since `finished_at` | `Held(ResumeGrace)`. |
+   | Not `working`, and the grace has passed | Deliver `[cafleet] exec <exec_id> finished with exit <code>. Continue your work using its output above.` through the gate table, then stamp `resumed_at`. |
+
+5. **Decide** per the gate table below.
+6. **Fire**: take the pane claim, stamp the item (`notified_at`,
+   `dispatched_at`, or `resumed_at`) and, on a forced delivery, `forced_at`;
+   then send the keystroke — `send_inline_preview` for a preview,
+   `send_prompt` for the exec dispatch line `! cafleet member exec-run
+   <exec_id>` and for the exec resume line. A refused claim → `Held(Busy)`.
+   A failed keystroke clears the item stamp, so the item stays owed, and
+   returns `Held(KeystrokeFailed)`.
+
+| Pane state | Hold age below the timeout | Hold age at or above the timeout |
+|---|---|---|
+| `finished` | Ordinary delivery | Ordinary delivery |
+| `awaiting_user` | Hold | Forced delivery; a preview adds the broker note |
+| `working` | Hold | Forced delivery; a preview adds the resume clause |
+| unclassified | Hold | Forced delivery; base payload only |
+
+**Hold age** is `now − max(item timestamp, finished_at of the pane's latest
+exec, forced_at)`. The item timestamp is `created_at` for a preview or a
+queued exec and `finished_at` for a resume. The two pane-level terms restart
+the clock for everything queued behind an event.
+
+**Timeout.** `settings.delivery_hold_timeout` (`CAFLEET_DELIVERY_HOLD_TIMEOUT`,
+§7.1), default `300` seconds. `0` disables forcing: a hold then lasts until
+the pane is at rest.
+
+**Pane claim.** Immediately before a keystroke, the process runs the broker's
+pane-claim statement (§6.2) with `KEYSTROKE_SPACING_SECONDS = 3`. One row
+changed means the claim is held; zero rows means another cafleet process is
+typing into that pane, and this one holds. The window covers the `Esc` settle
+and submit delays (1.1 s), so two processes never interleave their
+keystrokes. `member ping`, `member prompt`, and the monitor wake take the same
+claim before typing.
+
+**Preview payloads.**
+
+| Delivery | Payload |
+|---|---|
+| Ordinary, or forced on an unclassified pane | The base payload |
+| Forced on `working` | The base payload, then `[cafleet] Resume your work if something was still running.` |
+| Forced on `awaiting_user` | The base payload, then `[cafleet] This delivery's Escape dismissed a pending prompt in your pane; that rejection did not come from the user. Re-issue the tool call if you still need it.` |
+
+The extra line is the `note` argument of `send_inline_preview`.
+
+**Keystrokes that reach a pane that is not `finished`:**
+
+| Keystroke | Rule |
+|---|---|
+| Forced delivery | The hold timeout |
+| `member ping` on an unclassified pane | §6.3 *`member ping`* |
+| `member prompt` | Not gated; takes the pane claim |
+| Monitor wake | Not gated; takes the pane claim, and a refused claim leaves the wake due for the next tick |
 
 ### 6.6 Monitor heartbeat loop
 
-**Scope:** the in-process supervision scheduler. The fleet's **monitor
-member** — a dedicated watcher spawned by the `cafleet fleet create`
-bootstrap, before any ordinary `cafleet member create` (re-spawned mid-run
-via `cafleet member create --role monitor` after a monitor death) — hosts the
-blocking `run_monitor_loop` command as a backend-resolved long-lived execution
-in its own pane. It fires one unconditional, fleet-level wake into the
-**monitor member's own pane** once per
-wake interval, naming every ordinary member and the Director with their
-pending-delivery counts, pointing at the monitor role protocol, and resuming
+**Scope:** the in-process supervision scheduler. cafleet starts the blocking
+`run_monitor_loop` command as a **detached process** through
+`ensure_monitor_loop` — from `cafleet fleet create`, and from any command that
+leaves work owed while no loop is live — so the loop depends on no member's
+shell tool. Each tick it runs the **delivery pass** (the held deliveries of
+§6.5 for every pane with owed work), and once per wake interval it fires one
+unconditional, fleet-level wake into the **monitor member's own pane** —
+the fleet's dedicated watcher, spawned by the `cafleet fleet create`
+bootstrap before any ordinary `cafleet member create` (re-spawned mid-run
+via `cafleet member create --role monitor` after a monitor death). The wake
+names every ordinary member and the Director with their
+pending-delivery counts, points at the monitor role protocol, and resumes
 the monitor member's own work
 if something was still running. The module owns the OS-facing half — the pure
-due-check, one scan pass, the foreground driver with signal handling and
-runtime-row cleanup, and the scan-cadence and default-wake-interval constants.
+due-check, one tick, the foreground driver with signal handling and
+runtime-row cleanup, and the tick-cadence and default-wake-interval constants.
 It performs no DB internals (the broker's) and no multiplexer internals; it
 orchestrates calls into both. The wake is unconditional and interval-driven
 on every backend: there is no per-member due computation and no consumption
@@ -2522,15 +2915,23 @@ of `AgentStateAware` native status.
   `started_at` as the baseline: parsable → due iff `now − started_at`, in
   whole seconds, is `>= wake_interval_seconds`; `NULL` or unparsable →
   immediately due.
-- **`monitor_tick(fleet_id, now) -> CONTINUE | STOP`** —
-  one scan pass. Takes no interval parameter — each pass re-reads
+- **`monitor_tick(fleet_id, now) -> CONTINUE | STOP | MUX_UNREACHABLE`** —
+  one tick: heartbeat → fleet liveness → delivery pass → wake schedule. Takes
+  no interval parameter — each pass re-reads
   `wake_interval_seconds` from the fleet's runtime row.
 - **`run_monitor_loop(fleet_id, tick_seconds, wake_interval_seconds)`** —
-  foreground driver: claim slot → install signal handlers → `tick → sleep`
-  until signalled → clear slot on exit. `wake_interval_seconds` is used only
-  to stamp the claim; the ticks read the stored value.
-- **`CONTINUE` / `STOP`** — tick-result markers distinguishing "keep looping"
-  from "self-terminate".
+  foreground driver: multiplexer probe → claim slot → install signal handlers
+  → `tick → sleep` until signalled → clear slot on exit. Both `tick_seconds`
+  and `wake_interval_seconds` are optional and are used only to stamp the
+  claim (§6.2 `claim_monitor_runtime`); the ticks read the stored interval.
+- **`ensure_monitor_loop(conn, settings, fleet_id)`** — in the runtime
+  module: start the detached loop when none is live (§ *Loop start*).
+- **`MUX_FAILURE_LIMIT = 3`** — consecutive failing `list_pane_ids` ticks
+  after which a running loop exits.
+- **`CONTINUE` / `STOP` / `MUX_UNREACHABLE`** — tick-result markers
+  distinguishing "keep looping" from "self-terminate" and from "this tick
+  could not list the multiplexer's panes"; the last carries the backend error
+  for the driver's consecutive-failure count.
 - **`DEFAULT_TICK_SECONDS = 5`** — default scan cadence (seconds).
 - **`DEFAULT_WAKE_INTERVAL_SECONDS = 600`** — default wake interval
   (seconds), re-exported from `settings.monitor_wake_interval` (§7.1) so the
@@ -2542,9 +2943,45 @@ The stop flag, the sleep helper, the signal handler, and the marker type are
 implementation-private; only the functions, the markers, and the constants
 above are public.
 
+#### Loop start
+
+`ensure_monitor_loop(conn, settings, fleet_id)`:
+
+1. Return when `broker::monitor_is_live` is true.
+2. Spawn `cafleet monitor <fleet-id>`, with no flags, from the current
+   executable: stdin null, stdout and stderr appended to
+   `<database directory>/monitor-<fleet_id>.log`, in its own process group.
+   A log file that cannot be opened returns the error `cannot open monitor
+   log <log path>: <error>`; a process that cannot be spawned (including an
+   unresolvable current executable) returns `cannot spawn the monitor loop
+   for fleet <fleet_id>: <error>`. `<error>` is the operating-system error
+   text.
+3. Poll `monitor_is_live` every 100 ms for up to 5 s. On timeout return the
+   error `monitor loop for fleet <fleet_id> did not start; see <log path>`.
+
+Each of the three errors is an application error, and each is the `<error>`
+of the caller table below. Two racing callers are safe: the single-instance
+claim lets one loop win and the other exits.
+
+| Caller | When | On failure |
+|---|---|---|
+| `fleet create` | After the bootstrap transaction commits | Compensate, then exit 1 with the error (§6.3 `fleet` group) |
+| `message send` | After the delivery attempt, when the fleet has owed work | Exit 1: `Message <id> was persisted, but <error>. Do not resend this message; run 'cafleet doctor'.` |
+| `message broadcast` | After the delivery attempts, when the fleet has owed work | Exit 1: `Broadcast <summary id> was persisted, but <error>. Do not resend it; run 'cafleet doctor'.` |
+| `member exec` | After the delivery attempt; the new exec is itself owed work | Exit 1: `Exec <id> was queued, but <error>` |
+
+The condition is the fleet's owed work (§5.2), not the caller's own row, so a
+command also restarts a dead loop for items held earlier. A command that
+leaves nothing owed never calls `ensure_monitor_loop`: a self-send, a send to
+a member without a pane, and a send or broadcast whose every preview was
+keystroked exit 0 without a loop and without a multiplexer.
+`POST /api/messages/send` (§6.8) never calls it. A loop that dies while no
+cafleet command is being run stays down until the next command that leaves
+work owed restarts it.
+
 #### `monitor_tick(fleet_id, now)`
 
-One scan pass, steps in order:
+One tick, steps in order:
 
 1. **Ownership-checked heartbeat.** Call the broker's heartbeat with `(fleet_id,
    this-pid, now-as-ISO)`. Returns false (zero-row update — this process was
@@ -2552,39 +2989,68 @@ One scan pass, steps in order:
    split-brain loser's exit.
 2. **Fleet liveness.** Fetch the fleet; absent **or** `deleted_at` set → return
    `STOP`.
-3. **Read the runtime row.** The heartbeat just matched, so the row exists;
+3. **Delivery pass.** Runs on every tick, including when the wake interval is
+   `0`:
+   1. Read the live pane set once (`list_pane_ids`) and reuse it for the wake
+      (step 8). A failure ends the tick with `MUX_UNREACHABLE`: the driver
+      increments its consecutive-failure count and keeps looping, or stops
+      the loop at `MUX_FAILURE_LIMIT`; a tick that returns `CONTINUE` resets
+      the count. If the root Director's
+      pane is not in the set, print `<iso> director pane <pane_id> is gone;
+      stopping` and return `STOP`.
+   2. **Close lost execs.** For every exec that is dispatched but not started
+      after `EXEC_START_GRACE_SECONDS = 30`, or running with a `pid` that is
+      no longer alive: close it (`finished_at = resumed_at = now`,
+      `exit_code` null) and post the matching notice (§ *Broker notices*).
+   3. **Ready watchdog.** For every member the broker's ready-watchdog
+      selection returns (§6.2), post the silent-member notice and stamp
+      `silence_notice_at`.
+   4. For every active member of the fleet, the Director included, whose pane
+      is live and that has an exec row not yet closed or a pending preview,
+      run `deliver_pane` (§6.5). A member with nothing owed is neither
+      captured nor keystroked. A per-pane error is echoed and never aborts
+      the tick.
+   5. Echo one line per keystroke: `<iso> tick -> preview msg <id> member
+      <member_id>`, `<iso> tick -> forced preview msg <id> member
+      <member_id>`, `<iso> tick -> dispatch exec <id> member <member_id>`, or
+      `<iso> tick -> resume exec <id> member <member_id>`.
+4. **Read the runtime row.** The heartbeat just matched, so the row exists;
    take its `wake_interval_seconds` — the owning loop stamped the value at
    claim, so `NULL` here is corrupt state and fails loudly — and its
    `wake_requested_at`: `forced = wake_requested_at is non-null` (an
    operator requested an immediate wake via `POST /api/monitor/wake`, §6.8).
-4. **Wake-interval gate.** `wake_interval_seconds == 0` → return `CONTINUE`
-   (a heartbeat-only tick: no due-check, no monitor-member resolution, no
-   multiplexer call). Evaluated per tick against the value just read.
+5. **Wake-interval gate.** `wake_interval_seconds == 0` → return `CONTINUE`
+   (no due-check, no monitor-member resolution, no wake keystroke).
+   Evaluated per tick against the value just read.
    **Skipped when `forced`** — an explicit operator action bypasses a
    disabled schedule.
-5. **Compute due-ness.** Call
+6. **Compute due-ness.** Call
    `wake_due(last_wake_at, started_at, wake_interval_seconds, now)` on the
    row's values. Not due →
-   return `CONTINUE` with no multiplexer call. **Skipped when `forced`** —
+   return `CONTINUE` with no wake keystroke. **Skipped when `forced`** —
    an explicit operator action bypasses a not-yet-due schedule.
-6. **Resolve the monitor member's pane.** Call the broker's
+7. **Resolve the monitor member's pane.** Call the broker's
    `active_monitor_member_id(fleet_id)` (§6.2) and, when it resolves, read
    that member's placement `mux_pane_id`. No active monitor member, or one
    with no pane →
    return `CONTINUE`
    (nothing recorded — the fleet stays due, and a pending request stays
    pending, retrying next tick).
-7. **Fetch pane liveness once.** A single `list_pane_ids` call against the
-   resolved backend (§6.5). The monitor member's pane absent from the live set →
+8. **Check pane liveness** against the live pane set read in step 3 — one
+   `list_pane_ids` call serves the whole tick. The monitor member's pane
+   absent from the live set →
    return `CONTINUE` (nothing recorded — the fleet stays due, and a pending
    request stays pending, retrying next tick).
-8. **Wake the monitor member.** Fetch the wake roster via the broker's
+9. **Wake the monitor member.** Take the pane claim for the monitor member's
+   pane (§6.5 *Pane claim*); a refused claim → return `CONTINUE` with nothing
+   recorded, so the wake stays due for the next tick. Fetch the wake roster
+   via the broker's
    `list_fleet_wake_targets(fleet_id)` (§6.2 — every active, non-Director,
    non-monitor
    member with its `coding_agent` and `pending_count`) and the Director's own
    descriptor via the broker's `fleet_wake_director(fleet_id)` (§6.2), then call the
-   multiplexer's wake trigger against the monitor member's own pane (the loop's
-   **only** keystroke), passing `fleet_id`, the roster, and the Director
+   multiplexer's wake trigger against the monitor member's own pane, passing
+   `fleet_id`, the roster, and the Director
    descriptor; it returns a
    boolean `woke`. An entry — roster or Director — with an invalid
    `coding_agent` aborts the wake
@@ -2605,7 +3071,7 @@ One scan pass, steps in order:
    - If `woke` is false: do not record the wake and do not echo — the wake
      stays due and any pending request stays pending, so the next tick
      retries (no wake-storm, no silent skip).
-9. Return `CONTINUE`.
+10. Return `CONTINUE`.
 
 **Critical ordering invariant:** `record_monitor_wake` and the heartbeat echo
 are both gated behind `woke == true`. Preserve this gating exactly. The wake
@@ -2627,10 +3093,16 @@ tick, so a forced wake lands within `tick_seconds` of the request.
 Foreground driver. The fleet's monitor-runtime row is the **only** coordination
 artifact (no PID file); identity throughout is the OS process id.
 
-1. Reset the shared stop flag to false. Capture `pid = this-pid`.
+1. Reset the shared stop flag to false. Capture `pid = this-pid`. **Probe the
+   multiplexer** with one `list_pane_ids` call; a failure exits 1 **without a
+   claim**, so a loop that cannot reach the multiplexer never looks live and
+   `ensure_monitor_loop` times out. (A loop restarted by a member's `message
+   send` inherits that member's process environment, which can be a sandbox
+   without access to the multiplexer socket.)
 2. **Claim the slot** via the broker's atomic claim `(fleet_id, pid,
    tick_seconds, wake_interval_seconds, now-as-ISO)` — the driver's only use
-   of its `wake_interval_seconds` parameter. On refusal (returns false) →
+   of its optional `tick_seconds` and `wake_interval_seconds` parameters; the
+   loop then sleeps the tick the claim resolved. On refusal (returns false) →
    application error
    (exit 1) `monitor already running for fleet {fleet_id}`. There is no silent
    fallback. A reclaim leaves `last_wake_at` untouched (§6.2), so the wake
@@ -2638,10 +3110,14 @@ artifact (no PID file); identity throughout is the OS process id.
    fleet that never received its first wake waits a fresh full
    `wake_interval_seconds` from the restart. Retain ownership for cleanup before continuing.
 3. **Install signal handlers** for SIGTERM and SIGINT; each flips the shared stop
-   flag to true (the handler is minimal — just a flag flip). Retain each successful registration. After both handlers are installed, write and flush `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` to stdout before the first tick. The monitor confirms that line before its `monitor live` gate. Registration, startup-write or startup-flush failure enters cleanup; write and flush errors are `stdout write failed: <error>` and `stdout flush failed: <error>`.
+   flag to true (the handler is minimal — just a flag flip). Register `SIGHUP` to a no-op handler so a closing terminal does not stop the loop. Retain each successful registration. After the handlers are installed, write and flush `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` to stdout before the first tick. Registration, startup-write or startup-flush failure enters cleanup; write and flush errors are `stdout write failed: <error>` and `stdout flush failed: <error>`.
 4. **Loop** while the stop flag is false: if `monitor_tick(fleet_id, now)`
    (each pass stamps `now` fresh as tz-aware UTC)
-   returns `STOP` → break; else call `interruptible_sleep(tick_seconds)`.
+   returns `STOP` → break; else call `interruptible_sleep(tick_seconds)`. The
+   driver counts consecutive ticks that return `MUX_UNREACHABLE`; at
+   `MUX_FAILURE_LIMIT = 3` it breaks with the backend's error as an
+   application error (exit 1), so cleanup clears the runtime row and
+   the next caller starts a replacement. A `CONTINUE` resets the count.
 5. **Cleanup (always, including partial startup failure):** unregister every retained signal handler, then perform the broker's ownership-checked clear
    `(fleet_id, pid)` — nulls the slot's `pid` / `started_at` / `last_tick_at`
    only if this pid still owns the slot (`last_wake_at` is preserved, §6.2), so
@@ -2650,9 +3126,26 @@ artifact (no PID file); identity throughout is the OS process id.
 **Stop paths:** (a) a signal sets the stop flag → loop exits → finally clears;
 (b) `monitor_tick` returns `STOP` → break → finally clears; (c) a hard kill runs
 no cleanup — the row's heartbeat goes stale and the broker's later liveness check
-reports it dead. `cafleet fleet delete` also ends a still-running loop — its
+reports it dead; (d) the multiplexer failure limit → break → finally clears.
+`cafleet fleet delete` ends a still-running loop — its
 next tick sees the soft-deleted fleet and self-terminates via step 2 of
-`monitor_tick`.
+`monitor_tick` — and a missing Director pane ends it via step 3.
+
+#### Broker notices
+
+Every notice is posted with `post_notice` (§6.2) and starts with `[cafleet] `:
+
+| Notice | Posted by | Text |
+|---|---|---|
+| Exec finished | `member exec-run` | `[cafleet] exec <id> on member <member_id> (<name>) exited <code> after <n> s.` |
+| Exec never started | The loop's lost-exec closing | `[cafleet] exec <id> on member <member_id> (<name>) did not start within 30 s of dispatch. Inspect the pane with cafleet member capture <member_id> and run it again if still needed.` |
+| Exec lost | The loop's lost-exec closing | `[cafleet] exec <id> on member <member_id> (<name>) ended without reporting an exit status. Inspect the pane with cafleet member capture <member_id>.` |
+| Silent member | The ready watchdog | `[cafleet] member <member_id> (<name>) has sent no message <n> s after spawn. Its broker commands may be denied: inspect it with cafleet member capture <member_id> and run cafleet doctor.` |
+
+`ready` is the only signal that the agent in a pane booted; the ready
+watchdog is the first thing that notices its absence, and it reports each
+member once. A member that goes silent after it has spoken is the monitor
+member's to report.
 
 #### Monitor resource ownership
 
@@ -2711,9 +3204,10 @@ Each exposes two read-only properties and three methods:
   non-None value. Same exit-code note as `validate_model`: `member create`
   translates the value-error to a **usage error (exit 2)** with the backend's
   message (§6.3).
-- **`build_spawn_argv(prompt, display_name, model, effort)`** — returns the
-  full argv vector (binary + flags + prompt) for the multiplexer's
-  window-split.
+- **`build_spawn_argv(prompt, display_name, model, effort, monitor)`** —
+  returns the full argv vector (binary + flags + prompt) for the multiplexer's
+  window-split. `monitor` is a boolean, true when the member being spawned is
+  the fleet's monitor member; only the claude backend reads it.
 
 **Ordering invariant:** the consumer (`member create`) MUST call them in the
 order **`validate_model` → `validate_effort` → `ensure_available` →
@@ -2742,16 +3236,33 @@ validates). `validate_effort` enum check over the module-level
 `EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")`; an unknown level
 raises the claude effort value-error (see § Contract error strings).
 `ensure_available` PATH check on `claude` only. claude is the
-**only** backend that honors `display_name` (via `--name`).
+**only** backend that honors `display_name` (via `--name`) and `monitor`.
 
 ```
-["claude", "--permission-mode", "dontAsk", "--name", <display_name>]
+["claude", "--permission-mode", "dontAsk", "--allowedTools", <rule>...,
+ "--name", <display_name>]
   (+ ["--model", <model>]  if model is not None)
   (+ ["--effort", <effort>]  if effort is not None)
   (+ <prompt>)                                       # bare trailing positional
 ```
 
-**codex** — `validate_model` pass-through. `validate_effort` enum check over
+The `--allowedTools` values are session allow rules for the member's broker
+commands, one argv token per rule, so a claude member does not depend on any
+`Bash(cafleet ...)` rule in the user's `settings.json`:
+
+| Member | Rules, in order |
+|---|---|
+| Every claude member | `Bash(cafleet message *)` |
+| The monitor member (`monitor` true), additionally | `Bash(cafleet monitor scan *)`, `Bash(cafleet member ping *)` |
+
+`--allowedTools` takes several values, so it sits before `--name`, which ends
+its value list and keeps the prompt positional. A `deny` or `ask` rule at any
+settings level still blocks the command, and the managed setting
+`allowManagedPermissionRulesOnly` makes Claude Code ignore `--allowedTools`;
+`doctor` reports both (§6.3 *`doctor`*). A blocking `PreToolUse` hook is
+outside what `doctor` can evaluate.
+
+**codex** — `validate_model` pass-through. `monitor` is ignored. `validate_effort` enum check over
 the module-level `EFFORT_LEVELS = ("minimal", "low", "medium", "high",
 "xhigh")`; an unknown level raises the codex effort value-error (see
 § Contract error strings). `ensure_available` PATH check on
@@ -2779,9 +3290,9 @@ base>/agents/cafleet.md` — `<preset base>` resolved through the probe's
 `env_var` lookup per §6.3 *Config-dir resolution* (`OPENCODE_CONFIG_DIR`,
 default `~/.opencode`); an invalid variable surfaces the pinned validation
 error before the existence check (see § opencode
-preset). `display_name` is silently ignored; the prompt is passed
-as a `--prompt <prompt>` flag pair (two tokens), unlike claude/codex's bare
-positional.
+preset). `display_name` and `monitor` are silently ignored; the prompt is
+passed as a `--prompt <prompt>` flag pair (two tokens), unlike claude/codex's
+bare positional.
 
 ```
 ["opencode", "--agent", "cafleet"]
@@ -2808,9 +3319,19 @@ prefix_rule(pattern = ["cafleet"], decision = "allow")
 prefix_rule(
     pattern = ["cafleet", "member", "prompt"],
     decision = "prompt",
-    justification = "cafleet member prompt keystrokes arbitrary text or shell commands into a member pane",
+    justification = "cafleet member prompt keystrokes arbitrary text into a member pane",
+)
+
+prefix_rule(
+    pattern = ["cafleet", "member", "exec"],
+    decision = "prompt",
+    justification = "cafleet member exec runs an arbitrary shell command in a member pane",
 )
 ```
+
+Codex applies the strictest matching decision, so `member prompt` and
+`member exec` keep requiring approval while every other subcommand matches
+only the broad allow.
 
 #### opencode preset
 
@@ -2876,6 +3397,7 @@ around command names and `.env`):
       "mise //cafleet:build": "allow",
       "wc *": "allow",
       "cafleet *": "allow",
+      "cafleet member exec *": "deny",
     },
     "read": {
       "*": "allow",
@@ -3076,10 +3598,11 @@ same `{"detail": <string>}` shape (a single human-readable string).
   `404`, detail `Member not found`; otherwise send and return `{message_id,
   status}`. Both branches:
   `{message_id: int, status: string}` (`status` = the broker message's `status_state`).
-  The unicast branch consumes only the `message` object of the broker send
-  outcome and intentionally ignores its `notification_error` (§6.2) — the
-  `200` response after persistence is unchanged whatever the notification
-  outcome.
+  After the broker persists, the handler runs `deliver_pane` (§6.5) for each
+  recipient when the server process can resolve a multiplexer; otherwise the
+  rows stay owed. The route never calls `ensure_monitor_loop`, because the
+  server may run outside the multiplexer session the loop needs. The `200`
+  response after persistence is the same whatever the delivery outcome.
   The SPA always submits `from_member_id = director.member_id` (the fleet's
   root Director); the endpoint itself is sender-agnostic.
 
@@ -3154,29 +3677,36 @@ binding, so an unrelated `CAFLEET_*` variable never binds by accident.
 | `max_text_len` | `CAFLEET_MAX_TEXT_LEN` | non-negative integer | `200` |
 | `multiplexer` | `CAFLEET_MULTIPLEXER` | optional string | `None` (auto-detect) |
 | `monitor_wake_interval` | `CAFLEET_MONITOR_WAKE_INTERVAL` | non-negative 64-bit integer | `600` |
+| `delivery_hold_timeout` | `CAFLEET_DELIVERY_HOLD_TIMEOUT` | non-negative 64-bit integer | `300` |
 
 - **`multiplexer`** is the explicit backend override consumed by
   `resolve_multiplexer()` (§6.5). `None` (unset) means auto-detect from
   `HERDR_ENV` / `TMUX`.
   A set value must name a registry key (`tmux`/`herdr`) or resolution raises.
 - **`monitor_wake_interval`** is the `cafleet monitor` wake interval in
-  seconds, overridden per-invocation by `--interval` (§6.3). `0` disables the
-  wake while the loop keeps heartbeating every tick. The value is a
-  non-negative 64-bit integer; anything else fails loudly at startup with
+  seconds. It ranks below `--interval` and below the fleet's stored
+  `wake_interval_seconds` (§6.3 `monitor` precedence), so it sets the interval
+  of a fleet whose loop has never run. `0` disables the
+  wake while the loop keeps heartbeating and delivering every tick. The value
+  is a non-negative 64-bit integer; anything else fails loudly at startup with
   `CAFLEET_MONITOR_WAKE_INTERVAL must be a non-negative integer (got '<raw>')`.
-  The startup-resolved value is stamped into
-  `monitor_runtime.wake_interval_seconds` at each `cafleet monitor` start
-  (§6.6);
+  The resolved value is stamped into
+  `monitor_runtime.wake_interval_seconds` at each claim (§6.6);
   dispatch cadence is
   persisted in `monitor_runtime.last_wake_at` (§6.2), durable across loop
   restarts.
+- **`delivery_hold_timeout`** is the number of seconds a held delivery waits
+  before it becomes a forced delivery (§6.5 *Held delivery*). `0` disables
+  forcing: a hold then lasts until the pane is at rest. It is parsed with the
+  same non-negative-integer rule; anything else fails loudly at startup with
+  `CAFLEET_DELIVERY_HOLD_TIMEOUT must be a non-negative integer (got '<raw>')`.
 - **Default DB URL** expands `~` to `$HOME` **only for the factory default**; a
   user-supplied `CAFLEET_DATABASE_URL` is passed through verbatim (no `~`
   expansion, so a user value must already be absolute). Net default on home
   `/home/u`: `sqlite:////home/u/.local/share/cafleet/cafleet_v6.db` (four slashes).
 - A non-integer `broker_port`/`max_text_len` must **fail loudly at startup** (a
   hard validation error, not a silent default).
-- `max_text_len` truncates only CLI echo + the broker inline-preview keystroke.
+- `max_text_len` truncates only CLI echo + the inline-preview keystroke.
   It is **never** applied by the WebUI API (raw broker results) and never
   truncates the persisted `Message.text` column.
 
@@ -3251,8 +3781,10 @@ UTF-8 (no ASCII escaping).
 
 ### 7.4 Logging & stdout discipline
 
-- The monitor loop emits one heartbeat line per delivered wake to **stdout**
-  (`{iso} tick -> wake monitor {monitor_member_id} ({N} members)`).
+- The monitor loop emits one line per keystroke to **stdout**: the wake line
+  (`{iso} tick -> wake monitor {monitor_member_id} ({N} members)`) and the
+  delivery-pass lines of §6.6. A loop started by `ensure_monitor_loop` has its
+  stdout and stderr appended to `<database directory>/monitor-<fleet_id>.log`.
 - Creation rollback diagnostics go to **stderr**, following the primary cause.
   Preserve the stream
   choice (stdout vs. stderr) — it is part of the observable contract.
@@ -3299,9 +3831,8 @@ identical for the claude, codex, and opencode backends:
 - A one-shot CAFleet command is never placed beside another command via a
   newline, `;`, `&&`, a pipe, shell `&`, or any other setup/follow-up command.
   A compound invocation keeps the agent's shell tool occupied after the
-  CAFleet process exits, so the pane cannot consume an inbound inline-preview
-  keystroke (§6.5) and a notification aimed at it can fail after the message
-  was persisted.
+  CAFleet process exits, so the pane is not at rest and every delivery aimed
+  at it is held (§6.5).
 - Leading `NAME=value` assignments immediately preceding the CAFleet
   executable are allowed — they set the CAFleet process environment without
   starting another process. An `env` helper process is not a substitute.
@@ -3315,29 +3846,17 @@ pane-command failure — signals that the invocation likely ran outside the
 coding agent's command auto-approval scope: a compound invocation does not
 match single-command allow rules, so the shell tool executes it under the
 agent's restricted sandbox or permission set. The response is to re-run the
-CAFleet command as its own isolated invocation, honoring the no-resend rule
-whenever a persisted message id was already reported; retrying the compound
-form is forbidden.
-
-The sole exception is the long-lived `cafleet monitor` process (§6.6): its
-invocation still contains only that monitor process, but it may use the
-background or managed-execution mechanism resolved by the member's
-coding-agent overlay (part of the installed skill assets). The core rule
-defers that launch syntax to the overlay and does not duplicate it.
-
-The companion recovery contract for a `message send` partial failure — the
-persisted id proves the send committed, the sender never resends the body, and
-recovery is an isolated `cafleet member ping <recipient-id>` or a
-recipient-side isolated `cafleet message poll <recipient-id>` followed by a
-normal ACK — is pinned in §6.3 and also ships in the core skill's Send
-guidance. No layer retries the notification.
+CAFleet command as its own isolated invocation. A message whose persisted id
+was already reported is not sent again: the id proves the send committed, and
+the loop delivers the existing row (§6.3 *`message` group*).
 
 ---
 
 ## 8. Database schema
 
-**Schema** = the six application tables of §5.2 (`fleets`, `members`,
-`messages`, `member_placements`, `monitor_runtime`, `asset_installs`) plus the
+**Schema** = the application tables of §5.2 (`fleets`, `members`,
+`messages`, `member_placements`, `member_execs`, `monitor_runtime`,
+`asset_installs`) plus the
 migration ledger table `refinery_schema_history` (the bookkeeping table
 recording one row per applied migration: version, name, applied-on timestamp,
 checksum). The schema
@@ -3363,7 +3882,7 @@ defaults, FK rules, AUTOINCREMENT, and the create-order quirk are in §6.1.
   generation omits the monitor marker; Director-first display-kind resolution
   (§5.4) is unchanged and does not override this index predicate.
 
-**The migration chain.** Head is **`V8`**, contiguous from 1 with exactly one
+**The migration chain.** Head is **`V9`**, contiguous from 1 with exactly one
 baseline:
 
 1. `V1__baseline.sql` — the baseline, creating the schema in this order:
@@ -3446,6 +3965,32 @@ baseline:
    ```
    Existing duplicate active monitors make this DDL fail. No survivor is
    selected automatically, and existing migration files remain unchanged.
+9. `V9__held_delivery_and_member_execs.sql` — adds the delivery state
+   (§5.2): the preview stamp on `messages`, the three pane-level timestamps
+   on `member_placements`, and the `member_execs` table. The `UPDATE`
+   backfill marks every existing message as settled, so no stored row is
+   owed a preview:
+   ```sql
+   ALTER TABLE messages ADD COLUMN notified_at TEXT;
+   UPDATE messages SET notified_at = created_at;
+
+   ALTER TABLE member_placements ADD COLUMN keystroke_at TEXT;
+   ALTER TABLE member_placements ADD COLUMN forced_at TEXT;
+   ALTER TABLE member_placements ADD COLUMN silence_notice_at TEXT;
+
+   CREATE TABLE member_execs (
+       exec_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+       member_id INTEGER NOT NULL REFERENCES members (member_id) ON DELETE RESTRICT,
+       command TEXT NOT NULL,
+       created_at TEXT NOT NULL,
+       dispatched_at TEXT,
+       started_at TEXT,
+       pid INTEGER,
+       finished_at TEXT,
+       exit_code INTEGER,
+       resumed_at TEXT
+   );
+   ```
 
 There are no CHECK constraints. Future schema changes are hand-written
 numbered files `V<N>__<slug>.sql` appended to the chain; the chain stays
@@ -3480,7 +4025,7 @@ the same diagnostic; otherwise preserve the original migration error. On
 success print `Created <db_file> and applied migrations
 to head (<N>).` when no version was recorded before the run (a fresh or
 table-less DB), else `Upgraded from <M> to <N>.`. `<M>` / `<N>` are the
-integer migration versions (the head is `8`). The driver's
+integer migration versions (the head is `9`). The driver's
 connection is closed when the command finishes (success or failure).
 
 **Duplicate-monitor recovery.** Preserve the diagnostic's fleet/member IDs and use this complete operator procedure:
@@ -3506,6 +4051,12 @@ Migration applies pending changes in place and preserves message history; V6's s
     sanitizer substitutions, and the per-method failure contracts (best-effort
     boolean, the result-returning inline preview with its exact missing-binary
     strings, and fail-fast raising).
+  - *Pane-state classifier* — each state per coding agent from a short inline
+    capture, cue precedence, a cue outside its region, and an unknown coding
+    agent.
+  - *Delivery step* — `deliver_pane` against a fake `PaneIo`: the gate table,
+    the forced payload per state, hold-age restarts, item priority, the pane
+    claim, and the cleared stamp after a failed keystroke.
   - *Coding-agent* — assert each `build_spawn_argv` argv, the opencode model
     validation, and each backend's `ensure_available` preconditions (PATH
     check; opencode's preset-existence check at the resolved preset path)
@@ -3513,8 +4064,8 @@ Migration applies pending changes in place and preserves message history; V6's s
   - *Monitor* — `wake_due` is pure (table-test interval gating,
     `last_wake_at` precedence, the `started_at` baseline, and corrupt
     stamps); `monitor_tick` against a fake broker+multiplexer asserting the
-    zero-interval heartbeat-only tick, the `woke`-gated `record_monitor_wake`,
-    and the `STOP` paths.
+    delivery pass (including at a zero wake interval), the `woke`-gated
+    `record_monitor_wake`, and the `STOP` paths.
   - *Config* — env-var parsing, the default-URL home expansion, and loud failure
     on non-integer port/len.
 - **Integration:**
@@ -3537,7 +4088,7 @@ Migration applies pending changes in place and preserves message history; V6's s
 
 ## 10. CLI command checklist
 
-The full command surface — **16 subcommands across 3 groups + 4 top-level
+The full command surface — **18 subcommands across 3 groups + 4 top-level
 commands**, one of which (`monitor`) is two-form: the bare loop plus its
 `scan` subcommand.
 Each must be reproduced with identical positional/option names, types,
@@ -3553,7 +4104,7 @@ The shared trailing `--json` flag (§6.3) is listed per row below.
 - [ ] `cafleet setup` (`--coding-agent AGENT...` multi-value/repeatable choice, default all three agents; no positional arguments; §6.3 setup)
 - [ ] `cafleet doctor` (`--json`; §6.3 doctor)
 - [ ] `cafleet server` (`--host`=settings.broker_host, `--port`=settings.broker_port)
-- [ ] `cafleet monitor FLEET_ID` (the loop form; `--tick`≥1=5, `--interval`≥0=`CAFLEET_MONITOR_WAKE_INTERVAL` (default 600); §6.3 monitor and §6.6 driver)
+- [ ] `cafleet monitor FLEET_ID` (the loop form; `--tick`≥1 and `--interval`≥0, each optional and defaulting to the stored value, then `5` / `CAFLEET_MONITOR_WAKE_INTERVAL` (default 600); §6.3 monitor and §6.6 driver)
 - [ ] `cafleet monitor scan FLEET_ID` (`--lines`≥1=**20**, `--ansi`, `--json`; §6.3 monitor scan)
 
 **`fleet`:**
@@ -3569,8 +4120,10 @@ The shared trailing `--json` flag (§6.3) is listed per row below.
 - [ ] `cafleet member delete MEMBER_ID` (`--json`; §6.3 member delete owns successful exits and error paths)
 - [ ] `cafleet member show MEMBER_ID` (`--json`)
 - [ ] `cafleet member list FLEET_ID` (`--json`)
-- [ ] `cafleet member prompt MEMBER_ID TEXT` (`--shell`, `--json`)
-- [ ] `cafleet member ping MEMBER_ID` (`--json`; §6.3 member ping)
+- [ ] `cafleet member prompt MEMBER_ID TEXT` (`--json`)
+- [ ] `cafleet member exec MEMBER_ID` (positional `COMMAND` / `--file PATH` xor-required, `--wait`, `--json`; §6.3 member exec)
+- [ ] `cafleet member exec-run EXEC_ID` (no flags; §6.3 member exec-run)
+- [ ] `cafleet member ping MEMBER_ID` (`--json`; gated, §6.3 member ping)
 - [ ] `cafleet member capture MEMBER_ID` (`--lines`=**20**, `--ansi`, `--json`)
 
 **`message`:**
@@ -3601,7 +4154,9 @@ This index locates the complete inline decision owners. Detailed rules govern th
 | Positional subjects, relationship flags, no ID environment defaults, command choices, guards and both creation templates | §6.3 |
 | Untruncated JSON, truncation and formatter-specific glyphs | §6.4 |
 | Multiplexer argv/ownership and environment ordering allowance | §6.5 |
+| Pane-state classification, held delivery, the hold timeout and the pane claim | §6.5 |
 | Runtime policy constants and signal/startup/cleanup ordering | §6.2 and §6.6 |
+| Detached loop start, the delivery pass, lost execs, the ready watchdog and broker notices | §6.6 |
 | Coding-agent registry representation allowance and exact argv/presets | §6.7 |
 | Config-owned settings singleton and wake defaults | §7.1 |
 | Usage/application/HTTP error classification | §7.2 |

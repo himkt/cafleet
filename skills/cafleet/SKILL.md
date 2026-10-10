@@ -15,7 +15,7 @@ Use the `cafleet` CLI to register as a member, send and receive messages, and di
 
 ## Required reading
 
-Open your authoritative role first. Use an available non-shell text reader for prerequisites; when shell is the only text reader, prerequisite file reads may precede ready. Ready is an ordinary member's first operational broker shell command and precedes task work. A monitor follows its distinct pre-launch backend read and startup sequence.
+Open your authoritative role first. Use an available non-shell text reader for prerequisites; when shell is the only text reader, prerequisite file reads may precede ready. Ready is a member's first operational broker shell command and precedes task work.
 
 | # | Read | Timing and responsibility |
 |---|---|---|
@@ -27,9 +27,9 @@ Load skills through your executing backend's supported loader. Absolute-path loa
 | Required read | Action boundary |
 |---|---|
 | [Member role](roles/member.md) | Ordinary-member startup and command authority. |
-| [Monitor role](roles/monitor.md) | Monitor startup, loop ownership and wake handling. |
+| [Monitor role](roles/monitor.md) | Monitor startup and wake handling. |
 | [Director role](roles/director.md) and [Supervision](reference/supervision.md) | Director setup, before orchestration; the role gates selected-backend and spawn-prompt reads. |
-| [Denied-command routing](reference/prompt-routing.md) | Before routing or processing an actual denied-command request. |
+| [Command routing](reference/prompt-routing.md) | Before routing a command your harness denied, or running one a member routed to you. |
 | [Recovery](reference/supervision.md#recovery) / [Shutdown](reference/supervision.md#shutdown) | Director reads the applicable section immediately before that action. |
 | [Broadcast](#broadcast) | Before fan-out or origin-message threading. |
 
@@ -40,11 +40,11 @@ Use the [command index](#command-index) on demand for exact runtime flags, outpu
 You have read `reference/coding-agents.md` (Required-reading row #1). Resolve values by the subject of the action:
 
 1. **Select the subject.** For your current instructions, use your `CODING AGENT:` identity (your own identity when standalone) and its Runtime bindings. For a member spawn, select the backend under [Director model-selection policy](roles/director.md#model-selection), then read that backend's Model catalog and Role defaults and validate target effort and launch capabilities against its Runtime bindings. For captured panes, use the observed member's recorded backend and its Pane-state capture cues. Keep the observer's own tools and decision surface.
-2. **Materialize values.** Resolve the seven runtime placeholders from Runtime bindings for the relevant operation, and the role's model and effort from the selected spawn backend's Role defaults. A Director's local long-lived work uses its own execution primitive. Monitor bootstrap and recovery inherit the Director's backend; reviewer selection may use a different backend. Use the documented neutral defaults below only for their explicitly allowed missing/unknown-backend cases. Report a missing required supported-backend section, malformed table, or broken reference as a documentation defect.
+2. **Materialize values.** Resolve the five runtime placeholders from Runtime bindings for the relevant operation, and the role's model and effort from the selected spawn backend's Role defaults. Monitor bootstrap and recovery inherit the Director's backend; reviewer selection may use a different backend. Use the documented neutral defaults below only for their explicitly allowed missing/unknown-backend cases. Report a missing required supported-backend section, malformed table, or broken reference as a documentation defect.
 3. **Apply notes.** At each instruction named in the selected backend's *Note → applies at* table, follow that note's caveat. An ordinary member resolves its own runtime section; it acquires no model-selection duty.
 4. **Self-check at emission.** Emit concrete values in commands and messages. Resolve any remaining literal `{token}` before emitting it.
 
-For example, a Codex Director spawning an OpenCode reviewer reads OpenCode Role defaults and effort capability while retaining Codex decision and execution tools. A Claude monitor observing Codex applies Codex capture cues while its own loop uses Claude execution.
+For example, a Codex Director spawning an OpenCode reviewer reads OpenCode Role defaults and effort capability while retaining Codex decision and execution tools. A Claude monitor observing Codex applies Codex capture cues while keeping its own Claude tools.
 
 ### Documented defaults
 
@@ -60,8 +60,6 @@ Used only when your backend's section omits a token or your backend is unknown. 
 | `{other_model}` | the spawning Director's own model (inherit the parent) |
 | `{other_effort}` | omit `--effort` to use the backend default |
 | `{permission_flags}` | describe the mode neutrally as "workspace-scoped auto-approval" — for prose uses only; spawn-flag construction never falls here |
-| `{bg_run}` | a backgrounded `!` shell command |
-| `{bg_stop}` | killing the recorded background process |
 | `{pane_title}` | no `--name` analog |
 | `{skill_loader}` | reading the skill's `SKILL.md` + your overlay by absolute path |
 | `{effort_levels}` | unsupported — omit `--effort` |
@@ -70,7 +68,7 @@ Used only when your backend's section omits a token or your backend is unknown. 
 
 Every `cafleet` invocation that touches members or messages names its **subject** as a positional integer id placed immediately after the subcommand name; ids that describe a relationship stay as flags:
 
-- Positional `MEMBER_ID` — **the member in question**: the requester on `message poll`, and the target on `member delete` / `show` / `prompt` / `ping` / `capture`. The fleet is derived from the member row.
+- Positional `MEMBER_ID` — **the member in question**: the requester on `message poll`, and the target on `member delete` / `show` / `prompt` / `exec` / `ping` / `capture`. The fleet is derived from the member row.
 - Positional `MESSAGE_ID` — the message on `message ack` / `message show`; recipient and fleet are derived from the message row.
 - Positional `FLEET_ID` — the fleet on `fleet show` / `fleet delete` / `member list` / `monitor`.
 - `--from-member-id <int>` / `--to-member-id <int>` — the two parties of a two-party command: the **sender** and the **recipient** on `message send`; `message broadcast` takes the sender only. The fleet is derived from the sender row.
@@ -93,7 +91,7 @@ CLI environment variables (the `CAFLEET_`-prefixed `CAFLEET_DATABASE_URL`, `CAFL
 
 ## Team supervision
 
-The fleet's **monitor member** is spawned by the `cafleet fleet create` bootstrap itself, before any ordinary `cafleet member create`. At startup it launches the `cafleet monitor` wake loop in its own pane, confirms the loop's `monitor loop started` line, and sends the gate signal `monitor live` to the Director — the message that gates the first ordinary spawn (the CLI's monitor-first guard backstops it). On each wake it classifies the fleet's panes and contacts the Director only when something actually needs attention. A dead monitor is re-spawned mid-run with `cafleet member create --role monitor`.
+`cafleet fleet create` bootstraps supervision in one command: it spawns the fleet's **monitor member** before any ordinary `cafleet member create`, starts the fleet's `cafleet monitor` loop as a detached process, and returns once the loop is live. The loop delivers the keystrokes the broker is holding for busy panes and, once per wake interval, wakes the monitor member. The monitor member's `ready` gates the first ordinary spawn (the CLI's monitor-first guard backstops it). On each wake it classifies the fleet's panes and contacts the Director only when something actually needs attention. A dead monitor is re-spawned mid-run with `cafleet member create --role monitor`.
 
 For the full governance + heartbeat mechanism, Read [`reference/supervision.md`](reference/supervision.md); the monitor member's own protocol is [`roles/monitor.md`](roles/monitor.md).
 
@@ -115,13 +113,11 @@ When you need a recorded user reaction — **approve**, **choose among options**
 
 ## One-shot command isolation
 
-Every one-shot `cafleet` process is the **only command in its shell-tool invocation**. Run a sequence of CAFleet operations as separate shell-tool calls. Do not place a one-shot CAFleet command beside another command using a newline, `;`, `&&`, a pipe, shell `&`, or any other setup/follow-up command — a compound invocation keeps your shell tool occupied after the CAFleet process exits, so your pane cannot consume an inbound inline preview while the extra command runs.
+Every one-shot `cafleet` process is the **only command in its shell-tool invocation**. Run a sequence of CAFleet operations as separate shell-tool calls. Do not place a one-shot CAFleet command beside another command using a newline, `;`, `&&`, a pipe, shell `&`, or any other setup/follow-up command — a compound invocation keeps your shell tool occupied after the CAFleet process exits, so your pane is not at rest and the broker holds every inbound preview while the extra command runs.
 
 Leading `NAME=value` assignments that set the environment of the CAFleet process are allowed; they do not start another process. They must immediately precede the CAFleet executable — do not substitute an `env` helper process or append another command. Shell redirection does not authorize another process either; a command that needs a long body uses the positional argument or `--file <path>`, not a pipe.
 
-**Permission-error diagnostic.** A CAFleet command that fails with an operating-system permission error — `Operation not permitted` / `Permission denied`, commonly surfacing as a multiplexer socket or pane-command failure — signals that the invocation likely ran outside your coding agent's command auto-approval scope: a compound invocation does not match single-command allow rules, so the shell tool executes it under the agent's restricted sandbox or permission set. The response is to re-run the CAFleet command as its own isolated invocation, honoring the no-resend rule (§ *Send (Unicast)*) whenever a persisted message id was already reported — never a compound retry.
-
-The sole exception is the long-lived `cafleet monitor` process. Its invocation must still contain only that monitor process, but it may use exactly the background or managed-execution mechanism resolved by your coding-agent overlay — including OpenCode's shell `&` form and tool-managed background modes. The overlay owns that launch syntax; this rule does not duplicate lifecycle mechanics.
+**Permission-error diagnostic.** A CAFleet command that fails with an operating-system permission error — `Operation not permitted` / `Permission denied`, commonly surfacing as a multiplexer socket or pane-command failure — signals that the invocation likely ran outside your coding agent's command auto-approval scope: a compound invocation does not match single-command allow rules, so the shell tool executes it under the agent's restricted sandbox or permission set. The response is to re-run the CAFleet command as its own isolated invocation. A message whose persisted id was already reported is committed (§ *Send (Unicast)*): send its body once only.
 
 Command isolation complements, but does not replace, the Director-side dispatch boundary in [`reference/supervision.md`](reference/supervision.md) § *Asynchronous Wait Rule*: after dispatching work to a member, a Director ends or yields its turn and a notification resumes the workflow in a later turn.
 
@@ -132,15 +128,11 @@ cafleet message send --from-member-id <my-member-id> \
   --to-member-id <target-member-id> "Did the API schema change?"
 ```
 
-`--to-member-id` (recipient id) is required, plus exactly one of the positional `TEXT` (inline body) or `--file <path>` (a UTF-8 file, or `-` for stdin — use it for long or multi-line bodies that would exceed the shell's `ARG_MAX`). The delivered body is truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` in the inline preview and text output. `--json` carries the complete untruncated body per [runtime JSON output](reference/runtime/spec/cli-options.md#json-output). After persisting, the broker keystrokes a 2-line inline preview into the recipient's pane — an `Esc`-safeguarded auto-fire the recipient consumes as a fresh user-turn (the same path serves `message broadcast`), caught on the next manual `message poll` or a Director `cafleet member ping` if missed; full mechanics in [`multiplexer-backends.md`](reference/runtime/spec/multiplexer-backends.md#push-notifications).
+`--to-member-id` (recipient id) is required, plus exactly one of the positional `TEXT` (inline body) or `--file <path>` (a UTF-8 file, or `-` for stdin — use it for long or multi-line bodies that would exceed the shell's `ARG_MAX`). The delivered body is truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` in the inline preview and text output. `--json` carries the complete untruncated body per [runtime JSON output](reference/runtime/spec/cli-options.md#json-output).
 
-When `message send` exits nonzero while stating that `Message <id> was persisted`, preserve that ID and **do not resend** the body. The recipient consumes and ACKs the existing row through its own isolated `message poll` and `message ack` calls. Handle the notification failure within your role authority:
+**Held delivery.** The broker persists the message, then keystrokes a 2-line inline preview into the recipient's pane — an `Esc`-safeguarded keystroke the recipient consumes as a fresh user-turn (the same path serves `message broadcast`). The keystroke is sent only into a pane at rest. When the recipient is mid-turn or shows a permission prompt the preview is **held**: the command still exits 0 (`notification_sent: false` in `--json`), and the fleet's monitor loop delivers the preview within one tick of the pane coming to rest. So send when you have something to send — no check of the recipient's pane comes first, and a held message needs no follow-up. A hold longer than `CAFLEET_DELIVERY_HOLD_TIMEOUT` (default 300 s) is forced into the pane with a `[cafleet]` line saying what it interrupted; full mechanics in [`multiplexer-backends.md`](reference/runtime/spec/multiplexer-backends.md#push-notifications).
 
-- An ordinary member reports the actual failure and persisted ID to the Director through `message send`; it acquires no pane-repair or ping authority.
-- The Director diagnoses or re-engages the recipient through [Recovery](reference/supervision.md#recovery), observing the fresh-capture gate before a non-exempt ping. The monitor uses only its fixed-ping and reporting policy.
-- If the report itself fails, preserve any persisted relay ID and report the actual observed failure through the remaining permitted surface. End the attempt without recursive duplicate failure reports. If broker routing is unavailable, state that concrete limitation; claim success only from observed results.
-
-This consumes committed messages without retrying their notifications. Exact intentional-skip and failed-preview outcomes remain in the [runtime send contract](reference/runtime/spec/cli-options.md#message-send).
+A `message send` that exits nonzero while stating that `Message <id> was persisted` has committed the message: the fleet's monitor loop could not be started. Keep the ID and send the body once only; the recipient consumes and ACKs the existing row. The exact outcomes are in the [runtime send contract](reference/runtime/spec/cli-options.md#message-send).
 
 ## Poll (Check Inbox)
 
@@ -166,13 +158,13 @@ Send to every active recipient in the sender's fleet except the sender. Supply t
 cafleet message broadcast --from-member-id <my-member-id> "Build failed on main branch"
 ```
 
-The broker persists one delivery per recipient plus a sender-side `broadcast_summary` row, and returns only the summary with `recipients` (real recipient count N) and `delivered` (panes reached by the preview). Failed previews can make these counts differ. Text output is:
+The broker persists one delivery per recipient plus a sender-side `broadcast_summary` row, and returns only the summary with `recipients` (real recipient count N) and `delivered` (the previews this command keystroked). A `delivered` below `recipients` means the other previews are held, and the monitor loop delivers each when its pane is at rest. Text output is:
 
 ```text
 broadcast id=<id> recipients=<N> delivered=<k>
 ```
 
-Use trailing `--json` for the full untruncated summary envelope and counts. Each recipient polls and ACKs its own delivery, as for unicast; recipients do not ACK the sender's summary. Preserve existing delivery IDs when handling missed previews under [Send](#send-unicast). A Director broadcasts only when every recipient passes the [fresh-capture gate](reference/supervision.md#the-pre-ping-capture-gate); otherwise defer the whole broadcast or use individually gated unicasts.
+Use trailing `--json` for the full untruncated summary envelope and counts. Each recipient polls and ACKs its own delivery, as for unicast; recipients do not ACK the sender's summary. A broadcast needs no check of the recipients' panes first: the broker holds each preview per recipient, as described under [Send](#send-unicast).
 
 The exact `"Broadcast sent to N recipients"` summary, `origin_message_id` grouping and row schema are owned by [Broadcast grouping](reference/runtime/spec/data-model.md#broadcast-grouping) and the [message envelope](reference/runtime/spec/message-envelope.md); flags and outcomes are in [message broadcast](reference/runtime/spec/cli-options.md#message-broadcast).
 
@@ -187,11 +179,13 @@ Use the offline runtime owners below for commands beyond Send/Poll/ACK. Command 
 | Database/server/output environment defaults | [Environment variables](reference/runtime/spec/cli-options.md#environment-variables) |
 | One message by positional MESSAGE_ID; full body with `--json` | [Message show](reference/runtime/spec/cli-options.md#message-show) and [envelopes](reference/runtime/spec/message-envelope.md) |
 | Active registry entries, detailed member view, placement/pending/idle and timestamps | [Member list](reference/runtime/spec/cli-options.md#member-list), [member show](reference/runtime/spec/cli-options.md#member-show), [output shapes](reference/runtime/spec/cli-options.md#output-shapes) |
-| Doctor's complete multiplexer/database/agent diagnosis and gating exit | [Doctor](reference/runtime/spec/cli-options.md#cafleet-doctor) |
+| Doctor's complete multiplexer/database/agent/member-permissions diagnosis and gating exit | [Doctor](reference/runtime/spec/cli-options.md#cafleet-doctor) |
+| Running a member's routed command to completion, its output and notices | [Member exec](reference/runtime/spec/cli-options.md#member-exec), [command routing](reference/prompt-routing.md) |
+| Held delivery, the hold timeout and forced previews | [Held delivery](reference/runtime/spec/multiplexer-backends.md#held-delivery) |
 | Backend selection, inherited/default/pinned models and effort | [Director model selection](roles/director.md#model-selection), [backend catalog](reference/coding-agents.md), [member create](reference/runtime/spec/cli-options.md#member-create) |
 | Monitor loop interval/tick/startup, scan/capture and pending-ping output | [Monitor](reference/runtime/spec/cli-options.md#cafleet-monitor), [Director actions](roles/director.md#fleet-scan), [monitor role](roles/monitor.md) |
 | Member deletion, pending/placementless registration and root guard | [Member delete](reference/runtime/spec/cli-options.md#member-delete) |
 | Fleet transaction/idempotence/message retention and pane teardown distinction | [Fleet delete](reference/runtime/spec/cli-options.md#fleet-delete); read [Shutdown](reference/supervision.md#shutdown) immediately before teardown |
-| Bootstrap, doctor → monitor ready/live → per-member ready, dispatch and closure | [Supervision](reference/supervision.md#spawn-protocol), [manual lifecycle](reference/runtime/how-to/mixed-backend-team.md#manual-lifecycle) |
+| Bootstrap, doctor → monitor ready → per-member ready, dispatch and closure | [Supervision](reference/supervision.md#spawn-protocol), [manual lifecycle](reference/runtime/how-to/mixed-backend-team.md#manual-lifecycle) |
 | ACK state transitions | [Persistence contracts](reference/runtime/spec/data-model.md#query-and-activity-contracts) |
 | Exact error strings and exit codes | [Error messages](reference/runtime/spec/cli-options.md#error-messages); application errors remain text on stderr even with `--json` |

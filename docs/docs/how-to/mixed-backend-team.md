@@ -21,8 +21,8 @@ Send each member a message asking it to report its backend, confirm
 all three replies, then shut down the team.
 ```
 
-Your agent loads the CAFleet Director instructions, starts the monitor,
-and dispatches each member after its own ready signal. Messages appear as
+Your agent loads the CAFleet Director instructions, creates the fleet with
+its monitor, and dispatches each member after its own ready signal. Messages appear as
 [inline previews](../spec/multiplexer-backends.md#push-notifications) in
 the member panes and remain available through the broker.
 
@@ -49,7 +49,8 @@ for overrides. The default skill roots are:
 The Director loads its own backend instructions and the installed generic
 Director role and supervision protocol before orchestration. When composing
 a spawn, it reads the selected backend's model catalog, defaults and
-capabilities. Pane classification uses the observed member's backend cues.
+capabilities. The monitor member classifies a pane with the observed
+member's backend cues.
 
 ### Bootstrap the monitor
 
@@ -68,20 +69,20 @@ DIRECTOR MEMBER ID: {director_member_id}
 YOUR MEMBER ID: {member_id}
 BASE: /home/cafleet-demo/work/demo
 CODING AGENT: {coding_agent}
-Complete the role's prerequisite reads, send ready to the Director, then launch the monitor loop in your own pane using the resolved backend lifecycle. Retain its execution handle and confirm the startup line before sending monitor live. Report a failed start without claiming live; the Director waits for monitor live before spawning an ordinary member.
+Complete the role's prerequisite reads, send ready to the Director, then end your turn. The monitor loop is already running; each wake it sends you names the members to health-check.
 ```
 
 ```bash
 cafleet fleet create --name demo --coding-agent claude --monitor-model haiku --monitor-effort low --monitor-file /home/cafleet-demo/work/demo/.prompts/monitor.md
 ```
 
-For example, the command returns `1 director=2 monitor=3`. The
-`--coding-agent` value states the backend already running in the Director's
-pane; the monitor inherits it. Wait for the monitor's `ready`, then its
-confirmed `monitor live` before creating an ordinary member. Registration
-alone does not establish startup. Codex retains a managed execution session
-and performs bounded startup and later-wake liveness checks; each backend's
-installed monitor instructions define its execution mechanism.
+For example, the command prints `1 director=2 monitor=3` and
+`monitor loop: pid 4821`. It returns only after the fleet's monitor loop is
+running, so the loop needs no step of its own. The `--coding-agent` value
+states the backend already running in the Director's pane; the monitor
+inherits it. Wait for the monitor's `ready` before creating an ordinary
+member: registration alone does not establish that the agent in the pane
+booted.
 
 ### Create and dispatch a member
 
@@ -106,21 +107,17 @@ cafleet member create --fleet-id 1 --name alice --description "Demo member" --fi
 ```
 
 Suppose the returned member ID is `4`. Wait for that member's `ready`, then
-take a fresh capture and apply the [capture gate](../concepts/monitoring.md)
-before dispatching work:
-
-```bash
-cafleet member capture 4
-```
-
-When the capture shows the member ready to receive its assignment:
+dispatch its work at once:
 
 ```bash
 cafleet message send --from-member-id 2 --to-member-id 4 "Please reply hello."
 ```
 
-The member receives the preview, polls, acknowledges and replies. Read the
-Director inbox and ACK each consumed delivery using its actual message ID:
+The send needs no check of the member's pane. When the member is still busy,
+the broker [holds the preview](../concepts/monitoring.md#delivery-pass) and
+the monitor loop delivers it once the pane is at rest. The member receives
+the preview, polls, acknowledges and replies. Read the Director inbox and ACK
+each consumed delivery using its actual message ID:
 
 ```bash
 cafleet message poll 2 --json
@@ -130,15 +127,28 @@ cafleet message poll 2 --json
 cafleet message ack 10
 ```
 
-Here `10` is an example. Repeat the capture gate before further dispatch;
-working or awaiting-user panes defer the send, and an unknown capture needs
-diagnosis. The monitor's live gate and each ordinary member's ready gate
-serve different purposes.
+Here `10` is an example. The monitor's `ready` gates the first member
+creation; each ordinary member's `ready` gates that member's first
+assignment.
+
+### Run a command for a member
+
+A member whose harness does not run a command asks the Director for it with
+a message such as `Need to run: mise //cafleet:test. My harness denied it.`
+Run the command in that member's pane:
+
+```bash
+cafleet member exec 4 "mise //cafleet:test"
+```
+
+The command runs to completion in the member's pane, the Director receives a
+completion notice in its inbox, and the member continues with the output — no
+ping and no pane capture. See
+[Command routing](../concepts/member-lifecycle.md#command-routing).
 
 ### Close the fleet
 
-Delete the monitor first to stop its wake source, then delete the ordinary
-member. After each command succeeds, verify that only the root Director
+Delete the monitor first, then delete the ordinary member. After each command succeeds, verify that only the root Director
 remains before deleting the fleet:
 
 ```bash
@@ -173,8 +183,8 @@ monitor model. The monitor inherits the Director's backend. Resolve model
 choices through [Model choice](../concepts/coding-agents.md#model-choice).
 
 For a mixed team, save separate ordinary-member prompts with the appropriate
-installed role/core/backend paths and a shared workspace BASE. After monitor
-live, add members with explicit backend flags:
+installed role/core/backend paths and a shared workspace BASE. After the
+monitor's `ready`, add members with explicit backend flags:
 
 ```bash
 cafleet member create --fleet-id 1 --name bob --description "Codex member" --coding-agent codex --file /home/cafleet-demo/work/demo/.prompts/bob.md
@@ -184,8 +194,7 @@ cafleet member create --fleet-id 1 --name bob --description "Codex member" --cod
 cafleet member create --fleet-id 1 --name carol --description "OpenCode member" --coding-agent opencode --file /home/cafleet-demo/work/demo/.prompts/carol.md
 ```
 
-Dispatch each member after its own ready and fresh capture, using the actual
-returned ID. List members to find their panes: only Claude sets the member
+Dispatch each member after its own ready, using the actual returned ID. List members to find their panes: only Claude sets the member
 name as its pane title. During shutdown, delete every added member after the
 monitor and before the root-only registry check. Exact flags, outputs and
 failure distinctions are in [CLI options](../spec/cli-options.md).

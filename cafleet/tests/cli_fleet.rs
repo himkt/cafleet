@@ -106,7 +106,7 @@ fn fleet_create_spawns_the_monitor_pane_with_identity_and_model() {
     ]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
 
-    assert_eq!(stdout(&output), "1 director=1 monitor=2\n");
+    assert_eq!(stdout(&output), cli.fleet_create_text(1, 1, 2));
     let split_line = cli
         .shim_calls()
         .into_iter()
@@ -117,8 +117,12 @@ fn fleet_create_spawns_the_monitor_pane_with_identity_and_model() {
         "only CAFLEET_DATABASE_URL is forwarded, got: {split_line}"
     );
     assert!(
-        split_line.contains("claude --permission-mode dontAsk --name monitor"),
-        "the monitor spawns under its hardcoded display name, got: {split_line}"
+        split_line.contains(
+            "claude --permission-mode dontAsk --allowedTools Bash(cafleet message *) \
+             Bash(cafleet monitor scan *) Bash(cafleet member ping *) --name monitor"
+        ),
+        "the monitor spawns with its allow rules under its hardcoded display name, \
+         got: {split_line}"
     );
     assert!(
         split_line.contains("--model haiku"),
@@ -177,7 +181,7 @@ fn fleet_create_reads_the_monitor_prompt_from_stdin() {
         "follow your monitor role protocol",
     );
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
-    assert_eq!(stdout(&output), "1 director=1 monitor=2\n");
+    assert_eq!(stdout(&output), cli.fleet_create_text(1, 1, 2));
 }
 
 #[test]
@@ -292,7 +296,7 @@ fn fleet_create_split_failure_rolls_back_rows_and_allows_fixture_retry() {
         "the command retries as-is: {}",
         stderr(&output)
     );
-    assert_eq!(stdout(&output), "1 director=1 monitor=2\n");
+    assert_eq!(stdout(&output), cli.fleet_create_text(1, 1, 2));
 }
 
 #[test]

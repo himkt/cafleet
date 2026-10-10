@@ -19,7 +19,7 @@
 //!     fn validate_effort(&self, effort: Option<&str>) -> Result<(), CafleetError>;
 //!     fn ensure_available(&self, probe: &dyn SpawnProbe) -> Result<(), CafleetError>;
 //!     fn build_spawn_argv(&self, prompt: &str, display_name: &str,
-//!         model: Option<&str>, effort: Option<&str>) -> Vec<String>;
+//!         model: Option<&str>, effort: Option<&str>, monitor: bool) -> Vec<String>;
 //! }
 //!
 //! // Registry: exact-name lookup over exactly three eager singletons.

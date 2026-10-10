@@ -17,14 +17,19 @@ mod structural_contracts {
     const MANUAL: &str = "docs/docs/how-to/mixed-backend-team.md";
     const AUTHOR: &str = ".claude/skills/skill-author/SKILL.md";
     const BASH: &str = ".claude/rules/bash-tool.md";
-    const RUNTIME: [&str; 7] = [
+    const RUNTIME: [&str; 5] = [
         "decision_surface",
         "permission_flags",
-        "bg_run",
-        "bg_stop",
         "pane_title",
         "skill_loader",
         "effort_levels",
+    ];
+    const SUBSECTIONS: [&str; 5] = [
+        "runtime-bindings",
+        "role-defaults",
+        "model-catalog",
+        "note--applies-at",
+        "pane-state-capture-cues",
     ];
     const DEFAULTS: [&str; 6] = [
         "reviewer_model",
@@ -326,6 +331,25 @@ mod structural_contracts {
                     &format!("missing anchor #{anchor}; {}", unsupported.join("; ")),
                 ))
             }
+        }
+
+        fn subsections(&self) -> Result<Vec<String>, String> {
+            let child = self.text.chars().take_while(|c| *c == '#').count() + 1;
+            let mut fence = false;
+            let mut ids = Vec::new();
+            for (index, line) in self.text.lines().enumerate() {
+                if line.trim_start().starts_with("~~~") || line.trim_start().starts_with("```") {
+                    fence = !fence;
+                }
+                let depth = line.chars().take_while(|c| *c == '#').count();
+                if !fence && depth == child && line.as_bytes().get(depth) == Some(&b' ') {
+                    ids.push(
+                        heading_id(line[depth + 1..].trim())
+                            .map_err(|error| self.error(self.line + index, &error))?,
+                    );
+                }
+            }
+            Ok(ids)
         }
 
         fn require(&self, tokens: &[&str]) -> Result<(), String> {
@@ -654,48 +678,27 @@ mod structural_contracts {
     }
 
     #[test]
-    fn backend_worked_launches_and_stop_bindings_preserve_execution_modes() {
+    fn backend_sections_hold_the_canonical_subsections_in_order() {
         let document = INVENTORY.document(BACKENDS);
-        for (backend, launch, stop) in [
-            ("claude", "run_in_background: true", "TaskStop"),
-            (
-                "codex",
-                "cafleet monitor <fleet-id>",
-                "retained managed execution session",
-            ),
-            (
-                "opencode",
-                "cafleet monitor <fleet-id> &",
-                "recorded background process",
-            ),
-        ] {
+        for backend in ["claude", "codex", "opencode", "template"] {
             let section = document.section(backend).unwrap();
-            let worked = section.section("worked-resolution").unwrap();
-            worked
-                .require(&[
-                    launch,
-                    "cafleet monitor <fleet-id>",
-                    "monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)",
-                    "monitor live",
-                ])
-                .unwrap();
-            let runtime = section
-                .section("runtime-bindings")
-                .unwrap()
-                .bindings(&RUNTIME)
-                .unwrap();
-            if backend == "codex" {
-                assert!(
-                    runtime["bg_run"].contains("Codex-managed execution"),
-                    "{}",
-                    section.error(section.line, "bg_run must bind Codex-managed execution")
-                );
-            }
-            assert!(
-                runtime["bg_stop"].contains(stop),
+            assert_eq!(
+                section.subsections().unwrap(),
+                SUBSECTIONS,
                 "{}",
-                section.error(section.line, &format!("bg_stop must name {stop}"))
+                section.error(
+                    section.line,
+                    "backend subsections must match the canonical list"
+                )
             );
+        }
+    }
+
+    #[test]
+    fn backend_capture_cues_name_all_four_states() {
+        let document = INVENTORY.document(BACKENDS);
+        for backend in ["claude", "codex", "opencode"] {
+            let section = document.section(backend).unwrap();
             let cues = section.section("pane-state-capture-cues").unwrap();
             let rows = cues.rows().unwrap();
             let actual = rows
@@ -860,7 +863,6 @@ mod structural_contracts {
                 "1 director=2 monitor=3",
                 "cafleet member create --fleet-id 1",
                 "member ID is `4`",
-                "cafleet member capture 4",
                 "cafleet message send --from-member-id 2 --to-member-id 4",
                 "cafleet message poll 2 --json",
                 "cafleet message ack 10",
@@ -881,20 +883,18 @@ mod structural_contracts {
     }
 
     #[test]
-    fn message_and_shell_examples_retain_commands_and_protocol_links() {
+    fn message_and_exec_examples_retain_commands_and_protocol_links() {
         let send = INVENTORY.document(CORE).section("send-unicast").unwrap();
         send.require(&[
             "cafleet message send --from-member-id",
             "--to-member-id",
             "--file",
             "--json",
-            "Message <id> was persisted",
         ])
         .unwrap();
         for target in [
             "reference/runtime/spec/cli-options.md#json-output",
             "reference/runtime/spec/multiplexer-backends.md#push-notifications",
-            "reference/supervision.md#recovery",
             "reference/runtime/spec/cli-options.md#message-send",
         ] {
             INVENTORY.require_link(&send, target).unwrap();
@@ -915,25 +915,24 @@ mod structural_contracts {
         ] {
             INVENTORY.require_link(&broadcast, target).unwrap();
         }
-        let dispatch = INVENTORY
-            .document(ROUTING)
-            .section("director-side-dispatch")
+        let routing = INVENTORY.document(ROUTING);
+        routing
+            .require(&["Need to run: <command>. My harness denied it."])
             .unwrap();
-        dispatch
+        routing
+            .section("director-side-dispatch")
+            .unwrap()
             .ordered(&[
-                "cafleet member prompt <member-id> --shell",
-                "cafleet member ping <member-id>",
+                "cafleet member exec <member-id>",
                 "cafleet message ack <message-id>",
             ])
             .unwrap();
         for target in [
             "../roles/member.md#command-execution",
+            "../roles/director.md#member-exec",
             "../roles/director.md#member-prompt",
-            "../roles/director.md#member-ping-manual-inbox-poll",
         ] {
-            INVENTORY
-                .require_link(&INVENTORY.document(ROUTING), target)
-                .unwrap();
+            INVENTORY.require_link(&routing, target).unwrap();
         }
         let isolation = INVENTORY
             .document(CORE)
@@ -968,7 +967,7 @@ mod structural_contracts {
             .unwrap();
         bash.require(&[
             "cafleet member ping",
-            "cafleet member prompt --shell",
+            "cafleet member exec",
             "cafleet message poll <your-member-id>",
             "skills/cafleet/roles/member.md",
             "skills/cafleet/reference/prompt-routing.md",
@@ -1100,7 +1099,7 @@ mod structural_contracts {
             .unwrap();
         spec.section("member-ping")
             .unwrap()
-            .require(&["send_poll_trigger", "{member_id, pane_id, skipped}"])
+            .require(&["send_poll_trigger", "{member_id, pane_id, skipped, reason}"])
             .unwrap();
         spec.section("member-capture")
             .unwrap()
@@ -1111,7 +1110,6 @@ mod structural_contracts {
             .require(&[
                 "cafleet monitor FLEET_ID [--tick N] [--interval N]",
                 "CAFLEET_MONITOR_WAKE_INTERVAL",
-                "monitor live",
             ])
             .unwrap();
         spec.section("66-monitor-heartbeat-loop")
@@ -1205,7 +1203,6 @@ mod structural_contracts {
                 vec![
                     "pane-creation-ownership",
                     "push-notifications",
-                    "inline-preview-errors",
                     "esc-safeguard",
                 ],
             ),
@@ -1373,17 +1370,17 @@ mod structural_contracts {
                 "missing",
                 "| Placeholder | Value |\n|---|---|\n",
                 4,
-                "missing binding bg_run",
+                "missing binding pane_title",
             ),
             (
                 "duplicate",
-                "| Placeholder | Value |\n|---|---|\n| `{bg_run}` | launch |\n| `{bg_run}` | again |\n",
+                "| Placeholder | Value |\n|---|---|\n| `{pane_title}` | title |\n| `{pane_title}` | again |\n",
                 7,
-                "unknown or duplicate binding bg_run",
+                "unknown or duplicate binding pane_title",
             ),
             (
                 "empty",
-                "| Placeholder | Value |\n|---|---|\n| `{bg_run}` | |\n",
+                "| Placeholder | Value |\n|---|---|\n| `{pane_title}` | |\n",
                 6,
                 "malformed table row",
             ),
@@ -1394,7 +1391,7 @@ mod structural_contracts {
                 line: 4,
                 section: "codex runtime-bindings".into(),
             };
-            let error = region.bindings(&["bg_run"]).unwrap_err();
+            let error = region.bindings(&["pane_title"]).unwrap_err();
             assert!(
                 error.starts_with(&format!("{name}.md:{expected_line}:"))
                     && error.contains(expected),

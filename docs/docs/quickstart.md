@@ -27,7 +27,7 @@ system:
 
 | Backend | Config file | Manual configuration | Installed by `cafleet setup` | Reference |
 |---|---|---|---|---|
-| `claude` (Claude Code) | `~/.claude/settings.json` | The `permissions.allow` / `permissions.ask` entries below | The skills | The sub-section below |
+| `claude` (Claude Code) | `~/.claude/settings.json` | The `permissions.allow` / `permissions.ask` entries below, for the Director's session | The skills | The sub-section below |
 | `codex` (OpenAI Codex CLI) | `~/.codex/config.toml` | The `[sandbox_workspace_write]` entries below | The skills, plus `~/.codex/rules/cafleet.rules` | [The `cafleet` rules file](spec/coding-agent-backends.md#cafleet-rules-file) |
 | `opencode` | none | none required | The skills, plus the `cafleet` agent preset at `~/.opencode/agents/cafleet.md` | [Opencode](spec/coding-agent-backends.md#opencode) |
 
@@ -50,7 +50,8 @@ that need one.
       "Skill(cafleet:cafleet-design-doc)"
     ],
     "ask": [
-      "Bash(cafleet * member prompt *)"
+      "Bash(cafleet member prompt *)",
+      "Bash(cafleet member exec *)"
     ]
   }
 }
@@ -59,8 +60,15 @@ that need one.
 The `Bash(cafleet *)` pattern is the single allow-everything entry that the
 literal integer-id convention enables —
 one pattern covers every subcommand for every fleet. `cafleet member prompt *`
-is moved to the `ask` list because it keystrokes arbitrary text or shell
-commands into a member's pane; the operator should confirm each invocation.
+and `cafleet member exec *` are moved to the `ask` list because the first
+keystrokes arbitrary text into a member's pane and the second runs an
+arbitrary command there; the operator should confirm each invocation.
+
+These entries serve the session that directs the fleet. A claude member
+needs no allow rule of its own for the broker commands: cafleet passes them
+on the member's spawn command line. A `deny` or `ask` rule that matches a
+broker command still blocks a member, and `cafleet doctor` reports it — see
+[Spawn-time allow rules](spec/coding-agent-backends.md#spawn-time-allow-rules).
 
 ### Codex
 
@@ -78,8 +86,8 @@ default SQLite DB directory. Use the absolute path matching
 `CAFLEET_DATABASE_URL` or the default XDG location.
 
 The Codex rules for `cafleet` commands allow every subcommand while keeping
-`cafleet member prompt` prompting; the reference above covers their precedence
-and where operator customizations belong.
+`cafleet member prompt` and `cafleet member exec` prompting; the reference
+above covers their precedence and where operator customizations belong.
 
 ### Trust the working directory
 

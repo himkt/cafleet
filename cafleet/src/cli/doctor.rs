@@ -1,7 +1,7 @@
-//! `cafleet doctor` — the three-section environment diagnosis (SPEC §6.3
-//! *doctor*): multiplexer, database, coding agents, rendered without early
-//! abort. Guard-exempt: it reports instead of blocking; exit 1 iff any
-//! rendered issue.
+//! `cafleet doctor` — the four-section environment diagnosis (SPEC §6.3
+//! *doctor*): multiplexer, database, coding agents, member permissions,
+//! rendered without early abort. Guard-exempt: it reports instead of
+//! blocking; exit 1 iff any rendered issue.
 
 use std::path::{Path, PathBuf};
 
@@ -15,6 +15,7 @@ use crate::config::Settings;
 use crate::config_dir::DirSource;
 use crate::diagnosis::{self, AssetMode, AssetReport, AssetState, SchemaState};
 use crate::error::CafleetError;
+use crate::member_permissions::{self, Finding, FindingKind};
 use crate::multiplexer::{Multiplexer, MultiplexerContext};
 use crate::presentation;
 
@@ -70,10 +71,13 @@ pub fn run(
     let assets = assets?;
     let agents = agent_rows(&home, &assets);
     let superseded = &assets.superseded;
+    let permissions = claude_member_permissions(&assets)?;
+    let findings = permissions.as_deref().unwrap_or_default();
 
     let issues = usize::from(mux.is_err())
         + usize::from(!db_ok)
-        + agents.iter().filter(|row| row.is_issue).count();
+        + agents.iter().filter(|row| row.is_issue).count()
+        + findings.len();
     let agents_ok = agents.iter().all(|row| !row.is_issue);
 
     let payload = json!({
@@ -101,6 +105,7 @@ pub fn run(
         },
         "database": presentation::doctor_database(&schema, head),
         "coding_agents": presentation::doctor_assets(&assets, super::VERSION),
+        "member_permissions": presentation::doctor_member_permissions(findings),
         "issues": issues,
     });
 
@@ -142,6 +147,13 @@ pub fn run(
                 tilde(&row.path, &home)
             ));
         }
+        lines.push(format!(
+            "{} member permissions",
+            if findings.is_empty() { "✓" } else { "✗" }
+        ));
+        for detail in member_permission_lines(permissions.as_deref(), &home) {
+            lines.push(format!("  claude: {detail}"));
+        }
         lines.push(match issues {
             0 => "no issues found".to_string(),
             1 => "1 issue found".to_string(),
@@ -170,6 +182,55 @@ fn multiplexer_report(settings: &Settings) -> Result<MuxOk, String> {
         presence_var,
         presence_value: std::env::var(presence_var).unwrap_or_default(),
     })
+}
+
+/// The member-permission findings for claude; `None` when the claude assets
+/// are not installed at the resolved config directory, so nothing is checked.
+fn claude_member_permissions(report: &AssetReport) -> Result<Option<Vec<Finding>>, CafleetError> {
+    let installed_at = report.agents.iter().find_map(|agent| match &agent.state {
+        AssetState::Current { identity, .. } | AssetState::Stale { identity, .. }
+            if agent.coding_agent == "claude" =>
+        {
+            Some(&identity.path)
+        }
+        _ => None,
+    });
+    let Some(config_dir) = installed_at else {
+        return Ok(None);
+    };
+    let cwd = std::env::current_dir().map_err(|error| {
+        CafleetError::App(format!("cannot read the working directory: {error}"))
+    })?;
+    Ok(Some(member_permissions::diagnose(
+        &member_permissions::claude_settings_files(config_dir, &cwd),
+    )))
+}
+
+fn member_permission_lines(findings: Option<&[Finding]>, home: &Path) -> Vec<String> {
+    let Some(findings) = findings else {
+        return vec!["– not installed".to_string()];
+    };
+    if findings.is_empty() {
+        return vec!["no setting blocks the member broker commands".to_string()];
+    }
+    findings
+        .iter()
+        .map(|finding| {
+            let file = tilde(&finding.file.display().to_string(), home);
+            match &finding.kind {
+                FindingKind::BlockingRule {
+                    list,
+                    rule,
+                    command,
+                } => format!("{file} permissions.{list} \"{rule}\" matches \"{command}\""),
+                FindingKind::ManagedRulesOnly { command } => format!(
+                    "{file} allowManagedPermissionRulesOnly is true and its permissions.allow \
+                     does not match \"{command}\""
+                ),
+                FindingKind::Unreadable => format!("{file} is not valid JSON"),
+            }
+        })
+        .collect()
 }
 
 /// Render typed asset facts using the existing text-only cells.

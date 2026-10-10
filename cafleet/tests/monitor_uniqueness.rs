@@ -229,7 +229,7 @@ fn populated_v7_upgrade_preserves_records_and_adds_the_unique_index() {
     member(&conn, 2, 1, "deregistered", MONITOR).unwrap();
     member(&conn, 3, 1, "active", "{}").unwrap();
     let before = records(&conn);
-    assert_eq!(db::migrate_to_head(&mut conn).unwrap(), 8);
+    assert_eq!(db::migrate_to_head(&mut conn).unwrap(), 9);
     assert_eq!(records(&conn), before);
     let index: (i64, i64) = conn.query_row("SELECT \"unique\", partial FROM pragma_index_list('members') WHERE name='idx_members_one_active_monitor_per_fleet'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
     assert_eq!(index, (1, 1));

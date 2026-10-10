@@ -28,6 +28,7 @@
       "mise //cafleet:build": "allow",
       "wc *": "allow",
       "cafleet *": "allow",
+      "cafleet member exec *": "deny",
     },
     "read": {
       "*": "allow",

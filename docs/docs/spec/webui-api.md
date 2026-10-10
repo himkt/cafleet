@@ -224,17 +224,19 @@ The complete field lifecycle is in the
 [data model](data-model.md#monitor_runtime).
 
 
-Launching the loop is CLI-only (`cafleet monitor`), and the monitor member owns
-it as a long-lived execution resolved by its backend. It has no `POST`/`DELETE` counterpart
-and no CLI stop command — deleting the monitor member kills the pane hosting
-the loop, and a still-running loop self-terminates after `fleet delete`.
+Starting the loop is CLI-only: `cafleet fleet create` starts it as a detached
+process, and a `message send`, `message broadcast`, or `member exec` that
+leaves work owed restarts a dead one (see
+[Loop start](cli-options.md#monitor-loop-start)). It has no `POST`/`DELETE`
+counterpart and no CLI stop command — a running loop stops on its next tick
+after `fleet delete`, or when the Director's pane is gone.
 
 ### PATCH /api/monitor — Update the Wake Interval {#patch-api-monitor}
 
 Updates the fleet's wake interval. The running loop re-reads the
 stored value on every tick, so the edit changes the cadence within one scan
-tick; the next `cafleet monitor` start re-stamps the interval from the CLI/env
-resolution. See
+tick, and a restarted loop keeps it unless it is started with `--interval`
+(see [loop precedence](cli-options.md#monitor-loop-precedence)). See
 [Monitoring](../concepts/monitoring.md#cadence-and-tick-precision).
 
 **Request**: `X-Fleet-Id: <fleet_id>` header.
@@ -367,6 +369,8 @@ X-Fleet-Id: <fleet_id>
 **Broadcast** (`to_member_id == "*"`): the server skips destination validation (no specific recipient to verify) and fans out to every active member in the fleet except the sender, plus a summary message. The sender is still required to be active and in the caller's fleet. The response's `message_id` is the summary message's id.
 
 **Sender identity**: The Admin WebUI always submits `from_member_id = director.member_id` (the fleet's root Director). The endpoint itself is sender-agnostic — it accepts any active member in the fleet — but no UI path lets the operator pick a different sender.
+
+**Delivery**: the server persists the message and, when its process can resolve a multiplexer, makes one [delivery attempt](multiplexer-backends.md#held-delivery) per recipient pane. A preview that is held, or that the server cannot attempt, stays owed and the fleet's monitor loop delivers it. The route does not start the loop, because the server may run outside the multiplexer session the loop needs. The response is the same in every case.
 
 **Response** (200 OK):
 

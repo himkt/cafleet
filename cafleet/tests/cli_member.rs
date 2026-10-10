@@ -4,7 +4,7 @@
 
 mod common;
 
-use common::{Cli, code, stderr, stdout, write_file};
+use common::{Cli, REST_CAPTURE, code, stderr, stdout, write_file};
 use sha2::{Digest, Sha256};
 
 fn database_records(cli: &Cli) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
@@ -53,7 +53,7 @@ fn assert_keys(value: &serde_json::Value, expected: &[&str]) {
 }
 
 fn assert_capture_content(entry: &serde_json::Value, pane: &str) {
-    let content = format!("pane:{pane}\nline1\nline2");
+    let content = REST_CAPTURE.replace("{pane}", pane);
     assert_eq!(entry["content"], content);
     assert!(entry["captured_at"].is_string());
     let digest = Sha256::digest(content.as_bytes());
@@ -131,7 +131,8 @@ fn member_create_spawns_patches_the_pane_and_substitutes_identity() {
     );
     assert!(
         split_line.contains(
-            "claude --permission-mode dontAsk --name worker FLEET 1 ME 3 DIRECTOR 1 AGENT claude"
+            "claude --permission-mode dontAsk --allowedTools Bash(cafleet message *) \
+             --name worker FLEET 1 ME 3 DIRECTOR 1 AGENT claude"
         ),
         "the rendered prompt carries literal identity, got: {split_line}"
     );
@@ -518,23 +519,10 @@ fn member_prompt_dispatches_and_validates_the_text() {
         "{calls:?}"
     );
 
-    let calls_before = calls.len();
-    let output = cli.run(&[
-        "member",
-        "prompt",
-        &member_id.to_string(),
-        "--shell",
-        "ls -la",
-    ]);
-    assert_eq!(code(&output), 0, "{}", stderr(&output));
-    let out = stdout(&output);
-    assert!(out.contains("Sent shell prompt"), "{out}");
-    assert!(out.contains(&format!("worker ({pane}).")), "{out}");
-    let calls = cli.shim_calls();
     let delta = &calls[calls_before..];
     let payload = delta
         .iter()
-        .position(|line| line == &format!("send-keys -t {pane} -l ! ls -la"))
+        .position(|line| line == &format!("send-keys -t {pane} -l hello worker"))
         .unwrap();
     assert!(payload > 0, "{delta:?}");
     assert_eq!(delta[payload - 1], format!("send-keys -t {pane} Escape"));
@@ -553,6 +541,58 @@ fn member_prompt_dispatches_and_validates_the_text() {
             .iter()
             .all(|line| !line.starts_with("send-keys")),
         "{calls:?}"
+    );
+}
+
+#[test]
+fn member_prompt_takes_the_pane_claim_and_fails_while_another_keystroke_holds_it() {
+    let cli = Cli::new();
+    let (fleet_id, _) = cli.seeded_fleet();
+    let member_id = cli.seed_member(fleet_id, "worker");
+    let keystroke_at = || -> Option<String> {
+        cli.sqlite()
+            .query_row(
+                "SELECT keystroke_at FROM member_placements WHERE member_id=?1",
+                [member_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+    };
+
+    let output = cli.run(&["member", "prompt", &member_id.to_string(), "hello worker"]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(keystroke_at().is_some(), "a dispatch claims the pane");
+
+    let held = cafleet::time::format_utc(chrono::Utc::now() + chrono::Duration::hours(1));
+    cli.sqlite()
+        .execute(
+            "UPDATE member_placements SET keystroke_at=?1 WHERE member_id=?2",
+            rusqlite::params![held, member_id],
+        )
+        .unwrap();
+    let calls_before = cli.shim_calls().len();
+    let output = cli.run(&["member", "prompt", &member_id.to_string(), "second prompt"]);
+    assert_eq!(code(&output), 1);
+    assert_eq!(stdout(&output), "");
+    assert!(
+        stderr(&output).contains(&format!(
+            "Error: member {member_id}'s pane is receiving another keystroke; \
+             retry in a few seconds."
+        )),
+        "{}",
+        stderr(&output)
+    );
+    let calls = cli.shim_calls();
+    assert!(
+        calls[calls_before..]
+            .iter()
+            .all(|line| !line.starts_with("send-keys")),
+        "{calls:?}"
+    );
+    assert_eq!(
+        keystroke_at(),
+        Some(held),
+        "a refused claim changes nothing"
     );
 }
 
@@ -606,10 +646,11 @@ fn member_ping_skips_a_pending_placement_and_exits_zero() {
     let output = cli.run(&["member", "ping", &member_id.to_string(), "--json"]);
     assert_eq!(code(&output), 0);
     let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
-    assert_keys(&payload, &["member_id", "pane_id", "skipped"]);
+    assert_keys(&payload, &["member_id", "pane_id", "skipped", "reason"]);
     assert_eq!(payload["member_id"], member_id);
     assert_eq!(payload["pane_id"], serde_json::Value::Null);
     assert_eq!(payload["skipped"], true);
+    assert_eq!(payload["reason"], "pending_placement");
     let calls = cli.shim_calls();
     assert!(
         calls[calls_before..]
@@ -626,10 +667,11 @@ fn member_ping_skips_a_pending_placement_and_exits_zero() {
     let output = cli.run(&["member", "ping", &member_id.to_string(), "--json"]);
     assert_eq!(code(&output), 0);
     let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
-    assert_keys(&payload, &["member_id", "pane_id", "skipped"]);
+    assert_keys(&payload, &["member_id", "pane_id", "skipped", "reason"]);
     assert_eq!(payload["member_id"], member_id);
     assert_eq!(payload["pane_id"], pane);
     assert_eq!(payload["skipped"], false);
+    assert_eq!(payload["reason"], serde_json::Value::Null);
     let calls = cli.shim_calls();
     assert_eq!(calls[calls_before..].iter().filter(|line| line.as_str() == format!(
         "send-keys -t {pane} -l cafleet message poll {member_id} — then resume your work if something was still running."
@@ -645,7 +687,7 @@ fn member_capture_text_emits_the_content_only() {
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     assert_eq!(
         stdout(&output),
-        "pane:%7\nline1\nline2",
+        REST_CAPTURE.replace("{pane}", "%7"),
         "the raw capture content, no envelope, no trailing newline"
     );
 
@@ -774,7 +816,7 @@ fn monitor_scan_prints_director_first_then_members_ascending() {
             "{section}"
         );
         assert!(
-            section.ends_with(&format!("pane:{pane}\nline1\nline2")),
+            section.ends_with(&REST_CAPTURE.replace("{pane}", pane)),
             "{section}"
         );
     }

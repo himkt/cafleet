@@ -43,8 +43,8 @@ enum Command {
     /// Migrate the database schema and install the coding-agent assets
     /// (skills and presets).
     Setup(setup::SetupArgs),
-    /// Print the three-section environment diagnosis (multiplexer, database,
-    /// coding agents).
+    /// Print the four-section environment diagnosis (multiplexer, database,
+    /// coding agents, member permissions).
     Doctor(doctor::DoctorArgs),
     /// Start the admin WebUI server.
     Server(server::ServerArgs),
@@ -160,16 +160,9 @@ mod tests {
                 VERSION,
             )
             .unwrap();
-            let message = broker::send_message(
-                &mut conn,
-                &common::FakeNotifier::succeeding(),
-                200,
-                director,
-                &director.to_string(),
-                "ack",
-            )
-            .unwrap();
-            assert_eq!(message.message.message_id, 1);
+            let message =
+                broker::send_message(&mut conn, director, &director.to_string(), "ack").unwrap();
+            assert_eq!(message.message_id, 1);
             Ok(conn)
         };
         run_with_hooks(

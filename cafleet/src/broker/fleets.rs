@@ -279,8 +279,8 @@ mod tests {
     use crate::broker;
     use crate::broker::test_support as common;
     use crate::broker::test_support::{
-        FakeNotifier, MONITOR_DESCRIPTION, MONITOR_NAME, MONITOR_PANE, bootstrap_monitor,
-        create_fleet, migrated_conn, register,
+        MONITOR_DESCRIPTION, MONITOR_NAME, MONITOR_PANE, bootstrap_monitor, create_fleet,
+        migrated_conn, register,
     };
     use crate::error::CafleetError;
     use crate::output::format_json;
@@ -570,10 +570,12 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
-        let notifier = FakeNotifier::succeeding();
-        common::send(&mut conn, &notifier, director_id, member_id, "hi");
+        common::send(&mut conn, director_id, member_id, "hi");
         let now = crate::time::format_utc(chrono::Utc::now());
-        assert!(broker::claim_monitor_runtime(&mut conn, fleet_id, 4242, 5, 600, &now).unwrap());
+        assert!(
+            broker::claim_monitor_runtime(&mut conn, fleet_id, 4242, Some(5), Some(600), &now)
+                .unwrap()
+        );
 
         let result = broker::delete_fleet(&mut conn, fleet_id).unwrap();
         assert_eq!(

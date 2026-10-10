@@ -91,23 +91,38 @@ pub fn resolve_body(
     file: Option<&str>,
     flag: &str,
 ) -> Result<String, CafleetError> {
+    let body = read_body(inline, file, flag)?;
+    if !is_blank(&body) {
+        return Ok(body);
+    }
+    Err(match file {
+        None => CafleetError::Usage("text may not be empty.".to_string()),
+        Some("-") => CafleetError::App(format!("{flag} -: stdin is empty.")),
+        Some(path) => CafleetError::App(format!("{flag} {path}: file is empty.")),
+    })
+}
+
+/// The `member exec` command body: the same positional / `--file` reader,
+/// with one empty-body rejection for either source. The body is returned
+/// verbatim.
+pub fn resolve_command_body(
+    inline: Option<&str>,
+    file: Option<&str>,
+) -> Result<String, CafleetError> {
+    let body = read_body(inline, file, "--file")?;
+    if is_blank(&body) {
+        return Err(CafleetError::Usage("command may not be empty.".to_string()));
+    }
+    Ok(body)
+}
+
+fn read_body(inline: Option<&str>, file: Option<&str>, flag: &str) -> Result<String, CafleetError> {
     match (inline, file) {
-        (Some(text), None) => {
-            if is_blank(text) {
-                Err(CafleetError::Usage("text may not be empty.".to_string()))
-            } else {
-                Ok(text.to_string())
-            }
-        }
+        (Some(text), None) => Ok(text.to_string()),
         (None, Some("-")) => {
             let bytes = read_stdin().map_err(|e| CafleetError::App(format!("{flag} -: {e}")))?;
-            let body = String::from_utf8(bytes)
-                .map_err(|_| CafleetError::App(format!("{flag} -: file is not valid UTF-8.")))?;
-            if is_blank(&body) {
-                Err(CafleetError::App(format!("{flag} -: stdin is empty.")))
-            } else {
-                Ok(body)
-            }
+            String::from_utf8(bytes)
+                .map_err(|_| CafleetError::App(format!("{flag} -: file is not valid UTF-8.")))
         }
         (None, Some(path)) => {
             let bytes = std::fs::read(path).map_err(|e| {
@@ -119,14 +134,8 @@ pub fn resolve_body(
                 };
                 CafleetError::App(message)
             })?;
-            let body = String::from_utf8(bytes).map_err(|_| {
-                CafleetError::App(format!("{flag} {path}: file is not valid UTF-8."))
-            })?;
-            if is_blank(&body) {
-                Err(CafleetError::App(format!("{flag} {path}: file is empty.")))
-            } else {
-                Ok(body)
-            }
+            String::from_utf8(bytes)
+                .map_err(|_| CafleetError::App(format!("{flag} {path}: file is not valid UTF-8.")))
         }
         (Some(_), Some(_)) | (None, None) => {
             unreachable!("clap's required argument group supplies exactly one body source")
@@ -140,43 +149,5 @@ pub fn emit(json: bool, payload: &Value, text: impl FnOnce() -> String) {
         println!("{}", format_json(payload));
     } else {
         println!("{}", text());
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::broker::InlinePreviewSender;
-    use crate::config::Settings;
-    use crate::runtime::RuntimeNotifier;
-
-    fn settings(multiplexer: Option<&str>) -> Settings {
-        Settings {
-            database_url: "sqlite:///unused.db".to_string(),
-            broker_host: "127.0.0.1".to_string(),
-            broker_port: 8000,
-            max_text_len: 200,
-            multiplexer: multiplexer.map(str::to_string),
-            monitor_wake_interval: 60,
-        }
-    }
-
-    #[test]
-    fn cli_notifier_construction_is_infallible_and_defers_the_resolution_error() {
-        let notifier = RuntimeNotifier::new(&settings(Some("bogus")));
-        let expected = "CAFLEET_MULTIPLEXER='bogus' is not a supported multiplexer \
-                        (expected one of: herdr, tmux)";
-
-        let err = notifier
-            .send_inline_preview("%1", 7, 2, "2026-07-30T09:00:00.000000+00:00", "hi")
-            .unwrap_err();
-        assert_eq!(err, expected, "the retained resolve_mux error, verbatim");
-
-        let err = notifier
-            .send_inline_preview("%1", 8, 2, "2026-07-30T09:00:00.000000+00:00", "again")
-            .unwrap_err();
-        assert_eq!(
-            err, expected,
-            "the retained error survives repeated attempts"
-        );
     }
 }

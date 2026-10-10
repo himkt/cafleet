@@ -112,7 +112,7 @@ User → /clean-docs (one workflow)
 
 | Role | Responsibility |
 |---|---|
-| **Director** | Resolve task-scoped `${BASE}`; bootstrap the fleet with the monitor member included (`cafleet fleet create --monitor-file <abs path> --monitor-model {monitor_model}` plus supported monitor effort) and gate the first ordinary spawn on its `monitor live` message (the CLI monitor-first guard backstops); partition the in-scope tree into **disjoint file-ownership** slices (one file → one scanner, whole surfaces per scanner); merge partial artifacts into the run's canonical artifact; route it to the reviewer and **hold the apply until the reviewer's approval**; relay approval to scanners; apply a denied write through the full-file staging protocol; run verification; escalate observations to the user; delete the monitor member first (first-out) at teardown. |
+| **Director** | Resolve task-scoped `${BASE}`; bootstrap the fleet with the monitor member included (`cafleet fleet create --monitor-file <abs path> --monitor-model {monitor_model}` plus supported monitor effort) and gate the first ordinary spawn on its `ready` message (the CLI monitor-first guard backstops); partition the in-scope tree into **disjoint file-ownership** slices (one file → one scanner, whole surfaces per scanner); merge partial artifacts into the run's canonical artifact; route it to the reviewer and **hold the apply until the reviewer's approval**; relay approval to scanners; apply a denied write through the full-file staging protocol; run verification; escalate observations to the user; delete the monitor member first (first-out) at teardown. |
 | **scanner** (×N) | For its slice: run the workflow's scan mechanics, propose actions per the workflow's rubric, record observations separately, write its partial artifact under `${BASE}`. After approval is relayed: apply its own slice's approved rows exactly as written, re-verify its diff, route harness-denied writes to the Director. |
 | **reviewer** | Validate the merged artifact **before** any edit, per the workflow's guarantees and guardrails. After apply: run the workflow verification (parameter table below). |
 
@@ -145,8 +145,8 @@ extensions, since a run produces a run artifact, not a design document:
 2. **Bootstrap** — `cafleet doctor` (gating), then `cafleet fleet create
    --monitor-file <abs path to ${BASE}/.prompts/monitor-<UTC-compact>.md>
    --monitor-model {monitor_model} [--monitor-effort {monitor_effort}]` (one atomic command: fleet + Director +
-   monitor member; members spawned `{permission_flags}`); gate the first
-   ordinary spawn on the monitor's `monitor live` message (the CLI
+   monitor member + the monitor loop; members spawned `{permission_flags}`); gate the first
+   ordinary spawn on the monitor's `ready` message (the CLI
    monitor-first guard backstops).
 3. **Spawn workers** — scanners (one per disjoint slice, using the other-member defaults) and the reviewer
    (`--model {reviewer_model}` with supported reviewer effort), each from a rendered prompt at
@@ -165,9 +165,9 @@ extensions, since a run produces a run artifact, not a design document:
    (parameter table below).
 8. **Report + teardown** — the Director reports the applied set and the
    escalated observations, commits only when the user asks, and tears down
-   (delete the monitor member first — the pane kill takes the loop down —
+   (delete the monitor member first
    → delete the remaining members → verify via `member list` →
-   `fleet delete`).
+   `fleet delete`, which also stops the monitor loop).
 
 ### Full-file staging
 
@@ -217,7 +217,7 @@ ROLE DEFINITION: Open [INSERT abs path to <workflow>/roles/<role>.md] with an av
 
 Load these skills at startup:
 - the clean-docs skill — for the shared spine and your workflow's mechanics
-- the cafleet skill — for the broker primitives and bash-via-Director routing
+- the cafleet skill — for the broker primitives and command routing through the Director
 
 FLEET ID: {fleet_id}
 DIRECTOR MEMBER ID: {director_member_id}
@@ -246,7 +246,7 @@ When you see cafleet message poll output with a message from the Director, act o
 ## Backend-neutrality
 
 `SKILL.md`, the workflow bodies, and every `<workflow>/roles/*.md` are
-backend-neutral: they use `{bg_run}` / `{reviewer_model}` /
+backend-neutral: they use `{reviewer_model}` /
 `{skill_loader}` / `{decision_surface}` / `{permission_flags}` tokens resolved
 from the executing agent's Runtime bindings or, for model placeholders, the selected spawn backend's Role defaults in `../../../skills/cafleet/reference/coding-agents.md`. Capture interpretation uses the observed member's backend cues, and
 every member's spawn-prompt identity block carries a

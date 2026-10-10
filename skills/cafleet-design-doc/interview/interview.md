@@ -13,7 +13,7 @@ Read these prerequisites in order before orchestration. Your `CODING AGENT:` ide
 | 1 | Your backend section in [coding-agents.md](../../cafleet/reference/coding-agents.md) | Resolve local Runtime bindings and bound notes before acting. |
 | 2 | [Generic Director role](../../cafleet/roles/director.md) | Before setup; obey its selected-backend, spawn skeleton, audit, size and action-triggered reads. |
 | 3 | [Guidelines File Layout](../reference/guidelines.md#file-layout), then [BASE](../../cafleet/reference/base-dir.md) | Before argument normalization and output-root resolution. |
-| 4 | [Supervision](../../cafleet/reference/supervision.md) | Before orchestration; monitor bootstrap/live, capture, dispatch and authorization gates. |
+| 4 | [Supervision](../../cafleet/reference/supervision.md) | Before orchestration; monitor bootstrap and ready gate, broker-held delivery, dispatch and authorization scope. |
 | 5 | [Coordination](../reference/coordination.md) | Before messages, payload retrieval or markers. |
 | 6 | [Guidelines](../reference/guidelines.md) | Before document-format or phase-completion actions. |
 
@@ -89,9 +89,9 @@ cafleet fleet create --name "design-doc-interview-{slug}" --coding-agent <backen
 
 Capture `fleet_id` and `director.member_id` from the JSON response and substitute them for `<fleet-id>` and `<director-member-id>` in every subsequent command.
 
-#### 2b. Wait for the monitor gate (before the Analyzer)
+#### 2b. Wait for the monitor's ready (before the Analyzer)
 
-Wait for the monitor member's `ready` then `monitor live` signals per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Wait for the monitor gate* — `monitor live` gates the Analyzer spawn (2d). The monitor member is deleted first (first-out) in the 2f teardown.
+Wait for the monitor member's `ready` signal per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Wait for the monitor's ready* — it gates the Analyzer spawn (2d). The monitor member is deleted first (first-out) in the 2f teardown.
 
 #### 2c. Locate the Analyzer role file (path-by-reference)
 
@@ -101,7 +101,7 @@ Resolve the absolute path of `<this skill>/roles/analyzer.md`. The spawn prompt 
 
 #### 2d. Spawn the Analyzer
 
-**Gate**: do not spawn the Analyzer until the monitor member's `monitor live` signal (2b) has arrived.
+**Gate**: spawn the Analyzer only after the monitor member's `ready` signal (2b) has arrived.
 
 Render the canonical [spawn-prompt skeleton](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with the Analyzer delta below (two-stage rendering + brace rules at the skeleton):
 

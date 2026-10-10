@@ -45,11 +45,10 @@
 //! send_wake_entries(&self, target_pane_id: &str, fleet_id: i64, members: &[WakeEntry<'_>],
 //!     director: &WakeEntry<'_>) -> Result<bool, MultiplexerError>  // Ok(false) = keystroke lost
 //! send_inline_preview(&self, target_pane_id: &str, message_id: i64, sender_id: i64,
-//!     ts: &str, text: &str) -> Result<(), MultiplexerError>
+//!     ts: &str, text: &str, note: Option<&str>) -> Result<(), MultiplexerError>
 //!     // fail-fast: Err carries the raw backend detail (missing binary is the
 //!     // exact "<backend> binary not found on PATH" string)
-//! send_prompt(&self, target_pane_id: &str, text: &str, shell: bool)
-//!     -> Result<(), MultiplexerError>
+//! send_prompt(&self, target_pane_id: &str, text: &str) -> Result<(), MultiplexerError>
 //! capture_pane(&self, target_pane_id: &str, lines: i64) -> Result<String, MultiplexerError>
 //! list_pane_ids(&self) -> Result<BTreeSet<String>, MultiplexerError>
 //! kill_pane(&self, target_pane_id: &str, ignore_missing: bool) -> Result<(), MultiplexerError>

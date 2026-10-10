@@ -12,6 +12,7 @@ pub mod tmux;
 use std::fmt;
 
 use crate::coding_agent::coding_agent;
+use crate::delivery::PaneIo;
 
 pub use herdr::HerdrMultiplexer;
 pub use tmux::TmuxMultiplexer;
@@ -227,6 +228,24 @@ pub fn build_wake_payload_from_entries(
     ))
 }
 
+/// The inline-preview payload shared by both backends: the header line, the
+/// text with its line breaks folded to `⏎`, and the optional broker note line.
+pub(crate) fn inline_preview_payload(
+    message_id: i64,
+    sender_id: i64,
+    ts: &str,
+    text: &str,
+    note: Option<&str>,
+) -> String {
+    let sanitized = text.replace("\r\n", "⏎").replace(['\n', '\r'], "⏎");
+    let mut payload = format!("[cafleet msg {message_id} from {sender_id} {ts}]\n{sanitized}");
+    if let Some(note) = note {
+        payload.push('\n');
+        payload.push_str(note);
+    }
+    payload
+}
+
 /// The pane-hosting backend surface (SPEC §6.5). `agent_status` is the
 /// `Option`-returning native-state capability: herdr reads its native state,
 /// tmux always answers `None`.
@@ -257,13 +276,9 @@ pub trait Multiplexer {
         sender_id: i64,
         ts: &str,
         text: &str,
+        note: Option<&str>,
     ) -> Result<(), MultiplexerError>;
-    fn send_prompt(
-        &self,
-        target_pane_id: &str,
-        text: &str,
-        shell: bool,
-    ) -> Result<(), MultiplexerError>;
+    fn send_prompt(&self, target_pane_id: &str, text: &str) -> Result<(), MultiplexerError>;
     fn capture_pane(&self, target_pane_id: &str, lines: i64) -> Result<String, MultiplexerError>;
     fn list_pane_ids(&self) -> Result<std::collections::BTreeSet<String>, MultiplexerError>;
     fn kill_pane(&self, target_pane_id: &str, ignore_missing: bool)
@@ -337,17 +352,13 @@ impl Multiplexer for AnyMultiplexer {
         sender_id: i64,
         ts: &str,
         text: &str,
+        note: Option<&str>,
     ) -> Result<(), MultiplexerError> {
-        dispatch!(self, mux => mux.send_inline_preview(target_pane_id, message_id, sender_id, ts, text))
+        dispatch!(self, mux => mux.send_inline_preview(target_pane_id, message_id, sender_id, ts, text, note))
     }
 
-    fn send_prompt(
-        &self,
-        target_pane_id: &str,
-        text: &str,
-        shell: bool,
-    ) -> Result<(), MultiplexerError> {
-        dispatch!(self, mux => mux.send_prompt(target_pane_id, text, shell))
+    fn send_prompt(&self, target_pane_id: &str, text: &str) -> Result<(), MultiplexerError> {
+        dispatch!(self, mux => mux.send_prompt(target_pane_id, text))
     }
 
     fn capture_pane(&self, target_pane_id: &str, lines: i64) -> Result<String, MultiplexerError> {
@@ -425,17 +436,25 @@ macro_rules! implement_backend {
                 sender_id: i64,
                 ts: &str,
                 text: &str,
+                note: Option<&str>,
             ) -> Result<(), MultiplexerError> {
-                $backend::send_inline_preview(self, target_pane_id, message_id, sender_id, ts, text)
+                $backend::send_inline_preview(
+                    self,
+                    target_pane_id,
+                    message_id,
+                    sender_id,
+                    ts,
+                    text,
+                    note,
+                )
             }
 
             fn send_prompt(
                 &self,
                 target_pane_id: &str,
                 text: &str,
-                shell: bool,
             ) -> Result<(), MultiplexerError> {
-                $backend::send_prompt(self, target_pane_id, text, shell)
+                $backend::send_prompt(self, target_pane_id, text)
             }
 
             fn capture_pane(
@@ -471,6 +490,29 @@ macro_rules! implement_backend {
 }
 implement_backend!(TmuxMultiplexer);
 implement_backend!(HerdrMultiplexer);
+
+impl<M: Multiplexer> PaneIo for M {
+    fn capture_pane(&self, pane_id: &str, lines: i64) -> Result<String, String> {
+        Multiplexer::capture_pane(self, pane_id, lines).map_err(|error| error.to_string())
+    }
+
+    fn send_inline_preview(
+        &self,
+        pane_id: &str,
+        message_id: i64,
+        sender_id: i64,
+        ts: &str,
+        text: &str,
+        note: Option<&str>,
+    ) -> Result<(), String> {
+        Multiplexer::send_inline_preview(self, pane_id, message_id, sender_id, ts, text, note)
+            .map_err(|error| error.to_string())
+    }
+
+    fn send_prompt(&self, pane_id: &str, text: &str) -> Result<(), String> {
+        Multiplexer::send_prompt(self, pane_id, text).map_err(|error| error.to_string())
+    }
+}
 
 /// Resolve the backend per the SPEC precedence and construct it over the
 /// given runner and environment snapshot.
@@ -783,7 +825,7 @@ mod tests {
                 env(&[("TMUX", "/tmp/tmux"), ("TMUX_PANE", "%1")]),
             ));
             assert_eq!(
-                mux.send_inline_preview("%5", 5, 2, TS, "hi")
+                mux.send_inline_preview("%5", 5, 2, TS, "hi", None)
                     .unwrap_err()
                     .to_string(),
                 "tmux binary not found on PATH"
@@ -794,7 +836,7 @@ mod tests {
                 env(&[("HERDR_ENV", "1")]),
             ));
             assert_eq!(
-                mux.send_inline_preview("w1:p2", 5, 2, TS, "hi")
+                mux.send_inline_preview("w1:p2", 5, 2, TS, "hi", None)
                     .unwrap_err()
                     .to_string(),
                 "herdr binary not found on PATH"
@@ -804,7 +846,7 @@ mod tests {
                 FakeRunner::with_binary("tmux"),
                 env(&[("TMUX", "/tmp/tmux"), ("TMUX_PANE", "%1")]),
             ));
-            assert!(mux.send_inline_preview("%5", 5, 2, TS, "hi").is_ok());
+            assert!(mux.send_inline_preview("%5", 5, 2, TS, "hi", None).is_ok());
         }
     }
 }

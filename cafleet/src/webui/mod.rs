@@ -19,7 +19,7 @@ use crate::broker;
 use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::output::format_json;
-use crate::runtime::RuntimeNotifier;
+use crate::runtime::{deliver_preview, resolve_mux};
 use crate::time::{format_utc, now_utc};
 
 const RESERVED_PREFIXES: [&str; 2] = ["ui", "api"];
@@ -403,36 +403,32 @@ async fn send(State(state): State<AppState>, headers: HeaderMap, body: Bytes) ->
             Ok(settings) => settings,
             Err(error) => return broker_500(error),
         };
-        let notifier = RuntimeNotifier::new(&settings);
-        let message = match recipient {
-            SendRecipient::Broadcast => {
-                match broker::broadcast_message(conn, &notifier, settings.max_text_len, from, &text)
-                {
-                    Ok(result) => result.message,
-                    Err(error) => return broker_500(error),
-                }
-            }
+        let (message, deliveries) = match recipient {
+            SendRecipient::Broadcast => match broker::broadcast_message(conn, from, &text) {
+                Ok(rows) => (rows.summary, rows.deliveries),
+                Err(error) => return broker_500(error),
+            },
             SendRecipient::Member(to) => {
                 match broker::get_member(conn, to, fleet_id) {
                     Ok(Some(_)) => {}
                     Ok(None) => return detail(StatusCode::NOT_FOUND, "Member not found"),
                     Err(error) => return broker_500(error),
                 }
-                match broker::send_message(
-                    conn,
-                    &notifier,
-                    settings.max_text_len,
-                    from,
-                    &to.to_string(),
-                    &text,
-                ) {
-                    // Persistence alone decides the response; the outcome's
-                    // notification_error is intentionally ignored (SPEC §6.8).
-                    Ok(outcome) => outcome.message,
+                match broker::send_message(conn, from, &to.to_string(), &text) {
+                    Ok(message) => {
+                        let delivery = (to, message.message_id);
+                        (message, vec![delivery])
+                    }
                     Err(error) => return broker_500(error),
                 }
             }
         };
+        // Persistence alone decides the response (SPEC §6.8): a preview this
+        // attempt does not keystroke stays owed to the fleet's loop.
+        let mux = resolve_mux(&settings).ok();
+        for (member_id, message_id) in deliveries {
+            let _ = deliver_preview(conn, &settings, mux.as_ref(), member_id, message_id);
+        }
         json_response(
             StatusCode::OK,
             &json!({
@@ -499,13 +495,7 @@ mod integrity_regressions {
             let mut conn = common::migrated_conn(&dir);
             let (fleet, director) = common::create_fleet(&mut conn, "integrity");
             let worker = common::register(&mut conn, fleet, "worker", None);
-            let sent = common::send(
-                &mut conn,
-                &common::FakeNotifier::succeeding(),
-                director,
-                worker,
-                "work",
-            );
+            let sent = common::send(&mut conn, director, worker, "work");
             let message =
                 broker::get_message(&conn, sent["message"]["message_id"].as_i64().unwrap())
                     .unwrap();

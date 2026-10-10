@@ -13,7 +13,7 @@ Read these prerequisites in order before orchestration. Your `CODING AGENT:` ide
 | 1 | Your backend section in [coding-agents.md](../../cafleet/reference/coding-agents.md) | Resolve local Runtime bindings and bound notes before acting. |
 | 2 | [Generic Director role](../../cafleet/roles/director.md) | Before setup; obey its selected-backend, spawn skeleton, audit, size and action-triggered reads. |
 | 3 | [Guidelines File Layout](../reference/guidelines.md#file-layout), then [BASE](../../cafleet/reference/base-dir.md) | Before argument normalization and output-root resolution. |
-| 4 | [Supervision](../../cafleet/reference/supervision.md) | Before orchestration; monitor bootstrap/live, capture, dispatch and authorization gates. |
+| 4 | [Supervision](../../cafleet/reference/supervision.md) | Before orchestration; monitor bootstrap and ready gate, broker-held delivery, dispatch and authorization scope. |
 | 5 | [Coordination](../reference/coordination.md) | Before messages, payload retrieval or markers. |
 | 6 | [Guidelines](../reference/guidelines.md) | Before document-format or phase-completion actions. |
 
@@ -29,7 +29,7 @@ Read [Recovery](../../cafleet/reference/supervision.md#recovery) immediately bef
 
 Own the document's quality and fidelity to user intent. Bootstrap and supervise the fleet, enforce fresh-Drafter clarification before document content, relay questions and answers faithfully, and route Drafter/Reviewer revisions until Reviewer approval. Present that reviewed revision for explicit user approval, process feedback through Step 5, and send the Step 6 finalization handoff before teardown. The Drafter writes the document; the Reviewer independently evaluates it.
 
-Store literal fleet and member IDs from CLI JSON and use them on every broker command. Retrieve full payloads with `message poll --json`, ACK each consumed message, and dispatch through the shared capture/turn-boundary rules. Coordination owns marker placement and file-detail recovery; the process below owns each phase transition.
+Store literal fleet and member IDs from CLI JSON and use them on every broker command. Retrieve full payloads with `message poll --json`, ACK each consumed message, and dispatch at once under the shared dispatch-on-ready and turn-boundary rules; the broker holds a keystroke for a busy pane. Coordination owns marker placement and file-detail recovery; the process below owns each phase transition.
 
 ### Diagnostics and progress
 
@@ -111,9 +111,9 @@ cafleet fleet create --name "design-doc-create-{slug}" --coding-agent <backend> 
 
 Capture `fleet_id` and `director.member_id` from the JSON response and substitute them for `<fleet-id>` and `<director-member-id>` in every subsequent command.
 
-#### 1b. Wait for the monitor gate (before any ordinary member)
+#### 1b. Wait for the monitor's ready (before any ordinary member)
 
-Wait for the monitor member's `ready` then `monitor live` signals per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Wait for the monitor gate* — `monitor live` gates the Drafter and Reviewer spawns (1d/1e). The monitor member runs unchanged through the quality loop and is deleted first (first-out) in Step 6's teardown.
+Wait for the monitor member's `ready` signal per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Wait for the monitor's ready* — it gates the Drafter and Reviewer spawns (1d/1e). The monitor member runs unchanged through the quality loop and is deleted first (first-out) in Step 6's teardown.
 
 #### 1c. Locate role definitions (path-by-reference)
 
@@ -128,7 +128,7 @@ Substitute these absolute paths into the spawn prompts below.
 
 #### 1d. Spawn the Drafter
 
-**Gate**: do not spawn the Drafter until the monitor member's `monitor live` signal (1b) has arrived.
+**Gate**: spawn the Drafter only after the monitor member's `ready` signal (1b) has arrived.
 
 **Drafter spawn prompt** — render the canonical [spawn-prompt skeleton](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with the per-role delta below (two-stage rendering + brace rules at the skeleton). Keep the prompt compact and reference installed roles by path. Use the normal-mode column for fresh creation, the resume column for interview-marker resolution, and the review-only delta below when `QUALITY_REVIEW_ONLY=true`.
 

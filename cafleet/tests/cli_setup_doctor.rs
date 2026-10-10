@@ -76,8 +76,24 @@ fn assert_keys(value: &serde_json::Value, expected: &[&str]) {
 fn assert_doctor_shape(payload: &serde_json::Value) {
     assert_keys(
         payload,
-        &["multiplexer", "database", "coding_agents", "issues"],
+        &[
+            "multiplexer",
+            "database",
+            "coding_agents",
+            "member_permissions",
+            "issues",
+        ],
     );
+    assert_keys(&payload["member_permissions"], &["ok", "findings"]);
+    for finding in payload["member_permissions"]["findings"]
+        .as_array()
+        .unwrap()
+    {
+        assert_keys(
+            finding,
+            &["coding_agent", "file", "list", "rule", "command"],
+        );
+    }
     assert_keys(
         &payload["multiplexer"],
         &[
@@ -628,15 +644,6 @@ fn step6_doctor_open_and_path_failures_still_render_all_sections_in_text_and_jso
     assert_eq!(code(&output), 1);
     let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
     assert_doctor_shape(&payload);
-    assert_eq!(
-        payload
-            .as_object()
-            .unwrap()
-            .keys()
-            .map(String::as_str)
-            .collect::<Vec<_>>(),
-        vec!["multiplexer", "database", "coding_agents", "issues"]
-    );
     assert_eq!(payload["multiplexer"]["ok"], true);
     assert_eq!(payload["database"]["ok"], false);
     assert_eq!(
@@ -917,4 +924,155 @@ fn doctor_treats_empty_and_absent_asset_tables_as_informational() {
         "every agent renders not-installed with no recorded data: {out}"
     );
     assert!(out.contains("no issues found"), "got: {out}");
+}
+
+const SEND_PROBE: &str = "cafleet message send --from-member-id 1 --to-member-id 2 x";
+
+/// Run `doctor` and `doctor --json` from `project`, returning the text
+/// report and the parsed payload once both agree on `exit_code`.
+fn doctor_from(cli: &Cli, project: &Path, exit_code: i32) -> (String, serde_json::Value) {
+    let text = cli.run_in(project, &["doctor"]);
+    assert_eq!(code(&text), exit_code, "{}", stdout(&text));
+    let json = cli.run_in(project, &["doctor", "--json"]);
+    assert_eq!(code(&json), exit_code, "exit parity with text mode");
+    let payload: serde_json::Value = serde_json::from_str(stdout(&json).trim()).unwrap();
+    assert_doctor_shape(&payload);
+    (stdout(&text), payload)
+}
+
+fn write_user_settings(cli: &Cli, contents: &str) -> PathBuf {
+    let config_dir = PathBuf::from(cli.identity_path("claude"));
+    std::fs::create_dir_all(&config_dir).unwrap();
+    let path = config_dir.join("settings.json");
+    std::fs::write(&path, contents).unwrap();
+    path
+}
+
+#[test]
+fn doctor_reports_no_member_permission_finding_when_no_setting_blocks_a_broker_command() {
+    let cli = Cli::new();
+    cli.migrate();
+    seed_all_current(&cli);
+    write_user_settings(
+        &cli,
+        r#"{"permissions": {"allow": ["Bash(mise *)"], "deny": ["Bash(rm *)"]}}"#,
+    );
+    let project = tempfile::TempDir::new().unwrap();
+
+    let (out, payload) = doctor_from(&cli, project.path(), 0);
+    assert!(
+        out.contains(
+            "✓ member permissions\n  claude: no setting blocks the member broker commands\n\
+             no issues found"
+        ),
+        "{out}"
+    );
+    assert_eq!(
+        payload["member_permissions"],
+        serde_json::json!({"ok": true, "findings": []})
+    );
+    assert_eq!(payload["issues"], 0);
+}
+
+#[test]
+fn doctor_skips_member_permissions_when_the_claude_assets_are_not_installed() {
+    let cli = Cli::new();
+    cli.migrate();
+    write_user_settings(&cli, r#"{"permissions": {"deny": ["Bash"]}}"#);
+    let project = tempfile::TempDir::new().unwrap();
+
+    let (out, payload) = doctor_from(&cli, project.path(), 0);
+    assert!(
+        out.contains("✓ member permissions\n  claude: – not installed\nno issues found"),
+        "the – state never counts: {out}"
+    );
+    assert_eq!(
+        payload["member_permissions"],
+        serde_json::json!({"ok": true, "findings": []})
+    );
+    assert_eq!(payload["issues"], 0);
+}
+
+#[test]
+fn doctor_names_the_file_and_rule_of_a_deny_rule_that_blocks_a_broker_command() {
+    let cli = Cli::new();
+    cli.migrate();
+    seed_all_current(&cli);
+    let settings = write_user_settings(&cli, r#"{"permissions": {"deny": ["Bash(cafleet *)"]}}"#);
+    let project = tempfile::TempDir::new().unwrap();
+
+    let (out, payload) = doctor_from(&cli, project.path(), 1);
+    assert!(
+        out.contains(&format!(
+            "✗ member permissions\n  claude: ~/.claude/settings.json permissions.deny \
+             \"Bash(cafleet *)\" matches \"{SEND_PROBE}\"\n1 issue found"
+        )),
+        "{out}"
+    );
+    assert_eq!(
+        payload["member_permissions"],
+        serde_json::json!({
+            "ok": false,
+            "findings": [{
+                "coding_agent": "claude",
+                "file": settings.to_str().unwrap(),
+                "list": "deny",
+                "rule": "Bash(cafleet *)",
+                "command": SEND_PROBE,
+            }],
+        })
+    );
+    assert_eq!(payload["issues"], 1);
+}
+
+#[test]
+fn doctor_reports_a_project_ask_rule_and_an_unreadable_local_settings_file() {
+    let cli = Cli::new();
+    cli.migrate();
+    seed_all_current(&cli);
+    let project = tempfile::TempDir::new().unwrap();
+    let project_dir = project.path().canonicalize().unwrap();
+    std::fs::create_dir(project_dir.join(".claude")).unwrap();
+    let settings = project_dir.join(".claude/settings.json");
+    std::fs::write(
+        &settings,
+        r#"{"permissions": {"ask": ["Bash(cafleet message ack:*)"]}}"#,
+    )
+    .unwrap();
+    let local = project_dir.join(".claude/settings.local.json");
+    std::fs::write(&local, "{not json").unwrap();
+
+    let (out, payload) = doctor_from(&cli, &project_dir, 1);
+    assert!(
+        out.contains(&format!(
+            "✗ member permissions\n  claude: {} permissions.ask \"Bash(cafleet message ack:*)\" \
+             matches \"cafleet message ack 1\"\n  claude: {} is not valid JSON\n2 issues found",
+            settings.display(),
+            local.display()
+        )),
+        "{out}"
+    );
+    assert_eq!(
+        payload["member_permissions"],
+        serde_json::json!({
+            "ok": false,
+            "findings": [
+                {
+                    "coding_agent": "claude",
+                    "file": settings.to_str().unwrap(),
+                    "list": "ask",
+                    "rule": "Bash(cafleet message ack:*)",
+                    "command": "cafleet message ack 1",
+                },
+                {
+                    "coding_agent": "claude",
+                    "file": local.to_str().unwrap(),
+                    "list": null,
+                    "rule": null,
+                    "command": null,
+                },
+            ],
+        })
+    );
+    assert_eq!(payload["issues"], 2);
 }

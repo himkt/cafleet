@@ -19,8 +19,11 @@ path.
 ## Rust boundaries
 
 Broker queries return typed records; CLI and HTTP presenters build wire JSON.
-Shared diagnosis returns schema and asset facts. Keep process and notification
-adapters in `runtime/`, and preserve command output and guard order when refactoring.
+Shared diagnosis returns schema and asset facts. The broker persists and sends
+no keystroke; the delivery step in `delivery.rs` is the one place a held
+keystroke is sent, and the pane-state classifier lives in `pane_state.rs`. Keep
+process adapters and the monitor-loop launcher in `runtime/`, and preserve
+command output and guard order when refactoring.
 Use the existing CLI integration tests to check behavior across these boundaries.
 
 ## Tech stack

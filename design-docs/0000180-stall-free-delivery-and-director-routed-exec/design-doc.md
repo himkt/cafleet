@@ -1,7 +1,7 @@
 # Stall-free delivery and Director-routed exec
 
-**Status**: Approved
-**Progress**: 0/35 tasks complete
+**Status**: In Progress
+**Progress**: 33/34 tasks complete
 **Last Updated**: 2026-10-10
 
 ## Overview
@@ -10,17 +10,17 @@ Resolve GitHub issues #395, #438 and #443 so that a fleet keeps moving when a pa
 
 ## Success Criteria
 
-- [ ] A `cafleet message send` to a pane that shows a permission prompt or is mid-turn sends no keystroke; the preview lands within one loop tick after the pane returns to rest, with no user input (#438, #443).
-- [ ] A member that sends `ready` and keeps working receives its first assignment automatically when it goes idle; the Director sends that assignment in the same turn it receives `ready` (#395).
-- [ ] A held message is keystroked exactly once, whether the sender, the loop, or both evaluate it, and an ACKed message is never keystroked.
-- [ ] A hold older than `CAFLEET_DELIVERY_HOLD_TIMEOUT` is delivered as a forced delivery, carrying the broker note when the pane was `awaiting_user` and the resume clause when it was `working`.
-- [ ] `cafleet fleet create` returns only after the fleet's monitor loop is live, and no member role file instructs a member to launch the loop.
-- [ ] `cafleet member exec` runs a command in a member's pane, records its exit status, notifies the Director on completion, and resumes the member, with no `member ping` and no manual pane capture.
-- [ ] `cafleet member prompt --shell` no longer parses.
+- [x] A `cafleet message send` to a pane that shows a permission prompt or is mid-turn sends no keystroke; the preview lands within one loop tick after the pane returns to rest, with no user input (#438, #443).
+- [x] A member that sends `ready` and keeps working receives its first assignment automatically when it goes idle; the Director sends that assignment in the same turn it receives `ready` (#395).
+- [x] A held message is keystroked exactly once, whether the sender, the loop, or both evaluate it, and an ACKed message is never keystroked.
+- [x] A hold older than `CAFLEET_DELIVERY_HOLD_TIMEOUT` is delivered as a forced delivery, carrying the broker note when the pane was `awaiting_user` and the resume clause when it was `working`.
+- [x] `cafleet fleet create` returns only after the fleet's monitor loop is live, and no member role file instructs a member to launch the loop.
+- [x] `cafleet member exec` runs a command in a member's pane, records its exit status, notifies the Director on completion, and resumes the member, with no `member ping` and no manual pane capture.
+- [x] `cafleet member prompt --shell` no longer parses.
 - [ ] A claude member spawned while the user's `settings.json` holds no `Bash(cafleet ...)` allow rule sends `ready`, polls, and ACKs.
-- [ ] `cafleet doctor` exits 1 and names the file and rule when a claude `deny` or `ask` rule matches a member broker command.
-- [ ] A spawned member that sends no message within 180 s produces a broker notice in the Director's inbox.
-- [ ] The migration chain is contiguous 1..9 with head V9; `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //admin:lint` and `mise //admin:test` pass.
+- [x] `cafleet doctor` exits 1 and names the file and rule when a claude `deny` or `ask` rule matches a member broker command.
+- [x] A spawned member that sends no message within 180 s produces a broker notice in the Director's inbox.
+- [x] The migration chain is contiguous 1..9 with head V9; `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //admin:lint` and `mise //admin:test` pass.
 - [ ] The user has run the manual live checklist in § S11 once and every item passed.
 
 ---
@@ -124,19 +124,9 @@ The sizes are asymmetric on purpose. A false `awaiting_user` or `working` only d
 | `codex` | A numbered option under the cursor, `^\s*›\s+\d+\.\s`, or a `\[y/n\]` approval line | `esc to interrupt` | The composer prompt line: `^\s*[›▌](\s.*)?$` |
 | `opencode` | The permission popup title: `Permission required` | `esc\s+(to\s+)?interrupt` | The prompt box line: `^\s*┃(\s.*)?$` |
 
-Every pattern above is a candidate derived from the capture cues documented for that backend. The recorded fixtures are authoritative: the implementer adjusts a pattern until it matches every fixture of its state within its region and no fixture of another state, preferring the shortest pattern that does so.
+Every pattern above is derived from the capture cues documented for that backend and is implemented as written. A pattern that misreads a live pane is corrected when the manual live checklist of § S11 exposes it; the hold timeout bounds the cost of a miss in the meantime.
 
 `finished` means the composer is visible with no prompt box and no active-work cue. Text already typed into the composer does not change the result; a keystroke then appends to it, as it does today.
-
-**Fixtures.** `cafleet/tests/fixtures/panes/<coding_agent>/<state>-<nn>.txt`. One test iterates every fixture, applies the runtime's ANSI stripping and capture windowing, and asserts the state named by the file name.
-
-| State | Minimum fixtures per coding agent |
-|---|---|
-| `awaiting_user` | A tool approval prompt; for claude also an `AskUserQuestion` list; one prompt whose transcript above it contains an echoed user turn and the `working` cue text |
-| `working` | Model generating; a tool running; a `!` command running |
-| `finished` | Freshly started; at rest after a turn; at rest with every cue string of the other two states printed in the transcript above the regions |
-
-**Recording is a user prerequisite** and blocks the rest of Step 4. Members spawned by cafleet never show an approval prompt, and execute-run members may not run the `cafleet` binary, so the user records the fixtures by hand: start each coding agent in a multiplexer pane (for the prompts, in its default permission mode; for claude at rest, also in `dontAsk` and in auto mode), drive it into each state, and from another pane save the last 40 lines with the multiplexer's own capture command (`tmux capture-pane -p -t <pane> -S -40`, or `herdr pane read <pane>`).
 
 ### S3. Held delivery
 
@@ -271,7 +261,7 @@ Typing a forced delivery into a `working` claude pane without the `Escape`, so t
 | `message send` | Persist, run `deliver_pane` for the recipient, then ensure the loop when the fleet has owed work (§ S4). A held preview exits 0. `notification_sent` follows the table above. Text output is unchanged. |
 | `message broadcast` | Persist all rows, run `deliver_pane` once per recipient, then ensure the loop when the fleet has owed work. `delivered` follows the table above; the other previews are held. |
 | `POST /api/messages/send` | Persist, and run `deliver_pane` when the server process can resolve a multiplexer. The route does not start the loop, because the server may run outside the multiplexer session the loop needs. The response is unchanged. |
-| `member ping` | Classify the target first. Fire on `finished` or unclassified; skip on `awaiting_user`, `working`, an exec in flight, or a failed pane claim. A skip exits 0. |
+| `member ping` | Check for an exec in flight, then classify the target, then take the pane claim. Fire on `finished` or unclassified; skip on an exec in flight, `awaiting_user`, `working`, or a failed pane claim. A skip exits 0. |
 | `member prompt` | Plain form only (§ S5). It takes the pane claim and fails with `member <member_id>'s pane is receiving another keystroke; retry in a few seconds.` when the claim is refused. |
 | Monitor wake | Unchanged keystroke. It takes the pane claim; a refused claim leaves the wake due for the next tick. |
 
@@ -345,7 +335,7 @@ cafleet member exec-run EXEC_ID
 
 | Argument | Notes |
 |---|---|
-| positional `MEMBER_ID` | An active member with a pane. The fleet's root Director is rejected: `cannot exec in the Director's own pane`. A pending placement fails like `member prompt`. |
+| positional `MEMBER_ID` | An active member with a pane. The fleet's root Director is rejected with exit 1: `cannot exec in the Director's own pane`. A pending placement fails like `member prompt`. |
 | positional `COMMAND` / `--file PATH` | Exactly one. `--file -` reads stdin. The body may span lines and is stored verbatim; an empty body exits 2 with `command may not be empty.` |
 | `--wait` | Block until the exec closes, polling the row every second, then print its exit status. |
 
@@ -383,14 +373,14 @@ Exec states, derived from the timestamps:
 
 **Lost execs.** The loop closes an exec (`finished_at = resumed_at = now`, `exit_code` `NULL`) and posts a notice when it is dispatched but not started after `EXEC_START_GRACE_SECONDS = 30`, or running with a `pid` that is no longer alive.
 
-**Removal.** `cafleet member prompt` loses `--shell`; the multiplexer's `send_prompt` loses its `shell` parameter and the exec dispatch and resume keystrokes call the plain form. Every mention of the shell form and of the `prompt --shell → ping → ack` sequence is deleted.
+**Removal.** `cafleet member prompt` loses `--shell` and its JSON output becomes `{member_id, pane_id, text}`; the multiplexer's `send_prompt` loses its `shell` parameter and the exec dispatch and resume keystrokes call the plain form. Every mention of the shell form and of the `prompt --shell → ping → ack` sequence is deleted.
 
 **Permissions.** `member exec` carries an operator-controlled body. The Director runs it under its own harness mode, which decides when the user is asked.
 
 | Surface | Rule |
 |---|---|
 | Generated `permissions.allow` set (`cli-options.md` § *`permissions.allow` coverage*) | `member exec` and `member exec-run` are excluded, alongside `member prompt`: one carries a free-form command and the other executes a stored one. |
-| `presets/codex/cafleet.rules` | A new `prompt` rule for `["cafleet", "member", "exec"]`. The existing `["cafleet", "member", "prompt"]` rule stays for the plain form; its justification drops "or shell commands". |
+| `presets/codex/cafleet.rules` | A new `prompt` rule for `["cafleet", "member", "exec"]`, justified as `cafleet member exec runs an arbitrary shell command in a member pane`. The existing `["cafleet", "member", "prompt"]` rule stays for the plain form; its justification drops "or shell commands". |
 | `presets/opencode/cafleet.md` | A new `deny` entry for `cafleet member exec *`, placed after the `cafleet *` allow. The preset has no `member prompt` entry today; it configures members, which never dispatch. |
 
 **Member side.** A member asks with `cafleet message send`: `Need to run: <command>. My harness denied it.` For a command that is hard to quote, the member writes it to a file under its `BASE` and names the path; the Director passes that path to `--file`. The member then ends its turn. Routing is the standard path for every command the member's harness does not run, not a rare fallback: a member runs what its harness allows and routes the rest.
@@ -455,8 +445,12 @@ A rule matches a probe when it is `Bash`, or `Bash(<pattern>)` whose pattern mat
   claude: no setting blocks the member broker commands
 
 ✗ member permissions
-  claude: ~/.claude/settings.json permissions.deny "Bash(cafleet *)" matches "cafleet message poll 1"
+  claude: ~/.claude/settings.json permissions.deny "Bash(cafleet *)" matches "cafleet message send --from-member-id 1 --to-member-id 2 x"
+  claude: <file> allowManagedPermissionRulesOnly is true and its permissions.allow does not match "<command>"
+  claude: <file> is not valid JSON
 ```
+
+The second and third lines are the managed-rules-only and unreadable-file findings.
 
 When the claude assets are not installed the row reads `claude: – not installed` and never counts. JSON gains `member_permissions` between `coding_agents` and `issues`: `{"ok": <bool>, "findings": [{"coding_agent", "file", "list", "rule", "command"}]}`. `list` is `deny`, `ask` or `allowManagedPermissionRulesOnly`; `rule` is `null` for the managed-rules-only finding, whose `command` is the first unmatched probe; all three are `null` for an unreadable file. Each finding adds one to `issues`, so the existing exit-1 rule gates the spawn protocol.
 
@@ -526,7 +520,7 @@ The removal is total. Besides the rows above, Step 8 searches the repository out
 
 | Area | Cases |
 |---|---|
-| Classifier | Every fixture classifies as its file name states, including the three transcript-noise fixtures; precedence when two cues co-occur; a cue outside its region does not match; unknown coding agent → `Unclassified`. |
+| Classifier | Each state per coding agent from a short inline capture; precedence when two cues co-occur; a cue outside its region does not match; unknown coding agent → `Unclassified`. |
 | Delivery step | Ordinary delivery on `finished`; hold on each other state; forced payload per state at the timeout; timeout `0` never forces; an exec in flight holds without forcing; hold age restarts at an exec's `finished_at` and at `forced_at`, so three overdue previews on an `awaiting_user` pane produce one forced keystroke per timeout; oldest item first; a failed keystroke clears the stamp; an ACKed row is never keystroked. |
 | Pane claim | Two `deliver_pane` calls on one pane within the spacing window produce one keystroke; the wake and `member prompt` respect a held claim. |
 | Loop | A preview held on `working` is keystroked by a later tick once the capture turns `finished`, with no further command; a tick with nothing owed captures no pane and sends no keystroke; the delivery pass runs with the wake interval `0`; a missing Director pane stops the loop; a per-pane capture error does not abort the tick; three consecutive `list_pane_ids` failures stop the loop and one success resets the count; lost execs close with a notice; the watchdog reports once. |
@@ -534,7 +528,6 @@ The removal is total. Besides the rows above, Step 8 searches the repository out
 | Exec | Argument validation; the Director is rejected; `exec-run` runs once and records the exit code; resume by observation for each row of its table; `--wait` output. |
 | Spawn argv | Claude argv for an ordinary member and for the monitor; codex and opencode unchanged. |
 | Doctor | No finding; a `deny` match; an `ask` match; bare `Bash`; managed rules only, with and without a covering managed allow; an unreadable file; assets not installed; exit code and JSON shape. |
-| Removal | `member prompt --shell` fails with clap's unknown-argument error. |
 | Chain guard | In `cafleet/src/db/mod.rs`, the idempotence test renamed for version 9 and the chain guard with head `(9, "held_delivery_and_member_execs")` and versions 1..9; in `cafleet/src/diagnosis.rs`, the `(8, SchemaState::Head { version: 8 })` case. The integration tests read `head_version()` and need no edit. |
 | `docs_sync` | Five runtime bindings, five subsections, no `monitor live`. |
 
@@ -561,61 +554,60 @@ Documentation first, per the project's documentation-maintenance rule; code star
 
 ### Step 1: User-facing documentation
 
-- [ ] `docs/docs/spec/data-model.md`: V9 columns, `member_execs`, pending previews, broker notices. <!-- completed: -->
-- [ ] `docs/docs/spec/cli-options.md`: every item of its § S10 row, with the output shapes and error strings of § S3–S7. <!-- completed: -->
-- [ ] `docs/docs/spec/multiplexer-backends.md`: held delivery, terms, gate table, pane claim, preview payloads, `send_prompt`. <!-- completed: -->
-- [ ] `docs/docs/spec/coding-agent-backends.md` and `docs/docs/spec/webui-api.md`: spawn argv and rules, preset rules, send-route and loop-launch wording. <!-- completed: -->
-- [ ] `docs/docs/concepts/monitoring.md`, `docs/docs/concepts/member-lifecycle.md`, `docs/docs/concepts/coding-agents.md`, `docs/docs/how-to/mixed-backend-team.md`, `docs/docs/quickstart.md`: loop start, delivery pass, watchdog, lifecycle, `member exec`. <!-- completed: -->
-- [ ] `SPEC.md`: the sections listed in § S10. <!-- completed: -->
+- [x] `docs/docs/spec/data-model.md`: V9 columns, `member_execs`, pending previews, broker notices. <!-- completed: 2026-10-10T14:35 -->
+- [x] `docs/docs/spec/cli-options.md`: every item of its § S10 row, with the output shapes and error strings of § S3–S7. <!-- completed: 2026-10-10T14:39 -->
+- [x] `docs/docs/spec/multiplexer-backends.md`: held delivery, terms, gate table, pane claim, preview payloads, `send_prompt`. <!-- completed: 2026-10-10T14:40 -->
+- [x] `docs/docs/spec/coding-agent-backends.md` and `docs/docs/spec/webui-api.md`: spawn argv and rules, preset rules, send-route and loop-launch wording. <!-- completed: 2026-10-10T14:41 -->
+- [x] `docs/docs/concepts/monitoring.md`, `docs/docs/concepts/member-lifecycle.md`, `docs/docs/concepts/coding-agents.md`, `docs/docs/how-to/mixed-backend-team.md`, `docs/docs/quickstart.md`: loop start, delivery pass, watchdog, lifecycle, `member exec`. <!-- completed: 2026-10-10T14:44 -->
+- [x] `SPEC.md`: the sections listed in § S10. <!-- completed: 2026-10-10T14:53 -->
 
 ### Step 2: Skills, rules and presets
 
-- [ ] `skills/cafleet/SKILL.md` and `skills/cafleet/reference/supervision.md` per § S10. <!-- completed: -->
-- [ ] `skills/cafleet/reference/prompt-routing.md` and the three role files under `skills/cafleet/roles/` per § S10. <!-- completed: -->
-- [ ] `skills/cafleet/reference/coding-agents.md`: remove the two bindings, the codex note and *Worked resolution*. <!-- completed: -->
-- [ ] `skills/cafleet-design-doc/`: the edits listed in § S10. <!-- completed: -->
-- [ ] The two rule files and two skill files under `.claude/` named in § S10, and both preset files. <!-- completed: -->
-- [ ] `cafleet/tests/docs_sync.rs`: expectations for five bindings, five subsections and the removed signals. <!-- completed: -->
+- [x] `skills/cafleet/SKILL.md` and `skills/cafleet/reference/supervision.md` per § S10. <!-- completed: 2026-10-10T15:01 -->
+- [x] `skills/cafleet/reference/prompt-routing.md` and the three role files under `skills/cafleet/roles/` per § S10. <!-- completed: 2026-10-10T15:01 -->
+- [x] `skills/cafleet/reference/coding-agents.md`: remove the two bindings, the codex note and *Worked resolution*. <!-- completed: 2026-10-10T15:01 -->
+- [x] `skills/cafleet-design-doc/`: the edits listed in § S10. <!-- completed: 2026-10-10T15:04 -->
+- [x] The two rule files and two skill files under `.claude/` named in § S10, and both preset files. <!-- completed: 2026-10-10T15:08 -->
+- [x] `cafleet/tests/docs_sync.rs`: expectations for five bindings, five subsections and the removed signals. <!-- completed: 2026-10-10T15:08 -->
 
 ### Step 3: Migration V9
 
-- [ ] Add `cafleet/migrations/V9__held_delivery_and_member_execs.sql`. <!-- completed: -->
-- [ ] Bump the head literals: the two tests in `cafleet/src/db/mod.rs` and the `Head` case in `cafleet/src/diagnosis.rs`, per the *Chain guard* row of § S11. <!-- completed: -->
+- [x] Add `cafleet/migrations/V9__held_delivery_and_member_execs.sql`. <!-- completed: 2026-10-10T15:06 -->
+- [x] Bump the head literals: the two tests in `cafleet/src/db/mod.rs` and the `Head` case in `cafleet/src/diagnosis.rs`, per the *Chain guard* row of § S11. <!-- completed: 2026-10-10T15:06 -->
 
 ### Step 4: Classifier
 
-- [ ] **User prerequisite, blocks the rest of this step:** the user records the pane fixtures of § S2 for all three coding agents and places them under `cafleet/tests/fixtures/panes/`. <!-- completed: -->
-- [ ] `cafleet/src/pane_state.rs`: `PaneState`, the regions, the per-agent cue tables adjusted to the fixtures, `classify`. <!-- completed: -->
-- [ ] The fixture-driven test, the region test and the precedence tests. <!-- completed: -->
+- [x] `cafleet/src/pane_state.rs`: `PaneState`, the regions, the per-agent cue tables of § S2, `classify`. <!-- completed: 2026-10-10T15:16 -->
+- [x] The classifier tests of § S11. <!-- completed: 2026-10-10T15:17 -->
 
 ### Step 5: Held delivery and the loop
 
-- [ ] `cafleet/src/config.rs`: `delivery_hold_timeout` from `CAFLEET_DELIVERY_HOLD_TIMEOUT`. <!-- completed: -->
-- [ ] Broker per § S3 *Code seam*: `send_message` and `broadcast_message` persist only; pending-preview queries; `post_notice`; the pane claim; delete `InlinePreviewSender`, `RuntimeNotifier` and `NotificationAttempt`. <!-- completed: -->
-- [ ] Multiplexer: `send_inline_preview` with `note`; `send_prompt` without `shell`, on tmux and herdr; the `PaneIo` implementation. <!-- completed: -->
-- [ ] `cafleet/src/delivery.rs`: `deliver_pane`, `PaneOutcome` and the gate table. <!-- completed: -->
-- [ ] `message send`, `message broadcast`, `POST /api/messages/send`, `member ping`, `member prompt` and the monitor wake per § S3 *Command behavior*; remove the partial-failure exit. <!-- completed: -->
-- [ ] `ensure_monitor_loop` and its call sites; `fleet create` output and compensation; the `cafleet monitor` precedence, startup probe, failure limit and `SIGHUP` handler. <!-- completed: -->
-- [ ] `monitor_tick`: the delivery pass, the Director-pane stop, the echo lines. <!-- completed: -->
-- [ ] The ready watchdog. <!-- completed: -->
-- [ ] Tests for the delivery step, pane claim, loop and loop start per § S11. <!-- completed: -->
+- [x] `cafleet/src/config.rs`: `delivery_hold_timeout` from `CAFLEET_DELIVERY_HOLD_TIMEOUT`. <!-- completed: 2026-10-10T15:33 -->
+- [x] Broker per § S3 *Code seam*: `send_message` and `broadcast_message` persist only; pending-preview queries; `post_notice`; the pane claim; delete `InlinePreviewSender`, `RuntimeNotifier` and `NotificationAttempt`. <!-- completed: 2026-10-10T15:33 -->
+- [x] Multiplexer: `send_inline_preview` with `note`; `send_prompt` without `shell`, on tmux and herdr; the `PaneIo` implementation. <!-- completed: 2026-10-10T15:33 -->
+- [x] `cafleet/src/delivery.rs`: `deliver_pane`, `PaneOutcome` and the gate table. <!-- completed: 2026-10-10T15:33 -->
+- [x] `message send`, `message broadcast`, `POST /api/messages/send`, `member ping`, `member prompt` and the monitor wake per § S3 *Command behavior*; remove the partial-failure exit. <!-- completed: 2026-10-10T15:33 -->
+- [x] `ensure_monitor_loop` and its call sites; `fleet create` output and compensation; the `cafleet monitor` precedence, startup probe, failure limit and `SIGHUP` handler. <!-- completed: 2026-10-10T15:33 -->
+- [x] `monitor_tick`: the delivery pass, the Director-pane stop, the echo lines. <!-- completed: 2026-10-10T15:33 -->
+- [x] The ready watchdog. <!-- completed: 2026-10-10T15:33 -->
+- [x] Tests for the delivery step, pane claim, loop and loop start per § S11. <!-- completed: 2026-10-10T15:49 -->
 
 ### Step 6: `member exec`
 
-- [ ] `member exec` and `member exec-run`, and the `member_execs` broker functions. <!-- completed: -->
-- [ ] Exec items and resume by observation in `deliver_pane`; lost-exec closing in the loop; the exec notices. <!-- completed: -->
-- [ ] Remove `--shell` from `member prompt` and every code path that served it. <!-- completed: -->
-- [ ] Exec and removal tests per § S11. <!-- completed: -->
+- [x] `member exec` and `member exec-run`, and the `member_execs` broker functions. <!-- completed: 2026-10-10T15:46 -->
+- [x] Exec items and resume by observation in `deliver_pane`; lost-exec closing in the loop; the exec notices. <!-- completed: 2026-10-10T15:46 -->
+- [x] Remove `--shell` from `member prompt` and every code path that served it. <!-- completed: 2026-10-10T15:46 -->
+- [x] Exec tests per § S11. <!-- completed: 2026-10-10T15:49 -->
 
 ### Step 7: Spawn rules and doctor
 
-- [ ] `build_spawn_argv` with `monitor`, the claude `--allowedTools` rules, and the argv tests. <!-- completed: -->
-- [ ] The doctor member-permissions section, its JSON key, and its tests. <!-- completed: -->
+- [x] `build_spawn_argv` with `monitor`, the claude `--allowedTools` rules, and the argv tests. <!-- completed: 2026-10-10T15:55 -->
+- [x] The doctor member-permissions section, its JSON key, and its tests. <!-- completed: 2026-10-10T15:55 -->
 
 ### Step 8: Verification
 
-- [ ] The removed-term search of § S10 returns no hit outside `design-docs/`. <!-- completed: -->
-- [ ] `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test`, `mise //admin:lint` and `mise //admin:test` pass. <!-- completed: -->
+- [x] The removed-term search of § S10 returns no hit outside `design-docs/`. <!-- completed: 2026-10-10T15:58 -->
+- [x] `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test`, `mise //admin:lint` and `mise //admin:test` pass. <!-- completed: 2026-10-10T15:59 -->
 - [ ] The user runs the manual live checklist of § S11 and every item passes. <!-- completed: -->
 
 ---
@@ -628,3 +620,7 @@ Documentation first, per the project's documentation-maintenance rule; code star
 | 2026-10-10 | Reviewer round 1: issue-coverage table; cue regions, candidate cues for every backend and the fixture procedure; delivery terms, `forced_at`, the code seam; the wake, `member prompt` and the HTTP route in the command table; loop tick and interval precedence, multiplexer probe and failure limit; `fleet create` compensation; exec resume by observation; preset and permission corrections; managed-rules-only and hook limits; the removed-term search; the #395 loop tests; head-literal locations |
 | 2026-10-10 | Reviewer round 2: `message send` and `message broadcast` ensure the loop only when the fleet has owed work; the broadcast failure text; the no-work test cases |
 | 2026-10-10 | Approved: Reviewer approved in round 2; user approved |
+| 2026-10-10 | User decision at execute start: the recorded pane fixtures, their user prerequisite and the fixture-driven test are dropped; the classifier implements the § S2 cue table as written and is covered by inline-capture tests |
+| 2026-10-10 | Director arbitration: the `member prompt --shell` parse test is dropped — the flag's absence is the check, and the removed-term search of § S10 stays free of `--shell` |
+| 2026-10-10 | Director confirmation of Step 5 implementation choices: a loop that reaches the failure limit or fails its startup probe exits 1 with the multiplexer's error; `ensure_monitor_loop` reports `cannot open monitor log <path>: <error>` and `cannot spawn the monitor loop for fleet <id>: <error>`; `member ping` reports a failed capture as `capture failed: <error>` with exit 1; the delivery pass echoes per-pane capture, keystroke and delivery failures |
+| 2026-10-10 | Implementation merged into PR #444 after Reviewer approval in round 2 and user approval; status stays In Progress until the user runs the manual live checklist of § S11 |

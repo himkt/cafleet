@@ -3,18 +3,22 @@
 //! expected public API is catalogued in [`test_support`].
 
 pub mod asset_installs;
+pub mod execs;
 pub mod fleets;
 pub mod members;
 pub mod messaging;
 pub mod monitor;
+pub mod panes;
 pub mod queries;
 pub mod records;
 #[cfg(test)]
 pub mod test_support;
 
 pub use asset_installs::*;
+pub use execs::*;
 pub use fleets::*;
 pub use members::*;
 pub use messaging::*;
 pub use monitor::*;
+pub use panes::*;
 pub use queries::*;

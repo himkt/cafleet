@@ -31,7 +31,7 @@ const NO_INSTALL_ERROR: &str =
     "Error: no assets install is recorded at the resolved paths; run 'cafleet setup' to install";
 
 const OUTDATED_ERROR: &str =
-    "Error: database schema is outdated (schema 5, head 8); run 'cafleet setup'";
+    "Error: database schema is outdated (schema 5, head 9); run 'cafleet setup'";
 
 const NO_DATABASE_ERROR: &str = "Error: no cafleet database; run 'cafleet setup'";
 
@@ -102,7 +102,7 @@ fn the_schema_guard_reports_a_newer_database() {
     cli.sqlite()
         .execute(
             "INSERT INTO refinery_schema_history (version, name, applied_on, checksum) \
-             VALUES (9, 'future', '2026-01-01T00:00:00Z', '0')",
+             VALUES (10, 'future', '2026-01-01T00:00:00Z', '0')",
             [],
         )
         .unwrap();
@@ -110,7 +110,7 @@ fn the_schema_guard_reports_a_newer_database() {
     assert_eq!(code(&output), 1);
     assert!(
         stderr(&output).contains(
-            "Error: database schema 9 is newer than this cafleet (head 8); upgrade cafleet"
+            "Error: database schema 10 is newer than this cafleet (head 9); upgrade cafleet"
         ),
         "got: {}",
         stderr(&output)

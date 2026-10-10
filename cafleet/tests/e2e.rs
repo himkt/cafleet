@@ -1,136 +1,51 @@
 //! End-to-end binary tests (design § Success Criteria): atomic fleet create
-//! (fleet + Director + monitor member in one invocation) → member create
-//! (tmux shim) → message send/poll/ack → one monitor tick waking the monitor
-//! member's pane, all against a fresh temp DB.
+//! (fleet + Director + monitor member + the detached monitor loop in one
+//! invocation) → member create (tmux shim) → message send/poll/ack → one loop
+//! tick waking the monitor member's pane, all against a fresh temp DB.
 
 mod common;
 
-use std::io;
-use std::process::{Child, Output};
 use std::time::{Duration, Instant};
 
-use common::{Cli, code, stderr, stdout, text};
+use common::{Cli, LoopChild, code, stderr, stdout};
 
-const DEADLINE: Duration = Duration::from_secs(10);
+const DEADLINE: Duration = Duration::from_secs(30);
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
 
-struct MonitorChild<'a> {
-    child: Option<Child>,
-    cli: &'a Cli,
-    name: &'static str,
-}
+/// The loop `fleet create` started detached; stopped when the test ends.
+struct DetachedLoop(i64);
 
-impl<'a> MonitorChild<'a> {
-    fn spawn(cli: &'a Cli, name: &'static str, args: &[&str]) -> Self {
-        Self {
-            child: Some(cli.spawn(args)),
-            cli,
-            name,
-        }
-    }
-
-    fn id(&self) -> u32 {
-        self.child.as_ref().expect("uncollected child").id()
-    }
-
-    fn reap(&mut self) -> io::Result<Output> {
-        let child = self.child.as_mut().expect("collect each child once");
-        if child.try_wait()?.is_none() {
-            child.kill()?;
-        }
-        self.child.take().unwrap().wait_with_output()
-    }
-
-    fn fail(&mut self, reason: &str) -> ! {
-        let output = self.reap().expect("terminate and reap failed monitor");
-        panic!(
-            "{}: {reason}; status={}; stdout={}; stderr={}; shim={:?}",
-            self.name,
-            output.status,
-            stdout(&output),
-            stderr(&output),
-            self.cli.shim_calls()
-        );
-    }
-
-    fn wait_until(&mut self, description: &str, mut observed: impl FnMut() -> bool) {
-        let deadline = Instant::now() + DEADLINE;
-        loop {
-            if self.child.as_mut().unwrap().try_wait().unwrap().is_some() {
-                self.fail(&format!("exited before {description}"));
-            }
-            if observed() {
-                return;
-            }
-            if Instant::now() >= deadline {
-                self.fail(&format!("deadline waiting for {description}"));
-            }
-            std::thread::sleep(POLL_INTERVAL);
-        }
-    }
-
-    fn stop(&mut self) -> Output {
-        let pid = nix::unistd::Pid::from_raw(i32::try_from(self.id()).expect("child PID fits i32"));
-        nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGTERM)
-            .expect("request graceful monitor shutdown");
-        self.wait_for_exit("graceful monitor shutdown")
-    }
-
-    fn wait_for_exit(&mut self, description: &str) -> Output {
-        let deadline = Instant::now() + DEADLINE;
-        loop {
-            if self.child.as_mut().unwrap().try_wait().unwrap().is_some() {
-                return self.reap().expect("collect completed monitor");
-            }
-            if Instant::now() >= deadline {
-                self.fail(&format!("deadline waiting for {description}"));
-            }
-            std::thread::sleep(POLL_INTERVAL);
-        }
+impl DetachedLoop {
+    fn terminate(&self) {
+        let pid = nix::unistd::Pid::from_raw(i32::try_from(self.0).expect("PID fits i32"));
+        let _ = nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGTERM);
     }
 }
 
-impl Drop for MonitorChild<'_> {
+impl Drop for DetachedLoop {
     fn drop(&mut self) {
-        if self.child.is_none() {
-            return;
-        }
-        match self.reap() {
-            Ok(output) => eprintln!(
-                "{} reaped after assertion failure: status={}; stdout={}; stderr={}; shim={:?}",
-                self.name,
-                output.status,
-                stdout(&output),
-                stderr(&output),
-                self.cli.shim_calls()
-            ),
-            Err(error) if std::thread::panicking() => {
-                eprintln!("{} cleanup failed: {error}", self.name)
-            }
-            Err(error) => panic!("{} cleanup failed: {error}", self.name),
-        }
+        self.terminate();
     }
 }
 
-fn install_distinct_pane_shim(cli: &Cli) {
-    std::fs::write(
-        cli.shim_dir.join("tmux"),
-        r#"#!/bin/sh
-printf '%s\n' "$*" >> "$CAFLEET_TEST_TMUX_LOG"
-case "$1" in
-    display-message) printf 'main|@1|%%0\n' ;;
-    split-window) printf '%s\n' "${CAFLEET_TEST_NEXT_PANE:?required next pane}" ;;
-    list-panes) printf '%%0\n%%7\n%%8\n%%9\n' ;;
-esac
-"#,
-    )
-    .unwrap();
+fn wait_for(cli: &Cli, description: &str, mut observed: impl FnMut() -> bool) {
+    let deadline = Instant::now() + DEADLINE;
+    while !observed() {
+        assert!(
+            Instant::now() < deadline,
+            "deadline waiting for {description}; log={:?}; shim={:?}",
+            std::fs::read_to_string(cli.monitor_log_path(1)),
+            cli.shim_calls()
+        );
+        std::thread::sleep(POLL_INTERVAL);
+    }
 }
 
 #[test]
 fn end_to_end_lifecycle_with_one_monitor_tick() {
     let mut cli = Cli::new();
-    install_distinct_pane_shim(&cli);
+    cli.set_env("CAFLEET_TEST_TMUX_PANES", "%0 %7 %8 %9");
+    cli.set_env("CAFLEET_MONITOR_WAKE_INTERVAL", "1");
     cli.set_env("CAFLEET_TEST_NEXT_PANE", "%7");
     cli.install();
 
@@ -145,7 +60,9 @@ fn end_to_end_lifecycle_with_one_monitor_tick() {
         &cli.monitor_prompt_path(),
     ]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
-    assert_eq!(stdout(&output), "1 director=1 monitor=2\n");
+    assert_eq!(stdout(&output), cli.fleet_create_text(1, 1, 2));
+    let pid = cli.monitor_pid(1).expect("fleet create started the loop");
+    let monitor_loop = DetachedLoop(pid);
 
     let monitor_id = Cli::BOOTSTRAP_MONITOR_ID;
     cli.set_env("CAFLEET_TEST_NEXT_PANE", "%8");
@@ -205,27 +122,7 @@ fn end_to_end_lifecycle_with_one_monitor_tick() {
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     assert!(stdout(&output).contains("No messages found."));
 
-    let payload = format!(
-        "[cafleet] tick: fleet 1 — health-check your 2 members: \
-         {worker_id} (worker; coding_agent=claude; unacked=0), \
-         {helper_id} (helper; coding_agent=claude; unacked=0). \
-         Director: 1 (Director; coding_agent=claude; unacked=0). \
-         Follow your monitor role protocol. \
-         Resume your work if something was still running."
-    );
-
-    let mut child = MonitorChild::spawn(
-        &cli,
-        "primary monitor",
-        &["monitor", "1", "--tick", "1", "--interval", "1"],
-    );
-    let pid = i64::from(child.id());
-    child.wait_until("owned live runtime slot", || conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM monitor_runtime WHERE fleet_id=1 AND pid=?1 AND last_tick_at IS NOT NULL)",
-        [pid], |row| row.get::<_, bool>(0),
-    ).unwrap());
-
-    let mut second = MonitorChild::spawn(&cli, "second monitor", &["monitor", "1", "--tick", "1"]);
+    let mut second = LoopChild::spawn(&cli, &["monitor", "1", "--tick", "1"]);
     let output = second.wait_for_exit("second monitor refusal");
     assert_eq!(
         code(&output),
@@ -239,8 +136,16 @@ fn end_to_end_lifecycle_with_one_monitor_tick() {
         stderr(&output)
     );
 
+    let payload = format!(
+        "[cafleet] tick: fleet 1 — health-check your 2 members: \
+         {worker_id} (worker; coding_agent=claude; unacked=0), \
+         {helper_id} (helper; coding_agent=claude; unacked=0). \
+         Director: 1 (Director; coding_agent=claude; unacked=0). \
+         Follow your monitor role protocol. \
+         Resume your work if something was still running."
+    );
     let wake_keystroke = format!("send-keys -t %7 -l {payload}");
-    child.wait_until("committed monitor-directed wake", || {
+    wait_for(&cli, "the committed monitor-directed wake", || {
         let committed = conn
             .query_row(
                 "SELECT last_wake_at FROM monitor_runtime WHERE fleet_id=1",
@@ -249,39 +154,30 @@ fn end_to_end_lifecycle_with_one_monitor_tick() {
             )
             .unwrap()
             .is_some_and(|timestamp| !timestamp.is_empty());
-        let calls = cli.shim_calls();
-        committed && calls.iter().any(|line| line == &wake_keystroke)
+        committed && cli.shim_calls().iter().any(|line| line == &wake_keystroke)
     });
-    let loop_output = child.stop();
-    let loop_stdout = text(&loop_output.stdout);
+
+    monitor_loop.terminate();
+    wait_for(&cli, "the loop to clear its runtime row", || {
+        cli.monitor_pid(1).is_none()
+    });
+    let log = std::fs::read_to_string(cli.monitor_log_path(1)).unwrap();
     let calls = cli.shim_calls();
-    assert_eq!(
-        code(&loop_output),
-        0,
-        "stdout: {loop_stdout}; stderr: {}; shim: {calls:?}",
-        stderr(&loop_output)
-    );
     assert!(
-        loop_stdout.contains(&format!(
-            "monitor loop started (fleet 1, tick 1s, pid {pid})"
+        log.contains(&format!(
+            "monitor loop started (fleet 1, tick 5s, pid {pid})"
         )),
-        "stdout: {loop_stdout}; stderr: {}; shim: {calls:?}",
-        stderr(&loop_output)
+        "log: {log}; shim: {calls:?}"
     );
     assert!(
-        loop_stdout.contains(&format!("tick -> wake monitor {monitor_id} (2 members)")),
-        "stdout: {loop_stdout}; stderr: {}; shim: {calls:?}",
-        stderr(&loop_output)
-    );
-    assert!(
-        calls.iter().any(|line| line == &wake_keystroke),
-        "monitor-directed wake: {calls:?}"
+        log.contains(&format!("tick -> wake monitor {monitor_id} (2 members)")),
+        "log: {log}; shim: {calls:?}"
     );
     assert!(
         calls
             .iter()
             .filter(|line| line.contains("[cafleet] tick:"))
-            .all(|line| line == &wake_keystroke),
+            .all(|line| line.starts_with("send-keys -t %7 -l [cafleet] tick: fleet 1 ")),
         "every wake targets the monitor, including no Director-directed wake: {calls:?}"
     );
     let last_wake: String = conn

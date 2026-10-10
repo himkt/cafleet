@@ -64,13 +64,15 @@ pub fn format_member_detail(member: &Value) -> String {
     )
 }
 
-/// `<fleet_id> director=<id> monitor=<id>` — the only text form (SPEC §6.4).
+/// `<fleet_id> director=<id> monitor=<id>`, then `monitor loop: pid <pid>` —
+/// the only text form (SPEC §6.4).
 pub fn format_fleet_create(data: &Value) -> String {
     format!(
-        "{} director={} monitor={}",
+        "{} director={} monitor={}\nmonitor loop: pid {}",
         scalar(&data["fleet_id"]),
         scalar(&data["director"]["member_id"]),
         scalar(&data["monitor"]["member_id"]),
+        scalar(&data["monitor_loop"]["pid"]),
     )
 }
 
@@ -301,14 +303,15 @@ mod tests {
                         "mux_pane_id": "%1",
                     },
                 },
+                "monitor_loop": {"pid": 4242},
             })
         }
 
         #[test]
-        fn compact_is_fleet_id_director_and_monitor() {
+        fn compact_is_fleet_id_director_and_monitor_then_the_loop_pid() {
             assert_eq!(
                 format_fleet_create(&fleet_create_result(json!("alpha"))),
-                "3 director=1 monitor=2"
+                "3 director=1 monitor=2\nmonitor loop: pid 4242"
             );
         }
 
@@ -316,7 +319,7 @@ mod tests {
         fn compact_ignores_the_name_and_placement() {
             assert_eq!(
                 format_fleet_create(&fleet_create_result(Value::Null)),
-                "3 director=1 monitor=2",
+                "3 director=1 monitor=2\nmonitor loop: pid 4242",
                 "the detailed view is --json only"
             );
         }

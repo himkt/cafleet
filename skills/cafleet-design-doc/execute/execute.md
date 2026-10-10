@@ -13,7 +13,7 @@ Read these prerequisites in order before orchestration. Your `CODING AGENT:` ide
 | 1 | Your backend section in [coding-agents.md](../../cafleet/reference/coding-agents.md) | Resolve local Runtime bindings and bound notes before acting. |
 | 2 | [Generic Director role](../../cafleet/roles/director.md) | Before setup; obey its selected-backend, spawn skeleton, audit, size and action-triggered reads. |
 | 3 | [Guidelines File Layout](../reference/guidelines.md#file-layout), then [BASE](../../cafleet/reference/base-dir.md) | Before argument normalization and output-root resolution. |
-| 4 | [Supervision](../../cafleet/reference/supervision.md) | Before orchestration; monitor bootstrap/live, capture, dispatch and authorization gates. |
+| 4 | [Supervision](../../cafleet/reference/supervision.md) | Before orchestration; monitor bootstrap and ready gate, broker-held delivery, dispatch and authorization scope. |
 | 5 | [Coordination](../reference/coordination.md) | Before messages, payload retrieval or markers. |
 | 6 | [Guidelines](../reference/guidelines.md) | Before document-format or phase-completion actions. |
 
@@ -188,9 +188,9 @@ cafleet fleet create --name "design-doc-execute-{slug}" --coding-agent <backend>
 
 Capture `fleet_id` and `director.member_id` from the JSON response and substitute them for `<fleet-id>` and `<director-member-id>` in every subsequent command.
 
-#### 3b. Wait for the monitor gate (before any ordinary member)
+#### 3b. Wait for the monitor's ready (before any ordinary member)
 
-Wait for the monitor member's `ready` then `monitor live` signals per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Wait for the monitor gate* — `monitor live` gates the first ordinary `member create`. The monitor member runs unchanged through Steps 3–8 and is deleted first (first-out) in Step 8's cleanup.
+Wait for the monitor member's `ready` signal per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Wait for the monitor's ready* — it gates the first ordinary `member create`. The monitor member runs unchanged through Steps 3–8 and is deleted first (first-out) in Step 8's cleanup.
 
 #### 3c. Analyze implementation tasks to decide team composition
 

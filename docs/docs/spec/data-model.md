@@ -38,6 +38,7 @@ change stored future timestamps or parsing.
 | `members` | `INTEGER PRIMARY KEY AUTOINCREMENT` | `fleets.fleet_id` | `RESTRICT` | Soft-delete (`status='deregistered'` + `deregistered_at`) |
 | `messages` | `INTEGER PRIMARY KEY AUTOINCREMENT` | `members.member_id`, via `owner_member_id` | `RESTRICT` | Not deleted |
 | `member_placements` | Reuses `members.member_id` | `members` | `CASCADE` | Hard-deleted on deregistration |
+| `member_execs` | `INTEGER PRIMARY KEY AUTOINCREMENT` | `members.member_id` | `RESTRICT` | Not deleted |
 | `monitor_runtime` | Reuses `fleets.fleet_id` | `fleets` | `RESTRICT` | Removed inside the `fleet delete` transaction; "no monitor" is modeled as "no row" |
 | `asset_installs` | `(coding_agent, path)` composite | — | — | Upserted, one row per coding agent and install path |
 
@@ -54,7 +55,9 @@ owns failure ordering and diagnostics. The connection holds
 SQLite's write lock across the pane-spawn subprocess call, so a concurrent
 cafleet writer on the shared database blocks for the duration of the
 multiplexer call, backstopped by the connection's `busy_timeout=5000`
-PRAGMA.
+PRAGMA. After the commit the command starts the fleet's monitor loop, and
+soft-deletes the fleet it just committed when the loop does not start — see
+[Loop start](cli-options.md#monitor-loop-start).
 
 ### `members`
 
@@ -98,6 +101,20 @@ every state change and drives `ORDER BY DESC` listing. The rendered envelope is 
 
 Deliveries transition once from `input_required → completed` on ACK.
 
+`notified_at` records the pane keystroke of the row's inline preview: `NULL`
+while the preview is owed, and the UTC timestamp of the keystroke once it
+landed. The column is storage-only; the message envelope does not carry it.
+The migration that adds the column stamps every existing row with its
+`created_at`, so no stored message is owed a preview.
+
+A **pending preview** is a row with `type = 'unicast'`,
+`status_state = 'input_required'`, and `notified_at IS NULL` whose recipient
+is active and owns a pane. An ACK settles a preview without a keystroke,
+because the row leaves `input_required`. A CLI self-send is inserted with
+`notified_at = created_at`, so it never owes a preview. The delivery rules
+for a pending preview are in
+[Held delivery](multiplexer-backends.md#held-delivery).
+
 ### `member_placements`
 
 Links a member to its multiplexer pane; pane ids are stored verbatim as opaque
@@ -105,6 +122,45 @@ strings. The root Director keeps its own placement row (it is pane-bound); an
 ordinary member is a placed row other than the fleet's root Director
 (`member_id != fleets.director_member_id`). Placement rows have no historical
 value.
+
+Three nullable timestamp columns carry the pane's delivery state:
+
+| Column | Meaning |
+|---|---|
+| `keystroke_at` | The last time a cafleet process claimed this pane for a keystroke — see [Pane claim](multiplexer-backends.md#pane-claim). |
+| `forced_at` | The time of the pane's last forced delivery. `NULL` until one happens. |
+| `silence_notice_at` | When the ready watchdog reported this member. `NULL` until then. |
+
+### `member_execs`
+
+One row per [`cafleet member exec`](cli-options.md#member-exec). Rows are
+ordered by `exec_id`, and a closed row stays as the record of the command.
+
+| Column | Type | Meaning |
+|---|---|---|
+| `exec_id` | `INTEGER`, primary key | The id the dispatch keystroke carries. |
+| `member_id` | `INTEGER NOT NULL` | The member whose pane runs the command. |
+| `command` | `TEXT NOT NULL` | The command body, stored verbatim. |
+| `created_at` | `TEXT NOT NULL` | When the exec was queued. |
+| `dispatched_at` | `TEXT` | When the dispatch keystroke landed in the pane. |
+| `started_at` | `TEXT` | When the pane-side runner claimed the row. |
+| `pid` | `INTEGER` | The runner's process id, set with `started_at`. |
+| `finished_at` | `TEXT` | When the command ended, or when the loop closed a lost exec. |
+| `exit_code` | `INTEGER` | The command's exit status; `128 +` the signal number for a signal death. `NULL` for a lost exec. |
+| `resumed_at` | `TEXT` | When the member was resumed or observed working again. |
+
+An exec's state is derived from its timestamps:
+
+| State | Condition | Pane effect |
+|---|---|---|
+| queued | `dispatched_at` is `NULL` | The dispatch is the pane's next item |
+| dispatched | `dispatched_at` set, `started_at` `NULL` | Every other item holds |
+| running | `started_at` set, `finished_at` `NULL` | Every other item holds |
+| finished | `finished_at` set, `resumed_at` `NULL` | The resume observation is the pane's next item |
+| closed | `resumed_at` set | none |
+
+A fleet has **owed work** while any of its members has a pending preview or a
+`member_execs` row whose `resumed_at` is `NULL`.
 
 ### `monitor_runtime`
 
@@ -116,10 +172,10 @@ value.
 | `pid` | `Option<i64>` | Null means no claim; claim stores the direct loop pid and normal clear nulls it. Preserve the existing process probe's handling of zero. |
 | `started_at` | `Option<String>` | Null means no claim start time; claim/reclaim stamps it and normal clear nulls it. |
 | `last_tick_at` | `Option<String>` | Null or an unparseable timestamp is not a fresh heartbeat. Claim/tick updates it and normal clear nulls it. |
-| `last_wake_at` | `Option<String>` | Null means no successful wake is recorded; cadence then falls back to `started_at`. Successful scheduled/forced delivery updates it, and clear/reclaim preserve it. |
+| `last_wake_at` | `Option<String>` | Null means no successful wake is recorded; cadence then falls back to `started_at`. A delivered wake, scheduled or requested, updates it, and clear/reclaim preserve it. |
 | `wake_requested_at` | `Option<String>` | Null means no forced-wake request; repeated requests overwrite/coalesce. Successful delivery or reclaim clears it; normal clear alone preserves it. |
-| `tick_seconds` | `i64` | Non-null tick cadence, DB default 5; CLI rejects zero rather than treating it as disabled. Normal clear preserves it. |
-| `wake_interval_seconds` | `Option<i64>` | Null is the legacy state before a row has been claimed since V5 added the column; zero disables scheduled wakes while permitting forced wake. Positive values are seconds; claim/reclaim/PATCH stamps the value and normal clear preserves it. |
+| `tick_seconds` | `i64` | Non-null tick cadence, DB default 5; CLI rejects zero rather than treating it as disabled. A claim without `--tick` keeps the stored value, and normal clear preserves it. |
+| `wake_interval_seconds` | `Option<i64>` | Null is the legacy state before a row has been claimed since V5 added the column; zero disables scheduled wakes while permitting a requested wake. Positive values are seconds; a claim stamps the value resolved by the [loop precedence](cli-options.md#monitor-loop-precedence), PATCH overwrites it, and normal clear preserves it. |
 
 A claimed loop always has a non-null wake interval. Do not normalize the legacy
 null interval into zero or treat a stopped HTTP response as the stored row:
@@ -144,8 +200,8 @@ superseded rows surface only as informational doctor footnotes (see
 
 ## Typed broker records
 
-Broker queries decode rows into typed member, placement, message, and monitor
-records. Presenters preserve the wire shapes below. Missing placements differ
+Broker queries decode rows into typed member, placement, message, exec, and
+monitor records. Presenters preserve the wire shapes below. Missing placements differ
 from pending panes, and absent monitor rows differ from nullable fields.
 Unknown stored enums are integrity errors; free-form skills retain their
 existing JSON representation.
@@ -169,6 +225,25 @@ recipient, so existence (plus, for ACK, message state) is the enforcement:
 | `message poll` | Returns the `input_required` deliveries whose `owner_member_id` equals the positional `MEMBER_ID`; the member must exist, and any caller can poll any inbox by id. |
 | `message show` | Returns the message iff the `MESSAGE_ID` exists; unknown ids return "not found". |
 | `message ack` | Transitions the message iff it exists and is in the `input_required` state; the recipient is derived from the message row. |
+
+## Broker notices {#broker-notices}
+
+A broker notice is a message the broker writes to tell the Director about an
+event no member reported. It is a `unicast` row whose `owner_member_id`,
+`from_member_id`, and `to_member_id` are all the fleet's root Director,
+inserted with `notified_at` `NULL`, so it is delivered, polled, and ACKed like
+any other message. Every notice body starts with `[cafleet] `.
+
+| Notice | Text |
+|---|---|
+| Exec finished | `[cafleet] exec <id> on member <member_id> (<name>) exited <code> after <n> s.` |
+| Exec never started | `[cafleet] exec <id> on member <member_id> (<name>) did not start within 30 s of dispatch. Inspect the pane with cafleet member capture <member_id> and run it again if still needed.` |
+| Exec lost | `[cafleet] exec <id> on member <member_id> (<name>) ended without reporting an exit status. Inspect the pane with cafleet member capture <member_id>.` |
+| Silent member | `[cafleet] member <member_id> (<name>) has sent no message <n> s after spawn. Its broker commands may be denied: inspect it with cafleet member capture <member_id> and run cafleet doctor.` |
+
+The exec notices are raised by [`member exec`](cli-options.md#member-exec) and
+the monitor loop; the silent-member notice is raised by the
+[ready watchdog](../concepts/monitoring.md#ready-watchdog).
 
 ## Broadcast Grouping
 

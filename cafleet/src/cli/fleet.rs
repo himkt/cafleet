@@ -4,7 +4,7 @@
 use rusqlite::Connection;
 
 use clap::Subcommand;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::creation::PaneGuard;
 use super::helpers::{emit, resolve_body, resolve_mux};
@@ -15,6 +15,7 @@ use crate::error::CafleetError;
 use crate::multiplexer::Multiplexer;
 
 use crate::output::format_fleet_create;
+use crate::runtime::ensure_monitor_loop;
 use crate::runtime::system::SystemProbe;
 
 const MONITOR_NAME: &str = "monitor";
@@ -173,8 +174,13 @@ fn create(
                 director_id,
                 agent_name,
             )?;
-            let argv =
-                backend.build_spawn_argv(&prompt, MONITOR_NAME, monitor.model, monitor.effort);
+            let argv = backend.build_spawn_argv(
+                &prompt,
+                MONITOR_NAME,
+                monitor.model,
+                monitor.effort,
+                true,
+            );
             let pane_id = mux
                 .split_window(&context, &env, &argv)
                 .map_err(|error| CafleetError::App(format!("tmux split-window failed: {error}")))?;
@@ -185,7 +191,7 @@ fn create(
             Ok(pane_id)
         },
     );
-    let fleet = match bootstrap {
+    let mut fleet = match bootstrap {
         Ok(fleet) => fleet,
         Err(error) => {
             // The broker has ended its transaction scope. Close our DB handle
@@ -197,11 +203,43 @@ fn create(
             });
         }
     };
+    let fleet_id = fleet["fleet_id"]
+        .as_i64()
+        .expect("the bootstrap reports the fleet id");
+    let loop_pid = match start_monitor_loop(conn, settings, fleet_id) {
+        Ok(pid) => pid,
+        Err(error) => {
+            let error = match broker::delete_fleet(conn, fleet_id) {
+                Ok(_) => error,
+                Err(cleanup) => {
+                    error.with_cleanup(format!("cleanup failed for fleet {fleet_id}: {cleanup}"))
+                }
+            };
+            drop(slot.take());
+            return Err(match &mut spawned_pane {
+                Some(pane) => pane.rollback(error),
+                None => error,
+            });
+        }
+    };
     if let Some(pane) = &mut spawned_pane {
         pane.finish();
     }
+    fleet["monitor_loop"] = json!({"pid": loop_pid});
     emit(json, &fleet, || format_fleet_create(&fleet));
     Ok(())
+}
+
+/// Start the fleet's loop and return the process id that owns its runtime row.
+fn start_monitor_loop(
+    conn: &Connection,
+    settings: &Settings,
+    fleet_id: i64,
+) -> Result<i64, CafleetError> {
+    ensure_monitor_loop(conn, settings, fleet_id)?;
+    Ok(broker::read_monitor_runtime(conn, fleet_id)?
+        .and_then(|runtime| runtime.pid)
+        .expect("a live loop owns the runtime row"))
 }
 
 fn list(conn: &mut Connection, json: bool) -> Result<(), CafleetError> {

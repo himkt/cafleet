@@ -1,6 +1,7 @@
 //! Monitor heartbeat loop (SPEC §6.6): ownership-checked heartbeat, fleet
-//! liveness, typed wake descriptors, and the delivery-gated ledger write.
-//! Runtime staleness constants are re-exported from their broker home.
+//! liveness, the delivery pass over panes with owed work, typed wake
+//! descriptors, and the delivery-gated ledger write. Runtime staleness
+//! constants are re-exported from their broker home.
 
 use std::collections::BTreeSet;
 use std::io::Write;
@@ -12,15 +13,20 @@ use rusqlite::Connection;
 
 use crate::broker;
 pub use crate::broker::{MONITOR_STALE_FACTOR, MONITOR_STALE_FLOOR_SECONDS};
+use crate::config::Settings;
+use crate::delivery::{HoldReason, Item, PaneIo, PaneOutcome, deliver_pane};
 use crate::error::CafleetError;
 use crate::multiplexer::{Multiplexer, MultiplexerError, WakeEntry};
+use crate::notices;
 use crate::time::{format_utc, now_utc, parse_lenient};
 
 pub const DEFAULT_TICK_SECONDS: i64 = 5;
+pub const MUX_FAILURE_LIMIT: u32 = 3;
+pub const READY_GRACE_SECONDS: i64 = 180;
 
-/// What the tick consumes from the resolved backend: pane liveness and the
-/// single monitor-wake keystroke.
-pub trait MonitorMux {
+/// What the tick consumes from the resolved backend: pane liveness, the
+/// held deliveries, and the single monitor-wake keystroke.
+pub trait MonitorMux: PaneIo {
     fn list_pane_ids(&self) -> Result<BTreeSet<String>, MultiplexerError>;
 
     fn send_wake_entries(
@@ -60,10 +66,17 @@ fn wake_descriptor(target: &broker::records::WakeTarget) -> WakeEntry<'_> {
 pub enum TickResult {
     Continue,
     Stop,
+    /// The tick could not list the multiplexer's panes; it carries the
+    /// backend error for the driver's consecutive-failure count.
+    MuxUnreachable(String),
 }
 
 fn mux_err(error: MultiplexerError) -> CafleetError {
     CafleetError::App(error.to_string())
+}
+
+fn write_err(error: std::io::Error) -> CafleetError {
+    CafleetError::App(format!("stdout write failed: {error}"))
 }
 
 /// Pure due-check for the fleet-level wake. A present `last_wake_at` always
@@ -86,31 +99,158 @@ pub fn wake_due(
     (now - parsed).num_seconds() >= wake_interval
 }
 
+/// The ready watchdog (SPEC §6.6): report, once, every member that has sent
+/// no message a grace period after its pane was spawned.
+fn report_silent_members(
+    conn: &mut Connection,
+    fleet_id: i64,
+    now: DateTime<Utc>,
+) -> Result<(), CafleetError> {
+    for member in broker::unreported_silent_members(conn, fleet_id)? {
+        let silent_seconds = (now - parse_lenient(&member.spawned_at)?).num_seconds();
+        if silent_seconds < READY_GRACE_SECONDS {
+            continue;
+        }
+        broker::post_notice(
+            conn,
+            fleet_id,
+            &notices::silent_member(&member, silent_seconds),
+        )?;
+        broker::stamp_silence_notice(conn, member.member_id, &format_utc(now))?;
+    }
+    Ok(())
+}
+
+/// Close every exec that will never report an exit status and tell the
+/// Director (SPEC §6.6).
+fn close_lost_execs(
+    conn: &mut Connection,
+    fleet_id: i64,
+    now: DateTime<Utc>,
+) -> Result<(), CafleetError> {
+    for exec in broker::lost_execs(conn, fleet_id, now)? {
+        broker::close_lost_exec(conn, exec.exec_id, &format_utc(now))?;
+        let member = broker::exec_member(conn, exec.member_id)?;
+        broker::post_notice(conn, fleet_id, &notices::exec_lost(&exec, &member))?;
+    }
+    Ok(())
+}
+
+fn keystroke_echo(item: Item, forced: bool, member_id: i64) -> String {
+    match item {
+        Item::Preview { message_id } if forced => {
+            format!("forced preview msg {message_id} member {member_id}")
+        }
+        Item::Preview { message_id } => format!("preview msg {message_id} member {member_id}"),
+        Item::ExecDispatch { exec_id } => format!("dispatch exec {exec_id} member {member_id}"),
+        Item::ExecResume { exec_id } => format!("resume exec {exec_id} member {member_id}"),
+    }
+}
+
+/// Run `deliver_pane` for every member with owed work whose pane is live. A
+/// per-pane failure is echoed and never aborts the pass.
+fn deliver_owed_work(
+    conn: &mut Connection,
+    mux: &dyn MonitorMux,
+    out: &mut dyn Write,
+    settings: &Settings,
+    fleet_id: i64,
+    live_panes: &BTreeSet<String>,
+    clock: &TickClock,
+) -> Result<(), CafleetError> {
+    for target in broker::owed_pane_targets(conn, fleet_id)? {
+        if !live_panes.contains(&target.pane_id) {
+            continue;
+        }
+        let member_id = target.member_id;
+        let at = clock.now();
+        let iso = format_utc(at);
+        let line = match deliver_pane(conn, mux, settings, member_id, at) {
+            Ok(PaneOutcome::Fired { item, forced }) => keystroke_echo(item, forced, member_id),
+            Ok(PaneOutcome::Held(HoldReason::CaptureFailed(error))) => {
+                format!("member {member_id} capture failed: {error}")
+            }
+            Ok(PaneOutcome::Held(HoldReason::KeystrokeFailed(error))) => {
+                format!("member {member_id} keystroke failed: {error}")
+            }
+            Ok(PaneOutcome::Held(_) | PaneOutcome::Idle) => continue,
+            Err(error) => format!("member {member_id} delivery failed: {}", error.message()),
+        };
+        writeln!(out, "{iso} tick -> {line}").map_err(write_err)?;
+    }
+    Ok(())
+}
+
+/// The tick's wall clock: the tick's own `now` advanced by the time the tick
+/// has been running, so a pane claim taken after earlier keystrokes carries
+/// the moment it is taken.
+struct TickClock {
+    tick_now: DateTime<Utc>,
+    started: std::time::Instant,
+}
+
+impl TickClock {
+    fn now(&self) -> DateTime<Utc> {
+        self.tick_now
+            + chrono::Duration::from_std(self.started.elapsed())
+                .expect("a tick's running time fits a chrono duration")
+    }
+}
+
 /// One scan pass (SPEC §6.6): ownership-checked heartbeat → fleet liveness →
-/// runtime-row read (the per-tick interval re-read) → the schedule gates
-/// (wake-interval and due-check, both bypassed by a pending forced-wake
-/// request) → monitor-pane resolution → one fleet-level wake into the monitor
-/// member's pane → the `woke`-gated ledger write and heartbeat echo.
+/// the delivery pass (live pane set, Director-pane check, lost execs, ready watchdog,
+/// held deliveries) → runtime-row read (the per-tick interval re-read) → the
+/// schedule gates (wake-interval and due-check, both bypassed by a pending
+/// forced-wake request) → monitor-pane resolution → one fleet-level wake into
+/// the monitor member's pane → the `woke`-gated ledger write and heartbeat
+/// echo.
 pub fn monitor_tick(
     conn: &mut Connection,
     mux: &dyn MonitorMux,
     out: &mut dyn Write,
+    settings: &Settings,
     fleet_id: i64,
     pid: i64,
     now: DateTime<Utc>,
 ) -> Result<TickResult, CafleetError> {
+    let clock = TickClock {
+        tick_now: now,
+        started: std::time::Instant::now(),
+    };
     let iso = format_utc(now);
     if !broker::heartbeat_monitor_runtime(conn, fleet_id, pid, &iso)? {
         return Ok(TickResult::Stop);
     }
-    let fleet = broker::fleets::fetch_fleet(conn, fleet_id)?;
-    let live = match fleet {
-        Some(ref fleet) => fleet.deleted_at.is_none(),
-        None => false,
+    let Some(fleet) = broker::fleets::fetch_fleet(conn, fleet_id)? else {
+        return Ok(TickResult::Stop);
     };
-    if !live {
+    if fleet.deleted_at.is_some() {
         return Ok(TickResult::Stop);
     }
+
+    let live_panes = match mux.list_pane_ids() {
+        Ok(panes) => panes,
+        Err(error) => return Ok(TickResult::MuxUnreachable(error.to_string())),
+    };
+    let director_pane = fleet
+        .director_member_id
+        .map(|director_id| broker::pane_target(conn, director_id))
+        .transpose()?
+        .flatten()
+        .ok_or_else(|| {
+            CafleetError::App(format!(
+                "fleet {fleet_id} has no Director with a pane recorded"
+            ))
+        })?
+        .pane_id;
+    if !live_panes.contains(&director_pane) {
+        writeln!(out, "{iso} director pane {director_pane} is gone; stopping")
+            .map_err(write_err)?;
+        return Ok(TickResult::Stop);
+    }
+    close_lost_execs(conn, fleet_id, now)?;
+    report_silent_members(conn, fleet_id, now)?;
+    deliver_owed_work(conn, mux, out, settings, fleet_id, &live_panes, &clock)?;
 
     let runtime = broker::read_monitor_runtime(conn, fleet_id)?.ok_or_else(|| {
         CafleetError::InvalidStoredValue {
@@ -154,8 +294,11 @@ pub fn monitor_tick(
     let Some(monitor_pane) = monitor_pane else {
         return Ok(TickResult::Continue);
     };
-    let live_panes = mux.list_pane_ids().map_err(mux_err)?;
     if !live_panes.contains(monitor_pane) {
+        return Ok(TickResult::Continue);
+    }
+    // A refused claim leaves the wake due for the next tick.
+    if !broker::claim_pane(conn, monitor_id, clock.now())? {
         return Ok(TickResult::Continue);
     }
 
@@ -178,7 +321,7 @@ pub fn monitor_tick(
             "{iso} tick -> {label} monitor {monitor_id} ({} members)",
             roster.len()
         )
-        .map_err(|e| CafleetError::App(format!("stdout write failed: {e}")))?;
+        .map_err(write_err)?;
     }
     Ok(TickResult::Continue)
 }
@@ -197,13 +340,14 @@ fn interruptible_sleep(seconds: u64, stop: &AtomicBool) {
     }
 }
 
-/// The foreground driver: atomically claim the runtime slot, install the
-/// SIGTERM/SIGINT stop flag, print the startup line, then tick until stopped
-/// or displaced; the exit path is an ownership-checked clear.
+/// The signals the foreground driver handles: the first two set the stop
+/// flag; a hangup is caught and ignored, so a closing terminal does not stop
+/// a detached loop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MonitorSignal {
     Terminate,
     Interrupt,
+    Hangup,
 }
 
 pub(crate) trait MonitorSignalHandle {
@@ -262,18 +406,25 @@ impl Drop for MonitorLease<'_, '_> {
     }
 }
 
+/// The foreground driver: probe the multiplexer, atomically claim the
+/// runtime slot, install the signal handlers, print the startup line, then
+/// tick until stopped, displaced, or cut off from the multiplexer; the exit
+/// path is an ownership-checked clear. An absent `tick_seconds` or
+/// `wake_interval` keeps the fleet's stored value.
 pub fn run_monitor_loop(
     conn: &mut Connection,
     mux: &dyn MonitorMux,
     out: &mut dyn Write,
+    settings: &Settings,
     fleet_id: i64,
-    tick_seconds: i64,
-    wake_interval: i64,
+    tick_seconds: Option<i64>,
+    wake_interval: Option<i64>,
 ) -> Result<(), CafleetError> {
     let register = |signal, stop| -> std::io::Result<Box<dyn MonitorSignalHandle>> {
         let signal = match signal {
             MonitorSignal::Terminate => signal_hook::consts::SIGTERM,
             MonitorSignal::Interrupt => signal_hook::consts::SIGINT,
+            MonitorSignal::Hangup => signal_hook::consts::SIGHUP,
         };
         Ok(Box::new(SystemSignalHandle(signal_hook::flag::register(
             signal, stop,
@@ -283,6 +434,7 @@ pub fn run_monitor_loop(
         conn,
         mux,
         out,
+        settings,
         fleet_id,
         tick_seconds,
         wake_interval,
@@ -296,28 +448,58 @@ pub fn run_monitor_loop(
     )
 }
 
+/// Claim the runtime slot with the flag values, falling back to the caller's
+/// defaults only for a value the fleet has never stored, and return the tick
+/// the claim resolved.
+fn claim_runtime(
+    conn: &mut Connection,
+    settings: &Settings,
+    fleet_id: i64,
+    pid: i64,
+    tick_seconds: Option<i64>,
+    wake_interval: Option<i64>,
+    when: &str,
+) -> Result<i64, CafleetError> {
+    let stored = broker::read_monitor_runtime(conn, fleet_id)?;
+    let tick_seconds = tick_seconds.or(stored.is_none().then_some(DEFAULT_TICK_SECONDS));
+    let stored_wake_interval = stored.and_then(|runtime| runtime.wake_interval_seconds);
+    let wake_interval = wake_interval.or(stored_wake_interval
+        .is_none()
+        .then_some(settings.monitor_wake_interval));
+    if !broker::claim_monitor_runtime(conn, fleet_id, pid, tick_seconds, wake_interval, when)? {
+        return Err(CafleetError::App(format!(
+            "monitor already running for fleet {fleet_id}"
+        )));
+    }
+    Ok(broker::read_monitor_runtime(conn, fleet_id)?
+        .expect("the claim just wrote the runtime row")
+        .tick_seconds)
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn run_monitor_loop_with_hooks(
     conn: &mut Connection,
     mux: &dyn MonitorMux,
     out: &mut dyn Write,
+    settings: &Settings,
     fleet_id: i64,
-    tick_seconds: i64,
-    wake_interval: i64,
+    tick_seconds: Option<i64>,
+    wake_interval: Option<i64>,
     hooks: &MonitorLoopHooks<'_>,
 ) -> Result<(), CafleetError> {
     let pid = hooks.pid;
-    if !broker::claim_monitor_runtime(
+    // A loop that cannot reach the multiplexer must never look live, so the
+    // probe precedes the claim.
+    mux.list_pane_ids().map_err(mux_err)?;
+    let tick_seconds = claim_runtime(
         conn,
+        settings,
         fleet_id,
         pid,
         tick_seconds,
         wake_interval,
         &format_utc((hooks.now)()),
-    )? {
-        return Err(CafleetError::App(format!(
-            "monitor already running for fleet {fleet_id}"
-        )));
-    }
+    )?;
     let mut lease = MonitorLease {
         conn,
         fleet_id,
@@ -326,8 +508,13 @@ pub(crate) fn run_monitor_loop_with_hooks(
         armed: true,
     };
     let outcome = (|| {
-        for signal in [MonitorSignal::Terminate, MonitorSignal::Interrupt] {
-            let handle = (hooks.register)(signal, Arc::clone(&hooks.stop)).map_err(|e| {
+        let ignored_hangup = Arc::new(AtomicBool::new(false));
+        for (signal, flag) in [
+            (MonitorSignal::Terminate, &hooks.stop),
+            (MonitorSignal::Interrupt, &hooks.stop),
+            (MonitorSignal::Hangup, &ignored_hangup),
+        ] {
+            let handle = (hooks.register)(signal, Arc::clone(flag)).map_err(|e| {
                 CafleetError::App(format!("cannot install the signal handler: {e}"))
             })?;
             lease.handles.push(handle);
@@ -336,17 +523,24 @@ pub(crate) fn run_monitor_loop_with_hooks(
             out,
             "monitor loop started (fleet {fleet_id}, tick {tick_seconds}s, pid {pid})"
         );
-        result.map_err(|e| CafleetError::App(format!("stdout write failed: {e}")))?;
+        result.map_err(write_err)?;
         let result = out.flush();
         result.map_err(|e| CafleetError::App(format!("stdout flush failed: {e}")))?;
+        let mut mux_failures = 0;
         loop {
             if hooks.stop.load(Ordering::Relaxed) {
                 return Ok(());
             }
-            let result = monitor_tick(lease.conn, mux, out, fleet_id, pid, (hooks.now)());
+            let result = monitor_tick(lease.conn, mux, out, settings, fleet_id, pid, (hooks.now)());
             match result? {
                 TickResult::Stop => return Ok(()),
-                TickResult::Continue => {}
+                TickResult::Continue => mux_failures = 0,
+                TickResult::MuxUnreachable(error) => {
+                    mux_failures += 1;
+                    if mux_failures == MUX_FAILURE_LIMIT {
+                        return Err(CafleetError::App(error));
+                    }
+                }
             }
             out.flush().ok();
             (hooks.sleep)(
@@ -372,6 +566,8 @@ mod tests {
     use crate::broker::test_support::{
         bootstrap_monitor, create_fleet, migrated_conn, register, register_monitor,
     };
+    use crate::config::Settings;
+    use crate::delivery::PaneIo;
     use crate::monitor::{
         DEFAULT_TICK_SECONDS, MONITOR_STALE_FACTOR, MONITOR_STALE_FLOOR_SECONDS, MonitorMux,
         TickResult, monitor_tick, run_monitor_loop, wake_due,
@@ -469,6 +665,35 @@ mod tests {
         }
     }
 
+    impl PaneIo for FakeMux {
+        fn capture_pane(&self, pane_id: &str, _: i64) -> Result<String, String> {
+            panic!("no pane is owed a delivery in these fixtures (captured {pane_id})")
+        }
+
+        fn send_inline_preview(
+            &self,
+            pane_id: &str,
+            _: i64,
+            _: i64,
+            _: &str,
+            _: &str,
+            _: Option<&str>,
+        ) -> Result<(), String> {
+            panic!("no pane is owed a delivery in these fixtures (preview into {pane_id})")
+        }
+
+        fn send_prompt(&self, pane_id: &str, _: &str) -> Result<(), String> {
+            panic!("no pane is owed a delivery in these fixtures (prompt into {pane_id})")
+        }
+    }
+
+    fn settings() -> Settings {
+        Settings::from_lookup(|name| {
+            (name == "CAFLEET_DATABASE_URL").then(|| "sqlite:///unused.db".to_string())
+        })
+        .unwrap()
+    }
+
     /// Fleet with its bootstrap monitor member (the wake recipient) on `%1`
     /// and two pane-bound workers on `%2` and `%4`; the Director sits on `%0`.
     fn wake_fleet(conn: &mut rusqlite::Connection) -> (i64, i64, i64, i64, i64) {
@@ -491,8 +716,15 @@ mod tests {
         now: DateTime<Utc>,
     ) {
         assert!(
-            broker::claim_monitor_runtime(conn, fleet_id, pid, 5, wake_interval, &format_utc(now))
-                .unwrap()
+            broker::claim_monitor_runtime(
+                conn,
+                fleet_id,
+                pid,
+                Some(5),
+                Some(wake_interval),
+                &format_utc(now)
+            )
+            .unwrap()
         );
     }
 
@@ -508,7 +740,7 @@ mod tests {
         now: DateTime<Utc>,
     ) -> (TickResult, String) {
         let mut out = Vec::new();
-        let result = monitor_tick(conn, mux, &mut out, fleet_id, pid, now).unwrap();
+        let result = monitor_tick(conn, mux, &mut out, &settings(), fleet_id, pid, now).unwrap();
         (result, String::from_utf8(out).unwrap())
     }
 
@@ -1285,8 +1517,16 @@ mod tests {
 
             let mux = FakeMux::with_live_panes(&["%0", "%1", "%2", "%4"]);
             let mut out = Vec::new();
-            let err = run_monitor_loop(&mut conn, &mux, &mut out, fleet_id, 5, 600)
-                .expect_err("the atomic claim is authoritative");
+            let err = run_monitor_loop(
+                &mut conn,
+                &mux,
+                &mut out,
+                &settings(),
+                fleet_id,
+                Some(5),
+                Some(600),
+            )
+            .expect_err("the atomic claim is authoritative");
             assert_eq!(
                 err.message(),
                 format!("monitor already running for fleet {fleet_id}")

@@ -116,24 +116,50 @@ pub struct MonitorRuntime {
     pub wake_requested_at: Option<String>,
 }
 
+/// The rows one broadcast persisted: the sender's summary plus one
+/// `(member_id, message_id)` pair per delivery, in recipient order.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum NotificationAttempt {
-    Skipped,
-    Sent,
-    Failed { error: String },
+pub struct BroadcastRows {
+    pub summary: MessageRecord,
+    pub deliveries: Vec<(i64, i64)>,
+}
+
+/// What a keystroke into one member's pane needs to know about it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaneTarget {
+    pub member_id: i64,
+    pub name: String,
+    pub pane_id: String,
+    pub coding_agent: String,
+    pub forced_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SendOutcome {
-    pub message: MessageRecord,
-    pub notification: NotificationAttempt,
+pub struct MemberExec {
+    pub exec_id: i64,
+    pub member_id: i64,
+    pub command: String,
+    pub created_at: String,
+    pub dispatched_at: Option<String>,
+    pub started_at: Option<String>,
+    pub pid: Option<i64>,
+    pub finished_at: Option<String>,
+    pub exit_code: Option<i64>,
+    pub resumed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BroadcastOutcome {
-    pub message: MessageRecord,
-    pub recipients: usize,
-    pub delivered: i64,
+pub struct ExecMember {
+    pub member_id: i64,
+    pub fleet_id: i64,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SilentMember {
+    pub member_id: i64,
+    pub name: String,
+    pub spawned_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -184,15 +210,7 @@ mod tests {
     #[test]
     fn corrupt_member_status_returns_the_domain_variant_from_storage() {
         let (_dir, mut conn, fleet, director) = fixture();
-        broker::send_message(
-            &mut conn,
-            &common::FakeNotifier::succeeding(),
-            common::MAX_TEXT_LEN,
-            director,
-            &director.to_string(),
-            "retain history",
-        )
-        .unwrap();
+        broker::send_message(&mut conn, director, &director.to_string(), "retain history").unwrap();
         conn.execute_batch("PRAGMA ignore_check_constraints=ON")
             .unwrap();
         conn.execute(

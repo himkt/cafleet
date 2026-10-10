@@ -1,30 +1,19 @@
-//! Message send/broadcast/poll/ack with the write-then-attempted-preview
-//! ordering (SPEC §6.2 *Messaging*). The colocated tests pin the contract;
-//! see [`super::test_support`] for the API.
+//! Message send/broadcast/poll/ack and the pending-preview state (SPEC §6.2
+//! *Messaging*). The broker persists only; the caller delivers. The colocated
+//! tests pin the contract; see [`super::test_support`] for the API.
 
 use rusqlite::{Connection, OptionalExtension, params};
 
 use super::members::db_err;
-use super::records::{
-    BroadcastOutcome, MemberStatus, MessageRecord, MessageStatus, NotificationAttempt, SendOutcome,
-};
+use super::records::{BroadcastRows, MemberStatus, MessageRecord, MessageStatus};
 use crate::error::CafleetError;
-use crate::output::truncate_text;
 use crate::time::{format_utc, now_utc};
 
-/// The broker-side half of the inline-preview overlap point (SPEC §4): the
-/// broker truncates and calls this; the keystroke mechanics live behind it.
-/// `Err` carries the raw multiplexer error string, preserved verbatim.
-pub trait InlinePreviewSender {
-    fn send_inline_preview(
-        &self,
-        target_pane_id: &str,
-        message_id: i64,
-        sender_id: i64,
-        ts: &str,
-        text: &str,
-    ) -> Result<(), String>;
-}
+pub(crate) const MESSAGE_COLUMNS: &str = "message_id, owner_member_id, from_member_id, \
+     to_member_id, type, created_at, status_state, status_timestamp, origin_message_id, text";
+
+const PENDING_PREVIEW: &str =
+    "type='unicast' AND status_state='input_required' AND notified_at IS NULL";
 
 /// Read one full typed-column message row in the pinned key order.
 pub(crate) fn message_row(
@@ -32,9 +21,7 @@ pub(crate) fn message_row(
     message_id: i64,
 ) -> Result<Option<MessageRecord>, CafleetError> {
     conn.query_row(
-        "SELECT message_id, owner_member_id, from_member_id, to_member_id, type, \
-                created_at, status_state, status_timestamp, origin_message_id, text \
-         FROM messages WHERE message_id=?1",
+        &format!("SELECT {MESSAGE_COLUMNS} FROM messages WHERE message_id=?1"),
         [message_id],
         map_message_row,
     )
@@ -72,30 +59,12 @@ fn sender_fleet(conn: &Connection, from_member_id: i64) -> Result<i64, CafleetEr
     })
 }
 
-fn pane_of(conn: &Connection, member_id: i64) -> Result<Option<String>, CafleetError> {
-    Ok(conn
-        .query_row(
-            "SELECT mux_pane_id FROM member_placements WHERE member_id=?1",
-            [member_id],
-            |row| row.get::<_, Option<String>>(0),
-        )
-        .optional()
-        .map_err(db_err)?
-        .flatten())
-}
-
-fn preview_text(text: &str, max_text_len: usize) -> String {
-    truncate_text(Some(text), max_text_len).expect("Some input yields Some")
-}
-
 pub fn send_message(
     conn: &mut Connection,
-    notifier: &dyn InlinePreviewSender,
-    max_text_len: usize,
     from_member_id: i64,
     to: &str,
     text: &str,
-) -> Result<SendOutcome, CafleetError> {
+) -> Result<MessageRecord, CafleetError> {
     let fleet_id = sender_fleet(conn, from_member_id)?;
     let to_id: i64 = to
         .parse()
@@ -125,57 +94,33 @@ pub fn send_message(
     }
 
     let now = format_utc(now_utc());
+    // A self-send owes no keystroke, so it is settled at insert.
+    let notified_at = (to_id == from_member_id).then_some(&now);
     conn.execute(
         "INSERT INTO messages (owner_member_id, from_member_id, to_member_id, type, \
-         created_at, status_state, status_timestamp, origin_message_id, text) \
-         VALUES (?1, ?2, ?3, 'unicast', ?4, 'input_required', ?4, NULL, ?5)",
-        params![to_id, from_member_id, to_id, now, text],
+         created_at, status_state, status_timestamp, origin_message_id, text, notified_at) \
+         VALUES (?1, ?2, ?3, 'unicast', ?4, 'input_required', ?4, NULL, ?5, ?6)",
+        params![to_id, from_member_id, to_id, now, text, notified_at],
     )
     .map_err(db_err)?;
-    let message_id = conn.last_insert_rowid();
-
-    let mut notification = NotificationAttempt::Skipped;
-    if to_id != from_member_id
-        && let Some(pane) = pane_of(conn, to_id)?
-    {
-        match notifier.send_inline_preview(
-            &pane,
-            message_id,
-            from_member_id,
-            &now,
-            &preview_text(text, max_text_len),
-        ) {
-            Ok(()) => notification = NotificationAttempt::Sent,
-            Err(error) => notification = NotificationAttempt::Failed { error },
-        }
-    }
-    let message = required_message_row(conn, message_id)?;
-    Ok(SendOutcome {
-        message,
-        notification,
-    })
+    required_message_row(conn, conn.last_insert_rowid())
 }
 
 pub fn broadcast_message(
     conn: &mut Connection,
-    notifier: &dyn InlinePreviewSender,
-    max_text_len: usize,
     from_member_id: i64,
     text: &str,
-) -> Result<BroadcastOutcome, CafleetError> {
+) -> Result<BroadcastRows, CafleetError> {
     let fleet_id = sender_fleet(conn, from_member_id)?;
     let mut stmt = conn
         .prepare(
-            "SELECT m.member_id, p.mux_pane_id \
-             FROM members m LEFT JOIN member_placements p ON p.member_id=m.member_id \
-             WHERE m.fleet_id=?1 AND m.status='active' AND m.member_id != ?2 \
-             ORDER BY m.member_id",
+            "SELECT member_id FROM members \
+             WHERE fleet_id=?1 AND status='active' AND member_id != ?2 \
+             ORDER BY member_id",
         )
         .map_err(db_err)?;
-    let recipients: Vec<(i64, Option<String>)> = stmt
-        .query_map(params![fleet_id, from_member_id], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })
+    let recipients: Vec<i64> = stmt
+        .query_map(params![fleet_id, from_member_id], |row| row.get(0))
         .map_err(db_err)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(db_err)?;
@@ -186,8 +131,8 @@ pub fn broadcast_message(
     let tx = conn.transaction().map_err(db_err)?;
     tx.execute(
         "INSERT INTO messages (owner_member_id, from_member_id, to_member_id, type, \
-         created_at, status_state, status_timestamp, origin_message_id, text) \
-         VALUES (?1, ?1, NULL, 'broadcast_summary', ?2, 'completed', ?2, NULL, ?3)",
+         created_at, status_state, status_timestamp, origin_message_id, text, notified_at) \
+         VALUES (?1, ?1, NULL, 'broadcast_summary', ?2, 'completed', ?2, NULL, ?3, ?2)",
         params![from_member_id, now, summary_text],
     )
     .map_err(db_err)?;
@@ -197,8 +142,8 @@ pub fn broadcast_message(
         [summary_id],
     )
     .map_err(db_err)?;
-    let mut deliveries: Vec<(i64, Option<String>)> = Vec::with_capacity(recipients.len());
-    for (recipient_id, pane) in recipients.iter().cloned() {
+    let mut deliveries: Vec<(i64, i64)> = Vec::with_capacity(recipients.len());
+    for recipient_id in recipients {
         tx.execute(
             "INSERT INTO messages (owner_member_id, from_member_id, to_member_id, type, \
              created_at, status_state, status_timestamp, origin_message_id, text) \
@@ -206,27 +151,82 @@ pub fn broadcast_message(
             params![recipient_id, from_member_id, now, summary_id, text],
         )
         .map_err(db_err)?;
-        deliveries.push((tx.last_insert_rowid(), pane));
+        deliveries.push((recipient_id, tx.last_insert_rowid()));
     }
     tx.commit().map_err(db_err)?;
 
-    let preview = preview_text(text, max_text_len);
-    let mut delivered = 0i64;
-    for (delivery_id, pane) in &deliveries {
-        if let Some(pane) = pane
-            && notifier
-                .send_inline_preview(pane, *delivery_id, from_member_id, &now, &preview)
-                .is_ok()
-        {
-            delivered += 1;
-        }
-    }
-    let message = required_message_row(conn, summary_id)?;
-    Ok(BroadcastOutcome {
-        message,
-        recipients: recipients.len(),
-        delivered,
+    Ok(BroadcastRows {
+        summary: required_message_row(conn, summary_id)?,
+        deliveries,
     })
+}
+
+/// Insert a broker notice: a unicast row from and to the fleet's root
+/// Director, delivered, polled and ACKed like any message.
+pub fn post_notice(
+    conn: &mut Connection,
+    fleet_id: i64,
+    text: &str,
+) -> Result<MessageRecord, CafleetError> {
+    let director_id = super::fleets::fetch_fleet(conn, fleet_id)?
+        .and_then(|fleet| fleet.director_member_id)
+        .ok_or_else(|| {
+            CafleetError::App(format!("fleet {fleet_id} has no root Director recorded"))
+        })?;
+    let now = format_utc(now_utc());
+    conn.execute(
+        "INSERT INTO messages (owner_member_id, from_member_id, to_member_id, type, \
+         created_at, status_state, status_timestamp, origin_message_id, text) \
+         VALUES (?1, ?1, ?1, 'unicast', ?2, 'input_required', ?2, NULL, ?3)",
+        params![director_id, now, text],
+    )
+    .map_err(db_err)?;
+    required_message_row(conn, conn.last_insert_rowid())
+}
+
+pub fn oldest_pending_preview(
+    conn: &Connection,
+    member_id: i64,
+) -> Result<Option<MessageRecord>, CafleetError> {
+    conn.query_row(
+        &format!(
+            "SELECT {MESSAGE_COLUMNS} FROM messages \
+             WHERE owner_member_id=?1 AND {PENDING_PREVIEW} \
+             ORDER BY created_at, message_id LIMIT 1"
+        ),
+        [member_id],
+        map_message_row,
+    )
+    .optional()
+    .map_err(db_err)
+}
+
+/// Stamp a pending preview as keystroked; `false` when the row is no longer
+/// pending, because it was ACKed or another process stamped it first.
+pub fn stamp_notified(
+    conn: &mut Connection,
+    message_id: i64,
+    when: &str,
+) -> Result<bool, CafleetError> {
+    let changed = conn
+        .execute(
+            &format!(
+                "UPDATE messages SET notified_at=?1 WHERE message_id=?2 AND {PENDING_PREVIEW}"
+            ),
+            params![when, message_id],
+        )
+        .map_err(db_err)?;
+    Ok(changed == 1)
+}
+
+/// Return a preview to pending after its keystroke failed.
+pub fn clear_notified(conn: &mut Connection, message_id: i64) -> Result<(), CafleetError> {
+    conn.execute(
+        "UPDATE messages SET notified_at=NULL WHERE message_id=?1",
+        [message_id],
+    )
+    .map_err(db_err)?;
+    Ok(())
 }
 
 pub fn poll_messages(
@@ -237,13 +237,11 @@ pub fn poll_messages(
         return Err(CafleetError::Value(format!("Member {member_id} not found")));
     }
     let mut stmt = conn
-        .prepare(
-            "SELECT message_id, owner_member_id, from_member_id, to_member_id, type, \
-                    created_at, status_state, status_timestamp, origin_message_id, text \
-             FROM messages \
+        .prepare(&format!(
+            "SELECT {MESSAGE_COLUMNS} FROM messages \
              WHERE owner_member_id=?1 AND status_state='input_required' AND type='unicast' \
-             ORDER BY status_timestamp DESC, message_id DESC",
-        )
+             ORDER BY status_timestamp DESC, message_id DESC"
+        ))
         .map_err(db_err)?;
     let rows = stmt
         .query_map([member_id], map_message_row)
@@ -288,171 +286,70 @@ mod tests {
     use tempfile::TempDir;
 
     use crate::broker;
-    use crate::broker::records::NotificationAttempt;
     use crate::broker::test_support as common;
-    use crate::broker::test_support::{
-        FakeNotifier, MAX_TEXT_LEN, MONITOR_PANE, PREVIEW_ERROR, bootstrap_monitor, create_fleet,
-        migrated_conn, register,
-    };
+    use crate::broker::test_support::{bootstrap_monitor, create_fleet, migrated_conn, register};
     use crate::error::CafleetError;
     use crate::output::format_json;
 
+    fn notified_at(conn: &rusqlite::Connection, message_id: i64) -> Option<String> {
+        conn.query_row(
+            "SELECT notified_at FROM messages WHERE message_id=?1",
+            [message_id],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
     #[test]
-    fn send_message_persists_the_full_row_and_notifies() {
+    fn send_message_persists_the_full_row_and_leaves_the_preview_owed() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
-        let notifier = FakeNotifier::succeeding();
 
-        let preview_limit = 5;
-        let text = "界".repeat(preview_limit + 5);
-        let outcome = broker::send_message(
-            &mut conn,
-            &notifier,
-            preview_limit,
-            director_id,
-            &member_id.to_string(),
-            &text,
-        )
-        .unwrap();
-        let result = &crate::presentation::send_outcome(&outcome);
-        assert_eq!(result["notification_sent"], true);
-        assert_eq!(
-            outcome.notification,
-            NotificationAttempt::Sent,
-            "a delivered preview carries no error"
-        );
-
-        let message = &result["message"];
-        let message_id = message["message_id"].as_i64().unwrap();
-        let ts = message["created_at"].as_str().unwrap().to_string();
+        let text = "界".repeat(250);
+        let sent =
+            broker::send_message(&mut conn, director_id, &member_id.to_string(), &text).unwrap();
+        let message = crate::presentation::message(&sent);
+        let message_id = sent.message_id;
+        let ts = sent.created_at.clone();
         let expected = format!(
             r#"{{"message_id":{message_id},"owner_member_id":{member_id},"from_member_id":{director_id},"to_member_id":{member_id},"type":"unicast","created_at":"{ts}","status_state":"input_required","status_timestamp":"{ts}","origin_message_id":null,"text":"{text}"}}"#
         );
-        assert_eq!(format_json(message), expected);
+        assert_eq!(format_json(&message), expected);
 
         let stored = broker::get_message(&conn, message_id).unwrap();
-        assert_eq!(crate::presentation::message(&stored), *message);
+        assert_eq!(crate::presentation::message(&stored), message);
         assert_eq!(stored.text, text);
-        let calls = notifier.calls.borrow();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].target_pane_id, "%2");
-        assert_eq!(calls[0].message_id, message_id);
-        assert_eq!(calls[0].sender_id, director_id);
-        assert_eq!(calls[0].ts, ts);
-        assert_eq!(calls[0].text, format!("{}…", "界".repeat(preview_limit)));
+        assert_eq!(
+            notified_at(&conn, message_id),
+            None,
+            "the preview is owed from the insert"
+        );
     }
 
     #[test]
-    fn send_message_attempted_failure_persists_and_carries_the_raw_error() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
-        let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
-        let notifier = FakeNotifier::failing();
-
-        let outcome = broker::send_message(
-            &mut conn,
-            &notifier,
-            MAX_TEXT_LEN,
-            director_id,
-            &member_id.to_string(),
-            "hi",
-        )
-        .unwrap();
-        assert!(
-            matches!(&outcome.notification, NotificationAttempt::Failed { error } if error == PREVIEW_ERROR),
-            "the raw multiplexer error is preserved verbatim"
-        );
-        assert_eq!(
-            notifier.calls.borrow().len(),
-            1,
-            "exactly one notification attempt, no retry"
-        );
-
-        let message = &crate::presentation::send_outcome(&outcome)["message"];
-        let message_id = message["message_id"].as_i64().unwrap();
-        let ts = message["created_at"].as_str().unwrap().to_string();
-        let expected = format!(
-            r#"{{"message":{{"message_id":{message_id},"owner_member_id":{member_id},"from_member_id":{director_id},"to_member_id":{member_id},"type":"unicast","created_at":"{ts}","status_state":"input_required","status_timestamp":"{ts}","origin_message_id":null,"text":"hi"}},"notification_sent":false}}"#
-        );
-        assert_eq!(
-            format_json(&crate::presentation::send_outcome(&outcome)),
-            expected,
-            "the payload keeps the exact envelope; notification_error never enters the JSON"
-        );
-
-        let pending = broker::poll_messages(&conn, member_id)
-            .map(|records| {
-                records
-                    .iter()
-                    .map(crate::presentation::message)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap();
-        assert_eq!(
-            pending.len(),
-            1,
-            "the persisted message is never rolled back"
-        );
-        assert_eq!(pending[0]["text"], "hi", "the full body remains readable");
-    }
-
-    #[test]
-    fn a_failing_notifier_cannot_fail_self_send_or_no_pane_skips() {
+    fn a_self_send_is_settled_at_insert_and_a_paneless_send_persists() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         let pending_id = register(&mut conn, fleet_id, "pending", None);
-        let notifier = FakeNotifier::failing();
 
-        let self_send = broker::send_message(
-            &mut conn,
-            &notifier,
-            MAX_TEXT_LEN,
-            director_id,
-            &director_id.to_string(),
-            "note",
-        )
-        .unwrap();
+        let self_send =
+            broker::send_message(&mut conn, director_id, &director_id.to_string(), "note").unwrap();
         assert_eq!(
-            crate::presentation::send_outcome(&self_send)["notification_sent"],
-            false
-        );
-        assert_eq!(
-            self_send.notification,
-            NotificationAttempt::Skipped,
-            "self-send attempts nothing"
+            notified_at(&conn, self_send.message_id),
+            Some(self_send.created_at.clone()),
+            "a self-send owes no keystroke"
         );
 
-        let pending_send = broker::send_message(
-            &mut conn,
-            &notifier,
-            MAX_TEXT_LEN,
-            director_id,
-            &pending_id.to_string(),
-            "hi",
-        )
-        .unwrap();
-        assert_eq!(
-            crate::presentation::send_outcome(&pending_send)["notification_sent"],
-            false
-        );
-        assert_eq!(
-            pending_send.notification,
-            NotificationAttempt::Skipped,
-            "no-pane attempts nothing"
-        );
-        assert!(
-            notifier.calls.borrow().is_empty(),
-            "a skip never reaches the notifier, so its error cannot surface"
-        );
-        for (outcome, recipient, text) in [
+        let pending_send =
+            broker::send_message(&mut conn, director_id, &pending_id.to_string(), "hi").unwrap();
+        for (sent, recipient, text) in [
             (&self_send, director_id, "note"),
             (&pending_send, pending_id, "hi"),
         ] {
-            let stored = broker::get_message(&conn, outcome.message.message_id).unwrap();
+            let stored = broker::get_message(&conn, sent.message_id).unwrap();
             assert_eq!(stored.owner_member_id, recipient);
             assert_eq!(stored.from_member_id, director_id);
             assert_eq!(stored.to_member_id, Some(recipient));
@@ -460,13 +357,10 @@ mod tests {
             assert_eq!(stored.status.as_str(), "input_required");
             assert_eq!(
                 crate::presentation::message(&stored),
-                crate::presentation::message(&outcome.message)
+                crate::presentation::message(sent)
             );
         }
-        assert_ne!(
-            self_send.message.message_id,
-            pending_send.message.message_id
-        );
+        assert_ne!(self_send.message_id, pending_send.message_id);
     }
 
     #[test]
@@ -474,10 +368,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (_, director_id) = create_fleet(&mut conn, "alpha");
-        let notifier = FakeNotifier::succeeding();
-        let err =
-            broker::send_message(&mut conn, &notifier, MAX_TEXT_LEN, director_id, "abc", "hi")
-                .expect_err("a non-integer destination must error");
+        let err = broker::send_message(&mut conn, director_id, "abc", "hi")
+            .expect_err("a non-integer destination must error");
         assert!(matches!(err, CafleetError::Value(_)));
         assert_eq!(err.message(), "Invalid destination format: abc");
     }
@@ -487,8 +379,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let _ = create_fleet(&mut conn, "alpha");
-        let notifier = FakeNotifier::succeeding();
-        let err = broker::send_message(&mut conn, &notifier, MAX_TEXT_LEN, 999, "1", "hi")
+        let err = broker::send_message(&mut conn, 999, "1", "hi")
             .expect_err("an unknown sender must error");
         assert!(matches!(err, CafleetError::Value(_)));
         assert_eq!(err.message(), "Sender member not found or not active: 999");
@@ -499,10 +390,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (_, director_id) = create_fleet(&mut conn, "alpha");
-        let notifier = FakeNotifier::succeeding();
-        let err =
-            broker::send_message(&mut conn, &notifier, MAX_TEXT_LEN, director_id, "999", "hi")
-                .expect_err("a missing destination must error");
+        let err = broker::send_message(&mut conn, director_id, "999", "hi")
+            .expect_err("a missing destination must error");
         assert!(matches!(err, CafleetError::Value(_)));
         assert_eq!(err.message(), "Destination member not found: 999");
     }
@@ -514,16 +403,8 @@ mod tests {
         let (_, director_a) = create_fleet(&mut conn, "alpha");
         let (fleet_b, _) = create_fleet(&mut conn, "beta");
         let stranger_id = register(&mut conn, fleet_b, "stranger", Some("%5"));
-        let notifier = FakeNotifier::succeeding();
-        let err = broker::send_message(
-            &mut conn,
-            &notifier,
-            MAX_TEXT_LEN,
-            director_a,
-            &stranger_id.to_string(),
-            "hi",
-        )
-        .expect_err("a cross-fleet destination must error");
+        let err = broker::send_message(&mut conn, director_a, &stranger_id.to_string(), "hi")
+            .expect_err("a cross-fleet destination must error");
         assert!(matches!(err, CafleetError::Value(_)));
         assert_eq!(
             err.message(),
@@ -539,19 +420,19 @@ mod tests {
         let monitor_id = bootstrap_monitor(&conn, fleet_id);
         let member_a = register(&mut conn, fleet_id, "a", Some("%2"));
         let member_b = register(&mut conn, fleet_id, "b", Some("%3"));
-        let notifier = FakeNotifier::succeeding();
 
-        let result =
-            broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, director_id, "all hands")
-                .map(|record| vec![crate::presentation::broadcast_outcome(&record)])
-                .unwrap();
-        assert_eq!(result.len(), 1, "single-element result list");
-        let envelope = &result[0];
-        assert_eq!(envelope["recipients"], 3, "monitor + two workers");
-        assert_eq!(envelope["delivered"], 3);
+        let rows = broker::broadcast_message(&mut conn, director_id, "all hands").unwrap();
+        assert_eq!(
+            rows.deliveries
+                .iter()
+                .map(|(member_id, _)| *member_id)
+                .collect::<Vec<_>>(),
+            [monitor_id, member_a, member_b],
+            "monitor + two workers"
+        );
 
-        let summary = &envelope["message"];
-        let summary_id = summary["message_id"].as_i64().unwrap();
+        let summary = &crate::presentation::message(&rows.summary);
+        let summary_id = rows.summary.message_id;
         assert_eq!(summary["owner_member_id"], director_id);
         assert_eq!(summary["from_member_id"], director_id);
         assert_eq!(summary["to_member_id"], Value::Null);
@@ -563,13 +444,7 @@ mod tests {
         );
         assert_eq!(summary["text"], "Broadcast sent to 3 recipients");
 
-        let calls = notifier.calls.borrow();
-        assert_eq!(calls.len(), 3);
-        for (recipient, pane) in [
-            (monitor_id, MONITOR_PANE),
-            (member_a, "%2"),
-            (member_b, "%3"),
-        ] {
+        for (recipient, delivery_id) in rows.deliveries.iter().copied() {
             let pending = broker::poll_messages(&conn, recipient)
                 .map(|records| {
                     records
@@ -584,132 +459,35 @@ mod tests {
             assert_eq!(delivery["status_state"], "input_required");
             assert_eq!(delivery["origin_message_id"], summary_id);
             assert_eq!(delivery["text"], "all hands");
-
-            let call = calls
-                .iter()
-                .find(|c| c.target_pane_id == pane)
-                .expect("one preview per recipient pane");
             assert_eq!(
-                call.message_id,
-                delivery["message_id"].as_i64().unwrap(),
-                "the preview carries the recipient's own delivery id — \
-                 the id the recipient acks"
+                delivery["message_id"], delivery_id,
+                "the returned id is the recipient's own delivery — the id the recipient acks"
             );
-            assert_eq!(call.sender_id, director_id);
+            assert_eq!(notified_at(&conn, delivery_id), None);
         }
     }
 
     #[test]
-    fn broadcast_excludes_the_sender_and_counts_only_landed_previews() {
+    fn broadcast_excludes_the_sender() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
         let sender_id = register(&mut conn, fleet_id, "sender", Some("%2"));
         register(&mut conn, fleet_id, "helper", Some("%3"));
         register(&mut conn, fleet_id, "pending", None);
-        let notifier = FakeNotifier::succeeding();
 
-        let result =
-            broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, sender_id, "hello")
-                .map(|record| vec![crate::presentation::broadcast_outcome(&record)])
-                .unwrap();
-        let envelope = &result[0];
+        let rows = broker::broadcast_message(&mut conn, sender_id, "hello").unwrap();
         assert_eq!(
-            envelope["recipients"], 4,
+            rows.deliveries.len(),
+            4,
             "director + monitor + pane-bound peer + pending peer; sender excluded"
         );
-        assert_eq!(
-            envelope["delivered"], 3,
-            "the paneless peer contributes no preview"
+        assert!(
+            rows.deliveries
+                .iter()
+                .all(|(member_id, _)| *member_id != sender_id)
         );
-        assert_eq!(
-            envelope["message"]["text"],
-            "Broadcast sent to 4 recipients"
-        );
-    }
-
-    #[test]
-    fn broadcast_discards_individual_preview_errors_without_schema_change() {
-        use std::cell::RefCell;
-
-        use crate::broker::InlinePreviewSender;
-
-        struct PaneSelectiveNotifier {
-            fail_pane: &'static str,
-            attempts: RefCell<usize>,
-        }
-
-        impl InlinePreviewSender for PaneSelectiveNotifier {
-            fn send_inline_preview(
-                &self,
-                target_pane_id: &str,
-                _message_id: i64,
-                _sender_id: i64,
-                _ts: &str,
-                _text: &str,
-            ) -> Result<(), String> {
-                *self.attempts.borrow_mut() += 1;
-                if target_pane_id == self.fail_pane {
-                    Err(PREVIEW_ERROR.to_string())
-                } else {
-                    Ok(())
-                }
-            }
-        }
-
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
-        let monitor_id = bootstrap_monitor(&conn, fleet_id);
-        let member_a = register(&mut conn, fleet_id, "a", Some("%2"));
-        let member_b = register(&mut conn, fleet_id, "b", Some("%3"));
-        let notifier = PaneSelectiveNotifier {
-            fail_pane: "%2",
-            attempts: RefCell::new(0),
-        };
-
-        let result =
-            broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, director_id, "all hands")
-                .map(|record| vec![crate::presentation::broadcast_outcome(&record)])
-                .unwrap();
-        assert_eq!(result.len(), 1, "still the single summary envelope");
-        let envelope = &result[0];
-        assert_eq!(
-            envelope
-                .as_object()
-                .expect("a JSON object")
-                .keys()
-                .collect::<Vec<_>>(),
-            ["message", "recipients", "delivered"],
-            "no error list or extra field joins the envelope"
-        );
-        assert_eq!(envelope["recipients"], 3, "monitor + two workers");
-        assert_eq!(
-            envelope["delivered"], 2,
-            "only Ok previews count; the failed pane is discarded silently"
-        );
-        assert_eq!(envelope["message"]["status_state"], "completed");
-        assert_eq!(
-            *notifier.attempts.borrow(),
-            3,
-            "one attempt per pane, no retry"
-        );
-
-        for recipient in [monitor_id, member_a, member_b] {
-            let pending = broker::poll_messages(&conn, recipient)
-                .map(|records| {
-                    records
-                        .iter()
-                        .map(crate::presentation::message)
-                        .collect::<Vec<_>>()
-                })
-                .unwrap();
-            assert_eq!(
-                pending.len(),
-                1,
-                "every delivery row persists regardless of its preview outcome"
-            );
-        }
+        assert_eq!(rows.summary.text, "Broadcast sent to 4 recipients");
     }
 
     #[test]
@@ -717,8 +495,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let _ = create_fleet(&mut conn, "alpha");
-        let notifier = FakeNotifier::succeeding();
-        let err = broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, 999, "hi")
+        let err = broker::broadcast_message(&mut conn, 999, "hi")
             .expect_err("an unknown sender must error");
         assert!(matches!(err, CafleetError::Value(_)));
         assert_eq!(err.message(), "Sender member not found or not active: 999");
@@ -730,10 +507,9 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
-        let notifier = FakeNotifier::succeeding();
 
-        let first = common::send(&mut conn, &notifier, director_id, member_id, "one");
-        let second = common::send(&mut conn, &notifier, director_id, member_id, "two");
+        let first = common::send(&mut conn, director_id, member_id, "one");
+        let second = common::send(&mut conn, director_id, member_id, "two");
         let first_id = first["message"]["message_id"].as_i64().unwrap();
         let second_id = second["message"]["message_id"].as_i64().unwrap();
 
@@ -761,7 +537,7 @@ mod tests {
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0]["message_id"], second_id);
 
-        broker::broadcast_message(&mut conn, &notifier, 200, member_id, "fanout").unwrap();
+        broker::broadcast_message(&mut conn, member_id, "fanout").unwrap();
         let sender_pending = broker::poll_messages(&conn, member_id)
             .map(|records| {
                 records
@@ -799,8 +575,7 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
-        let notifier = FakeNotifier::succeeding();
-        let sent = common::send(&mut conn, &notifier, director_id, member_id, "hi");
+        let sent = common::send(&mut conn, director_id, member_id, "hi");
         let message_id = sent["message"]["message_id"].as_i64().unwrap();
         let sent_ts = sent["message"]["status_timestamp"]
             .as_str()
@@ -825,8 +600,7 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
-        let notifier = FakeNotifier::succeeding();
-        let sent = common::send(&mut conn, &notifier, director_id, member_id, "hi");
+        let sent = common::send(&mut conn, director_id, member_id, "hi");
         let message_id = sent["message"]["message_id"].as_i64().unwrap();
 
         let err = broker::ack_message(&mut conn, 999).expect_err("missing message");
