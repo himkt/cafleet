@@ -1015,6 +1015,31 @@ mod tests {
     }
 
     #[test]
+    fn send_inline_preview_sends_the_note_on_its_own_line_after_the_base_payload() {
+        let runner = FakeRunner::with_binary("herdr");
+        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+        let ts = "2026-07-30T09:00:00.000000+00:00";
+        let note = "[cafleet] Resume your work if something was still running.";
+        assert!(
+            mux.send_inline_preview("w1:p2", 5, 2, ts, "a\nb", Some(note))
+                .is_ok()
+        );
+        assert_eq!(
+            runner.events()[2],
+            run_event(
+                &[
+                    "herdr",
+                    "pane",
+                    "send-text",
+                    "w1:p2",
+                    &format!("[cafleet msg 5 from 2 {ts}]\na⏎b\n{note}"),
+                ],
+                Some(5),
+            )
+        );
+    }
+
+    #[test]
     fn send_inline_preview_without_the_binary_is_the_exact_path_error() {
         let runner = FakeRunner::without_binaries();
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
