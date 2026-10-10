@@ -137,7 +137,7 @@ After the five steps, honor the resume clause of whatever keystroke re-opened yo
 
 ### Routing member command requests
 
-The workflow's spawned members run in workspace-scoped auto-approval mode ({permission_flags}; Bash tool enabled, broker commands allowed from spawn). A member runs what its harness allows and routes the rest: it sends `Need to run: <command>. My harness denied it.` via `cafleet message send` and ends its turn, and you run the command with `cafleet member exec <member-id> "<command>"`, then ACK the request. The broker reports the exit status as a notice and resumes the member — no ping and no capture follow. Routing is the standard path for a command the harness does not run, so expect it routinely; process requests in poll order ([`reference/prompt-routing.md`](prompt-routing.md)).
+The workflow's spawned members run in workspace-scoped auto-approval mode ({permission_flags}; Bash tool enabled, broker commands allowed from spawn). What each backend denies is its `{permission_flags}` note in [`coding-agents.md`](coding-agents.md). A member runs what its harness allows and routes the rest: it sends `Need to run: <command>. My harness denied it.` via `cafleet message send` and ends its turn, and you run the command with `cafleet member exec <member-id> "<command>"`, then ACK the request. The broker reports the exit status as a notice and resumes the member — no ping and no capture follow. Routing is the standard path for a command the harness does not run, so expect it routinely; process requests in poll order ([`reference/prompt-routing.md`](prompt-routing.md)).
 
 ## Monitor Lifecycle
 

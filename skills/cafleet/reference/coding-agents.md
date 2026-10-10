@@ -67,6 +67,7 @@ Sources: [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pr
 |------|-----------|
 | `AskUserQuestion` takes ≤ 4 options/question; the built-in "Other" is the free-text path (don't add an explicit "Other"). Question shapes → form: choice among ≤ 4 labeled options; approve-or-revise (two options); continue-or-abort (two options); open-ended draft-comparison (2–4 full candidate bodies). | `{decision_surface}` — `cafleet/SKILL.md` § Soliciting user reactions; `cafleet-design-doc/create/create.md` Step 2 question batch |
 | *Pane-state capture cues* (below) — the concrete claude-pane discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`. | the monitor member's on-wake classification (its role file's § *On each wake*) and the Director's reading of a pane capture — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response; the pane-state taxonomy in [Monitoring](runtime/concepts/monitoring.md) (each reader applies the cues of the **target member's** backend overlay). |
+| A member's broker commands are allowed on its spawn command line. Beyond them, `dontAsk` runs the harness's built-in read-only commands, file reads inside the working directory, and every tool call matching the operator's `permissions.allow`; every other call — shell command or file edit — is denied without a prompt. A task command outside that allow list is routed on every use, and each routed dispatch costs the operator one `member exec` confirmation. Routing carries shell commands only: report a denied file edit to the Director — as a missing `Edit` allow entry, or, for a path under the harness's protected directories (such as `.git` and `.claude`), as an edit the Director must make. | `{permission_flags}` — `cafleet/roles/member.md` § Command execution; `cafleet/reference/prompt-routing.md` opening paragraphs / § Member-side: reconsider, then route; `cafleet/roles/director.md` introduction / § Member Create; `cafleet/reference/supervision.md` § Routing member command requests |
 
 ### Pane-state capture cues
 
@@ -123,6 +124,7 @@ Sources: [OpenAI pricing](https://developers.openai.com/api/docs/pricing) and [C
 |------|-----------|
 | No in-pane prompt — a fleet member sends its question to the Director, which answers as a plain operator message. Ask a concrete, answerable question, not free-form prose. | `{decision_surface}` — `cafleet/SKILL.md` § Soliciting user reactions |
 | *Pane-state capture cues* (below) — the concrete codex-pane discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`. | the monitor member's on-wake classification (its role file's § *On each wake*) and the Director's reading of a pane capture — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response; the pane-state taxonomy in [Monitoring](runtime/concepts/monitoring.md) (each reader applies the cues of the **target member's** backend overlay). |
+| Denial is the rare case: the harness rejects a few destructive operations (e.g. `git push`, `rm -rf`). | `{permission_flags}` — `cafleet/roles/member.md` § Command execution; `cafleet/reference/prompt-routing.md` opening paragraphs / § Member-side: reconsider, then route; `cafleet/roles/director.md` introduction / § Member Create; `cafleet/reference/supervision.md` § Routing member command requests |
 
 ### Pane-state capture cues
 
@@ -187,6 +189,7 @@ Source: [OpenCode Zen models and pricing](https://opencode.ai/docs/zen.md).
 |------|-----------|
 | No in-pane prompt — a fleet member sends its question to the Director, which answers as a plain operator message. The `--agent cafleet` safety floor shows no popup; if a popup ever appears it is a regression to escalate, not a decision point. | `{decision_surface}` — `cafleet/SKILL.md` § Soliciting user reactions |
 | *Pane-state capture cues* (below) — the concrete opencode-pane discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`. | the monitor member's on-wake classification (its role file's § *On each wake*) and the Director's reading of a pane capture — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response; the pane-state taxonomy in [Monitoring](runtime/concepts/monitoring.md) (each reader applies the cues of the **target member's** backend overlay). |
+| The `--agent cafleet` preset is a deny-by-default bash allowlist: denial is the common case for any un-allowlisted command, and routing workflow commands through the Director is the routine path. Before routing, check whether an allowlisted command covers the need. | `{permission_flags}` — `cafleet/roles/member.md` § Command execution; `cafleet/reference/prompt-routing.md` opening paragraphs / § Member-side: reconsider, then route; `cafleet/roles/director.md` introduction / § Member Create; `cafleet/reference/supervision.md` § Routing member command requests |
 
 ### Pane-state capture cues
 
@@ -219,7 +222,7 @@ List exact spawn tokens, valid aliases, reviewed most-to-least capability orderi
 
 ### Note → applies at
 
-Use a `Note | Applies at` table, one caveat per row. Every Applies-at cell names the token and affected `<skill>/<file>` section. Bind the pane-cue table to monitor on-wake classification and the Director's reading of a pane capture.
+Use a `Note | Applies at` table, one caveat per row. Every Applies-at cell names the token and affected `<skill>/<file>` section. Bind the pane-cue table to monitor on-wake classification and the Director's reading of a pane capture. Bind a `{permission_flags}` row stating the posture's denial semantics — what a member runs unprompted, what the harness denies, and when the member routes — to the member command-execution, prompt-routing, Director, and supervision instructions that point at it.
 
 ### Pane-state capture cues
 

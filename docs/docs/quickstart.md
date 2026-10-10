@@ -27,7 +27,7 @@ system:
 
 | Backend | Config file | Manual configuration | Installed by `cafleet setup` | Reference |
 |---|---|---|---|---|
-| `claude` (Claude Code) | `~/.claude/settings.json` | The `permissions.allow` / `permissions.ask` entries below, for the Director's session | The skills | The sub-section below |
+| `claude` (Claude Code) | `~/.claude/settings.json` | The permission profile below that matches the Director's mode | The skills | The sub-section below |
 | `codex` (OpenAI Codex CLI) | `~/.codex/config.toml` | The `[sandbox_workspace_write]` entries below | The skills, plus `~/.codex/rules/cafleet.rules` | [The `cafleet` rules file](spec/coding-agent-backends.md#cafleet-rules-file) |
 | `opencode` | none | none required | The skills, plus the `cafleet` agent preset at `~/.opencode/agents/cafleet.md` | [Opencode](spec/coding-agent-backends.md#opencode) |
 
@@ -41,13 +41,51 @@ that need one.
 
 ### Claude Code
 
+Add the profile below that matches the permission mode your Director session
+runs in to your user-level `~/.claude/settings.json`. Members start in
+`dontAsk` mode whichever mode the Director uses, so both profiles pre-approve
+what members need beyond their broker commands.
+
+| Behavior | Auto mode profile | Other-modes profile |
+|---|---|---|
+| Director session's permission mode | `auto` | Any other mode |
+| The Director's `cafleet` commands | Reviewed by the auto mode classifier | Pre-approved by `Bash(cafleet *)` |
+| A member's skill loads, skill-page reads, and file edits | Pre-approved by the entries both profiles share | Pre-approved by the entries both profiles share |
+| `cafleet member prompt` and `cafleet member exec` | Prompt the operator | Prompt the operator |
+
+`cafleet member prompt` and `cafleet member exec` are under `ask` in both
+profiles because the first keystrokes arbitrary text into a member's pane and
+the second runs an arbitrary command there; the operator confirms each
+invocation.
+
+A claude member needs no allow rule of its own for the broker commands:
+cafleet passes them on the member's spawn command line. A `deny` or `ask` rule
+that matches a broker command still blocks a member, and `cafleet doctor`
+reports it — see
+[Spawn-time allow rules](spec/coding-agent-backends.md#spawn-time-allow-rules).
+
+`Edit` and `Write` let members write files. They apply to every session that
+reads the settings file, your own included: each then edits files outside
+Claude Code's protected paths without a prompt or classifier review.
+[What each profile entry is for](spec/coding-agent-backends.md#claude-profile-entries)
+names the role that needs each entry and gives the path rule that confines
+this approval.
+[What members can run](spec/coding-agent-backends.md#claude-member-permissions)
+covers denied commands and the entries to add for your project's own task
+commands.
+
+#### Auto mode {#auto-mode-profile}
+
 ```json
 {
   "permissions": {
+    "defaultMode": "auto",
     "allow": [
-      "Bash(cafleet *)",
-      "Skill(cafleet:cafleet)",
-      "Skill(cafleet:cafleet-design-doc)"
+      "Skill(cafleet)",
+      "Skill(cafleet-design-doc)",
+      "Read(~/.claude/skills/**)",
+      "Edit",
+      "Write"
     ],
     "ask": [
       "Bash(cafleet member prompt *)",
@@ -57,18 +95,35 @@ that need one.
 }
 ```
 
-The `Bash(cafleet *)` pattern is the single allow-everything entry that the
-literal integer-id convention enables —
-one pattern covers every subcommand for every fleet. `cafleet member prompt *`
-and `cafleet member exec *` are moved to the `ask` list because the first
-keystrokes arbitrary text into a member's pane and the second runs an
-arbitrary command there; the operator should confirm each invocation.
+In auto mode a classifier reviews each Director command that no rule matches,
+so the allow list carries no `Bash(cafleet ...)` entry. `defaultMode` selects
+auto mode from user-level or managed settings; a project or local settings
+file cannot select it.
 
-These entries serve the session that directs the fleet. A claude member
-needs no allow rule of its own for the broker commands: cafleet passes them
-on the member's spawn command line. A `deny` or `ask` rule that matches a
-broker command still blocks a member, and `cafleet doctor` reports it — see
-[Spawn-time allow rules](spec/coding-agent-backends.md#spawn-time-allow-rules).
+#### Other permission modes {#other-modes-profile}
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(cafleet *)",
+      "Skill(cafleet)",
+      "Skill(cafleet-design-doc)",
+      "Read(~/.claude/skills/**)",
+      "Edit",
+      "Write"
+    ],
+    "ask": [
+      "Bash(cafleet member prompt *)",
+      "Bash(cafleet member exec *)"
+    ]
+  }
+}
+```
+
+`Bash(cafleet *)` is the single allow-everything entry that the literal
+integer-id convention enables — one pattern covers every subcommand the
+Director runs, for every fleet.
 
 ### Codex
 
@@ -87,7 +142,9 @@ default SQLite DB directory. Use the absolute path matching
 
 The Codex rules for `cafleet` commands allow every subcommand while keeping
 `cafleet member prompt` and `cafleet member exec` prompting; the reference
-above covers their precedence and where operator customizations belong.
+above covers their precedence and where operator customizations belong. A
+rules directory maintained without the installed file needs the
+[minimum rule set](spec/coding-agent-backends.md#minimum-rule-set).
 
 ### Trust the working directory
 

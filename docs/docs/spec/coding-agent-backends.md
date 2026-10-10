@@ -44,7 +44,7 @@ Per-backend capabilities:
 
 | Backend | OS-level sandbox | Sets the pane title | Shell-command posture | Preset / config prerequisite |
 |---|---|---|---|---|
-| `claude` | none | yes, via `--name <member-name>` | Runs the broker commands under its spawn-time allow rules and other commands under the user's own rules; a denied command routes to the Director | none |
+| `claude` | none | yes, via `--name <member-name>` | Runs the broker commands under its spawn-time allow rules, read-only commands, and every command matching the operator's `permissions.allow`; a denied command routes to the Director | A permission profile in `~/.claude/settings.json` — a permission posture, not a spawn dependency ([Claude](#claude)) |
 | `codex` | kernel-enforced ([Codex](#codex)) | no — locate the pane through `cafleet member list` (`pane_id` is ground truth) | Runs cafleet and any shell command directly | `~/.codex/rules/cafleet.rules` (`CODEX_HOME` relocates it), plus the `~/.codex/config.toml` settings and a trusted working directory — a permission posture, not a spawn dependency ([the rules file](#cafleet-rules-file)) |
 | `opencode` | none | no — locate the pane through `cafleet member list` | Deny-by-default allowlist; everything outside it routes to the Director | `~/.opencode/agents/cafleet.md` (`OPENCODE_CONFIG_DIR` relocates it) — a spawn precondition ([the agent preset](#cafleet-agent-preset)) |
 
@@ -67,7 +67,16 @@ Per-backend capabilities:
 ## Claude {#claude}
 
 `--permission-mode dontAsk` is the reference auto-approval posture the other
-backends match.
+backends match. A member runs four kinds of call without a prompt: its
+[spawn-time allow rules](#spawn-time-allow-rules), Claude Code's built-in
+read-only commands, file reads inside its working directory, and every tool
+call matching `permissions.allow`. Every other call — a shell command or a
+file edit, including one matching `permissions.ask` — is denied without a
+prompt. A write to one of Claude Code's protected paths, such as a project's
+`.git` or `.claude` directory, is denied whatever the allow list holds. Beyond
+the broker commands, the operator's settings are therefore the member's allow
+list; the recommended profiles are in
+[Claude Code configuration](../quickstart.md#claude-code).
 
 ### Spawn-time allow rules {#spawn-time-allow-rules}
 
@@ -102,6 +111,54 @@ The flags do not cover these cases:
 - Work commands (`mise`, `git commit`, package managers) stay under the
   user's own rules; a denied one is routed through
   [`cafleet member exec`](cli-options.md#member-exec).
+
+### What each profile entry is for {#claude-profile-entries}
+
+| Entry | Profile | Needed by | Why |
+|---|---|---|---|
+| `Bash(cafleet *)` | Other modes | The Director | One pattern pre-approves every subcommand the Director runs. |
+| `Skill(cafleet)`, `Skill(cafleet-design-doc)` | Both | The Director and every member | Each loads the installed skills through the Skill tool. |
+| `Read(~/.claude/skills/**)` | Both | The Director and every member | Role and reference pages of an installed skill sit outside the working directory. |
+| `Edit`, `Write` | Both | Every member that writes files | A member's file edit is denied unless an entry matches it. No entry covers a protected path. |
+| `Bash(cafleet member prompt *)`, `Bash(cafleet member exec *)` under `ask` | Both | The Director | The operator confirms each dispatch; a member's own attempt is denied. |
+
+The auto mode profile carries no `Bash(cafleet ...)` allow entry: the
+classifier reviews each Director command that no rule matches, auto mode
+approves the Director's file edits inside the working directory, and members
+receive their broker commands as spawn-time allow rules.
+
+`cafleet member prompt` and `cafleet member exec` stay under `ask` in both
+profiles because the first keystrokes arbitrary text into a member's pane and
+the second runs an arbitrary command there. An ask rule outranks every allow
+rule, so the entries hold beside `Bash(cafleet *)`.
+
+`Edit` and `Write` apply to every session that reads the settings file, so
+they also pre-approve file edits in your own sessions. To confine the
+approval, replace both with a path rule such as `Edit(~/work/**)`, which
+covers every file-editing tool. No entry reaches a protected path: a member's
+edit under a project's `.git` or `.claude` directory is always denied, and the
+Director session makes that edit instead. When `CLAUDE_CONFIG_DIR` relocates
+the config directory, write the `Read` entry against that directory's
+`skills/**`.
+
+### What members can run {#claude-member-permissions}
+
+A member whose shell command is denied asks its Director to run it. The
+Director runs it with [`cafleet member exec`](cli-options.md#member-exec),
+which is under `ask`, so each routed command costs the operator one
+confirmation. Add an allow entry for every project command members run as
+part of their work — a test or lint task, for example, as `Bash(npm test *)` —
+so those commands run without routing. Routing carries shell commands only: a
+denied file edit needs a matching `Edit` entry, or, on a protected path, the
+Director to make the edit.
+
+| Symptom | Cause | Resolution |
+|---|---|---|
+| A member reports a denied shell command | The command is outside the spawn-time allow rules, the read-only set, and the allow list | Add an allow entry for the command. Until then, each Director dispatch of it asks the operator to confirm. |
+| A member reports a denied file edit | No `Edit` entry matches the file's path, or the path is protected | Add `Edit` and `Write`, or widen the `Edit` path rule to cover the member's working directory. For a protected path, the Director makes the edit. |
+| The Director is prompted for every `cafleet` command | The session runs in a non-auto mode with the auto mode profile | Switch the session to auto mode, or use the other-modes profile |
+| The classifier blocks a Director `cafleet` command | Auto mode judged the action outside the request | Add a pattern for that subcommand per [`permissions.allow` coverage](cli-options.md#permissionsallow-coverage) |
+| `defaultMode: "auto"` has no effect | It is set in a project or local settings file, or auto mode is unavailable for the organization or model | Move it to `~/.claude/settings.json`, removing it from the project file. When auto mode is unavailable, use the other-modes profile. |
 
 ## Codex {#codex}
 
@@ -166,6 +223,58 @@ so operator customizations belong in a separate rules file under
 startup and applies the strictest decision across all of them. The rules file
 is a permission posture, not a spawn dependency: `cafleet member create
 --coding-agent codex` requires only the `codex` binary on PATH.
+
+#### Minimum rule set {#minimum-rule-set}
+
+A rules directory maintained without the installed file — for example one
+managed from a dotfiles repository — needs at least these rules:
+
+```text
+prefix_rule(
+    pattern = ["cafleet", "message"],
+    decision = "allow",
+    match = ["cafleet message poll 5", "cafleet message send --from-member-id 1 --to-member-id 2 ready"],
+    not_match = ["cafleet member list 1", "cafleet doctor"],
+)
+
+prefix_rule(
+    pattern = ["cafleet", "monitor", "scan"],
+    decision = "allow",
+    match = ["cafleet monitor scan 1", "cafleet monitor scan 1 --lines 120 --json"],
+    not_match = ["cafleet monitor 1", "cafleet message poll 5"],
+)
+
+prefix_rule(
+    pattern = ["cafleet", "member", "ping"],
+    decision = "allow",
+    match = ["cafleet member ping 5", "cafleet member ping 5 --json"],
+    not_match = ["cafleet member prompt 5 hello", "cafleet member list 1"],
+)
+
+prefix_rule(
+    pattern = ["cafleet", "member", "prompt"],
+    decision = "prompt",
+    justification = "cafleet member prompt keystrokes arbitrary text into a member pane",
+)
+
+prefix_rule(
+    pattern = ["cafleet", "member", "exec"],
+    decision = "prompt",
+    justification = "cafleet member exec runs an arbitrary shell command in a member pane",
+)
+```
+
+The `allow` rules cover the broker commands members run themselves — the same
+commands a claude member receives as
+[spawn-time allow rules](#spawn-time-allow-rules); the `prompt` rules keep
+`cafleet member prompt` and `cafleet member exec` under operator approval.
+
+The set is sufficient for members and is not the recommendation for a
+Director session. Codex has no classifier to review what these rules leave
+unmatched, so every other `cafleet` command a Director runs follows that
+session's own approval policy and sandbox instead of running pre-approved
+outside it. Keep the installed file for a Director session; it is a superset
+of these rules, so they add nothing when it is also present.
 
 ## Opencode {#opencode}
 
