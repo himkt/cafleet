@@ -1,6 +1,6 @@
 # Stall-free delivery and Director-routed exec
 
-**Status**: Approved
+**Status**: In Progress
 **Progress**: 33/34 tasks complete
 **Last Updated**: 2026-10-10
 
@@ -623,3 +623,4 @@ Documentation first, per the project's documentation-maintenance rule; code star
 | 2026-10-10 | User decision at execute start: the recorded pane fixtures, their user prerequisite and the fixture-driven test are dropped; the classifier implements the § S2 cue table as written and is covered by inline-capture tests |
 | 2026-10-10 | Director arbitration: the `member prompt --shell` parse test is dropped — the flag's absence is the check, and the removed-term search of § S10 stays free of `--shell` |
 | 2026-10-10 | Director confirmation of Step 5 implementation choices: a loop that reaches the failure limit or fails its startup probe exits 1 with the multiplexer's error; `ensure_monitor_loop` reports `cannot open monitor log <path>: <error>` and `cannot spawn the monitor loop for fleet <id>: <error>`; `member ping` reports a failed capture as `capture failed: <error>` with exit 1; the delivery pass echoes per-pane capture, keystroke and delivery failures |
+| 2026-10-10 | Implementation merged into PR #444 after Reviewer approval in round 2 and user approval; status stays In Progress until the user runs the manual live checklist of § S11 |
