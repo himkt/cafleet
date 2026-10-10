@@ -1,6 +1,6 @@
 # Recommended Permission Settings for Auto Mode and Other Modes
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 27/27 tasks complete
 **Last Updated**: 2026-10-10
 
@@ -564,3 +564,4 @@ The Director session performs this step. `.claude/` is a Claude Code protected d
 |------|---------|
 | 2026-10-10 | Initial draft |
 | 2026-10-10 | Target text rebased on the spawn-time allow rules and `cafleet member exec`: the auto mode profile carries no `Bash(cafleet ...)` allow entry, `member exec` joins `member prompt` under `ask`, and routing names `member exec` |
+| 2026-10-10 | Implementation complete |
