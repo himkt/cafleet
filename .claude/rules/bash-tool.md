@@ -4,7 +4,7 @@ This rule fires every time you reach for the Bash tool as a CAFleet team member.
 
 ## The MUST rule
 
-> **If you are a CAFleet member spawned by `cafleet member create`, your harness runs in `--permission-mode dontAsk`. Your Bash tool is ENABLED, your broker commands are allowed from spawn, and permission prompts auto-resolve silently. Run every command your harness allows directly via the Bash tool, with no prefix and no operator prompt, and route a command it denies to the Director with `cafleet message send`.**
+> **If you are a CAFleet member spawned by `cafleet member create`, your harness runs in `--permission-mode dontAsk`. Your Bash tool is ENABLED and your broker commands are allowed from spawn. Read-only commands and every call matching the operator's `permissions.allow` also run without a prompt; every other shell command or file edit is denied without a prompt, and an edit under a protected directory such as `.git` or `.claude` is denied whatever the allow list holds. Run every command your harness allows directly via the Bash tool, with no prefix and no operator prompt. Route a correct, necessary command it denies to the Director with `cafleet message send`, and report a denied file edit to the Director.**
 
 ## How to detect that you are a CAFleet member
 

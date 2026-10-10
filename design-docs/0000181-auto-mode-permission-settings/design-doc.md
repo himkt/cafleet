@@ -1,7 +1,7 @@
 # Recommended Permission Settings for Auto Mode and Other Modes
 
 **Status**: Approved
-**Progress**: 19/27 tasks complete
+**Progress**: 20/27 tasks complete
 **Last Updated**: 2026-10-10
 
 ## Overview
@@ -541,7 +541,7 @@ Documentation only. Follow the project order: `docs/` pages first, then skills, 
 
 The Director session performs this step. `.claude/` is a Claude Code protected directory, so a `dontAsk` member's write there is denied whatever the allow list holds, and routing carries shell commands only.
 
-- [ ] Director: replace the MUST-rule blockquote in `.claude/rules/bash-tool.md` <!-- completed: -->
+- [x] Director: replace the MUST-rule blockquote in `.claude/rules/bash-tool.md` <!-- completed: 2026-10-10T16:52 -->
 
 ### Step 6: README and SPEC check
 
