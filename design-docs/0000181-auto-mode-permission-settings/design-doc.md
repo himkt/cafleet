@@ -1,7 +1,7 @@
 # Recommended Permission Settings for Auto Mode and Other Modes
 
 **Status**: Approved
-**Progress**: 20/27 tasks complete
+**Progress**: 27/27 tasks complete
 **Last Updated**: 2026-10-10
 
 ## Overview
@@ -10,15 +10,15 @@ CAFleet's documentation recommends a single Claude Code permission block built a
 
 ## Success Criteria
 
-- [ ] Quickstart § Configure › Claude Code presents two `settings.json` profiles, auto mode first, and each snippet parses as valid JSON.
-- [ ] The backend spec § Claude carries a per-entry table naming the role that needs each entry and why, and states that a `dontAsk` member is denied every shell command and file edit outside its spawn-time allow rules, the read-only set, and the allow list.
-- [ ] Both profiles keep `Bash(cafleet member prompt *)` and `Bash(cafleet member exec *)` under `permissions.ask`, use the un-namespaced `Skill(cafleet)` / `Skill(cafleet-design-doc)` entries, and carry the `Edit` / `Write` entries members need to write files.
-- [ ] The backend spec keeps § Spawn-time allow rules and its `#spawn-time-allow-rules` anchor unchanged, and the quickstart still states that a claude member needs no allow rule of its own for the broker commands.
-- [ ] `grep -ri` over `docs/docs/`, `skills/`, and `.claude/rules/` finds none of the strings listed in § Specification › Stale strings.
-- [ ] cli-options § `permissions.allow` coverage keeps its heading and anchor, states the pattern rule, and links to the quickstart profiles instead of restating them.
-- [ ] The Codex rules reference documents the minimum rule set and states that it is sufficient for members and not the recommendation for a Director session.
-- [ ] `mise //docs:build` succeeds, and the rendered quickstart and backend spec show both snippets and all new tables intact.
-- [ ] `git diff --stat` lists only the files named in § Specification › Files changed; `SPEC.md`, `README.md`, and everything under `cafleet/` are untouched.
+- [x] Quickstart § Configure › Claude Code presents two `settings.json` profiles, auto mode first, and each snippet parses as valid JSON.
+- [x] The backend spec § Claude carries a per-entry table naming the role that needs each entry and why, and states that a `dontAsk` member is denied every shell command and file edit outside its spawn-time allow rules, the read-only set, and the allow list.
+- [x] Both profiles keep `Bash(cafleet member prompt *)` and `Bash(cafleet member exec *)` under `permissions.ask`, use the un-namespaced `Skill(cafleet)` / `Skill(cafleet-design-doc)` entries, and carry the `Edit` / `Write` entries members need to write files.
+- [x] The backend spec keeps § Spawn-time allow rules and its `#spawn-time-allow-rules` anchor unchanged, and the quickstart still states that a claude member needs no allow rule of its own for the broker commands.
+- [x] `grep -ri` over `docs/docs/`, `skills/`, and `.claude/rules/` finds none of the strings listed in § Specification › Stale strings.
+- [x] cli-options § `permissions.allow` coverage keeps its heading and anchor, states the pattern rule, and links to the quickstart profiles instead of restating them.
+- [x] The Codex rules reference documents the minimum rule set and states that it is sufficient for members and not the recommendation for a Director session.
+- [x] `mise //docs:build` succeeds, and the rendered quickstart and backend spec show both snippets and all new tables intact.
+- [x] `git diff --stat` lists only the files named in § Specification › Files changed; `SPEC.md`, `README.md`, and everything under `cafleet/` are untouched.
 
 ---
 
@@ -545,16 +545,16 @@ The Director session performs this step. `.claude/` is a Claude Code protected d
 
 ### Step 6: README and SPEC check
 
-- [ ] Confirm `README.md` needs no edit (it only links to the quickstart) and that `SPEC.md` is unchanged <!-- completed: -->
+- [x] Confirm `README.md` needs no edit (it only links to the quickstart) and that `SPEC.md` is unchanged <!-- completed: 2026-10-10T16:52 -->
 
 ### Step 7: Verification
 
-- [ ] Parse each of the two quickstart JSON snippets with a JSON parser and confirm both are valid <!-- completed: -->
-- [ ] Run a case-insensitive `grep -r` over `docs/docs/`, `skills/`, and `.claude/rules/` for each string in § Specification › Stale strings; confirm no match <!-- completed: -->
-- [ ] Run `mise //docs:build` and confirm it succeeds <!-- completed: -->
-- [ ] Inspect the rendered quickstart, cli-options, and coding-agent-backends pages: both snippets and every new table render intact, and the `#auto-mode-profile`, `#claude-profile-entries`, `#claude-member-permissions`, `#minimum-rule-set`, `#spawn-time-allow-rules`, and `#permissionsallow-coverage` links resolve <!-- completed: -->
-- [ ] Run `mise //cafleet:test` and `mise //cafleet:lint`, since the skill files are embedded in the binary <!-- completed: -->
-- [ ] Run `git diff --stat` and confirm only the files in § Specification › Files changed appear <!-- completed: -->
+- [x] Parse each of the two quickstart JSON snippets with a JSON parser and confirm both are valid <!-- completed: 2026-10-10T16:56 -->
+- [x] Run a case-insensitive `grep -r` over `docs/docs/`, `skills/`, and `.claude/rules/` for each string in § Specification › Stale strings; confirm no match <!-- completed: 2026-10-10T16:56 -->
+- [x] Run `mise //docs:build` and confirm it succeeds <!-- completed: 2026-10-10T16:56 -->
+- [x] Inspect the rendered quickstart, cli-options, and coding-agent-backends pages: both snippets and every new table render intact, and the `#auto-mode-profile`, `#claude-profile-entries`, `#claude-member-permissions`, `#minimum-rule-set`, `#spawn-time-allow-rules`, and `#permissionsallow-coverage` links resolve <!-- completed: 2026-10-10T16:56 -->
+- [x] Run `mise //cafleet:test` and `mise //cafleet:lint`, since the skill files are embedded in the binary <!-- completed: 2026-10-10T16:56 -->
+- [x] Run `git diff --stat` and confirm only the files in § Specification › Files changed appear <!-- completed: 2026-10-10T16:56 -->
 
 ---
 
