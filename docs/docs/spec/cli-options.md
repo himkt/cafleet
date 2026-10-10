@@ -192,8 +192,8 @@ truncation suffix in an inline preview) is emitted as UTF-8, not escaped.
 JSON is always the complete, untruncated machine form — full envelopes, full
 message bodies; text output is always truncated per
 [Message Body Truncation](#message-body-truncation). The trailing position
-keeps JSON invocations inside the existing per-subcommand allow patterns (see
-[`permissions.allow` coverage](#permissionsallow-coverage)).
+keeps a JSON invocation inside the same prefix pattern that covers the command
+(see [`permissions.allow` coverage](#permissionsallow-coverage)).
 
 The [command index](#subcommand-summary) records JSON availability.
 
@@ -236,29 +236,30 @@ an active member with a placement row — see
 
 ## `permissions.allow` coverage
 
-The allow set is generated mechanically, one `Bash(...)` pattern per
-allow-listed subcommand:
+Every `cafleet` invocation is coverable by a prefix pattern, because each id
+rides after the subcommand name as a literal positional or trailing argument:
 
-- **One pattern per subcommand**, matching the subcommand prefix —
-  `Bash(cafleet <grp> <cmd> *)`. The positional subject id and trailing flags
-  such as [`--json`](#json-output) are covered by the same pattern. Both
-  `monitor` forms ride the single `Bash(cafleet monitor *)` pattern —
-  `cafleet monitor scan` needs no pattern of its own.
-- **`member prompt`, `member exec`, and `member exec-run` are excluded**, so
-  the Director's own harness mode decides when the user is asked:
-  `member prompt` carries operator-controlled text, `member exec` carries a
-  free-form command, and `member exec-run` executes a stored one.
+- **A pattern is a command prefix followed by ` *`.** The prefix is the whole
+  CLI (`Bash(cafleet *)`), a command group (`Bash(cafleet message *)`), or one
+  subcommand (`Bash(cafleet member capture *)`). The positional subject id and
+  trailing flags such as [`--json`](#json-output) are covered by the same
+  pattern. Both `monitor` forms ride the single `Bash(cafleet monitor *)`
+  pattern — `cafleet monitor scan` needs no pattern of its own.
+- **`member prompt` and `member exec` stay under `permissions.ask`** as
+  `Bash(cafleet member prompt *)` and `Bash(cafleet member exec *)`:
+  `member prompt` carries operator-controlled text and `member exec` carries a
+  free-form command. An ask rule outranks every allow rule, so both entries
+  hold beside `Bash(cafleet *)`.
 
-```
-Bash(cafleet message poll *)
-Bash(cafleet member create *)
-Bash(cafleet member capture *)
-```
-
-Apply the patterns to your user-level `~/.claude/settings.json` manually; the
-repo does not ship a committed permissions block. The set serves the Director's
-own session: a spawned claude member receives the broker commands it needs as
-allow rules on its spawn command line — see
+Which prefixes to allow depends on the permission mode the Director session
+runs in. The recommended profiles are in
+[Claude Code configuration](../quickstart.md#claude-code), and the role that
+needs each entry is in
+[What each profile entry is for](coding-agent-backends.md#claude-profile-entries).
+Apply a profile to your user-level `~/.claude/settings.json` manually; the
+repo does not ship a committed permissions block. The `Bash(cafleet ...)`
+entries serve the Director's own session: a spawned claude member receives the
+broker commands it needs as allow rules on its spawn command line — see
 [Spawn-time allow rules](coding-agent-backends.md#spawn-time-allow-rules).
 
 ## Message Body Truncation
@@ -1306,8 +1307,9 @@ something was still running.` → `Enter` into the target's pane
 re-poke for a quiet pane, owned by the Director and the monitor member (whose
 fixed-ping exception is the one automatic use — see
 [Monitoring](../concepts/monitoring.md)); the action is wholly fixed by the
-command — no operator-controlled body — which is why `member ping` sits in
-`permissions.allow`.
+command — no operator-controlled body — which is why `member ping` needs no
+operator confirmation, while `member prompt` and `member exec` stay under
+`permissions.ask`.
 
 The ping is gated. The command captures the target's pane, classifies it, and
 keystrokes only a pane that can take the keystroke:

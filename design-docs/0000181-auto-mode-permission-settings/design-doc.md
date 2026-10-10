@@ -1,7 +1,7 @@
 # Recommended Permission Settings for Auto Mode and Other Modes
 
 **Status**: Approved
-**Progress**: 3/27 tasks complete
+**Progress**: 6/27 tasks complete
 **Last Updated**: 2026-10-10
 
 ## Overview
@@ -514,9 +514,9 @@ Documentation only. Follow the project order: `docs/` pages first, then skills, 
 
 ### Step 2: CLI options spec
 
-- [ ] Replace the body of § `permissions.allow` coverage in `docs/docs/spec/cli-options.md`, keeping the heading text so the `#permissionsallow-coverage` anchor is unchanged <!-- completed: -->
-- [ ] Reword the allow-pattern sentence in § JSON output <!-- completed: -->
-- [ ] Reword the `permissions.allow` clause in § `member ping` <!-- completed: -->
+- [x] Replace the body of § `permissions.allow` coverage in `docs/docs/spec/cli-options.md`, keeping the heading text so the `#permissionsallow-coverage` anchor is unchanged <!-- completed: 2026-10-10T16:50 -->
+- [x] Reword the allow-pattern sentence in § JSON output <!-- completed: 2026-10-10T16:50 -->
+- [x] Reword the `permissions.allow` clause in § `member ping` <!-- completed: 2026-10-10T16:50 -->
 
 ### Step 3: Backend spec and concepts
 
