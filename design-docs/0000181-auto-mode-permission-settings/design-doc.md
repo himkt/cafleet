@@ -1,7 +1,7 @@
 # Recommended Permission Settings for Auto Mode and Other Modes
 
 **Status**: Approved
-**Progress**: 12/27 tasks complete
+**Progress**: 19/27 tasks complete
 **Last Updated**: 2026-10-10
 
 ## Overview
@@ -529,13 +529,13 @@ Documentation only. Follow the project order: `docs/` pages first, then skills, 
 
 ### Step 4: Skill pages
 
-- [ ] Append the `{permission_flags}` row to the `Note → applies at` table of each backend section in `skills/cafleet/reference/coding-agents.md`, leaving the freshness date unchanged <!-- completed: -->
-- [ ] Replace the `## Template` § Note → applies at paragraph in the same file so a new backend must supply the `{permission_flags}` row <!-- completed: -->
-- [ ] Replace the second paragraph of `skills/cafleet/reference/prompt-routing.md` with the pointer to the `{permission_flags}` note <!-- completed: -->
-- [ ] Update the `cafleet member ping` Permission gate cell in § The Director's pane primitives in the same file <!-- completed: -->
-- [ ] Replace the first paragraph of § Member-side: reconsider, then route in the same file <!-- completed: -->
-- [ ] Append the introduction sentence and replace the § Member Create sentence in `skills/cafleet/roles/director.md` <!-- completed: -->
-- [ ] Insert the `{permission_flags}` sentence in § Routing member command requests in `skills/cafleet/reference/supervision.md` <!-- completed: -->
+- [x] Append the `{permission_flags}` row to the `Note → applies at` table of each backend section in `skills/cafleet/reference/coding-agents.md`, leaving the freshness date unchanged <!-- completed: 2026-10-10T16:52 -->
+- [x] Replace the `## Template` § Note → applies at paragraph in the same file so a new backend must supply the `{permission_flags}` row <!-- completed: 2026-10-10T16:52 -->
+- [x] Replace the second paragraph of `skills/cafleet/reference/prompt-routing.md` with the pointer to the `{permission_flags}` note <!-- completed: 2026-10-10T16:52 -->
+- [x] Update the `cafleet member ping` Permission gate cell in § The Director's pane primitives in the same file <!-- completed: 2026-10-10T16:52 -->
+- [x] Replace the first paragraph of § Member-side: reconsider, then route in the same file <!-- completed: 2026-10-10T16:52 -->
+- [x] Append the introduction sentence and replace the § Member Create sentence in `skills/cafleet/roles/director.md` <!-- completed: 2026-10-10T16:52 -->
+- [x] Insert the `{permission_flags}` sentence in § Routing member command requests in `skills/cafleet/reference/supervision.md` <!-- completed: 2026-10-10T16:52 -->
 
 ### Step 5: Project rule
 

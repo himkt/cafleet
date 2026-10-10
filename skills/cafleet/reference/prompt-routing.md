@@ -2,7 +2,7 @@
 
 A member runs every command its harness allows and routes the rest to the Director. Routing is the standard path for a command the harness does not run, not a rare fallback: the member asks with a plain CAFleet message, the Director runs the command in the member's pane with `cafleet member exec`, and the broker reports completion and resumes the member.
 
-How often a member routes depends on its backend. A claude member's broker commands are allowed on its spawn command line, and its work commands (`mise`, `git commit`, package managers) run under the user's own rules. A codex member is denied a few destructive operations. An opencode member's preset is a deny-by-default bash allowlist, so every un-allowlisted command is routed.
+How often a member routes depends on its backend: what your harness runs and what it denies is the `{permission_flags}` note in your overlay section of [`coding-agents.md`](coding-agents.md).
 
 ## The Director's pane primitives
 
@@ -10,13 +10,13 @@ How often a member routes depends on its backend. A claude member's broker comma
 |---|---|---|
 | [`cafleet member exec`](../roles/director.md#member-exec) | Runs a shell command to completion in a member's pane, records its exit status, notifies the Director, and resumes the member. | Asked per invocation: the body is operator-controlled |
 | [`cafleet member prompt`](../roles/director.md#member-prompt) | Keystrokes one line of `TEXT` + `Enter` into a member's pane as a submitted user turn. | Asked per invocation: the body is operator-controlled |
-| [`cafleet member ping`](../roles/director.md#member-ping-manual-inbox-poll) | Fixed-action inbox-poll; no operator-controlled body. | `permissions.allow` |
+| [`cafleet member ping`](../roles/director.md#member-ping-manual-inbox-poll) | Fixed-action inbox-poll; no operator-controlled body. | Not asked: the action is fixed by the command |
 
 `cafleet member prompt` exists for text that only takes effect when it arrives as a direct user turn in the member's pane — slash commands, skill invocations, and other magic commands a broker message body cannot trigger (a `message send` inline preview arrives as content, not as a typed command). Broker messaging remains the canonical coordination channel: `member prompt` is not a substitute for `message send`, and a shell command goes through `member exec`.
 
 ## Member-side: reconsider, then route
 
-Reconsider first: most denials are a wrong flag, wrong path, or an unnecessary command; on opencode check whether an allowlisted command covers the need. Fix or drop what you can yourself. A correct, needed, still-denied command gets routed:
+Reconsider first, using your overlay's `{permission_flags}` note: check whether the flag or path is wrong, whether the command is unnecessary, and whether a command your posture approves covers the need. Fix or drop what you can yourself. A correct, needed, still-denied command gets routed:
 
 1. Send a plain CAFleet message to the Director:
    ```bash

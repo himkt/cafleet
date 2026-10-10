@@ -1,6 +1,6 @@
 # Director Role
 
-You are a **Director** managing one or more members in a CAFleet team. Members spawn with workspace-scoped auto-approval: each runs the commands its harness allows itself and routes the rest to you, and you run a routed command in the member's pane with `cafleet member exec`.
+You are a **Director** managing one or more members in a CAFleet team. Members spawn with workspace-scoped auto-approval: each runs the commands its harness allows itself and routes the rest to you, and you run a routed command in the member's pane with `cafleet member exec`. What each backend denies is the `{permission_flags}` note in that backend's section of [`coding-agents.md`](../reference/coding-agents.md).
 
 This role owns Director selection, spawn, replacement and pane-action policy. Supervision owns orchestration, recovery and shutdown.
 
@@ -94,7 +94,7 @@ cafleet member create --fleet-id <fleet-id> \
 
 `--role monitor` is recovery-only: the bootstrap monitor is spawned by `cafleet fleet create`; use the flag solely to re-spawn a dead monitor mid-run (`--model {monitor_model}`, omit `--coding-agent`; protocol in [`roles/monitor.md`](monitor.md)). The database enforces one active monitor member per fleet, including concurrent registrations; an ordinary `member create` requires one through its existing CLI guard. A dead pane alone does not free the slot: deregister the old monitor before re-spawning it. Both CLI guard error strings are in [`cli-options.md`](../reference/runtime/spec/cli-options.md#error-messages).
 
-The per-backend spawn argv is in [`cli-options.md`](../reference/runtime/spec/cli-options.md#member-create) § Spawn command per backend. In all three modes the member's Bash tool is enabled, its broker commands are allowed from spawn, and routine permission prompts auto-resolve; a command the harness does not run is routed per [`reference/prompt-routing.md`](../reference/prompt-routing.md). Per-backend deltas: [`claude`](../reference/coding-agents.md#claude) / [`codex`](../reference/coding-agents.md#codex) / [`opencode`](../reference/coding-agents.md#opencode).
+The per-backend spawn argv is in [`cli-options.md`](../reference/runtime/spec/cli-options.md#member-create) § Spawn command per backend. In all three modes the member's Bash tool is enabled, its broker commands are allowed from spawn, and no call waits on a permission prompt — an approved call runs and any other is denied; a command the harness does not run is routed per [`reference/prompt-routing.md`](../reference/prompt-routing.md). Per-backend deltas: [`claude`](../reference/coding-agents.md#claude) / [`codex`](../reference/coding-agents.md#codex) / [`opencode`](../reference/coding-agents.md#opencode).
 
 ### Model-name-to-backend inference
 
