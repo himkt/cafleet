@@ -376,9 +376,9 @@ composer in the last six lines, so the pane is unclassified and holds.
 
 | Coding agent | `awaiting_user` cue | `working` cue | `finished` cue |
 |---|---|---|---|
-| `claude` | A numbered option under the selection cursor: <code>^[\s│]*❯\s+\d+\.\s</code> | `esc to interrupt` | The composer prompt line: <code>^[\s│]*[>❯](\s.*)?$</code> |
-| `codex` | A numbered option under the cursor, <code>^\s*›\s+\d+\.\s</code>, or a `\[y/n\]` approval line | `esc to interrupt` | The composer prompt line: <code>^\s*[›▌](\s.*)?$</code> |
-| `opencode` | The permission popup title: `Permission required` | <code>esc\s+(to\s+)?interrupt</code> | The prompt box line: <code>^\s*┃(\s.*)?$</code> |
+| `claude` | A numbered option under the selection cursor: `^[\s│]*❯\s+\d+\.\s` | `esc to interrupt` | The composer prompt line: `^[\s│]*[>❯](\s.*)?$` |
+| `codex` | A numbered option under the cursor, `^\s*›\s+\d+\.\s`, or a `\[y/n\]` approval line | `esc to interrupt` | The composer prompt line: `^\s*[›▌](\s.*)?$` |
+| `opencode` | The permission popup title: `Permission required` | `esc\s+(to\s+)?interrupt` | The prompt box line: `^\s*┃(\s.*)?$` |
 
 `finished` means the composer is visible with no prompt box and no active-work
 cue. Text already typed into the composer does not change the result; a
