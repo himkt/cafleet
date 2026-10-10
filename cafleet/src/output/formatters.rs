@@ -303,14 +303,15 @@ mod tests {
                         "mux_pane_id": "%1",
                     },
                 },
+                "monitor_loop": {"pid": 4242},
             })
         }
 
         #[test]
-        fn compact_is_fleet_id_director_and_monitor() {
+        fn compact_is_fleet_id_director_and_monitor_then_the_loop_pid() {
             assert_eq!(
                 format_fleet_create(&fleet_create_result(json!("alpha"))),
-                "3 director=1 monitor=2"
+                "3 director=1 monitor=2\nmonitor loop: pid 4242"
             );
         }
 
@@ -318,7 +319,7 @@ mod tests {
         fn compact_ignores_the_name_and_placement() {
             assert_eq!(
                 format_fleet_create(&fleet_create_result(Value::Null)),
-                "3 director=1 monitor=2",
+                "3 director=1 monitor=2\nmonitor loop: pid 4242",
                 "the detailed view is --json only"
             );
         }

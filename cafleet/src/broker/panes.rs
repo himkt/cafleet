@@ -17,9 +17,12 @@ const PANE_TARGET_SELECT: &str = "SELECT m.member_id, m.name, p.mux_pane_id, p.c
      FROM members m JOIN member_placements p ON p.member_id=m.member_id \
      WHERE m.status='active' AND p.mux_pane_id IS NOT NULL";
 
-const HAS_PENDING_PREVIEW: &str = "EXISTS(SELECT 1 FROM messages g \
+/// A pending preview or an exec that is not yet closed.
+const HAS_OWED_WORK: &str = "(EXISTS(SELECT 1 FROM messages g \
      WHERE g.owner_member_id=m.member_id AND g.type='unicast' \
-       AND g.status_state='input_required' AND g.notified_at IS NULL)";
+       AND g.status_state='input_required' AND g.notified_at IS NULL) \
+     OR EXISTS(SELECT 1 FROM member_execs e \
+     WHERE e.member_id=m.member_id AND e.resumed_at IS NULL))";
 
 fn map_pane_target(row: &rusqlite::Row<'_>) -> rusqlite::Result<PaneTarget> {
     Ok(PaneTarget {
@@ -51,7 +54,7 @@ pub fn owed_pane_targets(
 ) -> Result<Vec<PaneTarget>, CafleetError> {
     let mut stmt = conn
         .prepare(&format!(
-            "{PANE_TARGET_SELECT} AND m.fleet_id=?1 AND {HAS_PENDING_PREVIEW} \
+            "{PANE_TARGET_SELECT} AND m.fleet_id=?1 AND {HAS_OWED_WORK} \
              ORDER BY m.member_id"
         ))
         .map_err(db_err)?;
@@ -69,7 +72,7 @@ pub fn fleet_has_owed_work(conn: &Connection, fleet_id: i64) -> Result<bool, Caf
             "SELECT EXISTS(SELECT 1 FROM members m \
                  JOIN member_placements p ON p.member_id=m.member_id \
                  WHERE m.fleet_id=?1 AND m.status='active' AND p.mux_pane_id IS NOT NULL \
-                   AND {HAS_PENDING_PREVIEW})"
+                   AND {HAS_OWED_WORK})"
         ),
         [fleet_id],
         |row| row.get(0),

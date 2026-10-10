@@ -2,10 +2,12 @@ use super::*;
 use crate::broker::test_support;
 use std::{cell::Cell, io, rc::Rc};
 
+const EXITS_FIRST: &str = "fixture must exit before the delivery pass";
+
 struct NoWake;
 impl MonitorMux for NoWake {
     fn list_pane_ids(&self) -> Result<BTreeSet<String>, MultiplexerError> {
-        panic!("wake interval is zero")
+        Ok(BTreeSet::new())
     }
     fn send_wake_entries(
         &self,
@@ -14,7 +16,26 @@ impl MonitorMux for NoWake {
         _: &[WakeEntry<'_>],
         _: &WakeEntry<'_>,
     ) -> Result<bool, MultiplexerError> {
-        panic!("wake interval is zero")
+        panic!("{EXITS_FIRST}")
+    }
+}
+impl PaneIo for NoWake {
+    fn capture_pane(&self, _: &str, _: i64) -> Result<String, String> {
+        panic!("{EXITS_FIRST}")
+    }
+    fn send_inline_preview(
+        &self,
+        _: &str,
+        _: i64,
+        _: i64,
+        _: &str,
+        _: &str,
+        _: Option<&str>,
+    ) -> Result<(), String> {
+        panic!("{EXITS_FIRST}")
+    }
+    fn send_prompt(&self, _: &str, _: &str) -> Result<(), String> {
+        panic!("{EXITS_FIRST}")
     }
 }
 
@@ -46,6 +67,10 @@ impl Write for Writer {
 
 #[test]
 fn loop_exits_unregister_signals_and_clear_only_the_owned_runtime() {
+    let settings = Settings::from_lookup(|name| {
+        (name == "CAFLEET_DATABASE_URL").then(|| "sqlite:///unused.db".to_string())
+    })
+    .unwrap();
     for failure in [
         "none",
         "first signal",
@@ -82,9 +107,10 @@ fn loop_exits_unregister_signals_and_clear_only_the_owned_runtime() {
                 &mut conn,
                 &NoWake,
                 &mut Writer(failure),
+                &settings,
                 fleet,
-                5,
-                0,
+                Some(5),
+                Some(0),
                 &MonitorLoopHooks {
                     pid: 424242,
                     stop: Arc::new(AtomicBool::new(false)),
@@ -116,7 +142,7 @@ fn loop_exits_unregister_signals_and_clear_only_the_owned_runtime() {
                 match failure {
                     "first signal" => 0,
                     "second signal" => 1,
-                    _ => 2,
+                    _ => 3,
                 }
             );
             let runtime = broker::read_monitor_runtime(&conn, fleet).unwrap().unwrap();

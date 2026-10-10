@@ -27,7 +27,7 @@ fn stale_after_seconds(tick_seconds: i64) -> i64 {
 }
 
 /// Signal-0 process probe: `EPERM` corroborates alive, `ESRCH` dead.
-fn process_alive(pid: i64) -> bool {
+pub(crate) fn process_alive(pid: i64) -> bool {
     let Ok(pid) = i32::try_from(pid) else {
         return false;
     };

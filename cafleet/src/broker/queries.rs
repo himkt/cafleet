@@ -314,7 +314,7 @@ mod timeline_regressions {
         assert_eq!(partial[0].status.as_str(), "input_required");
         assert_eq!(
             partial[0].origin_message_id,
-            Some(broadcast.message.message_id)
+            Some(broadcast.summary.message_id)
         );
         let full = list_timeline(&conn, fleet, 3).unwrap();
         assert_eq!(
@@ -323,7 +323,7 @@ mod timeline_regressions {
         );
         assert_eq!(
             full.iter()
-                .filter(|row| row.origin_message_id == Some(broadcast.message.message_id))
+                .filter(|row| row.origin_message_id == Some(broadcast.summary.message_id))
                 .count(),
             2
         );
@@ -334,7 +334,7 @@ mod timeline_regressions {
             4
         );
         assert_eq!(
-            get_message(&conn, broadcast.message.message_id)
+            get_message(&conn, broadcast.summary.message_id)
                 .map(|record| crate::presentation::message_envelope(&record))
                 .unwrap()["message"]["type"],
             "broadcast_summary"

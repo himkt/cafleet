@@ -5,7 +5,7 @@ use chrono::{DateTime, Duration, Utc};
 use rusqlite::Connection;
 
 use crate::broker;
-use crate::broker::records::{MessageRecord, PaneTarget};
+use crate::broker::records::{MemberExec, MessageRecord, PaneTarget};
 use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::output::{strip_ansi, truncate_text};
@@ -13,6 +13,7 @@ use crate::pane_state::{PaneState, classify};
 use crate::time::{format_utc, parse_lenient};
 
 pub const DELIVERY_CAPTURE_LINES: i64 = 40;
+pub const EXEC_RESUME_GRACE_SECONDS: i64 = 10;
 
 const RESUME_CLAUSE: &str = "[cafleet] Resume your work if something was still running.";
 const BROKER_NOTE: &str = "[cafleet] This delivery's Escape dismissed a pending prompt in your pane; \
@@ -102,14 +103,122 @@ fn forced_note(state: PaneState) -> Option<&'static str> {
     }
 }
 
+/// The one item a pane is owed next.
+enum Owed {
+    Resume(MemberExec),
+    Dispatch(MemberExec),
+    Preview(MessageRecord),
+}
+
+impl Owed {
+    /// A finished exec not yet resumed, else the oldest queued exec, else the
+    /// oldest pending preview.
+    fn select(conn: &Connection, member_id: i64) -> Result<Option<Owed>, CafleetError> {
+        if let Some(exec) = broker::oldest_finished_exec(conn, member_id)? {
+            return Ok(Some(Owed::Resume(exec)));
+        }
+        if let Some(exec) = broker::oldest_queued_exec(conn, member_id)? {
+            return Ok(Some(Owed::Dispatch(exec)));
+        }
+        Ok(broker::oldest_pending_preview(conn, member_id)?.map(Owed::Preview))
+    }
+
+    fn item(&self) -> Item {
+        match self {
+            Owed::Resume(exec) => Item::ExecResume {
+                exec_id: exec.exec_id,
+            },
+            Owed::Dispatch(exec) => Item::ExecDispatch {
+                exec_id: exec.exec_id,
+            },
+            Owed::Preview(message) => Item::Preview {
+                message_id: message.message_id,
+            },
+        }
+    }
+
+    /// When the item became owed: an exec's end for a resume, the row's
+    /// creation otherwise.
+    fn owed_since(&self) -> &str {
+        match self {
+            Owed::Resume(exec) => finished_at(exec),
+            Owed::Dispatch(exec) => &exec.created_at,
+            Owed::Preview(message) => &message.created_at,
+        }
+    }
+
+    /// Stamp the item as keystroked; `false` when it is no longer owed,
+    /// because it was ACKed or another process stamped it first.
+    fn stamp(&self, conn: &mut Connection, when: &str) -> Result<bool, CafleetError> {
+        match self {
+            Owed::Resume(exec) => broker::stamp_exec_resumed(conn, exec.exec_id, when),
+            Owed::Dispatch(exec) => broker::stamp_exec_dispatched(conn, exec.exec_id, when),
+            Owed::Preview(message) => broker::stamp_notified(conn, message.message_id, when),
+        }
+    }
+
+    fn clear_stamp(&self, conn: &mut Connection) -> Result<(), CafleetError> {
+        match self {
+            Owed::Resume(exec) => broker::clear_exec_resumed(conn, exec.exec_id),
+            Owed::Dispatch(exec) => broker::clear_exec_dispatched(conn, exec.exec_id),
+            Owed::Preview(message) => broker::clear_notified(conn, message.message_id),
+        }
+    }
+
+    fn send(
+        &self,
+        io: &dyn PaneIo,
+        settings: &Settings,
+        pane_id: &str,
+        note: Option<&str>,
+    ) -> Result<(), String> {
+        match self {
+            Owed::Resume(exec) => io.send_prompt(
+                pane_id,
+                &format!(
+                    "[cafleet] exec {} finished with exit {}. \
+                     Continue your work using its output above.",
+                    exec.exec_id,
+                    exec.exit_code
+                        .expect("an exec that awaits its resume recorded an exit code"),
+                ),
+            ),
+            Owed::Dispatch(exec) => io.send_prompt(
+                pane_id,
+                &format!("! cafleet member exec-run {}", exec.exec_id),
+            ),
+            Owed::Preview(message) => io.send_inline_preview(
+                pane_id,
+                message.message_id,
+                message.from_member_id,
+                &message.created_at,
+                &truncate_text(Some(&message.text), settings.max_text_len)
+                    .expect("a present text truncates to a present text"),
+                note,
+            ),
+        }
+    }
+}
+
+fn finished_at(exec: &MemberExec) -> &str {
+    exec.finished_at
+        .as_deref()
+        .expect("a finished exec carries finished_at")
+}
+
+/// `now − max(item timestamp, finished_at of the pane's latest exec,
+/// forced_at)`: the two pane-level terms restart the clock for everything
+/// queued behind an exec or a forced delivery.
 fn hold_age(
+    conn: &Connection,
     target: &PaneTarget,
-    item_timestamp: &str,
+    owed: &Owed,
     now: DateTime<Utc>,
 ) -> Result<Duration, CafleetError> {
-    let mut baseline = parse_lenient(item_timestamp)?;
-    if let Some(forced_at) = &target.forced_at {
-        baseline = baseline.max(parse_lenient(forced_at)?);
+    let mut baseline = parse_lenient(owed.owed_since())?;
+    let latest_exec_end = broker::latest_exec_finished_at(conn, target.member_id)?;
+    for restart in [&latest_exec_end, &target.forced_at].into_iter().flatten() {
+        baseline = baseline.max(parse_lenient(restart)?);
     }
     Ok(now - baseline)
 }
@@ -125,7 +234,10 @@ pub fn deliver_pane(
     let Some(target) = broker::pane_target(conn, member_id)? else {
         return Ok(PaneOutcome::Idle);
     };
-    let Some(message) = broker::oldest_pending_preview(conn, member_id)? else {
+    if broker::exec_in_flight(conn, member_id)? {
+        return Ok(PaneOutcome::Held(HoldReason::ExecRunning));
+    }
+    let Some(owed) = Owed::select(conn, member_id)? else {
         return Ok(PaneOutcome::Idle);
     };
 
@@ -134,58 +246,43 @@ pub fn deliver_pane(
         Err(error) => return Ok(PaneOutcome::Held(HoldReason::CaptureFailed(error))),
     };
     let state = classify(&target.coding_agent, &strip_ansi(&content));
-    let age = hold_age(&target, &message.created_at, now)?;
+
+    if let Owed::Resume(exec) = &owed {
+        if state == PaneState::Working {
+            // The harness answered the command's output with a turn of its
+            // own, so the exec closes without a keystroke.
+            broker::stamp_exec_resumed(conn, exec.exec_id, &format_utc(now))?;
+            return Ok(PaneOutcome::Held(HoldReason::Working));
+        }
+        if now - parse_lenient(finished_at(exec))? < Duration::seconds(EXEC_RESUME_GRACE_SECONDS) {
+            return Ok(PaneOutcome::Held(HoldReason::ResumeGrace));
+        }
+    }
+
+    let age = hold_age(conn, &target, &owed, now)?;
     let forced = match gate(state, age, settings.delivery_hold_timeout) {
         Gate::Ordinary => false,
         Gate::Forced => true,
         Gate::Hold(reason) => return Ok(PaneOutcome::Held(reason)),
     };
 
-    fire_preview(conn, io, settings, &target, &message, state, forced, now)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn fire_preview(
-    conn: &mut Connection,
-    io: &dyn PaneIo,
-    settings: &Settings,
-    target: &PaneTarget,
-    message: &MessageRecord,
-    state: PaneState,
-    forced: bool,
-    now: DateTime<Utc>,
-) -> Result<PaneOutcome, CafleetError> {
     let stamp = format_utc(now);
     // A refused claim means another cafleet process is typing into the pane;
-    // a refused stamp means the row was ACKed after it was selected.
-    if !broker::claim_pane(conn, target.member_id, now)?
-        || !broker::stamp_notified(conn, message.message_id, &stamp)?
-    {
+    // a refused stamp means the item stopped being owed after it was selected.
+    if !broker::claim_pane(conn, member_id, now)? || !owed.stamp(conn, &stamp)? {
         return Ok(PaneOutcome::Held(HoldReason::Busy));
     }
     if forced {
-        broker::stamp_forced(conn, target.member_id, &stamp)?;
+        broker::stamp_forced(conn, member_id, &stamp)?;
     }
-
-    let text = truncate_text(Some(&message.text), settings.max_text_len)
-        .expect("a present text truncates to a present text");
     let note = if forced { forced_note(state) } else { None };
-    match io.send_inline_preview(
-        &target.pane_id,
-        message.message_id,
-        message.from_member_id,
-        &message.created_at,
-        &text,
-        note,
-    ) {
+    match owed.send(io, settings, &target.pane_id, note) {
         Ok(()) => Ok(PaneOutcome::Fired {
-            item: Item::Preview {
-                message_id: message.message_id,
-            },
+            item: owed.item(),
             forced,
         }),
         Err(error) => {
-            broker::clear_notified(conn, message.message_id)?;
+            owed.clear_stamp(conn)?;
             Ok(PaneOutcome::Held(HoldReason::KeystrokeFailed(error)))
         }
     }

@@ -135,6 +135,27 @@ pub struct PaneTarget {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemberExec {
+    pub exec_id: i64,
+    pub member_id: i64,
+    pub command: String,
+    pub created_at: String,
+    pub dispatched_at: Option<String>,
+    pub started_at: Option<String>,
+    pub pid: Option<i64>,
+    pub finished_at: Option<String>,
+    pub exit_code: Option<i64>,
+    pub resumed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecMember {
+    pub member_id: i64,
+    pub fleet_id: i64,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SilentMember {
     pub member_id: i64,
     pub name: String,

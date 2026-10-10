@@ -174,8 +174,13 @@ fn create(
                 director_id,
                 agent_name,
             )?;
-            let argv =
-                backend.build_spawn_argv(&prompt, MONITOR_NAME, monitor.model, monitor.effort);
+            let argv = backend.build_spawn_argv(
+                &prompt,
+                MONITOR_NAME,
+                monitor.model,
+                monitor.effort,
+                true,
+            );
             let pane_id = mux
                 .split_window(&context, &env, &argv)
                 .map_err(|error| CafleetError::App(format!("tmux split-window failed: {error}")))?;

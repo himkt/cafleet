@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 
 use crate::config_dir::DirSource;
 use crate::diagnosis::{AssetReport, AssetState, SchemaState};
+use crate::member_permissions::{Finding, FindingKind};
 
 pub(crate) fn doctor_database_detail(schema: &SchemaState) -> String {
     match schema {
@@ -75,6 +76,30 @@ pub(crate) fn doctor_assets(assets: &AssetReport, cli_version: &str) -> Value {
     json!({"ok":ok,"cli_version":cli_version,"agents":agents,
         "superseded":assets.superseded.iter().map(|r| json!({"coding_agent":r.coding_agent,
             "path":r.path,"recorded_version":r.cafleet_version,"installed_at":r.installed_at})).collect::<Vec<_>>()})
+}
+
+pub(crate) fn doctor_member_permissions(findings: &[Finding]) -> Value {
+    let findings = findings
+        .iter()
+        .map(|finding| {
+            let (list, rule, command) = match &finding.kind {
+                FindingKind::BlockingRule {
+                    list,
+                    rule,
+                    command,
+                } => (Some(*list), Some(rule.as_str()), Some(*command)),
+                FindingKind::ManagedRulesOnly { command } => (
+                    Some("allowManagedPermissionRulesOnly"),
+                    None,
+                    Some(*command),
+                ),
+                FindingKind::Unreadable => (None, None, None),
+            };
+            json!({"coding_agent":"claude","file":finding.file.display().to_string(),
+                "list":list,"rule":rule,"command":command})
+        })
+        .collect::<Vec<_>>();
+    json!({"ok":findings.is_empty(),"findings":findings})
 }
 
 pub fn placement(row: &Placement) -> Value {

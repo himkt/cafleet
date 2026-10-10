@@ -48,6 +48,7 @@ impl CodingAgent for Codex {
         _display_name: &str,
         model: Option<&str>,
         effort: Option<&str>,
+        _monitor: bool,
     ) -> Vec<String> {
         let mut argv = vec![
             "codex".to_string(),
@@ -114,7 +115,7 @@ mod tests {
     #[test]
     fn spawn_argv_ignores_display_name_and_packs_effort_into_one_token() {
         assert_eq!(
-            codex().build_spawn_argv("do it", "ignored", Some("o3"), Some("high")),
+            codex().build_spawn_argv("do it", "ignored", Some("o3"), Some("high"), false),
             argv(&[
                 "codex",
                 "--ask-for-approval",
@@ -133,7 +134,7 @@ mod tests {
     #[test]
     fn spawn_argv_omits_all_tokens_for_none_model_and_effort() {
         assert_eq!(
-            codex().build_spawn_argv("do it", "ignored", None, None),
+            codex().build_spawn_argv("do it", "ignored", None, None, false),
             argv(&[
                 "codex",
                 "--ask-for-approval",
@@ -142,6 +143,14 @@ mod tests {
                 "workspace-write",
                 "do it",
             ])
+        );
+    }
+
+    #[test]
+    fn spawn_argv_is_the_same_for_the_monitor() {
+        assert_eq!(
+            codex().build_spawn_argv("do it", "monitor", Some("o3"), Some("high"), true),
+            codex().build_spawn_argv("do it", "monitor", Some("o3"), Some("high"), false)
         );
     }
 

@@ -17,6 +17,7 @@ use crate::config::Settings;
 use crate::delivery::{HoldReason, Item, PaneIo, PaneOutcome, deliver_pane};
 use crate::error::CafleetError;
 use crate::multiplexer::{Multiplexer, MultiplexerError, WakeEntry};
+use crate::notices;
 use crate::time::{format_utc, now_utc, parse_lenient};
 
 pub const DEFAULT_TICK_SECONDS: i64 = 5;
@@ -110,18 +111,27 @@ fn report_silent_members(
         if silent_seconds < READY_GRACE_SECONDS {
             continue;
         }
-        let member_id = member.member_id;
         broker::post_notice(
             conn,
             fleet_id,
-            &format!(
-                "[cafleet] member {member_id} ({}) has sent no message {silent_seconds} s after \
-                 spawn. Its broker commands may be denied: inspect it with cafleet member \
-                 capture {member_id} and run cafleet doctor.",
-                member.name
-            ),
+            &notices::silent_member(&member, silent_seconds),
         )?;
-        broker::stamp_silence_notice(conn, member_id, &format_utc(now))?;
+        broker::stamp_silence_notice(conn, member.member_id, &format_utc(now))?;
+    }
+    Ok(())
+}
+
+/// Close every exec that will never report an exit status and tell the
+/// Director (SPEC §6.6).
+fn close_lost_execs(
+    conn: &mut Connection,
+    fleet_id: i64,
+    now: DateTime<Utc>,
+) -> Result<(), CafleetError> {
+    for exec in broker::lost_execs(conn, fleet_id, now)? {
+        broker::close_lost_exec(conn, exec.exec_id, &format_utc(now))?;
+        let member = broker::exec_member(conn, exec.member_id)?;
+        broker::post_notice(conn, fleet_id, &notices::exec_lost(&exec, &member))?;
     }
     Ok(())
 }
@@ -188,7 +198,7 @@ impl TickClock {
 }
 
 /// One scan pass (SPEC §6.6): ownership-checked heartbeat → fleet liveness →
-/// the delivery pass (live pane set, Director-pane check, ready watchdog,
+/// the delivery pass (live pane set, Director-pane check, lost execs, ready watchdog,
 /// held deliveries) → runtime-row read (the per-tick interval re-read) → the
 /// schedule gates (wake-interval and due-check, both bypassed by a pending
 /// forced-wake request) → monitor-pane resolution → one fleet-level wake into
@@ -238,6 +248,7 @@ pub fn monitor_tick(
             .map_err(write_err)?;
         return Ok(TickResult::Stop);
     }
+    close_lost_execs(conn, fleet_id, now)?;
     report_silent_members(conn, fleet_id, now)?;
     deliver_owed_work(conn, mux, out, settings, fleet_id, &live_panes, &clock)?;
 
@@ -555,6 +566,8 @@ mod tests {
     use crate::broker::test_support::{
         bootstrap_monitor, create_fleet, migrated_conn, register, register_monitor,
     };
+    use crate::config::Settings;
+    use crate::delivery::PaneIo;
     use crate::monitor::{
         DEFAULT_TICK_SECONDS, MONITOR_STALE_FACTOR, MONITOR_STALE_FLOOR_SECONDS, MonitorMux,
         TickResult, monitor_tick, run_monitor_loop, wake_due,
@@ -652,6 +665,35 @@ mod tests {
         }
     }
 
+    impl PaneIo for FakeMux {
+        fn capture_pane(&self, pane_id: &str, _: i64) -> Result<String, String> {
+            panic!("no pane is owed a delivery in these fixtures (captured {pane_id})")
+        }
+
+        fn send_inline_preview(
+            &self,
+            pane_id: &str,
+            _: i64,
+            _: i64,
+            _: &str,
+            _: &str,
+            _: Option<&str>,
+        ) -> Result<(), String> {
+            panic!("no pane is owed a delivery in these fixtures (preview into {pane_id})")
+        }
+
+        fn send_prompt(&self, pane_id: &str, _: &str) -> Result<(), String> {
+            panic!("no pane is owed a delivery in these fixtures (prompt into {pane_id})")
+        }
+    }
+
+    fn settings() -> Settings {
+        Settings::from_lookup(|name| {
+            (name == "CAFLEET_DATABASE_URL").then(|| "sqlite:///unused.db".to_string())
+        })
+        .unwrap()
+    }
+
     /// Fleet with its bootstrap monitor member (the wake recipient) on `%1`
     /// and two pane-bound workers on `%2` and `%4`; the Director sits on `%0`.
     fn wake_fleet(conn: &mut rusqlite::Connection) -> (i64, i64, i64, i64, i64) {
@@ -698,7 +740,7 @@ mod tests {
         now: DateTime<Utc>,
     ) -> (TickResult, String) {
         let mut out = Vec::new();
-        let result = monitor_tick(conn, mux, &mut out, fleet_id, pid, now).unwrap();
+        let result = monitor_tick(conn, mux, &mut out, &settings(), fleet_id, pid, now).unwrap();
         (result, String::from_utf8(out).unwrap())
     }
 
@@ -1475,8 +1517,16 @@ mod tests {
 
             let mux = FakeMux::with_live_panes(&["%0", "%1", "%2", "%4"]);
             let mut out = Vec::new();
-            let err = run_monitor_loop(&mut conn, &mux, &mut out, fleet_id, 5, 600)
-                .expect_err("the atomic claim is authoritative");
+            let err = run_monitor_loop(
+                &mut conn,
+                &mux,
+                &mut out,
+                &settings(),
+                fleet_id,
+                Some(5),
+                Some(600),
+            )
+            .expect_err("the atomic claim is authoritative");
             assert_eq!(
                 err.message(),
                 format!("monitor already running for fleet {fleet_id}")

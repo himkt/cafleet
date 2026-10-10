@@ -777,7 +777,7 @@ per finding, and each finding is one issue:
   claude: no setting blocks the member broker commands
 
 ✗ member permissions
-  claude: ~/.claude/settings.json permissions.deny "Bash(cafleet *)" matches "cafleet message poll 1"
+  claude: ~/.claude/settings.json permissions.deny "Bash(cafleet *)" matches "cafleet message send --from-member-id 1 --to-member-id 2 x"
   claude: <file> allowManagedPermissionRulesOnly is true and its permissions.allow does not match "<command>"
   claude: <file> is not valid JSON
 ```
