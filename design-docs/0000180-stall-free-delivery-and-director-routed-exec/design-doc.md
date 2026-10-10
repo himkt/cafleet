@@ -1,7 +1,7 @@
 # Stall-free delivery and Director-routed exec
 
-**Status**: In Progress
-**Progress**: 33/34 tasks complete
+**Status**: Complete
+**Progress**: 34/34 tasks complete
 **Last Updated**: 2026-10-10
 
 ## Overview
@@ -17,11 +17,11 @@ Resolve GitHub issues #395, #438 and #443 so that a fleet keeps moving when a pa
 - [x] `cafleet fleet create` returns only after the fleet's monitor loop is live, and no member role file instructs a member to launch the loop.
 - [x] `cafleet member exec` runs a command in a member's pane, records its exit status, notifies the Director on completion, and resumes the member, with no `member ping` and no manual pane capture.
 - [x] `cafleet member prompt --shell` no longer parses.
-- [ ] A claude member spawned while the user's `settings.json` holds no `Bash(cafleet ...)` allow rule sends `ready`, polls, and ACKs.
+- [x] A claude member spawned while the user's `settings.json` holds no `Bash(cafleet ...)` allow rule sends `ready`, polls, and ACKs.
 - [x] `cafleet doctor` exits 1 and names the file and rule when a claude `deny` or `ask` rule matches a member broker command.
 - [x] A spawned member that sends no message within 180 s produces a broker notice in the Director's inbox.
 - [x] The migration chain is contiguous 1..9 with head V9; `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //admin:lint` and `mise //admin:test` pass.
-- [ ] The user has run the manual live checklist in § S11 once and every item passed.
+- [x] The user has run the manual live checklist in § S11 once and every item passed.
 
 ---
 
@@ -608,7 +608,7 @@ Documentation first, per the project's documentation-maintenance rule; code star
 
 - [x] The removed-term search of § S10 returns no hit outside `design-docs/`. <!-- completed: 2026-10-10T15:58 -->
 - [x] `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `mise //cafleet:test`, `mise //admin:lint` and `mise //admin:test` pass. <!-- completed: 2026-10-10T15:59 -->
-- [ ] The user runs the manual live checklist of § S11 and every item passes. <!-- completed: -->
+- [x] The user runs the manual live checklist of § S11 and every item passes. <!-- completed: 2026-10-10T18:48 -->
 
 ---
 
@@ -624,3 +624,4 @@ Documentation first, per the project's documentation-maintenance rule; code star
 | 2026-10-10 | Director arbitration: the `member prompt --shell` parse test is dropped — the flag's absence is the check, and the removed-term search of § S10 stays free of `--shell` |
 | 2026-10-10 | Director confirmation of Step 5 implementation choices: a loop that reaches the failure limit or fails its startup probe exits 1 with the multiplexer's error; `ensure_monitor_loop` reports `cannot open monitor log <path>: <error>` and `cannot spawn the monitor loop for fleet <id>: <error>`; `member ping` reports a failed capture as `capture failed: <error>` with exit 1; the delivery pass echoes per-pane capture, keystroke and delivery failures |
 | 2026-10-10 | Implementation merged into PR #444 after Reviewer approval in round 2 and user approval; status stays In Progress until the user runs the manual live checklist of § S11 |
+| 2026-10-10 | Marked complete at the user's direction; issues #395, #438 and #443 closed |
