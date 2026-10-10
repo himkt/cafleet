@@ -45,11 +45,11 @@ command groups:
 | Entry point | Scope | Subcommands |
 |---|---|---|
 | `setup` | one-time onboarding: brings the database to the current schema and installs the coding-agent assets | — |
-| `doctor` | environment check: a three-section diagnosis covering the multiplexer, the database schema, and the coding-agent installs | — |
+| `doctor` | environment check: a diagnosis covering the multiplexer, the database schema, the coding-agent installs, and the member permissions | — |
 | `server` | serves the admin WebUI | — |
 | `monitor` | the supervision scheduler, run as `cafleet monitor FLEET_ID` | — |
 | `fleet` | fleet lifecycle | `create`, `list`, `show`, `delete` |
-| `member` | member lifecycle + keystroke interaction | `create`, `delete`, `show`, `list`, `prompt`, `ping`, `capture` |
+| `member` | member lifecycle + keystroke interaction | `create`, `delete`, `show`, `list`, `prompt`, `exec`, `exec-run`, `ping`, `capture` |
 | `message` | the message broker | `send`, `broadcast`, `poll`, `ack`, `show` |
 
 `member` is the single home for the member lifecycle — spawn, teardown,

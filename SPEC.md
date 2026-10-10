@@ -2951,11 +2951,17 @@ above are public.
 2. Spawn `cafleet monitor <fleet-id>`, with no flags, from the current
    executable: stdin null, stdout and stderr appended to
    `<database directory>/monitor-<fleet_id>.log`, in its own process group.
+   A log file that cannot be opened returns the error `cannot open monitor
+   log <log path>: <error>`; a process that cannot be spawned (including an
+   unresolvable current executable) returns `cannot spawn the monitor loop
+   for fleet <fleet_id>: <error>`. `<error>` is the operating-system error
+   text.
 3. Poll `monitor_is_live` every 100 ms for up to 5 s. On timeout return the
    error `monitor loop for fleet <fleet_id> did not start; see <log path>`.
 
-Two racing callers are safe: the single-instance claim lets one loop win and
-the other exits.
+Each of the three errors is an application error, and each is the `<error>`
+of the caller table below. Two racing callers are safe: the single-instance
+claim lets one loop win and the other exits.
 
 | Caller | When | On failure |
 |---|---|---|

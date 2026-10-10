@@ -1449,11 +1449,16 @@ A command that needs the loop ensures it is running:
 2. Spawn `cafleet monitor <fleet-id>`, with no flags, from the current
    executable: stdin closed, stdout and stderr appended to
    `<database directory>/monitor-<fleet_id>.log`, in its own process group.
+   A log file that cannot be opened is the error
+   `cannot open monitor log <log path>: <error>`, and a process that cannot
+   be spawned is `cannot spawn the monitor loop for fleet <fleet_id>: <error>`;
+   `<error>` is the operating system's error text.
 3. Poll the loop's liveness every 100 ms for up to 5 s. On timeout the error
    is `monitor loop for fleet <fleet_id> did not start; see <log path>`.
 
-Two racing callers are safe: the single-instance claim lets one loop win and
-the other exits.
+Each of the three errors is the `<error>` of the table below. Two racing
+callers are safe: the single-instance claim lets one loop win and the other
+exits.
 
 | Caller | When | On failure |
 |---|---|---|
@@ -1580,6 +1585,8 @@ and exit categories, and define the remaining exact diagnostics.
 | `message broadcast` | Work is owed and the monitor loop does not start | `Error: Broadcast <summary-id> was persisted, but monitor loop for fleet <fleet-id> did not start; see <log path>. Do not resend it; run 'cafleet doctor'.` | 1 | Every delivery row stays `input_required` |
 | `member exec` | The monitor loop does not start | `Error: Exec <exec-id> was queued, but monitor loop for fleet <fleet-id> did not start; see <log path>` | 1 | The exec row stays queued — see [Loop start](#monitor-loop-start) |
 | `fleet create` | The monitor loop does not start after the commit | `Error: monitor loop for fleet <fleet-id> did not start; see <log path>` followed by applicable cleanup diagnostics | 1 | The monitor pane is killed and the fleet soft-deleted; no ids are printed |
+| Every command that starts the monitor loop | The loop's log file cannot be opened | `cannot open monitor log <log path>: <error>` | 1 | Takes the place of the did-not-start text in that command's message above — see [Loop start](#monitor-loop-start) |
+| Every command that starts the monitor loop | The loop process cannot be spawned | `cannot spawn the monitor loop for fleet <fleet-id>: <error>` | 1 | Takes the place of the did-not-start text in that command's message above |
 | `member prompt` | Missing positional `TEXT` | `Error: Missing argument 'TEXT'.` | 2 | — |
 | `member prompt` | `\n` or `\r` in the text | `Error: text may not contain newlines.` | 2 | Checked first, against the original text — a `"\n"`-only input raises this, not the empty-text error |
 | `member prompt` | Empty / whitespace-only text | `Error: text may not be empty.` | 2 | — |
