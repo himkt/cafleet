@@ -24,7 +24,7 @@ Resolve by the subject of the action:
 | Select/configure a spawned member | Backend selected under Director policy | Its Model catalog and Role defaults; validate its effort and launch capabilities against Runtime bindings. |
 | Interpret a captured pane | Observed member's recorded backend | Its capture cues, retaining the observer's own tools and decision surface. |
 
-For example, a Codex Director selecting an OpenCode reviewer resolves the OpenCode reviewer default and effort capability while keeping Codex decision and execution tools. A Claude monitor observing Codex applies Codex capture cues while its own loop uses Claude execution. Monitor bootstrap and recovery inherit the Director's backend. Ordinary members resolve their own runtime section without acquiring model-selection duties.
+For example, a Codex Director selecting an OpenCode reviewer resolves the OpenCode reviewer default and effort capability while keeping Codex decision and execution tools. A Claude monitor observing Codex applies Codex capture cues while keeping its own Claude tools. Monitor bootstrap and recovery inherit the Director's backend. Ordinary members resolve their own runtime section without acquiring model-selection duties.
 
 ## How the base and overlay connect
 
