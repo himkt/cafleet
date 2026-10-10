@@ -362,6 +362,105 @@ fn the_ready_watchdog_reports_a_silent_member_once() {
 }
 
 #[test]
+fn lost_execs_close_with_a_notice() {
+    let mut cli = Cli::new();
+    fleet_with_worker(&cli);
+    let helper = cli.seed_member(FLEET, "helper");
+    let runner = cli.seed_member(FLEET, "runner");
+    cli.set_env(
+        "CAFLEET_TEST_TMUX_PANES",
+        &format!(
+            "{DIRECTOR_PANE} {WORKER_PANE} %{} %{}",
+            helper + 4,
+            runner + 4
+        ),
+    );
+    let mut ended = std::process::Command::new("true").spawn().unwrap();
+    ended.wait().unwrap();
+    let ended_pid = i64::from(ended.id());
+    let own_pid = i64::from(std::process::id());
+
+    let ago = |seconds: i64| format_utc(Utc::now() - Duration::seconds(seconds));
+    let insert = |member_id: i64, dispatched_at: String, started: Option<(String, i64)>| {
+        let (started_at, pid) = started.unzip();
+        cli.sqlite()
+            .execute(
+                "INSERT INTO member_execs \
+                 (member_id, command, created_at, dispatched_at, started_at, pid) \
+                 VALUES (?1, 'mise //cafleet:test', ?2, ?2, ?3, ?4)",
+                rusqlite::params![member_id, dispatched_at, started_at, pid],
+            )
+            .unwrap();
+    };
+    insert(WORKER, ago(31), None);
+    insert(helper, ago(100), Some((ago(99), ended_pid)));
+    insert(runner, ago(100), Some((ago(99), own_pid)));
+
+    let notices = || -> Vec<(i64, i64, Option<i64>, String)> {
+        let conn = cli.sqlite();
+        let mut statement = conn
+            .prepare(
+                "SELECT owner_member_id, from_member_id, to_member_id, text FROM messages \
+                 WHERE text LIKE '[cafleet] exec %' ORDER BY text",
+            )
+            .unwrap();
+        statement
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    };
+
+    let mut monitor = LoopChild::start(&cli, FLEET, &["--tick", "1", "--interval", "0"]);
+    monitor.wait_until("both lost-exec notices", || notices().len() == 2);
+    monitor.wait_ticks(3);
+    let output = monitor.stop();
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+
+    let to_director = (DIRECTOR, DIRECTOR, Some(DIRECTOR));
+    assert_eq!(
+        notices()
+            .into_iter()
+            .map(|(owner, from, to, text)| ((owner, from, to), text))
+            .collect::<Vec<_>>(),
+        [
+            (
+                to_director,
+                format!(
+                    "[cafleet] exec 1 on member {WORKER} (worker) did not start within 30 s of \
+                     dispatch. Inspect the pane with cafleet member capture {WORKER} and run it \
+                     again if still needed."
+                )
+            ),
+            (
+                to_director,
+                format!(
+                    "[cafleet] exec 2 on member {helper} (helper) ended without reporting an \
+                     exit status. Inspect the pane with cafleet member capture {helper}."
+                )
+            ),
+        ],
+        "each lost exec is reported once; the exec with a live pid is not"
+    );
+
+    let conn = cli.sqlite();
+    let mut statement = conn
+        .prepare(
+            "SELECT finished_at IS NOT NULL AND finished_at = resumed_at, exit_code \
+             FROM member_execs ORDER BY exec_id",
+        )
+        .unwrap();
+    let closed: Vec<(bool, Option<i64>)> = statement
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(closed, [(true, None), (true, None), (false, None)]);
+}
+
+#[test]
 fn the_wake_respects_a_held_pane_claim_and_stays_due() {
     let mut cli = Cli::new();
     fleet_with_worker(&cli);

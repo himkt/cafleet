@@ -117,8 +117,12 @@ fn fleet_create_spawns_the_monitor_pane_with_identity_and_model() {
         "only CAFLEET_DATABASE_URL is forwarded, got: {split_line}"
     );
     assert!(
-        split_line.contains("claude --permission-mode dontAsk --name monitor"),
-        "the monitor spawns under its hardcoded display name, got: {split_line}"
+        split_line.contains(
+            "claude --permission-mode dontAsk --allowedTools Bash(cafleet message *) \
+             Bash(cafleet monitor scan *) Bash(cafleet member ping *) --name monitor"
+        ),
+        "the monitor spawns with its allow rules under its hardcoded display name, \
+         got: {split_line}"
     );
     assert!(
         split_line.contains("--model haiku"),

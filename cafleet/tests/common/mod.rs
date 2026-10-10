@@ -180,6 +180,11 @@ impl Cli {
         self.command(args, true).output().unwrap()
     }
 
+    /// Run inside the fake tmux context with `dir` as the working directory.
+    pub fn run_in(&self, dir: &Path, args: &[&str]) -> Output {
+        self.command(args, true).current_dir(dir).output().unwrap()
+    }
+
     /// Run with no multiplexer presence variables set.
     pub fn run_outside_tmux(&self, args: &[&str]) -> Output {
         self.command(args, false).output().unwrap()

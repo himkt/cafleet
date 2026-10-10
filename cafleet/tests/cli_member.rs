@@ -131,7 +131,8 @@ fn member_create_spawns_patches_the_pane_and_substitutes_identity() {
     );
     assert!(
         split_line.contains(
-            "claude --permission-mode dontAsk --name worker FLEET 1 ME 3 DIRECTOR 1 AGENT claude"
+            "claude --permission-mode dontAsk --allowedTools Bash(cafleet message *) \
+             --name worker FLEET 1 ME 3 DIRECTOR 1 AGENT claude"
         ),
         "the rendered prompt carries literal identity, got: {split_line}"
     );
@@ -815,7 +816,7 @@ fn monitor_scan_prints_director_first_then_members_ascending() {
             "{section}"
         );
         assert!(
-            section.ends_with(&REST_CAPTURE.replace("{pane}", &pane)),
+            section.ends_with(&REST_CAPTURE.replace("{pane}", pane)),
             "{section}"
         );
     }
