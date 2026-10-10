@@ -1,7 +1,7 @@
 # Recommended Permission Settings for Auto Mode and Other Modes
 
 **Status**: Approved
-**Progress**: 0/26 tasks complete
+**Progress**: 3/27 tasks complete
 **Last Updated**: 2026-10-10
 
 ## Overview
@@ -11,8 +11,9 @@ CAFleet's documentation recommends a single Claude Code permission block built a
 ## Success Criteria
 
 - [ ] Quickstart § Configure › Claude Code presents two `settings.json` profiles, auto mode first, and each snippet parses as valid JSON.
-- [ ] The backend spec § Claude carries a per-entry table naming the role that needs each entry and why, and states that a `dontAsk` member is denied every shell command and file edit outside the read-only set and the allow list.
-- [ ] Both profiles keep `Bash(cafleet member prompt *)` under `permissions.ask`, use the un-namespaced `Skill(cafleet)` / `Skill(cafleet-design-doc)` entries, and carry the `Edit` / `Write` entries members need to write files.
+- [ ] The backend spec § Claude carries a per-entry table naming the role that needs each entry and why, and states that a `dontAsk` member is denied every shell command and file edit outside its spawn-time allow rules, the read-only set, and the allow list.
+- [ ] Both profiles keep `Bash(cafleet member prompt *)` and `Bash(cafleet member exec *)` under `permissions.ask`, use the un-namespaced `Skill(cafleet)` / `Skill(cafleet-design-doc)` entries, and carry the `Edit` / `Write` entries members need to write files.
+- [ ] The backend spec keeps § Spawn-time allow rules and its `#spawn-time-allow-rules` anchor unchanged, and the quickstart still states that a claude member needs no allow rule of its own for the broker commands.
 - [ ] `grep -ri` over `docs/docs/`, `skills/`, and `.claude/rules/` finds none of the strings listed in § Specification › Stale strings.
 - [ ] cli-options § `permissions.allow` coverage keeps its heading and anchor, states the pattern rule, and links to the quickstart profiles instead of restating them.
 - [ ] The Codex rules reference documents the minimum rule set and states that it is sufficient for members and not the recommendation for a Director session.
@@ -27,18 +28,21 @@ CAFleet's documentation recommends a single Claude Code permission block built a
 
 | Surface | Current content |
 |---|---|
-| Quickstart § Configure › Claude Code | One snippet: allow `Bash(cafleet *)`, `Skill(cafleet:cafleet)`, `Skill(cafleet:cafleet-design-doc)`; ask `Bash(cafleet * member prompt *)` |
-| cli-options § `permissions.allow` coverage | "One pattern per subcommand" rule with three example patterns; `member prompt` excluded so it stays under `permissions.ask` |
-| coding-agent-backends § Spawn argv | Claude members "run cafleet and any shell command directly"; config prerequisite "none" |
-| `skills/cafleet/reference/prompt-routing.md` | For Claude members "denial is the rare case — the harness deny-list rejects a few destructive operations"; "most denials are a wrong flag, wrong path, or an unnecessary command" |
-| `skills/cafleet/roles/director.md`, `skills/cafleet/reference/supervision.md` | Members "run shell commands themselves … no Director routing required"; "permission prompts auto-resolve" |
-| `.claude/rules/bash-tool.md` | Member "permission prompts auto-resolve silently"; "No … Director routing" |
+| Quickstart § Configure › Claude Code | One snippet: allow `Bash(cafleet *)`, `Skill(cafleet:cafleet)`, `Skill(cafleet:cafleet-design-doc)`; ask `Bash(cafleet member prompt *)` and `Bash(cafleet member exec *)`. A closing paragraph states that a claude member receives its broker commands on its spawn command line. |
+| cli-options § `permissions.allow` coverage | "One pattern per subcommand" rule with three example patterns; `member prompt`, `member exec`, and `member exec-run` excluded |
+| coding-agent-backends § Spawn argv | Claude members run "the broker commands under its spawn-time allow rules and other commands under the user's own rules"; config prerequisite "none" |
+| coding-agent-backends § Claude | One sentence on `dontAsk`, then § Spawn-time allow rules |
+| `skills/cafleet/reference/prompt-routing.md` | A per-backend paragraph on how often a member routes; "most denials are a wrong flag, wrong path, or an unnecessary command" |
+| `skills/cafleet/roles/director.md` | § Member Create: "routine permission prompts auto-resolve" |
+| `.claude/rules/bash-tool.md` | Member "permission prompts auto-resolve silently" |
 
-No page mentions auto mode or `permissions.defaultMode`.
+No page mentions auto mode, `permissions.defaultMode`, or the entries a member needs to load skills, read skill pages, and edit files.
 
 ### What changed
 
-The maintainer simplified their own Claude Code settings for auto mode: `defaultMode: "auto"` with the CAFleet allow entries reduced to `Bash(cafleet message *)`, `Bash(cafleet monitor *)`, `Bash(cafleet member ping *)`, `Skill(cafleet)`, and `Skill(cafleet-design-doc)`. Their Codex rules were aligned to the same three prefixes. The same settings file also carries general-purpose entries that CAFleet members depend on: bare `Edit` / `Write` / `NotebookEdit`, `Read(/skills/**)`, and `additionalDirectories: ["~/.claude"]`. The documentation should describe the full posture a fleet needs, alongside the existing one.
+The maintainer simplified their own Claude Code settings for auto mode: `defaultMode: "auto"` with the CAFleet allow entries reduced to a few narrow `Bash(cafleet ...)` patterns, `Skill(cafleet)`, and `Skill(cafleet-design-doc)`. The same settings file also carries general-purpose entries that CAFleet members depend on: bare `Edit` / `Write` / `NotebookEdit`, `Read(/skills/**)`, and `additionalDirectories: ["~/.claude"]`. The documentation should describe the full posture a fleet needs, alongside the existing one.
+
+cafleet now passes every claude member its broker commands as allow rules on the spawn command line (backend spec § Spawn-time allow rules), and a routed command is dispatched with `cafleet member exec`. The profiles therefore carry no `Bash(cafleet ...)` entry for members, and every statement about routing names `member exec`.
 
 ### Claude Code facts the design relies on
 
@@ -46,9 +50,9 @@ Verified against the Claude Code permission-mode and permission-rule documentati
 
 | Fact | Consequence for CAFleet |
 |---|---|
-| Rules resolve first in every mode, in the order deny → ask → allow. An ask rule prompts even when an allow rule also matches. | `Bash(cafleet member prompt *)` under ask holds beside `Bash(cafleet *)` under allow. |
-| In auto mode, a call matching no rule goes to a classifier; read-only actions and working-directory edits are auto-approved. A content-matching ask rule still prompts. | The Director's remaining `cafleet` commands and its own file edits need no allow entry in auto mode. |
-| `dontAsk` runs only what needs no approval in Manual mode — read-only Bash commands and file reads inside the working directories — plus calls matching `permissions.allow`. Every call that would prompt is denied, including one matching an ask rule. | A member's shell commands and file edits are denied by default. A member can never run `member prompt`. |
+| Rules resolve first in every mode, in the order deny → ask → allow. An ask rule prompts even when an allow rule also matches. | `Bash(cafleet member prompt *)` and `Bash(cafleet member exec *)` under ask hold beside `Bash(cafleet *)` under allow. |
+| In auto mode, a call matching no rule goes to a classifier; read-only actions and working-directory edits are auto-approved. A content-matching ask rule still prompts. | The Director's `cafleet` commands and its own file edits need no allow entry in auto mode. |
+| `dontAsk` runs only what needs no approval in Manual mode — read-only Bash commands and file reads inside the working directories — plus calls matching an allow rule. Every call that would prompt is denied, including one matching an ask rule. | Beyond its spawn-time allow rules, a member's shell commands and file edits are denied by default. A member can never run `member prompt` or `member exec`. |
 | File modification needs approval in Manual mode. `Edit` rules apply to every built-in file-editing tool; a path rule for those tools is written as `Edit(path)`. | A member writes files only when an `Edit` allow entry matches. |
 | Writes to protected paths — directories such as `.git` and `.claude`, files such as `.mcp.json` — are denied in `dontAsk`, routed to the classifier in auto mode, and prompted in Manual mode. Allow rules in settings files do not pre-approve them. | No profile entry lets a member edit a project's `.claude/` or `.git/`; the Director session makes those edits. |
 | `--permission-mode` on the command line outranks `permissions.defaultMode`. | Members stay in `dontAsk` whatever the operator's default mode is. |
@@ -69,14 +73,15 @@ The normative wording of every edit is § Target text. The subsections before it
 | D1 | Two profiles: **auto mode** and **other permission modes**. The split key is the mode the Director session runs in. | Members always spawn in `dontAsk`; only the Director's mode varies. Every non-auto mode needs the same pre-approval. |
 | D2 | Quickstart § Configure › Claude Code owns the lead paragraph, the profile comparison table, and the two snippets. The backend spec § Claude owns the per-entry table, the member-permission semantics, and the symptom table. cli-options § `permissions.allow` coverage keeps only the pattern rule. | One owner per enumeration, and the same split Codex and OpenCode use: a snippet in the quickstart, posture detail in the backend spec. |
 | D3 | The auto mode profile is presented first. | It is the maintainer's primary setup and the built-in starting mode of current Claude Code. |
-| D4 | Both profiles keep `Bash(cafleet member prompt *)` under `permissions.ask`. | The command keystrokes operator-controlled text into a pane. This intentionally differs from the maintainer's deployed settings, which carry no such entry. |
-| D5 | The ask pattern is `Bash(cafleet member prompt *)`. | Ids are positional after the subcommand; nothing sits between `cafleet` and `member`, so the documented `Bash(cafleet * member prompt *)` matches no invocation. |
+| D4 | Both profiles keep `Bash(cafleet member prompt *)` and `Bash(cafleet member exec *)` under `permissions.ask`. | The first keystrokes operator-controlled text into a pane and the second runs an arbitrary command there. This intentionally differs from the maintainer's deployed settings, which carry no such entries. |
+| D5 | The auto mode profile carries no `Bash(cafleet ...)` allow entry. | Members receive their broker commands as spawn-time allow rules, and the classifier reviews the Director's commands. Decided by the maintainer on 2026-10-10. |
 | D6 | Skill entries are `Skill(cafleet)` and `Skill(cafleet-design-doc)`. | They match the personal skills `cafleet setup` installs. |
 | D7 | Both profiles carry `Read(~/.claude/skills/**)`. | The maintainer's settings already hold this entry as `Read(/skills/**)`; the profiles spell it home-relative so it reads the same in any settings file. See § Read entry. |
 | D8 | Both profiles carry bare `Edit` and `Write`. | Without them every member file edit is denied. See § File-edit entries. |
 | D9 | Codex is described through a minimum rule set owned by the Codex rules reference, stated as sufficient for members only. The installed `cafleet.rules` and the OpenCode preset are unchanged. | Docs only. See § Codex minimum rule set. |
-| D10 | Each backend's denial semantics move into a `{permission_flags}` row of its `Note → applies at` table. The neutral skill pages (`prompt-routing.md`, `director.md`, `supervision.md`) are reworded to hold on every backend and point at that note. | The project's overlay rule keeps backend specifics in the backend reference. The current neutral sentences ("denial is rare", "no Director routing required") are wrong for a Claude member under a minimal allow list. |
-| D11 | The documentation states that each routed command costs one operator confirmation, and that project task commands members run belong in the allow list. | Routing dispatches through `cafleet member prompt --shell`, which D4 keeps under `ask`. Allow-listing task commands is therefore a practical requirement, not polish. |
+| D10 | Each backend's denial semantics live in a `{permission_flags}` row of its `Note → applies at` table. The neutral skill pages (`prompt-routing.md`, `director.md`, `supervision.md`) hold on every backend and point at that note. | The project's overlay rule keeps backend specifics in the backend reference. `prompt-routing.md` currently carries a per-backend paragraph that the note replaces. |
+| D11 | The documentation states that each routed command costs one operator confirmation, and that project task commands members run belong in the allow list. | Routing dispatches through `cafleet member exec`, which D4 keeps under `ask`. Allow-listing task commands is therefore a practical requirement, not polish. |
+| D12 | § Spawn-time allow rules in the backend spec, and every statement that a claude member's broker commands are allowed from spawn, stay as they are. | They describe shipped behavior this design builds on. |
 
 ### Read entry
 
@@ -92,11 +97,11 @@ No allow entry reaches Claude Code's protected paths. A member's edit under a pr
 
 ### Codex minimum rule set
 
-The installed `~/.codex/rules/cafleet.rules` allows the whole `cafleet` prefix and prompts for `cafleet member prompt`; it remains the recommended Codex configuration. The minimum rule set serves a rules directory maintained without the installed file, such as the maintainer's dotfiles-managed one. It is the three `allow` prefixes members run plus a `prompt` rule that applies D4 to Codex.
+The installed `~/.codex/rules/cafleet.rules` allows the whole `cafleet` prefix and prompts for `cafleet member prompt` and `cafleet member exec`; it remains the recommended Codex configuration. The minimum rule set serves a rules directory maintained without the installed file, such as the maintainer's dotfiles-managed one. It is the three `allow` prefixes members run — the same commands a claude member receives as spawn-time allow rules — plus the two `prompt` rules that apply D4 to Codex.
 
-The set mirrors the auto mode profile for members only. Claude's auto mode leaves the Director's remaining commands to a classifier; Codex has none, so under the minimum set a Codex Director's other `cafleet` commands match no rule and follow that session's own approval policy and sandbox, instead of running pre-approved outside it. The target text therefore recommends the installed file for a Director session.
+The set covers members only. Claude's auto mode leaves the Director's commands to a classifier; Codex has none, so under the minimum set a Codex Director's other `cafleet` commands match no rule and follow that session's own approval policy and sandbox, instead of running pre-approved outside it. The target text therefore recommends the installed file for a Director session.
 
-The `match` / `not_match` examples use real CAFleet invocations. The maintainer's personal rules use `cafleet monitor start 1` and `cafleet member ping 5 --timeout 10`, which are valid prefix matches and not real command forms.
+The `match` / `not_match` examples use real CAFleet invocations.
 
 ### Files changed
 
@@ -104,12 +109,12 @@ The `match` / `not_match` examples use real CAFleet invocations. The maintainer'
 |---|---|---|
 | 1 | `docs/docs/quickstart.md` | § Configure table cell, § Claude Code rewritten, § Codex closing paragraph |
 | 2 | `docs/docs/spec/cli-options.md` | § `permissions.allow` coverage rewritten; one sentence in § JSON output; one clause in § `member ping` |
-| 3 | `docs/docs/spec/coding-agent-backends.md` | Capability-table `claude` cells, § Claude rewritten with two new subsections, new § Minimum rule set |
+| 3 | `docs/docs/spec/coding-agent-backends.md` | Capability-table `claude` cells, § Claude lead paragraph, two new subsections after § Spawn-time allow rules, new § Minimum rule set |
 | 4 | `docs/docs/concepts/coding-agents.md` | One cell of the asymmetries table |
 | 5 | `skills/cafleet/reference/coding-agents.md` | One `{permission_flags}` row added to each backend's `Note → applies at` table; `## Template` requires that row |
-| 6 | `skills/cafleet/reference/prompt-routing.md` | Opening paragraph and the reconsider sentence made backend-neutral |
+| 6 | `skills/cafleet/reference/prompt-routing.md` | The per-backend paragraph, the reconsider sentence, and the `member ping` permission-gate cell |
 | 7 | `skills/cafleet/roles/director.md` | Introduction sentence and one § Member Create sentence |
-| 8 | `skills/cafleet/reference/supervision.md` | § Routing member bash requests, first two sentences |
+| 8 | `skills/cafleet/reference/supervision.md` | § Routing member command requests, one sentence added |
 | 9 | `.claude/rules/bash-tool.md` | The MUST rule |
 | 10 | `design-docs/0000181-auto-mode-permission-settings/design-doc.md` | This document |
 
@@ -119,10 +124,11 @@ Statements reviewed and left unchanged:
 
 | Statement | Why it stays |
 |---|---|
-| `skills/cafleet/roles/member.md` — "workspace-scoped auto-approval ({permission_flags}). Run task commands yourself" and § Command execution | Already neutral: it tells the member to attempt the command and follow the denial path. |
+| `skills/cafleet/roles/member.md` — "workspace-scoped auto-approval ({permission_flags})" and § Command execution | Already neutral: it tells the member to attempt the command and follow the denial path. |
 | `skills/cafleet/SKILL.md` and `director.md` — "`permissions.allow` matches Bash invocations as fixed strings" | Still true under both profiles. |
-| `prompt-routing.md` § The two primitives, **Permission gate** column | `member prompt` under ask and `member ping` under allow hold in both profiles. |
+| `prompt-routing.md` § The Director's pane primitives, the `member exec` and `member prompt` rows | Both stay asked per invocation in both profiles. |
 | backend spec — "All three postures enable the Bash tool with no runtime permission prompts" | True: a call is approved or denied, never prompted. |
+| backend spec § Spawn-time allow rules; cli-options § Member permissions | Shipped behavior this design builds on (D12). |
 | The `freshness` date in `skills/cafleet/reference/coding-agents.md` | It covers model data; a note-table edit preserves it. |
 
 ### Stale strings
@@ -132,15 +138,11 @@ After the edits, a case-insensitive search of `docs/docs/`, `skills/`, and `.cla
 | String | Removed from |
 |---|---|
 | `Skill(cafleet:` | quickstart |
-| `cafleet * member prompt` | quickstart |
-| `prompts auto-resolve` | `director.md`, `supervision.md`, `bash-tool.md` |
-| `no Director routing` | `director.md`, `bash-tool.md` |
-| `deny-list` | `prompt-routing.md`, concepts page |
+| `prompts auto-resolve` | `director.md`, `bash-tool.md` |
+| `deny-list` | concepts page |
 | `per-subcommand allow patterns` | cli-options |
+| `One pattern per subcommand` | cli-options |
 | `most denials are` | `prompt-routing.md` |
-| `any shell command directly` (on a `claude` table row) | backend spec |
-
-The last string remains on the `codex` row of the capability table, which this design does not change; the check for it is scoped to the `claude` row.
 
 ### Target text
 
@@ -156,14 +158,35 @@ In the § Configure table, the `claude` row's **Manual configuration** cell beco
 Add the profile below that matches the permission mode your Director session
 runs in to your user-level `~/.claude/settings.json`. Members start in
 `dontAsk` mode whichever mode the Director uses, so both profiles pre-approve
-what members run.
+what members need beyond their broker commands.
 
 | Behavior | Auto mode profile | Other-modes profile |
 |---|---|---|
 | Director session's permission mode | `auto` | Any other mode |
-| The Director's `cafleet` commands | Reviewed by the auto mode classifier, except the allow-listed member patterns | Pre-approved by `Bash(cafleet *)` |
-| A member's `cafleet` commands | Pre-approved by the narrow member patterns | Pre-approved by `Bash(cafleet *)` |
-| `cafleet member prompt` | Prompts the operator | Prompts the operator |
+| The Director's `cafleet` commands | Reviewed by the auto mode classifier | Pre-approved by `Bash(cafleet *)` |
+| A member's skill loads, skill-page reads, and file edits | Pre-approved by the entries both profiles share | Pre-approved by the entries both profiles share |
+| `cafleet member prompt` and `cafleet member exec` | Prompt the operator | Prompt the operator |
+
+`cafleet member prompt` and `cafleet member exec` are under `ask` in both
+profiles because the first keystrokes arbitrary text into a member's pane and
+the second runs an arbitrary command there; the operator confirms each
+invocation.
+
+A claude member needs no allow rule of its own for the broker commands:
+cafleet passes them on the member's spawn command line. A `deny` or `ask` rule
+that matches a broker command still blocks a member, and `cafleet doctor`
+reports it — see
+[Spawn-time allow rules](spec/coding-agent-backends.md#spawn-time-allow-rules).
+
+`Edit` and `Write` let members write files. They apply to every session that
+reads the settings file, your own included: each then edits files outside
+Claude Code's protected paths without a prompt or classifier review.
+[What each profile entry is for](spec/coding-agent-backends.md#claude-profile-entries)
+names the role that needs each entry and gives the path rule that confines
+this approval.
+[What members can run](spec/coding-agent-backends.md#claude-member-permissions)
+covers denied commands and the entries to add for your project's own task
+commands.
 
 #### Auto mode {#auto-mode-profile}
 
@@ -172,9 +195,6 @@ what members run.
   "permissions": {
     "defaultMode": "auto",
     "allow": [
-      "Bash(cafleet message *)",
-      "Bash(cafleet monitor *)",
-      "Bash(cafleet member ping *)",
       "Skill(cafleet)",
       "Skill(cafleet-design-doc)",
       "Read(~/.claude/skills/**)",
@@ -182,16 +202,17 @@ what members run.
       "Write"
     ],
     "ask": [
-      "Bash(cafleet member prompt *)"
+      "Bash(cafleet member prompt *)",
+      "Bash(cafleet member exec *)"
     ]
   }
 }
 ```
 
 In auto mode a classifier reviews each Director command that no rule matches,
-so the allow list carries only what members need. `defaultMode` selects auto
-mode from user-level or managed settings; a project or local settings file
-cannot select it.
+so the allow list carries no `Bash(cafleet ...)` entry. `defaultMode` selects
+auto mode from user-level or managed settings; a project or local settings
+file cannot select it.
 
 #### Other permission modes {#other-modes-profile}
 
@@ -207,34 +228,25 @@ cannot select it.
       "Write"
     ],
     "ask": [
-      "Bash(cafleet member prompt *)"
+      "Bash(cafleet member prompt *)",
+      "Bash(cafleet member exec *)"
     ]
   }
 }
 ```
 
 `Bash(cafleet *)` is the single allow-everything entry that the literal
-integer-id convention enables — one pattern covers every subcommand for every
-fleet, for the Director and for members.
-
-`Edit` and `Write` let members write files. They apply to every session that
-reads the settings file, your own included: each then edits files outside
-Claude Code's protected paths without a prompt or classifier review.
-[What each profile entry is for](spec/coding-agent-backends.md#claude-profile-entries)
-names the role that needs each entry and gives the path rule that confines
-this approval.
-[What members can run](spec/coding-agent-backends.md#claude-member-permissions)
-covers denied commands and the entries to add for your project's own task
-commands.
+integer-id convention enables — one pattern covers every subcommand the
+Director runs, for every fleet.
 ````
 
 In § Codex, the closing paragraph becomes:
 
 ```markdown
 The Codex rules for `cafleet` commands allow every subcommand while keeping
-`cafleet member prompt` prompting; the reference above covers their precedence
-and where operator customizations belong. A rules directory maintained without
-the installed file needs the
+`cafleet member prompt` and `cafleet member exec` prompting; the reference
+above covers their precedence and where operator customizations belong. A
+rules directory maintained without the installed file needs the
 [minimum rule set](spec/coding-agent-backends.md#minimum-rule-set).
 ```
 
@@ -250,14 +262,15 @@ rides after the subcommand name as a literal positional or trailing argument:
 
 - **A pattern is a command prefix followed by ` *`.** The prefix is the whole
   CLI (`Bash(cafleet *)`), a command group (`Bash(cafleet message *)`), or one
-  subcommand (`Bash(cafleet member ping *)`). The positional subject id and
+  subcommand (`Bash(cafleet member capture *)`). The positional subject id and
   trailing flags such as [`--json`](#json-output) are covered by the same
   pattern. Both `monitor` forms ride the single `Bash(cafleet monitor *)`
   pattern — `cafleet monitor scan` needs no pattern of its own.
-- **`member prompt` stays under `permissions.ask`** as
-  `Bash(cafleet member prompt *)` — its positional text body is
-  operator-controlled, in both the plain and the `--shell` form. An ask rule
-  outranks every allow rule, so the entry holds beside `Bash(cafleet *)`.
+- **`member prompt` and `member exec` stay under `permissions.ask`** as
+  `Bash(cafleet member prompt *)` and `Bash(cafleet member exec *)`:
+  `member prompt` carries operator-controlled text and `member exec` carries a
+  free-form command. An ask rule outranks every allow rule, so both entries
+  hold beside `Bash(cafleet *)`.
 
 Which prefixes to allow depends on the permission mode the Director session
 runs in. The recommended profiles are in
@@ -265,12 +278,15 @@ runs in. The recommended profiles are in
 needs each entry is in
 [What each profile entry is for](coding-agent-backends.md#claude-profile-entries).
 Apply a profile to your user-level `~/.claude/settings.json` manually; the
-repo does not ship a committed permissions block.
+repo does not ship a committed permissions block. The `Bash(cafleet ...)`
+entries serve the Director's own session: a spawned claude member receives the
+broker commands it needs as allow rules on its spawn command line — see
+[Spawn-time allow rules](coding-agent-backends.md#spawn-time-allow-rules).
 ````
 
 In § JSON output, the sentence `The trailing position keeps JSON invocations inside the existing per-subcommand allow patterns (see [`permissions.allow` coverage](#permissionsallow-coverage)).` becomes `The trailing position keeps a JSON invocation inside the same prefix pattern that covers the command (see [`permissions.allow` coverage](#permissionsallow-coverage)).`
 
-In § `member ping`, the clause `which is why `member ping` sits in `permissions.allow` while `member prompt` stays in `permissions.ask`` becomes `which is why both recommended permission profiles allow `member ping` while keeping `member prompt` under `permissions.ask``.
+In § `member ping`, the clause `which is why `member ping` sits in `permissions.allow`.` becomes `which is why `member ping` needs no operator confirmation, while `member prompt` and `member exec` stay under `permissions.ask`.`
 
 #### 3. `docs/docs/spec/coding-agent-backends.md`
 
@@ -278,44 +294,47 @@ In the per-backend capabilities table, the `claude` row changes two cells:
 
 | Column | New cell |
 |---|---|
-| Shell-command posture | Runs read-only commands and every command matching the operator's `permissions.allow`; denies the rest without a prompt |
+| Shell-command posture | Runs the broker commands under its spawn-time allow rules, read-only commands, and every command matching the operator's `permissions.allow`; a denied command routes to the Director |
 | Preset / config prerequisite | A permission profile in `~/.claude/settings.json` — a permission posture, not a spawn dependency ([Claude](#claude)) |
 
-§ Claude is replaced in full by:
+In § Claude, the lead paragraph (the text between the `## Claude {#claude}` heading and `### Spawn-time allow rules`) is replaced by:
 
-````markdown
-## Claude {#claude}
-
+```markdown
 `--permission-mode dontAsk` is the reference auto-approval posture the other
-backends match. A member runs Claude Code's built-in read-only commands, file
-reads inside its working directory, and every tool call matching
-`permissions.allow` without a prompt. Every other call — a shell command or a
+backends match. A member runs four kinds of call without a prompt: its
+[spawn-time allow rules](#spawn-time-allow-rules), Claude Code's built-in
+read-only commands, file reads inside its working directory, and every tool
+call matching `permissions.allow`. Every other call — a shell command or a
 file edit, including one matching `permissions.ask` — is denied without a
 prompt. A write to one of Claude Code's protected paths, such as a project's
-`.git` or `.claude` directory, is denied whatever the allow list holds. The
-operator's settings are therefore the member's allow list; the recommended
-profiles are in [Claude Code configuration](../quickstart.md#claude-code).
+`.git` or `.claude` directory, is denied whatever the allow list holds. Beyond
+the broker commands, the operator's settings are therefore the member's allow
+list; the recommended profiles are in
+[Claude Code configuration](../quickstart.md#claude-code).
+```
 
+§ Spawn-time allow rules is unchanged. Two subsections are inserted after it, before `## Codex {#codex}`:
+
+````markdown
 ### What each profile entry is for {#claude-profile-entries}
 
 | Entry | Profile | Needed by | Why |
 |---|---|---|---|
-| `Bash(cafleet message *)` | Auto mode | Every member | Each member sends, polls, and acknowledges its own messages. |
-| `Bash(cafleet monitor *)` | Auto mode | The monitor member | It hosts the wake loop and runs the per-wake fleet scan. |
-| `Bash(cafleet member ping *)` | Auto mode | The monitor member | Its fixed re-poke of a quiet pane carries no operator-controlled text. |
-| `Bash(cafleet *)` | Other modes | The Director and every member | One pattern pre-approves every subcommand, in place of the narrow member patterns. |
+| `Bash(cafleet *)` | Other modes | The Director | One pattern pre-approves every subcommand the Director runs. |
 | `Skill(cafleet)`, `Skill(cafleet-design-doc)` | Both | The Director and every member | Each loads the installed skills through the Skill tool. |
 | `Read(~/.claude/skills/**)` | Both | The Director and every member | Role and reference pages of an installed skill sit outside the working directory. |
 | `Edit`, `Write` | Both | Every member that writes files | A member's file edit is denied unless an entry matches it. No entry covers a protected path. |
-| `Bash(cafleet member prompt *)` under `ask` | Both | The Director | The operator confirms each dispatch; a member's own attempt is denied. |
+| `Bash(cafleet member prompt *)`, `Bash(cafleet member exec *)` under `ask` | Both | The Director | The operator confirms each dispatch; a member's own attempt is denied. |
 
-In the auto mode profile the Director needs no further entry: the classifier
-reviews each of its commands that no rule matches, and auto mode approves its
-file edits inside the working directory.
+The auto mode profile carries no `Bash(cafleet ...)` allow entry: the
+classifier reviews each Director command that no rule matches, auto mode
+approves the Director's file edits inside the working directory, and members
+receive their broker commands as spawn-time allow rules.
 
-`cafleet member prompt` stays under `ask` in both profiles because it
-keystrokes arbitrary text or shell commands into a member's pane. An ask rule
-outranks every allow rule, so the entry holds beside `Bash(cafleet *)`.
+`cafleet member prompt` and `cafleet member exec` stay under `ask` in both
+profiles because the first keystrokes arbitrary text into a member's pane and
+the second runs an arbitrary command there. An ask rule outranks every allow
+rule, so the entries hold beside `Bash(cafleet *)`.
 
 `Edit` and `Write` apply to every session that reads the settings file, so
 they also pre-approve file edits in your own sessions. To confine the
@@ -328,18 +347,18 @@ the config directory, write the `Read` entry against that directory's
 
 ### What members can run {#claude-member-permissions}
 
-A member whose shell command is denied asks its Director to dispatch it. The
-Director dispatches with `cafleet member prompt --shell`, which is under
-`ask`, so each routed command costs the operator one confirmation. Add an
-allow entry for every project command members run as part of their work — a
-test or lint task, for example, as `Bash(npm test *)` — so those commands run
-without routing. Routing carries shell commands only: a denied file edit
-needs a matching `Edit` entry, or, on a protected path, the Director to make
-the edit.
+A member whose shell command is denied asks its Director to run it. The
+Director runs it with [`cafleet member exec`](cli-options.md#member-exec),
+which is under `ask`, so each routed command costs the operator one
+confirmation. Add an allow entry for every project command members run as
+part of their work — a test or lint task, for example, as `Bash(npm test *)` —
+so those commands run without routing. Routing carries shell commands only: a
+denied file edit needs a matching `Edit` entry, or, on a protected path, the
+Director to make the edit.
 
 | Symptom | Cause | Resolution |
 |---|---|---|
-| A member reports a denied shell command | The command is outside the read-only set and the allow list | Add an allow entry for the command. Until then, each Director dispatch of it asks the operator to confirm. |
+| A member reports a denied shell command | The command is outside the spawn-time allow rules, the read-only set, and the allow list | Add an allow entry for the command. Until then, each Director dispatch of it asks the operator to confirm. |
 | A member reports a denied file edit | No `Edit` entry matches the file's path, or the path is protected | Add `Edit` and `Write`, or widen the `Edit` path rule to cover the member's working directory. For a protected path, the Director makes the edit. |
 | The Director is prompted for every `cafleet` command | The session runs in a non-auto mode with the auto mode profile | Switch the session to auto mode, or use the other-modes profile |
 | The classifier blocks a Director `cafleet` command | Auto mode judged the action outside the request | Add a pattern for that subcommand per [`permissions.allow` coverage](cli-options.md#permissionsallow-coverage) |
@@ -363,10 +382,10 @@ prefix_rule(
 )
 
 prefix_rule(
-    pattern = ["cafleet", "monitor"],
+    pattern = ["cafleet", "monitor", "scan"],
     decision = "allow",
-    match = ["cafleet monitor 1", "cafleet monitor scan 1 --lines 120 --json"],
-    not_match = ["cafleet member list 1", "cafleet message poll 5"],
+    match = ["cafleet monitor scan 1", "cafleet monitor scan 1 --lines 120 --json"],
+    not_match = ["cafleet monitor 1", "cafleet message poll 5"],
 )
 
 prefix_rule(
@@ -379,14 +398,20 @@ prefix_rule(
 prefix_rule(
     pattern = ["cafleet", "member", "prompt"],
     decision = "prompt",
-    justification = "cafleet member prompt keystrokes arbitrary text or shell commands into a member pane",
+    justification = "cafleet member prompt keystrokes arbitrary text into a member pane",
+)
+
+prefix_rule(
+    pattern = ["cafleet", "member", "exec"],
+    decision = "prompt",
+    justification = "cafleet member exec runs an arbitrary shell command in a member pane",
 )
 ```
 
-The `allow` rules cover what members run themselves, each mirroring the
-`Bash` entry of the same prefix in the
-[auto mode profile](../quickstart.md#auto-mode-profile); the `prompt` rule
-keeps `cafleet member prompt` under operator approval.
+The `allow` rules cover the broker commands members run themselves — the same
+commands a claude member receives as
+[spawn-time allow rules](#spawn-time-allow-rules); the `prompt` rules keep
+`cafleet member prompt` and `cafleet member exec` under operator approval.
 
 The set is sufficient for members and is not the recommendation for a
 Director session. Codex has no classifier to review what these rules leave
@@ -405,69 +430,69 @@ In the § Known asymmetries table, the **Sandbox isolation** cell for `claude` b
 One row is appended to each backend's `Note → applies at` table. All three rows share this **Applies at** cell:
 
 ```markdown
-`{permission_flags}` — `cafleet/roles/member.md` § Command execution; `cafleet/reference/prompt-routing.md` opening paragraph / § Member-side: reconsider, then route; `cafleet/roles/director.md` introduction / § Member Create; `cafleet/reference/supervision.md` § Routing member bash requests
+`{permission_flags}` — `cafleet/roles/member.md` § Command execution; `cafleet/reference/prompt-routing.md` opening paragraphs / § Member-side: reconsider, then route; `cafleet/roles/director.md` introduction / § Member Create; `cafleet/reference/supervision.md` § Routing member command requests
 ```
 
 The **Note** cells:
 
 | Section | Note cell |
 |---|---|
-| `## claude` | `dontAsk` runs the harness's built-in read-only commands, file reads inside the working directory, and every tool call matching the operator's `permissions.allow`; every other call — shell command or file edit — is denied without a prompt. A task command outside that allow list is routed on every use, and each routed dispatch costs the operator one `member prompt` confirmation. Routing carries shell commands only: report a denied file edit to the Director — as a missing `Edit` allow entry, or, for a path under the harness's protected directories (such as `.git` and `.claude`), as an edit the Director must make. |
+| `## claude` | A member's broker commands are allowed on its spawn command line. Beyond them, `dontAsk` runs the harness's built-in read-only commands, file reads inside the working directory, and every tool call matching the operator's `permissions.allow`; every other call — shell command or file edit — is denied without a prompt. A task command outside that allow list is routed on every use, and each routed dispatch costs the operator one `member exec` confirmation. Routing carries shell commands only: report a denied file edit to the Director — as a missing `Edit` allow entry, or, for a path under the harness's protected directories (such as `.git` and `.claude`), as an edit the Director must make. |
 | `## codex` | Denial is the rare case: the harness rejects a few destructive operations (e.g. `git push`, `rm -rf`). |
-| `## opencode` | The `--agent cafleet` preset is a deny-by-default bash allowlist: denial is the common case for any un-allowlisted command, and routing workflow commands (`mise`, `mkdir`, …) through the Director is the routine path. Before routing, check whether an allowlisted command covers the need. |
+| `## opencode` | The `--agent cafleet` preset is a deny-by-default bash allowlist: denial is the common case for any un-allowlisted command, and routing workflow commands through the Director is the routine path. Before routing, check whether an allowlisted command covers the need. |
 
-The codex and opencode notes relocate the wording that `prompt-routing.md` carries today; their meaning is unchanged.
-
-The neutral pages now send every reader to this note, so `## Template` requires it of a new backend. In `## Template` § Note → applies at, the paragraph is replaced in full by:
+The neutral pages send every reader to this note, so `## Template` requires it of a new backend. In `## Template` § Note → applies at, the paragraph is replaced in full by:
 
 ```markdown
-Use a `Note | Applies at` table, one caveat per row. Every Applies-at cell names the token and affected `<skill>/<file>` section. Bind the pane-cue table to monitor on-wake classification and the Director's capture gate. Bind a `{permission_flags}` row stating the posture's denial semantics — what a member runs unprompted, what the harness denies, and when the member routes — to the member command-execution, prompt-routing, Director, and supervision instructions that point at it.
+Use a `Note | Applies at` table, one caveat per row. Every Applies-at cell names the token and affected `<skill>/<file>` section. Bind the pane-cue table to monitor on-wake classification and the Director's reading of a pane capture. Bind a `{permission_flags}` row stating the posture's denial semantics — what a member runs unprompted, what the harness denies, and when the member routes — to the member command-execution, prompt-routing, Director, and supervision instructions that point at it.
 ```
 
 #### 6. `skills/cafleet/reference/prompt-routing.md`
 
-The opening paragraph is replaced in full by:
+The opening paragraph (`A member runs every command its harness allows …`) is unchanged. The second paragraph (`How often a member routes depends on its backend. …`) is replaced in full by:
 
 ```markdown
-The bash-via-Director protocol is the **fallback** for a harness-denied command. Members run shell commands directly via the Bash tool by default (workspace-scoped auto-approval — see [`roles/member.md`](../roles/member.md)). What your harness denies, and so how often the fallback fires, is backend-specific: read the `{permission_flags}` note in your overlay section of [`coding-agents.md`](coding-agents.md). Either way the member auto-routes a plain CAFleet message to its Director, which dispatches the command into the member's pane via `cafleet member prompt --shell` (keystrokes literal `! <cmd>` + `Enter`, honored by `claude` / `codex` / `opencode`).
+How often a member routes depends on its backend: what your harness runs and what it denies is the `{permission_flags}` note in your overlay section of [`coding-agents.md`](coding-agents.md).
 ```
+
+In § The Director's pane primitives, the **Permission gate** cell of the `cafleet member ping` row becomes `Not asked: the action is fixed by the command`.
 
 In § Member-side: reconsider, then route, the first paragraph is replaced in full by:
 
 ```markdown
-Reconsider first, using your overlay's `{permission_flags}` note: check whether the flag or path is wrong, whether the command is unnecessary, and whether a command your posture approves covers the need. Fix or drop what you can yourself. Only a genuinely-correct, genuinely-needed, still-denied command gets routed:
+Reconsider first, using your overlay's `{permission_flags}` note: check whether the flag or path is wrong, whether the command is unnecessary, and whether a command your posture approves covers the need. Fix or drop what you can yourself. A correct, needed, still-denied command gets routed:
 ```
 
 #### 7. `skills/cafleet/roles/director.md`
 
-In the introduction, the sentence `Members spawn with workspace-scoped auto-approval, so by default they run shell commands themselves via the Bash tool — no Director routing required.` becomes:
+In the introduction, this sentence is appended after `… and you run a routed command in the member's pane with `cafleet member exec`.`:
 
 ```markdown
-Members spawn with workspace-scoped auto-approval: each runs the commands its backend's posture approves itself and routes a denied command through you. What each backend denies is the `{permission_flags}` note in that backend's section of [`coding-agents.md`](../reference/coding-agents.md).
+What each backend denies is the `{permission_flags}` note in that backend's section of [`coding-agents.md`](../reference/coding-agents.md).
 ```
 
-In § Member Create, the sentence `In all three modes the member's Bash tool is enabled and routine permission prompts auto-resolve; the denied-command fallback is [`reference/prompt-routing.md`](../reference/prompt-routing.md).` becomes:
+In § Member Create, the sentence `In all three modes the member's Bash tool is enabled, its broker commands are allowed from spawn, and routine permission prompts auto-resolve; a command the harness does not run is routed per [`reference/prompt-routing.md`](../reference/prompt-routing.md).` becomes:
 
 ```markdown
-In all three modes the member's Bash tool is enabled and never waits on a permission prompt — an approved command runs and any other is denied; the denied-command fallback is [`reference/prompt-routing.md`](../reference/prompt-routing.md).
+In all three modes the member's Bash tool is enabled, its broker commands are allowed from spawn, and no call waits on a permission prompt — an approved call runs and any other is denied; a command the harness does not run is routed per [`reference/prompt-routing.md`](../reference/prompt-routing.md).
 ```
 
 #### 8. `skills/cafleet/reference/supervision.md`
 
-In § Routing member bash requests, the first two sentences become:
+In § Routing member command requests, this sentence is inserted after the first sentence (`… broker commands allowed from spawn).`):
 
 ```markdown
-The workflow's spawned members run in workspace-scoped auto-approval mode ({permission_flags}; Bash tool enabled, no permission prompt ever waits), so they run the commands their backend's posture approves directly. When a member's harness denies a command (what each backend denies is its `{permission_flags}` note in [`coding-agents.md`](coding-agents.md)), it auto-routes a plain shell-command request via `cafleet message send`, and you respond via `cafleet member prompt --shell`.
+What each backend denies is its `{permission_flags}` note in [`coding-agents.md`](coding-agents.md).
 ```
 
-The paragraph's last sentence (`Process such requests one at a time in poll order.`) is unchanged.
+The rest of the paragraph is unchanged.
 
 #### 9. `.claude/rules/bash-tool.md`
 
 The blockquote under § The MUST rule is replaced by:
 
 ```markdown
-> **If you are a CAFleet member spawned by `cafleet member create`, your harness runs in `--permission-mode dontAsk`. Your Bash tool is ENABLED: read-only commands and every call matching the operator's `permissions.allow` run without a prompt, and every other shell command or file edit is denied without a prompt. An edit under a protected directory such as `.git` or `.claude` is denied whatever the allow list holds. Run cafleet commands and your task commands directly via the Bash tool, with no prefix and no operator prompt. When a correct, necessary command is denied, follow the reconsider-then-route protocol; report a denied file edit to the Director.**
+> **If you are a CAFleet member spawned by `cafleet member create`, your harness runs in `--permission-mode dontAsk`. Your Bash tool is ENABLED and your broker commands are allowed from spawn. Read-only commands and every call matching the operator's `permissions.allow` also run without a prompt; every other shell command or file edit is denied without a prompt, and an edit under a protected directory such as `.git` or `.claude` is denied whatever the allow list holds. Run every command your harness allows directly via the Bash tool, with no prefix and no operator prompt. Route a correct, necessary command it denies to the Director with `cafleet message send`, and report a denied file edit to the Director.**
 ```
 
 § The owning protocols already links the reconsider-then-route protocol and is unchanged.
@@ -483,33 +508,34 @@ Documentation only. Follow the project order: `docs/` pages first, then skills, 
 
 ### Step 1: Quickstart
 
-- [ ] In `docs/docs/quickstart.md` § Configure, update the `claude` row's Manual configuration cell <!-- completed: -->
-- [ ] Replace § Claude Code with the lead paragraph, the profile comparison table, the two profile snippets (auto mode first), and the closing links to the backend spec <!-- completed: -->
-- [ ] Replace the closing paragraph of § Codex with the version linking the minimum rule set <!-- completed: -->
+- [x] In `docs/docs/quickstart.md` § Configure, update the `claude` row's Manual configuration cell <!-- completed: 2026-10-10T16:49 -->
+- [x] Replace § Claude Code with the lead paragraph, the profile comparison table, the three shared paragraphs, and the two profile snippets (auto mode first) <!-- completed: 2026-10-10T16:49 -->
+- [x] Replace the closing paragraph of § Codex with the version linking the minimum rule set <!-- completed: 2026-10-10T16:49 -->
 
 ### Step 2: CLI options spec
 
 - [ ] Replace the body of § `permissions.allow` coverage in `docs/docs/spec/cli-options.md`, keeping the heading text so the `#permissionsallow-coverage` anchor is unchanged <!-- completed: -->
 - [ ] Reword the allow-pattern sentence in § JSON output <!-- completed: -->
-- [ ] Reword the `permissions.allow` / `permissions.ask` clause in § `member ping` <!-- completed: -->
+- [ ] Reword the `permissions.allow` clause in § `member ping` <!-- completed: -->
 
 ### Step 3: Backend spec and concepts
 
 - [ ] Update the two `claude` cells of the per-backend capabilities table in `docs/docs/spec/coding-agent-backends.md` <!-- completed: -->
-- [ ] Replace the § Claude paragraph with the `dontAsk` allow-list paragraph <!-- completed: -->
-- [ ] Add § What each profile entry is for with its table and the three paragraphs beneath it <!-- completed: -->
+- [ ] Replace the § Claude lead paragraph with the `dontAsk` allow-list paragraph, leaving § Spawn-time allow rules unchanged <!-- completed: -->
+- [ ] Add § What each profile entry is for after § Spawn-time allow rules, with its table and the three paragraphs beneath it <!-- completed: -->
 - [ ] Add § What members can run with its paragraph and the symptom table <!-- completed: -->
-- [ ] Append § Minimum rule set to § The `cafleet` rules file, with the four `prefix_rule` blocks and the two closing paragraphs <!-- completed: -->
+- [ ] Append § Minimum rule set to § The `cafleet` rules file, with the five `prefix_rule` blocks and the two closing paragraphs <!-- completed: -->
 - [ ] Update the `claude` Sandbox isolation cell in `docs/docs/concepts/coding-agents.md` <!-- completed: -->
 
 ### Step 4: Skill pages
 
 - [ ] Append the `{permission_flags}` row to the `Note → applies at` table of each backend section in `skills/cafleet/reference/coding-agents.md`, leaving the freshness date unchanged <!-- completed: -->
 - [ ] Replace the `## Template` § Note → applies at paragraph in the same file so a new backend must supply the `{permission_flags}` row <!-- completed: -->
-- [ ] Replace the opening paragraph of `skills/cafleet/reference/prompt-routing.md` <!-- completed: -->
+- [ ] Replace the second paragraph of `skills/cafleet/reference/prompt-routing.md` with the pointer to the `{permission_flags}` note <!-- completed: -->
+- [ ] Update the `cafleet member ping` Permission gate cell in § The Director's pane primitives in the same file <!-- completed: -->
 - [ ] Replace the first paragraph of § Member-side: reconsider, then route in the same file <!-- completed: -->
-- [ ] Replace the introduction sentence and the § Member Create sentence in `skills/cafleet/roles/director.md` <!-- completed: -->
-- [ ] Replace the first two sentences of § Routing member bash requests in `skills/cafleet/reference/supervision.md` <!-- completed: -->
+- [ ] Append the introduction sentence and replace the § Member Create sentence in `skills/cafleet/roles/director.md` <!-- completed: -->
+- [ ] Insert the `{permission_flags}` sentence in § Routing member command requests in `skills/cafleet/reference/supervision.md` <!-- completed: -->
 
 ### Step 5: Project rule
 
@@ -524,8 +550,17 @@ The Director session performs this step. `.claude/` is a Claude Code protected d
 ### Step 7: Verification
 
 - [ ] Parse each of the two quickstart JSON snippets with a JSON parser and confirm both are valid <!-- completed: -->
-- [ ] Run a case-insensitive `grep -r` over `docs/docs/`, `skills/`, and `.claude/rules/` for each string in § Specification › Stale strings; confirm no match, apart from the `codex` capability-table row noted there <!-- completed: -->
+- [ ] Run a case-insensitive `grep -r` over `docs/docs/`, `skills/`, and `.claude/rules/` for each string in § Specification › Stale strings; confirm no match <!-- completed: -->
 - [ ] Run `mise //docs:build` and confirm it succeeds <!-- completed: -->
-- [ ] Inspect the rendered quickstart, cli-options, and coding-agent-backends pages: both snippets and every new table render intact, and the `#auto-mode-profile`, `#claude-profile-entries`, `#claude-member-permissions`, `#minimum-rule-set`, and `#permissionsallow-coverage` links resolve <!-- completed: -->
+- [ ] Inspect the rendered quickstart, cli-options, and coding-agent-backends pages: both snippets and every new table render intact, and the `#auto-mode-profile`, `#claude-profile-entries`, `#claude-member-permissions`, `#minimum-rule-set`, `#spawn-time-allow-rules`, and `#permissionsallow-coverage` links resolve <!-- completed: -->
 - [ ] Run `mise //cafleet:test` and `mise //cafleet:lint`, since the skill files are embedded in the binary <!-- completed: -->
 - [ ] Run `git diff --stat` and confirm only the files in § Specification › Files changed appear <!-- completed: -->
+
+---
+
+## Changelog
+
+| Date | Changes |
+|------|---------|
+| 2026-10-10 | Initial draft |
+| 2026-10-10 | Target text rebased on the spawn-time allow rules and `cafleet member exec`: the auto mode profile carries no `Bash(cafleet ...)` allow entry, `member exec` joins `member prompt` under `ask`, and routing names `member exec` |
