@@ -1,26 +1,25 @@
 # Monitoring
 
-`cafleet monitor` is a fleet-scoped foreground loop — `scan → wake → sleep`.
-The fleet's **monitor member** hosts it as a backend-resolved long-lived execution
-in its own pane.
+`cafleet monitor` is a fleet-scoped loop — `deliver → wake → sleep`.
+`cafleet fleet create` starts it as a detached process, so it depends on no
+member's shell tool. The loop does two jobs. Its **delivery pass** sends the
+keystrokes the broker is holding for panes that were busy. Its **heartbeat**
+is a plain timer, not agent reasoning, that fires one unconditional
+fleet-level wake into the **monitor member**'s pane once per wake interval.
+
 The monitor member is a dedicated watcher spawned before any other member
 (by the `cafleet fleet create` bootstrap) on a cheap model — its work is
-bounded classification, not generation. The loop supplies the **heartbeat**: a
-plain loop, not agent reasoning, that fires one unconditional fleet-level wake
-into the monitor member's own pane once per wake interval. On each wake the
-monitor member classifies every member pane and contacts the Director only
-when something actually needs attention, so the Director is never nudged by a
-timer. The monitor member alone owns the execution handle and liveness checks;
-the Director reacts only to broker signals and never launches or polls the
-execution. Hosting mechanics differ by backend, while the heartbeat semantics
-are identical. One monitor loop per fleet; deleting the monitor member kills
-its pane and the loop process with it. Separately, the database enforces one
+bounded classification, not generation. On each wake it classifies every
+member pane and contacts the Director only when something actually needs
+attention, so the Director is never nudged by a timer.
+
+One monitor loop runs per fleet. Separately, the database enforces one
 active monitor member per fleet, including concurrent registrations. A
 monitor's pane dying does not itself deregister the member: deregister the
 old member before re-spawning it. Existing duplicate records block migration
 and require [duplicate-monitor recovery](storage.md#duplicate-monitor-recovery).
 
-## Heartbeat, classification, facilitation
+## Delivery, heartbeat, classification, facilitation
 
 The loop decides only the *when*; the monitor member owns the *what changed*;
 everything downstream — assignment, dispatch, recovery, escalation — stays the
@@ -28,12 +27,13 @@ Director's facilitation:
 
 | Layer | Owns | Lives in |
 |---|---|---|
-| Heartbeat (the *when*) | the unconditional fleet-level wake into the monitor member's pane | the `cafleet monitor` loop |
+| Delivery (the *when it lands*) | holding each broker keystroke until its pane is at rest, then sending it | the broker and the `cafleet monitor` loop |
+| Heartbeat (the *when to look*) | the unconditional fleet-level wake into the monitor member's pane | the `cafleet monitor` loop |
 | Classification (the *what changed*) | pane capture, per-backend content classification, quiet confirmation, the bounded pings, event messages to the Director | the monitor member, per its role protocol (part of the cafleet skill) |
 | Facilitation (the *what next*) | health-check judgment, assignment, dispatch, recovery, escalation | the Director, per the cafleet skill's supervision protocol |
 
-The loop's only keystroke is a **wake trigger** into the monitor member's own
-pane — a pure trigger, not a protocol payload. It opens `[cafleet] tick:`,
+The **wake trigger** into the monitor member's own pane is a pure trigger,
+not a protocol payload. It opens `[cafleet] tick:`,
 names every active ordinary member (the Director and the monitor member
 excluded) as `<member-id> (<name>; coding_agent=<agent>;
 unacked=<pending-count>)` in ascending member-id order, always carries a
@@ -44,6 +44,57 @@ members receives the `no members to health-check.` form, still carrying the
 `Director:` segment. The tmux and
 herdr payloads are byte-identical; the exact grammar is pinned in
 [Multiplexer backends](../spec/multiplexer-backends.md).
+
+## The delivery pass {#delivery-pass}
+
+A message, an exec dispatch, and an exec resume each need one keystroke into
+a member's pane. The broker sends that keystroke only into a pane at rest. A
+pane that shows a permission prompt keeps its prompt, and a member in the
+middle of a turn keeps its turn: the keystroke is **held**, and the work
+stays owed.
+
+The command that creates the work tries once, so delivery into a pane at rest
+is immediate. The loop then retries every held item on every tick — also when
+the wake interval is `0` — so held work always has a wake and needs no second
+signal from anyone:
+
+1. Read the multiplexer's live pane set. If the root Director's pane is gone,
+   the loop stops: a fleet without a Director pane has no one to facilitate
+   it.
+2. Close the execs whose command was lost.
+3. Run the [ready watchdog](#ready-watchdog).
+4. For every active member — the Director included — whose pane is live and
+   that has owed work, make one delivery attempt. A member with nothing owed
+   is neither captured nor keystroked, so an idle fleet is left alone.
+
+The broker judges a pane from its captured text and names one of four states:
+
+| State | Meaning | Delivery |
+|---|---|---|
+| `finished` | The composer is visible, with no prompt box and no active work | Sent now |
+| `awaiting_user` | A permission or selection prompt is waiting for a keypress | Held |
+| `working` | A turn, a tool, or a command is running | Held |
+| unclassified | None of the cues match | Held |
+
+A hold is bounded. Once it has lasted longer than the hold timeout the
+delivery is **forced** into the pane as it is, with a line that tells the
+recipient what the broker interrupted. The gate, the timeout, the payloads,
+and the per-backend cues are specified in
+[Held delivery](../spec/multiplexer-backends.md#held-delivery).
+
+For the Director this means **dispatch is unconditional**: it sends an
+assignment the moment it has one, and the broker decides when the keystroke
+lands. The Director keeps no deferred sends and reads no capture before a
+send.
+
+## Ready watchdog {#ready-watchdog}
+
+`ready` is the only signal that the agent in a pane booted. On every tick the
+loop looks for an active non-Director member that owns a pane, was spawned at
+least 180 seconds ago, and has never sent a message. It posts one
+silent-member [notice](../spec/data-model.md#broker-notices) to the Director
+for that member and never repeats it. A member that goes silent after it has
+spoken is the monitor member's to report.
 
 ## The monitor member's wake protocol
 
@@ -79,35 +130,28 @@ on each wake the monitor member:
    still unchanged at the next wake after its ping, a ping delivery failure,
    or an `unknown` capture — each said once per quiet period. With no event,
    it sends nothing.
+7. Reports a denial of one of its own commands to the Director once, naming
+   the command and the denial text. A monitor member whose `message send` is
+   denied from the start is reported by the [ready watchdog](#ready-watchdog).
 
 The monitor member's command surface on wake is exactly three families —
 `cafleet monitor scan`, `cafleet member ping`, and `cafleet message send` to
 the Director. Never `message broadcast`, never `member prompt`, never a ping
-at itself.
+at itself. A claude monitor member is spawned with all three already allowed
+(see [Spawn-time allow rules](../spec/coding-agent-backends.md#spawn-time-allow-rules)).
 
-The Director's re-engagement channels are the broker's automatic inline
-previews, the monitor's event messages, and the monitor's stalled-Director
-ping. The Director's own re-engagement remains **capture-gated**: before it
-fires a re-engagement keystroke at a member (`cafleet member ping`, a
-non-exempt `cafleet message send`, or a `cafleet message broadcast`), it reads
-a fresh capture of the target's pane and classifies the content with the
-capture cues of the target's backend overlay, firing only on `finished` or a
-confirmed stall. One fresh `cafleet monitor scan` satisfies the gate for every
-member for that facilitation turn; once the Director keystrokes a pane, that
-pane's snapshot is stale and a further re-engagement of the same member needs
-a fresh capture. The full pre-ping capture gate is part of the cafleet skill's
-supervision protocol. The capture-state taxonomy thus has two consumers: the
-monitor member's on-wake classification and the Director's pre-ping gate.
+The Director's re-engagement channels are the broker's inline previews, the
+broker's [notices](../spec/data-model.md#broker-notices), the monitor's event
+messages, and the monitor's stalled-Director ping. `cafleet member ping` is
+gated by the broker itself: it keystrokes a pane at rest or a quiet pane the
+broker cannot classify, and skips a pane that is working, waiting on a
+prompt, or running an exec. A captured prompt is not a relayed question: the
+Director answers explicit member questions through the broker.
 
-For the Director, `finished` with no outstanding assignment is normal rest.
-Outstanding work may resume through the fresh-capture gate; a
-`stall_candidate` needs unchanged captures across consecutive facilitation
-turns. `working` and `awaiting_user` defer the entire send, including message
-persistence. Idle duration, unread counts, and monitor events alone do not
-authorize a ping. A captured prompt is not a relayed question: the Director
-answers explicit member questions through the broker. Immediate replies to
-reply-soliciting messages and explicitly requested shell dispatch retain
-their exceptions to the gate.
+Pane state therefore has two readers with different jobs. The broker's
+four-state classification decides whether a keystroke may be sent. The
+monitor member's reading adds `stall_candidate` and `unknown` and decides
+whether a quiet pane deserves a ping or a report.
 
 An `unknown` capture calls for investigation, not a ping or an assumption
 that the pane died. Use `cafleet doctor` to diagnose the current connection and
@@ -117,7 +161,7 @@ Registry data does not prove physical pane presence or absence; retain
 facts only if that uncertainty blocks the work. The skill's recovery reference
 owns the procedure.
 
-The scan both consumers use is a **read-only batch of captures**:
+The scan is a **read-only batch of captures**:
 `cafleet monitor scan <fleet-id>` is a one-shot command that captures the
 Director's pane and every active member's pane in a single invocation —
 Director first, then members in ascending member-id order — so the reader
@@ -131,35 +175,38 @@ primitive for a single pane.
 
 | Knob | Default | Set by |
 |---|---|---|
-| Wake interval | `600s` | `CAFLEET_MONITOR_WAKE_INTERVAL` / `cafleet monitor FLEET_ID --interval N` |
-| Scan tick | `5s` | `cafleet monitor FLEET_ID --tick N` (per run) |
+| Wake interval | `600s` | `cafleet monitor FLEET_ID --interval N`, the fleet's stored interval, or `CAFLEET_MONITOR_WAKE_INTERVAL` |
+| Tick | `5s` | `cafleet monitor FLEET_ID --tick N`, or the fleet's stored tick |
 
-The monitor loop scans once per **tick** and the wake fires at the first tick
-boundary on which the wake interval has elapsed, so the tick is the floor on
-interval precision. The first wake is measured from the moment the loop
-started: it fires only once the interval has elapsed since launch, so a
-freshly spawned monitor member gets its startup window undisturbed. Every
-later wake is measured from the last delivered wake.
+The loop runs its delivery pass once per **tick**, and the wake fires at the
+first tick boundary on which the wake interval has elapsed, so the tick is
+the floor on interval precision. The first wake is measured from the moment
+the loop started: it fires only once the interval has elapsed since launch,
+so a freshly spawned monitor member gets its startup window undisturbed.
+Every later wake is measured from the last delivered wake.
 `CAFLEET_MONITOR_WAKE_INTERVAL=0` (or `--interval 0`) disables the wake while
-the loop keeps claiming the runtime slot and heartbeating every tick.
+the loop keeps claiming the runtime slot, heartbeating, and delivering every
+tick.
 
-The resolved interval is stamped per fleet into the `monitor_runtime` row at
-each `cafleet monitor` start and re-read on every tick, so a running loop's
-cadence is editable from the admin WebUI's interval editor: an edit takes
-effect within one tick and lasts until the next `cafleet monitor` start
-re-stamps the interval from the CLI/env resolution. Saving `0` disables the
-wake exactly as `--interval 0` does, while the loop keeps heartbeating.
+The interval is stored per fleet in the `monitor_runtime` row and re-read on
+every tick, so a running loop's cadence is editable from the admin WebUI's
+interval editor: an edit takes effect within one tick. A restarted loop keeps
+the stored interval and tick unless it is started with a flag; the full
+precedence is in
+[CLI options](../spec/cli-options.md#monitor-loop-precedence). A new fleet
+starts from the environment default. Saving `0` disables the wake exactly as
+`--interval 0` does.
 
 The schedule is not the only wake trigger: the admin WebUI's "Wake now"
 control (`POST /api/monitor/wake`) records a durable wake request on the
 fleet's runtime row, and the running loop honors it on its next tick — the
-wake lands within one scan tick even when the interval is `0` or the
+wake lands within one tick even when the interval is `0` or the
 schedule is not yet due, because an explicit operator action bypasses a
 disabled or not-yet-due schedule. Repeat requests coalesce into a single
 wake, and a wake the loop has to skip (no resolvable monitor pane) leaves
 the request pending to retry on the next tick, exactly as a scheduled wake
-stays due. A delivered wake — scheduled or forced — stamps the last-wake
-timestamp and clears any pending request in the same write, so a forced
+stays due. A delivered wake — scheduled or requested — stamps the last-wake
+timestamp and clears any pending request in the same write, so a requested
 wake resets the schedule baseline.
 
 The wake fires whenever the interval has elapsed and the fleet's monitor
@@ -175,18 +222,22 @@ launch. A failed wake commits nothing and retries on the next tick.
 
 ## Keystroke safety
 
-The wake is typed `Esc`-first: `Escape`, a settle delay, the payload, then
-`Enter` — the same safeguard every inline message preview already uses, so a
-wake landing on a pending permission prompt clears it instead of answering
-it. The resume clause makes the wake self-healing: a monitor member that
-stalls mid-turn is re-engaged by its own next wake.
+Every keystroke is typed `Esc`-first: `Escape`, a settle delay, the payload,
+then `Enter`. A delivery is sent only after the broker has seen the pane at
+rest, and the `Escape` covers the moment between that capture and the
+keystroke: a prompt that opens in between is rejected, never confirmed.
+
+The wake is the one loop keystroke that is not held. It re-engages a monitor
+member stuck mid-turn, its work is an idempotent re-scan, and the monitor
+member's spawn posture shows no user prompt. The resume clause makes the wake
+self-healing: a monitor member that stalls mid-turn is re-engaged by its own
+next wake.
 
 One hazard is documented rather than guarded: if the operator is
-mid-composition at the monitor member's pane when a wake lands, the `Esc`
-clears any pending prompt box and the payload is appended to whatever text is
-already in the composer, then `Enter` submits both together. An operator is
-rarely typing in the monitor member's pane, and `--interval 0` is the escape
-for hands-on sessions.
+mid-composition at a pane when a keystroke lands, the payload is appended to
+whatever text is already in the composer, then `Enter` submits both together.
+An operator is rarely typing in the monitor member's pane, and `--interval 0`
+is the escape for hands-on sessions.
 
 ## Single-instance and liveness
 
@@ -197,6 +248,12 @@ liveness: the running loop rewrites `last_tick_at` every tick, so a loop that
 died silently reads as stale. Both the per-tick heartbeat and the on-exit
 clear are ownership-checked — a displaced loop's next heartbeat matches zero
 rows and it self-terminates.
+
+A loop that cannot reach the multiplexer must not look live. It probes the
+multiplexer before claiming the row and exits without a claim when the probe
+fails, and a running loop that fails to list panes on several consecutive
+ticks clears its row and exits, so the next command that needs the loop
+starts a replacement.
 
 ## Runtime cleanup
 
@@ -211,71 +268,57 @@ reclaim.
 
 ## Lifecycle
 
-**Spawn.** `cafleet fleet create` spawns the monitor member as part of the
-fleet bootstrap: one command creates the fleet, root Director, and monitor
-rows in a DB transaction and takes ownership of the spawned pane, with the
-Director-authored monitor prompt passed via `--monitor-file` and the
-backend's monitor-default model via `--monitor-model` and supported effort via
-`--monitor-effort` (see
-[CLI options](../spec/cli-options.md#fleet-create)). Failed bootstrap attempts
-DB rollback and known-pane cleanup. A cleanup failure or unknown pane id is
-reported with the primary error; inspect those diagnostics before retrying. At startup the monitor member sends the standard `ready`
-signal, launches `cafleet monitor <fleet-id>` using its backend-resolved
-long-lived-execution primitive, and confirms the startup line the loop prints
-immediately after claiming the runtime row — `monitor loop started (fleet
-<fleet_id>, tick <tick>s, pid <pid>)`. On Codex, it runs the command without
-shell `&`, retains the managed execution's session ID, and inspects the initial output.
-If the line is absent while the session remains active, it performs one immediate poll.
-A missing session ID or an early exit is a failed start; an
-active but unconfirmed session is terminated after that poll. Only after the
-line is observed does the monitor member send `monitor live` to the Director.
-The monitor member is the only party that owns this execution or its handle:
-the Director receives only broker status signals, ordinary members never run
-the loop, and the session ID is never shared. That gate message unblocks the
-Director's first ordinary `cafleet member create`; the CLI enforces the same order (spawning
-an ordinary member into a fleet with no active monitor member fails — see
+**Spawn.** `cafleet fleet create` bootstraps the fleet in one command: it
+creates the fleet, root Director, and monitor rows in a DB transaction, takes
+ownership of the spawned monitor pane, and then starts the monitor loop as a
+detached process. The Director-authored monitor prompt is passed via
+`--monitor-file`, with the backend's monitor-default model via
+`--monitor-model` and supported effort via `--monitor-effort` (see
+[CLI options](../spec/cli-options.md#fleet-create)). The command returns only
+after the loop is live. A failed bootstrap attempts DB rollback and
+known-pane cleanup, and a loop that does not start is compensated the same
+way: the monitor pane is killed and the fleet is soft-deleted. A cleanup
+failure or unknown pane id is reported with the primary error; inspect those
+diagnostics before retrying.
+
+The monitor member's own startup is one step: it sends the standard `ready`
+signal and ends its turn. That `ready` unblocks the Director's first ordinary
+`cafleet member create`; the CLI enforces the same order (spawning an
+ordinary member into a fleet with no active monitor member fails — see
 [CLI options](../spec/cli-options.md#member-create)), and a
 `member create --role monitor` spawn into a fleet that already has an active
-monitor member also fails. Any failed start is reported to the Director without claiming the
-monitor is live.
+monitor member also fails.
 
-Once `monitor live` arrives, the Director spawns the ordinary members and
-**dispatches on ready**: when a member's ready signal arrives, the Director
-ACKs it and dispatches that member's first task in the same turn, provided
-the task's inputs exist. First-task dispatch is per-member — never held
-waiting for other members' ready signals or placements. A member whose
-first task genuinely depends on an input that does not yet exist (e.g. a
-deliverable another member has not produced) legitimately stays idle until
-that input lands — the Director dispatches whatever is dispatchable, to
-whoever is ready.
+The Director then spawns the ordinary members and **dispatches on ready**:
+when a member's ready signal arrives, the Director ACKs it and dispatches
+that member's first task in the same turn, provided the task's inputs exist.
+A member that sent `ready` and is still reading receives the assignment when
+it goes idle, because the broker holds the keystroke until then. First-task
+dispatch is per-member — never held waiting for other members' ready signals
+or placements. A member whose first task genuinely depends on an input that
+does not yet exist (e.g. a deliverable another member has not produced)
+legitimately stays idle until that input lands — the Director dispatches
+whatever is dispatchable, to whoever is ready.
 
-**Teardown**, in order: the Director deletes the **monitor member first**
-(first-out — the pane kill takes the loop process down, ending the wake
-source before any other member disappears), deletes each remaining member
-with `cafleet member delete`, verifies with `cafleet member list` that only
-the root Director's row remains, runs `cafleet fleet delete <fleet-id>`, and
-confirms with `cafleet fleet list`. `fleet delete` alone also ends a
-still-running loop — its next tick sees the soft-deleted fleet and
-self-terminates.
+**Teardown**, in order: the Director deletes the **monitor member first**,
+deletes each remaining member with `cafleet member delete`, verifies with
+`cafleet member list` that only the root Director's row remains, runs
+`cafleet fleet delete <fleet-id>`, and confirms with `cafleet fleet list`.
+`fleet delete` ends the loop: its next tick sees the soft-deleted fleet and
+stops.
 
-**Recovery and standing liveness.** If the monitor member's pane dies without
-a graceful stop, the loop process dies with the pane and a stale
-`monitor_runtime` row survives
-with a non-null `pid`. That row reads as dead on both liveness axes — the
-heartbeat goes stale and the process probe reports no such process — so a
-fresh `cafleet monitor` run reclaims it and succeeds. The Director re-spawns
-the dead monitor with `--role monitor` (the one-per-fleet guard counts only
-active members, so a deleted monitor frees the slot), and the fresh loop
-reclaims the stale row. Backends with push-style exit notification surface a
-loop exit directly. When a broker message reopens a later Codex turn, the
-monitor member polls its retained session once before other work. If the
-execution exited, the monitor member relaunches `cafleet monitor <fleet-id>`
-and repeats the bounded startup confirmation; it reports `monitor restarted`
-only after the replacement prints the startup line, and reports a failed
-relaunch instead of claiming a restart. The Director remains broker-reactive
-and never owns the execution handle or runs a session-poll loop. `cafleet fleet
-delete` removes the row unconditionally. No manual cleanup step exists or is
-needed.
+**Recovery and standing liveness.** The loop and the monitor member fail
+independently. If the monitor member's pane dies, the loop keeps delivering;
+the Director deletes the dead member and re-spawns it with `--role monitor`
+(the one-per-fleet guard counts only active members, so a deleted monitor
+frees the slot). If the loop process dies, the next `message send`,
+`message broadcast`, or `member exec` that leaves work owed starts a
+replacement, and the admin WebUI shows the loop stopped in the meantime. A
+loop that died without a graceful stop leaves a `monitor_runtime` row with a
+non-null `pid`; that row reads as dead on both liveness axes — the heartbeat
+goes stale and the process probe reports no such process — so the
+replacement reclaims it. `cafleet fleet delete` removes the row
+unconditionally. No manual cleanup step exists or is needed.
 
 See [Data model](../spec/data-model.md) for the backing table and
 [CLI options](../spec/cli-options.md#cafleet-monitor) for the command surface

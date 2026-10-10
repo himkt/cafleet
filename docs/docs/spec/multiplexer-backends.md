@@ -12,8 +12,8 @@ parses them.
 
 The pane is also cafleet's only push channel: message delivery stays pull-based
 (recipients drain the persisted queue with `cafleet message poll`), and the
-broker keystrokes an inline preview into the recipient's pane after
-persisting a message — see [Push notifications](#push-notifications).
+broker keystrokes an inline preview into the recipient's pane once that pane
+is at rest — see [Push notifications](#push-notifications).
 
 ## Backend matrix {#backend-matrix}
 
@@ -27,8 +27,7 @@ Each backend invokes its CLI from PATH. Their behavior differs as follows:
 | Access mechanism | Shells out to `tmux` | Uses the herdr CLI as a subprocess |
 | Pane-spawn cwd | Builtin inheritance from the splitting pane | Explicit `--cwd <dir>` on every `herdr pane split` |
 | Delete-time layout reflow | Native auto-fit after a bare `kill-pane` | No native reflow — `kill_pane` rebalances best-effort, scoped to the killed pane's tab |
-| `send_prompt` shell form | `Esc` first, then payload `! <stripped>` + `Enter` | `Esc` first, then `herdr pane run <pane> "! <stripped>"` |
-| `send_prompt` plain form | `Esc` first, then payload `<stripped>` + `Enter` | `Esc` first, then `herdr pane run <pane> <stripped>` |
+| `send_prompt` | `Esc` first, then payload `<stripped>` + `Enter` | `Esc` first, then `herdr pane run <pane> <stripped>` |
 | Inline-preview keystroke | `send-keys` | `pane send-text` + `pane send-keys` |
 
 `TmuxError` and `HerdrError` are both subclasses of `MultiplexerError`. Each
@@ -127,15 +126,18 @@ optional capability Protocol, `AgentStateAware`, that only the herdr backend
 implements — the base `Multiplexer` Protocol stays clean and tmux implements
 nothing new.
 
-No DB column backs the native status; supervision does not consume it — the
-monitor loop's wake is unconditional and periodic. See
+No DB column backs the native status, and nothing in cafleet consumes it: the
+monitor loop's wake is unconditional and periodic, and
+[pane-state classification](#pane-state-classification) reads captured text
+only, so it behaves the same on both backends. See
 [Monitoring](../concepts/monitoring.md).
 
 ## The monitor wake and the fixed direct ping
 
-The monitor loop is one fixed-cadence `scan → wake → sleep` path on both
-backends. Its only keystroke target is the monitor member's own pane; it
-never calls `send_poll_trigger` and never keystrokes any other pane.
+The monitor loop is one fixed-cadence path on both backends. Each tick it
+sends two kinds of keystroke: the [held deliveries](#held-delivery) owed to
+any member pane, and — once per wake interval — the wake into the monitor
+member's own pane. It never calls `send_poll_trigger`.
 
 `send_wake_trigger` receives the fleet's wake roster plus a Director
 descriptor and emits a **pure trigger** — the member list with
@@ -169,15 +171,15 @@ The Director's `<name>` renders as stored — `fleet create` registers the root
 Director as `Director` — with no case transformation.
 
 `cafleet member ping` is a fixed manual primitive of the Director and the
-monitor member, unchanged on both backends: `Esc`, then the literal payload
+monitor member, identical on both backends: `Esc`, then the literal payload
 `cafleet message poll <member-id> — then
-resume your work if something was still running.`, then `Enter` (a
-pending-placement target skips the keystroke and succeeds). It cannot carry
-arbitrary text.
+resume your work if something was still running.`, then `Enter`. It cannot
+carry arbitrary text, and it is gated on the target's pane state — see
+[CLI options](cli-options.md#member-ping).
 
 Anything a member needs from the Director travels as a plain
-`cafleet message send` — the same persisted queue and Esc-safeguarded
-inline-preview path every fleet message uses.
+`cafleet message send` — the same persisted queue and held inline-preview
+path every fleet message uses.
 
 ## Pane spawn working directory {#pane-spawn-cwd}
 
@@ -214,24 +216,24 @@ pane is closed and the member deregistered regardless.
 
 ## Prompt dispatch (`send_prompt`) {#prompt-dispatch}
 
-`cafleet member prompt` delivers its keystrokes through the multiplexer
-interface's `send_prompt(target_pane_id, text, shell = false)` operation.
+`cafleet member prompt`, the exec dispatch line, and the exec resume line all
+reach the pane through the multiplexer interface's
+`send_prompt(target_pane_id, text)` operation: one line of text, typed
+`Esc`-first and submitted with `Enter`.
 
 Both backends validate fail-fast: text empty after strip →
 `send_prompt: text may not be empty`; the **original** text containing `\n` or
 `\r` → `send_prompt: text may not contain newlines` (raised as the backend's
-native error type, `TmuxError` / `HerdrError`). Both forms use the same Esc
-safeguard and failure semantics; the `shell` flag controls only whether the
-payload has the `! ` prefix. The per-backend payloads are in the
-[backend matrix](#backend-matrix). Both herdr forms mirror
+native error type, `TmuxError` / `HerdrError`). The per-backend payloads are
+in the [backend matrix](#backend-matrix). The herdr realization mirrors
 `send_poll_trigger`'s esc-then-run shape.
 
 ## Push notifications {#push-notifications}
 
 CAFleet's delivery model is pull-based: recipients discover messages via
 `cafleet message poll`. To cut latency, the broker keystrokes a 2-line inline
-preview into the recipient's pane immediately after persisting a message, so
-the recipient's coding agent consumes it as a fresh user-turn input:
+preview into the recipient's pane, so the recipient's coding agent consumes it
+as a fresh user-turn input:
 
 ```text
 [cafleet msg <message_id> from <sender_id> <ts>]
@@ -240,37 +242,167 @@ the recipient's coding agent consumes it as a fresh user-turn input:
 
 The keystroke is dispatched through the resolved backend's
 `send_inline_preview` helper; the contract — one Esc-safeguarded submit of the
-whole 2-line payload — is identical on both, and the per-backend realization is
-in the [backend matrix](#backend-matrix).
+whole payload — is identical on both, and the per-backend realization is
+in the [backend matrix](#backend-matrix). The recipient pane is resolved from
+`member_placements` by `member_id` alone, so Member → Director notifications
+work automatically. The recipient acks via `cafleet message ack <message_id>`
+once it has consumed the message. Body truncation in the preview (`…` at
+`CAFLEET_MAX_TEXT_LEN` codepoints) is documented in
+[CLI options](cli-options.md#message-body-truncation).
 
-### Inline-preview error propagation {#inline-preview-errors}
+### Held delivery {#held-delivery}
 
-`send_inline_preview` is the one keystroke path that propagates its failure as
-a `Result` carrying the raw backend error instead of a best-effort boolean.
+A **broker delivery** is a keystroke the broker owes a pane: a message
+preview, an exec dispatch, or an exec resume. The broker sends it only when
+the pane can take it, and holds it otherwise. The command that creates the
+work makes one delivery attempt, and the monitor loop repeats the attempt on
+every tick until the keystroke lands. Both run the same delivery step, so a
+delivery into a pane at rest stays immediate and held work always has a wake.
+
+| Term | Meaning |
+|---|---|
+| Ordinary delivery | A delivery into a pane classified `finished` |
+| Forced delivery | A delivery into any other pane, made because the hold age reached the timeout |
+| Base payload | For a preview, the two lines above: the `[cafleet msg …]` header and the truncated text |
+| Owed work | For a fleet: a [pending preview](data-model.md#messages), or an exec not yet closed, for any of its members |
+
+Both kinds use the same keystroke shape: `Escape`, settle, payload, `Enter`.
+
+The delivery step performs at most one keystroke into one member's pane:
+
+1. **Exec in flight.** If an exec is dispatched or running in the pane, hold.
+   No timeout applies while a command is running.
+2. **Select one item**, in this priority: a finished exec not yet resumed,
+   else the oldest queued exec, else the oldest pending preview. With no
+   item, nothing is owed.
+3. **Capture and classify** the last 40 lines of the pane — see
+   [Pane-state classification](#pane-state-classification). A capture error
+   holds.
+4. **Resume by observation**, when the item is a finished exec — see
+   [member exec](cli-options.md#member-exec).
+5. **Decide** per the gate table below.
+6. **Fire**: take the [pane claim](#pane-claim), stamp the item, and send the
+   keystroke. A refused claim holds. A failed keystroke clears the stamp, so
+   the item stays owed and the next attempt retries it.
+
+| Pane state | Hold age below the timeout | Hold age at or above the timeout |
+|---|---|---|
+| `finished` | Ordinary delivery | Ordinary delivery |
+| `awaiting_user` | Hold | Forced delivery; a preview adds the broker note |
+| `working` | Hold | Forced delivery; a preview adds the resume clause |
+| unclassified | Hold | Forced delivery; base payload only |
+
+**Hold age** is the time since the latest of three moments: the item's own
+timestamp (creation for a preview or a queued exec, the end of the command
+for a resume), the end of the pane's latest exec, and the pane's last forced
+delivery. The two pane-level moments restart the clock for everything queued
+behind an event: a long command does not immediately force the keystrokes
+that waited for it, and several overdue items do not force back to back into
+a prompt the recipient has just re-raised.
+
+**Timeout.** `CAFLEET_DELIVERY_HOLD_TIMEOUT` seconds, default `300`. `0`
+disables forcing, so a hold lasts until the pane is at rest. The timeout
+bounds every classification miss to a delay.
+
+Four keystrokes reach a pane that is not `finished`:
+
+| Keystroke | Rule | Why |
+|---|---|---|
+| Forced delivery | The hold timeout | The bound on a hold |
+| `member ping` on an unclassified pane | [member ping](cli-options.md#member-ping) | A quiet pane the classifier cannot name is the stalled member a ping exists for |
+| `member prompt` | Not gated | The Director's deliberate direct turn |
+| Monitor wake | Not gated | It re-engages a monitor member stuck mid-turn. The monitor's work is an idempotent re-scan, and its spawn posture shows no user prompt |
+
+### Pane claim {#pane-claim}
+
+Immediately before a keystroke, a cafleet process claims the target pane by
+stamping the pane's `keystroke_at`, in one statement that succeeds only when
+the previous claim is at least 3 seconds old. A process whose claim is refused
+does not type: another cafleet process is typing into that pane. The window
+covers the `Esc` settle and submit delays, so two processes never interleave
+their keystrokes, and the loser's capture cannot mistake a half-typed pane for
+one at rest.
+
+| Keystroke | On a refused claim |
+|---|---|
+| Broker delivery | Holds; the next attempt retries |
+| `member ping` | Skips with reason `busy`; exit 0 |
+| `member prompt` | Exit 1 — see [member prompt](cli-options.md#member-prompt) |
+| Monitor wake | The wake stays due for the next tick |
+
+### Preview payloads {#preview-payloads}
+
+| Delivery | Payload |
+|---|---|
+| Ordinary, or forced on an unclassified pane | The base payload |
+| Forced on `working` | The base payload, then `[cafleet] Resume your work if something was still running.` |
+| Forced on `awaiting_user` | The base payload, then `[cafleet] This delivery's Escape dismissed a pending prompt in your pane; that rejection did not come from the user. Re-issue the tool call if you still need it.` |
+
+Each extra line is conditional. An ordinary preview lands in a pane at rest,
+where nothing was interrupted, so it carries no resume clause. The broker note
+is emitted only when the broker observed a pending prompt immediately before
+its own `Escape`, so its absence still means the user rejected the call.
+Re-issuing the tool call raises the prompt again, so the user's decision is
+preserved.
+
+### Pane-state classification {#pane-state-classification}
+
+The broker classifies a pane from the ANSI-stripped text of its last 40 lines.
+Each coding agent contributes three cues — regular expressions matched line by
+line — and the evaluation order is fixed:
+
+1. Any `awaiting_user` cue matches in its region → `awaiting_user`.
+2. Any `working` cue matches in its region → `working`.
+3. Any `finished` cue matches in its region → `finished`.
+4. Otherwise the pane is unclassified. A pane whose coding agent has no cue
+   table is always unclassified.
+
+A cue reads only the bottom of the pane, where the coding agent draws its live
+prompt box, activity line, and composer. Blank lines are dropped first; a
+region is the last N remaining lines.
+
+| Cue | Region | Reason for the size |
+|---|---|---|
+| `awaiting_user` | Last 20 lines | A selection list with descriptions is tall |
+| `working` | Last 10 lines | The activity line sits directly above the composer |
+| `finished` | Last 6 lines | The composer and its status lines only |
+
+The sizes are asymmetric on purpose. A false `awaiting_user` or `working`
+only delays a delivery, bounded by the timeout. A false `finished` sends the
+`Escape` that held delivery exists to withhold, so that cue reads the smallest
+region and is evaluated last: an echoed user turn higher in the transcript
+does not match, and a prompt box no `awaiting_user` cue recognises leaves no
+composer in the last six lines, so the pane is unclassified and holds.
+
+| Coding agent | `awaiting_user` cue | `working` cue | `finished` cue |
+|---|---|---|---|
+| `claude` | A numbered option under the selection cursor: <code>^[\s│]*❯\s+\d+\.\s</code> | `esc to interrupt` | The composer prompt line: <code>^[\s│]*[>❯](\s.*)?$</code> |
+| `codex` | A numbered option under the cursor, <code>^\s*›\s+\d+\.\s</code>, or a `\[y/n\]` approval line | `esc to interrupt` | The composer prompt line: <code>^\s*[›▌](\s.*)?$</code> |
+| `opencode` | The permission popup title: `Permission required` | <code>esc\s+(to\s+)?interrupt</code> | The prompt box line: <code>^\s*┃(\s.*)?$</code> |
+
+`finished` means the composer is visible with no prompt box and no active-work
+cue. Text already typed into the composer does not change the result; a
+keystroke then appends to it.
+
+### Keystroke error propagation {#keystroke-errors}
+
+`send_inline_preview` and `send_prompt` propagate a failure as a `Result`
+carrying the raw backend error instead of a best-effort boolean.
 A missing backend binary fails with exactly `tmux binary not found on PATH` or
 `herdr binary not found on PATH`; a subprocess failure after that precheck
-carries the backend's existing raw error formatting — the failed command, its
+carries the backend's raw error formatting — the failed command, its
 payload argv, and a newline-delimited stderr detail — from whichever Escape,
-payload, or Enter operation failed. The string is preserved verbatim all the
-way to the caller.
+payload, or Enter operation failed.
+
+A failed delivery keystroke is not a command failure: the item's stamp is
+cleared, the work stays owed, and the next attempt retries it. Every caller of
+the delivery step — `message send`, `message broadcast`,
+`POST /api/messages/send`, `member exec`, and the monitor loop — treats it the
+same way.
 
 The other trigger keystrokes, `send_poll_trigger` and `send_wake_trigger`,
 keep their best-effort boolean contract: they never raise, and any failure
 returns `false`.
-
-Callers consume the inline-preview `Result` asymmetrically:
-
-| Caller | On an attempted inline-preview failure |
-|---|---|
-| Unicast `message send` | Surfaces the raw error as an exit-1 partial failure after persistence — see [CLI options](cli-options.md#message-send-partial-failure) |
-| `message broadcast` | Discards the individual error; only the `delivered` count reflects it, and the summary output and exit 0 are unchanged |
-| `POST /api/messages/send` | Ignores the notification outcome; the 200 `{message_id, status}` response after persistence is unchanged |
-
-The recipient pane is resolved from `member_placements` by `member_id` alone,
-so Member → Director notifications work automatically. The recipient acks via
-`cafleet message ack <message_id>` once it has consumed the message.
-Body truncation in the preview (`…` at `CAFLEET_MAX_TEXT_LEN` codepoints) is
-documented in [CLI options](cli-options.md#message-body-truncation).
 
 ### The `Esc` safeguard {#esc-safeguard}
 
@@ -279,28 +411,34 @@ the payload and `Enter`.
 
 | Keystroke path | Payload | Why |
 |---|---|---|
-| Inline preview (`message send` / `message broadcast`) | The 2-line preview + `Enter` | A recipient parked on a pending permission-approval prompt has it dismissed before the trailing `Enter` lands |
-| `cafleet member ping` | The literal poll command with the resume clause + `Enter` | The manual re-poke for a pane that missed an inline preview |
-| `cafleet member prompt` (plain and `--shell` forms) | The text, optionally prefixed with `! `, + `Enter` | The same safeguard and failure semantics protect both forms; the flag changes only the payload prefix |
+| Inline preview (`message send` / `message broadcast`) | The [preview payload](#preview-payloads) + `Enter` | A prompt can open between the capture and the keystroke; the `Escape` rejects it instead of letting the trailing `Enter` confirm it |
+| Exec dispatch and exec resume | The fixed dispatch line or resume line + `Enter` | The same capture-to-keystroke window as a preview |
+| `cafleet member ping` | The literal poll command with the resume clause + `Enter` | The manual re-poke for a quiet pane |
+| `cafleet member prompt` | The text + `Enter` | The dispatch never blindly confirms a pending permission prompt |
 | Exit-command helper (`send_exit`) | `/exit` + `Enter` | Uses the same safeguard, with pane-gone tolerance covering the leading `Esc` when `ignore_missing` is enabled; creation rollback uses `kill_pane` |
 | Monitor-loop wake trigger (`send_wake_trigger`) | The `[cafleet] tick:` wake + `Enter` | It targets the monitor member's pane, which can be parked on a permission prompt (see [Monitoring](../concepts/monitoring.md)) |
 
 ### Delivery outcomes
 
-The persisted queue remains authoritative. Notification is attempted at most
-once; a failed push leaves the existing row available for polling and ACK.
-The recipient pane comes from its placement, so member-to-Director messages
-use the same path. Backend resolution follows [Backend selection](#backend-selection);
-keystrokes target the opaque pane id on the same host with a reachable server.
-Direct targeting uses tmux `send-keys -t <pane>` or herdr `pane send-*`.
+The persisted queue remains authoritative: a held or failed preview leaves
+the row available for polling and ACK, and an ACKed row is never keystroked.
+A preview is keystroked exactly once, whether the sending command, the monitor
+loop, or both evaluate it — the item stamp and the pane claim together
+guarantee it. The recipient pane comes from its placement, so
+member-to-Director messages use the same path. Backend resolution follows
+[Backend selection](#backend-selection); keystrokes target the opaque pane id
+on the same host with a reachable server. Direct targeting uses tmux
+`send-keys -t <pane>` or herdr `pane send-*`. A caller that cannot resolve a
+multiplexer skips the delivery attempt and leaves the row owed.
 
-| Notification outcome | Unicast success field | Persistence |
+| Delivery outcome | Unicast success field | Afterwards |
 |---|---|---|
-| Self-send or recipient placement has no pane id | `notification_sent: false`; no attempt or warning | Message remains available |
-| Attempted preview lands | `notification_sent: true` | Message remains available |
-| Attempted preview fails | No success payload; [caller-specific failure](#inline-preview-errors) | Existing row remains available; no retry |
+| Self-send or recipient placement has no pane id | `notification_sent: false`; no attempt | Nothing is owed |
+| The sending command keystrokes the preview | `notification_sent: true` | Nothing is owed |
+| The preview is held, or its keystroke fails | `notification_sent: false` | The preview stays owed; the monitor loop delivers it |
 
 Broadcast wrapper fields `recipients` and `delivered` count intended recipients
-and successful previews. Neither count is persisted. CLI wrappers and exact
-partial-failure output are owned by [Output shapes](cli-options.md#output-shapes)
-and [message send](cli-options.md#message-send-partial-failure).
+and the previews the broadcast command itself keystroked. Neither count is
+persisted. CLI wrappers and the loop-start failure output are owned by
+[Output shapes](cli-options.md#output-shapes) and
+[message send](cli-options.md#message-send-delivery).

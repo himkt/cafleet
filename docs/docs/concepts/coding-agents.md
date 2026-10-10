@@ -28,8 +28,9 @@ The flag means slightly different things per command:
   value still wins).
 
 Each backend is spawned with flags that enable its Bash tool with no runtime
-permission prompts. The per-backend spawn argv, shell-command posture, and
-sandbox trade-offs are specified in
+permission prompts, and with its broker commands already allowed: a claude
+member needs no user-level allow rule to send, poll, or ACK. The per-backend
+spawn argv, shell-command posture, and sandbox trade-offs are specified in
 [Coding-agent backends § Spawn argv](../spec/coding-agent-backends.md#spawn-argv).
 
 ## cafleet usage from a member pane
@@ -42,7 +43,9 @@ command. Each placeholder and its label line is in
 [CLI options § Spawn-prompt substitution](../spec/cli-options.md#spawn-prompt-substitution). The only environment variable forwarded into the pane is
 `CAFLEET_DATABASE_URL`.
 All three honor a leading-`!` shell shortcut on the coding agent's input line,
-so `cafleet member prompt --shell` works against any pane shape. For the full
+so `cafleet member exec` runs a command in any pane shape; a member routes a
+command its harness does not run through the Director — see
+[Command routing](member-lifecycle.md#command-routing). For the full
 broker CLI reference, see [CLI options](../spec/cli-options.md).
 
 ## One-shot command isolation {#one-shot-command-isolation}
@@ -55,22 +58,16 @@ calls. This rule is backend-neutral and applies identically to `claude`,
 The reason is the pane push channel: a compound invocation — a one-shot
 CAFleet command placed beside another command with a newline, `;`, `&&`, a
 pipe, or shell `&` — keeps the coding agent's shell tool occupied after the
-CAFleet process exits. While the tool is occupied, the pane cannot consume an
-inbound inline-preview keystroke, and a notification aimed at that pane can
-fail even though the message itself was durably persisted. Isolated
-invocations return the pane to the composer between operations, which is what
-the push-notification channel depends on.
+CAFleet process exits. While the tool is occupied, the pane is not at rest, so
+the broker holds every keystroke aimed at it and an inbound message waits.
+Isolated invocations return the pane to the composer between operations,
+which is what the push-notification channel depends on.
 
 Leading `NAME=value` environment assignments immediately preceding the
 `cafleet` executable are allowed: they set the CAFleet process's environment
 without starting another process. Shell redirection does not authorize another
 process either; a command that needs a long body should use the positional
 argument or `--file <path>` rather than a pipe.
-
-The sole exception is the long-lived `cafleet monitor` process. Its invocation
-still contains only that monitor process, but the monitor member hosts it with
-its backend-resolved long-lived-execution mechanism — see
-[Monitoring](monitoring.md) for the monitor lifecycle.
 
 ## Model choice
 

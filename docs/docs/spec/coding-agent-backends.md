@@ -12,7 +12,7 @@ version/config requirements.
 
 | Backend | Spawn argv |
 |---|---|
-| `claude` | `claude --permission-mode dontAsk --name <member-name> <prompt>` |
+| `claude` | `claude --permission-mode dontAsk --allowedTools <rule>... --name <member-name> <prompt>` |
 | `codex` | `codex --ask-for-approval never --sandbox workspace-write <prompt>` |
 | `opencode` | `opencode --agent cafleet --prompt <prompt>` |
 
@@ -20,7 +20,11 @@ Shared contract:
 
 - All three postures enable the Bash tool with no runtime permission prompts.
 - All three honor the leading-`!` shell shortcut that
-  [`cafleet member prompt --shell`](cli-options.md#member-prompt) uses.
+  [`cafleet member exec`](cli-options.md#member-exec) dispatches through.
+- Every member can run its broker commands from the moment it is spawned:
+  claude through [spawn-time allow rules](#spawn-time-allow-rules), codex
+  through [the rules file](#cafleet-rules-file), and opencode through
+  [the agent preset](#cafleet-agent-preset).
 - `--model <m>` from `cafleet member create` is inserted immediately before
   the prompt. The value passes through verbatim — the binary rejects unknown
   models, so newly released models need no cafleet release. Omitted, no model
@@ -40,7 +44,7 @@ Per-backend capabilities:
 
 | Backend | OS-level sandbox | Sets the pane title | Shell-command posture | Preset / config prerequisite |
 |---|---|---|---|---|
-| `claude` | none | yes, via `--name <member-name>` | Runs cafleet and any shell command directly | none |
+| `claude` | none | yes, via `--name <member-name>` | Runs the broker commands under its spawn-time allow rules and other commands under the user's own rules; a denied command routes to the Director | none |
 | `codex` | kernel-enforced ([Codex](#codex)) | no — locate the pane through `cafleet member list` (`pane_id` is ground truth) | Runs cafleet and any shell command directly | `~/.codex/rules/cafleet.rules` (`CODEX_HOME` relocates it), plus the `~/.codex/config.toml` settings and a trusted working directory — a permission posture, not a spawn dependency ([the rules file](#cafleet-rules-file)) |
 | `opencode` | none | no — locate the pane through `cafleet member list` | Deny-by-default allowlist; everything outside it routes to the Director | `~/.opencode/agents/cafleet.md` (`OPENCODE_CONFIG_DIR` relocates it) — a spawn precondition ([the agent preset](#cafleet-agent-preset)) |
 
@@ -64,6 +68,40 @@ Per-backend capabilities:
 
 `--permission-mode dontAsk` is the reference auto-approval posture the other
 backends match.
+
+### Spawn-time allow rules {#spawn-time-allow-rules}
+
+cafleet passes the broker commands a claude member needs as session allow
+rules on its spawn command line, so the member does not depend on any
+`Bash(cafleet ...)` rule in the user's `settings.json`:
+
+| Member | Rules |
+|---|---|
+| Every claude member | `Bash(cafleet message *)` |
+| The monitor member, additionally | `Bash(cafleet monitor scan *)`, `Bash(cafleet member ping *)` |
+
+`--allowedTools` takes several values, so it sits before `--name`, which ends
+its value list and keeps the prompt positional. The rules are fixed at spawn:
+a later loss of allow rules in the user's settings does not affect a running
+member.
+
+The flags do not cover these cases:
+
+- A `deny` or `ask` rule at any settings level, including managed policy,
+  still blocks the command. [`cafleet doctor`](cli-options.md#member-permissions)
+  reports it before spawn.
+- The managed setting `allowManagedPermissionRulesOnly` makes Claude Code
+  ignore `--allowedTools`. `cafleet doctor` reports it.
+- A blocking `PreToolUse` hook stops a tool call before permission rules are
+  evaluated. `cafleet doctor` cannot evaluate a hook.
+- A `deny` rule or hook added after the member is spawned is not seen by
+  `cafleet doctor`, and the [ready watchdog](../concepts/monitoring.md#ready-watchdog)
+  does not report a member that has already spoken. The runtime signal is the
+  monitor member: it pings a member that stays quiet and reports one that is
+  unchanged after the ping, using commands that are themselves spawn-allowed.
+- Work commands (`mise`, `git commit`, package managers) stay under the
+  user's own rules; a denied one is routed through
+  [`cafleet member exec`](cli-options.md#member-exec).
 
 ## Codex {#codex}
 
@@ -104,14 +142,21 @@ prefix_rule(pattern = ["cafleet"], decision = "allow")
 prefix_rule(
     pattern = ["cafleet", "member", "prompt"],
     decision = "prompt",
-    justification = "cafleet member prompt keystrokes arbitrary text or shell commands into a member pane",
+    justification = "cafleet member prompt keystrokes arbitrary text into a member pane",
+)
+
+prefix_rule(
+    pattern = ["cafleet", "member", "exec"],
+    decision = "prompt",
+    justification = "cafleet member exec runs an arbitrary shell command in a member pane",
 )
 ```
 
 Codex applies the strictest decision when more than one rule matches
-(`forbidden` > `prompt` > `allow`): `cafleet member prompt` matches both rules,
-so its `prompt` wins and each invocation keeps requiring approval, while every
-other subcommand matches only the broad `["cafleet"]` allow — for every fleet,
+(`forbidden` > `prompt` > `allow`): `cafleet member prompt` and
+`cafleet member exec` each match the broad allow and their own rule, so the
+`prompt` wins and each invocation keeps requiring approval, while every other
+subcommand matches only the broad `["cafleet"]` allow — for every fleet,
 since every id rides past the matched prefix as a positional or trailing
 argument.
 
@@ -147,7 +192,9 @@ then an explicit allowlist translated from the operator's Claude Code
 `permissions.allow` set (`cafleet *`, non-destructive `git` subcommands,
 file-inspection utilities, and the project's cargo-backed mise tasks). opencode selects the
 **last** matching rule, so this order is the safety floor — every check
-resolves to `allow` or `deny`, never `ask`. A permission popup in an opencode pane is
+resolves to `allow` or `deny`, never `ask`. A `cafleet member exec *` deny
+entry follows the `cafleet *` allow, so it wins: the preset configures
+members, and dispatching a command into another pane is the Director's act. A permission popup in an opencode pane is
 therefore a regression escape, not a runtime decision: capture the pane,
 escalate, and extend the allowlist by operator decision — do not answer the
 popup ad hoc.

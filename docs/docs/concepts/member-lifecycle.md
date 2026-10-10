@@ -68,6 +68,7 @@ The lifecycle ops and keystroke interaction all live in the `member` group:
 | Teardown | `member delete` |
 | Introspection | `member show`, `member list` |
 | Keystroke interaction | `member prompt`, `member ping` |
+| Command dispatch | `member exec` |
 | Pane read | `member capture` |
 
 `member create` takes no identity flag — the CLI resolves the
@@ -78,8 +79,28 @@ subcommand's purpose and argument surface are in
 [CLI options § Subcommand summary](../spec/cli-options.md#subcommand-summary),
 which also carries every flag and the shared resolution rules.
 
-`cafleet member prompt` keystrokes text into a member's pane: the plain form
-submits a direct user turn (for slash commands and other magic commands a
-broker message body cannot trigger), and the `--shell` form is the
-shell-dispatch primitive of the bash-via-Director fallback protocol — see
-[CLI options](../spec/cli-options.md#member-prompt).
+`cafleet member prompt` keystrokes text into a member's pane as a direct user
+turn, for slash commands and other magic commands a broker message body
+cannot trigger — see [CLI options](../spec/cli-options.md#member-prompt).
+
+## Command routing {#command-routing}
+
+A member runs every command its harness allows and routes the rest to the
+Director. Routing is the standard path for a command the harness does not
+run, not a rare fallback:
+
+1. The member asks with `cafleet message send`:
+   `Need to run: <command>. My harness denied it.` For a command that is hard
+   to quote, it writes the command to a file under its base directory and
+   names the path. It then ends its turn.
+2. The Director runs [`cafleet member exec`](../spec/cli-options.md#member-exec)
+   with the command, or with `--file` and the named path. The command runs in
+   the member's own pane and working directory, so its output lands in the
+   member's context.
+3. The broker records the exit status, posts a completion notice to the
+   Director, and resumes the member. The Director sends no ping and reads no
+   pane capture.
+
+A claude member's broker commands are allowed on its spawn command line, so
+asking the Director never depends on an allow rule in the user's settings —
+see [Spawn-time allow rules](../spec/coding-agent-backends.md#spawn-time-allow-rules).
