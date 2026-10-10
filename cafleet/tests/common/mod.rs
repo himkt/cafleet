@@ -1,14 +1,27 @@
 #![allow(dead_code)]
 
+use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Child, Command, Output, Stdio};
+use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
 
-use cafleet::broker::{self, InlinePreviewSender, NewPlacement};
+use cafleet::broker::{self, NewPlacement};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// The capture every pane shows unless [`Cli::set_pane_capture`] overrides it:
+/// a claude composer at rest, so a delivery fires immediately.
+pub const REST_CAPTURE: &str = "pane:{pane}\nline1\nline2\n> at rest";
+
+/// A capture file holding this line makes `capture-pane` fail for that pane.
+pub const CAPTURE_FAILS: &str = "CAPTURE-FAILS";
+
+// `CAFLEET_TEST_TMUX_LIST_PANES_SCRIPT` scripts `list-panes` per call: the Nth
+// call takes the Nth letter (`F` fails, anything else succeeds) and calls past
+// the end repeat the last letter. The shim has no PATH beyond itself, so the
+// call count is read back from its own log with shell builtins only.
 const TMUX_SHIM: &str = r#"#!/bin/sh
 printf '%s\n' "$*" >> "$CAFLEET_TEST_TMUX_LOG"
 if [ -n "$CAFLEET_TEST_TMUX_FAIL" ] && [ "$1" = "$CAFLEET_TEST_TMUX_FAIL" ]; then
@@ -17,19 +30,50 @@ if [ -n "$CAFLEET_TEST_TMUX_FAIL" ] && [ "$1" = "$CAFLEET_TEST_TMUX_FAIL" ]; the
 fi
 case "$1" in
     display-message) printf 'main|@1|%%0\n' ;;
-    split-window) printf '%%7\n' ;;
+    split-window) printf '%s\n' "${CAFLEET_TEST_NEXT_PANE:-%7}" ;;
     capture-pane)
         while [ "$#" -gt 0 ]; do
             if [ "$1" = "-t" ]; then
                 shift
-                printf 'pane:%s\nline1\nline2\n' "$1"
+                if [ -e "$CAFLEET_TEST_TMUX_CAPTURE_DIR/$1" ]; then
+                    while IFS= read -r line || [ -n "$line" ]; do
+                        if [ "$line" = "CAPTURE-FAILS" ]; then
+                            echo "forced failure" >&2
+                            exit 1
+                        fi
+                        printf '%s\n' "$line"
+                    done < "$CAFLEET_TEST_TMUX_CAPTURE_DIR/$1"
+                    exit 0
+                fi
+                printf 'pane:%s\nline1\nline2\n> at rest\n' "$1"
                 exit 0
             fi
             shift
         done
         exit 2
         ;;
-    list-panes) printf '%%0\n%%7\n' ;;
+    list-panes)
+        if [ -n "$CAFLEET_TEST_TMUX_LIST_PANES_SCRIPT" ]; then
+            script="$CAFLEET_TEST_TMUX_LIST_PANES_SCRIPT"
+            calls=0
+            while IFS= read -r line; do
+                case "$line" in list-panes*) calls=$((calls + 1)) ;; esac
+            done < "$CAFLEET_TEST_TMUX_LOG"
+            while [ "$calls" -gt 1 ] && [ "${#script}" -gt 1 ]; do
+                script="${script#?}"
+                calls=$((calls - 1))
+            done
+            case "$script" in
+                F*)
+                    echo "forced failure" >&2
+                    exit 1
+                    ;;
+            esac
+        fi
+        for pane in ${CAFLEET_TEST_TMUX_PANES:-%0 %7}; do
+            printf '%s\n' "$pane"
+        done
+        ;;
 esac
 exit 0
 "#;
@@ -38,6 +82,7 @@ pub struct Cli {
     pub home: TempDir,
     pub shim_dir: PathBuf,
     pub shim_log: PathBuf,
+    pub capture_dir: PathBuf,
     pub fail_subcommand: Option<String>,
     pub extra_env: Vec<(String, String)>,
 }
@@ -52,13 +97,46 @@ impl Cli {
         // (SPEC §6.3 step 4) — a no-op claude satisfies the default backend.
         write_executable(&shim_dir.join("claude"), "#!/bin/sh\nexit 0\n");
         let shim_log = home.path().join("tmux-shim.log");
+        let capture_dir = home.path().join("pane-captures");
+        std::fs::create_dir_all(&capture_dir).unwrap();
         Cli {
             home,
             shim_dir,
             shim_log,
+            capture_dir,
             fail_subcommand: None,
             extra_env: Vec::new(),
         }
+    }
+
+    /// Make `capture-pane` print `content` for `pane` from now on; a content
+    /// of [`CAPTURE_FAILS`] makes the capture fail instead.
+    pub fn set_pane_capture(&self, pane: &str, content: &str) {
+        std::fs::write(self.capture_dir.join(pane), content).unwrap();
+    }
+
+    /// The fleet's `monitor_runtime` owner pid; `None` when no loop holds it.
+    pub fn monitor_pid(&self, fleet_id: i64) -> Option<i64> {
+        self.sqlite()
+            .query_row(
+                "SELECT pid FROM monitor_runtime WHERE fleet_id=?1",
+                [fleet_id],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .ok()
+            .flatten()
+    }
+
+    /// The text `fleet create` prints once the fleet's loop is live.
+    pub fn fleet_create_text(&self, fleet_id: i64, director_id: i64, monitor_id: i64) -> String {
+        let pid = self
+            .monitor_pid(fleet_id)
+            .expect("fleet create returns only after the loop is live");
+        format!("{fleet_id} director={director_id} monitor={monitor_id}\nmonitor loop: pid {pid}\n")
+    }
+
+    pub fn monitor_log_path(&self, fleet_id: i64) -> PathBuf {
+        self.home.path().join(format!("monitor-{fleet_id}.log"))
     }
 
     /// Set an extra environment variable (e.g. a backend config-location
@@ -82,7 +160,8 @@ impl Cli {
             .env("HOME", self.home.path())
             .env("PATH", &self.shim_dir)
             .env("CAFLEET_DATABASE_URL", self.db_url())
-            .env("CAFLEET_TEST_TMUX_LOG", &self.shim_log);
+            .env("CAFLEET_TEST_TMUX_LOG", &self.shim_log)
+            .env("CAFLEET_TEST_TMUX_CAPTURE_DIR", &self.capture_dir);
         if let Some(fail) = &self.fail_subcommand {
             cmd.env("CAFLEET_TEST_TMUX_FAIL", fail);
         }
@@ -362,18 +441,11 @@ impl Cli {
 
     pub fn seed_message(&self, sender: i64, recipient: i64, body: &str) -> i64 {
         let mut conn = cafleet::db::connect(&self.db_url()).unwrap();
-        let outcome = broker::send_message(
-            &mut conn,
-            &SeedNotifier,
-            200,
-            sender,
-            &recipient.to_string(),
-            body,
-        )
-        .unwrap();
-        assert_eq!(outcome.message.owner_member_id, recipient);
-        assert_eq!(outcome.message.text, body);
-        outcome.message.message_id
+        let message =
+            broker::send_message(&mut conn, sender, &recipient.to_string(), body).unwrap();
+        assert_eq!(message.owner_member_id, recipient);
+        assert_eq!(message.text, body);
+        message.message_id
     }
 
     /// Spawn the fleet's monitor member through `member create --role monitor`.
@@ -439,11 +511,126 @@ impl Cli {
             .unwrap()
     }
 
+    /// How many shim calls so far start with `prefix`.
+    pub fn shim_count(&self, prefix: &str) -> usize {
+        self.shim_calls()
+            .iter()
+            .filter(|line| line.starts_with(prefix))
+            .count()
+    }
+
     pub fn shim_calls(&self) -> Vec<String> {
         match std::fs::read_to_string(&self.shim_log) {
             Ok(log) => log.lines().map(str::to_owned).collect(),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
             Err(error) => panic!("cannot read shim log {}: {error}", self.shim_log.display()),
+        }
+    }
+}
+
+const LOOP_DEADLINE: Duration = Duration::from_secs(20);
+const LOOP_POLL_INTERVAL: Duration = Duration::from_millis(20);
+
+/// A foreground `cafleet monitor` child that is always reaped, with its
+/// output and the shim log attached to every failure.
+pub struct LoopChild<'a> {
+    child: Option<Child>,
+    cli: &'a Cli,
+}
+
+impl<'a> LoopChild<'a> {
+    pub fn spawn(cli: &'a Cli, args: &[&str]) -> Self {
+        Self {
+            child: Some(cli.spawn(args)),
+            cli,
+        }
+    }
+
+    /// Spawn the loop for `fleet_id` and wait until it owns the runtime row.
+    pub fn start(cli: &'a Cli, fleet_id: i64, flags: &[&str]) -> Self {
+        let fleet = fleet_id.to_string();
+        let mut args = vec!["monitor", fleet.as_str()];
+        args.extend_from_slice(flags);
+        let mut child = Self::spawn(cli, &args);
+        let pid = child.pid();
+        child.wait_until("the loop to own the runtime row", || {
+            cli.monitor_pid(fleet_id) == Some(pid)
+        });
+        child
+    }
+
+    pub fn pid(&self) -> i64 {
+        i64::from(self.child.as_ref().expect("uncollected child").id())
+    }
+
+    fn reap(&mut self) -> io::Result<Output> {
+        let child = self.child.as_mut().expect("collect each child once");
+        if child.try_wait()?.is_none() {
+            child.kill()?;
+        }
+        self.child.take().unwrap().wait_with_output()
+    }
+
+    fn fail(&mut self, reason: &str) -> ! {
+        let output = self.reap().expect("terminate and reap the failed loop");
+        panic!(
+            "monitor loop: {reason}; status={}; stdout={}; stderr={}; shim={:?}",
+            output.status,
+            stdout(&output),
+            stderr(&output),
+            self.cli.shim_calls()
+        );
+    }
+
+    /// Wait for `observed` while the loop stays alive.
+    pub fn wait_until(&mut self, description: &str, mut observed: impl FnMut() -> bool) {
+        let deadline = Instant::now() + LOOP_DEADLINE;
+        loop {
+            if self.child.as_mut().unwrap().try_wait().unwrap().is_some() {
+                self.fail(&format!("exited before {description}"));
+            }
+            if observed() {
+                return;
+            }
+            if Instant::now() >= deadline {
+                self.fail(&format!("deadline waiting for {description}"));
+            }
+            std::thread::sleep(LOOP_POLL_INTERVAL);
+        }
+    }
+
+    /// Wait until the loop has listed the panes `ticks` more times.
+    pub fn wait_ticks(&mut self, ticks: usize) {
+        let cli = self.cli;
+        let target = cli.shim_count("list-panes") + ticks;
+        self.wait_until("further ticks", || cli.shim_count("list-panes") >= target);
+    }
+
+    pub fn stop(&mut self) -> Output {
+        let pid = nix::unistd::Pid::from_raw(i32::try_from(self.pid()).expect("PID fits i32"));
+        nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGTERM)
+            .expect("request graceful loop shutdown");
+        self.wait_for_exit("graceful loop shutdown")
+    }
+
+    pub fn wait_for_exit(&mut self, description: &str) -> Output {
+        let deadline = Instant::now() + LOOP_DEADLINE;
+        loop {
+            if self.child.as_mut().unwrap().try_wait().unwrap().is_some() {
+                return self.reap().expect("collect the completed loop");
+            }
+            if Instant::now() >= deadline {
+                self.fail(&format!("deadline waiting for {description}"));
+            }
+            std::thread::sleep(LOOP_POLL_INTERVAL);
+        }
+    }
+}
+
+impl Drop for LoopChild<'_> {
+    fn drop(&mut self) {
+        if self.child.is_some() {
+            let _ = self.reap();
         }
     }
 }
@@ -476,19 +663,4 @@ pub fn code(output: &Output) -> i32 {
 pub fn write_file(path: &Path, contents: &[u8]) -> String {
     std::fs::write(path, contents).unwrap();
     path.to_str().unwrap().to_string()
-}
-
-struct SeedNotifier;
-
-impl InlinePreviewSender for SeedNotifier {
-    fn send_inline_preview(
-        &self,
-        _pane: &str,
-        _message: i64,
-        _sender: i64,
-        _timestamp: &str,
-        _body: &str,
-    ) -> Result<(), String> {
-        Ok(())
-    }
 }

@@ -160,16 +160,9 @@ mod tests {
                 VERSION,
             )
             .unwrap();
-            let message = broker::send_message(
-                &mut conn,
-                &common::FakeNotifier::succeeding(),
-                200,
-                director,
-                &director.to_string(),
-                "ack",
-            )
-            .unwrap();
-            assert_eq!(message.message.message_id, 1);
+            let message =
+                broker::send_message(&mut conn, director, &director.to_string(), "ack").unwrap();
+            assert_eq!(message.message_id, 1);
             Ok(conn)
         };
         run_with_hooks(

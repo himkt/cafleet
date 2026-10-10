@@ -184,15 +184,7 @@ mod tests {
     #[test]
     fn corrupt_member_status_returns_the_domain_variant_from_storage() {
         let (_dir, mut conn, fleet, director) = fixture();
-        broker::send_message(
-            &mut conn,
-            &common::FakeNotifier::succeeding(),
-            common::MAX_TEXT_LEN,
-            director,
-            &director.to_string(),
-            "retain history",
-        )
-        .unwrap();
+        broker::send_message(&mut conn, director, &director.to_string(), "retain history").unwrap();
         conn.execute_batch("PRAGMA ignore_check_constraints=ON")
             .unwrap();
         conn.execute(

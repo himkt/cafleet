@@ -78,9 +78,7 @@ mod tests {
 
     use crate::broker;
     use crate::broker::test_support as common;
-    use crate::broker::test_support::{
-        FakeNotifier, MAX_TEXT_LEN, create_fleet, migrated_conn, register,
-    };
+    use crate::broker::test_support::{create_fleet, migrated_conn, register};
     use crate::error::CafleetError;
 
     #[test]
@@ -89,14 +87,13 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
-        let notifier = FakeNotifier::succeeding();
 
-        let first = common::send(&mut conn, &notifier, director_id, member_id, "one");
-        let second = common::send(&mut conn, &notifier, director_id, member_id, "two");
+        let first = common::send(&mut conn, director_id, member_id, "one");
+        let second = common::send(&mut conn, director_id, member_id, "two");
         let first_id = first["message"]["message_id"].as_i64().unwrap();
         let second_id = second["message"]["message_id"].as_i64().unwrap();
         broker::ack_message(&mut conn, first_id).unwrap();
-        broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, member_id, "x").unwrap();
+        broker::broadcast_message(&mut conn, member_id, "x").unwrap();
 
         let inbox = broker::list_inbox(&conn, member_id).unwrap();
         assert_eq!(
@@ -117,9 +114,7 @@ mod tests {
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         register(&mut conn, fleet_id, "a", Some("%2"));
         register(&mut conn, fleet_id, "b", Some("%3"));
-        let notifier = FakeNotifier::succeeding();
-        broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, director_id, "fanout")
-            .unwrap();
+        broker::broadcast_message(&mut conn, director_id, "fanout").unwrap();
 
         let sent = broker::list_sent(&conn, director_id).unwrap();
         assert_eq!(
@@ -139,12 +134,11 @@ mod tests {
         let member_a = register(&mut conn, fleet_a, "worker", Some("%2"));
         let (fleet_b, director_b) = create_fleet(&mut conn, "beta");
         let member_b = register(&mut conn, fleet_b, "stranger", Some("%5"));
-        let notifier = FakeNotifier::succeeding();
 
-        common::send(&mut conn, &notifier, director_a, member_a, "one");
-        let second = common::send(&mut conn, &notifier, director_a, member_a, "two");
-        let third = common::send(&mut conn, &notifier, member_a, director_a, "three");
-        let foreign = common::send(&mut conn, &notifier, director_b, member_b, "other");
+        common::send(&mut conn, director_a, member_a, "one");
+        let second = common::send(&mut conn, director_a, member_a, "two");
+        let third = common::send(&mut conn, member_a, director_a, "three");
+        let foreign = common::send(&mut conn, director_b, member_b, "other");
 
         let timeline = broker::list_timeline(&conn, fleet_a, 2).unwrap();
         assert_eq!(timeline.len(), 2, "capped at the supplied limit");
@@ -169,8 +163,7 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
-        let notifier = FakeNotifier::succeeding();
-        let sent = common::send(&mut conn, &notifier, director_id, member_id, "hi");
+        let sent = common::send(&mut conn, director_id, member_id, "hi");
         let message_id = sent["message"]["message_id"].as_i64().unwrap();
 
         let result = broker::get_message(&conn, message_id)
@@ -197,12 +190,10 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         register(&mut conn, fleet_id, "worker", Some("%2"));
-        let notifier = FakeNotifier::succeeding();
-        let result =
-            broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, director_id, "fanout")
-                .map(|record| vec![crate::presentation::broadcast_outcome(&record)])
-                .unwrap();
-        let summary_id = result[0]["message"]["message_id"].as_i64().unwrap();
+        let summary_id = broker::broadcast_message(&mut conn, director_id, "fanout")
+            .unwrap()
+            .summary
+            .message_id;
 
         let fetched = broker::get_message(&conn, summary_id)
             .map(|record| crate::presentation::message_envelope(&record))
@@ -220,7 +211,6 @@ mod tests {
 mod timeline_regressions {
     use super::*;
     use crate::broker::{self, test_support as common};
-    use common::{FakeNotifier, MAX_TEXT_LEN};
     use tempfile::TempDir;
 
     fn fixture() -> (TempDir, Connection, i64, i64, i64) {
@@ -239,23 +229,16 @@ mod timeline_regressions {
         let (_dir, mut conn, fleet_a, director_a, worker_a) = fixture();
         let (fleet_b, director_b) = common::create_fleet(&mut conn, "foreign");
         let worker_b = common::register(&mut conn, fleet_b, "foreign worker", None);
-        let notifier = FakeNotifier::succeeding();
         let local = common::send(
             &mut conn,
-            &notifier,
             director_a,
             worker_a,
             "local endpoints",
         )["message"]["message_id"]
             .as_i64()
             .unwrap();
-        let foreign = common::send(
-            &mut conn,
-            &notifier,
-            director_b,
-            worker_b,
-            "foreign endpoints",
-        )["message"]["message_id"]
+        let foreign = common::send(&mut conn, director_b, worker_b, "foreign endpoints")["message"]
+            ["message_id"]
             .as_i64()
             .unwrap();
         // Deliberately distinguish ownership from either endpoint. This is a
@@ -284,13 +267,7 @@ mod timeline_regressions {
     fn timeline_uses_status_timestamp_then_descending_id_not_created_at() {
         let (_dir, mut conn, fleet, director, worker) = fixture();
         for text in ["first", "second", "third"] {
-            common::send(
-                &mut conn,
-                &FakeNotifier::succeeding(),
-                director,
-                worker,
-                text,
-            );
+            common::send(&mut conn, director, worker, text);
         }
         conn.execute_batch("UPDATE messages SET status_timestamp='2026-01-01T00:00:00+00:00', created_at='2099-01-01T00:00:00+00:00' WHERE message_id=3;
             UPDATE messages SET status_timestamp='2026-02-01T00:00:00+00:00', created_at='2020-01-01T00:00:00+00:00' WHERE message_id IN (1,2);").unwrap();
@@ -305,15 +282,12 @@ mod timeline_regressions {
     #[test]
     fn timeline_filters_summaries_before_cap_and_keeps_partial_broadcast_as_rows() {
         let (_dir, mut conn, fleet, director, worker) = fixture();
-        let notifier = FakeNotifier::succeeding();
-        let broadcast =
-            broker::broadcast_message(&mut conn, &notifier, MAX_TEXT_LEN, director, "broadcast")
-                .unwrap();
-        let single = common::send(&mut conn, &notifier, director, worker, "single");
+        let broadcast = broker::broadcast_message(&mut conn, director, "broadcast").unwrap();
+        let single = common::send(&mut conn, director, worker, "single");
         let single_id = single["message"]["message_id"].as_i64().unwrap();
         let mut statement = conn.prepare("SELECT message_id FROM messages WHERE origin_message_id=?1 AND type='unicast' ORDER BY message_id DESC").unwrap();
         let deliveries = statement
-            .query_map([broadcast.message.message_id], |row| row.get::<_, i64>(0))
+            .query_map([broadcast.summary.message_id], |row| row.get::<_, i64>(0))
             .unwrap()
             .map(Result::unwrap)
             .collect::<Vec<_>>();
@@ -392,13 +366,7 @@ mod integrity_regressions {
             .unwrap();
         let mut conn = common::migrated_conn(&dir);
         let (_, director) = common::create_fleet(&mut conn, "integrity");
-        let id = common::send(
-            &mut conn,
-            &common::FakeNotifier::succeeding(),
-            director,
-            director,
-            "work",
-        )["message"]["message_id"]
+        let id = common::send(&mut conn, director, director, "work")["message"]["message_id"]
             .as_i64()
             .unwrap();
         // Only the isolated fixture relaxes CHECK constraints; production

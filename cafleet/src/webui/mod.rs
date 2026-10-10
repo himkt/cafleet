@@ -499,13 +499,7 @@ mod integrity_regressions {
             let mut conn = common::migrated_conn(&dir);
             let (fleet, director) = common::create_fleet(&mut conn, "integrity");
             let worker = common::register(&mut conn, fleet, "worker", None);
-            let sent = common::send(
-                &mut conn,
-                &common::FakeNotifier::succeeding(),
-                director,
-                worker,
-                "work",
-            );
+            let sent = common::send(&mut conn, director, worker, "work");
             let message =
                 broker::get_message(&conn, sent["message"]["message_id"].as_i64().unwrap())
                     .unwrap();

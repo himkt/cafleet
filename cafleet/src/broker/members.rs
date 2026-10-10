@@ -422,8 +422,7 @@ mod tests {
     use crate::broker;
     use crate::broker::test_support as common;
     use crate::broker::test_support::{
-        FakeNotifier, bootstrap_monitor, create_fleet, migrated_conn, placement, register,
-        register_monitor,
+        bootstrap_monitor, create_fleet, migrated_conn, placement, register, register_monitor,
     };
     use crate::error::CafleetError;
     use crate::output::format_json;
@@ -700,8 +699,7 @@ mod tests {
             .unwrap()
             .member_id;
 
-        let notifier = FakeNotifier::succeeding();
-        let sent = common::send(&mut conn, &notifier, director_id, member_id, "hi");
+        let sent = common::send(&mut conn, director_id, member_id, "hi");
         let message_id = sent["message"]["message_id"].as_i64().unwrap();
 
         let rows = broker::list_members(&conn, fleet_id)
@@ -908,8 +906,7 @@ mod tests {
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         let holder_id = register(&mut conn, fleet_id, "holder", Some("%2"));
         let silent_id = register(&mut conn, fleet_id, "silent", Some("%3"));
-        let notifier = FakeNotifier::succeeding();
-        common::send(&mut conn, &notifier, director_id, holder_id, "hi");
+        common::send(&mut conn, director_id, holder_id, "hi");
         broker::deregister_member(&mut conn, holder_id).unwrap();
         broker::deregister_member(&mut conn, silent_id).unwrap();
 

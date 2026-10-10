@@ -491,8 +491,15 @@ mod tests {
         now: DateTime<Utc>,
     ) {
         assert!(
-            broker::claim_monitor_runtime(conn, fleet_id, pid, 5, wake_interval, &format_utc(now))
-                .unwrap()
+            broker::claim_monitor_runtime(
+                conn,
+                fleet_id,
+                pid,
+                Some(5),
+                Some(wake_interval),
+                &format_utc(now)
+            )
+            .unwrap()
         );
     }
 

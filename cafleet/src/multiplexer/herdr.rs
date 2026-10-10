@@ -998,7 +998,10 @@ mod tests {
         let runner = FakeRunner::with_binary("herdr");
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
         let ts = "2026-07-30T09:00:00.000000+00:00";
-        assert!(mux.send_inline_preview("w1:p2", 5, 2, ts, "a\nb").is_ok());
+        assert!(
+            mux.send_inline_preview("w1:p2", 5, 2, ts, "a\nb", None)
+                .is_ok()
+        );
         assert_eq!(
             runner.events(),
             vec![
@@ -1026,7 +1029,14 @@ mod tests {
         let runner = FakeRunner::without_binaries();
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
         let err = mux
-            .send_inline_preview("w1:p2", 5, 2, "2026-07-30T09:00:00.000000+00:00", "hi")
+            .send_inline_preview(
+                "w1:p2",
+                5,
+                2,
+                "2026-07-30T09:00:00.000000+00:00",
+                "hi",
+                None,
+            )
             .unwrap_err();
         assert_eq!(err.to_string(), "herdr binary not found on PATH");
         assert!(
@@ -1043,7 +1053,14 @@ mod tests {
         }));
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
         let err = mux
-            .send_inline_preview("w1:p2", 5, 2, "2026-07-30T09:00:00.000000+00:00", "hi")
+            .send_inline_preview(
+                "w1:p2",
+                5,
+                2,
+                "2026-07-30T09:00:00.000000+00:00",
+                "hi",
+                None,
+            )
             .unwrap_err();
         assert_eq!(
             err.to_string(),
@@ -1072,7 +1089,7 @@ mod tests {
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
         let ts = "2026-07-30T09:00:00.000000+00:00";
         let err = mux
-            .send_inline_preview("w1:p2", 5, 2, ts, "a\nb")
+            .send_inline_preview("w1:p2", 5, 2, ts, "a\nb", None)
             .unwrap_err();
         let payload = format!("[cafleet msg 5 from 2 {ts}]\na⏎b");
         assert_eq!(
@@ -1103,7 +1120,7 @@ mod tests {
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
         let ts = "2026-07-30T09:00:00.000000+00:00";
         let err = mux
-            .send_inline_preview("w1:p2", 5, 2, ts, "hi")
+            .send_inline_preview("w1:p2", 5, 2, ts, "hi", None)
             .unwrap_err();
         assert_eq!(
             err.to_string(),
@@ -1168,31 +1185,25 @@ mod tests {
     }
 
     #[test]
-    fn send_prompt_shell_and_plain_forms() {
-        for (text, shell, payload) in [(" ls ", true, "! ls"), ("hi there", false, "hi there")] {
-            let runner = FakeRunner::with_binary("herdr");
-            let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-            mux.send_prompt("w1:p2", text, shell).unwrap();
-            assert_eq!(
-                runner.events(),
-                vec![
-                    run_event(&["herdr", "pane", "send-keys", "w1:p2", "esc"], Some(5)),
-                    sleep_event(0.1),
-                    run_event(&["herdr", "pane", "run", "w1:p2", payload], None),
-                ],
-                "the shell flag changes only the payload prefix"
-            );
-        }
+    fn send_prompt_is_esc_safeguarded_and_stripped() {
+        let runner = FakeRunner::with_binary("herdr");
+        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+        mux.send_prompt("w1:p2", " hi there ").unwrap();
+        assert_eq!(
+            runner.events(),
+            vec![
+                run_event(&["herdr", "pane", "send-keys", "w1:p2", "esc"], Some(5)),
+                sleep_event(0.1),
+                run_event(&["herdr", "pane", "run", "w1:p2", "hi there"], None),
+            ]
+        );
 
         let runner = FakeRunner::with_binary("herdr");
         runner.respond(Err(RunError::Failed {
             stderr: herdr_error_stderr("internal"),
         }));
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        assert!(
-            mux.send_prompt("w1:p2", "ls", true).is_err(),
-            "the shell form propagates an Esc failure like the plain form"
-        );
+        assert!(mux.send_prompt("w1:p2", "hi there").is_err());
         assert_eq!(
             runner.events(),
             vec![run_event(
@@ -1204,15 +1215,11 @@ mod tests {
 
         let mux = HerdrMultiplexer::new(FakeRunner::with_binary("herdr"), herdr_env());
         assert_eq!(
-            mux.send_prompt("w1:p2", " ", false)
-                .unwrap_err()
-                .to_string(),
+            mux.send_prompt("w1:p2", " ").unwrap_err().to_string(),
             "send_prompt: text may not be empty"
         );
         assert_eq!(
-            mux.send_prompt("w1:p2", "a\nb", false)
-                .unwrap_err()
-                .to_string(),
+            mux.send_prompt("w1:p2", "a\nb").unwrap_err().to_string(),
             "send_prompt: text may not contain newlines"
         );
     }

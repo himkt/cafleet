@@ -783,7 +783,7 @@ mod tests {
                 env(&[("TMUX", "/tmp/tmux"), ("TMUX_PANE", "%1")]),
             ));
             assert_eq!(
-                mux.send_inline_preview("%5", 5, 2, TS, "hi")
+                mux.send_inline_preview("%5", 5, 2, TS, "hi", None)
                     .unwrap_err()
                     .to_string(),
                 "tmux binary not found on PATH"
@@ -794,7 +794,7 @@ mod tests {
                 env(&[("HERDR_ENV", "1")]),
             ));
             assert_eq!(
-                mux.send_inline_preview("w1:p2", 5, 2, TS, "hi")
+                mux.send_inline_preview("w1:p2", 5, 2, TS, "hi", None)
                     .unwrap_err()
                     .to_string(),
                 "herdr binary not found on PATH"
@@ -804,7 +804,7 @@ mod tests {
                 FakeRunner::with_binary("tmux"),
                 env(&[("TMUX", "/tmp/tmux"), ("TMUX_PANE", "%1")]),
             ));
-            assert!(mux.send_inline_preview("%5", 5, 2, TS, "hi").is_ok());
+            assert!(mux.send_inline_preview("%5", 5, 2, TS, "hi", None).is_ok());
         }
     }
 }

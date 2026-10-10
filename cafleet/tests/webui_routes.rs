@@ -12,18 +12,10 @@
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
-use cafleet::broker::{self, InlinePreviewSender, NewPlacement};
+use cafleet::broker::{self, NewPlacement};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use tower::ServiceExt;
-
-struct NullNotifier;
-
-impl InlinePreviewSender for NullNotifier {
-    fn send_inline_preview(&self, _: &str, _: i64, _: i64, _: &str, _: &str) -> Result<(), String> {
-        Err("pane notification suppressed in tests".to_string())
-    }
-}
 
 fn migrated(dir: &TempDir) -> (String, rusqlite::Connection) {
     let url = format!("sqlite:///{}", dir.path().join("webui.db").display());
@@ -203,8 +195,6 @@ async fn the_roster_wraps_members_with_the_three_value_kind_union() {
         .unwrap();
     broker::send_message(
         &mut conn,
-        &NullNotifier,
-        200,
         director_id,
         &holder_id.to_string(),
         "audit trail",
@@ -273,15 +263,7 @@ async fn inbox_and_sent_carry_the_formatted_message_wire_shape() {
     let dir = TempDir::new().unwrap();
     let (url, mut conn) = migrated(&dir);
     let (_, director_id, member_id, _) = seeded_fleet(&mut conn);
-    broker::send_message(
-        &mut conn,
-        &NullNotifier,
-        200,
-        director_id,
-        &member_id.to_string(),
-        "hello wire",
-    )
-    .unwrap();
+    broker::send_message(&mut conn, director_id, &member_id.to_string(), "hello wire").unwrap();
     let app = app(&url);
 
     let (status, body) = call(
@@ -473,8 +455,6 @@ async fn the_monitor_endpoint_reports_and_masks_the_runtime() {
         .expect("the bootstrap registers the monitor member");
     broker::send_message(
         &mut conn,
-        &NullNotifier,
-        200,
         director_id,
         &member_id.to_string(),
         "pending work",
@@ -532,8 +512,8 @@ async fn the_monitor_endpoint_reports_and_masks_the_runtime() {
         &mut conn,
         fleet_id,
         pid,
-        5,
-        600,
+        Some(5),
+        Some(600),
         &cafleet::time::format_utc(now),
     )
     .unwrap();
@@ -679,8 +659,8 @@ async fn patch_monitor_updates_the_wake_interval_with_the_pinned_error_contract(
         &mut conn,
         fleet_id,
         i64::from(std::process::id()),
-        5,
-        600,
+        Some(5),
+        Some(600),
         &cafleet::time::format_utc(cafleet::time::now_utc()),
     )
     .unwrap();
@@ -756,8 +736,8 @@ async fn post_monitor_wake_requests_a_forced_wake_with_the_pinned_error_contract
         &mut conn,
         fleet_id,
         pid,
-        5,
-        600,
+        Some(5),
+        Some(600),
         &cafleet::time::format_utc(now),
     )
     .unwrap();
@@ -787,8 +767,8 @@ async fn post_monitor_wake_requests_a_forced_wake_with_the_pinned_error_contract
         &mut conn,
         fleet_id,
         pid,
-        5,
-        600,
+        Some(5),
+        Some(600),
         &cafleet::time::format_utc(cafleet::time::now_utc()),
     )
     .unwrap();
@@ -804,8 +784,8 @@ async fn post_monitor_wake_requests_a_forced_wake_with_the_pinned_error_contract
         &mut conn,
         fleet_id,
         pid,
-        5,
-        600,
+        Some(5),
+        Some(600),
         &cafleet::time::format_utc(cafleet::time::now_utc()),
     )
     .unwrap();
@@ -992,15 +972,7 @@ async fn integrity_missing_sender_name_returns_500_without_a_panicked_task_detai
     let dir = TempDir::new().unwrap();
     let (url, mut conn) = migrated(&dir);
     let (_, director, worker, _) = seeded_fleet(&mut conn);
-    broker::send_message(
-        &mut conn,
-        &NullNotifier,
-        200,
-        director,
-        &worker.to_string(),
-        "integrity",
-    )
-    .unwrap();
+    broker::send_message(&mut conn, director, &worker.to_string(), "integrity").unwrap();
     // Break only this isolated database. Keep a valid owner so the read
     // reaches name resolution instead of being filtered out of the timeline.
     conn.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
@@ -1027,15 +999,7 @@ async fn integrity_invalid_message_status_is_500_in_inbox_sent_and_timeline() {
     let dir = TempDir::new().unwrap();
     let (url, mut conn) = migrated(&dir);
     let (_, director, worker, _) = seeded_fleet(&mut conn);
-    broker::send_message(
-        &mut conn,
-        &NullNotifier,
-        200,
-        director,
-        &worker.to_string(),
-        "integrity",
-    )
-    .unwrap();
+    broker::send_message(&mut conn, director, &worker.to_string(), "integrity").unwrap();
     conn.execute_batch(
         "PRAGMA ignore_check_constraints=ON; UPDATE messages SET status_state='corrupt-status';",
     )
@@ -1062,15 +1026,7 @@ async fn integrity_invalid_member_status_is_500_instead_of_a_successful_roster_r
     let dir = TempDir::new().unwrap();
     let (url, mut conn) = migrated(&dir);
     let (_, director, worker, _) = seeded_fleet(&mut conn);
-    broker::send_message(
-        &mut conn,
-        &NullNotifier,
-        200,
-        director,
-        &worker.to_string(),
-        "holder",
-    )
-    .unwrap();
+    broker::send_message(&mut conn, director, &worker.to_string(), "holder").unwrap();
     conn.execute_batch("PRAGMA ignore_check_constraints=ON")
         .unwrap();
     conn.execute(

@@ -546,7 +546,7 @@ mod tests {
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
         let ts = "2026-07-30T09:00:00.000000+00:00";
         assert!(
-            mux.send_inline_preview("%5", 5, 2, ts, "a\r\nb\nc\rd")
+            mux.send_inline_preview("%5", 5, 2, ts, "a\r\nb\nc\rd", None)
                 .is_ok()
         );
         assert_eq!(
@@ -577,7 +577,7 @@ mod tests {
         let runner = FakeRunner::without_binaries();
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
         let err = mux
-            .send_inline_preview("%5", 5, 2, "2026-07-30T09:00:00.000000+00:00", "hi")
+            .send_inline_preview("%5", 5, 2, "2026-07-30T09:00:00.000000+00:00", "hi", None)
             .unwrap_err();
         assert_eq!(err.to_string(), "tmux binary not found on PATH");
         assert!(
@@ -594,7 +594,7 @@ mod tests {
         }));
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
         let err = mux
-            .send_inline_preview("%5", 5, 2, "2026-07-30T09:00:00.000000+00:00", "hi")
+            .send_inline_preview("%5", 5, 2, "2026-07-30T09:00:00.000000+00:00", "hi", None)
             .unwrap_err();
         assert_eq!(
             err.to_string(),
@@ -619,7 +619,9 @@ mod tests {
         }));
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
         let ts = "2026-07-30T09:00:00.000000+00:00";
-        let err = mux.send_inline_preview("%5", 5, 2, ts, "a\nb").unwrap_err();
+        let err = mux
+            .send_inline_preview("%5", 5, 2, ts, "a\nb", None)
+            .unwrap_err();
         let payload = format!("[cafleet msg 5 from 2 {ts}]\na⏎b");
         assert_eq!(
             err.to_string(),
@@ -648,7 +650,9 @@ mod tests {
         }));
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
         let ts = "2026-07-30T09:00:00.000000+00:00";
-        let err = mux.send_inline_preview("%5", 5, 2, ts, "hi").unwrap_err();
+        let err = mux
+            .send_inline_preview("%5", 5, 2, ts, "hi", None)
+            .unwrap_err();
         assert_eq!(
             err.to_string(),
             "tmux command failed: tmux send-keys -t %5 Enter\nstderr: submit lost"
@@ -763,10 +767,10 @@ mod tests {
     }
 
     #[test]
-    fn send_prompt_plain_form_is_esc_safeguarded_and_stripped() {
+    fn send_prompt_is_esc_safeguarded_and_stripped() {
         let runner = FakeRunner::with_binary("tmux");
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        mux.send_prompt("%5", "  hi tmux  ", false).unwrap();
+        mux.send_prompt("%5", "  hi tmux  ").unwrap();
         assert_eq!(
             runner.events(),
             vec![
@@ -777,33 +781,13 @@ mod tests {
                 run_event(&["tmux", "send-keys", "-t", "%5", "Enter"], None),
             ]
         );
-    }
-
-    #[test]
-    fn send_prompt_shell_form_is_esc_safeguarded_and_prefixes_bang() {
-        let runner = FakeRunner::with_binary("tmux");
-        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        mux.send_prompt("%5", " ls -la ", true).unwrap();
-        assert_eq!(
-            runner.events(),
-            vec![
-                run_event(&["tmux", "send-keys", "-t", "%5", "Escape"], None),
-                sleep_event(0.1),
-                run_event(&["tmux", "send-keys", "-t", "%5", "-l", "! ls -la"], None),
-                sleep_event(1.0),
-                run_event(&["tmux", "send-keys", "-t", "%5", "Enter"], None),
-            ]
-        );
 
         let runner = FakeRunner::with_binary("tmux");
         runner.respond(Err(RunError::Failed {
             stderr: "boom".to_string(),
         }));
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        assert!(
-            mux.send_prompt("%5", "ls -la", true).is_err(),
-            "the shell form propagates an Esc failure like the plain form"
-        );
+        assert!(mux.send_prompt("%5", "hi tmux").is_err());
         assert_eq!(
             runner.events(),
             vec![run_event(
@@ -819,17 +803,15 @@ mod tests {
         let runner = FakeRunner::with_binary("tmux");
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
         assert_eq!(
-            mux.send_prompt("%5", "   ", false).unwrap_err().to_string(),
+            mux.send_prompt("%5", "   ").unwrap_err().to_string(),
             "send_prompt: text may not be empty"
         );
         assert_eq!(
-            mux.send_prompt("%5", "a\nb", false)
-                .unwrap_err()
-                .to_string(),
+            mux.send_prompt("%5", "a\nb").unwrap_err().to_string(),
             "send_prompt: text may not contain newlines"
         );
         assert_eq!(
-            mux.send_prompt("%5", "a\rb", true).unwrap_err().to_string(),
+            mux.send_prompt("%5", "a\rb").unwrap_err().to_string(),
             "send_prompt: text may not contain newlines"
         );
         assert!(

@@ -170,10 +170,7 @@ fn each_agent_classifies_an_active_turn_as_working() {
         ),
         (
             "opencode",
-            vec![
-                "  ~ Writing the migration...",
-                "  ■■■⬝⬝⬝  esc to interrupt",
-            ],
+            vec!["  ~ Writing the migration...", "  ■■■⬝⬝⬝  esc to interrupt"],
         ),
     ] {
         assert_state(agent, &capture(&lines), "working");
@@ -253,10 +250,7 @@ fn each_agent_classifies_a_quiet_pane_without_a_composer_as_unclassified() {
         ),
         (
             "opencode",
-            vec![
-                "  ~ Preparing the write...",
-                "  → Read cafleet/src/lib.rs",
-            ],
+            vec!["  ~ Preparing the write...", "  → Read cafleet/src/lib.rs"],
         ),
     ] {
         assert_state(agent, &capture(&lines), "unclassified");
@@ -279,10 +273,7 @@ fn awaiting_user_outranks_working_and_finished_when_cues_co_occur() {
 #[test]
 fn working_outranks_finished_when_cues_co_occur() {
     for cues in &CUE_LINES {
-        for lines in [
-            [cues.working, cues.finished],
-            [cues.finished, cues.working],
-        ] {
+        for lines in [[cues.working, cues.finished], [cues.finished, cues.working]] {
             assert_state(cues.agent, &capture(&lines), "working");
         }
     }
