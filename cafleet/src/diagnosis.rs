@@ -214,14 +214,14 @@ mod tests {
     #[test]
     fn schema_states_preserve_versions_and_sql_failures() {
         let conn = crate::db::connect("sqlite:///:memory:").unwrap();
-        assert!(matches!(classify_schema(&conn, 8), SchemaState::Missing));
+        assert!(matches!(classify_schema(&conn, 9), SchemaState::Missing));
         conn.execute_batch("CREATE TABLE refinery_schema_history(version INTEGER)")
             .unwrap();
-        assert!(matches!(classify_schema(&conn, 8), SchemaState::Missing));
+        assert!(matches!(classify_schema(&conn, 9), SchemaState::Missing));
         conn.execute_batch("CREATE TABLE foreign_data(value TEXT)")
             .unwrap();
         assert!(matches!(
-            classify_schema(&conn, 8),
+            classify_schema(&conn, 9),
             SchemaState::Unversioned
         ));
         conn.execute_batch("DROP TABLE foreign_data; DROP TABLE refinery_schema_history")
@@ -229,36 +229,36 @@ mod tests {
         conn.execute_batch("CREATE TABLE app_data(value TEXT)")
             .unwrap();
         assert!(matches!(
-            classify_schema(&conn, 8),
+            classify_schema(&conn, 9),
             SchemaState::Unversioned
         ));
         conn.execute_batch("CREATE TABLE refinery_schema_history(version INTEGER)")
             .unwrap();
-        for version in [7, 8, 9] {
+        for version in [8, 9, 10] {
             conn.execute("INSERT INTO refinery_schema_history VALUES (?1)", [version])
                 .unwrap();
-            let state = classify_schema(&conn, 8);
+            let state = classify_schema(&conn, 9);
             assert!(matches!(
                 (version, state),
                 (
-                    7,
+                    8,
                     SchemaState::Behind {
-                        recorded: 7,
-                        head: 8
+                        recorded: 8,
+                        head: 9
                     }
-                ) | (8, SchemaState::Head { version: 8 })
+                ) | (9, SchemaState::Head { version: 9 })
                     | (
-                        9,
+                        10,
                         SchemaState::Ahead {
-                            recorded: 9,
-                            head: 8
+                            recorded: 10,
+                            head: 9
                         }
                     )
             ));
         }
         conn.execute_batch("ALTER TABLE refinery_schema_history RENAME COLUMN version TO broken")
             .unwrap();
-        let SchemaState::Unreachable { cause } = classify_schema(&conn, 8) else {
+        let SchemaState::Unreachable { cause } = classify_schema(&conn, 9) else {
             panic!("expected SQL failure")
         };
         assert!(cause.message().contains("version"));

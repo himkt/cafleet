@@ -104,13 +104,14 @@ mod tests {
         .unwrap()
     }
 
-    const APP_TABLES: [&str; 6] = [
+    const APP_TABLES: [&str; 7] = [
         "members",
         "fleets",
         "asset_installs",
         "member_placements",
         "monitor_runtime",
         "messages",
+        "member_execs",
     ];
 
     #[test]
@@ -140,11 +141,11 @@ mod tests {
     }
 
     #[test]
-    fn migrate_reaches_head_version_8_and_is_idempotent() {
+    fn migrate_reaches_head_version_9_and_is_idempotent() {
         let dir = TempDir::new().unwrap();
         let mut conn = connect(&temp_db_url(&dir)).unwrap();
-        assert_eq!(migrate_to_head(&mut conn).unwrap(), 8);
-        assert_eq!(migrate_to_head(&mut conn).unwrap(), 8);
+        assert_eq!(migrate_to_head(&mut conn).unwrap(), 9);
+        assert_eq!(migrate_to_head(&mut conn).unwrap(), 9);
     }
 
     #[test]
@@ -170,10 +171,10 @@ mod tests {
     }
 
     #[test]
-    fn autoincrement_on_exactly_fleets_members_messages() {
+    fn autoincrement_on_exactly_fleets_members_messages_member_execs() {
         let dir = TempDir::new().unwrap();
         let conn = migrated_conn(&dir);
-        for table in ["fleets", "members", "messages"] {
+        for table in ["fleets", "members", "messages", "member_execs"] {
             assert!(
                 table_sql(&conn, table).contains("AUTOINCREMENT"),
                 "{table} must AUTOINCREMENT"
@@ -361,14 +362,14 @@ mod tests {
             .unwrap()
             .map(Result::unwrap)
             .collect();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
     }
 
     // The chain guard reads the refinery-embedded listing, not the filesystem:
     // `migration_chain()` returns the `(version, name)` pairs of the embedded
     // runner's migrations, sorted ascending.
     #[test]
-    fn migration_chain_is_contiguous_from_1_with_exactly_one_baseline_and_head_8() {
+    fn migration_chain_is_contiguous_from_1_with_exactly_one_baseline_and_head_9() {
         let chain = migration_chain();
         let versions: Vec<u32> = chain.iter().map(|(version, _)| *version).collect();
         let contiguous: Vec<u32> = (1..=versions.len() as u32).collect();
@@ -393,8 +394,8 @@ mod tests {
             chain
                 .last()
                 .map(|(version, name)| (*version, name.as_str())),
-            Some((8, "unique_active_monitor")),
-            "expected head is V8__unique_active_monitor"
+            Some((9, "held_delivery_and_member_execs")),
+            "expected head is V9__held_delivery_and_member_execs"
         );
     }
 }
