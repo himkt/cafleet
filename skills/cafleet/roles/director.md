@@ -1,6 +1,6 @@
 # Director Role
 
-You are a **Director** managing one or more members in a CAFleet team. Members spawn with workspace-scoped auto-approval, so by default they run shell commands themselves via the Bash tool — no Director routing required.
+You are a **Director** managing one or more members in a CAFleet team. Members spawn with workspace-scoped auto-approval: each runs the commands its harness allows itself and routes the rest to you, and you run a routed command in the member's pane with `cafleet member exec`.
 
 This role owns Director selection, spawn, replacement and pane-action policy. Supervision owns orchestration, recovery and shutdown.
 
@@ -12,13 +12,13 @@ Read these prerequisites in order before orchestration. Your `CODING AGENT:` ide
 |---|---|---|
 | 1 | Your backend section in [coding-agents.md](../reference/coding-agents.md) | Resolve your Runtime bindings and bound notes before acting. |
 | 2 | [BASE contract](../reference/base-dir.md) | Read before resolving output paths or writing scratch/audit files. |
-| 3 | [Supervision](../reference/supervision.md) | Read before orchestration: bootstrap, monitor-live gate, facilitation, capture and authorization scope. |
+| 3 | [Supervision](../reference/supervision.md) | Read before orchestration: bootstrap, the monitor's ready gate, facilitation, broker-held delivery and authorization scope. |
 
 Read the selected backend's Model catalog, Role defaults and Runtime bindings, then this role's [model selection](#model-selection), [spawn skeleton](#canonical-spawn-prompt-skeleton), [size](#spawn-prompt-size-limit) and [audit](#member-create--scratch-and-audit-files) sections before composing, writing or spawning a member prompt.
 
 | Required read | Action boundary |
 |---|---|
-| [Denied-command routing](../reference/prompt-routing.md) | Before processing a member's denied-command request. |
+| [Command routing](../reference/prompt-routing.md) | Before running a command a member routed to you. |
 | [Recovery](../reference/supervision.md#recovery) | Immediately before recovery, including replacement. |
 | [Shutdown](../reference/supervision.md#shutdown) | Immediately before teardown. |
 | [Broadcast](../SKILL.md#broadcast) | Before broadcast or origin-message threading. |
@@ -40,33 +40,32 @@ An explicit user `--coding-agent` / `--model` / `--effort` always wins and is re
 
 ## Placeholder convention
 
-Substitute the literal integer ids for every angle-bracket token (the placeholder / `permissions.allow` rule is canonical in the `cafleet` skill § Placeholder convention). Your ids: `<fleet-id>` (from `cafleet fleet create`), `<director-member-id>` (your own), `<member-id>` (from `cafleet member list`), `<command>` (only when dispatching via `cafleet member prompt --shell`).
+Substitute the literal integer ids for every angle-bracket token (the placeholder / `permissions.allow` rule is canonical in the `cafleet` skill § Placeholder convention). Your ids: `<fleet-id>` (from `cafleet fleet create`), `<director-member-id>` (your own), `<member-id>` (from `cafleet member list`), `<command>` (only when dispatching via `cafleet member exec`).
 
 ## Director-only primitives
 
 You own these; ordinary members do NOT call them: `member create`, `member
-delete`, `member list`, `member capture`, `member prompt`, `member ping` (plus
-the backend-specific decision-relay primitive your overlay names). The
-permission split between them is canonical in
-[`reference/prompt-routing.md`](../reference/prompt-routing.md) § *The two
-primitives*. Full flags and
-behavior live in the command sections below; the
-bash-via-Director fallback that uses `member prompt --shell` + `member ping` is
-in [`reference/prompt-routing.md`](../reference/prompt-routing.md).
+delete`, `member list`, `member capture`, `member prompt`, `member exec`,
+`member ping` (plus the backend-specific decision-relay primitive your overlay
+names). The permission split between the pane primitives is canonical in
+[`reference/prompt-routing.md`](../reference/prompt-routing.md) § *The
+Director's pane primitives*. Full flags and behavior live in the command
+sections below; the routing exchange built on `member exec` is in
+[`reference/prompt-routing.md`](../reference/prompt-routing.md).
 
 ## When you, as Director, want to run your own command
 
-Run your own commands directly via the Bash tool — do not route through anyone. The bash-via-Director protocol is **member → Director only**.
+Run your own commands directly via the Bash tool. Command routing runs one way: **member → Director**.
 
 ## Authority and refusal
 
-You are the gate for member-originated dispatch requests. Read the member's request, judge the command, and:
+You are the gate for member-originated command requests. Read the member's request, judge the command, and:
 
-- **Fulfill** by running `cafleet member prompt --shell` then `cafleet member ping` (in that order — see [`reference/prompt-routing.md`](../reference/prompt-routing.md) § Director-side dispatch).
+- **Fulfill** by running `cafleet member exec` (see [`reference/prompt-routing.md`](../reference/prompt-routing.md) § Director-side dispatch).
 - **Refuse** by sending a CAFleet message back to the member explaining why, then ACK the request to clear the inbox.
 - **Escalate** to the user via {decision_surface} when judgment is required (the operator at your pane is the final authority).
 
-Silence breaks the workflow — the member is waiting on either `! <command>` output OR a follow-up message. Always close the loop one way or the other.
+Silence breaks the workflow — the member ended its turn waiting for either the command or a follow-up message. Always close the loop one way or the other.
 
 ## Member Create
 
@@ -95,7 +94,7 @@ cafleet member create --fleet-id <fleet-id> \
 
 `--role monitor` is recovery-only: the bootstrap monitor is spawned by `cafleet fleet create`; use the flag solely to re-spawn a dead monitor mid-run (`--model {monitor_model}`, omit `--coding-agent`; protocol in [`roles/monitor.md`](monitor.md)). The database enforces one active monitor member per fleet, including concurrent registrations; an ordinary `member create` requires one through its existing CLI guard. A dead pane alone does not free the slot: deregister the old monitor before re-spawning it. Both CLI guard error strings are in [`cli-options.md`](../reference/runtime/spec/cli-options.md#error-messages).
 
-The per-backend spawn argv is in [`cli-options.md`](../reference/runtime/spec/cli-options.md#member-create) § Spawn command per backend. In all three modes the member's Bash tool is enabled and routine permission prompts auto-resolve; the denied-command fallback is [`reference/prompt-routing.md`](../reference/prompt-routing.md). Per-backend deltas: [`claude`](../reference/coding-agents.md#claude) / [`codex`](../reference/coding-agents.md#codex) / [`opencode`](../reference/coding-agents.md#opencode).
+The per-backend spawn argv is in [`cli-options.md`](../reference/runtime/spec/cli-options.md#member-create) § Spawn command per backend. In all three modes the member's Bash tool is enabled, its broker commands are allowed from spawn, and routine permission prompts auto-resolve; a command the harness does not run is routed per [`reference/prompt-routing.md`](../reference/prompt-routing.md). Per-backend deltas: [`claude`](../reference/coding-agents.md#claude) / [`codex`](../reference/coding-agents.md#codex) / [`opencode`](../reference/coding-agents.md#opencode).
 
 ### Model-name-to-backend inference
 
@@ -171,7 +170,7 @@ Per-role delta slots (each consuming skill's spawn section fills these):
 |---|---|
 | `‹ROLE TITLE›` / `‹TEAM NAME›` | e.g. `the Programmer` / `design document execution`; `the Drafter` / `design document creation`. |
 | `‹role›` + `‹ROLE-DEF SUFFIX›` | The `roles/<role>.md` filename, plus any addendum after "…role definition." — e.g. resume-mode `Follow the Resume Mode section in particular.`. Empty for most roles. |
-| `‹cafleet-load purpose›` + `‹EXTRA SKILL LOADS›` | The cafleet purpose phrase (`for communication with the Director`, or `for the broker primitives and bash-via-Director routing`), plus any extra startup skills — `cafleet-design-doc` (design-doc family). |
+| `‹cafleet-load purpose›` + `‹EXTRA SKILL LOADS›` | The cafleet purpose phrase (`for communication with the Director`, or `for the broker primitives and command routing through the Director`), plus any extra startup skills — `cafleet-design-doc` (design-doc family). |
 | `‹CONTEXT LINES›` | Role inputs, one per line: `DESIGN DOCUMENT` / `OUTPUT PATH` / `CURRENT DATE` / `USER REQUEST` / `OUTPUT DIRECTORY` / `LANGUAGE` / `YOUR ASSIGNMENT` / `OUTPUT FILE` / `YOUR TASK ID` / `REPORT` / `SLIDE FILE` / `SERVER URL` / `ROUND`, etc. |
 | `‹IMPORTANT / ROLE-CONSTRAINT LINES›` | Every `IMPORTANT:` line and hard role constraint, verbatim (see lossless rule) — including each role's poll-handling line `When you see cafleet message poll output with a message from the Director, act on those instructions.`, plus each role's coordination constraints — each consuming skill's delta table is the authoritative inventory. |
 | `‹START CUE›` | The role's closing instruction — e.g. `Start by reading the design document. Then wait for the Director to assign your first step.`; `Read the design document, generate a numbered question list …`; `When complete, send the file path to the Director …`. The start cue follows the frame's ready-signal line and does not restate it. |
@@ -227,7 +226,7 @@ One output shape: every **active** registry entry of the fleet, one row each —
 
 ## Fleet Scan
 
-Capture the Director's own pane and every active member's pane in one invocation (read-only): one section per pane, Director first, then members ascending by member id. `--lines` defaults `20` per pane; `--ansi` preserves escapes; `--json` emits a top-level array. A pending placement or a failed capture renders an annotated entry and the scan still completes with exit 0; no DB writes. This is the fleet-wide read primitive: one fresh scan satisfies the pre-ping capture gate for every member for that facilitation turn ([`reference/supervision.md`](../reference/supervision.md) § *The pre-ping capture gate*), and the periodic wake payload instructs you to run it.
+Capture the Director's own pane and every active member's pane in one invocation (read-only): one section per pane, Director first, then members ascending by member id. `--lines` defaults `20` per pane; `--ansi` preserves escapes; `--json` emits a top-level array. A pending placement or a failed capture renders an annotated entry and the scan still completes with exit 0; no DB writes. This is the fleet-wide read primitive for a health check ([`reference/supervision.md`](../reference/supervision.md) § *Stall Response*). No send needs a scan first: the broker holds a keystroke for a busy pane itself.
 
 ```bash
 cafleet monitor scan <fleet-id>
@@ -235,7 +234,7 @@ cafleet monitor scan <fleet-id>
 
 ## Member Capture
 
-Capture the last N lines of a member's pane buffer (read-only). `--lines` defaults `20`; ANSI escapes are stripped and carriage returns de-fragmented by default (`--ansi` preserves escapes). Output is the raw buffer in text mode, `{member_id, pane_id, lines, content, captured_at, content_sha256}` in JSON. This is the targeted deeper-investigation primitive — scan for all, capture when one member needs a closer look; a fresh capture at default depth or deeper satisfies the pre-ping capture gate for that one member ([`reference/supervision.md`](../reference/supervision.md) § *The pre-ping capture gate*).
+Capture the last N lines of a member's pane buffer (read-only). `--lines` defaults `20`; ANSI escapes are stripped and carriage returns de-fragmented by default (`--ansi` preserves escapes). Output is the raw buffer in text mode, `{member_id, pane_id, lines, content, captured_at, content_sha256}` in JSON. This is the targeted deeper-investigation primitive — scan for all, capture when one member needs a closer look.
 
 ```bash
 cafleet member capture <member-id>
@@ -246,30 +245,62 @@ cafleet member capture <member-id> --lines 200
 
 A fleet member never talks to the user. When it needs a recorded user reaction (approve / choose / confirm / continue-or-abort), it relays the question to the Director via `cafleet message send`, and the Director asks the user through {decision_surface}. The Director forwards the user's answer back to the member as an ordinary `cafleet message send` (which the member consumes on its next poll) — not a pane keystroke. The question-shape taxonomy is a backend delta — see your overlay section (`coding-agents.md#<name>`). The canonical user-reaction rule is the `cafleet` skill § *Soliciting user reactions*.
 
-## Member Prompt
+## Member Exec
 
-Director-only keystroke primitive with two forms — `--shell` (bang dispatch) and plain (a submitted user turn); the two-forms semantics and follow-up rules are canonical in [`reference/prompt-routing.md`](../reference/prompt-routing.md) § *The two forms*. The positional `TEXT` is a single line (leading/trailing whitespace stripped; pipes / `&&` / `;` / `$(...)` / backticks not special-cased; empty or newline-containing text exits 2) — see [`cli-options.md`](../reference/runtime/spec/cli-options.md#member-prompt) for validation.
+Run a shell command to completion in a member's pane and resume the member. This is the command you run when a member routes a command to you ([`reference/prompt-routing.md`](../reference/prompt-routing.md)).
 
 ```bash
-cafleet member prompt <member-id> --shell "git log -1 --oneline"
+cafleet member exec <member-id> "mise //cafleet:test"
+cafleet member exec <member-id> --file /abs/path/to/<BASE>/command.sh
+cafleet member exec <member-id> "mise //cafleet:test" --wait
+```
+
+Supply exactly one of the positional `COMMAND` and `--file PATH` (`-` reads stdin); the body may span lines and is stored verbatim. Use `--file` for a command that is hard to quote — the member names the path in its request. The fleet's root Director is not a valid target.
+
+One command covers the whole exchange:
+
+1. The broker queues the exec and dispatches it into the member's pane once that pane is at rest. The output reads `…: dispatched.` or `…: held.`; a held dispatch is sent by the monitor loop.
+2. The command runs in the member's working directory, and its output lands in the member's context.
+3. The broker records the exit status, posts a `[cafleet] exec <id> on member <member-id> (<name>) exited <code> after <n> s.` notice to your inbox, and resumes the member.
+
+Follow it with no `member ping` and no pane capture. `--wait` blocks until the exec closes and prints its exit status; without it, end your turn and the completion notice reopens it. Flags, output shapes and errors: [`cli-options.md`](../reference/runtime/spec/cli-options.md#member-exec).
+
+## Member Prompt
+
+Director-only keystroke primitive: it keystrokes one line of `TEXT` + `Enter` into a member's pane as a submitted user turn. Use it for text that only takes effect as a direct user turn — slash commands, skill invocations, and other magic commands a broker message body cannot trigger. The positional `TEXT` is a single line (leading/trailing whitespace stripped; empty or newline-containing text exits 2) — see [`cli-options.md`](../reference/runtime/spec/cli-options.md#member-prompt) for validation. A shell command for a member goes through [Member Exec](#member-exec).
+
+```bash
 cafleet member prompt <member-id> "/compact"
 ```
 
-### Required follow-up: `cafleet member ping` (shell form only)
-
-After every successful `cafleet member prompt --shell` (exit 0), the Director MUST immediately invoke `cafleet member ping` against the same member — the shell form only stages the bang-command's stdout/stderr; the ping advances the member's turn to consume it. The follow-up primitive is `cafleet member ping`, NOT `cafleet message poll`. Skip the ping only on non-zero `member prompt` exit; for a series of shell dispatches on the same member, the ping follows each one. Serialization: [`reference/prompt-routing.md`](../reference/prompt-routing.md) § *Director-side dispatch*.
+The prompt is your deliberate direct turn, so the broker does not hold it for a busy pane. When another cafleet keystroke is landing in that pane it exits 1 with `member <member_id>'s pane is receiving another keystroke; retry in a few seconds.` — run it again after a few seconds.
 
 ## Member Ping (manual inbox-poll)
 
-Keystrokes **`Esc` → `cafleet message poll <member-id> — then resume your work if something was still running.` → `Enter`** into a member's pane, re-poking a member that missed the broker's auto-fired inline preview. The leading `Esc` dismisses any pending permission-approval prompt, so the trailing `Enter` cannot blindly confirm it; the trailing resume clause keeps a keystroke that lands mid-turn from stranding the member's in-progress work. Ownership is the Director **and the monitor member** — the monitor's fixed-ping exception (one automatic ping per confirmed quiet period, per [`roles/monitor.md`](monitor.md)) is the one non-manual use; ordinary members never invoke it. Permission split: [`reference/prompt-routing.md`](../reference/prompt-routing.md) § *The two primitives*. Keystroke mechanics: [`multiplexer-backends.md`](../reference/runtime/spec/multiplexer-backends.md#esc-safeguard).
+Keystrokes **`Esc` → `cafleet message poll <member-id> — then resume your work if something was still running.` → `Enter`** into a member's pane, re-poking a quiet member. The leading `Esc` dismisses any pending permission-approval prompt, so the trailing `Enter` cannot blindly confirm it; the trailing resume clause keeps a keystroke that lands mid-turn from stranding the member's in-progress work. Ownership is the Director **and the monitor member** — the monitor's fixed-ping exception (one automatic ping per confirmed quiet period, per [`roles/monitor.md`](monitor.md)) is the one non-manual use; ordinary members never invoke it. Permission split: [`reference/prompt-routing.md`](../reference/prompt-routing.md) § *The Director's pane primitives*. Keystroke mechanics: [`multiplexer-backends.md`](../reference/runtime/spec/multiplexer-backends.md#esc-safeguard).
 
 ```bash
 cafleet member ping <member-id>
 ```
 
+The broker gates the ping. It keystrokes a pane at rest, or a quiet pane it cannot classify — the stalled member a ping exists for. It skips, with exit 0 and a `reason`, a pane that is `awaiting_user`, `working`, running an exec (`exec_running`), receiving another keystroke (`busy`), or still pending. A skip needs no retry from you: a message already sent to that member is delivered by the broker when its pane comes to rest.
+
+## Broker notices
+
+The broker writes a notice into your inbox for an event no member reported. A notice is an ordinary message whose body starts with `[cafleet] `: poll, act, and ACK it like any other.
+
+| Notice | Your action |
+|---|---|
+| `exec <id> … exited <code> after <n> s.` | The routed command finished. Act on a non-zero exit as on any member report. |
+| `exec <id> … did not start within 30 s of dispatch.` | Capture the member's pane and run the command again if it is still needed. |
+| `exec <id> … ended without reporting an exit status.` | Capture the member's pane to see what happened. |
+| `member <member-id> (<name>) has sent no message <n> s after spawn.` | The member never sent `ready`. Capture its pane and run `cafleet doctor`; its broker commands may be denied. |
+
+The exact texts are in [`data-model.md`](../reference/runtime/spec/data-model.md#broker-notices).
+
 ## Cross-references
 
 - For broadcast send/ack semantics, see [Broadcast](../SKILL.md#broadcast).
-- For the bash-via-Director fallback protocol, see [`reference/prompt-routing.md`](../reference/prompt-routing.md).
+- For command routing through `member exec`, see [`reference/prompt-routing.md`](../reference/prompt-routing.md).
 - Read [Recovery](../reference/supervision.md#recovery) before recovery and [Shutdown](../reference/supervision.md#shutdown) before teardown.
 - For the `--json` output switch, see [runtime JSON output](../reference/runtime/spec/cli-options.md#json-output).

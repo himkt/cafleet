@@ -1230,7 +1230,13 @@ also matches the bare command.
 
 ✗ member permissions
   claude: ~/.claude/settings.json permissions.deny "Bash(cafleet *)" matches "cafleet message poll 1"
+  claude: <file> allowManagedPermissionRulesOnly is true and its permissions.allow does not match "<command>"
+  claude: <file> is not valid JSON
 ```
+
+The three `✗` lines are, in order, the blocking-rule, managed-rules-only, and
+unreadable-file findings; `<command>` on the second is the first unmatched
+probe.
 
 When the claude assets are not installed the row reads
 `claude: – not installed` and never counts. Each finding is one issue.
@@ -3303,9 +3309,19 @@ prefix_rule(pattern = ["cafleet"], decision = "allow")
 prefix_rule(
     pattern = ["cafleet", "member", "prompt"],
     decision = "prompt",
-    justification = "cafleet member prompt keystrokes arbitrary text or shell commands into a member pane",
+    justification = "cafleet member prompt keystrokes arbitrary text into a member pane",
+)
+
+prefix_rule(
+    pattern = ["cafleet", "member", "exec"],
+    decision = "prompt",
+    justification = "cafleet member exec runs an arbitrary shell command in a member pane",
 )
 ```
+
+Codex applies the strictest matching decision, so `member prompt` and
+`member exec` keep requiring approval while every other subcommand matches
+only the broad allow.
 
 #### opencode preset
 
@@ -3371,6 +3387,7 @@ around command names and `.env`):
       "mise //cafleet:build": "allow",
       "wc *": "allow",
       "cafleet *": "allow",
+      "cafleet member exec *": "deny",
     },
     "read": {
       "*": "allow",

@@ -14,7 +14,7 @@ Open this authoritative role first. Use an available non-shell text reader; prer
 | 4 | [Design-doc core](../../SKILL.md) and [guidelines](../../reference/guidelines.md) | Load the assigned workflow's format and role references before document work; retain this role's scope. |
 | 5 | [Coordination](../../reference/coordination.md) | Before payloads, markers and work/status messages. |
 
-Codex/OpenCode load the cores, own backend and required references by absolute path; use the executing backend's supported loader. Continue the existing assigned workflow without creating a second team. Read [prompt routing](../../../cafleet/reference/prompt-routing.md) before routing an actual denied command. Apply supplied host-rule equivalents where optional files are absent; route an essential unknown prerequisite to the Director before dependent work.
+Codex/OpenCode load the cores, own backend and required references by absolute path; use the executing backend's supported loader. Continue the existing assigned workflow without creating a second team. Read [command routing](../../../cafleet/reference/prompt-routing.md) before routing a command your harness denied. Apply supplied host-rule equivalents where optional files are absent; route an essential unknown prerequisite to the Director before dependent work.
 
 ## Your Accountability
 

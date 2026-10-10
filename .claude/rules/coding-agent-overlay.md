@@ -4,16 +4,15 @@ Write CAFleet base instructions so they read the same on every backend: family `
 
 ## Where backend specifics live
 
-`skills/cafleet/reference/coding-agents.md` is the canonical backend reference. Each self-contained `## claude`, `## codex`, or `## opencode` section contains these six subsections in order:
+`skills/cafleet/reference/coding-agents.md` is the canonical backend reference. Each self-contained `## claude`, `## codex`, or `## opencode` section contains these five subsections in order:
 
-1. **Runtime bindings**: the seven runtime placeholders for decision surface, permission flags, background run/stop, pane title, skill loader, and effort levels.
+1. **Runtime bindings**: the five runtime placeholders for decision surface, permission flags, pane title, skill loader, and effort levels.
 2. **Role defaults**: the concrete model and effort assignments for monitors, reviewers, and other members; models come from the backend catalog and effort matches its runtime capability.
 3. **Model catalog**: exact spawn tokens, aliases, reviewed capability classes/order, prices, context notes, and official provenance.
 4. **Note → applies at**: constraints bound to their tokens and consuming instructions.
-5. **Pane-state capture cues**: the four states and the supervision tie-break pointer.
-6. **Worked resolution**: the fully resolved monitor-loop launch.
+5. **Pane-state capture cues**: the four states and the monitor-protocol tie-break pointer.
 
-Add a backend by copying `## Template` and supplying all six subsections. Keep each section complete for its own backend, with shared policy and supervision linked to their authoritative homes. Model selection belongs to `skills/cafleet/roles/director.md` § Model selection. The `cafleet-model-list-refresh` skill owns catalogs, provenance/context notes, Role defaults, and shared freshness metadata; runtime documentation maintenance owns the remaining subsections.
+Add a backend by copying `## Template` and supplying all five subsections. Keep each section complete for its own backend, with shared policy and supervision linked to their authoritative homes. Model selection belongs to `skills/cafleet/roles/director.md` § Model selection. The `cafleet-model-list-refresh` skill owns catalogs, provenance/context notes, Role defaults, and shared freshness metadata; runtime documentation maintenance owns the remaining subsections.
 
 ## Reader contract
 
@@ -31,7 +30,7 @@ For example, a Codex Director selecting an OpenCode reviewer resolves the OpenCo
 
 Each reader entry point places its runtime overlay at **row #1 of the Required-reading block**, gated before action. Link `coding-agents.md#<name>`, substituting the reader's concrete backend anchor when used. The row requires **read-and-resolve**: identify the executing backend, read its Runtime bindings, and apply the core skill's resolution procedure before acting. Directors additionally read the selected spawn backend when selecting a member.
 
-1. **Materialize values.** Use the seven runtime bindings for the relevant operation and the selected spawn backend's model and effort Role defaults.
+1. **Materialize values.** Use the five runtime bindings for the relevant operation and the selected spawn backend's model and effort Role defaults.
 2. **Apply notes.** Follow each caveat at the instruction named in Note → applies at.
 3. **Self-check at emission.** Emit concrete command and message values; resolve any remaining literal `{token}` first.
 

@@ -4,7 +4,7 @@ This rule fires every time you reach for the Bash tool as a CAFleet team member.
 
 ## The MUST rule
 
-> **If you are a CAFleet member spawned by `cafleet member create`, your harness runs in `--permission-mode dontAsk`. Your Bash tool is ENABLED and permission prompts auto-resolve silently. Run cafleet (and any other shell command) directly via the Bash tool. No prefix, no Director routing, no operator prompts.**
+> **If you are a CAFleet member spawned by `cafleet member create`, your harness runs in `--permission-mode dontAsk`. Your Bash tool is ENABLED, your broker commands are allowed from spawn, and permission prompts auto-resolve silently. Run every command your harness allows directly via the Bash tool, with no prefix and no operator prompt, and route a command it denies to the Director with `cafleet message send`.**
 
 ## How to detect that you are a CAFleet member
 
@@ -16,6 +16,6 @@ Any of the following signals means you are a member subject to this rule:
 
 ## The owning protocols
 
-- Member-side conduct — the run-commands-yourself default, the never-fabricate rules, denial handling, and where your ids come from: `skills/cafleet/roles/member.md`.
-- The bash-via-Director fallback — the member-side reconsider-then-route protocol and the Director-side `prompt --shell → ping → ack` dispatch, serialization, and lookup boundary: `skills/cafleet/reference/prompt-routing.md`.
-- Director keystrokes you may see land in your pane: a `cafleet member ping` (`Esc` → `cafleet message poll <your-member-id> — then resume your work if something was still running.` → `Enter`) re-poking a missed delivery, and a `cafleet member prompt --shell` staging a dispatched command's output for your next turn.
+- Member-side conduct — run what your harness allows and route the rest, the never-fabricate rules, and where your ids come from: `skills/cafleet/roles/member.md`.
+- Command routing — the member-side reconsider-then-route protocol and the Director-side `cafleet member exec` dispatch, completion notice, and targeting boundary: `skills/cafleet/reference/prompt-routing.md`.
+- Keystrokes you may see land in your pane: a `cafleet member ping` (`Esc` → `cafleet message poll <your-member-id> — then resume your work if something was still running.` → `Enter`) re-poking a quiet pane, and a `! cafleet member exec-run <exec-id>` line running a command the Director dispatched for you with `cafleet member exec`.

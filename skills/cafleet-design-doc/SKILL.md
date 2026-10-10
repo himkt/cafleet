@@ -27,7 +27,7 @@ Before routing into a workflow or consulting a reference page, Read your overlay
 
 | # | Read | What you lose if you skip it |
 |---|------|------------------------------|
-| 1 | your overlay section [`../cafleet/reference/coding-agents.md#<name>`](../cafleet/reference/coding-agents.md) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{bg_run}` emitted unresolved |
+| 1 | your overlay section [`../cafleet/reference/coding-agents.md#<name>`](../cafleet/reference/coding-agents.md) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{decision_surface}` emitted unresolved |
 
 **On-demand — consult directly (no team), only when the task needs it:**
 
@@ -42,7 +42,7 @@ Each workflow body (create / interview / execute) carries its own Required-readi
 
 For a main-session user request matching a scenario below, invoke this skill and run the linked workflow as a full CAFleet team — proactively, the moment the request matches, without waiting for the user to say "use cafleet".
 
-**Routing into a workflow means executing its entire orchestration.** The Director bootstraps the fleet and its monitor member in one command (`cafleet fleet create --monitor-file <path>`; the monitor member launches the wake loop in its own pane and reports `monitor live`, gating the ordinary spawns), then spawns the role team, then the workflow body's review and revision rounds run through to approval. The linked workflow body is the authoritative procedure.
+**Routing into a workflow means executing its entire orchestration.** The Director bootstraps the fleet and its monitor member in one command (`cafleet fleet create --monitor-file <path>`, which also starts the fleet's monitor loop; the monitor member's `ready` gates the ordinary spawns), then spawns the role team, then the workflow body's review and revision rounds run through to approval. The linked workflow body is the authoritative procedure.
 
 | When the user wants to… | Invoke this skill and run |
 |:--|:--|

@@ -770,8 +770,7 @@ pattern matches the probe. `*` matches any text; a trailing ` *` or the legacy
 | Unreadable file | A settings file exists but does not parse as JSON. A missing file is expected and is not a finding. |
 
 With no finding the section is `✓`; otherwise it is `✗` with one detail line
-per finding, and each finding is one issue. A blocking rule names the file,
-the list, the rule, and the probe it matches:
+per finding, and each finding is one issue:
 
 ```
 ✓ member permissions
@@ -779,7 +778,13 @@ the list, the rule, and the probe it matches:
 
 ✗ member permissions
   claude: ~/.claude/settings.json permissions.deny "Bash(cafleet *)" matches "cafleet message poll 1"
+  claude: <file> allowManagedPermissionRulesOnly is true and its permissions.allow does not match "<command>"
+  claude: <file> is not valid JSON
 ```
+
+The three `✗` lines are, in order, a blocking rule (naming the file, the
+list, the rule, and the probe it matches), the managed-rules-only finding
+(naming the first unmatched probe), and an unreadable file.
 
 When the claude assets are not installed the row reads
 `claude: – not installed` and never counts as an issue.
