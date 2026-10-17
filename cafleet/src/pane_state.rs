@@ -42,6 +42,11 @@ static CLAUDE_CUES: LazyLock<CueTable> = LazyLock::new(|| {
     )
 });
 
+static CLAUDE_VIEWPORT_OVERLAY: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"Jump to bottom \(click\)|^─{3,} [0-9]+ new messages?(?: \(click\))? ─{3,}$")
+        .expect("the Claude viewport overlay pattern is valid")
+});
+
 static CODEX_CUES: LazyLock<CueTable> =
     LazyLock::new(|| CueTable::new(&[r"^\s*›\s+\d+\.\s", r"\[y/n\]"], &["esc to interrupt"]));
 
@@ -83,7 +88,7 @@ pub fn classify(coding_agent: &str, content: &str) -> PaneState {
         PaneState::Working
     } else if cue_lines.iter().any(|line| {
         line.contains(" new message (click)")
-            || (coding_agent == "claude" && line.contains("Jump to bottom (click)"))
+            || (coding_agent == "claude" && CLAUDE_VIEWPORT_OVERLAY.is_match(line.trim()))
     }) || (coding_agent == "opencode"
         && cue_lines
             .iter()
