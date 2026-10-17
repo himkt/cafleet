@@ -667,7 +667,7 @@ mod tests {
             panic!("no pane is owed a delivery in these fixtures (preview into {pane_id})")
         }
 
-        fn send_prompt(&self, pane_id: &str, _: &str) -> Result<(), String> {
+        fn send_automatic_prompt(&self, pane_id: &str, _: &str) -> Result<(), String> {
             panic!("no pane is owed a delivery in these fixtures (prompt into {pane_id})")
         }
 

@@ -905,27 +905,23 @@ mod tests {
     }
 
     #[test]
-    fn send_poll_trigger_is_esc_then_run() {
+    fn send_poll_trigger_submits_one_run() {
         let runner = FakeRunner::with_binary("herdr");
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
         assert!(mux.send_poll_trigger("w1:p2", 14));
         assert_eq!(
             runner.events(),
-            vec![
-                run_event(&["herdr", "pane", "send-keys", "w1:p2", "esc"], Some(5)),
-                sleep_event(0.1),
-                run_event(
-                    &[
-                        "herdr",
-                        "pane",
-                        "run",
-                        "w1:p2",
-                        "cafleet message poll 14 — then resume \
+            vec![run_event(
+                &[
+                    "herdr",
+                    "pane",
+                    "run",
+                    "w1:p2",
+                    "cafleet message poll 14 — then resume \
                          your work if something was still running.",
-                    ],
-                    Some(5),
-                ),
-            ],
+                ],
+                Some(5),
+            ),],
             "pane run submits atomically — no separate Enter, no submit delay"
         );
     }
@@ -946,7 +942,7 @@ mod tests {
     }
 
     #[test]
-    fn send_wake_entries_is_esc_then_run() {
+    fn send_wake_entries_submits_one_run() {
         let runner = FakeRunner::with_binary("herdr");
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
         let members = [WakeEntry {
@@ -969,17 +965,16 @@ mod tests {
         let payload = build_wake_payload_from_entries(3, &members, &director).unwrap();
         assert_eq!(
             runner.events(),
-            vec![
-                run_event(&["herdr", "pane", "send-keys", "w1:p9", "esc"], Some(5)),
-                sleep_event(0.1),
-                run_event(&["herdr", "pane", "run", "w1:p9", &payload], Some(5)),
-            ],
-            "Esc-first, then one atomic run; the payload is byte-identical to tmux's"
+            vec![run_event(
+                &["herdr", "pane", "run", "w1:p9", &payload],
+                Some(5)
+            ),],
+            "one run submits the shared payload"
         );
     }
 
     #[test]
-    fn send_inline_preview_is_esc_send_text_delay_enter() {
+    fn send_inline_preview_submits_text_after_the_submit_delay() {
         let runner = FakeRunner::with_binary("herdr");
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
         let ts = "2026-07-30T09:00:00.000000+00:00";
@@ -990,8 +985,6 @@ mod tests {
         assert_eq!(
             runner.events(),
             vec![
-                run_event(&["herdr", "pane", "send-keys", "w1:p2", "esc"], Some(5)),
-                sleep_event(0.1),
                 run_event(
                     &[
                         "herdr",
@@ -1020,7 +1013,7 @@ mod tests {
                 .is_ok()
         );
         assert_eq!(
-            runner.events()[2],
+            runner.events()[0],
             run_event(
                 &[
                     "herdr",
@@ -1056,43 +1049,8 @@ mod tests {
     }
 
     #[test]
-    fn send_inline_preview_propagates_an_esc_failure_with_the_raw_detail() {
-        let runner = FakeRunner::with_binary("herdr");
-        runner.respond(Err(RunError::Failed {
-            stderr: herdr_error_stderr("internal"),
-        }));
-        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        let err = mux
-            .send_inline_preview(
-                "w1:p2",
-                5,
-                2,
-                "2026-07-30T09:00:00.000000+00:00",
-                "hi",
-                None,
-            )
-            .unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            format!(
-                "herdr command failed: herdr pane send-keys w1:p2 esc\nstderr: {}",
-                herdr_error_stderr("internal")
-            )
-        );
-        assert_eq!(
-            runner.events(),
-            vec![run_event(
-                &["herdr", "pane", "send-keys", "w1:p2", "esc"],
-                Some(5),
-            )],
-            "a failed esc aborts before the payload"
-        );
-    }
-
-    #[test]
     fn send_inline_preview_propagates_a_send_text_failure_with_argv_and_stderr() {
         let runner = FakeRunner::with_binary("herdr");
-        runner.respond(Ok(String::new()));
         runner.respond(Err(RunError::Failed {
             stderr: "pane bridge broke".to_string(),
         }));
@@ -1110,11 +1068,10 @@ mod tests {
         );
         assert_eq!(
             runner.events(),
-            vec![
-                run_event(&["herdr", "pane", "send-keys", "w1:p2", "esc"], Some(5)),
-                sleep_event(0.1),
-                run_event(&["herdr", "pane", "send-text", "w1:p2", &payload], Some(5),),
-            ],
+            vec![run_event(
+                &["herdr", "pane", "send-text", "w1:p2", &payload],
+                Some(5),
+            ),],
             "one attempt only — the send-text failure aborts before enter"
         );
     }
@@ -1122,7 +1079,6 @@ mod tests {
     #[test]
     fn send_inline_preview_propagates_a_trailing_enter_failure() {
         let runner = FakeRunner::with_binary("herdr");
-        runner.respond(Ok(String::new()));
         runner.respond(Ok(String::new()));
         runner.respond(Err(RunError::Failed {
             stderr: "enter lost".to_string(),
@@ -1139,8 +1095,6 @@ mod tests {
         assert_eq!(
             runner.events(),
             vec![
-                run_event(&["herdr", "pane", "send-keys", "w1:p2", "esc"], Some(5)),
-                sleep_event(0.1),
                 run_event(
                     &[
                         "herdr",

@@ -34,7 +34,7 @@ impl PaneIo for NoWake {
     ) -> Result<(), String> {
         panic!("{EXITS_FIRST}")
     }
-    fn send_prompt(&self, _: &str, _: &str) -> Result<(), String> {
+    fn send_automatic_prompt(&self, _: &str, _: &str) -> Result<(), String> {
         panic!("{EXITS_FIRST}")
     }
     fn send_automatic_trigger(&self, _: &str, _: &str) -> bool {

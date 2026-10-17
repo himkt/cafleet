@@ -59,7 +59,7 @@ impl Clock for FakeClock {
 enum Event {
     Capture(String),
     Preview(String, i64, String),
-    Prompt(String, String),
+    AutomaticPrompt(String, String),
     Trigger(String, String),
 }
 
@@ -164,11 +164,11 @@ impl PaneIo for FakeIo {
         self.send_result.borrow().clone()
     }
 
-    fn send_prompt(&self, pane: &str, text: &str) -> Result<(), String> {
+    fn send_automatic_prompt(&self, pane: &str, text: &str) -> Result<(), String> {
         self.before_send();
         self.events
             .borrow_mut()
-            .push(Event::Prompt(pane.to_string(), text.to_string()));
+            .push(Event::AutomaticPrompt(pane.to_string(), text.to_string()));
         self.send_result.borrow().clone()
     }
 
@@ -528,6 +528,49 @@ fn every_owed_kind_holds_unsafe_or_failed_final_observations_without_stamping() 
 }
 
 #[test]
+fn broadcast_deliveries_and_broker_notices_hold_unsafe_final_captures_and_remain_pollable() {
+    for notice in [false, true] {
+        for (capture, reason) in unsafe_observations() {
+            let mut f = Fixture::new();
+            let (member_id, pane, message_id) = if notice {
+                let message =
+                    broker::post_notice(&mut f.conn, f.fleet_id, "exec completion notice").unwrap();
+                (f.director_id, DIRECTOR_PANE, message.message_id)
+            } else {
+                let broadcast =
+                    broker::broadcast_message(&mut f.conn, f.director_id, "broadcast preview")
+                        .unwrap();
+                let message_id = broadcast
+                    .deliveries
+                    .into_iter()
+                    .find(|(recipient, _)| *recipient == f.member_id)
+                    .unwrap()
+                    .1;
+                (f.member_id, MEMBER_PANE, message_id)
+            };
+            let item = TestItem {
+                kind: Kind::Preview,
+                id: message_id,
+            };
+            let io = FakeIo::new();
+            io.queue(pane, vec![Ok(real_capture("empty")), capture]);
+            held(
+                deliver_pane(&mut f.conn, &io, &settings(), member_id, &f.clock).unwrap(),
+                reason,
+            );
+            assert_no_send(&io, item, &f.conn);
+            assert_eq!(io.captures_for(pane), 2);
+            assert!(
+                broker::poll_messages(&f.conn, member_id)
+                    .unwrap()
+                    .iter()
+                    .any(|message| message.message_id == message_id)
+            );
+        }
+    }
+}
+
+#[test]
 fn valid_delivery_claims_between_observations_and_commits_the_item_before_transport() {
     for kind in KINDS {
         let mut f = Fixture::new();
@@ -560,6 +603,34 @@ fn valid_delivery_claims_between_observations_and_commits_the_item_before_transp
             ]
         );
         assert_eq!(io.sent().len(), 1);
+    }
+}
+
+#[test]
+fn exec_dispatch_and_resume_submit_the_exact_payload_through_the_automatic_operation() {
+    for kind in [Kind::Dispatch, Kind::Resume] {
+        let mut f = Fixture::new();
+        let item = f.item(kind);
+        let io = FakeIo::new();
+        io.safe(MEMBER_PANE, 2);
+        fired(deliver(&mut f, &io), item.expected());
+        let payload = match kind {
+            Kind::Dispatch => format!("! cafleet member exec-run {}", item.id),
+            Kind::Resume => format!(
+                "[cafleet] exec {} finished with exit 7. Continue your work using its output above.",
+                item.id
+            ),
+            Kind::Preview => unreachable!(),
+        };
+        assert_eq!(
+            *io.events.borrow(),
+            vec![
+                Event::Capture(MEMBER_PANE.into()),
+                Event::Capture(MEMBER_PANE.into()),
+                Event::AutomaticPrompt(MEMBER_PANE.into(), payload),
+            ]
+        );
+        assert!(item.stamp(&f.conn).is_some());
     }
 }
 

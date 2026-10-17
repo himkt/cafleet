@@ -825,6 +825,263 @@ mod tests {
         }
     }
 
+    mod automatic_transport_tests {
+        use std::rc::Rc;
+
+        use crate::delivery::PaneIo;
+        use crate::multiplexer::test_support::{Event, FakeRunner, env, run_event, sleep_event};
+        use crate::multiplexer::{
+            AnyMultiplexer, HerdrMultiplexer, Multiplexer, RunError, TmuxMultiplexer, WakeEntry,
+        };
+
+        fn fixture(backend: &str) -> (AnyMultiplexer, Rc<FakeRunner>, &'static str) {
+            let runner = FakeRunner::with_binary(backend);
+            match backend {
+                "tmux" => (
+                    AnyMultiplexer::Tmux(TmuxMultiplexer::new(
+                        runner.clone(),
+                        env(&[("TMUX", "/tmp/tmux"), ("TMUX_PANE", "%1")]),
+                    )),
+                    runner,
+                    "%5",
+                ),
+                "herdr" => (
+                    AnyMultiplexer::Herdr(HerdrMultiplexer::new(
+                        runner.clone(),
+                        env(&[("HERDR_ENV", "1")]),
+                    )),
+                    runner,
+                    "w1:p2",
+                ),
+                other => panic!("unsupported test backend: {other}"),
+            }
+        }
+
+        fn submission(
+            backend: &str,
+            pane: &str,
+            payload: &str,
+            timeout: Option<u64>,
+        ) -> Vec<Event> {
+            match backend {
+                "tmux" => vec![
+                    run_event(&["tmux", "send-keys", "-t", pane, "-l", payload], timeout),
+                    sleep_event(1.0),
+                    run_event(&["tmux", "send-keys", "-t", pane, "Enter"], timeout),
+                ],
+                "herdr" => vec![run_event(&["herdr", "pane", "run", pane, payload], timeout)],
+                other => panic!("unsupported test backend: {other}"),
+            }
+        }
+
+        #[test]
+        fn backend_automatic_prompts_submit_the_trimmed_literal_payload() {
+            for backend in ["tmux", "herdr"] {
+                let (mux, runner, pane) = fixture(backend);
+                match mux {
+                    AnyMultiplexer::Tmux(mux) => mux.send_automatic_prompt(pane, "  hello 世界  "),
+                    AnyMultiplexer::Herdr(mux) => mux.send_automatic_prompt(pane, "  hello 世界  "),
+                }
+                .unwrap();
+                assert_eq!(
+                    runner.events(),
+                    submission(backend, pane, "hello 世界", None)
+                );
+            }
+        }
+
+        #[test]
+        fn multiplexer_dispatch_and_pane_io_use_automatic_prompt_submission() {
+            for backend in ["tmux", "herdr"] {
+                for through_pane_io in [false, true] {
+                    let (mux, runner, pane) = fixture(backend);
+                    if through_pane_io {
+                        PaneIo::send_automatic_prompt(&mux, pane, "  prepared exec  ").unwrap();
+                    } else {
+                        Multiplexer::send_automatic_prompt(&mux, pane, "  prepared exec  ")
+                            .unwrap();
+                    }
+                    assert_eq!(
+                        runner.events(),
+                        submission(backend, pane, "prepared exec", None)
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn automatic_prompts_validate_before_any_terminal_operation() {
+            for backend in ["tmux", "herdr"] {
+                for (text, detail) in [
+                    ("", "text may not be empty"),
+                    (" \t ", "text may not be empty"),
+                    ("a\nb", "text may not contain newlines"),
+                    ("a\rb", "text may not contain newlines"),
+                    ("\nhello", "text may not contain newlines"),
+                    ("hello\r", "text may not contain newlines"),
+                ] {
+                    let (mux, runner, pane) = fixture(backend);
+                    let error = Multiplexer::send_automatic_prompt(&mux, pane, text).unwrap_err();
+                    assert!(error.to_string().ends_with(detail), "{error}");
+                    assert!(runner.events().is_empty());
+                }
+            }
+        }
+
+        #[test]
+        fn automatic_prompt_payload_failures_keep_backend_details_and_stop_submission() {
+            for backend in ["tmux", "herdr"] {
+                let (mux, runner, pane) = fixture(backend);
+                runner.respond(Err(RunError::Failed {
+                    stderr: "  payload lost  ".into(),
+                }));
+                let error = Multiplexer::send_automatic_prompt(&mux, pane, "hello").unwrap_err();
+                let expected = submission(backend, pane, "hello", None);
+                let Event::Run { argv, .. } = &expected[0] else {
+                    panic!("payload is first")
+                };
+                assert_eq!(
+                    error.to_string(),
+                    format!(
+                        "{backend} command failed: {}\nstderr: payload lost",
+                        argv.join(" ")
+                    )
+                );
+                assert_eq!(runner.events(), expected[..1]);
+            }
+        }
+
+        #[test]
+        fn automatic_prompt_binary_errors_preserve_the_backend_diagnostic() {
+            for backend in ["tmux", "herdr"] {
+                let (mux, runner, pane) = fixture(backend);
+                runner.respond(Err(RunError::BinaryNotFound(
+                    "missing test executable".into(),
+                )));
+                let error = Multiplexer::send_automatic_prompt(&mux, pane, "hello").unwrap_err();
+                assert_eq!(
+                    error.to_string(),
+                    format!("{backend} binary not found: missing test executable")
+                );
+                assert_eq!(
+                    runner.events(),
+                    submission(backend, pane, "hello", None)[..1]
+                );
+            }
+        }
+
+        #[test]
+        fn automatic_tmux_prompt_enter_failure_reports_the_command_after_one_payload() {
+            let (mux, runner, pane) = fixture("tmux");
+            runner.respond(Ok(String::new()));
+            runner.respond(Err(RunError::Failed {
+                stderr: "enter lost".into(),
+            }));
+            let error = Multiplexer::send_automatic_prompt(&mux, pane, "hello").unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                "tmux command failed: tmux send-keys -t %5 Enter\nstderr: enter lost"
+            );
+            assert_eq!(runner.events(), submission("tmux", pane, "hello", None));
+        }
+
+        #[test]
+        fn prepared_triggers_dispatch_only_the_prepared_payload() {
+            for backend in ["tmux", "herdr"] {
+                for through_pane_io in [false, true] {
+                    let (mux, runner, pane) = fixture(backend);
+                    let payload = "[cafleet] prepared trigger 世界";
+                    let sent = if through_pane_io {
+                        PaneIo::send_automatic_trigger(&mux, pane, payload)
+                    } else {
+                        Multiplexer::send_automatic_trigger(&mux, pane, payload)
+                    };
+                    assert!(sent);
+                    assert_eq!(runner.events(), submission(backend, pane, payload, Some(5)));
+                }
+            }
+        }
+
+        #[test]
+        fn poll_and_wake_helpers_dispatch_unchanged_payloads() {
+            for backend in ["tmux", "herdr"] {
+                let (mux, runner, pane) = fixture(backend);
+                assert!(Multiplexer::send_poll_trigger(&mux, pane, 14));
+                assert_eq!(
+                    runner.events(),
+                    submission(
+                        backend,
+                        pane,
+                        "cafleet message poll 14 — then resume your work if something was still running.",
+                        Some(5)
+                    )
+                );
+
+                let (mux, runner, pane) = fixture(backend);
+                let members = [WakeEntry {
+                    member_id: 4,
+                    name: "worker",
+                    coding_agent: "codex",
+                    pending_count: 2,
+                }];
+                let director = WakeEntry {
+                    member_id: 2,
+                    name: "Director",
+                    coding_agent: "claude",
+                    pending_count: 1,
+                };
+                assert!(
+                    Multiplexer::send_wake_entries(&mux, pane, 3, &members, &director).unwrap()
+                );
+                let payload = "[cafleet] tick: fleet 3 — health-check your 1 member: 4 (worker; coding_agent=codex; unacked=2). Director: 2 (Director; coding_agent=claude; unacked=1). Follow your monitor role protocol. Resume your work if something was still running.";
+                assert_eq!(runner.events(), submission(backend, pane, payload, Some(5)));
+            }
+        }
+
+        #[test]
+        fn preview_dispatch_preserves_folded_payload_and_submit_delay() {
+            for backend in ["tmux", "herdr"] {
+                let (mux, runner, pane) = fixture(backend);
+                Multiplexer::send_inline_preview(
+                    &mux,
+                    pane,
+                    5,
+                    2,
+                    "2026-10-17T00:00:00+00:00",
+                    "a\r\nb\nc\rd",
+                    None,
+                )
+                .unwrap();
+                let payload = "[cafleet msg 5 from 2 2026-10-17T00:00:00+00:00]\na⏎b⏎c⏎d";
+                let expected = match backend {
+                    "tmux" => submission(backend, pane, payload, Some(5)),
+                    "herdr" => vec![
+                        run_event(&["herdr", "pane", "send-text", pane, payload], Some(5)),
+                        sleep_event(1.0),
+                        run_event(&["herdr", "pane", "send-keys", pane, "enter"], Some(5)),
+                    ],
+                    other => panic!("unsupported test backend: {other}"),
+                };
+                assert_eq!(runner.events(), expected);
+            }
+        }
+
+        #[test]
+        fn prepared_trigger_failures_attempt_the_payload_once() {
+            for backend in ["tmux", "herdr"] {
+                let (mux, runner, pane) = fixture(backend);
+                runner.respond(Err(RunError::Failed {
+                    stderr: "transport lost".into(),
+                }));
+                assert!(!Multiplexer::send_automatic_trigger(&mux, pane, "prepared"));
+                assert_eq!(
+                    runner.events(),
+                    submission(backend, pane, "prepared", Some(5))[..1]
+                );
+            }
+        }
+    }
+
     mod any_multiplexer_inline_preview_tests {
         use crate::multiplexer::test_support::{FakeRunner, env};
         use crate::multiplexer::{AnyMultiplexer, HerdrMultiplexer, Multiplexer, TmuxMultiplexer};
