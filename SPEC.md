@@ -2821,10 +2821,28 @@ pub trait PaneIo {
     fn send_inline_preview(&self, pane_id: &str, message_id: i64, sender_id: i64,
                            ts: &str, text: &str) -> Result<(), String>;
     fn send_automatic_prompt(&self, pane_id: &str, text: &str) -> Result<(), String>;
+    fn send_automatic_trigger(&self, pane_id: &str, payload: &str) -> bool;
 }
 
 pub fn deliver_pane(conn: &mut Connection, io: &dyn PaneIo, settings: &Settings,
-                    member_id: i64, now: DateTime<Utc>) -> Result<PaneOutcome, CafleetError>
+                    member_id: i64, clock: &dyn Clock) -> Result<PaneOutcome, CafleetError>;
+
+pub trait Clock {
+    fn utc_now(&self) -> DateTime<Utc>;
+    fn monotonic_now(&self) -> std::time::Instant;
+}
+pub struct SystemClock;
+
+pub fn claim_automatic_pane(conn: &mut Connection, member_id: i64, clock: &dyn Clock)
+    -> Result<Option<PaneClaim>, CafleetError>;
+pub fn validate_automatic_claim(tx: &rusqlite::Transaction<'_>, claim: &PaneClaim, clock: &dyn Clock)
+    -> Result<bool, CafleetError>;
+pub fn observe_pane(io: &dyn PaneIo, pane_id: &str, coding_agent: &str) -> Result<(), HoldReason>;
+pub fn claim_and_recheck(conn: &mut Connection, io: &dyn PaneIo, clock: &dyn Clock, target: &PaneTarget)
+    -> Result<Result<PaneClaim, HoldReason>, CafleetError>;
+pub enum PingOutcome { Sent, Held(HoldReason) }
+pub fn ping_pane(conn: &mut Connection, io: &dyn PaneIo, clock: &dyn Clock, target: &PaneTarget)
+    -> Result<PingOutcome, CafleetError>;
 
 pub enum PaneOutcome { Fired { item: Item }, Held(HoldReason), Idle }
 pub enum Item { Preview { message_id: i64 }, ExecDispatch { exec_id: i64 }, ExecResume { exec_id: i64 } }
@@ -2873,6 +2891,17 @@ the diagnostic and leaves the wake due.
 
 Automatic orchestration accepts an injectable clock exposing fresh UTC and
 monotonic time, so capture duration and database waits are observable in tests.
+`Clock` and `SystemClock` live in the time module; production passes
+`SystemClock`. `PaneClaim` is opaque and retains member identity, exact stored
+timestamp, claimed UTC and monotonic acquisition instant. The broker exposes
+the claim/validation APIs; conditional item stamps accept `&Connection` and
+participate in the caller's immediate transaction. `observe_pane` returns
+`Ok(())` only for `Finished`; `claim_and_recheck` acquires a receipt and makes
+the final observation after the caller's initial safe observation. Ping maps
+capture failure to its existing CLI error. The shared prepared-payload
+`send_automatic_trigger` operation exists on both `PaneIo` and `Multiplexer`;
+poll/wake conveniences use the same backend helper, with payload rendering
+and validation completed before observation.
 
 **Pane claim.** Automatic receipt acquisition starts monotonic measurement
 immediately before the conditional claim update, counting database wait time.
@@ -2937,9 +2966,11 @@ of `AgentStateAware` native status.
   `started_at` as the baseline: parsable → due iff `now − started_at`, in
   whole seconds, is `>= wake_interval_seconds`; `NULL` or unparsable →
   immediately due.
-- **`monitor_tick(fleet_id, now) -> CONTINUE | STOP | MUX_UNREACHABLE`** —
+- **`monitor_tick(fleet_id, clock) -> CONTINUE | STOP | MUX_UNREACHABLE`** —
   one tick: heartbeat → fleet liveness → delivery pass → wake schedule. Takes
-  no interval parameter — each pass re-reads
+  `clock: &dyn Clock` and derives tick time from `clock.utc_now()`, sharing
+  that clock with automatic delivery and wake checks. Production passes
+  `SystemClock`. It takes no interval parameter — each pass re-reads
   `wake_interval_seconds` from the fleet's runtime row.
 - **`run_monitor_loop(fleet_id, tick_seconds, wake_interval_seconds)`** —
   foreground driver: multiplexer probe → claim slot → install signal handlers
@@ -3001,7 +3032,7 @@ keystroked exit 0 without a loop and without a multiplexer.
 cafleet command is being run stays down until the next command that leaves
 work owed restarts it.
 
-#### `monitor_tick(fleet_id, now)`
+#### `monitor_tick(fleet_id, clock)`
 
 One tick, steps in order:
 
@@ -3136,7 +3167,7 @@ artifact (no PID file); identity throughout is the OS process id.
    `wake_interval_seconds` from the restart. Retain ownership for cleanup before continuing.
 3. **Install signal handlers** for SIGTERM and SIGINT; each flips the shared stop
    flag to true (the handler is minimal — just a flag flip). Register `SIGHUP` to a no-op handler so a closing terminal does not stop the loop. Retain each successful registration. After the handlers are installed, write and flush `monitor loop started (fleet <fleet_id>, tick <tick>s, pid <pid>)` to stdout before the first tick. Registration, startup-write or startup-flush failure enters cleanup; write and flush errors are `stdout write failed: <error>` and `stdout flush failed: <error>`.
-4. **Loop** while the stop flag is false: if `monitor_tick(fleet_id, now)`
+4. **Loop** while the stop flag is false: if `monitor_tick(fleet_id, &SystemClock)`
    (each pass stamps `now` fresh as tz-aware UTC)
    returns `STOP` → break; else call `interruptible_sleep(tick_seconds)`. The
    driver counts consecutive ticks that return `MUX_UNREACHABLE`; at
