@@ -235,6 +235,218 @@ fn unsafe_observations() -> Vec<(Result<String, String>, HoldReason)> {
     ]
 }
 
+fn synthesized_blank_row_composer(agent: &str, extra_rows: usize) -> (String, String) {
+    assert!(extra_rows > 0);
+    let source = match agent {
+        "claude" => include_str!("fixtures/pane_state/claude-herdr-runtime.json"),
+        "opencode" => include_str!("fixtures/pane_state/opencode-unobstructed.json"),
+        other => panic!("unsupported blank-row fixture agent: {other}"),
+    };
+    let fixtures: Vec<serde_json::Value> = serde_json::from_str(source).unwrap();
+    let empty = fixtures
+        .iter()
+        .find(|entry| entry["state"] == "empty")
+        .unwrap()["content"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let bound = usize::try_from(DELIVERY_CAPTURE_LINES).unwrap();
+    let bounded = |rows: &[String]| rows[rows.len().saturating_sub(bound)..].join("\n");
+    let mut rows: Vec<String> = empty.lines().map(str::to_string).collect();
+    let baseline = bounded(&rows);
+    assert_eq!(
+        cafleet::pane_state::classify(agent, &baseline),
+        cafleet::pane_state::PaneState::Finished
+    );
+    let (insertion, blank) = match agent {
+        "claude" => (rows.iter().rposition(|row| row == "❯").unwrap() + 1, ""),
+        "opencode" => {
+            let model = rows
+                .iter()
+                .rposition(|row| row.starts_with("  ┃  ") && row.ends_with(" OpenCode"))
+                .unwrap();
+            assert_eq!(&rows[model - 3..model], &["  ┃", "  ┃", "  ┃"]);
+            (model, "  ┃")
+        }
+        other => panic!("unsupported blank-row fixture agent: {other}"),
+    };
+    rows.splice(
+        insertion..insertion,
+        std::iter::repeat_n(blank.to_string(), extra_rows),
+    );
+    (baseline, bounded(&rows))
+}
+
+fn blank_row_observations(
+    baseline: String,
+    draft: String,
+    final_observation: bool,
+) -> Vec<Result<String, String>> {
+    if final_observation {
+        vec![Ok(baseline), Ok(draft)]
+    } else {
+        vec![Ok(draft.clone()), Ok(draft)]
+    }
+}
+
+fn set_target_agent(f: &Fixture, member_id: i64, agent: &str) {
+    assert_eq!(
+        f.conn
+            .execute(
+                "UPDATE member_placements SET coding_agent=?1 WHERE member_id=?2",
+                params![agent, member_id]
+            )
+            .unwrap(),
+        1
+    );
+    assert_eq!(f.target(member_id).coding_agent, agent);
+}
+
+fn check_blank_row_owed_items(agent: &str, final_observation: bool) {
+    for kind in KINDS {
+        for extra_rows in [1, 2, 5] {
+            let (baseline, draft) = synthesized_blank_row_composer(agent, extra_rows);
+            let mut f = Fixture::new();
+            set_target_agent(&f, f.member_id, agent);
+            let item = f.item(kind);
+            let io = FakeIo::new();
+            io.queue(
+                MEMBER_PANE,
+                blank_row_observations(baseline, draft, final_observation),
+            );
+            held(deliver(&mut f, &io), HoldReason::Draft);
+            assert_no_send(&io, item, &f.conn);
+            assert_eq!(
+                io.captures_for(MEMBER_PANE),
+                if final_observation { 2 } else { 1 }
+            );
+            assert_eq!(
+                claim_stamp(&f.conn, f.member_id).is_some(),
+                final_observation
+            );
+        }
+    }
+}
+
+fn check_blank_row_ping(agent: &str, final_observation: bool) {
+    for extra_rows in [1, 2, 5] {
+        let (baseline, draft) = synthesized_blank_row_composer(agent, extra_rows);
+        let mut f = Fixture::new();
+        set_target_agent(&f, f.member_id, agent);
+        let item = f.item(Kind::Preview);
+        let io = FakeIo::new();
+        io.queue(
+            MEMBER_PANE,
+            blank_row_observations(baseline, draft, final_observation),
+        );
+        ping_held(ping(&mut f, &io).unwrap(), HoldReason::Draft);
+        assert_no_send(&io, item, &f.conn);
+        assert_eq!(
+            io.captures_for(MEMBER_PANE),
+            if final_observation { 2 } else { 1 }
+        );
+        assert_eq!(
+            claim_stamp(&f.conn, f.member_id).is_some(),
+            final_observation
+        );
+    }
+}
+
+fn check_blank_row_wakes(agent: &str, final_observation: bool) {
+    for requested in [false, true] {
+        for extra_rows in [1, 2, 5] {
+            let (baseline, draft) = synthesized_blank_row_composer(agent, extra_rows);
+            let mut f = Fixture::new();
+            set_target_agent(&f, f.monitor_id, agent);
+            f.start_monitor(requested);
+            let before = wake_stamps(&f);
+            let io = FakeIo::new();
+            io.queue(
+                MONITOR_PANE,
+                blank_row_observations(baseline, draft, final_observation),
+            );
+            f.tick(&io);
+            assert!(io.sent().is_empty());
+            assert_eq!(wake_stamps(&f), before);
+            assert_eq!(
+                io.captures_for(MONITOR_PANE),
+                if final_observation { 2 } else { 1 }
+            );
+            assert_eq!(
+                claim_stamp(&f.conn, f.monitor_id).is_some(),
+                final_observation
+            );
+            assert_eq!(
+                broker::read_monitor_runtime(&f.conn, f.fleet_id)
+                    .unwrap()
+                    .unwrap()
+                    .last_tick_at,
+                Some(format_utc(f.clock.utc_now()))
+            );
+        }
+    }
+}
+
+#[test]
+fn claude_blank_rows_hold_every_owed_kind_at_initial_observation() {
+    check_blank_row_owed_items("claude", false);
+}
+
+#[test]
+fn claude_blank_rows_hold_every_owed_kind_at_final_observation() {
+    check_blank_row_owed_items("claude", true);
+}
+
+#[test]
+fn opencode_blank_rows_hold_every_owed_kind_at_initial_observation() {
+    check_blank_row_owed_items("opencode", false);
+}
+
+#[test]
+fn opencode_blank_rows_hold_every_owed_kind_at_final_observation() {
+    check_blank_row_owed_items("opencode", true);
+}
+
+#[test]
+fn claude_blank_rows_hold_ping_at_initial_observation() {
+    check_blank_row_ping("claude", false);
+}
+
+#[test]
+fn claude_blank_rows_hold_ping_at_final_observation() {
+    check_blank_row_ping("claude", true);
+}
+
+#[test]
+fn opencode_blank_rows_hold_ping_at_initial_observation() {
+    check_blank_row_ping("opencode", false);
+}
+
+#[test]
+fn opencode_blank_rows_hold_ping_at_final_observation() {
+    check_blank_row_ping("opencode", true);
+}
+
+#[test]
+fn claude_blank_rows_hold_scheduled_and_requested_wakes_at_initial_observation() {
+    check_blank_row_wakes("claude", false);
+}
+
+#[test]
+fn claude_blank_rows_hold_scheduled_and_requested_wakes_at_final_observation() {
+    check_blank_row_wakes("claude", true);
+}
+
+#[test]
+fn opencode_blank_rows_hold_scheduled_and_requested_wakes_at_initial_observation() {
+    check_blank_row_wakes("opencode", false);
+}
+
+#[test]
+fn opencode_blank_rows_hold_scheduled_and_requested_wakes_at_final_observation() {
+    check_blank_row_wakes("opencode", true);
+}
+
 fn settings() -> Settings {
     Settings::from_lookup(|name| {
         (name == "CAFLEET_DATABASE_URL").then(|| "sqlite:///unused.db".to_string())
