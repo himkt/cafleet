@@ -2790,7 +2790,10 @@ Apply precedence `AwaitingUser`, `Working`, `Draft`, `Finished`, `Unclassified`:
 | `Unclassified` | Incomplete, unsupported, ambiguous, truncated or unrecognized layout |
 
 Inspect every composer row, including blank-first-row continuations and
-distinguishable whitespace-only input. Recognize placeholders only within the
+distinguishable whitespace-only input. Claude's proven empty composer has one
+input row; OpenCode's has exactly three bare composer rows. Additional blank
+rows in a complete recognized composer are `Draft`; clipped or incomplete
+boundaries remain `Unclassified`. Recognize placeholders only within the
 complete layout. Historical prompt lines establish no current idleness;
 unexpected footers, missing boundaries and decorations with unproven emptiness
 hold. Native lifecycle status alone proves no composer emptiness.

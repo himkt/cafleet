@@ -167,9 +167,7 @@ fn claude_composer(lines: &[&str]) -> Option<Composer> {
     {
         return None;
     }
-    let state = if !matches!(*first, "❯" | "❯\u{a0}")
-        || continuation.iter().any(|line| !line.is_empty())
-    {
+    let state = if !matches!(*first, "❯" | "❯\u{a0}") || !continuation.is_empty() {
         PaneState::Draft
     } else if idle_footer {
         PaneState::Finished
@@ -257,7 +255,11 @@ fn opencode_composer(lines: &[&str]) -> Option<Composer> {
     if rows.len() < 3 || rows.first()? != &"  ┃" || rows.last()? != &"  ┃" {
         return None;
     }
-    let mut state = PaneState::Finished;
+    let mut state = if rows.len() == 3 {
+        PaneState::Finished
+    } else {
+        PaneState::Draft
+    };
     for row in rows {
         let suffix = row.strip_prefix("  ┃")?;
         if !suffix.is_empty() {

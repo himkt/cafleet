@@ -348,7 +348,10 @@ and expected-state provenance. Blank lines and continuation rows are preserved.
 | unclassified | Unsupported, incomplete, truncated, ambiguous or unrecognized layout | Hold |
 
 Every composer row participates in the empty test, including a blank first row
-with later content and distinguishable whitespace-only input. Placeholder text
+with later content and distinguishable whitespace-only input. Claude's proven
+empty composer has one input row; OpenCode's has exactly three bare composer
+rows. Additional blank rows in a complete recognized composer are draft;
+clipped or incomplete boundaries remain unclassified. Placeholder text
 qualifies only within a recognized layout. Historical prompt lines establish
 no current idleness. Missing boundaries, unexpected footers, attachments or
 decorations whose emptiness is unproven hold. Native agent status alone proves
