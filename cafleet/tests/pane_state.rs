@@ -65,6 +65,9 @@ fn runtime_capture(agent: &str, state: &str) -> String {
     let source = match agent {
         "claude" => include_str!("fixtures/pane_state/claude-herdr-runtime.json"),
         "claude-overlay" => include_str!("fixtures/pane_state/claude-jump-overlay.json"),
+        "claude-visible-overlay" => {
+            include_str!("fixtures/pane_state/claude-visible-new-message-separator.json")
+        }
         "codex" => include_str!("fixtures/pane_state/codex-herdr-runtime.json"),
         "codex-monitor" => include_str!("fixtures/pane_state/codex-monitor-runtime.json"),
         "opencode" => include_str!("fixtures/pane_state/opencode-herdr-runtime.json"),
@@ -103,6 +106,15 @@ fn runtime_claude_jump_overlay_in_submitted_row_keeps_empty_composer_unclassifie
     assert_state(
         "claude",
         &runtime_capture("claude-overlay", "jump-to-bottom-submitted-row"),
+        PaneState::Unclassified,
+    );
+}
+
+#[test]
+fn visible_claude_numbered_new_message_separator_keeps_empty_composer_unclassified() {
+    assert_state(
+        "claude",
+        &runtime_capture("claude-visible-overlay", "numbered-new-message-separator"),
         PaneState::Unclassified,
     );
 }
