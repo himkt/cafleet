@@ -287,6 +287,7 @@ fn describe(outcome: &PaneOutcome) -> String {
             HoldReason::ResumeGrace => "held resume_grace".to_string(),
             HoldReason::AwaitingUser => "held awaiting_user".to_string(),
             HoldReason::Working => "held working".to_string(),
+            HoldReason::Draft => "held draft".to_string(),
             HoldReason::Unclassified => "held unclassified".to_string(),
             HoldReason::CaptureFailed(error) => format!("held capture_failed: {error}"),
             HoldReason::Busy => "held busy".to_string(),
