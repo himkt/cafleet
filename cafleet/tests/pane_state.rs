@@ -92,6 +92,100 @@ fn runtime_capture(agent: &str, state: &str) -> String {
     lines[lines.len().saturating_sub(window)..].join("\n")
 }
 
+fn empty_capture_with_added_composer_rows(agent: &str, extra_rows: usize) -> String {
+    assert!(extra_rows > 0);
+    let (content, row) = match agent {
+        "claude" => (runtime_capture("claude", "empty"), ""),
+        "opencode" => (runtime_capture("opencode-unobstructed", "empty"), "  ┃"),
+        _ => panic!("no evidenced empty composer row shape for {agent}"),
+    };
+    let mut lines = content.lines().map(str::to_string).collect::<Vec<_>>();
+    let insertion = match agent {
+        "claude" => {
+            lines
+                .iter()
+                .rposition(|line| line.starts_with('❯'))
+                .expect("the observed Claude composer contains its prompt")
+                + 1
+        }
+        "opencode" => lines
+            .iter()
+            .rposition(|line| line == "  ┃  Cafleet · Big Pickle OpenCode")
+            .expect("the observed OpenCode composer contains its model row"),
+        _ => unreachable!("the agent has an evidenced row shape"),
+    };
+    lines.splice(
+        insertion..insertion,
+        std::iter::repeat_n(row.to_string(), extra_rows),
+    );
+    lines.join("\n")
+}
+
+#[test]
+fn claude_observable_added_empty_continuation_rows_are_draft() {
+    for extra_rows in [1, 2, 5] {
+        assert_state(
+            "claude",
+            &empty_capture_with_added_composer_rows("claude", extra_rows),
+            PaneState::Draft,
+        );
+    }
+}
+
+#[test]
+fn opencode_observable_added_blank_composer_rows_are_draft() {
+    for extra_rows in [1, 2, 5] {
+        assert_state(
+            "opencode",
+            &empty_capture_with_added_composer_rows("opencode", extra_rows),
+            PaneState::Draft,
+        );
+    }
+}
+
+#[test]
+fn added_blank_composer_rows_preserve_current_permission_and_activity_precedence() {
+    for (agent, _, permission, working) in AGENT_CUES {
+        if agent == "codex" {
+            continue;
+        }
+        let content = empty_capture_with_added_composer_rows(agent, 1);
+        let mut lines = content.lines().map(str::to_string).collect::<Vec<_>>();
+        let top = match agent {
+            "claude" => lines
+                .iter()
+                .rposition(|line| line.contains("CaptureProbe-Claude ─"))
+                .expect("the observed Claude composer retains its top border"),
+            "opencode" => {
+                let model = lines
+                    .iter()
+                    .rposition(|line| line == "  ┃  Cafleet · Big Pickle OpenCode")
+                    .expect("the observed OpenCode composer retains its model row");
+                lines[..model]
+                    .iter()
+                    .rposition(|line| !line.starts_with("  ┃"))
+                    .expect("the observed OpenCode composer retains its separator")
+            }
+            _ => unreachable!("this regression covers the affected composer layouts"),
+        };
+        lines.insert(top, working.to_string());
+        assert_state(agent, &lines.join("\n"), PaneState::Working);
+        lines.insert(top + 1, permission.to_string());
+        assert_state(agent, &lines.join("\n"), PaneState::AwaitingUser);
+    }
+}
+
+#[test]
+fn added_blank_composer_rows_beyond_the_capture_window_are_unclassified() {
+    let window = usize::try_from(DELIVERY_CAPTURE_LINES).expect("capture line bound is positive");
+    for agent in ["claude", "opencode"] {
+        let content = empty_capture_with_added_composer_rows(agent, window);
+        let lines = content.lines().collect::<Vec<_>>();
+        let truncated = lines[lines.len() - window..].join("\n");
+        assert_state(agent, &truncated, PaneState::Unclassified);
+    }
+}
+
 #[test]
 fn runtime_claude_complete_empty_composer_is_finished() {
     assert_state(
