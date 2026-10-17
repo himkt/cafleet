@@ -64,7 +64,8 @@ pub fn classify(coding_agent: &str, content: &str) -> PaneState {
     let lines: Vec<&str> = content.lines().collect();
     let composer = match coding_agent {
         "claude" => claude_composer(&lines),
-        "codex" | "opencode" => None,
+        "codex" => codex_composer(&lines),
+        "opencode" => None,
         _ => unreachable!("the coding agent has a cue table"),
     };
     let transcript_end = match &composer {
@@ -87,7 +88,7 @@ pub fn classify(coding_agent: &str, content: &str) -> PaneState {
         PaneState::Unclassified
     } else {
         match composer {
-            Some(composer) => composer.state(),
+            Some(composer) => composer.state,
             None => PaneState::Unclassified,
         }
     }
@@ -115,30 +116,12 @@ static CLAUDE_USAGE_FOOTER: LazyLock<Regex> = LazyLock::new(|| {
         .expect("the usage footer pattern is valid")
 });
 
-struct ClaudeComposer<'a> {
+struct Composer {
     top: usize,
-    rows: &'a [&'a str],
-    idle_footer: bool,
+    state: PaneState,
 }
 
-impl ClaudeComposer<'_> {
-    fn state(&self) -> PaneState {
-        let (first, continuation) = self
-            .rows
-            .split_first()
-            .expect("a recognized composer contains its prompt row");
-        if !matches!(*first, "❯" | "❯\u{a0}") || continuation.iter().any(|line| !line.is_empty())
-        {
-            PaneState::Draft
-        } else if self.idle_footer {
-            PaneState::Finished
-        } else {
-            PaneState::Unclassified
-        }
-    }
-}
-
-fn claude_composer<'a>(lines: &'a [&'a str]) -> Option<ClaudeComposer<'a>> {
+fn claude_composer(lines: &[&str]) -> Option<Composer> {
     let idle_footer = matches!(
         *lines.last()?,
         "  ⏵⏵ don't ask on (shift+tab to cycle)"
@@ -173,11 +156,57 @@ fn claude_composer<'a>(lines: &'a [&'a str]) -> Option<ClaudeComposer<'a>> {
     {
         return None;
     }
-    Some(ClaudeComposer {
-        top,
-        rows,
-        idle_footer,
-    })
+    let state = if !matches!(*first, "❯" | "❯\u{a0}")
+        || continuation.iter().any(|line| !line.is_empty())
+    {
+        PaneState::Draft
+    } else if idle_footer {
+        PaneState::Finished
+    } else {
+        PaneState::Unclassified
+    };
+    Some(Composer { top, state })
+}
+
+static CODEX_MODEL_FOOTER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^  \S+ \S+ · \S[^·\r\n]* · \S[^·\r\n]* · Context [0-9]+% used · Fast (on|off)$")
+        .expect("the Codex model footer pattern is valid")
+});
+
+fn codex_composer(lines: &[&str]) -> Option<Composer> {
+    let footer = *lines.last()?;
+    let has_hint = matches!(footer, "  ? for shortcuts" | "  esc latest");
+    let model_index = lines.len().checked_sub(if has_hint { 2 } else { 1 })?;
+    if !CODEX_MODEL_FOOTER.is_match(lines[model_index]) {
+        return None;
+    }
+    let composer_end = model_index.checked_sub(1)?;
+    if !lines[composer_end].is_empty() {
+        return None;
+    }
+    let top = lines[..composer_end]
+        .iter()
+        .rposition(|line| line.starts_with('›'))?;
+    if top == 0 || !lines[top - 1].is_empty() {
+        return None;
+    }
+    let (first, continuation) = lines[top..composer_end].split_first()?;
+    if !(*first == "›" || first.starts_with("› "))
+        || continuation
+            .iter()
+            .any(|line| !line.is_empty() && !line.starts_with("  "))
+    {
+        return None;
+    }
+    let state = if *first == "› Ask Codex to do anything"
+        && continuation.is_empty()
+        && footer == "  ? for shortcuts"
+    {
+        PaneState::Finished
+    } else {
+        PaneState::Draft
+    };
+    Some(Composer { top, state })
 }
 
 fn matches_in_region(cues: &[Regex], lines: &[&str], region_lines: usize) -> bool {
