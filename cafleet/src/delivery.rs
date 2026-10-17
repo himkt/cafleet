@@ -22,7 +22,6 @@ pub trait PaneIo {
         sender_id: i64,
         ts: &str,
         text: &str,
-        note: Option<&str>,
     ) -> Result<(), String>;
     fn send_automatic_prompt(&self, pane_id: &str, text: &str) -> Result<(), String>;
     fn send_automatic_trigger(&self, pane_id: &str, payload: &str) -> bool;
@@ -30,14 +29,14 @@ pub trait PaneIo {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PaneOutcome {
-    Fired { item: Item, forced: bool },
+    Fired { item: Item },
     Held(HoldReason),
     Idle,
 }
 
 impl PaneOutcome {
     pub fn fired_preview(&self, message_id: i64) -> bool {
-        matches!(self, PaneOutcome::Fired { item: Item::Preview { message_id: fired }, .. } if *fired == message_id)
+        matches!(self, PaneOutcome::Fired { item: Item::Preview { message_id: fired } } if *fired == message_id)
     }
 }
 
@@ -221,7 +220,6 @@ impl PreparedDelivery<'_> {
                 message.from_member_id,
                 &message.created_at,
                 text,
-                None,
             ),
         }
     }
@@ -278,10 +276,7 @@ pub fn deliver_pane(
     }
     tx.commit().map_err(db_err)?;
     match prepared.send(io, &target.pane_id) {
-        Ok(()) => Ok(PaneOutcome::Fired {
-            item: owed.item(),
-            forced: false,
-        }),
+        Ok(()) => Ok(PaneOutcome::Fired { item: owed.item() }),
         Err(error) => {
             owed.clear_stamp(conn)?;
             Ok(PaneOutcome::Held(HoldReason::KeystrokeFailed(error)))

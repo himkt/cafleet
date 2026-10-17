@@ -241,22 +241,14 @@ pub fn build_wake_payload_from_entries(
     ))
 }
 
-/// The inline-preview payload shared by both backends: the header line, the
-/// text with its line breaks folded to `⏎`, and the optional broker note line.
 pub(crate) fn inline_preview_payload(
     message_id: i64,
     sender_id: i64,
     ts: &str,
     text: &str,
-    note: Option<&str>,
 ) -> String {
     let sanitized = text.replace("\r\n", "⏎").replace(['\n', '\r'], "⏎");
-    let mut payload = format!("[cafleet msg {message_id} from {sender_id} {ts}]\n{sanitized}");
-    if let Some(note) = note {
-        payload.push('\n');
-        payload.push_str(note);
-    }
-    payload
+    format!("[cafleet msg {message_id} from {sender_id} {ts}]\n{sanitized}")
 }
 
 /// The pane-hosting backend surface (SPEC §6.5). `agent_status` is the
@@ -290,7 +282,6 @@ pub trait Multiplexer {
         sender_id: i64,
         ts: &str,
         text: &str,
-        note: Option<&str>,
     ) -> Result<(), MultiplexerError>;
     fn send_prompt(&self, target_pane_id: &str, text: &str) -> Result<(), MultiplexerError>;
     fn send_automatic_prompt(
@@ -375,9 +366,8 @@ impl Multiplexer for AnyMultiplexer {
         sender_id: i64,
         ts: &str,
         text: &str,
-        note: Option<&str>,
     ) -> Result<(), MultiplexerError> {
-        dispatch!(self, mux => mux.send_inline_preview(target_pane_id, message_id, sender_id, ts, text, note))
+        dispatch!(self, mux => mux.send_inline_preview(target_pane_id, message_id, sender_id, ts, text))
     }
 
     fn send_prompt(&self, target_pane_id: &str, text: &str) -> Result<(), MultiplexerError> {
@@ -471,17 +461,8 @@ macro_rules! implement_backend {
                 sender_id: i64,
                 ts: &str,
                 text: &str,
-                note: Option<&str>,
             ) -> Result<(), MultiplexerError> {
-                $backend::send_inline_preview(
-                    self,
-                    target_pane_id,
-                    message_id,
-                    sender_id,
-                    ts,
-                    text,
-                    note,
-                )
+                $backend::send_inline_preview(self, target_pane_id, message_id, sender_id, ts, text)
             }
 
             fn send_prompt(
@@ -546,9 +527,8 @@ impl<M: Multiplexer> PaneIo for M {
         sender_id: i64,
         ts: &str,
         text: &str,
-        note: Option<&str>,
     ) -> Result<(), String> {
-        Multiplexer::send_inline_preview(self, pane_id, message_id, sender_id, ts, text, note)
+        Multiplexer::send_inline_preview(self, pane_id, message_id, sender_id, ts, text)
             .map_err(|error| error.to_string())
     }
 

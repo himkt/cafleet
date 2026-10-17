@@ -410,12 +410,11 @@ impl HerdrMultiplexer {
         sender_id: i64,
         ts: &str,
         text: &str,
-        note: Option<&str>,
     ) -> Result<(), MultiplexerError> {
         if !self.runner.binary_exists("herdr") {
             return Err(MultiplexerError::new("herdr binary not found on PATH"));
         }
-        let payload = super::inline_preview_payload(message_id, sender_id, ts, text, note);
+        let payload = super::inline_preview_payload(message_id, sender_id, ts, text);
         self.run(
             &herdr_argv(&["herdr", "pane", "send-text", target_pane_id, &payload]),
             Some(5),

@@ -8,7 +8,6 @@ pub struct Settings {
     pub max_text_len: usize,
     pub multiplexer: Option<String>,
     pub monitor_wake_interval: i64,
-    pub delivery_hold_timeout: i64,
 }
 
 impl Settings {
@@ -42,11 +41,6 @@ impl Settings {
                 &lookup,
                 "CAFLEET_MONITOR_WAKE_INTERVAL",
                 600,
-            )?,
-            delivery_hold_timeout: parse_non_negative(
-                &lookup,
-                "CAFLEET_DELIVERY_HOLD_TIMEOUT",
-                300,
             )?,
         })
     }

@@ -4026,6 +4026,9 @@ The foundational migrations are:
    marking existing messages as settled. The immutable migration file defines
    its applied SQL; §5.2 defines the current retained delivery columns and exec
    schema after the complete migration chain.
+10. `V10__composer_safe_delivery.sql` establishes the current placement schema
+    in §5.2 while preserving retained placement values, application records,
+    indexes, foreign keys and prior migration history.
 
 There are no CHECK constraints. Future schema changes are hand-written
 numbered files `V<N>__<slug>.sql` appended to the chain; the chain stays
@@ -4060,7 +4063,7 @@ the same diagnostic; otherwise preserve the original migration error. On
 success print `Created <db_file> and applied migrations
 to head (<N>).` when no version was recorded before the run (a fresh or
 table-less DB), else `Upgraded from <M> to <N>.`. `<M>` / `<N>` are the
-integer migration versions (the head is `9`). The driver's
+integer migration versions, with the head defined by the embedded chain. The driver's
 connection is closed when the command finishes (success or failure).
 
 **Duplicate-monitor recovery.** Preserve the diagnostic's fleet/member IDs and use this complete operator procedure:

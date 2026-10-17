@@ -575,7 +575,7 @@ fn exec(
     let outcome = deliver_pane(conn, &mux, settings, member_id, &SystemClock)?;
     let dispatched = matches!(
         outcome,
-        PaneOutcome::Fired { item: Item::ExecDispatch { exec_id: fired }, .. } if fired == exec_id
+        PaneOutcome::Fired { item: Item::ExecDispatch { exec_id: fired } } if fired == exec_id
     );
     ensure_monitor_loop(conn, settings, member.fleet_id).map_err(|error| {
         CafleetError::App(format!(

@@ -131,7 +131,6 @@ pub struct PaneTarget {
     pub name: String,
     pub pane_id: String,
     pub coding_agent: String,
-    pub forced_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

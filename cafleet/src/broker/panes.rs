@@ -1,6 +1,5 @@
-//! Pane keystroke state (SPEC §6.2): the pane claim, the forced-delivery and
-//! silence-notice stamps on `member_placements`, and the owed-work selections
-//! the delivery callers read.
+//! Pane keystroke state (SPEC §6.2): pane claims and silence-notice stamps on
+//! `member_placements`, and the owed-work selections the delivery callers read.
 
 use chrono::{DateTime, Duration, Utc};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
@@ -74,8 +73,7 @@ pub fn validate_automatic_claim(
         }))
 }
 
-const PANE_TARGET_SELECT: &str = "SELECT m.member_id, m.name, p.mux_pane_id, p.coding_agent, \
-            p.forced_at \
+const PANE_TARGET_SELECT: &str = "SELECT m.member_id, m.name, p.mux_pane_id, p.coding_agent \
      FROM members m JOIN member_placements p ON p.member_id=m.member_id \
      WHERE m.status='active' AND p.mux_pane_id IS NOT NULL";
 
@@ -92,7 +90,6 @@ fn map_pane_target(row: &rusqlite::Row<'_>) -> rusqlite::Result<PaneTarget> {
         name: row.get(1)?,
         pane_id: row.get(2)?,
         coding_agent: row.get(3)?,
-        forced_at: row.get(4)?,
     })
 }
 
@@ -161,15 +158,6 @@ pub fn claim_pane(
         )
         .map_err(db_err)?;
     Ok(changed == 1)
-}
-
-pub fn stamp_forced(conn: &mut Connection, member_id: i64, when: &str) -> Result<(), CafleetError> {
-    conn.execute(
-        "UPDATE member_placements SET forced_at=?1 WHERE member_id=?2",
-        params![when, member_id],
-    )
-    .map_err(db_err)?;
-    Ok(())
 }
 
 /// The ready-watchdog candidates: every active non-Director member of the

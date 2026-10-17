@@ -141,11 +141,8 @@ fn close_lost_execs(
     Ok(())
 }
 
-fn keystroke_echo(item: Item, forced: bool, member_id: i64) -> String {
+fn keystroke_echo(item: Item, member_id: i64) -> String {
     match item {
-        Item::Preview { message_id } if forced => {
-            format!("forced preview msg {message_id} member {member_id}")
-        }
         Item::Preview { message_id } => format!("preview msg {message_id} member {member_id}"),
         Item::ExecDispatch { exec_id } => format!("dispatch exec {exec_id} member {member_id}"),
         Item::ExecResume { exec_id } => format!("resume exec {exec_id} member {member_id}"),
@@ -171,7 +168,7 @@ fn deliver_owed_work(
         let at = clock.utc_now();
         let iso = format_utc(at);
         let line = match deliver_pane(conn, mux, settings, member_id, clock) {
-            Ok(PaneOutcome::Fired { item, forced }) => keystroke_echo(item, forced, member_id),
+            Ok(PaneOutcome::Fired { item }) => keystroke_echo(item, member_id),
             Ok(PaneOutcome::Held(HoldReason::CaptureFailed(error))) => {
                 format!("member {member_id} capture failed: {error}")
             }
