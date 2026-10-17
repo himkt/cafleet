@@ -83,9 +83,6 @@ impl TmuxMultiplexer {
         }
     }
 
-    /// The literal-then-Enter keystroke shape shared by every submit path:
-    /// optional `Escape` safeguard + settle, the `-l` literal payload, the
-    /// submit delay, and the trailing `Enter`.
     fn send_literal_then_enter(
         &self,
         target_pane_id: &str,
@@ -115,11 +112,11 @@ impl TmuxMultiplexer {
         )
     }
 
-    fn best_effort_send(&self, target_pane_id: &str, payload: &str, esc_first: bool) -> bool {
+    fn best_effort_send(&self, target_pane_id: &str, payload: &str) -> bool {
         if !self.runner.binary_exists("tmux") {
             return false;
         }
-        self.send_literal_then_enter(target_pane_id, payload, Some(5), false, esc_first)
+        self.send_literal_then_enter(target_pane_id, payload, Some(5), false, false)
             .is_ok()
     }
 
@@ -229,7 +226,7 @@ impl TmuxMultiplexer {
     }
 
     pub fn send_automatic_trigger(&self, target_pane_id: &str, payload: &str) -> bool {
-        self.best_effort_send(target_pane_id, payload, true)
+        self.best_effort_send(target_pane_id, payload)
     }
 
     pub fn send_wake_entries(
@@ -244,7 +241,7 @@ impl TmuxMultiplexer {
     }
 
     /// Result-returning (SPEC §6.5): the missing-binary precheck fails with
-    /// the exact PATH string, and any Escape/payload/Enter failure propagates
+    /// the exact PATH string, and any payload/Enter failure propagates
     /// as the raw error — no boolean wrapper, no retry.
     pub fn send_inline_preview(
         &self,
@@ -259,20 +256,21 @@ impl TmuxMultiplexer {
             return Err(MultiplexerError::new("tmux binary not found on PATH"));
         }
         let payload = super::inline_preview_payload(message_id, sender_id, ts, text, note);
-        self.send_literal_then_enter(target_pane_id, &payload, Some(5), false, true)
+        self.send_literal_then_enter(target_pane_id, &payload, Some(5), false, false)
     }
 
     pub fn send_prompt(&self, target_pane_id: &str, text: &str) -> Result<(), MultiplexerError> {
-        let stripped = text.trim();
-        if stripped.is_empty() {
-            return Err(MultiplexerError::new("send_prompt: text may not be empty"));
-        }
-        if text.contains('\n') || text.contains('\r') {
-            return Err(MultiplexerError::new(
-                "send_prompt: text may not contain newlines",
-            ));
-        }
+        let stripped = super::validated_prompt_text(text)?;
         self.send_literal_then_enter(target_pane_id, stripped, None, false, true)
+    }
+
+    pub fn send_automatic_prompt(
+        &self,
+        target_pane_id: &str,
+        text: &str,
+    ) -> Result<(), MultiplexerError> {
+        let stripped = super::validated_prompt_text(text)?;
+        self.send_literal_then_enter(target_pane_id, stripped, None, false, false)
     }
 
     /// Capture the last `lines` drawn lines of the pane buffer via the shared

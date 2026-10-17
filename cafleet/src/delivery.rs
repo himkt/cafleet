@@ -24,7 +24,7 @@ pub trait PaneIo {
         text: &str,
         note: Option<&str>,
     ) -> Result<(), String>;
-    fn send_prompt(&self, pane_id: &str, text: &str) -> Result<(), String>;
+    fn send_automatic_prompt(&self, pane_id: &str, text: &str) -> Result<(), String>;
     fn send_automatic_trigger(&self, pane_id: &str, payload: &str) -> bool;
 }
 
@@ -214,7 +214,7 @@ enum PreparedDelivery<'a> {
 impl PreparedDelivery<'_> {
     fn send(&self, io: &dyn PaneIo, pane_id: &str) -> Result<(), String> {
         match self {
-            Self::Prompt(text) => io.send_prompt(pane_id, text),
+            Self::Prompt(text) => io.send_automatic_prompt(pane_id, text),
             Self::Preview { message, text } => io.send_inline_preview(
                 pane_id,
                 message.message_id,

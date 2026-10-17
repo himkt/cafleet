@@ -20,6 +20,19 @@ pub use tmux::TmuxMultiplexer;
 pub(crate) const ESC_SETTLE_DELAY: f64 = 0.1;
 pub(crate) const SUBMIT_DELAY: f64 = 1.0;
 
+fn validated_prompt_text(text: &str) -> Result<&str, MultiplexerError> {
+    let stripped = text.trim();
+    if stripped.is_empty() {
+        return Err(MultiplexerError::new("send_prompt: text may not be empty"));
+    }
+    if text.contains('\n') || text.contains('\r') {
+        return Err(MultiplexerError::new(
+            "send_prompt: text may not contain newlines",
+        ));
+    }
+    Ok(stripped)
+}
+
 /// Resolved pane identity, returned by `context_discovery` (SPEC §6.5).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MultiplexerContext {
@@ -280,6 +293,11 @@ pub trait Multiplexer {
         note: Option<&str>,
     ) -> Result<(), MultiplexerError>;
     fn send_prompt(&self, target_pane_id: &str, text: &str) -> Result<(), MultiplexerError>;
+    fn send_automatic_prompt(
+        &self,
+        target_pane_id: &str,
+        text: &str,
+    ) -> Result<(), MultiplexerError>;
     fn capture_pane(&self, target_pane_id: &str, lines: i64) -> Result<String, MultiplexerError>;
     fn list_pane_ids(&self) -> Result<std::collections::BTreeSet<String>, MultiplexerError>;
     fn kill_pane(&self, target_pane_id: &str, ignore_missing: bool)
@@ -364,6 +382,14 @@ impl Multiplexer for AnyMultiplexer {
 
     fn send_prompt(&self, target_pane_id: &str, text: &str) -> Result<(), MultiplexerError> {
         dispatch!(self, mux => mux.send_prompt(target_pane_id, text))
+    }
+
+    fn send_automatic_prompt(
+        &self,
+        target_pane_id: &str,
+        text: &str,
+    ) -> Result<(), MultiplexerError> {
+        dispatch!(self, mux => mux.send_automatic_prompt(target_pane_id, text))
     }
 
     fn capture_pane(&self, target_pane_id: &str, lines: i64) -> Result<String, MultiplexerError> {
@@ -466,6 +492,14 @@ macro_rules! implement_backend {
                 $backend::send_prompt(self, target_pane_id, text)
             }
 
+            fn send_automatic_prompt(
+                &self,
+                target_pane_id: &str,
+                text: &str,
+            ) -> Result<(), MultiplexerError> {
+                $backend::send_automatic_prompt(self, target_pane_id, text)
+            }
+
             fn capture_pane(
                 &self,
                 target_pane_id: &str,
@@ -518,8 +552,8 @@ impl<M: Multiplexer> PaneIo for M {
             .map_err(|error| error.to_string())
     }
 
-    fn send_prompt(&self, pane_id: &str, text: &str) -> Result<(), String> {
-        Multiplexer::send_prompt(self, pane_id, text).map_err(|error| error.to_string())
+    fn send_automatic_prompt(&self, pane_id: &str, text: &str) -> Result<(), String> {
+        Multiplexer::send_automatic_prompt(self, pane_id, text).map_err(|error| error.to_string())
     }
 
     fn send_automatic_trigger(&self, pane_id: &str, payload: &str) -> bool {

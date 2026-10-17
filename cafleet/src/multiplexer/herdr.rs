@@ -379,7 +379,6 @@ impl HerdrMultiplexer {
 
     pub fn send_automatic_trigger(&self, target_pane_id: &str, payload: &str) -> bool {
         self.best_effort(|| {
-            self.send_esc(target_pane_id, false)?;
             self.run(
                 &herdr_argv(&["herdr", "pane", "run", target_pane_id, payload]),
                 Some(5),
@@ -402,7 +401,7 @@ impl HerdrMultiplexer {
     /// `send-text` delivers the raw 2-line payload without submitting; the
     /// single trailing enter submits the whole payload as one recipient turn.
     /// Result-returning (SPEC §6.5): the missing-binary precheck fails with
-    /// the exact PATH string, and any esc/send-text/enter failure propagates
+    /// the exact PATH string, and any send-text/enter failure propagates
     /// as the raw error — no boolean wrapper, no retry.
     pub fn send_inline_preview(
         &self,
@@ -417,7 +416,6 @@ impl HerdrMultiplexer {
             return Err(MultiplexerError::new("herdr binary not found on PATH"));
         }
         let payload = super::inline_preview_payload(message_id, sender_id, ts, text, note);
-        self.send_esc(target_pane_id, false)?;
         self.run(
             &herdr_argv(&["herdr", "pane", "send-text", target_pane_id, &payload]),
             Some(5),
@@ -431,16 +429,21 @@ impl HerdrMultiplexer {
     }
 
     pub fn send_prompt(&self, target_pane_id: &str, text: &str) -> Result<(), MultiplexerError> {
-        let stripped = text.trim();
-        if stripped.is_empty() {
-            return Err(MultiplexerError::new("send_prompt: text may not be empty"));
-        }
-        if text.contains('\n') || text.contains('\r') {
-            return Err(MultiplexerError::new(
-                "send_prompt: text may not contain newlines",
-            ));
-        }
+        let stripped = super::validated_prompt_text(text)?;
         self.send_esc(target_pane_id, false)?;
+        self.run(
+            &herdr_argv(&["herdr", "pane", "run", target_pane_id, stripped]),
+            None,
+        )?;
+        Ok(())
+    }
+
+    pub fn send_automatic_prompt(
+        &self,
+        target_pane_id: &str,
+        text: &str,
+    ) -> Result<(), MultiplexerError> {
+        let stripped = super::validated_prompt_text(text)?;
         self.run(
             &herdr_argv(&["herdr", "pane", "run", target_pane_id, stripped]),
             None,

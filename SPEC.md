@@ -1712,7 +1712,7 @@ empty.`, exit 2); `--wait` (boolean); the shared `--json`.
 2. Insert the `member_execs` row (§6.2 *Member execs*).
 3. Run `deliver_pane` for the member (§6.5). The dispatch keystroke is the
    fixed line `! cafleet member exec-run <exec_id>`, sent through
-   `send_prompt`, so no part of the command passes through the keystroke.
+   `send_automatic_prompt`, so no part of the command passes through the keystroke.
 4. Call `ensure_monitor_loop` (§6.6) — the new exec is itself owed work. A
    failure → application error `Exec <id> was queued, but <error>`.
 
@@ -2514,7 +2514,10 @@ space. A blank tail deeper than the requested window is why capture over-fetches
   single-line/nonempty validation and concrete backend errors as `send_prompt`.
   Exec dispatch and resume use it after automatic preflight; tmux sends the
   stripped payload literally, waits the existing submit delay and sends Enter,
-  with `esc_first=false`.
+  with `esc_first=false` and no subprocess timeout, preserving the exec prompt
+  timeout contract. `Multiplexer` dispatches this operation through either
+  backend; `PaneIo` exposes it as
+  `send_automatic_prompt(pane_id, text) -> Result<(), String>` for owed execs.
 - **`capture_pane(*, target_pane_id, lines=20) -> str`** — fail-fast. Validate
   lines, run `tmux capture-pane -p -t <target_pane_id> -S -<lines + 1000>`,
   then apply the shared Capture windowing contract above.
