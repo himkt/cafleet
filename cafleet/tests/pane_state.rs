@@ -1,3 +1,4 @@
+use cafleet::delivery::DELIVERY_CAPTURE_LINES;
 use cafleet::pane_state::{PaneState, classify};
 
 const AGENT_CUES: [(&str, &str, &str, &str); 3] = [
@@ -58,6 +59,163 @@ fn claude_capture(state: &str) -> String {
         .as_str()
         .expect("every real observation contains captured text")
         .to_string()
+}
+
+fn runtime_capture(agent: &str, state: &str) -> String {
+    let source = match agent {
+        "claude" => include_str!("fixtures/pane_state/claude-herdr-runtime.json"),
+        "codex" => include_str!("fixtures/pane_state/codex-herdr-runtime.json"),
+        _ => panic!("no runtime capture matrix for {agent}"),
+    };
+    let fixtures: Vec<serde_json::Value> =
+        serde_json::from_str(source).expect("the runtime capture fixtures are valid JSON");
+    let fixture = fixtures
+        .iter()
+        .find(|fixture| fixture["state"] == state)
+        .expect("the requested runtime observation is recorded");
+    let mut lines = fixture["content"]
+        .as_str()
+        .expect("every runtime observation contains captured text")
+        .lines()
+        .collect::<Vec<_>>();
+    while lines.last().is_some_and(|line| line.trim().is_empty()) {
+        lines.pop();
+    }
+    let window = usize::try_from(DELIVERY_CAPTURE_LINES).expect("capture line bound is positive");
+    lines[lines.len().saturating_sub(window)..].join("\n")
+}
+
+#[test]
+fn runtime_claude_complete_empty_composer_is_finished() {
+    assert_state(
+        "claude",
+        &runtime_capture("claude", "empty"),
+        PaneState::Finished,
+    );
+}
+
+#[test]
+fn runtime_claude_entered_composer_rows_are_draft() {
+    for state in [
+        "draft-single",
+        "draft-wrapped",
+        "draft-multiline",
+        "draft-blank-first",
+    ] {
+        assert_state(
+            "claude",
+            &runtime_capture("claude", state),
+            PaneState::Draft,
+        );
+    }
+}
+
+#[test]
+fn runtime_claude_native_model_decision_menu_is_awaiting_user() {
+    assert_state(
+        "claude",
+        &runtime_capture("claude", "decision-menu"),
+        PaneState::AwaitingUser,
+    );
+}
+
+#[test]
+fn runtime_claude_unproven_new_message_overlay_holds_even_with_empty_composer() {
+    for state in ["working", "final-empty"] {
+        assert_state(
+            "claude",
+            &runtime_capture("claude", state),
+            PaneState::Unclassified,
+        );
+    }
+}
+
+#[test]
+fn runtime_claude_indistinguishable_whitespace_has_the_empty_capture_classification() {
+    assert_eq!(
+        classify("claude", &runtime_capture("claude", "draft-whitespace")),
+        classify("claude", &runtime_capture("claude", "empty")),
+    );
+}
+
+#[test]
+fn runtime_codex_observed_drafts_hold_while_required_matrix_is_pending() {
+    for state in [
+        "draft-single",
+        "draft-wrapped",
+        "draft-multiline",
+        "draft-blank-first",
+        "draft-whitespace",
+    ] {
+        assert_held("codex", &runtime_capture("codex", state));
+    }
+}
+
+#[test]
+fn runtime_claude_unknown_footer_holds() {
+    let content = format!(
+        "{}\n[Unrecognized footer]",
+        runtime_capture("claude", "empty")
+    );
+    assert_state("claude", &content, PaneState::Unclassified);
+}
+
+#[test]
+fn runtime_claude_missing_upper_composer_boundary_holds() {
+    let content = runtime_capture("claude", "empty");
+    let lines = content.lines().collect::<Vec<_>>();
+    let current_prompt = lines
+        .iter()
+        .rposition(|line| line.starts_with('❯'))
+        .expect("the captured composer has its prompt row");
+    let truncated = content
+        .lines()
+        .skip(current_prompt)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_state("claude", &truncated, PaneState::Unclassified);
+}
+
+#[test]
+fn runtime_claude_observable_entered_spaces_are_draft() {
+    let content = runtime_capture("claude", "empty");
+    let mut lines = content.lines().map(str::to_string).collect::<Vec<_>>();
+    let current = lines
+        .iter()
+        .rposition(|line| line.starts_with('❯'))
+        .expect("the captured composer has its prompt row");
+    lines[current] = "❯   ".to_string();
+    assert_state("claude", &lines.join("\n"), PaneState::Draft);
+}
+
+#[test]
+fn runtime_claude_quoted_historical_permission_is_outside_current_interface() {
+    let content = runtime_capture("claude", "empty");
+    let mut lines = content.lines().collect::<Vec<_>>();
+    let top = lines
+        .iter()
+        .rposition(|line| line.contains("CaptureProbe-Claude ─"))
+        .expect("the captured composer has its named upper border");
+    lines.splice(
+        top..top,
+        ["Transcript example:", "```text", " ❯ 1. Yes", "```"],
+    );
+    assert_state("claude", &lines.join("\n"), PaneState::Finished);
+}
+
+#[test]
+fn runtime_claude_quoted_historical_activity_is_outside_current_interface() {
+    let content = runtime_capture("claude", "empty");
+    let mut lines = content.lines().collect::<Vec<_>>();
+    let top = lines
+        .iter()
+        .rposition(|line| line.contains("CaptureProbe-Claude ─"))
+        .expect("the captured composer has its named upper border");
+    lines.splice(
+        top..top,
+        ["Transcript example:", "```text", "esc to interrupt", "```"],
+    );
+    assert_state("claude", &lines.join("\n"), PaneState::Finished);
 }
 
 #[test]
