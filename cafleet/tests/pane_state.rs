@@ -65,6 +65,11 @@ fn runtime_capture(agent: &str, state: &str) -> String {
     let source = match agent {
         "claude" => include_str!("fixtures/pane_state/claude-herdr-runtime.json"),
         "claude-overlay" => include_str!("fixtures/pane_state/claude-jump-overlay.json"),
+        "claude-newline-native" => include_str!("fixtures/pane_state/claude-newline-native.json"),
+        "claude-newline-matrix" => include_str!("fixtures/pane_state/claude-newline-matrix.json"),
+        "opencode-newline-matrix" => {
+            include_str!("fixtures/pane_state/opencode-newline-matrix.json")
+        }
         "claude-visible-overlay" => {
             include_str!("fixtures/pane_state/claude-visible-new-message-separator.json")
         }
@@ -129,6 +134,86 @@ fn claude_observable_added_empty_continuation_rows_are_draft() {
             &empty_capture_with_added_composer_rows("claude", extra_rows),
             PaneState::Draft,
         );
+    }
+}
+
+#[test]
+fn native_claude_newline_partial_collector_empty_baselines_are_finished() {
+    for source in ["visible", "production", "final-visible"] {
+        assert_state(
+            "claude",
+            &runtime_capture(
+                "claude-newline-native",
+                &format!("partial-01-empty-baseline-{source}"),
+            ),
+            PaneState::Finished,
+        );
+    }
+}
+
+#[test]
+fn native_claude_newline_partial_collector_observable_continuation_is_draft() {
+    for source in ["visible", "production", "final-visible"] {
+        assert_state(
+            "claude",
+            &runtime_capture(
+                "claude-newline-native",
+                &format!("partial-01-newline-one-{source}"),
+            ),
+            PaneState::Draft,
+        );
+    }
+}
+
+#[test]
+fn native_newline_matrix_empty_baselines_are_finished() {
+    for agent in ["claude", "opencode"] {
+        for source in ["visible", "production", "final-visible"] {
+            assert_state(
+                agent,
+                &runtime_capture(
+                    &format!("{agent}-newline-matrix"),
+                    &format!("empty-baseline-{source}"),
+                ),
+                PaneState::Finished,
+            );
+        }
+    }
+}
+
+#[test]
+fn native_newline_matrix_entered_blank_rows_and_trailing_continuations_are_draft() {
+    for agent in ["claude", "opencode"] {
+        for state in ["newline-one", "newline-two", "blank-continuation"] {
+            for source in ["visible", "production", "final-visible"] {
+                assert_state(
+                    agent,
+                    &runtime_capture(
+                        &format!("{agent}-newline-matrix"),
+                        &format!("{state}-{source}"),
+                    ),
+                    PaneState::Draft,
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn native_newline_matrix_normal_footer_restorations_are_finished() {
+    for (agent, candidate) in [("claude", "02"), ("opencode", "01")] {
+        for state in ["newline-one", "newline-two", "blank-continuation"] {
+            for source in ["visible", "production", "final-visible"] {
+                assert_state(
+                    agent,
+                    &runtime_capture(
+                        &format!("{agent}-newline-matrix"),
+                        &format!("restored-after-{state}-candidate-{candidate}-{source}"),
+                    ),
+                    PaneState::Finished,
+                );
+            }
+        }
     }
 }
 
