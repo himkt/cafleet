@@ -65,6 +65,8 @@ fn runtime_capture(agent: &str, state: &str) -> String {
     let source = match agent {
         "claude" => include_str!("fixtures/pane_state/claude-herdr-runtime.json"),
         "codex" => include_str!("fixtures/pane_state/codex-herdr-runtime.json"),
+        "codex-monitor" => include_str!("fixtures/pane_state/codex-monitor-runtime.json"),
+        "opencode" => include_str!("fixtures/pane_state/opencode-herdr-runtime.json"),
         _ => panic!("no runtime capture matrix for {agent}"),
     };
     let fixtures: Vec<serde_json::Value> =
@@ -230,6 +232,116 @@ fn runtime_codex_historical_quoted_activity_is_outside_current_interface() {
         "Transcript example:\n```text\nesc to interrupt\n```\n\n› Ask Codex to do anything",
     );
     assert_state("codex", &quoted, PaneState::Finished);
+}
+
+#[test]
+fn runtime_codex_live_monitor_role_footer_is_finished() {
+    assert_state(
+        "codex",
+        &runtime_capture("codex-monitor", "monitor-empty"),
+        PaneState::Finished,
+    );
+}
+
+#[test]
+fn recognized_codex_footer_accepts_model_effort_path_branch_and_usage_data() {
+    let content = runtime_capture("codex", "empty");
+    let footer = content
+        .lines()
+        .find(|line| line.contains(" · Context "))
+        .expect("the evidenced Codex footer records context usage");
+    for replacement in [
+        "  GPT-6-Luna low · /workspace/monitor · main · Context 20% used · Fast off",
+        "  GPT-6-Astra high · ~/project with spaces · fix/notifications · Context 0% used · Fast on",
+        "  GPT-6.1-Sol xhigh · /tmp/worktree · HEAD · Context 100% used · Fast off",
+    ] {
+        assert_state(
+            "codex",
+            &content.replace(footer, replacement),
+            PaneState::Finished,
+        );
+    }
+}
+
+#[test]
+fn recognized_claude_footer_accepts_model_path_cost_and_context_data() {
+    let content = runtime_capture("claude", "empty");
+    let model = content
+        .lines()
+        .find(|line| line.starts_with("  Opus 5.5 | 📂 "))
+        .expect("the evidenced Claude layout records model and path");
+    let usage = content
+        .lines()
+        .find(|line| line.starts_with("  $ "))
+        .expect("the evidenced Claude layout records cost and context usage");
+    for (model_value, usage_value) in [
+        (
+            "  Sonnet 5.5 | 📂 /workspace/another-project",
+            "  $ 12.3000 | ○ 1.2K/200K (1%)",
+        ),
+        (
+            "  Haiku 5.5 | 📂 ~/project with spaces",
+            "  $ 0.0000 | ○ 150K/1M (15%)",
+        ),
+        (
+            "  Opus 5.5 | 📂 /tmp/worktree",
+            "  $ 3.1250 | ○ 1.2M/2M (60%)",
+        ),
+    ] {
+        let variant = content
+            .replace(model, model_value)
+            .replace(usage, usage_value);
+        assert_state("claude", &variant, PaneState::Finished);
+    }
+}
+
+#[test]
+fn runtime_opencode_empty_with_overlapping_sidebar_holds() {
+    for state in ["empty", "final-empty"] {
+        assert_held("opencode", &runtime_capture("opencode", state));
+    }
+}
+
+#[test]
+fn runtime_opencode_single_line_draft_with_sidebar_holds() {
+    assert_held("opencode", &runtime_capture("opencode", "draft-single"));
+}
+
+#[test]
+fn runtime_opencode_wrapped_and_multiline_composer_content_holds() {
+    for state in ["draft-wrapped", "draft-multiline"] {
+        assert_held("opencode", &runtime_capture("opencode", state));
+    }
+}
+
+#[test]
+fn runtime_opencode_blank_first_row_with_continuation_holds() {
+    assert_held(
+        "opencode",
+        &runtime_capture("opencode", "draft-blank-first"),
+    );
+}
+
+#[test]
+fn runtime_opencode_clipped_native_command_palette_holds() {
+    assert_held("opencode", &runtime_capture("opencode", "decision-menu"));
+}
+
+#[test]
+fn runtime_opencode_active_generation_overrides_empty_composer() {
+    assert_state(
+        "opencode",
+        &runtime_capture("opencode", "working"),
+        PaneState::Working,
+    );
+}
+
+#[test]
+fn runtime_opencode_entered_whitespace_is_indistinguishable_from_empty() {
+    assert_eq!(
+        runtime_capture("opencode", "draft-whitespace"),
+        runtime_capture("opencode", "empty")
+    );
 }
 
 #[test]

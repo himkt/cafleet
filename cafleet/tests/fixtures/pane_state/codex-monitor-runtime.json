@@ -1,0 +1,24 @@
+[
+  {
+    "state": "monitor-empty",
+    "agent": "codex",
+    "agent_version": "0.162.1",
+    "version_source": "Director observed codex-cli version for this executing fleet.",
+    "multiplexer": "herdr",
+    "member_id": 862,
+    "pane_id": "w2P:pK",
+    "viewport_rows": null,
+    "columns": null,
+    "dimensions_source": "Not supplied with this bounded live-monitor capture.",
+    "capture_source": "Production capture through cafleet member capture",
+    "requested_lines": 40,
+    "classifier_window_lines": 40,
+    "captured_at": "2026-10-17T12:42:11.979719+00:00",
+    "raw_sha256": "bd30d02aa8e58c37c014608649692ec71883cdc2e527e3fd59e73fb8a89effd7",
+    "source": "design-docs/0000182-composer-safe-notification-delivery/.acceptance/codex-monitor-footer.json",
+    "expected_classification": "Finished",
+    "provenance": "Live task monitor member, same Codex UI with the role-default model/effort; collected through cafleet member capture by Director.",
+    "sanitization": "Unedited bounded capture; its footer data records a different role-default model and effort.",
+    "content": "\n  Worked for 9s • 21:37\n\n\n› Ask Codex to do anything\n\n  GPT-6-Luna low · ~/work/himkt/cafleet · feat/0000182-composer-safe-notification-delivery · Context 20% used · Fast off\n  ? for shortcuts"
+  }
+]
