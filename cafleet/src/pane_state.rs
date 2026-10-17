@@ -65,7 +65,7 @@ pub fn classify(coding_agent: &str, content: &str) -> PaneState {
     let composer = match coding_agent {
         "claude" => claude_composer(&lines),
         "codex" => codex_composer(&lines),
-        "opencode" => None,
+        "opencode" => opencode_composer(&lines),
         _ => unreachable!("the coding agent has a cue table"),
     };
     let transcript_end = match &composer {
@@ -84,6 +84,10 @@ pub fn classify(coding_agent: &str, content: &str) -> PaneState {
     } else if cue_lines
         .iter()
         .any(|line| line.contains(" new message (click)"))
+        || (coding_agent == "opencode"
+            && cue_lines
+                .iter()
+                .any(|line| OPENCODE_MENU_OVERLAY.is_match(line)))
     {
         PaneState::Unclassified
     } else {
@@ -208,6 +212,54 @@ fn codex_composer(lines: &[&str]) -> Option<Composer> {
     } else {
         PaneState::Draft
     };
+    Some(Composer { top, state })
+}
+
+static OPENCODE_MENU_OVERLAY: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r" {3,}\S.* {2,}ctrl\+x [a-z](?: {2,}|$)")
+        .expect("the OpenCode menu overlay pattern is valid")
+});
+static OPENCODE_IDLE_FOOTER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^   (?:/|~/)[^\r\n]* {2,}[0-9]+(?:\.[0-9]+)?[KM]? \([0-9]+%\)  ctrl\+p commands$")
+        .expect("the OpenCode idle footer pattern is valid")
+});
+static OPENCODE_MODEL_ROW: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^  ┃  \S[^·\r\n]* · \S[^\r\n]* OpenCode$")
+        .expect("the OpenCode model row pattern is valid")
+});
+
+fn opencode_composer(lines: &[&str]) -> Option<Composer> {
+    if !OPENCODE_IDLE_FOOTER.is_match(lines.last()?) {
+        return None;
+    }
+    let border_index = lines.len().checked_sub(2)?;
+    let rule = lines[border_index].strip_prefix("  ╹")?;
+    if rule.chars().count() < 3 || !rule.chars().all(|ch| ch == '▀') {
+        return None;
+    }
+    let model_index = border_index.checked_sub(1)?;
+    if !OPENCODE_MODEL_ROW.is_match(lines[model_index]) {
+        return None;
+    }
+    let mut top = model_index;
+    while top > 0 && lines[top - 1].starts_with("  ┃") {
+        top -= 1;
+    }
+    if top == 0 || !lines[top - 1].is_empty() {
+        return None;
+    }
+    let rows = &lines[top..model_index];
+    if rows.len() < 3 || rows.first()? != &"  ┃" || rows.last()? != &"  ┃" {
+        return None;
+    }
+    let mut state = PaneState::Finished;
+    for row in rows {
+        let suffix = row.strip_prefix("  ┃")?;
+        if !suffix.is_empty() {
+            suffix.strip_prefix("  ")?;
+            state = PaneState::Draft;
+        }
+    }
     Some(Composer { top, state })
 }
 
