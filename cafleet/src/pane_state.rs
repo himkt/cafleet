@@ -81,13 +81,13 @@ pub fn classify(coding_agent: &str, content: &str) -> PaneState {
         PaneState::AwaitingUser
     } else if matches_in_region(&cues.working, &cue_lines, WORKING_REGION_LINES) {
         PaneState::Working
-    } else if cue_lines
-        .iter()
-        .any(|line| line.contains(" new message (click)"))
-        || (coding_agent == "opencode"
-            && cue_lines
-                .iter()
-                .any(|line| OPENCODE_MENU_OVERLAY.is_match(line)))
+    } else if cue_lines.iter().any(|line| {
+        line.contains(" new message (click)")
+            || (coding_agent == "claude" && line.contains("Jump to bottom (click)"))
+    }) || (coding_agent == "opencode"
+        && cue_lines
+            .iter()
+            .any(|line| OPENCODE_MENU_OVERLAY.is_match(line)))
     {
         PaneState::Unclassified
     } else {

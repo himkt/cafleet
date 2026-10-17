@@ -355,6 +355,9 @@ decorations whose emptiness is unproven hold. Native agent status alone proves
 no composer emptiness. An unproven agent layout remains unclassified until its
 required real-state evidence supports recognition; UI changes may reduce
 notification liveness until the parser is updated.
+Claude viewport overlays such as `Jump to bottom (click)` keep the layout
+unclassified after permission and active-turn cues have been evaluated, even
+when the visible composer and footer otherwise match an empty idle layout.
 
 ### Keystroke error propagation {#keystroke-errors}
 

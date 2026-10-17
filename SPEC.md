@@ -2794,6 +2794,9 @@ distinguishable whitespace-only input. Recognize placeholders only within the
 complete layout. Historical prompt lines establish no current idleness;
 unexpected footers, missing boundaries and decorations with unproven emptiness
 hold. Native lifecycle status alone proves no composer emptiness.
+Claude viewport overlays such as `Jump to bottom (click)` keep the layout
+`Unclassified` after permission and active-turn cues have been evaluated, even
+when the visible composer and footer otherwise match an empty idle layout.
 
 Finished recognition requires sanitized real empty, single-line draft,
 wrapped/multiline draft, permission and working captures with agent/version,
