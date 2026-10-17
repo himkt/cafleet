@@ -139,7 +139,7 @@ fn runtime_claude_indistinguishable_whitespace_has_the_empty_capture_classificat
 }
 
 #[test]
-fn runtime_codex_observed_drafts_hold_while_required_matrix_is_pending() {
+fn runtime_codex_observed_composer_content_is_draft() {
     for state in [
         "draft-single",
         "draft-wrapped",
@@ -147,8 +147,89 @@ fn runtime_codex_observed_drafts_hold_while_required_matrix_is_pending() {
         "draft-blank-first",
         "draft-whitespace",
     ] {
-        assert_held("codex", &runtime_capture("codex", state));
+        assert_state("codex", &runtime_capture("codex", state), PaneState::Draft);
+        assert_state(
+            "codex",
+            &runtime_capture("codex", &format!("earlier-{state}")),
+            PaneState::Draft,
+        );
     }
+}
+
+#[test]
+fn runtime_codex_complete_empty_and_restored_composers_are_finished() {
+    for state in ["earlier-empty", "empty", "final-empty"] {
+        assert_state(
+            "codex",
+            &runtime_capture("codex", state),
+            PaneState::Finished,
+        );
+    }
+}
+
+#[test]
+fn runtime_codex_native_model_selection_is_awaiting_user() {
+    assert_state(
+        "codex",
+        &runtime_capture("codex", "decision-menu"),
+        PaneState::AwaitingUser,
+    );
+}
+
+#[test]
+fn runtime_codex_current_active_indicator_overrides_empty_placeholder() {
+    assert_state(
+        "codex",
+        &runtime_capture("codex", "working"),
+        PaneState::Working,
+    );
+}
+
+#[test]
+fn runtime_codex_current_active_indicator_overrides_queued_composer_text() {
+    let content = runtime_capture("codex", "working");
+    let draft = content.replace("› Ask Codex to do anything", "› Preserve this queued reply");
+    assert_state("codex", &draft, PaneState::Working);
+}
+
+#[test]
+fn runtime_codex_incomplete_model_footer_holds() {
+    let content = runtime_capture("codex", "empty");
+    let truncated = content
+        .lines()
+        .filter(|line| !line.contains("GPT-6.1-Sol medium"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_state("codex", &truncated, PaneState::Unclassified);
+}
+
+#[test]
+fn runtime_codex_unrecognized_footer_holds() {
+    let content = format!(
+        "{}\n[Unrecognized footer]",
+        runtime_capture("codex", "empty")
+    );
+    assert_state("codex", &content, PaneState::Unclassified);
+}
+
+#[test]
+fn runtime_codex_unproven_attachment_decoration_holds() {
+    let content = runtime_capture("codex", "empty");
+    let decorated = content.replace(
+        "› Ask Codex to do anything",
+        "› Ask Codex to do anything\n  [Image #1]",
+    );
+    assert_held("codex", &decorated);
+}
+
+#[test]
+fn runtime_codex_historical_quoted_activity_is_outside_current_interface() {
+    let content = runtime_capture("codex", "empty");
+    let quoted = content.replace(
+        "› Ask Codex to do anything",
+        "Transcript example:\n```text\nesc to interrupt\n```\n\n› Ask Codex to do anything",
+    );
+    assert_state("codex", &quoted, PaneState::Finished);
 }
 
 #[test]
