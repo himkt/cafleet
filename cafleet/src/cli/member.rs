@@ -675,6 +675,7 @@ fn ping_hold_reason(state: PaneState) -> Option<&'static str> {
     match state {
         PaneState::AwaitingUser => Some("awaiting_user"),
         PaneState::Working => Some("working"),
+        PaneState::Draft => Some("draft"),
         PaneState::Finished | PaneState::Unclassified => None,
     }
 }

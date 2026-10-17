@@ -66,6 +66,7 @@ pub enum HoldReason {
     ResumeGrace,
     AwaitingUser,
     Working,
+    Draft,
     Unclassified,
     CaptureFailed(String),
     Busy,
@@ -85,6 +86,7 @@ fn gate(state: PaneState, hold_age: Duration, hold_timeout: i64) -> Gate {
         PaneState::Finished => return Gate::Ordinary,
         PaneState::AwaitingUser => HoldReason::AwaitingUser,
         PaneState::Working => HoldReason::Working,
+        PaneState::Draft => HoldReason::Draft,
         PaneState::Unclassified => HoldReason::Unclassified,
     };
     if hold_timeout > 0 && hold_age >= Duration::seconds(hold_timeout) {
@@ -99,7 +101,7 @@ fn forced_note(state: PaneState) -> Option<&'static str> {
     match state {
         PaneState::AwaitingUser => Some(BROKER_NOTE),
         PaneState::Working => Some(RESUME_CLAUSE),
-        PaneState::Finished | PaneState::Unclassified => None,
+        PaneState::Draft | PaneState::Finished | PaneState::Unclassified => None,
     }
 }
 
