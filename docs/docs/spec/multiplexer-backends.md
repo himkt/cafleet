@@ -28,7 +28,8 @@ Each backend invokes its CLI from PATH. Their behavior differs as follows:
 | Pane-spawn cwd | Builtin inheritance from the splitting pane | Explicit `--cwd <dir>` on every `herdr pane split` |
 | Delete-time layout reflow | Native auto-fit after a bare `kill-pane` | No native reflow — `kill_pane` rebalances best-effort, scoped to the killed pane's tab |
 | `send_prompt` | `Esc` first, then payload `<stripped>` + `Enter` | `Esc` first, then `herdr pane run <pane> <stripped>` |
-| Inline-preview keystroke | `send-keys` | `pane send-text` + `pane send-keys` |
+| `send_automatic_prompt`, ping and wake | Literal payload, submit delay, `Enter`; no Escape | `herdr pane run <pane> <payload>`; no Escape |
+| Inline-preview keystroke | Literal `send-keys`, submit delay, `Enter`; no Escape | `pane send-text`, submit delay, `pane send-keys ... enter`; no Escape |
 
 `TmuxError` and `HerdrError` are both subclasses of `MultiplexerError`. Each
 behavior's full contract stays under its own heading below.
@@ -127,7 +128,7 @@ implements — the base `Multiplexer` Protocol stays clean and tmux implements
 nothing new.
 
 No DB column backs the native status, and nothing in cafleet consumes it: the
-monitor loop's wake is unconditional and periodic, and
+monitor loop's wake follows its schedule and shared automatic safety gate, and
 [pane-state classification](#pane-state-classification) reads captured text
 only, so it behaves the same on both backends. See
 [Monitoring](../concepts/monitoring.md).
@@ -171,7 +172,7 @@ The Director's `<name>` renders as stored — `fleet create` registers the root
 Director as `Director` — with no case transformation.
 
 `cafleet member ping` is a fixed manual primitive of the Director and the
-monitor member, identical on both backends: `Esc`, then the literal payload
+monitor member, identical on both backends: the literal payload
 `cafleet message poll <member-id> — then
 resume your work if something was still running.`, then `Enter`. It cannot
 carry arbitrary text, and it is gated on the target's pane state — see
@@ -216,17 +217,19 @@ pane is closed and the member deregistered regardless.
 
 ## Prompt dispatch (`send_prompt`) {#prompt-dispatch}
 
-`cafleet member prompt`, the exec dispatch line, and the exec resume line all
-reach the pane through the multiplexer interface's
-`send_prompt(target_pane_id, text)` operation: one line of text, typed
-`Esc`-first and submitted with `Enter`.
+`cafleet member prompt` uses `send_prompt(target_pane_id, text)`: one line of
+text, typed `Esc`-first and submitted with `Enter`. Exec dispatch and resume
+use `send_automatic_prompt(target_pane_id, text)` after the shared automatic
+delivery checks. Automatic submission starts with the payload, without Escape.
 
 Both backends validate fail-fast: text empty after strip →
 `send_prompt: text may not be empty`; the **original** text containing `\n` or
 `\r` → `send_prompt: text may not contain newlines` (raised as the backend's
 native error type, `TmuxError` / `HerdrError`). The per-backend payloads are
-in the [backend matrix](#backend-matrix). The herdr realization mirrors
-`send_poll_trigger`'s esc-then-run shape.
+in the [backend matrix](#backend-matrix). The automatic API applies the same
+validation and concrete backend errors. Its herdr realization runs the validated
+payload with `pane run`; tmux sends it literally, waits the existing submit
+delay, then sends `Enter`.
 
 ## Push notifications {#push-notifications}
 
@@ -241,7 +244,7 @@ as a fresh user-turn input:
 ```
 
 The keystroke is dispatched through the resolved backend's
-`send_inline_preview` helper; the contract — one Esc-safeguarded submit of the
+`send_inline_preview` helper; the contract — one automatic submit of the
 whole payload — is identical on both, and the per-backend realization is
 in the [backend matrix](#backend-matrix). The recipient pane is resolved from
 `member_placements` by `member_id` alone, so Member → Director notifications
@@ -257,21 +260,20 @@ preview, an exec dispatch, or an exec resume. The broker sends it only when
 the pane can take it, and holds it otherwise. The command that creates the
 work makes one delivery attempt, and the monitor loop repeats the attempt on
 every tick until the keystroke lands. Both run the same delivery step, so a
-delivery into a pane at rest stays immediate and held work always has a wake.
+delivery into an empty idle composer stays immediate and held work is retried.
 
 | Term | Meaning |
 |---|---|
-| Ordinary delivery | A delivery into a pane classified `finished` |
-| Forced delivery | A delivery into any other pane, made because the hold age reached the timeout |
+| Eligible delivery | A delivery with two fresh `finished` observations and a valid pane claim |
 | Base payload | For a preview, the two lines above: the `[cafleet msg …]` header and the truncated text |
 | Owed work | For a fleet: a [pending preview](data-model.md#messages), or an exec not yet closed, for any of its members |
 
-Both kinds use the same keystroke shape: `Escape`, settle, payload, `Enter`.
+Automatic transport submits the payload without Escape, retaining the existing
+payload-to-submit delay where the backend uses separate operations.
 
 The delivery step performs at most one keystroke into one member's pane:
 
 1. **Exec in flight.** If an exec is dispatched or running in the pane, hold.
-   No timeout applies while a command is running.
 2. **Select one item**, in this priority: a finished exec not yet resumed,
    else the oldest queued exec, else the oldest pending preview. With no
    item, nothing is owed.
@@ -280,48 +282,42 @@ The delivery step performs at most one keystroke into one member's pane:
    holds.
 4. **Resume by observation**, when the item is a finished exec — see
    [member exec](cli-options.md#member-exec).
-5. **Decide** per the gate table below.
-6. **Fire**: take the [pane claim](#pane-claim), stamp the item, and send the
-   keystroke. A refused claim holds. A failed keystroke clears the stamp, so
-   the item stays owed and the next attempt retries it.
+5. **Require `finished`**, meaning affirmative empty-composer and idle evidence.
+   Every other state holds indefinitely, regardless of item age.
+6. **Claim and recheck**: acquire the [pane claim](#pane-claim), capture again,
+   and require `finished` again. A refused claim or unsafe/failed final capture
+   holds without stamping the item.
+7. **Validate and submit**: in an immediate SQLite transaction, validate claim
+   ownership and lifetime and conditionally stamp the still-owed item. Commit,
+   then immediately submit. An invalid claim or refused item stamp produces
+   zero input. A failed send clears the item stamp and leaves the item owed.
 
-| Pane state | Hold age below the timeout | Hold age at or above the timeout |
-|---|---|---|
-| `finished` | Ordinary delivery | Ordinary delivery |
-| `awaiting_user` | Hold | Forced delivery; a preview adds the broker note |
-| `working` | Hold | Forced delivery; a preview adds the resume clause |
-| unclassified | Hold | Forced delivery; base payload only |
-
-**Hold age** is the time since the latest of three moments: the item's own
-timestamp (creation for a preview or a queued exec, the end of the command
-for a resume), the end of the pane's latest exec, and the pane's last forced
-delivery. The two pane-level moments restart the clock for everything queued
-behind an event: a long command does not immediately force the keystrokes
-that waited for it, and several overdue items do not force back to back into
-a prompt the recipient has just re-raised.
-
-**Timeout.** `CAFLEET_DELIVERY_HOLD_TIMEOUT` seconds, default `300`. `0`
-disables forcing, so a hold lasts until the pane is at rest. The timeout
-bounds every classification miss to a delay.
-
-Four keystrokes reach a pane that is not `finished`:
-
-| Keystroke | Rule | Why |
-|---|---|---|
-| Forced delivery | The hold timeout | The bound on a hold |
-| `member ping` on an unclassified pane | [member ping](cli-options.md#member-ping) | A quiet pane the classifier cannot name is the stalled member a ping exists for |
-| `member prompt` | Not gated | The Director's deliberate direct turn |
-| Monitor wake | Not gated | It re-engages a monitor member stuck mid-turn. The monitor's work is an idempotent re-scan, and its spawn posture shows no user prompt |
+Ping and scheduled/requested monitor wakes use the same observation and claim
+sequence, including in-flight exec exclusion. Ping skips immediately when held.
+A held wake remains due; it preserves the wake request and last-success stamp
+while heartbeats and the delivery pass continue. Repeated due ticks coalesce.
+Explicit `member prompt`, pane bootstrap and shutdown retain direct-control
+semantics.
 
 ### Pane claim {#pane-claim}
 
-Immediately before a keystroke, a cafleet process claims the target pane by
-stamping the pane's `keystroke_at`, in one statement that succeeds only when
-the previous claim is at least 3 seconds old. A process whose claim is refused
-does not type: another cafleet process is typing into that pane. The window
-covers the `Esc` settle and submit delays, so two processes never interleave
-their keystrokes, and the loser's capture cannot mistake a half-typed pane for
-one at rest.
+A cafleet process claims a pane by conditionally stamping `keystroke_at` when
+the previous claim is at least 3 seconds old. Automatic callers retain the exact
+stored timestamp and a monotonic acquisition time measured immediately before
+the database update, so database waits count toward the lifetime.
+
+After the final capture, an immediate SQLite transaction requires the stored
+timestamp to match the receipt, monotonic elapsed time to be strictly below
+the spacing window, and fresh UTC to remain within that window without moving
+backwards. It conditionally stamps the owed item in the same transaction;
+ping and wake validate without an item stamp. Database errors retain their
+concrete diagnostics. A refused or expired receipt produces zero input and
+leaves the claim row intact until normal expiry. A retry starts with fresh
+observations and a new receipt.
+
+The claim spaces CAFleet writers in time. It is not a lock over the entire
+transport or operator keystrokes; expiry after validation can allow a second
+writer to overlap a slow submission.
 
 | Keystroke | On a refused claim |
 |---|---|
@@ -332,67 +328,43 @@ one at rest.
 
 ### Preview payloads {#preview-payloads}
 
-| Delivery | Payload |
-|---|---|
-| Ordinary, or forced on an unclassified pane | The base payload |
-| Forced on `working` | The base payload, then `[cafleet] Resume your work if something was still running.` |
-| Forced on `awaiting_user` | The base payload, then `[cafleet] This delivery's Escape dismissed a pending prompt in your pane; that rejection did not come from the user. Re-issue the tool call if you still need it.` |
-
-Each extra line is conditional. An ordinary preview lands in a pane at rest,
-where nothing was interrupted, so it carries no resume clause. The broker note
-is emitted only when the broker observed a pending prompt immediately before
-its own `Escape`, so its absence still means the user rejected the call.
-Re-issuing the tool call raises the prompt again, so the user's decision is
-preserved.
+Every preview consists of the header and truncated text shown above. Message
+newlines retain their existing folding and sanitization. Exec resume, ping and
+wake retain their established payloads and resume clauses.
 
 ### Pane-state classification {#pane-state-classification}
 
 The broker classifies a pane from the ANSI-stripped text of its last 40 lines.
-Each coding agent contributes three cues — regular expressions matched line by
-line — and the evaluation order is fixed:
+Each supported agent has a parser for its complete current bottom interface,
+grounded in sanitized real captures with agent/version, multiplexer, dimensions
+and expected-state provenance. Blank lines and continuation rows are preserved.
 
-1. Any `awaiting_user` cue matches in its region → `awaiting_user`.
-2. Any `working` cue matches in its region → `working`.
-3. Any `finished` cue matches in its region → `finished`.
-4. Otherwise the pane is unclassified. A pane whose coding agent has no cue
-   table is always unclassified.
-
-A cue reads only the bottom of the pane, where the coding agent draws its live
-prompt box, activity line, and composer. Blank lines are dropped first; a
-region is the last N remaining lines.
-
-| Cue | Region | Reason for the size |
+| State, in precedence order | Required evidence | Automatic action |
 |---|---|---|
-| `awaiting_user` | Last 20 lines | A selection list with descriptions is tall |
-| `working` | Last 10 lines | The activity line sits directly above the composer |
-| `finished` | Last 6 lines | The composer and its status lines only |
+| `awaiting_user` | Current permission or decision interface | Hold |
+| `working` | Current active-turn indicator, including queued composer text | Hold |
+| `draft` | Recognized current composer containing entered content or nonempty continuation rows | Hold |
+| `finished` | Complete recognized empty composer, recognized idle context and no stronger cue | Final recheck |
+| unclassified | Unsupported, incomplete, truncated, ambiguous or unrecognized layout | Hold |
 
-The sizes are asymmetric on purpose. A false `awaiting_user` or `working`
-only delays a delivery, bounded by the timeout. A false `finished` sends the
-`Escape` that held delivery exists to withhold, so that cue reads the smallest
-region and is evaluated last: an echoed user turn higher in the transcript
-does not match, and a prompt box no `awaiting_user` cue recognises leaves no
-composer in the last six lines, so the pane is unclassified and holds.
-
-| Coding agent | `awaiting_user` cue | `working` cue | `finished` cue |
-|---|---|---|---|
-| `claude` | A numbered option under the selection cursor: `^[\s│]*❯\s+\d+\.\s` | `esc to interrupt` | The composer prompt line: `^[\s│]*[>❯](\s.*)?$` |
-| `codex` | A numbered option under the cursor, `^\s*›\s+\d+\.\s`, or a `\[y/n\]` approval line | `esc to interrupt` | The composer prompt line: `^\s*[›▌](\s.*)?$` |
-| `opencode` | The permission popup title: `Permission required` | `esc\s+(to\s+)?interrupt` | The prompt box line: `^\s*┃(\s.*)?$` |
-
-`finished` means the composer is visible with no prompt box and no active-work
-cue. Text already typed into the composer does not change the result; a
-keystroke then appends to it.
+Every composer row participates in the empty test, including a blank first row
+with later content and distinguishable whitespace-only input. Placeholder text
+qualifies only within a recognized layout. Historical prompt lines establish
+no current idleness. Missing boundaries, unexpected footers, attachments or
+decorations whose emptiness is unproven hold. Native agent status alone proves
+no composer emptiness. An unproven agent layout remains unclassified until its
+required real-state evidence supports recognition; UI changes may reduce
+notification liveness until the parser is updated.
 
 ### Keystroke error propagation {#keystroke-errors}
 
-`send_inline_preview` and `send_prompt` propagate a failure as a `Result`
+`send_inline_preview`, `send_automatic_prompt` and `send_prompt` propagate a failure as a `Result`
 carrying the raw backend error instead of a best-effort boolean.
 A missing backend binary fails with exactly `tmux binary not found on PATH` or
 `herdr binary not found on PATH`; a subprocess failure after that precheck
 carries the backend's raw error formatting — the failed command, its
-payload argv, and a newline-delimited stderr detail — from whichever Escape,
-payload, or Enter operation failed.
+payload argv, and a newline-delimited stderr detail. Automatic paths report
+payload or submission failures; direct control also reports Escape failures.
 
 A failed delivery keystroke is not a command failure: the item's stamp is
 cleared, the work stays owed, and the next attempt retries it. Every caller of
@@ -404,27 +376,28 @@ The other trigger keystrokes, `send_poll_trigger` and `send_wake_trigger`,
 keep their best-effort boolean contract: they never raise, and any failure
 returns `false`.
 
-### The `Esc` safeguard {#esc-safeguard}
+### Automatic input and direct control {#esc-safeguard}
 
-Every keystroke path presses `Escape`, lets the pane settle ~0.1 s, then types
-the payload and `Enter`.
+Automatic previews, exec dispatch/resume, ping and monitor wakes submit without
+Escape after the shared safety checks. Explicit `member prompt` and `send_exit`
+retain their leading Escape safeguard and settle delay; pane bootstrap remains
+a lifecycle action.
 
-| Keystroke path | Payload | Why |
-|---|---|---|
-| Inline preview (`message send` / `message broadcast`) | The [preview payload](#preview-payloads) + `Enter` | A prompt can open between the capture and the keystroke; the `Escape` rejects it instead of letting the trailing `Enter` confirm it |
-| Exec dispatch and exec resume | The fixed dispatch line or resume line + `Enter` | The same capture-to-keystroke window as a preview |
-| `cafleet member ping` | The literal poll command with the resume clause + `Enter` | The manual re-poke for a quiet pane |
-| `cafleet member prompt` | The text + `Enter` | The dispatch never blindly confirms a pending permission prompt |
-| Exit-command helper (`send_exit`) | `/exit` + `Enter` | Uses the same safeguard, with pane-gone tolerance covering the leading `Esc` when `ignore_missing` is enabled; creation rollback uses `kill_pane` |
-| Monitor-loop wake trigger (`send_wake_trigger`) | The `[cafleet] tick:` wake + `Enter` | It targets the monitor member's pane, which can be parked on a permission prompt (see [Monitoring](../concepts/monitoring.md)) |
+Both safe captures and receipt validation establish eligibility only for the
+observed terminal representation. An operator or application can change state
+after the final capture, including during a payload-to-submit delay. tmux and
+herdr offer no atomic check-and-submit operation. Identically rendered typed
+text and placeholder text can be indistinguishable in text-only captures.
 
 ### Delivery outcomes
 
 The persisted queue remains authoritative: a held or failed preview leaves
 the row available for polling and ACK, and an ACKed row is never keystroked.
-A preview is keystroked exactly once, whether the sending command, the monitor
-loop, or both evaluate it — the item stamp and the pane claim together
-guarantee it. The recipient pane comes from its placement, so
+Conditional stamps arbitrate competing delivery attempts. Partial insertion or
+an Enter timeout can leave submission uncertain; diagnostics and existing retry
+behavior are preserved. A partially inserted payload normally becomes a draft
+and holds later automatic input. Every retry requires new safe observations and
+a valid new claim; terminal submission is best effort. The recipient pane comes from its placement, so
 member-to-Director messages use the same path. Backend resolution follows
 [Backend selection](#backend-selection); keystrokes target the opaque pane id
 on the same host with a reachable server. Direct targeting uses tmux

@@ -26,7 +26,7 @@ The Director's plain output is **not visible to members** — the only Director�
 
 CAFleet members do not act autonomously. The team's periodic heartbeat is **`cafleet monitor`**, a per-fleet `deliver → wake → sleep` loop. `cafleet fleet create` starts it as a detached process and returns only once it is live, so the loop depends on no member's shell tool and you never launch or poll it. It wakes the fleet's dedicated **monitor member** — a cheap-model watcher spawned FIRST, by the same bootstrap (§ *Spawn Protocol*).
 
-The wake is **unconditional and fleet-level**: once per wake interval (default **600 s**; `0` disables the wake while the loop keeps heartbeating and delivering) the loop keystrokes one `Esc`-first `[cafleet] tick:` payload into the **monitor member's own pane** — including when the fleet has no ordinary members yet. There is no per-member schedule and no per-member due computation.
+The wake is **fleet-level**: once per wake interval (default **600 s**; `0` disables scheduled wakes while the loop keeps heartbeating and delivering) one `[cafleet] tick:` payload becomes due for the **monitor member's own pane**, including when the fleet has no ordinary members yet. It passes the shared empty-and-idle observations and claim validation and submits without Escape. A held wake stays due, preserving its schedule/request stamps. There is no per-member schedule or per-member due computation.
 
 On each wake the monitor member captures the fleet once (`cafleet monitor scan`), classifies each pane's content per the **target member's** backend overlay cues, confirms quiet across two consecutive wakes by capture sha, pings a confirmed-quiet ordinary member at most once per quiet period, pings **you** only when you are confirmed quiet AND your `unacked` count is greater than 0, and messages you per event (a member unchanged after its ping, a ping delivery failure, an `unknown` capture, one of its own commands being denied). Its full protocol is [`roles/monitor.md`](../roles/monitor.md) — the sole normative carrier; the wake payload points there and carries no protocol clauses itself.
 
@@ -34,13 +34,13 @@ See [`SKILL.md`](../SKILL.md) and the [Monitoring concepts page](https://himkt.g
 
 ### Broker-held delivery
 
-The broker sends a keystroke only into a pane that is at rest. A message for a member that is mid-turn, or that shows a permission prompt, is **held**: the row is persisted at once, the pane is left alone, and the monitor loop delivers the preview within one tick of the pane coming to rest. The same rule covers your own pane, so a member's message never dismisses a prompt you are answering.
+The broker sends automatic input only after two fresh captures establish an empty idle composer and its claim remains valid. Drafts, active turns, permission interfaces and ambiguous layouts hold indefinitely. The row is persisted at once and remains pollable; the monitor loop retries. The same rule covers the Director and monitor. Capture/send separation still permits changes after the final observation; the runtime delivery contract records that limitation.
 
 This is why you send without checking the target first:
 
 - **Send when you have something to send.** `cafleet message send` and `cafleet message broadcast` need no capture beforehand. A held send exits 0; its output shows `notification_sent: false` (unicast, `--json`) or a `delivered` count below `recipients` (broadcast).
-- **A hold is bounded.** After the hold timeout (`CAFLEET_DELIVERY_HOLD_TIMEOUT`, default 300 s) the broker forces the delivery, with a line telling the recipient what it interrupted. A forced preview that names a dismissed prompt means the rejection came from the broker, not from the user: re-issue the tool call.
-- **`cafleet member ping` is gated by the broker too.** It keystrokes a pane at rest or a quiet pane it cannot classify, and skips a busy one with exit 0 and a reason.
+- **A hold lasts until safe observations permit delivery.** Poll and ACK remain available while a preview is held, and consume it without automatic pane input.
+- **`cafleet member ping` uses the same safety gate.** It skips unsafe or unclassified panes and invalid claims with exit 0 and a reason; capture failure remains an error.
 - **`cafleet member prompt` is your deliberate direct turn** and is sent at once.
 
 The broker also writes **notices** into your inbox — a finished or lost `member exec`, and a spawned member that sent no message within 180 s. Each is an ordinary message starting `[cafleet] `; the actions are in [`roles/director.md`](../roles/director.md#broker-notices).
@@ -144,7 +144,7 @@ The workflow's spawned members run in workspace-scoped auto-approval mode ({perm
 | Phase | Action |
 |---|---|
 | Spawn (before any ordinary member) | The `cafleet fleet create` bootstrap spawns the monitor member and starts the loop; wait for the monitor's `ready` per § *Spawn Protocol* → *Wait for the monitor's ready* — that message (plus the CLI monitor-first guard) gates the first ordinary `cafleet member create`. Re-spawn a dead monitor with `member create --role monitor`. |
-| Run work | Every tick the loop delivers the keystrokes the broker is holding. The `Esc`-first wake lands in the **monitor member's** pane per wake interval (default 600 s); the monitor scans, classifies, pings a confirmed-quiet member once per quiet period, and messages you per event. Each inbound preview, broker notice, monitor event, or monitor ping is the cue to run the 5-step facilitation loop above. |
+| Run work | Every tick retries owed deliveries; scheduled/requested wakes use the same safety gate and remain due while held. A delivered wake prompts the monitor to scan, classify, ping a confirmed-quiet member once per quiet period, and report events. Each delivered preview, notice, event or ping cues the facilitation loop above. |
 | User review | Keep the monitor member alive during the review cycle — revisions and re-reviews still count as in-progress work. |
 | Teardown | Delete the monitor member FIRST (first-out); the full ordering is § *Cleanup Protocol*. |
 
