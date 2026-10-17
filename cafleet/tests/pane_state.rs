@@ -67,6 +67,7 @@ fn runtime_capture(agent: &str, state: &str) -> String {
         "codex" => include_str!("fixtures/pane_state/codex-herdr-runtime.json"),
         "codex-monitor" => include_str!("fixtures/pane_state/codex-monitor-runtime.json"),
         "opencode" => include_str!("fixtures/pane_state/opencode-herdr-runtime.json"),
+        "opencode-unobstructed" => include_str!("fixtures/pane_state/opencode-unobstructed.json"),
         _ => panic!("no runtime capture matrix for {agent}"),
     };
     let fixtures: Vec<serde_json::Value> =
@@ -342,6 +343,156 @@ fn runtime_opencode_entered_whitespace_is_indistinguishable_from_empty() {
         runtime_capture("opencode", "draft-whitespace"),
         runtime_capture("opencode", "empty")
     );
+}
+
+#[test]
+fn runtime_opencode_unobstructed_empty_and_restored_composers_are_finished() {
+    for state in [
+        "empty",
+        "restored-after-draft-single",
+        "restored-after-draft-wrapped",
+        "restored-after-draft-multiline",
+        "restored-after-draft-blank-first",
+        "restored-after-draft-whitespace",
+        "decision-canceled",
+        "final-empty",
+    ] {
+        assert_state(
+            "opencode",
+            &runtime_capture("opencode-unobstructed", state),
+            PaneState::Finished,
+        );
+    }
+}
+
+#[test]
+fn runtime_opencode_unobstructed_single_line_composer_is_draft() {
+    assert_state(
+        "opencode",
+        &runtime_capture("opencode-unobstructed", "draft-single"),
+        PaneState::Draft,
+    );
+}
+
+#[test]
+fn runtime_opencode_unobstructed_wrapped_composer_is_draft() {
+    assert_state(
+        "opencode",
+        &runtime_capture("opencode-unobstructed", "draft-wrapped"),
+        PaneState::Draft,
+    );
+}
+
+#[test]
+fn runtime_opencode_unobstructed_multiline_composer_is_draft() {
+    assert_state(
+        "opencode",
+        &runtime_capture("opencode-unobstructed", "draft-multiline"),
+        PaneState::Draft,
+    );
+}
+
+#[test]
+fn runtime_opencode_unobstructed_blank_first_row_with_continuation_is_draft() {
+    assert_state(
+        "opencode",
+        &runtime_capture("opencode-unobstructed", "draft-blank-first"),
+        PaneState::Draft,
+    );
+}
+
+#[test]
+fn runtime_opencode_unobstructed_indistinguishable_whitespace_matches_empty() {
+    let empty = runtime_capture("opencode-unobstructed", "empty");
+    let whitespace = runtime_capture("opencode-unobstructed", "draft-whitespace");
+    assert_eq!(whitespace, empty);
+    assert_eq!(
+        classify("opencode", &whitespace),
+        classify("opencode", &empty)
+    );
+}
+
+#[test]
+fn runtime_opencode_unobstructed_clipped_command_menu_holds() {
+    assert_held(
+        "opencode",
+        &runtime_capture("opencode-unobstructed", "decision-menu"),
+    );
+}
+
+#[test]
+fn runtime_opencode_unobstructed_active_footer_overrides_empty_composer() {
+    assert_state(
+        "opencode",
+        &runtime_capture("opencode-unobstructed", "working"),
+        PaneState::Working,
+    );
+}
+
+#[test]
+fn runtime_opencode_unobstructed_active_footer_overrides_queued_draft() {
+    let content = runtime_capture("opencode-unobstructed", "working");
+    let current_composer = "  ┃\n  ┃\n  ┃\n  ┃  Cafleet · Big Pickle OpenCode";
+    assert!(content.contains(current_composer));
+    let queued = content.replace(
+        current_composer,
+        "  ┃\n  ┃  Preserve this queued reply\n  ┃\n  ┃  Cafleet · Big Pickle OpenCode",
+    );
+    assert_state("opencode", &queued, PaneState::Working);
+}
+
+#[test]
+fn runtime_opencode_unobstructed_missing_footer_holds() {
+    let content = runtime_capture("opencode-unobstructed", "empty");
+    let truncated = content
+        .lines()
+        .filter(|line| !line.contains("ctrl+p commands"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_held("opencode", &truncated);
+}
+
+#[test]
+fn runtime_opencode_unobstructed_unknown_footer_holds() {
+    let content = format!(
+        "{}\n[Unrecognized application overlay]",
+        runtime_capture("opencode-unobstructed", "empty")
+    );
+    assert_held("opencode", &content);
+}
+
+#[test]
+fn runtime_opencode_unobstructed_truncated_composer_holds() {
+    let content = runtime_capture("opencode-unobstructed", "draft-blank-first");
+    let continuation = content
+        .lines()
+        .position(|line| line.contains("Capture evidence after blank first line."))
+        .expect("the observed draft has a nonempty continuation");
+    let truncated = content
+        .lines()
+        .skip(continuation)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_held("opencode", &truncated);
+}
+
+#[test]
+fn recognized_opencode_footer_accepts_model_path_and_context_data() {
+    let content = runtime_capture("opencode-unobstructed", "empty");
+    let footer = content
+        .lines()
+        .find(|line| line.contains("ctrl+p commands"))
+        .expect("the observed idle footer has its commands shortcut");
+    let variant = content
+        .replace(
+            "Cafleet · Big Pickle OpenCode",
+            "Cafleet · Another Model OpenCode",
+        )
+        .replace(
+            footer,
+            "   /workspace/another-project                 1.2K (1%)  ctrl+p commands",
+        );
+    assert_state("opencode", &variant, PaneState::Finished);
 }
 
 #[test]
