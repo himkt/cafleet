@@ -14,7 +14,7 @@ use crate::config::Settings;
 use crate::delivery::deliver_pane;
 use crate::error::CafleetError;
 use crate::multiplexer::{AnyMultiplexer, MultiplexerError, resolve_multiplexer};
-use crate::time::now_utc;
+use crate::time::{SystemClock, now_utc};
 use system::SystemRunner;
 
 const LOOP_START_TIMEOUT: Duration = Duration::from_secs(5);
@@ -46,7 +46,7 @@ pub fn deliver_preview(
     let Some(mux) = mux else {
         return Ok(false);
     };
-    Ok(deliver_pane(conn, mux, settings, member_id, now_utc())?.fired_preview(message_id))
+    Ok(deliver_pane(conn, mux, settings, member_id, &SystemClock)?.fired_preview(message_id))
 }
 
 /// Ensure the fleet's loop when the fleet has owed work; a fleet that owes

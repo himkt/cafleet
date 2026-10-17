@@ -225,7 +225,11 @@ impl TmuxMultiplexer {
             "cafleet message poll {member_id} \
              — then resume your work if something was still running."
         );
-        self.best_effort_send(target_pane_id, &payload, true)
+        self.send_automatic_trigger(target_pane_id, &payload)
+    }
+
+    pub fn send_automatic_trigger(&self, target_pane_id: &str, payload: &str) -> bool {
+        self.best_effort_send(target_pane_id, payload, true)
     }
 
     pub fn send_wake_entries(
@@ -236,7 +240,7 @@ impl TmuxMultiplexer {
         director: &WakeEntry<'_>,
     ) -> Result<bool, MultiplexerError> {
         let payload = build_wake_payload_from_entries(fleet_id, members, director)?;
-        Ok(self.best_effort_send(target_pane_id, &payload, true))
+        Ok(self.send_automatic_trigger(target_pane_id, &payload))
     }
 
     /// Result-returning (SPEC §6.5): the missing-binary precheck fails with

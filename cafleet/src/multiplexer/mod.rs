@@ -262,6 +262,7 @@ pub trait Multiplexer {
     fn send_exit(&self, target_pane_id: &str, ignore_missing: bool)
     -> Result<(), MultiplexerError>;
     fn send_poll_trigger(&self, target_pane_id: &str, member_id: i64) -> bool;
+    fn send_automatic_trigger(&self, target_pane_id: &str, payload: &str) -> bool;
     fn send_wake_entries(
         &self,
         target_pane_id: &str,
@@ -333,6 +334,10 @@ impl Multiplexer for AnyMultiplexer {
 
     fn send_poll_trigger(&self, target_pane_id: &str, member_id: i64) -> bool {
         dispatch!(self, mux => mux.send_poll_trigger(target_pane_id, member_id))
+    }
+
+    fn send_automatic_trigger(&self, target_pane_id: &str, payload: &str) -> bool {
+        dispatch!(self, mux => mux.send_automatic_trigger(target_pane_id, payload))
     }
 
     fn send_wake_entries(
@@ -417,6 +422,10 @@ macro_rules! implement_backend {
 
             fn send_poll_trigger(&self, target_pane_id: &str, member_id: i64) -> bool {
                 $backend::send_poll_trigger(self, target_pane_id, member_id)
+            }
+
+            fn send_automatic_trigger(&self, target_pane_id: &str, payload: &str) -> bool {
+                $backend::send_automatic_trigger(self, target_pane_id, payload)
             }
 
             fn send_wake_entries(
@@ -511,6 +520,10 @@ impl<M: Multiplexer> PaneIo for M {
 
     fn send_prompt(&self, pane_id: &str, text: &str) -> Result<(), String> {
         Multiplexer::send_prompt(self, pane_id, text).map_err(|error| error.to_string())
+    }
+
+    fn send_automatic_trigger(&self, pane_id: &str, payload: &str) -> bool {
+        Multiplexer::send_automatic_trigger(self, pane_id, payload)
     }
 }
 

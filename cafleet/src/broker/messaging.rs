@@ -204,7 +204,7 @@ pub fn oldest_pending_preview(
 /// Stamp a pending preview as keystroked; `false` when the row is no longer
 /// pending, because it was ACKed or another process stamped it first.
 pub fn stamp_notified(
-    conn: &mut Connection,
+    conn: &Connection,
     message_id: i64,
     when: &str,
 ) -> Result<bool, CafleetError> {

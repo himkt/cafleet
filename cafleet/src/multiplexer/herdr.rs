@@ -374,18 +374,20 @@ impl HerdrMultiplexer {
             "cafleet message poll {member_id} \
              — then resume your work if something was still running."
         );
+        self.send_automatic_trigger(target_pane_id, &payload)
+    }
+
+    pub fn send_automatic_trigger(&self, target_pane_id: &str, payload: &str) -> bool {
         self.best_effort(|| {
             self.send_esc(target_pane_id, false)?;
             self.run(
-                &herdr_argv(&["herdr", "pane", "run", target_pane_id, &payload]),
+                &herdr_argv(&["herdr", "pane", "run", target_pane_id, payload]),
                 Some(5),
             )?;
             Ok(())
         })
     }
 
-    /// Esc first: the wake targets the monitor member's own pane, which can
-    /// be parked on a permission prompt.
     pub fn send_wake_entries(
         &self,
         target_pane_id: &str,
@@ -394,14 +396,7 @@ impl HerdrMultiplexer {
         director: &WakeEntry<'_>,
     ) -> Result<bool, MultiplexerError> {
         let payload = build_wake_payload_from_entries(fleet_id, members, director)?;
-        Ok(self.best_effort(|| {
-            self.send_esc(target_pane_id, false)?;
-            self.run(
-                &herdr_argv(&["herdr", "pane", "run", target_pane_id, &payload]),
-                Some(5),
-            )?;
-            Ok(())
-        }))
+        Ok(self.send_automatic_trigger(target_pane_id, &payload))
     }
 
     /// `send-text` delivers the raw 2-line payload without submitting; the

@@ -140,7 +140,7 @@ pub fn latest_exec_finished_at(
 
 /// Stamp a queued exec as dispatched; `false` when it is no longer queued.
 pub fn stamp_exec_dispatched(
-    conn: &mut Connection,
+    conn: &Connection,
     exec_id: i64,
     when: &str,
 ) -> Result<bool, CafleetError> {
@@ -199,7 +199,7 @@ pub fn finish_exec(
 
 /// Close a finished exec; `false` when it is already closed.
 pub fn stamp_exec_resumed(
-    conn: &mut Connection,
+    conn: &Connection,
     exec_id: i64,
     when: &str,
 ) -> Result<bool, CafleetError> {
