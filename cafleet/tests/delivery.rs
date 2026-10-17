@@ -325,9 +325,18 @@ impl Fixture {
         let old = self.clock.utc_now() - Duration::days(3650);
         let id = match kind {
             Kind::Preview => {
+                let sender = if member_id == self.director_id {
+                    self.member_id
+                } else {
+                    self.director_id
+                };
+                assert_ne!(
+                    sender, member_id,
+                    "an owed preview comes from another member"
+                );
                 let message = broker::send_message(
                     &mut self.conn,
-                    self.director_id,
+                    sender,
                     &member_id.to_string(),
                     "preserve this queued payload",
                 )
