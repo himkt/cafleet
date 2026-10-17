@@ -109,10 +109,12 @@ fn unquoted_lines<'a>(lines: &[&'a str]) -> Option<Vec<&'a str>> {
 }
 
 static CLAUDE_MODEL_FOOTER: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^  Opus 5\.5 \| 📂 .+$").expect("the model footer pattern is valid")
+    Regex::new(r"^  \S[^|\r\n]* \| 📂 \S[^\r\n]*$").expect("the model footer pattern is valid")
 });
 static CLAUDE_USAGE_FOOTER: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^  \$ [0-9.]+ \| ○ [0-9.]+K/1M \([0-9]+%\)$")
+    Regex::new(
+        r"^  \$ [0-9]+(?:\.[0-9]+)? \| ○ [0-9]+(?:\.[0-9]+)?[KM]?/[0-9]+(?:\.[0-9]+)?[KM]? \([0-9]+%\)$",
+    )
         .expect("the usage footer pattern is valid")
 });
 
