@@ -47,6 +47,58 @@ fn claude_box(rows: &[&str]) -> String {
     lines.join("\n")
 }
 
+fn claude_capture(state: &str) -> String {
+    let fixtures: Vec<serde_json::Value> =
+        serde_json::from_str(include_str!("fixtures/pane_state/claude-herdr.json"))
+            .expect("the real Claude capture fixtures are valid JSON");
+    fixtures
+        .iter()
+        .find(|fixture| fixture["state"] == state)
+        .expect("the requested real Claude observation is recorded")["content"]
+        .as_str()
+        .expect("every real observation contains captured text")
+        .to_string()
+}
+
+#[test]
+fn real_claude_single_line_composer_is_draft() {
+    assert_state("claude", &claude_capture("draft_single"), PaneState::Draft);
+}
+
+#[test]
+fn real_claude_wrapped_composer_with_clipped_footer_holds() {
+    assert_held("claude", &claude_capture("draft_wrapped"));
+}
+
+#[test]
+fn real_claude_multiline_composer_with_clipped_footer_holds() {
+    assert_held("claude", &claude_capture("draft_multiline"));
+}
+
+#[test]
+fn real_claude_blank_first_row_with_entered_continuation_holds() {
+    assert_held("claude", &claude_capture("draft_blank_first"));
+}
+
+#[test]
+fn real_claude_active_indicator_overrides_empty_composer() {
+    assert_state("claude", &claude_capture("working"), PaneState::Working);
+}
+
+#[test]
+fn real_claude_changed_exit_footer_is_unclassified() {
+    assert_state(
+        "claude",
+        &claude_capture("restored"),
+        PaneState::Unclassified,
+    );
+}
+
+#[test]
+fn real_claude_whitespace_input_is_indistinguishable_from_empty_capture() {
+    assert_eq!(claude_capture("draft_whitespace"), claude_capture("empty"));
+}
+
 #[test]
 fn synthetic_claude_boxed_single_line_input_holds() {
     assert_held("claude", &claude_box(&["❯ draft reply typed so far"]));
