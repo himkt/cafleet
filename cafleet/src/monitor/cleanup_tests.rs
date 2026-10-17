@@ -37,6 +37,9 @@ impl PaneIo for NoWake {
     fn send_prompt(&self, _: &str, _: &str) -> Result<(), String> {
         panic!("{EXITS_FIRST}")
     }
+    fn send_automatic_trigger(&self, _: &str, _: &str) -> bool {
+        panic!("{EXITS_FIRST}")
+    }
 }
 
 struct Handle(Rc<Cell<usize>>);
@@ -114,7 +117,7 @@ fn loop_exits_unregister_signals_and_clear_only_the_owned_runtime() {
                 &MonitorLoopHooks {
                     pid: 424242,
                     stop: Arc::new(AtomicBool::new(false)),
-                    now: &now_utc,
+                    clock: &SystemClock,
                     register: &register,
                     sleep: &|_, _| panic!("fixture must exit before sleeping"),
                 },

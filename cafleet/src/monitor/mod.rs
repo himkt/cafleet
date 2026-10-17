@@ -574,7 +574,7 @@ mod tests {
         TickResult, monitor_tick, run_monitor_loop, wake_due,
     };
     use crate::multiplexer::{MultiplexerError, WakeEntry};
-    use crate::time::format_utc;
+    use crate::time::{Clock, format_utc};
 
     fn own_pid() -> i64 {
         i64::from(std::process::id())
@@ -603,26 +603,7 @@ mod tests {
         );
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    struct ObservedWake {
-        member_id: i64,
-        name: String,
-        coding_agent: String,
-        pending_count: i64,
-    }
-
-    impl From<&WakeEntry<'_>> for ObservedWake {
-        fn from(entry: &WakeEntry<'_>) -> Self {
-            Self {
-                member_id: entry.member_id,
-                name: entry.name.into(),
-                coding_agent: entry.coding_agent.into(),
-                pending_count: entry.pending_count,
-            }
-        }
-    }
-
-    type WakeCall = (String, i64, Vec<ObservedWake>, ObservedWake);
+    type WakeCall = (String, String);
 
     struct FakeMux {
         live_panes: BTreeSet<String>,
@@ -651,24 +632,27 @@ mod tests {
 
         fn send_wake_entries(
             &self,
-            target_pane_id: &str,
-            fleet_id: i64,
-            members: &[WakeEntry<'_>],
-            director: &WakeEntry<'_>,
+            _: &str,
+            _: i64,
+            _: &[WakeEntry<'_>],
+            _: &WakeEntry<'_>,
         ) -> Result<bool, MultiplexerError> {
-            self.wakes.borrow_mut().push((
-                target_pane_id.to_string(),
-                fleet_id,
-                members.iter().map(ObservedWake::from).collect(),
-                ObservedWake::from(director),
-            ));
-            Ok(self.wake_ok.get())
+            panic!("monitor orchestration submits the prepared automatic payload")
         }
     }
 
     impl PaneIo for FakeMux {
-        fn capture_pane(&self, pane_id: &str, _: i64) -> Result<String, String> {
-            panic!("no pane is owed a delivery in these fixtures (captured {pane_id})")
+        fn capture_pane(&self, pane_id: &str, lines: i64) -> Result<String, String> {
+            assert_eq!(
+                pane_id, "%1",
+                "only the monitor is eligible for input in this fixture"
+            );
+            assert_eq!(lines, crate::delivery::DELIVERY_CAPTURE_LINES);
+            Ok(
+                include_str!("../../tests/fixtures/pane_state/claude-rest.txt")
+                    .trim_end_matches('\n')
+                    .to_string(),
+            )
         }
 
         fn send_inline_preview(
@@ -685,6 +669,27 @@ mod tests {
 
         fn send_prompt(&self, pane_id: &str, _: &str) -> Result<(), String> {
             panic!("no pane is owed a delivery in these fixtures (prompt into {pane_id})")
+        }
+
+        fn send_automatic_trigger(&self, pane_id: &str, payload: &str) -> bool {
+            self.wakes
+                .borrow_mut()
+                .push((pane_id.to_string(), payload.to_string()));
+            self.wake_ok.get()
+        }
+    }
+
+    struct TestClock {
+        utc: DateTime<Utc>,
+        monotonic: std::time::Instant,
+    }
+
+    impl Clock for TestClock {
+        fn utc_now(&self) -> DateTime<Utc> {
+            self.utc
+        }
+        fn monotonic_now(&self) -> std::time::Instant {
+            self.monotonic
         }
     }
 
@@ -741,7 +746,11 @@ mod tests {
         now: DateTime<Utc>,
     ) -> (TickResult, String) {
         let mut out = Vec::new();
-        let result = monitor_tick(conn, mux, &mut out, &settings(), fleet_id, pid, now).unwrap();
+        let clock = TestClock {
+            utc: now,
+            monotonic: std::time::Instant::now(),
+        };
+        let result = monitor_tick(conn, mux, &mut out, &settings(), fleet_id, pid, &clock).unwrap();
         (result, String::from_utf8(out).unwrap())
     }
 
@@ -900,29 +909,18 @@ mod tests {
 
             let wakes = mux.wakes.borrow();
             assert_eq!(wakes.len(), 1, "one keystroke at one pane per due tick");
-            let (pane, wake_fleet_id, members, director) = &wakes[0];
+            let (pane, payload) = &wakes[0];
             assert_eq!(pane, "%1", "the monitor member's own pane");
-            assert_eq!(*wake_fleet_id, fleet_id);
             assert_eq!(
-                members.len(),
-                2,
-                "both workers, never the Director or the monitor"
+                payload,
+                &format!(
+                    "[cafleet] tick: fleet {fleet_id} — health-check your 2 members: \
+                 {member_id} (worker; coding_agent=claude; unacked=0), \
+                 {second_id} (helper; coding_agent=claude; unacked=0). \
+                 Director: {director_id} (Director; coding_agent=claude; unacked=0). \
+                 Follow your monitor role protocol. Resume your work if something was still running."
+                )
             );
-            assert_eq!(members[0].member_id, member_id);
-            assert_eq!(members[1].member_id, second_id);
-            assert!(
-                members
-                    .iter()
-                    .all(|m| m.member_id != director_id && m.member_id != monitor_id),
-                "the monitor is the recipient and the Director rides its own segment"
-            );
-            assert_eq!(
-                director.member_id, director_id,
-                "the Director descriptor passes through to the wake"
-            );
-            assert_eq!(director.name, "Director");
-            assert_eq!(director.coding_agent, "claude");
-            assert_eq!(director.pending_count, 0);
             drop(wakes);
 
             let iso = format_utc(due_at);
@@ -1322,12 +1320,15 @@ mod tests {
 
             let wakes = mux.wakes.borrow();
             assert_eq!(wakes.len(), 1, "the tick fires even with no other members");
-            let (pane, _, members, director) = &wakes[0];
+            let (pane, payload) = &wakes[0];
             assert_eq!(pane, "%1");
-            assert!(members.is_empty(), "the N == 0 roster is empty");
             assert_eq!(
-                director.member_id, director_id,
-                "the Director segment rides even the N == 0 wake"
+                payload,
+                &format!(
+                    "[cafleet] tick: fleet {fleet_id} — no members to health-check. \
+                 Director: {director_id} (Director; coding_agent=claude; unacked=0). \
+                 Follow your monitor role protocol. Resume your work if something was still running."
+                )
             );
             drop(wakes);
 
