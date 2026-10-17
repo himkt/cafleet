@@ -662,7 +662,6 @@ mod tests {
             _: i64,
             _: &str,
             _: &str,
-            _: Option<&str>,
         ) -> Result<(), String> {
             panic!("no pane is owed a delivery in these fixtures (preview into {pane_id})")
         }

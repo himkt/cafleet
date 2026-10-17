@@ -155,7 +155,6 @@ impl PaneIo for FakeIo {
         _: i64,
         _: &str,
         text: &str,
-        _: Option<&str>,
     ) -> Result<(), String> {
         self.before_send();
         self.events
@@ -448,7 +447,7 @@ fn held(outcome: PaneOutcome, reason: HoldReason) {
 
 fn fired(outcome: PaneOutcome, expected: Item) {
     assert!(
-        matches!(outcome, PaneOutcome::Fired { item, .. } if item == expected),
+        matches!(outcome, PaneOutcome::Fired { item } if item == expected),
         "{outcome:?}"
     );
 }
@@ -524,6 +523,41 @@ fn every_owed_kind_holds_unsafe_or_failed_final_observations_without_stamping() 
             assert_no_send(&io, item, &f.conn);
             assert!(claim_stamp(&f.conn, f.member_id).is_some());
         }
+    }
+}
+
+#[test]
+fn every_owed_item_stays_pending_across_old_draft_holds_and_delivers_after_clearing() {
+    for kind in KINDS {
+        let mut f = Fixture::new();
+        let item = f.item(kind);
+        let io = FakeIo::new();
+        let (draft, reason) = unsafe_observations()
+            .into_iter()
+            .find(|(_, reason)| *reason == HoldReason::Draft)
+            .unwrap();
+        let mut captures = Vec::new();
+        for _ in 0..3 {
+            captures.push(Ok(real_capture("empty")));
+            captures.push(draft.clone());
+        }
+        captures.extend([Ok(real_capture("empty")), Ok(real_capture("empty"))]);
+        io.queue(MEMBER_PANE, captures);
+        for attempt in 1..=3 {
+            held(deliver(&mut f, &io), reason.clone());
+            assert_no_send(&io, item, &f.conn);
+            assert_eq!(io.captures_for(MEMBER_PANE), attempt * 2);
+            f.clock.advance(Duration::days(36500).num_milliseconds());
+        }
+        fired(deliver(&mut f, &io), item.expected());
+        if matches!(kind, Kind::Dispatch) {
+            held(deliver(&mut f, &io), HoldReason::ExecRunning);
+        } else {
+            assert!(matches!(deliver(&mut f, &io), PaneOutcome::Idle));
+        }
+        assert_eq!(io.captures_for(MEMBER_PANE), 8);
+        assert_eq!(io.sent().len(), 1);
+        assert!(item.stamp(&f.conn).is_some());
     }
 }
 

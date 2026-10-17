@@ -23,15 +23,7 @@ impl PaneIo for NoWake {
     fn capture_pane(&self, _: &str, _: i64) -> Result<String, String> {
         panic!("{EXITS_FIRST}")
     }
-    fn send_inline_preview(
-        &self,
-        _: &str,
-        _: i64,
-        _: i64,
-        _: &str,
-        _: &str,
-        _: Option<&str>,
-    ) -> Result<(), String> {
+    fn send_inline_preview(&self, _: &str, _: i64, _: i64, _: &str, _: &str) -> Result<(), String> {
         panic!("{EXITS_FIRST}")
     }
     fn send_automatic_prompt(&self, _: &str, _: &str) -> Result<(), String> {
