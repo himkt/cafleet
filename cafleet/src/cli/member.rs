@@ -15,18 +15,17 @@ use crate::broker::{self, NewPlacement};
 use crate::capture::{CaptureSnapshot, MemberCapture, write_member_capture};
 use crate::coding_agent::coding_agent;
 use crate::config::Settings;
-use crate::delivery::{DELIVERY_CAPTURE_LINES, Item, PaneOutcome, deliver_pane};
+use crate::delivery::{HoldReason, Item, PaneOutcome, PingOutcome, deliver_pane, ping_pane};
 use crate::error::CafleetError;
 use crate::notices;
 use crate::runtime::{deliver_preview, ensure_monitor_loop};
 use crate::time::format_utc;
 
 use crate::multiplexer::Multiplexer;
-use crate::output::{format_member, format_member_detail, format_member_list, strip_ansi};
-use crate::pane_state::{PaneState, classify};
+use crate::output::{format_member, format_member_detail, format_member_list};
 use crate::presentation;
 use crate::runtime::system::SystemProbe;
-use crate::time::now_utc;
+use crate::time::{SystemClock, now_utc};
 
 #[derive(Args)]
 #[group(required = true, multiple = false)]
@@ -573,10 +572,10 @@ fn exec(
     let pane_id = require_pane(&member, member_id, "exec")?;
 
     let exec_id = broker::queue_exec(conn, member_id, &command)?.exec_id;
-    let outcome = deliver_pane(conn, &mux, settings, member_id, now_utc())?;
+    let outcome = deliver_pane(conn, &mux, settings, member_id, &SystemClock)?;
     let dispatched = matches!(
         outcome,
-        PaneOutcome::Fired { item: Item::ExecDispatch { exec_id: fired }, .. } if fired == exec_id
+        PaneOutcome::Fired { item: Item::ExecDispatch { exec_id: fired } } if fired == exec_id
     );
     ensure_monitor_loop(conn, settings, member.fleet_id).map_err(|error| {
         CafleetError::App(format!(
@@ -669,13 +668,19 @@ fn exec_run(conn: &mut Connection, settings: &Settings, exec_id: i64) -> Result<
     std::process::exit(exit_code);
 }
 
-/// Why a gated ping sends no keystroke into a pane in `state`; `None` when
-/// the state lets the ping through.
-fn ping_hold_reason(state: PaneState) -> Option<&'static str> {
-    match state {
-        PaneState::AwaitingUser => Some("awaiting_user"),
-        PaneState::Working => Some("working"),
-        PaneState::Finished | PaneState::Unclassified => None,
+fn ping_hold_reason(reason: HoldReason) -> &'static str {
+    match reason {
+        HoldReason::AwaitingUser => "awaiting_user",
+        HoldReason::Working => "working",
+        HoldReason::Draft => "draft",
+        HoldReason::Unclassified => "unclassified",
+        HoldReason::ExecRunning => "exec_running",
+        HoldReason::Busy => "busy",
+        HoldReason::ResumeGrace | HoldReason::CaptureFailed(_) | HoldReason::KeystrokeFailed(_) => {
+            unreachable!(
+                "ping reports capture/transport failures as errors and has no resume grace"
+            )
+        }
     }
 }
 
@@ -713,18 +718,10 @@ fn ping(
         return Ok(());
     };
 
-    let hold_reason = if broker::exec_in_flight(conn, member_id)? {
-        Some("exec_running")
-    } else {
-        let content = mux
-            .capture_pane(pane_id, DELIVERY_CAPTURE_LINES)
-            .map_err(|e| CafleetError::App(format!("capture failed: {e}")))?;
-        match ping_hold_reason(classify(&placement.coding_agent, &strip_ansi(&content))) {
-            Some(reason) => Some(reason),
-            None => (!broker::claim_pane(conn, member_id, now_utc())?).then_some("busy"),
-        }
-    };
-    if let Some(reason) = hold_reason {
+    let target = broker::pane_target(conn, member_id)?
+        .ok_or_else(|| CafleetError::App(format!("Member {member_id} not found")))?;
+    if let PingOutcome::Held(reason) = ping_pane(conn, &mux, &SystemClock, &target)? {
+        let reason = ping_hold_reason(reason);
         let result = json!({
             "member_id": member_id,
             "pane_id": pane_id,
@@ -737,12 +734,6 @@ fn ping(
         return Ok(());
     }
 
-    if !mux.send_poll_trigger(pane_id, member_id) {
-        return Err(CafleetError::App(format!(
-            "send failed: tmux send-keys did not deliver the poll-trigger keystroke \
-             to pane {pane_id}."
-        )));
-    }
     let result = json!({
         "member_id": member_id,
         "pane_id": pane_id,

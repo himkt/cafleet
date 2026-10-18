@@ -695,7 +695,7 @@ mod structural_contracts {
     }
 
     #[test]
-    fn backend_capture_cues_name_all_four_states() {
+    fn backend_capture_cues_name_monitor_classification_states() {
         let document = INVENTORY.document(BACKENDS);
         for backend in ["claude", "codex", "opencode"] {
             let section = document.section(backend).unwrap();
@@ -710,13 +710,68 @@ mod structural_contracts {
                 actual,
                 BTreeSet::from(["awaiting_user", "finished", "working", "stall_candidate"]),
                 "{}",
-                cues.error(cues.line, "capture-state keys must name all four states")
+                cues.error(
+                    cues.line,
+                    "capture-state keys must match monitor classification"
+                )
             );
             assert_eq!(
                 rows.len() - 2,
                 actual.len(),
                 "{}",
                 cues.error(cues.line, "duplicate state")
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_delivery_classification_prescribes_state_precedence_and_eligibility() {
+        for path in [
+            "docs/docs/spec/multiplexer-backends.md",
+            "skills/cafleet/reference/runtime/spec/multiplexer-backends.md",
+        ] {
+            let classifier = INVENTORY
+                .document(path)
+                .section("pane-state-classification")
+                .unwrap();
+            let rows = classifier.rows().unwrap();
+            let states = rows
+                .iter()
+                .skip(2)
+                .map(|(_, row)| (row[0].trim_matches('`'), row[2]))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                states,
+                vec![
+                    ("awaiting_user", "Hold"),
+                    ("working", "Hold"),
+                    ("draft", "Hold"),
+                    ("finished", "Final recheck"),
+                    ("unclassified", "Hold"),
+                ],
+                "{path}: classification precedence and eligibility must agree"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_transport_matrix_separates_automatic_payloads_from_explicit_control() {
+        let backend = INVENTORY.document("docs/docs/spec/multiplexer-backends.md");
+        let matrix = backend.section("backend-matrix").unwrap();
+        let rows = matrix.rows().unwrap();
+        for operation in [
+            "`send_automatic_prompt`, ping and wake",
+            "Inline-preview keystroke",
+        ] {
+            let (_, row) = rows
+                .iter()
+                .find(|(_, row)| row[0] == operation)
+                .expect("the backend matrix specifies every automatic transport family");
+            assert!(row[1].contains("no Escape"), "tmux {operation}: {}", row[1]);
+            assert!(
+                row[2].contains("no Escape"),
+                "herdr {operation}: {}",
+                row[2]
             );
         }
     }

@@ -728,6 +728,97 @@ fn member_capture_text_emits_the_content_only() {
 }
 
 #[test]
+fn member_ping_preserves_skip_json_and_sends_zero_input_for_unsafe_composers() {
+    let fixtures: Vec<serde_json::Value> = serde_json::from_str(include_str!(
+        "fixtures/pane_state/claude-herdr-runtime.json"
+    ))
+    .unwrap();
+    let draft = fixtures
+        .iter()
+        .find(|entry| entry["state"] == "draft-single")
+        .unwrap()["content"]
+        .as_str()
+        .unwrap();
+    let decision = fixtures
+        .iter()
+        .find(|entry| entry["state"] == "decision-menu")
+        .unwrap()["content"]
+        .as_str()
+        .unwrap();
+    for (capture, reason) in [
+        (draft, "draft"),
+        (decision, "awaiting_user"),
+        ("✻ Cogitating… (12s · esc to interrupt)", "working"),
+        ("Unsupported current interface", "unclassified"),
+    ] {
+        let cli = Cli::new();
+        let (fleet, _) = cli.seeded_fleet();
+        let member = cli.seed_member(fleet, "worker");
+        let pane = format!("%{}", member + 4);
+        cli.set_pane_capture(&pane, capture);
+        let before = cli.shim_calls().len();
+        let output = cli.run(&["member", "ping", &member.to_string(), "--json"]);
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+        let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+        assert_keys(&payload, &["member_id", "pane_id", "skipped", "reason"]);
+        assert_eq!(payload["member_id"], member);
+        assert_eq!(payload["pane_id"], pane);
+        assert_eq!(payload["skipped"], true);
+        assert_eq!(payload["reason"], reason);
+        assert!(
+            cli.shim_calls()[before..]
+                .iter()
+                .all(|line| !line.starts_with("send-keys"))
+        );
+    }
+}
+
+#[test]
+fn member_ping_capture_failure_is_an_error_with_no_terminal_input() {
+    let cli = Cli::new();
+    let (fleet, _) = cli.seeded_fleet();
+    let member = cli.seed_member(fleet, "worker");
+    let pane = format!("%{}", member + 4);
+    cli.set_pane_capture(&pane, common::CAPTURE_FAILS);
+    let before = cli.shim_calls().len();
+    let output = cli.run(&["member", "ping", &member.to_string(), "--json"]);
+    assert_eq!(code(&output), 1);
+    assert!(
+        stderr(&output).contains("capture failed"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(stdout(&output).is_empty());
+    assert!(
+        cli.shim_calls()[before..]
+            .iter()
+            .all(|line| !line.starts_with("send-keys"))
+    );
+}
+
+#[test]
+fn member_ping_success_keeps_json_shape_and_observes_the_composer_twice() {
+    let cli = Cli::new();
+    let (fleet, _) = cli.seeded_fleet();
+    let member = cli.seed_member(fleet, "worker");
+    let before = cli.shim_calls().len();
+    let output = cli.run(&["member", "ping", &member.to_string(), "--json"]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+    assert_keys(&payload, &["member_id", "pane_id", "skipped", "reason"]);
+    assert_eq!(payload["member_id"], member);
+    assert_eq!(payload["skipped"], false);
+    assert_eq!(payload["reason"], serde_json::Value::Null);
+    assert_eq!(
+        cli.shim_calls()[before..]
+            .iter()
+            .filter(|line| line.starts_with("capture-pane"))
+            .count(),
+        2
+    );
+}
+
+#[test]
 fn monitor_no_longer_parses_a_capture_subcommand() {
     let cli = Cli::new();
     let (fleet_id, _) = cli.seeded_fleet();

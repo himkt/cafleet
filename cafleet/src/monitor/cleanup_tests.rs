@@ -23,18 +23,13 @@ impl PaneIo for NoWake {
     fn capture_pane(&self, _: &str, _: i64) -> Result<String, String> {
         panic!("{EXITS_FIRST}")
     }
-    fn send_inline_preview(
-        &self,
-        _: &str,
-        _: i64,
-        _: i64,
-        _: &str,
-        _: &str,
-        _: Option<&str>,
-    ) -> Result<(), String> {
+    fn send_inline_preview(&self, _: &str, _: i64, _: i64, _: &str, _: &str) -> Result<(), String> {
         panic!("{EXITS_FIRST}")
     }
-    fn send_prompt(&self, _: &str, _: &str) -> Result<(), String> {
+    fn send_automatic_prompt(&self, _: &str, _: &str) -> Result<(), String> {
+        panic!("{EXITS_FIRST}")
+    }
+    fn send_automatic_trigger(&self, _: &str, _: &str) -> bool {
         panic!("{EXITS_FIRST}")
     }
 }
@@ -114,7 +109,7 @@ fn loop_exits_unregister_signals_and_clear_only_the_owned_runtime() {
                 &MonitorLoopHooks {
                     pid: 424242,
                     stop: Arc::new(AtomicBool::new(false)),
-                    now: &now_utc,
+                    clock: &SystemClock,
                     register: &register,
                     sleep: &|_, _| panic!("fixture must exit before sleeping"),
                 },

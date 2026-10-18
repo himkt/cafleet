@@ -4,8 +4,9 @@
 `cafleet fleet create` starts it as a detached process, so it depends on no
 member's shell tool. The loop does two jobs. Its **delivery pass** sends the
 keystrokes the broker is holding for panes that were busy. Its **heartbeat**
-is a plain timer, not agent reasoning, that fires one unconditional
-fleet-level wake into the **monitor member**'s pane once per wake interval.
+is a plain timer, not agent reasoning, that makes a fleet-level wake due for
+the **monitor member**'s pane once per wake interval. Submission waits for the
+shared automatic safety gate.
 
 The monitor member is a dedicated watcher spawned before any other member
 (by the `cafleet fleet create` bootstrap) on a cheap model — its work is
@@ -28,7 +29,7 @@ Director's facilitation:
 | Layer | Owns | Lives in |
 |---|---|---|
 | Delivery (the *when it lands*) | holding each broker keystroke until its pane is at rest, then sending it | the broker and the `cafleet monitor` loop |
-| Heartbeat (the *when to look*) | the unconditional fleet-level wake into the monitor member's pane | the `cafleet monitor` loop |
+| Heartbeat (the *when to look*) | the fleet-level wake, delivered when the monitor composer is empty and idle | the `cafleet monitor` loop |
 | Classification (the *what changed*) | pane capture, per-backend content classification, quiet confirmation, the bounded pings, event messages to the Director | the monitor member, per its role protocol (part of the cafleet skill) |
 | Facilitation (the *what next*) | health-check judgment, assignment, dispatch, recovery, escalation | the Director, per the cafleet skill's supervision protocol |
 
@@ -67,19 +68,20 @@ signal from anyone:
    that has owed work, make one delivery attempt. A member with nothing owed
    is neither captured nor keystroked, so an idle fleet is left alone.
 
-The broker judges a pane from its captured text and names one of four states:
+The broker judges the current bottom interface from captured text:
 
 | State | Meaning | Delivery |
 |---|---|---|
-| `finished` | The composer is visible, with no prompt box and no active work | Sent now |
+| `finished` | A complete recognized empty composer and idle context, with no stronger cue | Eligible for a final capture and claim validation |
 | `awaiting_user` | A permission or selection prompt is waiting for a keypress | Held |
 | `working` | A turn, a tool, or a command is running | Held |
+| `draft` | The current composer contains entered text or continuation content | Held |
 | unclassified | None of the cues match | Held |
 
-A hold is bounded. Once it has lasted longer than the hold timeout the
-delivery is **forced** into the pane as it is, with a line that tells the
-recipient what the broker interrupted. The gate, the timeout, the payloads,
-and the per-backend cues are specified in
+A hold lasts until two fresh observations establish an empty idle composer
+and the pane claim remains valid. Drafts, prompts, active turns and ambiguous
+layouts hold indefinitely, while messages remain available for polling and ACK.
+The gate, payloads and classification contract are specified in
 [Held delivery](../spec/multiplexer-backends.md#held-delivery).
 
 For the Director this means **dispatch is unconditional**: it sends an
@@ -143,13 +145,13 @@ at itself. A claude monitor member is spawned with all three already allowed
 The Director's re-engagement channels are the broker's inline previews, the
 broker's [notices](../spec/data-model.md#broker-notices), the monitor's event
 messages, and the monitor's stalled-Director ping. `cafleet member ping` is
-gated by the broker itself: it keystrokes a pane at rest or a quiet pane the
-broker cannot classify, and skips a pane that is working, waiting on a
-prompt, or running an exec. A captured prompt is not a relayed question: the
+gated by the broker itself: it submits only after two empty-and-idle observations
+and valid claim ownership/lifetime, skipping drafts, unknown layouts, active
+turns, permission prompts and in-flight execs. A captured prompt is not a relayed question: the
 Director answers explicit member questions through the broker.
 
 Pane state therefore has two readers with different jobs. The broker's
-four-state classification decides whether a keystroke may be sent. The
+classification decides whether a keystroke may be sent. The
 monitor member's reading adds `stall_candidate` and `unknown` and decides
 whether a quiet pane deserves a ping or a report.
 
@@ -200,17 +202,17 @@ starts from the environment default. Saving `0` disables the wake exactly as
 The schedule is not the only wake trigger: the admin WebUI's "Wake now"
 control (`POST /api/monitor/wake`) records a durable wake request on the
 fleet's runtime row, and the running loop honors it on its next tick — the
-wake lands within one tick even when the interval is `0` or the
-schedule is not yet due, because an explicit operator action bypasses a
-disabled or not-yet-due schedule. Repeat requests coalesce into a single
-wake, and a wake the loop has to skip (no resolvable monitor pane) leaves
+loop attempts the wake on the next tick even when the interval is `0` or the
+schedule is not yet due. An explicit request bypasses scheduling delay and
+still passes the full automatic safety gate. Repeat requests coalesce into a single
+wake, and a wake the loop has to hold or skip leaves
 the request pending to retry on the next tick, exactly as a scheduled wake
 stays due. A delivered wake — scheduled or requested — stamps the last-wake
 timestamp and clears any pending request in the same write, so a requested
 wake resets the schedule baseline.
 
-The wake fires whenever the interval has elapsed and the fleet's monitor
-member is resolvable to a live pane, **including when the fleet has no
+The wake becomes due whenever the interval has elapsed and targets the fleet's
+live monitor pane, **including when the fleet has no
 ordinary members** (the `no members to health-check.` payload form). No
 active monitor member, or a monitor pane the multiplexer no longer lists,
 means no wake and no timestamp stamp — the fleet stays due, so the wake fires
@@ -222,22 +224,22 @@ launch. A failed wake commits nothing and retries on the next tick.
 
 ## Keystroke safety
 
-Every keystroke is typed `Esc`-first: `Escape`, a settle delay, the payload,
-then `Enter`. A delivery is sent only after the broker has seen the pane at
-rest, and the `Escape` covers the moment between that capture and the
-keystroke: a prompt that opens in between is rejected, never confirmed.
+Every automatic write, including ping and monitor wake, requires two fresh
+empty-and-idle captures and a valid spacing claim. Automatic transport starts
+with the payload and submits without Escape; explicit prompts and shutdown
+retain their direct-control safeguard.
 
-The wake is the one loop keystroke that is not held. It re-engages a monitor
-member stuck mid-turn, its work is an idempotent re-scan, and the monitor
-member's spawn posture shows no user prompt. The resume clause makes the wake
-self-healing: a monitor member that stalls mid-turn is re-engaged by its own
-next wake.
+A drafted, active, permission-blocked or ambiguous monitor composer holds the
+wake, preserving the last-success timestamp and any wake request. Heartbeats
+and the owed-work pass continue. A capture failure logs its diagnostic and
+keeps the wake due; repeated ticks coalesce into one due wake.
 
-One hazard is documented rather than guarded: if the operator is
-mid-composition at a pane when a keystroke lands, the payload is appended to
-whatever text is already in the composer, then `Enter` submits both together.
-An operator is rarely typing in the monitor member's pane, and `--interval 0`
-is the escape for hands-on sessions.
+Capture and submission are separate operations. Typing or application activity
+after the final capture can race with input, including during the existing
+submit delay. Claim expiry after validation can also permit slow transports
+to overlap. Text-only captures can render typed text and a placeholder
+identically. These checks provide a bounded best-effort guarantee for observed
+states, rather than atomic non-interference or exactly-once submission.
 
 ## Single-instance and liveness
 
