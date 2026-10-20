@@ -146,11 +146,11 @@ mod tests {
     }
 
     #[test]
-    fn migrate_reaches_head_version_10_and_is_idempotent() {
+    fn migrate_reaches_head_version_9_and_is_idempotent() {
         let dir = TempDir::new().unwrap();
         let mut conn = connect(&temp_db_url(&dir)).unwrap();
-        assert_eq!(migrate_to_head(&mut conn).unwrap(), 10);
-        assert_eq!(migrate_to_head(&mut conn).unwrap(), 10);
+        assert_eq!(migrate_to_head(&mut conn).unwrap(), 9);
+        assert_eq!(migrate_to_head(&mut conn).unwrap(), 9);
     }
 
     #[test]
@@ -367,14 +367,14 @@ mod tests {
             .unwrap()
             .map(Result::unwrap)
             .collect();
-        assert_eq!(versions, (1..=10).collect::<Vec<_>>());
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
     }
 
     // The chain guard reads the refinery-embedded listing, not the filesystem:
     // `migration_chain()` returns the `(version, name)` pairs of the embedded
     // runner's migrations, sorted ascending.
     #[test]
-    fn migration_chain_is_contiguous_from_1_with_exactly_one_baseline_and_head_10() {
+    fn migration_chain_is_contiguous_from_1_with_exactly_one_baseline_and_head_9() {
         let chain = migration_chain();
         let versions: Vec<u32> = chain.iter().map(|(version, _)| *version).collect();
         let contiguous: Vec<u32> = (1..=versions.len() as u32).collect();
@@ -399,8 +399,8 @@ mod tests {
             chain
                 .last()
                 .map(|(version, name)| (*version, name.as_str())),
-            Some((10, "composer_safe_delivery")),
-            "expected head is V10__composer_safe_delivery"
+            Some((9, "held_delivery_and_member_execs")),
+            "expected head is V9__held_delivery_and_member_execs"
         );
     }
 }

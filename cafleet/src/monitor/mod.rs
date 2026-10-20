@@ -9,21 +9,16 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use chrono::{DateTime, Utc};
-use rusqlite::{Connection, TransactionBehavior};
+use rusqlite::Connection;
 
 use crate::broker;
-use crate::broker::members::db_err;
 pub use crate::broker::{MONITOR_STALE_FACTOR, MONITOR_STALE_FLOOR_SECONDS};
 use crate::config::Settings;
-use crate::delivery::{
-    HoldReason, Item, PaneIo, PaneOutcome, claim_and_recheck, deliver_pane, observe_pane,
-};
+use crate::delivery::{HoldReason, Item, PaneIo, PaneOutcome, deliver_pane};
 use crate::error::CafleetError;
-use crate::multiplexer::{
-    Multiplexer, MultiplexerError, WakeEntry, build_wake_payload_from_entries,
-};
+use crate::multiplexer::{Multiplexer, MultiplexerError, WakeEntry};
 use crate::notices;
-use crate::time::{Clock, SystemClock, format_utc, parse_lenient};
+use crate::time::{format_utc, now_utc, parse_lenient};
 
 pub const DEFAULT_TICK_SECONDS: i64 = 5;
 pub const MUX_FAILURE_LIMIT: u32 = 3;
@@ -141,8 +136,11 @@ fn close_lost_execs(
     Ok(())
 }
 
-fn keystroke_echo(item: Item, member_id: i64) -> String {
+fn keystroke_echo(item: Item, forced: bool, member_id: i64) -> String {
     match item {
+        Item::Preview { message_id } if forced => {
+            format!("forced preview msg {message_id} member {member_id}")
+        }
         Item::Preview { message_id } => format!("preview msg {message_id} member {member_id}"),
         Item::ExecDispatch { exec_id } => format!("dispatch exec {exec_id} member {member_id}"),
         Item::ExecResume { exec_id } => format!("resume exec {exec_id} member {member_id}"),
@@ -158,17 +156,17 @@ fn deliver_owed_work(
     settings: &Settings,
     fleet_id: i64,
     live_panes: &BTreeSet<String>,
-    clock: &dyn Clock,
+    clock: &TickClock,
 ) -> Result<(), CafleetError> {
     for target in broker::owed_pane_targets(conn, fleet_id)? {
         if !live_panes.contains(&target.pane_id) {
             continue;
         }
         let member_id = target.member_id;
-        let at = clock.utc_now();
+        let at = clock.now();
         let iso = format_utc(at);
-        let line = match deliver_pane(conn, mux, settings, member_id, clock) {
-            Ok(PaneOutcome::Fired { item }) => keystroke_echo(item, member_id),
+        let line = match deliver_pane(conn, mux, settings, member_id, at) {
+            Ok(PaneOutcome::Fired { item, forced }) => keystroke_echo(item, forced, member_id),
             Ok(PaneOutcome::Held(HoldReason::CaptureFailed(error))) => {
                 format!("member {member_id} capture failed: {error}")
             }
@@ -183,16 +181,20 @@ fn deliver_owed_work(
     Ok(())
 }
 
-fn report_wake_hold(
-    out: &mut dyn Write,
-    iso: &str,
-    member_id: i64,
-    reason: HoldReason,
-) -> Result<(), CafleetError> {
-    if let HoldReason::CaptureFailed(error) = reason {
-        writeln!(out, "{iso} monitor {member_id} capture failed: {error}").map_err(write_err)?;
+/// The tick's wall clock: the tick's own `now` advanced by the time the tick
+/// has been running, so a pane claim taken after earlier keystrokes carries
+/// the moment it is taken.
+struct TickClock {
+    tick_now: DateTime<Utc>,
+    started: std::time::Instant,
+}
+
+impl TickClock {
+    fn now(&self) -> DateTime<Utc> {
+        self.tick_now
+            + chrono::Duration::from_std(self.started.elapsed())
+                .expect("a tick's running time fits a chrono duration")
     }
-    Ok(())
 }
 
 /// One scan pass (SPEC §6.6): ownership-checked heartbeat → fleet liveness →
@@ -209,9 +211,12 @@ pub fn monitor_tick(
     settings: &Settings,
     fleet_id: i64,
     pid: i64,
-    clock: &dyn Clock,
+    now: DateTime<Utc>,
 ) -> Result<TickResult, CafleetError> {
-    let now = clock.utc_now();
+    let clock = TickClock {
+        tick_now: now,
+        started: std::time::Instant::now(),
+    };
     let iso = format_utc(now);
     if !broker::heartbeat_monitor_runtime(conn, fleet_id, pid, &iso)? {
         return Ok(TickResult::Stop);
@@ -245,7 +250,7 @@ pub fn monitor_tick(
     }
     close_lost_execs(conn, fleet_id, now)?;
     report_silent_members(conn, fleet_id, now)?;
-    deliver_owed_work(conn, mux, out, settings, fleet_id, &live_panes, clock)?;
+    deliver_owed_work(conn, mux, out, settings, fleet_id, &live_panes, &clock)?;
 
     let runtime = broker::read_monitor_runtime(conn, fleet_id)?.ok_or_else(|| {
         CafleetError::InvalidStoredValue {
@@ -275,44 +280,41 @@ pub fn monitor_tick(
         }
     }
 
+    // No active monitor member, a monitor with no pane, or a pane absent
+    // from the live set skips the wake without stamping — the fleet stays
+    // due for the next tick.
     let Some(monitor_id) = broker::active_monitor_member_id(conn, fleet_id)? else {
         return Ok(TickResult::Continue);
     };
-    let Some(target) = broker::pane_target(conn, monitor_id)? else {
+    let monitor = broker::get_member(conn, monitor_id, fleet_id)?;
+    let monitor_pane = monitor
+        .as_ref()
+        .and_then(|member| member.placement.as_ref())
+        .and_then(|placement| placement.mux_pane_id.as_deref());
+    let Some(monitor_pane) = monitor_pane else {
         return Ok(TickResult::Continue);
     };
-    if !live_panes.contains(&target.pane_id) {
+    if !live_panes.contains(monitor_pane) {
         return Ok(TickResult::Continue);
     }
+    // A refused claim leaves the wake due for the next tick.
+    if !broker::claim_pane(conn, monitor_id, clock.now())? {
+        return Ok(TickResult::Continue);
+    }
+
     let roster = broker::list_fleet_wake_targets(conn, fleet_id)?;
     let director = broker::fleet_wake_director(conn, fleet_id)?;
     let entries = roster.iter().map(wake_descriptor).collect::<Vec<_>>();
-    let payload = build_wake_payload_from_entries(fleet_id, &entries, &wake_descriptor(&director))
+    let woke = mux
+        .send_wake_entries(
+            monitor_pane,
+            fleet_id,
+            &entries,
+            &wake_descriptor(&director),
+        )
         .map_err(mux_err)?;
-    if broker::exec_in_flight(conn, monitor_id)? {
-        return Ok(TickResult::Continue);
-    }
-    if let Err(reason) = observe_pane(mux, &target.pane_id, &target.coding_agent) {
-        report_wake_hold(out, &iso, monitor_id, reason)?;
-        return Ok(TickResult::Continue);
-    }
-    let claim = match claim_and_recheck(conn, mux, clock, &target)? {
-        Ok(claim) => claim,
-        Err(reason) => {
-            report_wake_hold(out, &iso, monitor_id, reason)?;
-            return Ok(TickResult::Continue);
-        }
-    };
-    let tx = conn
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(db_err)?;
-    if !broker::validate_automatic_claim(&tx, &claim, clock)? {
-        return Ok(TickResult::Continue);
-    }
-    tx.commit().map_err(db_err)?;
-    let woke = mux.send_automatic_trigger(&target.pane_id, &payload);
     if woke {
-        broker::record_monitor_wake(conn, fleet_id, &format_utc(clock.utc_now()))?;
+        broker::record_monitor_wake(conn, fleet_id, &iso)?;
         let label = if forced { "forced wake" } else { "wake" };
         writeln!(
             out,
@@ -357,7 +359,7 @@ type RegisterSignal<'a> =
 pub(crate) struct MonitorLoopHooks<'a> {
     pub pid: i64,
     pub stop: Arc<AtomicBool>,
-    pub clock: &'a dyn Clock,
+    pub now: &'a dyn Fn() -> DateTime<Utc>,
     pub register: &'a RegisterSignal<'a>,
     pub sleep: &'a dyn Fn(u64, &AtomicBool),
 }
@@ -439,7 +441,7 @@ pub fn run_monitor_loop(
         &MonitorLoopHooks {
             pid: i64::from(std::process::id()),
             stop: Arc::new(AtomicBool::new(false)),
-            clock: &SystemClock,
+            now: &now_utc,
             register: &register,
             sleep: &interruptible_sleep,
         },
@@ -496,7 +498,7 @@ pub(crate) fn run_monitor_loop_with_hooks(
         pid,
         tick_seconds,
         wake_interval,
-        &format_utc(hooks.clock.utc_now()),
+        &format_utc((hooks.now)()),
     )?;
     let mut lease = MonitorLease {
         conn,
@@ -529,7 +531,7 @@ pub(crate) fn run_monitor_loop_with_hooks(
             if hooks.stop.load(Ordering::Relaxed) {
                 return Ok(());
             }
-            let result = monitor_tick(lease.conn, mux, out, settings, fleet_id, pid, hooks.clock);
+            let result = monitor_tick(lease.conn, mux, out, settings, fleet_id, pid, (hooks.now)());
             match result? {
                 TickResult::Stop => return Ok(()),
                 TickResult::Continue => mux_failures = 0,
@@ -571,7 +573,7 @@ mod tests {
         TickResult, monitor_tick, run_monitor_loop, wake_due,
     };
     use crate::multiplexer::{MultiplexerError, WakeEntry};
-    use crate::time::{Clock, format_utc};
+    use crate::time::format_utc;
 
     fn own_pid() -> i64 {
         i64::from(std::process::id())
@@ -600,7 +602,26 @@ mod tests {
         );
     }
 
-    type WakeCall = (String, String);
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct ObservedWake {
+        member_id: i64,
+        name: String,
+        coding_agent: String,
+        pending_count: i64,
+    }
+
+    impl From<&WakeEntry<'_>> for ObservedWake {
+        fn from(entry: &WakeEntry<'_>) -> Self {
+            Self {
+                member_id: entry.member_id,
+                name: entry.name.into(),
+                coding_agent: entry.coding_agent.into(),
+                pending_count: entry.pending_count,
+            }
+        }
+    }
+
+    type WakeCall = (String, i64, Vec<ObservedWake>, ObservedWake);
 
     struct FakeMux {
         live_panes: BTreeSet<String>,
@@ -629,27 +650,24 @@ mod tests {
 
         fn send_wake_entries(
             &self,
-            _: &str,
-            _: i64,
-            _: &[WakeEntry<'_>],
-            _: &WakeEntry<'_>,
+            target_pane_id: &str,
+            fleet_id: i64,
+            members: &[WakeEntry<'_>],
+            director: &WakeEntry<'_>,
         ) -> Result<bool, MultiplexerError> {
-            panic!("monitor orchestration submits the prepared automatic payload")
+            self.wakes.borrow_mut().push((
+                target_pane_id.to_string(),
+                fleet_id,
+                members.iter().map(ObservedWake::from).collect(),
+                ObservedWake::from(director),
+            ));
+            Ok(self.wake_ok.get())
         }
     }
 
     impl PaneIo for FakeMux {
-        fn capture_pane(&self, pane_id: &str, lines: i64) -> Result<String, String> {
-            assert_eq!(
-                pane_id, "%1",
-                "only the monitor is eligible for input in this fixture"
-            );
-            assert_eq!(lines, crate::delivery::DELIVERY_CAPTURE_LINES);
-            Ok(
-                include_str!("../../tests/fixtures/pane_state/claude-rest.txt")
-                    .trim_end_matches('\n')
-                    .to_string(),
-            )
+        fn capture_pane(&self, pane_id: &str, _: i64) -> Result<String, String> {
+            panic!("no pane is owed a delivery in these fixtures (captured {pane_id})")
         }
 
         fn send_inline_preview(
@@ -659,33 +677,13 @@ mod tests {
             _: i64,
             _: &str,
             _: &str,
+            _: Option<&str>,
         ) -> Result<(), String> {
             panic!("no pane is owed a delivery in these fixtures (preview into {pane_id})")
         }
 
-        fn send_automatic_prompt(&self, pane_id: &str, _: &str) -> Result<(), String> {
+        fn send_prompt(&self, pane_id: &str, _: &str) -> Result<(), String> {
             panic!("no pane is owed a delivery in these fixtures (prompt into {pane_id})")
-        }
-
-        fn send_automatic_trigger(&self, pane_id: &str, payload: &str) -> bool {
-            self.wakes
-                .borrow_mut()
-                .push((pane_id.to_string(), payload.to_string()));
-            self.wake_ok.get()
-        }
-    }
-
-    struct TestClock {
-        utc: DateTime<Utc>,
-        monotonic: std::time::Instant,
-    }
-
-    impl Clock for TestClock {
-        fn utc_now(&self) -> DateTime<Utc> {
-            self.utc
-        }
-        fn monotonic_now(&self) -> std::time::Instant {
-            self.monotonic
         }
     }
 
@@ -742,11 +740,7 @@ mod tests {
         now: DateTime<Utc>,
     ) -> (TickResult, String) {
         let mut out = Vec::new();
-        let clock = TestClock {
-            utc: now,
-            monotonic: std::time::Instant::now(),
-        };
-        let result = monitor_tick(conn, mux, &mut out, &settings(), fleet_id, pid, &clock).unwrap();
+        let result = monitor_tick(conn, mux, &mut out, &settings(), fleet_id, pid, now).unwrap();
         (result, String::from_utf8(out).unwrap())
     }
 
@@ -905,18 +899,29 @@ mod tests {
 
             let wakes = mux.wakes.borrow();
             assert_eq!(wakes.len(), 1, "one keystroke at one pane per due tick");
-            let (pane, payload) = &wakes[0];
+            let (pane, wake_fleet_id, members, director) = &wakes[0];
             assert_eq!(pane, "%1", "the monitor member's own pane");
+            assert_eq!(*wake_fleet_id, fleet_id);
             assert_eq!(
-                payload,
-                &format!(
-                    "[cafleet] tick: fleet {fleet_id} — health-check your 2 members: \
-                 {member_id} (worker; coding_agent=claude; unacked=0), \
-                 {second_id} (helper; coding_agent=claude; unacked=0). \
-                 Director: {director_id} (Director; coding_agent=claude; unacked=0). \
-                 Follow your monitor role protocol. Resume your work if something was still running."
-                )
+                members.len(),
+                2,
+                "both workers, never the Director or the monitor"
             );
+            assert_eq!(members[0].member_id, member_id);
+            assert_eq!(members[1].member_id, second_id);
+            assert!(
+                members
+                    .iter()
+                    .all(|m| m.member_id != director_id && m.member_id != monitor_id),
+                "the monitor is the recipient and the Director rides its own segment"
+            );
+            assert_eq!(
+                director.member_id, director_id,
+                "the Director descriptor passes through to the wake"
+            );
+            assert_eq!(director.name, "Director");
+            assert_eq!(director.coding_agent, "claude");
+            assert_eq!(director.pending_count, 0);
             drop(wakes);
 
             let iso = format_utc(due_at);
@@ -1316,15 +1321,12 @@ mod tests {
 
             let wakes = mux.wakes.borrow();
             assert_eq!(wakes.len(), 1, "the tick fires even with no other members");
-            let (pane, payload) = &wakes[0];
+            let (pane, _, members, director) = &wakes[0];
             assert_eq!(pane, "%1");
+            assert!(members.is_empty(), "the N == 0 roster is empty");
             assert_eq!(
-                payload,
-                &format!(
-                    "[cafleet] tick: fleet {fleet_id} — no members to health-check. \
-                 Director: {director_id} (Director; coding_agent=claude; unacked=0). \
-                 Follow your monitor role protocol. Resume your work if something was still running."
-                )
+                director.member_id, director_id,
+                "the Director segment rides even the N == 0 wake"
             );
             drop(wakes);
 

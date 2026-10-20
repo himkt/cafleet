@@ -277,13 +277,13 @@ The prompt is your deliberate direct turn, so the broker does not hold it for a 
 
 ## Member Ping (manual inbox-poll)
 
-Submits **`cafleet message poll <member-id> — then resume your work if something was still running.` → `Enter`** without Escape after the shared automatic safety checks, re-poking a quiet member. The fixed payload retains its resume clause. Ownership is the Director **and the monitor member** — the monitor's fixed-ping exception (one automatic ping per confirmed quiet period, per [`roles/monitor.md`](monitor.md)) is the one non-manual use; ordinary members never invoke it. Permission split: [`reference/prompt-routing.md`](../reference/prompt-routing.md) § *The Director's pane primitives*. Keystroke mechanics: [`multiplexer-backends.md`](../reference/runtime/spec/multiplexer-backends.md#esc-safeguard).
+Keystrokes **`Esc` → `cafleet message poll <member-id> — then resume your work if something was still running.` → `Enter`** into a member's pane, re-poking a quiet member. The leading `Esc` dismisses any pending permission-approval prompt, so the trailing `Enter` cannot blindly confirm it; the trailing resume clause keeps a keystroke that lands mid-turn from stranding the member's in-progress work. Ownership is the Director **and the monitor member** — the monitor's fixed-ping exception (one automatic ping per confirmed quiet period, per [`roles/monitor.md`](monitor.md)) is the one non-manual use; ordinary members never invoke it. Permission split: [`reference/prompt-routing.md`](../reference/prompt-routing.md) § *The Director's pane primitives*. Keystroke mechanics: [`multiplexer-backends.md`](../reference/runtime/spec/multiplexer-backends.md#esc-safeguard).
 
 ```bash
 cafleet member ping <member-id>
 ```
 
-The broker gates the ping with two fresh empty-and-idle captures and claim ownership/lifetime validation. It skips unsafe or unclassified panes, in-flight execs, invalid claims and pending placements with exit 0 and a `reason`; the runtime CLI reference owns the reason values. Capture failure remains an error. A skip needs no retry from you: an already-sent message remains owed until safe delivery or inbox consumption.
+The broker gates the ping. It keystrokes a pane at rest, or a quiet pane it cannot classify — the stalled member a ping exists for. It skips, with exit 0 and a `reason`, a pane that is `awaiting_user`, `working`, running an exec (`exec_running`), receiving another keystroke (`busy`), or still pending. A skip needs no retry from you: a message already sent to that member is delivered by the broker when its pane comes to rest.
 
 ## Broker notices
 

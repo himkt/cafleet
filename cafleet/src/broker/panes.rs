@@ -1,79 +1,19 @@
-//! Pane keystroke state (SPEC §6.2): pane claims and silence-notice stamps on
-//! `member_placements`, and the owed-work selections the delivery callers read.
+//! Pane keystroke state (SPEC §6.2): the pane claim, the forced-delivery and
+//! silence-notice stamps on `member_placements`, and the owed-work selections
+//! the delivery callers read.
 
 use chrono::{DateTime, Duration, Utc};
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use super::members::db_err;
 use super::records::{PaneTarget, SilentMember};
 use crate::error::CafleetError;
-use crate::time::{Clock, format_utc};
+use crate::time::format_utc;
 
 pub const KEYSTROKE_SPACING_SECONDS: i64 = 3;
 
-pub struct PaneClaim {
-    member_id: i64,
-    keystroke_at: String,
-    claimed_utc: DateTime<Utc>,
-    acquired_at: std::time::Instant,
-}
-
-pub fn claim_automatic_pane(
-    conn: &mut Connection,
-    member_id: i64,
-    clock: &dyn Clock,
-) -> Result<Option<PaneClaim>, CafleetError> {
-    let claimed_utc = clock.utc_now();
-    let keystroke_at = format_utc(claimed_utc);
-    let threshold = format_utc(claimed_utc - Duration::seconds(KEYSTROKE_SPACING_SECONDS));
-    let acquired_at = clock.monotonic_now();
-    let changed = conn
-        .execute(
-            "UPDATE member_placements SET keystroke_at=?1 \
-         WHERE member_id=?2 AND (keystroke_at IS NULL OR keystroke_at <= ?3)",
-            params![keystroke_at, member_id, threshold],
-        )
-        .map_err(db_err)?;
-    Ok((changed == 1).then_some(PaneClaim {
-        member_id,
-        keystroke_at,
-        claimed_utc,
-        acquired_at,
-    }))
-}
-
-pub fn validate_automatic_claim(
-    tx: &Transaction<'_>,
-    claim: &PaneClaim,
-    clock: &dyn Clock,
-) -> Result<bool, CafleetError> {
-    let stored: Option<Option<String>> = tx
-        .query_row(
-            "SELECT keystroke_at FROM member_placements WHERE member_id=?1",
-            [claim.member_id],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(db_err)?;
-    if stored.flatten().as_deref() != Some(claim.keystroke_at.as_str()) {
-        return Ok(false);
-    }
-    let now = clock.utc_now();
-    let elapsed = clock
-        .monotonic_now()
-        .checked_duration_since(claim.acquired_at);
-    Ok(now >= claim.claimed_utc
-        && now < claim.claimed_utc + Duration::seconds(KEYSTROKE_SPACING_SECONDS)
-        && elapsed.is_some_and(|duration| {
-            duration
-                < std::time::Duration::from_secs(
-                    u64::try_from(KEYSTROKE_SPACING_SECONDS)
-                        .expect("keystroke spacing is nonnegative"),
-                )
-        }))
-}
-
-const PANE_TARGET_SELECT: &str = "SELECT m.member_id, m.name, p.mux_pane_id, p.coding_agent \
+const PANE_TARGET_SELECT: &str = "SELECT m.member_id, m.name, p.mux_pane_id, p.coding_agent, \
+            p.forced_at \
      FROM members m JOIN member_placements p ON p.member_id=m.member_id \
      WHERE m.status='active' AND p.mux_pane_id IS NOT NULL";
 
@@ -90,6 +30,7 @@ fn map_pane_target(row: &rusqlite::Row<'_>) -> rusqlite::Result<PaneTarget> {
         name: row.get(1)?,
         pane_id: row.get(2)?,
         coding_agent: row.get(3)?,
+        forced_at: row.get(4)?,
     })
 }
 
@@ -158,6 +99,15 @@ pub fn claim_pane(
         )
         .map_err(db_err)?;
     Ok(changed == 1)
+}
+
+pub fn stamp_forced(conn: &mut Connection, member_id: i64, when: &str) -> Result<(), CafleetError> {
+    conn.execute(
+        "UPDATE member_placements SET forced_at=?1 WHERE member_id=?2",
+        params![when, member_id],
+    )
+    .map_err(db_err)?;
+    Ok(())
 }
 
 /// The ready-watchdog candidates: every active non-Director member of the

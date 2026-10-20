@@ -8,6 +8,7 @@ pub struct Settings {
     pub max_text_len: usize,
     pub multiplexer: Option<String>,
     pub monitor_wake_interval: i64,
+    pub delivery_hold_timeout: i64,
 }
 
 impl Settings {
@@ -41,6 +42,11 @@ impl Settings {
                 &lookup,
                 "CAFLEET_MONITOR_WAKE_INTERVAL",
                 600,
+            )?,
+            delivery_hold_timeout: parse_non_negative(
+                &lookup,
+                "CAFLEET_DELIVERY_HOLD_TIMEOUT",
+                300,
             )?,
         })
     }
@@ -115,14 +121,7 @@ mod tests {
 
     #[test]
     fn each_field_binds_to_its_exact_env_var() {
-        let Settings {
-            database_url,
-            broker_host,
-            broker_port,
-            max_text_len,
-            multiplexer,
-            monitor_wake_interval,
-        } = Settings::from_lookup(|name| match name {
+        let s = Settings::from_lookup(|name| match name {
             "CAFLEET_DATABASE_URL" => Some("sqlite:///srv/db/registry.db".to_string()),
             "CAFLEET_BROKER_HOST" => Some("0.0.0.0".to_string()),
             "CAFLEET_BROKER_PORT" => Some("9001".to_string()),
@@ -132,12 +131,12 @@ mod tests {
             _ => None,
         })
         .unwrap();
-        assert_eq!(database_url, "sqlite:///srv/db/registry.db");
-        assert_eq!(broker_host, "0.0.0.0");
-        assert_eq!(broker_port, 9001);
-        assert_eq!(max_text_len, 50);
-        assert_eq!(multiplexer, Some("herdr".to_string()));
-        assert_eq!(monitor_wake_interval, 900);
+        assert_eq!(s.database_url, "sqlite:///srv/db/registry.db");
+        assert_eq!(s.broker_host, "0.0.0.0");
+        assert_eq!(s.broker_port, 9001);
+        assert_eq!(s.max_text_len, 50);
+        assert_eq!(s.multiplexer, Some("herdr".to_string()));
+        assert_eq!(s.monitor_wake_interval, 900);
     }
 
     #[test]

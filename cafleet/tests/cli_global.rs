@@ -6,7 +6,6 @@ mod common;
 
 use std::process::Command;
 
-use cafleet::db::head_version;
 use common::{Cli, VERSION, code, stderr, stdout, text};
 
 #[test]
@@ -31,12 +30,8 @@ fn an_unknown_pre_subcommand_option_is_a_parse_error() {
 const NO_INSTALL_ERROR: &str =
     "Error: no assets install is recorded at the resolved paths; run 'cafleet setup' to install";
 
-fn outdated_error() -> String {
-    format!(
-        "Error: database schema is outdated (schema 5, head {}); run 'cafleet setup'",
-        head_version()
-    )
-}
+const OUTDATED_ERROR: &str =
+    "Error: database schema is outdated (schema 5, head 9); run 'cafleet setup'";
 
 const NO_DATABASE_ERROR: &str = "Error: no cafleet database; run 'cafleet setup'";
 
@@ -107,18 +102,16 @@ fn the_schema_guard_reports_a_newer_database() {
     cli.sqlite()
         .execute(
             "INSERT INTO refinery_schema_history (version, name, applied_on, checksum) \
-             VALUES (?1, 'future', '2026-01-01T00:00:00Z', '0')",
-            [head_version() + 1],
+             VALUES (10, 'future', '2026-01-01T00:00:00Z', '0')",
+            [],
         )
         .unwrap();
     let output = cli.run(&["fleet", "list"]);
     assert_eq!(code(&output), 1);
     assert!(
-        stderr(&output).contains(&format!(
-            "Error: database schema {} is newer than this cafleet (head {}); upgrade cafleet",
-            head_version() + 1,
-            head_version()
-        )),
+        stderr(&output).contains(
+            "Error: database schema 10 is newer than this cafleet (head 9); upgrade cafleet"
+        ),
         "got: {}",
         stderr(&output)
     );
@@ -138,7 +131,7 @@ fn the_schema_guard_blocks_every_guarded_group() {
         let output = cli.run(args);
         assert_eq!(code(&output), 1, "guarded: {args:?}");
         assert!(
-            stderr(&output).contains(&outdated_error()),
+            stderr(&output).contains(OUTDATED_ERROR),
             "{args:?} → {}",
             stderr(&output)
         );
@@ -175,7 +168,7 @@ fn the_schema_guard_blocks_server_startup() {
         .unwrap()
         .read_to_string(&mut err)
         .unwrap();
-    assert!(err.contains(&outdated_error()), "got: {err}");
+    assert!(err.contains(OUTDATED_ERROR), "got: {err}");
 }
 
 #[test]

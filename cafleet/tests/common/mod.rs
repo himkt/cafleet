@@ -3,7 +3,6 @@
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
-use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
@@ -14,11 +13,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The capture every pane shows unless [`Cli::set_pane_capture`] overrides it:
 /// a claude composer at rest, so a delivery fires immediately.
-pub static REST_CAPTURE: LazyLock<String> = LazyLock::new(|| {
-    include_str!("../fixtures/pane_state/claude-rest.txt")
-        .trim_end_matches('\n')
-        .to_string()
-});
+pub const REST_CAPTURE: &str = "pane:{pane}\nline1\nline2\n> at rest";
 
 /// A capture file holding this line makes `capture-pane` fail for that pane.
 pub const CAPTURE_FAILS: &str = "CAPTURE-FAILS";
@@ -50,8 +45,7 @@ case "$1" in
                     done < "$CAFLEET_TEST_TMUX_CAPTURE_DIR/$1"
                     exit 0
                 fi
-                printf 'pane:%s\nline1\nline2\n' "$1"
-                printf '%s\n' "$CAFLEET_TEST_TMUX_REST_COMPOSER"
+                printf 'pane:%s\nline1\nline2\n> at rest\n' "$1"
                 exit 0
             fi
             shift
@@ -167,10 +161,6 @@ impl Cli {
             .env("PATH", &self.shim_dir)
             .env("CAFLEET_DATABASE_URL", self.db_url())
             .env("CAFLEET_TEST_TMUX_LOG", &self.shim_log)
-            .env(
-                "CAFLEET_TEST_TMUX_REST_COMPOSER",
-                REST_CAPTURE.lines().skip(3).collect::<Vec<_>>().join("\n"),
-            )
             .env("CAFLEET_TEST_TMUX_CAPTURE_DIR", &self.capture_dir);
         if let Some(fail) = &self.fail_subcommand {
             cmd.env("CAFLEET_TEST_TMUX_FAIL", fail);

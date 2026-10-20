@@ -2,23 +2,6 @@ use chrono::{DateTime, Utc};
 
 use crate::error::CafleetError;
 
-pub trait Clock {
-    fn utc_now(&self) -> DateTime<Utc>;
-    fn monotonic_now(&self) -> std::time::Instant;
-}
-
-pub struct SystemClock;
-
-impl Clock for SystemClock {
-    fn utc_now(&self) -> DateTime<Utc> {
-        now_utc()
-    }
-
-    fn monotonic_now(&self) -> std::time::Instant {
-        std::time::Instant::now()
-    }
-}
-
 pub fn now_utc() -> DateTime<Utc> {
     Utc::now()
 }

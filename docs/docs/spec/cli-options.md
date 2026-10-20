@@ -50,6 +50,7 @@ Every `CAFLEET_`-prefixed variable cafleet reads:
 | `CAFLEET_BROKER_HOST` | `broker_host` | `127.0.0.1` | The `cafleet server` bind address | `--host` |
 | `CAFLEET_BROKER_PORT` | `broker_port` | `8000` | The `cafleet server` bind port | `--port` |
 | `CAFLEET_MONITOR_WAKE_INTERVAL` | `monitor_wake_interval` | `600` | The `cafleet monitor` wake interval in seconds; `0` disables the wake while the loop keeps heartbeating. A non-integer value fails loudly | `--interval`, then the fleet's stored interval — see [loop precedence](#monitor-loop-precedence) |
+| `CAFLEET_DELIVERY_HOLD_TIMEOUT` | `delivery_hold_timeout` | `300` | The seconds a held delivery waits before it becomes a forced delivery; `0` disables forcing, so a hold lasts until the pane is at rest. See [Held delivery](multiplexer-backends.md#held-delivery) | — |
 
 A flag wins over its environment variable, and the environment variable wins
 over the hardcoded default. A variable that holds a count or a duration
@@ -123,8 +124,8 @@ start, it instead exits 1 through stderr — see [Loop start](#monitor-loop-star
 | Pending-placement skip | `Member <name> has no pane yet (pending placement) — ping skipped; it will poll its inbox on spawn.` | `{"member_id": <id>, "pane_id": null, "skipped": true, "reason": "pending_placement"}` |
 | Gated skip | `Member <name> (<pane_id>) is <reason> — ping skipped.` | `{"member_id": <id>, "pane_id": "<pane_id>", "skipped": true, "reason": "<reason>"}` |
 
-A gated skip's `<reason>` follows the eligibility table in
-[member ping](#member-ping).
+A gated skip's `<reason>` is one of `awaiting_user`, `working`,
+`exec_running`, or `busy` — see [member ping](#member-ping).
 
 ### Monitor scan output {#monitor-scan-output}
 
@@ -1270,7 +1271,7 @@ a notice, when it was dispatched but did not start within 30 s, or when it is
 running and its process is no longer alive.
 
 While an exec is dispatched or running, every other delivery into that pane
-holds until safe delivery becomes possible; the exec's states are in
+holds, and no hold timeout applies; the exec's states are in
 [Data model](data-model.md#member_execs).
 
 ### `member exec-run` {#member-exec-run}
@@ -1298,10 +1299,10 @@ as a `!` command; it is not a command an operator or an agent runs by hand.
 `cafleet member ping MEMBER_ID [--json]` — the positional `MEMBER_ID` names
 the target member.
 
-Re-pokes a member's inbox: submits `cafleet message poll
+Re-pokes a member's inbox: keystrokes `Esc` → `cafleet message poll
 <member-id> — then resume your work if
 something was still running.` → `Enter` into the target's pane
-(using the shared automatic safety gate, without Escape — see
+(the leading `Esc` is the permission-prompt safeguard — see
 [Push notifications](multiplexer-backends.md#esc-safeguard)). It is the manual
 re-poke for a quiet pane, owned by the Director and the monitor member (whose
 fixed-ping exception is the one automatic use — see
@@ -1315,18 +1316,15 @@ keystrokes only a pane that can take the keystroke:
 
 | Target | Outcome | `reason` |
 |---|---|---|
-| Two `finished` observations and a valid claim | Keystroke sent | `null` |
+| `finished`, or a pane the classifier cannot name | Keystroke sent | `null` |
 | Pending placement | Skip | `pending_placement` |
 | `awaiting_user` | Skip | `awaiting_user` |
 | `working` | Skip | `working` |
-| `draft` | Skip | `draft` |
-| Unclassified layout | Skip | `unclassified` |
 | An exec is dispatched or running in the pane | Skip | `exec_running` |
 | Another cafleet process holds the [pane claim](multiplexer-backends.md#pane-claim) | Skip | `busy` |
 
-A failed or changed final observation holds the ping; capture failures remain
-CLI errors. An expired or superseded claim skips with `busy`. Ping is immediate
-and nonqueued. A pending placement (a
+An unclassified pane is keystroked because a quiet pane the classifier cannot
+name is the stalled member a ping exists for. A pending placement (a
 placement row whose `pane_id` is not yet patched) polls its inbox on spawn,
 so there is nothing a ping would add. Every skip exits 0 in every mode, and
 the `skipped` and `reason` JSON keys are present on every success path
@@ -1430,6 +1428,7 @@ Each tick writes one line per keystroke to stdout:
 |---|---|
 | Wake | `<iso-ts> tick -> wake monitor <monitor-member-id> (<N> members)` |
 | Preview | `<iso-ts> tick -> preview msg <id> member <member_id>` |
+| Forced preview | `<iso-ts> tick -> forced preview msg <id> member <member_id>` |
 | Exec dispatch | `<iso-ts> tick -> dispatch exec <id> member <member_id>` |
 | Exec resume | `<iso-ts> tick -> resume exec <id> member <member_id>` |
 
@@ -1601,6 +1600,7 @@ and exit categories, and define the remaining exact diagnostics.
 | `member ping` | The keystroke fails | `Error: send failed: tmux send-keys did not deliver the poll-trigger keystroke to pane <pane>.` | 1 | — |
 | `member show` / `prompt` / `exec` / `ping` / `capture` | An unknown or inactive target member id | `Error: Member <member-id> not found` | 1 | — |
 | `member prompt` / `exec` / `ping` / `capture` | A target with no placement row | ``Error: member <member-id> has no placement row; it was not spawned via `cafleet member create`.`` | 1 | — |
+| (any command reading settings) | `CAFLEET_DELIVERY_HOLD_TIMEOUT` is not a non-negative integer | `Error: CAFLEET_DELIVERY_HOLD_TIMEOUT must be a non-negative integer (got '<value>')` | 1 | The rule every count or duration variable shares — see [Environment variables](#environment-variables) |
 | `message send` / `message broadcast` / `member create` | Neither the positional body nor `--file`, or both | The parser's native argument-group error | 2 | — |
 | `message send` / `message broadcast` / `member create` | Positional body empty or whitespace-only | `Error: text may not be empty.` | 2 | — |
 | `message send` / `message broadcast` / `member create` | `--file <path>` to an empty (zero-byte or whitespace-only) file | `Error: --file <path>: file is empty.` | 1 | — |

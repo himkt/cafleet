@@ -71,7 +71,7 @@ members and the Director with their `unacked` counts. Run these steps:
    `cafleet member ping <member-id>`. Confirmed quiet alone suffices here: a
    member may have stalled mid-task with an empty inbox, and one bounded poll
    trigger per quiet period is cheap. The broker gates the ping itself: it
-   submits only after empty-and-idle observations and valid claim checks, and reports a skip
+   keystrokes a pane at rest or one it cannot classify, and reports a skip
    (exit 0, with a reason) for a pane that is working, waiting on a prompt,
    running an exec, or pending.
 5. **Ping the Director only when it is actually stalled**: confirmed quiet
@@ -103,10 +103,8 @@ arbitrary instruction text attached to a pane action.
 
 ## Who watches the watcher
 
-The wake keystroke into your own pane passes the shared empty-and-idle safety
-gate, submits without Escape, and closes with the
-resume clause. A due wake waits while a turn is active or a draft is present,
-then re-engages you once the composer is empty and idle. If
+The wake keystroke into your own pane is `Esc`-first and closes with the
+resume clause, so if you stall mid-turn your own next wake re-engages you. If
 your pane dies, the loop keeps running, and the Director re-spawns you with
 `--role monitor` (the one-per-fleet guard counts only *active* members, so a
 deleted monitor frees the slot).
