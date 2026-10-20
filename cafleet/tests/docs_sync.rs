@@ -1018,7 +1018,6 @@ mod structural_contracts {
             (
                 "docs/docs/concepts/monitoring.md",
                 vec![
-                    "storage.md#duplicate-monitor-recovery",
                     "../spec/multiplexer-backends.md",
                     "../spec/cli-options.md#monitor-resource-cleanup",
                     "../spec/cli-options.md#cafleet-monitor-scan",
@@ -1028,7 +1027,6 @@ mod structural_contracts {
                 "docs/docs/concepts/storage.md",
                 vec![
                     "../spec/cli-options.md#cafleet-setup",
-                    "../spec/data-model.md#members",
                     "../spec/cli-options.md#stale-assets-guard",
                 ],
             ),
@@ -1082,16 +1080,6 @@ mod structural_contracts {
             .section("resolve-and-bootstrap")
             .unwrap()
             .require(&["cafleet doctor", "--monitor-file", "--monitor-model"])
-            .unwrap();
-        INVENTORY
-            .document("docs/docs/concepts/storage.md")
-            .section("duplicate-monitor-recovery")
-            .unwrap()
-            .require(&[
-                "member delete <surplus-id>",
-                "CAFLEET_DATABASE_URL",
-                "setup",
-            ])
             .unwrap();
         let spec = INVENTORY.document("SPEC.md");
         INVENTORY

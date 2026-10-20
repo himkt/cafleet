@@ -24,7 +24,7 @@ impl Settings {
                         "HOME is not set; cannot derive the default database path".to_string(),
                     )
                 })?;
-                format!("sqlite:///{home}/.local/share/cafleet/cafleet_v6.db")
+                format!("sqlite:///{home}/.local/share/cafleet/cafleet_v7.db")
             }
         };
         Ok(Settings {
@@ -106,12 +106,12 @@ mod tests {
     }
 
     #[test]
-    fn default_database_url_points_at_expanded_home_cafleet_v6() {
+    fn default_database_url_points_at_expanded_home_cafleet_v7() {
         let s = Settings::from_lookup(|_| None).unwrap();
         assert!(s.database_url.starts_with("sqlite:///"));
         assert!(
             s.database_url
-                .ends_with("/.local/share/cafleet/cafleet_v6.db")
+                .ends_with("/.local/share/cafleet/cafleet_v7.db")
         );
         assert!(
             !s.database_url.contains('~'),

@@ -49,7 +49,8 @@ reports instead of blocking. The exact rules and error strings are in
 A database file written by a release with a different default file name
 records a schema version ahead of the bundled head, so every command refuses
 it and leaves the file untouched. To start on the current schema, unset
-`CAFLEET_DATABASE_URL` (or point it at a new file) and run `cafleet setup`.
+`CAFLEET_DATABASE_URL` (or point it at a new file) and run
+[`cafleet setup`](../spec/cli-options.md#cafleet-setup).
 
 ## Assets-install recording
 
