@@ -32,7 +32,7 @@ is never used to price a model.
 | Anthropic pricing | `claude` prices | `https://platform.claude.com/docs/en/about-claude/pricing.md` |
 | OpenAI pricing | `codex` prices | `https://developers.openai.com/api/docs/pricing.md` |
 | Codex model availability | `codex` availability | `https://learn.chatgpt.com/docs/models.md` |
-| OpenCode Zen models and pricing | `opencode` prices and availability | `https://opencode.ai/docs/zen.md` |
+| OpenCode Console models and pricing | `opencode` prices and availability | `https://opencode.ai/v2/docs/console/models/` |
 | Claude Code model configuration | `claude` context windows and `[1m]` applicability | `https://code.claude.com/docs/en/model-config.md` |
 
 ## Refresh procedure
@@ -47,7 +47,7 @@ is never used to price a model.
    sources only.
 3. **Refresh the `claude` and `codex` tables** from their provider pricing
    pages, and **refresh the `opencode` table** with the dedicated procedure
-   below — the Zen catalog behaves differently from the provider pages, so
+   below — the Console catalog behaves differently from the provider pages, so
    follow that procedure exactly. For `codex`, pricing and availability come
    from different pages: price each model from the OpenAI pricing page, but
    take Codex availability from the Codex models page
@@ -101,32 +101,33 @@ is never used to price a model.
    every successful refresh keeps it present and current. A failed refresh
    makes **no** edit.
 
-## OpenCode Zen procedure (the `opencode` table)
+## OpenCode Console procedure (the `opencode` table)
 
-The `opencode` backend is priced by the OpenCode Zen page, and its catalog
+The `opencode` backend is priced by the OpenCode Console page, and its catalog
 behaves differently from the two provider pages: model IDs differ from
 display names, the page lists many models while cafleet curates a few, and
 free stealth/preview models appear and disappear. On **every** refresh, even
 when the claude/codex prices are unchanged:
 
-1. **Price from the Zen page only.** Zen's own USD-per-MTok rates are the
-   billing rates for the `opencode` backend. Never price a Zen model from the
-   upstream vendor's page (Anthropic, OpenAI, DeepSeek, …) — the Zen rate is
-   the one cafleet members are billed at.
-2. **Copy the Zen model ID exactly; never slugify the display name.** The
-   page shows a display name ("GLM 5.2", "Kimi K2.7 Code") and a distinct
-   model ID (`glm-5.2`, `kimi-k2.7-code`). The row's `--model` value is
-   `opencode/<zen-model-id>` — the literal `opencode/` prefix followed by the
-   ID copied verbatim from the page. A hand-derived slug that does not match
-   the Zen ID fails at spawn time.
+1. **Price from the Console page only.** Console's own USD-per-MTok rates are
+   the billing rates for the `opencode` backend. Never price a Console model
+   from the upstream vendor's page (Anthropic, OpenAI, DeepSeek, …) — the
+   Console rate is the one cafleet members are billed at.
+2. **Copy the Console model ID exactly; never slugify the display name.** The
+   page's *Model list* table maps each display name ("GLM 5.2", "Kimi K2.7
+   Code") to a distinct model ID (`glm-5.2`, `kimi-k2.7-code`), and its
+   *Pricing* table keys prices by the same display name. The row's `--model`
+   value is `opencode/<console-model-id>` — the literal `opencode/` prefix
+   followed by the ID copied verbatim from the page. A hand-derived slug that
+   does not match the Console ID fails at spawn time.
 3. **Re-verify every curated row against the page.** For each existing row,
-   confirm the model is still listed on Zen and its price is current. A
+   confirm the model is still listed on Console and its price is current. A
    delisted model's row is removed in the same refresh.
-4. **Handle free models by their published price.** A model Zen offers free
-   for a limited time is priced `0.00` in both columns. When the free offer
-   ends: update the row to the newly published Zen price, or remove the row
-   if the model disappears or has no published price.
-5. **Keep the table a curated subset.** Do not mirror the full Zen catalog —
+4. **Handle free models by their published price.** A model Console offers
+   free for a limited time is priced `0.00` in both columns. When the free
+   offer ends: update the row to the newly published Console price, or remove
+   the row if the model disappears or has no published price.
+5. **Keep the table a curated subset.** Do not mirror the full Console catalog —
    keep a handful of reviewed models spanning the price range. Adding or
    removing a curated model is a reviewed policy change, approved in the same
    pull request like any class or ordering change.
