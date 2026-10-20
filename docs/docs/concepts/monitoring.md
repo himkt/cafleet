@@ -16,8 +16,7 @@ attention, so the Director is never nudged by a timer.
 One monitor loop runs per fleet. Separately, the database enforces one
 active monitor member per fleet, including concurrent registrations. A
 monitor's pane dying does not itself deregister the member: deregister the
-old member before re-spawning it. Existing duplicate records block migration
-and require [duplicate-monitor recovery](storage.md#duplicate-monitor-recovery).
+old member before re-spawning it.
 
 ## Delivery, heartbeat, classification, facilitation
 
@@ -77,8 +76,9 @@ The broker judges a pane from its captured text and names one of four states:
 | unclassified | None of the cues match | Held |
 
 A hold is bounded. Once it has lasted longer than the hold timeout the
-delivery is **forced** into the pane as it is, with a line that tells the
-recipient what the broker interrupted. The gate, the timeout, the payloads,
+delivery is **forced** into the pane as it is. A forced preview always tells
+the recipient to resume its work if something was still running, and adds a
+note when its `Escape` dismissed a pending prompt. The gate, the timeout, the payloads,
 and the per-backend cues are specified in
 [Held delivery](../spec/multiplexer-backends.md#held-delivery).
 

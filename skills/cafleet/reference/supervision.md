@@ -39,7 +39,7 @@ The broker sends a keystroke only into a pane that is at rest. A message for a m
 This is why you send without checking the target first:
 
 - **Send when you have something to send.** `cafleet message send` and `cafleet message broadcast` need no capture beforehand. A held send exits 0; its output shows `notification_sent: false` (unicast, `--json`) or a `delivered` count below `recipients` (broadcast).
-- **A hold is bounded.** After the hold timeout (`CAFLEET_DELIVERY_HOLD_TIMEOUT`, default 300 s) the broker forces the delivery, with a line telling the recipient what it interrupted. A forced preview that names a dismissed prompt means the rejection came from the broker, not from the user: re-issue the tool call.
+- **A hold is bounded.** After the hold timeout (`CAFLEET_DELIVERY_HOLD_TIMEOUT`, default 300 s) the broker forces the delivery. Every forced preview tells the recipient to resume its work if something was still running. A forced preview that names a dismissed prompt means the rejection came from the broker, not from the user: re-issue the tool call.
 - **`cafleet member ping` is gated by the broker too.** It keystrokes a pane at rest or a quiet pane it cannot classify, and skips a busy one with exit 0 and a reason.
 - **`cafleet member prompt` is your deliberate direct turn** and is sent at once.
 

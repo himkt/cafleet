@@ -1915,8 +1915,8 @@ first, then assets):
   apply the bundled migrations up to the head revision (idempotent). On an
   application error, print `db half failed: <message>` and record the
   failure. The assets half still runs after a DB-half failure. Its pre-flight
-  fails if `asset_installs` is missing, but an old database with that table can
-  accept assets updates even when duplicate monitors prevent migration.
+  fails if `asset_installs` is missing, but a database with that table can
+  accept assets updates even when its migration fails.
   Report only the halves that actually failed; the DB failure still makes
   the overall command exit 1.
 - **Assets half** — installs, from the data embedded in the binary at build
@@ -2841,9 +2841,9 @@ performs at most one keystroke into one member's pane:
 | Pane state | Hold age below the timeout | Hold age at or above the timeout |
 |---|---|---|
 | `finished` | Ordinary delivery | Ordinary delivery |
-| `awaiting_user` | Hold | Forced delivery; a preview adds the broker note |
+| `awaiting_user` | Hold | Forced delivery; a preview adds the resume clause and the broker note |
 | `working` | Hold | Forced delivery; a preview adds the resume clause |
-| unclassified | Hold | Forced delivery; base payload only |
+| unclassified | Hold | Forced delivery; a preview adds the resume clause |
 
 **Hold age** is `now − max(item timestamp, finished_at of the pane's latest
 exec, forced_at)`. The item timestamp is `created_at` for a preview or a
@@ -2866,11 +2866,13 @@ claim before typing.
 
 | Delivery | Payload |
 |---|---|
-| Ordinary, or forced on an unclassified pane | The base payload |
-| Forced on `working` | The base payload, then `[cafleet] Resume your work if something was still running.` |
-| Forced on `awaiting_user` | The base payload, then `[cafleet] This delivery's Escape dismissed a pending prompt in your pane; that rejection did not come from the user. Re-issue the tool call if you still need it.` |
+| Ordinary | The base payload |
+| Forced on `working` or an unclassified pane | The base payload, then `[cafleet] Resume your work if something was still running.` |
+| Forced on `awaiting_user` | The base payload, then `[cafleet] Resume your work if something was still running.`, then `[cafleet] This delivery's Escape dismissed a pending prompt in your pane; that rejection did not come from the user. Re-issue the tool call if you still need it.` |
 
-The extra line is the `note` argument of `send_inline_preview`.
+The extra lines are the `note` argument of `send_inline_preview`: one string
+whose lines are joined with `\n`, typed after the base payload in the same
+literal keystroke.
 
 **Keystrokes that reach a pane that is not `finished`:**
 
@@ -3671,7 +3673,7 @@ binding, so an unrelated `CAFLEET_*` variable never binds by accident.
 
 | Field | Env var | Type | Default |
 |---|---|---|---|
-| `database_url` | `CAFLEET_DATABASE_URL` | string | `sqlite:///` + `~/.local/share/cafleet/cafleet_v6.db` (home expanded **at startup**) |
+| `database_url` | `CAFLEET_DATABASE_URL` | string | `sqlite:///` + `~/.local/share/cafleet/cafleet_v7.db` (home expanded **at startup**) |
 | `broker_host` | `CAFLEET_BROKER_HOST` | string | `"127.0.0.1"` |
 | `broker_port` | `CAFLEET_BROKER_PORT` | integer (16-bit port) | `8000` |
 | `max_text_len` | `CAFLEET_MAX_TEXT_LEN` | non-negative integer | `200` |
@@ -3703,7 +3705,7 @@ binding, so an unrelated `CAFLEET_*` variable never binds by accident.
 - **Default DB URL** expands `~` to `$HOME` **only for the factory default**; a
   user-supplied `CAFLEET_DATABASE_URL` is passed through verbatim (no `~`
   expansion, so a user value must already be absolute). Net default on home
-  `/home/u`: `sqlite:////home/u/.local/share/cafleet/cafleet_v6.db` (four slashes).
+  `/home/u`: `sqlite:////home/u/.local/share/cafleet/cafleet_v7.db` (four slashes).
 - A non-integer `broker_port`/`max_text_len` must **fail loudly at startup** (a
   hard validation error, not a silent default).
 - `max_text_len` truncates only CLI echo + the inline-preview keystroke.
@@ -3862,8 +3864,7 @@ recording one row per applied migration: version, name, applied-on timestamp,
 checksum). The schema
 is created and evolved by a **chain of embedded SQL migrations** — numbered
 files `V<N>__<slug>.sql`, contiguous from 1, compiled into the binary;
-applying the chain in place preserves existing data (§11; the one exception
-is `V6`, which restarts `asset_installs` empty — see the chain below). Column types,
+applying the chain in place preserves existing data (§11). Column types,
 defaults, FK rules, AUTOINCREMENT, and the create-order quirk are in §6.1.
 
 **Indexes (non-unique), at head:**
@@ -3882,123 +3883,116 @@ defaults, FK rules, AUTOINCREMENT, and the create-order quirk are in §6.1.
   generation omits the monitor marker; Director-first display-kind resolution
   (§5.4) is unchanged and does not override this index predicate.
 
-**The migration chain.** Head is **`V9`**, contiguous from 1 with exactly one
-baseline:
+**The migration chain.** Head is **`V1`**, contiguous from 1 with exactly one
+baseline: `V1__baseline.sql` creates the head schema in this order —
+`members` (+ `idx_members_fleet_status` and
+`idx_members_one_active_monitor_per_fleet`) — created **first** because every
+other FK-bearing table references it; `members.fleet_id` forward-references
+the still-uncreated `fleets` (§6.1), AUTOINCREMENT; `fleets`, AUTOINCREMENT;
+`asset_installs` — composite PK `(coding_agent, path)`, no AUTOINCREMENT, no
+FK constraint; `member_placements` — PK=FK `member_id`, not AUTOINCREMENT,
+`backend` DDL default `"tmux"`, `coding_agent` NOT NULL with no DDL default;
+`monitor_runtime` — PK=FK `fleet_id` ON DELETE RESTRICT, `tick_seconds`
+default 5, not AUTOINCREMENT; `messages` (+
+`idx_messages_owner_member_status_ts`, `idx_messages_from_member_status_ts`),
+AUTOINCREMENT; `member_execs`, AUTOINCREMENT. The exact DDL:
 
-1. `V1__baseline.sql` — the baseline, creating the schema in this order:
-   `members` (+ `idx_members_fleet_status`) — created **first** because every
-   other FK-bearing table references it; `members.fleet_id` forward-references
-   the still-uncreated `fleets` (§6.1), AUTOINCREMENT; `fleets`, AUTOINCREMENT;
-   `asset_installs` — TEXT PK `coding_agent`, no AUTOINCREMENT, no FK
-   constraint, columns `coding_agent` TEXT PK, `cafleet_version` TEXT NOT NULL,
-   `installed_at` TEXT NOT NULL (recreated with the composite
-   `(coding_agent, path)` key at `V6`, below — §5.2 carries the head-shape
-   semantics); `member_placements` — PK=FK `member_id`,
-   not AUTOINCREMENT, `backend` DDL default `"tmux"`, `coding_agent` NOT NULL
-   with no DDL default; the per-member monitor schedule table — PK=FK
-   `member_id` ON DELETE CASCADE, `interval_seconds` default 60, `enabled`
-   default 1, not AUTOINCREMENT (dropped at `V4`, below; its exact DDL is the
-   `V1` migration file's content); `monitor_runtime` — PK=FK
-   `fleet_id` ON DELETE RESTRICT, `tick_seconds` default 5, not AUTOINCREMENT;
-   `messages` (+ `idx_messages_owner_member_status_ts`,
-   `idx_messages_from_member_status_ts`), AUTOINCREMENT.
-2. `V2__drop_director_monitor_enrollment.sql` — data migration: deletes the
-   rows owned by any fleet's `director_member_id` from the per-member monitor
-   schedule table (the root Director was never a supervision watch target).
-3. `V3__strip_monitoring_member_kind.sql` — data migration: removes the whole
-   `$.cafleet` object from `member_card_json`
-   (`json_remove(member_card_json, '$.cafleet')`) on every row whose
-   `$.cafleet.kind` carries the retired per-member enrollment marker (the
-   migration file names the literal) — `cafleet.kind` was the sole key under
-   `$.cafleet`, so the whole object goes. The marker `register_member` writes
-   for the fleet's monitor member, `$.cafleet.kind == "monitor"` (§5.4,
-   §6.2), is a different literal value, so `V3` never touches a monitor
-   member's card.
-4. `V4__fleet_level_wake_schedule.sql` — drops the per-member monitor
-   schedule table (supervision cadence lives solely on `monitor_runtime`) and
-   runs `ALTER TABLE monitor_runtime ADD COLUMN last_wake_at TEXT` (nullable,
-   no DDL default).
-5. `V5__monitor_wake_interval.sql` — runs
-   `ALTER TABLE monitor_runtime ADD COLUMN wake_interval_seconds INTEGER`
-   (nullable, no DDL default).
-6. `V6__path_aware_asset_installs.sql` — drops and recreates `asset_installs`
-   with the composite `(coding_agent, path)` key. A `PRIMARY KEY` change has
-   no in-place `ALTER TABLE` form in SQLite, and the table has no FK parents,
-   so drop-and-recreate is the legitimate path; the table restarts empty —
-   the old rows' install locations were `$HOME`-dependent hard-coded
-   defaults, and a plain-SQL migration cannot know `$HOME` to backfill a
-   truthful `path` value, so an empty restart is the only non-fabricated
-   option (every machine re-runs `setup` per agent after upgrading). Head
-   `asset_installs` schema:
-   ```sql
-   DROP TABLE asset_installs;
+```sql
+CREATE TABLE members (
+    member_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    fleet_id INTEGER NOT NULL REFERENCES fleets (fleet_id) ON DELETE RESTRICT,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    status TEXT NOT NULL,
+    registered_at TEXT NOT NULL,
+    deregistered_at TEXT,
+    member_card_json TEXT NOT NULL
+);
 
-   CREATE TABLE asset_installs (
-       coding_agent TEXT NOT NULL,
-       path TEXT NOT NULL,
-       cafleet_version TEXT NOT NULL,
-       installed_at TEXT NOT NULL,
-       PRIMARY KEY (coding_agent, path)
-   );
-   ```
-7. `V7__monitor_wake_request.sql` — runs
-   `ALTER TABLE monitor_runtime ADD COLUMN wake_requested_at TEXT`
-   (nullable, no DDL default). Head `monitor_runtime` schema:
-   ```sql
-   CREATE TABLE monitor_runtime (
-       fleet_id INTEGER NOT NULL PRIMARY KEY REFERENCES fleets (fleet_id) ON DELETE RESTRICT,
-       pid INTEGER,
-       started_at TEXT,
-       last_tick_at TEXT,
-       tick_seconds INTEGER NOT NULL DEFAULT 5,
-       last_wake_at TEXT,
-       wake_interval_seconds INTEGER,
-       wake_requested_at TEXT
-   );
-   ```
-8. `V8__unique_active_monitor.sql` — adds the partial unique index:
-   ```sql
-   CREATE UNIQUE INDEX idx_members_one_active_monitor_per_fleet
-   ON members(fleet_id)
-   WHERE status = 'active'
-     AND json_extract(member_card_json, '$.cafleet.kind') = 'monitor';
-   ```
-   Existing duplicate active monitors make this DDL fail. No survivor is
-   selected automatically, and existing migration files remain unchanged.
-9. `V9__held_delivery_and_member_execs.sql` — adds the delivery state
-   (§5.2): the preview stamp on `messages`, the three pane-level timestamps
-   on `member_placements`, and the `member_execs` table. The `UPDATE`
-   backfill marks every existing message as settled, so no stored row is
-   owed a preview:
-   ```sql
-   ALTER TABLE messages ADD COLUMN notified_at TEXT;
-   UPDATE messages SET notified_at = created_at;
+CREATE INDEX idx_members_fleet_status ON members (fleet_id, status);
 
-   ALTER TABLE member_placements ADD COLUMN keystroke_at TEXT;
-   ALTER TABLE member_placements ADD COLUMN forced_at TEXT;
-   ALTER TABLE member_placements ADD COLUMN silence_notice_at TEXT;
+CREATE UNIQUE INDEX idx_members_one_active_monitor_per_fleet
+ON members(fleet_id)
+WHERE status = 'active'
+  AND json_extract(member_card_json, '$.cafleet.kind') = 'monitor';
 
-   CREATE TABLE member_execs (
-       exec_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-       member_id INTEGER NOT NULL REFERENCES members (member_id) ON DELETE RESTRICT,
-       command TEXT NOT NULL,
-       created_at TEXT NOT NULL,
-       dispatched_at TEXT,
-       started_at TEXT,
-       pid INTEGER,
-       finished_at TEXT,
-       exit_code INTEGER,
-       resumed_at TEXT
-   );
-   ```
+CREATE TABLE fleets (
+    fleet_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    created_at TEXT NOT NULL,
+    deleted_at TEXT,
+    director_member_id INTEGER REFERENCES members (member_id) ON DELETE RESTRICT
+);
+
+CREATE TABLE asset_installs (
+    coding_agent TEXT NOT NULL,
+    path TEXT NOT NULL,
+    cafleet_version TEXT NOT NULL,
+    installed_at TEXT NOT NULL,
+    PRIMARY KEY (coding_agent, path)
+);
+
+CREATE TABLE member_placements (
+    member_id INTEGER NOT NULL PRIMARY KEY REFERENCES members (member_id) ON DELETE CASCADE,
+    mux_session TEXT NOT NULL,
+    mux_window_id TEXT NOT NULL,
+    mux_pane_id TEXT,
+    backend TEXT NOT NULL DEFAULT 'tmux',
+    coding_agent TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    keystroke_at TEXT,
+    forced_at TEXT,
+    silence_notice_at TEXT
+);
+
+CREATE TABLE monitor_runtime (
+    fleet_id INTEGER NOT NULL PRIMARY KEY REFERENCES fleets (fleet_id) ON DELETE RESTRICT,
+    pid INTEGER,
+    started_at TEXT,
+    last_tick_at TEXT,
+    tick_seconds INTEGER NOT NULL DEFAULT 5,
+    last_wake_at TEXT,
+    wake_interval_seconds INTEGER,
+    wake_requested_at TEXT
+);
+
+CREATE TABLE messages (
+    message_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    owner_member_id INTEGER NOT NULL REFERENCES members (member_id) ON DELETE RESTRICT,
+    from_member_id INTEGER NOT NULL,
+    to_member_id INTEGER,
+    type TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    status_state TEXT NOT NULL,
+    status_timestamp TEXT NOT NULL,
+    origin_message_id INTEGER,
+    text TEXT NOT NULL,
+    notified_at TEXT
+);
+
+CREATE INDEX idx_messages_owner_member_status_ts ON messages (owner_member_id, status_timestamp);
+CREATE INDEX idx_messages_from_member_status_ts ON messages (from_member_id, status_timestamp);
+
+CREATE TABLE member_execs (
+    exec_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    member_id INTEGER NOT NULL REFERENCES members (member_id) ON DELETE RESTRICT,
+    command TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    dispatched_at TEXT,
+    started_at TEXT,
+    pid INTEGER,
+    finished_at TEXT,
+    exit_code INTEGER,
+    resumed_at TEXT
+);
+```
 
 There are no CHECK constraints. Future schema changes are hand-written
 numbered files `V<N>__<slug>.sql` appended to the chain; the chain stays
 contiguous from 1 with exactly one baseline.
 
-A fresh DB migrated to head starts with **no rows in any application table**
-(`V2`/`V3` are no-ops on an empty database). `asset_installs` rows are
-written at install time, not by the schema.
+A fresh DB migrated to head starts with **no rows in any application table**.
+`asset_installs` rows are written at install time, not by the schema.
 
 **`setup` db-migration driver** (the db half of `setup`, §6.3). Procedure: (1)
 validate the URL scheme is `sqlite` (§6.1); (2) extract the DB file path — if
@@ -4010,32 +4004,16 @@ unversioned database.`; a recorded version greater than the embedded chain's
 head → the **ahead-of-head refusal**, application error `DB schema is at
 version <M> which is unknown to this version of cafleet. Refusing to downgrade
 automatically.`; (5) already at head (recorded version == head) → print
-`Already at head (<N>); nothing to do.` and stop; (6) before applying pending
-migrations, if `members` exists, query duplicate fleets using the partial
-index's exact predicate, with fleet ids and member ids in ascending order.
-A duplicate fails the DB half with
-`active monitor duplicates prevent migration: fleet <id>: members <ids>; ...`.
-Preserve all member/placement rows, panes, and schema history: diagnosis makes
-no changes and does not choose a survivor. A new database without `members`
-skips this check; (7) apply all pending migrations in refinery's grouped
-transaction. If index creation fails (including a duplicate introduced after
-step 6), roll back the entire pending group and its ledger writes. Re-query
-for duplicates after failure: if that succeeds and finds duplicates, report
-the same diagnostic; otherwise preserve the original migration error. On
-success print `Created <db_file> and applied migrations
-to head (<N>).` when no version was recorded before the run (a fresh or
-table-less DB), else `Upgraded from <M> to <N>.`. `<M>` / `<N>` are the
-integer migration versions (the head is `9`). The driver's
-connection is closed when the command finishes (success or failure).
+`Already at head (<N>); nothing to do.` and stop; (6) apply all pending
+migrations in refinery's grouped transaction; a failure rolls back the entire
+pending group and its ledger writes and reports the original migration error.
+On success print `Created <db_file> and applied migrations to head (<N>).`
+when no version was recorded before the run (a fresh or table-less DB), else
+`Upgraded from <M> to <N>.`. `<M>` / `<N>` are the integer migration versions
+(the head is `1`). The driver's connection is closed when the command
+finishes (success or failure).
 
-**Duplicate-monitor recovery.** Preserve the diagnostic's fleet/member IDs and use this complete operator procedure:
-
-1. Use the previous compatible CAFleet binary to inspect affected fleets and choose the intended monitor; the migration never selects a survivor.
-2. Restore assets compatible with that binary using its `cafleet setup` so its stale-assets guard permits the cleanup commands.
-3. Use that binary's `cafleet member delete <surplus-monitor-id>` for each selected surplus monitor. Delete through CAFleet so panes and registrations are both handled; retain the intended monitor.
-4. Return to the new binary and run `cafleet setup` to apply pending migrations and install its matching assets. Confirm the reported outcome before resuming work.
-
-Migration applies pending changes in place and preserves message history; V6's specified asset-record reset remains its explicit exception to row preservation. Schema/stale-asset guards direct an upgraded installation to setup; an ahead-of-head or unversioned populated database retains its refusal path.
+Migration applies pending changes in place and preserves message history. Schema/stale-asset guards direct an upgraded installation to setup; an ahead-of-head or unversioned populated database retains its refusal path. A database file written by a release with a different default file name records a version ahead of head and is refused by every command, file untouched.
 
 ## 9. Testing strategy
 
@@ -4055,7 +4033,8 @@ Migration applies pending changes in place and preserves message history; V6's s
     capture, cue precedence, a cue outside its region, and an unknown coding
     agent.
   - *Delivery step* — `deliver_pane` against a fake `PaneIo`: the gate table,
-    the forced payload per state, hold-age restarts, item priority, the pane
+    the forced payload per state (the resume clause on every forced
+    preview), hold-age restarts, item priority, the pane
     claim, and the cleared stamp after a failed keystroke.
   - *Coding-agent* — assert each `build_spawn_argv` argv, the opencode model
     validation, and each backend's `ensure_available` preconditions (PATH
@@ -4160,4 +4139,4 @@ This index locates the complete inline decision owners. Detailed rules govern th
 | Coding-agent registry representation allowance and exact argv/presets | §6.7 |
 | Config-owned settings singleton and wake defaults | §7.1 |
 | Usage/application/HTTP error classification | §7.2 |
-| Embedded migration chain, V6 asset reset, refusal and duplicate-monitor recovery | §8 |
+| Embedded migration chain, head schema and setup refusals | §8 |

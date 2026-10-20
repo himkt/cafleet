@@ -86,8 +86,6 @@ inside it, before inserting either a member or placement. The CLI's early
 check preserves validation order; the DB constraint also protects direct
 broker callers and concurrent registrations. A conflict retains the existing
 CLI error and exit 1, without creating a losing member, placement, or pane.
-See [duplicate-monitor recovery](../concepts/storage.md#duplicate-monitor-recovery)
-for migration of databases that already contain conflicting rows.
 
 ### `messages`
 

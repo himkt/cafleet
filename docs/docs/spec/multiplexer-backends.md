@@ -288,9 +288,9 @@ The delivery step performs at most one keystroke into one member's pane:
 | Pane state | Hold age below the timeout | Hold age at or above the timeout |
 |---|---|---|
 | `finished` | Ordinary delivery | Ordinary delivery |
-| `awaiting_user` | Hold | Forced delivery; a preview adds the broker note |
+| `awaiting_user` | Hold | Forced delivery; a preview adds the resume clause and the broker note |
 | `working` | Hold | Forced delivery; a preview adds the resume clause |
-| unclassified | Hold | Forced delivery; base payload only |
+| unclassified | Hold | Forced delivery; a preview adds the resume clause |
 
 **Hold age** is the time since the latest of three moments: the item's own
 timestamp (creation for a preview or a queued exec, the end of the command
@@ -334,14 +334,16 @@ one at rest.
 
 | Delivery | Payload |
 |---|---|
-| Ordinary, or forced on an unclassified pane | The base payload |
-| Forced on `working` | The base payload, then `[cafleet] Resume your work if something was still running.` |
-| Forced on `awaiting_user` | The base payload, then `[cafleet] This delivery's Escape dismissed a pending prompt in your pane; that rejection did not come from the user. Re-issue the tool call if you still need it.` |
+| Ordinary | The base payload |
+| Forced on `working` or an unclassified pane | The base payload, then `[cafleet] Resume your work if something was still running.` |
+| Forced on `awaiting_user` | The base payload, then `[cafleet] Resume your work if something was still running.`, then `[cafleet] This delivery's Escape dismissed a pending prompt in your pane; that rejection did not come from the user. Re-issue the tool call if you still need it.` |
 
-Each extra line is conditional. An ordinary preview lands in a pane at rest,
-where nothing was interrupted, so it carries no resume clause. The broker note
-is emitted only when the broker observed a pending prompt immediately before
-its own `Escape`, so its absence still means the user rejected the call.
+An ordinary preview lands in a pane at rest, where nothing was interrupted, so
+it carries no resume clause. Every forced preview carries it, because a forced
+keystroke may have interrupted a turn the classifier did not recognize. The
+broker note is emitted only when the broker observed a pending prompt
+immediately before its own `Escape`, so its absence still means the user
+rejected the call.
 Re-issuing the tool call raises the prompt again, so the user's decision is
 preserved.
 

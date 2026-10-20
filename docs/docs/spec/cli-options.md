@@ -44,7 +44,7 @@ Every `CAFLEET_`-prefixed variable cafleet reads:
 
 | Environment variable | Settings field | Default | Controls | Overridden by |
 |---|---|---|---|---|
-| `CAFLEET_DATABASE_URL` | `database_url` | `sqlite:///` + `~/.local/share/cafleet/cafleet_v6.db` | The registry database location; an absolute path is required | — |
+| `CAFLEET_DATABASE_URL` | `database_url` | `sqlite:///` + `~/.local/share/cafleet/cafleet_v7.db` | The registry database location; an absolute path is required | — |
 | `CAFLEET_MULTIPLEXER` | `multiplexer` | unset ⇒ auto-detect | The multiplexer backend, per [Backend selection](multiplexer-backends.md#backend-selection) | — |
 | `CAFLEET_MAX_TEXT_LEN` | `max_text_len` | `200` | Text-mode body truncation on `message {send,poll,ack,show}`, and the broker's inline-preview truncation | — |
 | `CAFLEET_BROKER_HOST` | `broker_host` | `127.0.0.1` | The `cafleet server` bind address | `--host` |
@@ -332,19 +332,10 @@ The command runs two halves, in order:
     | At head | No-op | `Already at head (<N>); nothing to do.` |
     | Tables present but no `refinery_schema_history` | Refused | `DB has existing tables but no refinery_schema_history. Refusing to migrate an unversioned database.` |
     | Version unknown to this CLI version | Refused | `DB schema is at version <M> which is unknown to this version of cafleet. Refusing to downgrade automatically.` |
-    | Pending migration with duplicate active monitors | Refused; DB rows, schema history, and panes preserved | `active monitor duplicates prevent migration: fleet <id>: members <ids>; ...` |
 
-   The unversioned and newer-schema refusals retain precedence. Before applying
-   pending migrations, check existing members using the active-monitor index
-   predicate; a new DB without members skips the diagnostic. Conflicting fleet
-   ids and member ids are ascending. Pending migrations use one grouped
-   transaction, so a failure rolls back every pending schema/history change.
-   The index also rejects a duplicate introduced after the diagnostic. If a
-   recheck after migration failure finds duplicates, use the same diagnostic;
-   otherwise retain the original migration error. The DB half never manipulates
-   panes or chooses which monitor survives. Recovery uses the prior compatible
-   binary and may require restoring its assets first; see
-   [duplicate-monitor recovery](../concepts/storage.md#duplicate-monitor-recovery).
+   Pending migrations use one grouped transaction, so a failure rolls back
+   every pending schema/history change and reports the original migration
+   error.
 
 2. **assets half** — installs, from the data embedded in the binary at build
    time with no network access, each selected agent's two skill directories
@@ -381,7 +372,7 @@ The assets-half pre-flight can fire only after a db-half failure or an
 externally broken schema — the db half always runs first within the same
 command. A DB-half failure does not automatically fail or skip the assets
 half: if `asset_installs` remains usable, assets can be updated and recorded
-even when duplicate monitors prevent the schema upgrade.
+even when the schema upgrade fails.
 
 ### Config-dir resolution {#config-dir-resolution}
 
@@ -1557,7 +1548,6 @@ and exit categories, and define the remaining exact diagnostics.
 | (any fleet-scoped command) | No agent has an `asset_installs` row at its currently-resolved path | [Stale-assets guard](#stale-assets-guard) | 1 | See [Stale-assets guard](#stale-assets-guard) |
 | (any fleet-scoped command) | An `asset_installs` row at a resolved path differs from the runtime CLI version | [Stale-assets guard](#stale-assets-guard) | 1 | See [Stale-assets guard](#stale-assets-guard) |
 | `member create` | `--coding-agent opencode` with no agent preset at the resolved preset path | `Error: opencode agent preset not found at <preset>; run 'cafleet setup --coding-agent opencode' first` | 1 | `<preset>` is the resolved `<preset base>/agents/cafleet.md` — see [Config-dir resolution](#config-dir-resolution) |
-| `setup` | Existing duplicate active monitors prevent a pending migration | `active monitor duplicates prevent migration: fleet <id>: members <ids>; ...` | 1 | DB-half failure; see [duplicate-monitor recovery](../concepts/storage.md#duplicate-monitor-recovery) |
 | `setup` | The `asset_installs` table is missing as the assets half starts | `the database schema is missing or outdated; run 'cafleet setup' first` | 1 | An assets-half failure, after a db-half failure or an externally broken schema |
 | (any subject-taking command) | Missing positional subject id | The parser's native missing-required-argument error naming the positional | 2 | — |
 | (any id argument) | A non-integer id | The parser's native invalid-value error | 2 | — |
