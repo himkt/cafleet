@@ -12,7 +12,7 @@ Resolve the five runtime placeholders from Runtime bindings for the relevant ope
 
 For example, a Codex Director selecting an OpenCode reviewer uses the OpenCode catalog and reviewer defaults with the Codex decision surface and local execution tools. A Claude monitor observing a Codex member uses Codex capture cues with its own Claude tools. Monitor bootstrap and recovery select the Director's backend by construction: pass its monitor model and supported effort at bootstrap and recovery, retaining backend inheritance. User overrides and selection decisions follow [Director model-selection policy](../roles/director.md#model-selection).
 
-Model catalogs, their provenance/context notes, canonical Role defaults, and shared freshness metadata are maintained exclusively by the `cafleet-model-list-refresh` skill from the official sources in each backend section, refreshed at least every 30 days (last refreshed: 2026-10-08). Runtime bindings, bound runtime notes, pane cues, and worked resolutions belong to runtime documentation maintenance. The freshness date applies to model data; structural reorganization preserves that date.
+Model catalogs, their provenance/context notes, canonical Role defaults, and shared freshness metadata are maintained exclusively by the `cafleet-model-list-refresh` skill from the official sources in each backend section, refreshed at least every 30 days (last refreshed: 2026-10-20). Runtime bindings, bound runtime notes, pane cues, and worked resolutions belong to runtime documentation maintenance. The freshness date applies to model data; structural reorganization preserves that date.
 
 Prices are standard provider USD rates per MTok and are planning estimates, not an invoice guarantee. Each backend's catalog is ordered most → least capable as reviewed judgment. Context windows are listed for the `claude` backend, whose model strings are the ones a context-window suffix can apply to. Selection policy, including cost efficiency mode and monitor/reviewer rules, lives in [Director model selection](../roles/director.md#model-selection).
 
@@ -52,12 +52,10 @@ Either the model name or its alias is a valid `--model` token.
 | claude-sonnet-5-5 | sonnet | Efficient mid tier for routine work | 1M | 2.00 | 10.00 |
 | claude-sonnet-5 | — | Prior mid-tier generation at the same price | 1M | 2.00 | 10.00 |
 | claude-haiku-5-5 | haiku | Fast lowest-cost tier; 1M context; monitoring and quick bounded tasks | 1M | 0.10 | 0.50 |
-| claude-haiku-4-5 | — | Prior Haiku generation at a higher price | 200K | 1.00 | 5.00 |
 
-Every 1M row above runs at that window on every plan on the Anthropic API,
-so its `--model` value needs no `[1m]` suffix; `claude-haiku-4-5` has no 1M
-variant and never takes one. `claude-haiku-5-5` prices above apply to
-prompts up to 100K tokens; longer prompts bill at 0.50 / 2.50.
+Every row above runs at its 1M window on every plan on the Anthropic API,
+so its `--model` value needs no `[1m]` suffix. `claude-haiku-5-5` prices
+above apply to prompts up to 100K tokens; longer prompts bill at 0.50 / 2.50.
 
 Sources: [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing.md) and [Claude Code model configuration](https://code.claude.com/docs/en/model-config.md) — context windows and `[1m]` applicability.
 
@@ -103,7 +101,7 @@ Tie-breaks and the two-quiet-families rule: `cafleet/roles/monitor.md` § *On ea
 | `{monitor_model}` | `gpt-6-luna` |
 | `{monitor_effort}` | `low` |
 | `{other_model}` | `gpt-6.1-sol` |
-| `{other_effort}` | `medium` |
+| `{other_effort}` | `xhigh` |
 
 ### Model catalog
 
@@ -155,33 +153,34 @@ Tie-breaks and the two-quiet-families rule: `cafleet/roles/monitor.md` § *On ea
 
 | Placeholder | Value |
 |---|---|
-| `{reviewer_model}` | `opencode/muse-spark-1.3-contributor-free` |
+| `{reviewer_model}` | `opencode/deepseek-v4.1-flash-free` |
 | `{reviewer_effort}` | `—` |
 | `{monitor_model}` | `opencode/big-pickle` |
 | `{monitor_effort}` | `—` |
-| `{other_model}` | `opencode/mimo-v2.5-free` |
+| `{other_model}` | `opencode/glm-5.3-flash-free` |
 | `{other_effort}` | `—` |
 
 ### Model catalog
 
-A curated subset of the [OpenCode Zen](https://opencode.ai/docs/zen.md)
+A curated subset of the [OpenCode Console](https://opencode.ai/v2/docs/console/models/)
 catalog; the `opencode/` prefix is part of the `--model` value. Any other
 `<provider-id>/<model-id>` value remains a manual spawn with explicit
 `--coding-agent opencode --model` flags on `member create`. A price of
-0.00 is an explicitly free model, currently offered by Zen for a limited
-time.
+0.00 is an explicitly free model, currently offered by OpenCode Console for
+a limited time.
 
 | Model | Class | Input $/MTok | Output $/MTok |
 |---|---|---|---|
 | opencode/glm-5.2 | Strong general coding tier | 1.40 | 4.40 |
 | opencode/kimi-k2.7-code | Strong agentic tier tuned for code | 0.95 | 4.00 |
 | opencode/muse-spark-1.2 | Mid-price general coding tier | 1.25 | 4.25 |
-| opencode/muse-spark-1.3-contributor-free | Muse Spark 1.3 free for contributors | 0.00 | 0.00 |
-| opencode/mimo-v2.5-free | MiMo-V2.5 free general model | 0.00 | 0.00 |
+| opencode/deepseek-v4.1-flash-free | DeepSeek V4.1 Flash free tier; zero-retention provider | 0.00 | 0.00 |
+| opencode/glm-5.3-flash-free | GLM-5.3-Flash free efficient tier; zero-retention provider | 0.00 | 0.00 |
 | opencode/qwen3.5-plus | Efficient mid tier for routine work | 0.20 | 1.20 |
+| opencode/glm-5.3-flash | Fast low-cost GLM tier for routine work | 0.15 | 0.50 |
 | opencode/big-pickle | Stealth preview model; capability unverified | 0.00 | 0.00 |
 
-Source: [OpenCode Zen models and pricing](https://opencode.ai/docs/zen.md).
+Source: [OpenCode Console models and pricing](https://opencode.ai/v2/docs/console/models/).
 
 ### Note → applies at
 
