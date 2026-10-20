@@ -216,7 +216,7 @@ the runtime fields take these values:
 
 This is a presenter projection, not a serialization of the stored
 `MonitorRuntime` record. Stored null, zero, and a positive wake interval remain
-distinct: zero disables scheduled wakes but still allows requested wakes, while a
+distinct: zero disables scheduled wakes but still allows forced wake, while a
 legacy null interval remains null until claimed. A normal clear retains the
 stored `last_wake_at` and pending `wake_requested_at` even though stopped-process
 timestamps are hidden here; the request field is not added to this response.
@@ -279,13 +279,12 @@ a live consumer; against a dead loop it would silently never fire.
 ### POST /api/monitor/wake — Request an Immediate Wake {#post-api-monitor-wake}
 
 Records a durable request for an immediate monitor wake on the fleet's
-runtime row. The running loop attempts the request on its next tick, bypassing a disabled
-schedule (`wake_interval_seconds = 0`) and a not-yet-due one alike while
-preserving the shared automatic safety gate. A held or failed wake leaves the
-request pending and the last-success stamp unchanged. Repeat
+runtime row. The running loop honors the request on its next tick, so the
+wake lands within one scan tick (default 5 s) — bypassing a disabled
+schedule (`wake_interval_seconds = 0`) and a not-yet-due one alike. Repeat
 requests overwrite the stored timestamp, coalescing into a single wake. A
-delivered wake — scheduled or requested — stamps the last-wake timestamp and
-clears the request in one write, so a requested wake resets the schedule
+delivered wake — scheduled or forced — stamps the last-wake timestamp and
+clears the request in one write, so a forced wake resets the schedule
 baseline. See
 [Monitoring](../concepts/monitoring.md#cadence-and-tick-precision).
 

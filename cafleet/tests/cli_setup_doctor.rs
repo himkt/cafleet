@@ -262,6 +262,33 @@ fn setup_refuses_an_unversioned_database_with_existing_tables() {
 }
 
 #[test]
+fn setup_refuses_a_pre_reset_database_and_leaves_its_ledger_unchanged() {
+    let cli = Cli::new();
+    cli.seed_pre_reset_database();
+
+    let output = cli.run(&["setup"]);
+    assert_eq!(code(&output), 1);
+    let combined = format!("{}{}", stdout(&output), stderr(&output));
+    assert!(
+        combined.contains(
+            "db half failed: DB schema is at version 10 which is unknown to this version \
+             of cafleet. Refusing to downgrade automatically."
+        ),
+        "got: {combined}"
+    );
+    assert_eq!(
+        cli.sqlite()
+            .query_row(
+                "SELECT COUNT(*), MAX(version) FROM refinery_schema_history",
+                [],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .unwrap(),
+        (10, 10)
+    );
+}
+
+#[test]
 fn selector_setup_deduplicates_and_installs_in_the_fixed_order() {
     let cli = Cli::new();
     let output = cli.run(&[
@@ -474,9 +501,9 @@ fn doctor_reports_a_missing_database() {
 }
 
 #[test]
-fn doctor_completes_the_report_against_a_pre_v6_database() {
+fn doctor_completes_the_report_against_a_pre_reset_database() {
     let cli = Cli::new();
-    cli.seed_pre_v6_database();
+    cli.seed_pre_reset_database();
     let output = cli.run(&["doctor"]);
     assert_eq!(code(&output), 1, "the database issue exits 1");
     let out = stdout(&output);
@@ -484,7 +511,7 @@ fn doctor_completes_the_report_against_a_pre_v6_database() {
     assert!(out.contains("✗ database"), "got: {out}");
     assert!(
         out.contains(&format!(
-            "schema 5, head is {} — run: cafleet setup",
+            "schema 10 is newer than this CLI (head {}) — upgrade cafleet",
             head_version()
         )),
         "got: {out}"
@@ -509,7 +536,7 @@ fn doctor_completes_the_report_against_a_pre_v6_database() {
     assert_doctor_shape(&payload);
 
     assert_eq!(payload["database"]["ok"], false);
-    assert_eq!(payload["database"]["schema_version"], 5);
+    assert_eq!(payload["database"]["schema_version"], 10);
     assert_eq!(payload["database"]["head_version"], head_version());
 
     let agents = payload["coding_agents"]["agents"].as_array().unwrap();
@@ -694,78 +721,63 @@ fn step6_doctor_open_and_path_failures_still_render_all_sections_in_text_and_jso
 }
 
 #[test]
-fn step6_doctor_non_head_states_do_not_query_malformed_asset_records() {
-    for ahead in [false, true] {
-        let cli = Cli::new();
-        cli.migrate();
-        let conn = cli.sqlite();
-        if ahead {
-            conn.execute(
-                "UPDATE refinery_schema_history SET version=?1 WHERE version=?2",
-                rusqlite::params![cafleet::db::head_version() + 1, cafleet::db::head_version()],
-            )
-            .unwrap();
-        } else {
-            conn.execute(
-                "DELETE FROM refinery_schema_history WHERE version=?1",
-                [cafleet::db::head_version()],
-            )
-            .unwrap();
-        }
-        conn.execute_batch(
-            "DROP TABLE asset_installs; CREATE TABLE asset_installs(wrong_column TEXT)",
-        )
+fn step6_doctor_ahead_of_head_does_not_query_malformed_asset_records() {
+    let cli = Cli::new();
+    cli.migrate();
+    let conn = cli.sqlite();
+    conn.execute(
+        "UPDATE refinery_schema_history SET version=?1 WHERE version=?2",
+        rusqlite::params![cafleet::db::head_version() + 1, cafleet::db::head_version()],
+    )
+    .unwrap();
+    conn.execute_batch("DROP TABLE asset_installs; CREATE TABLE asset_installs(wrong_column TEXT)")
         .unwrap();
-        drop(conn);
-        let head = head_version();
-        let recorded = if ahead { head + 1 } else { head - 1 };
-        let remedy = if ahead {
-            format!("schema {recorded} is newer than this CLI (head {head}) — upgrade cafleet")
-        } else {
-            format!("schema {recorded}, head is {head} — run: cafleet setup")
-        };
-        let output = cli.run(&["doctor"]);
-        assert_eq!(code(&output), 1);
-        let out = stdout(&output);
-        assert!(out.contains(&remedy), "{out}");
-        assert!(out.contains("coding agents"), "{out}");
-        assert_eq!(out.matches("– cafleet setup --coding-agent").count(), 3);
-        assert!(out.contains("1 issue found"), "{out}");
-        let output = cli.run(&["doctor", "--json"]);
-        assert_eq!(code(&output), 1);
-        let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
-        assert_doctor_shape(&payload);
-        assert_eq!(
-            payload["database"],
-            serde_json::json!({"ok": false,
+    drop(conn);
+    let head = head_version();
+    let recorded = head + 1;
+    let remedy =
+        format!("schema {recorded} is newer than this CLI (head {head}) — upgrade cafleet");
+    let output = cli.run(&["doctor"]);
+    assert_eq!(code(&output), 1);
+    let out = stdout(&output);
+    assert!(out.contains(&remedy), "{out}");
+    assert!(out.contains("coding agents"), "{out}");
+    assert_eq!(out.matches("– cafleet setup --coding-agent").count(), 3);
+    assert!(out.contains("1 issue found"), "{out}");
+    let output = cli.run(&["doctor", "--json"]);
+    assert_eq!(code(&output), 1);
+    let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+    assert_doctor_shape(&payload);
+    assert_eq!(
+        payload["database"],
+        serde_json::json!({"ok": false,
             "schema_version": recorded, "head_version": head, "error": remedy})
-        );
-        assert!(
-            payload["coding_agents"]["superseded"]
-                .as_array()
-                .unwrap()
-                .is_empty()
-        );
-        for agent in payload["coding_agents"]["agents"].as_array().unwrap() {
-            assert_eq!(agent["recorded_version"], serde_json::Value::Null);
-            assert_eq!(agent["installed_at"], serde_json::Value::Null);
-            assert_eq!(agent["error"], serde_json::Value::Null);
-        }
-        assert_eq!(payload["database"]["ok"], false);
-        assert_eq!(payload["coding_agents"]["ok"], true);
-        assert_eq!(
-            payload["coding_agents"]["agents"].as_array().unwrap().len(),
-            3
-        );
-        assert!(
-            payload["coding_agents"]["agents"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .all(|a| a["state"] == "not_installed")
-        );
-        assert_eq!(payload["issues"], 1);
+    );
+    assert!(
+        payload["coding_agents"]["superseded"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    for agent in payload["coding_agents"]["agents"].as_array().unwrap() {
+        assert_eq!(agent["recorded_version"], serde_json::Value::Null);
+        assert_eq!(agent["installed_at"], serde_json::Value::Null);
+        assert_eq!(agent["error"], serde_json::Value::Null);
     }
+    assert_eq!(payload["database"]["ok"], false);
+    assert_eq!(payload["coding_agents"]["ok"], true);
+    assert_eq!(
+        payload["coding_agents"]["agents"].as_array().unwrap().len(),
+        3
+    );
+    assert!(
+        payload["coding_agents"]["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|a| a["state"] == "not_installed")
+    );
+    assert_eq!(payload["issues"], 1);
 }
 
 #[test]

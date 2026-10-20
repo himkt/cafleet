@@ -86,8 +86,6 @@ inside it, before inserting either a member or placement. The CLI's early
 check preserves validation order; the DB constraint also protects direct
 broker callers and concurrent registrations. A conflict retains the existing
 CLI error and exit 1, without creating a losing member, placement, or pane.
-See [duplicate-monitor recovery](../concepts/storage.md#duplicate-monitor-recovery)
-for migration of databases that already contain conflicting rows.
 
 ### `messages`
 
@@ -123,12 +121,12 @@ ordinary member is a placed row other than the fleet's root Director
 (`member_id != fleets.director_member_id`). Placement rows have no historical
 value.
 
-The nullable timestamp columns for pane claims and ready-watchdog reporting
-carry the pane's delivery state:
+Three nullable timestamp columns carry the pane's delivery state:
 
 | Column | Meaning |
 |---|---|
 | `keystroke_at` | The last time a cafleet process claimed this pane for a keystroke — see [Pane claim](multiplexer-backends.md#pane-claim). |
+| `forced_at` | The time of the pane's last forced delivery. `NULL` until one happens. |
 | `silence_notice_at` | When the ready watchdog reported this member. `NULL` until then. |
 
 ### `member_execs`
@@ -173,7 +171,7 @@ A fleet has **owed work** while any of its members has a pending preview or a
 | `started_at` | `Option<String>` | Null means no claim start time; claim/reclaim stamps it and normal clear nulls it. |
 | `last_tick_at` | `Option<String>` | Null or an unparseable timestamp is not a fresh heartbeat. Claim/tick updates it and normal clear nulls it. |
 | `last_wake_at` | `Option<String>` | Null means no successful wake is recorded; cadence then falls back to `started_at`. A delivered wake, scheduled or requested, updates it, and clear/reclaim preserve it. |
-| `wake_requested_at` | `Option<String>` | Null means no requested wake is pending; repeated requests overwrite/coalesce. Successful delivery or reclaim clears it; normal clear alone preserves it. |
+| `wake_requested_at` | `Option<String>` | Null means no forced-wake request; repeated requests overwrite/coalesce. Successful delivery or reclaim clears it; normal clear alone preserves it. |
 | `tick_seconds` | `i64` | Non-null tick cadence, DB default 5; CLI rejects zero rather than treating it as disabled. A claim without `--tick` keeps the stored value, and normal clear preserves it. |
 | `wake_interval_seconds` | `Option<i64>` | Null is the legacy state before a row has been claimed since V5 added the column; zero disables scheduled wakes while permitting a requested wake. Positive values are seconds; a claim stamps the value resolved by the [loop precedence](cli-options.md#monitor-loop-precedence), PATCH overwrites it, and normal clear preserves it. |
 

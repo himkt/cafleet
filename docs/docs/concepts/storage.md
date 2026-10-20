@@ -6,10 +6,10 @@ Everything is persisted in a single SQLite database accessed synchronously,
 with SQLite bundled into the `cafleet` binary. There is no separate database
 daemon to operate, monitor, or back up — the database is a single file.
 
-The default database path is `~/.local/share/cafleet/cafleet_v6.db` (XDG state
+The default database path is `~/.local/share/cafleet/cafleet_v7.db` (XDG state
 directory), expanded once at config load time. Override with the
 `CAFLEET_DATABASE_URL` environment variable, e.g.
-`sqlite:////var/lib/cafleet/cafleet_v6.db`; see
+`sqlite:////var/lib/cafleet/cafleet_v7.db`; see
 [CLI options](../spec/cli-options.md) for the full `CAFLEET_*` variable set.
 
 **Concurrency**: `PRAGMA busy_timeout=5000` lets SQLite retry for up to 5 s
@@ -38,7 +38,6 @@ re-run after every upgrade.
 |---|---|
 | Behind the bundled head | Migrates in place to the bundled head revision |
 | Already at the bundled head | Nothing to apply |
-| Pending migration with duplicate active monitors | Refuses with the conflicting fleet and member ids; preserves existing rows and schema history |
 | Ahead of the bundled head | Refuses to auto-downgrade |
 | Unversioned, with tables it does not recognize | Refuses |
 
@@ -47,28 +46,11 @@ with guidance naming `cafleet setup` — never a raw SQLite error; `doctor`
 reports instead of blocking. The exact rules and error strings are in
 [CLI options](../spec/cli-options.md#schema-version-guard).
 
-Duplicate-monitor detection reports the conflicting fleet and member ids;
-the operator chooses which monitor to retain. The complete diagnostic,
-transaction rollback and concurrent-write behavior are owned by
-[setup's migration contract](../spec/cli-options.md#cafleet-setup), using
-the [active-monitor index predicate](../spec/data-model.md#members).
-
-### Recovering duplicate active monitors {#duplicate-monitor-recovery}
-
-1. Stop new registrations against the affected database. Choose the monitor
-   to retain from the reported ids.
-2. Use the preceding release that supports the old schema, from a separate
-   binary path, with the same `CAFLEET_DATABASE_URL` and backend configuration
-   directories. The new binary's `member delete` is blocked by its
-   behind-schema guard.
-3. The failed new `setup` may have successfully updated assets: its DB and
-   assets halves run independently. If so, use the old binary's `setup` for
-   the same backend(s) to restore assets compatible with that binary. Then
-   use the old binary's `member delete <surplus-id>`, one isolated invocation
-   per surplus monitor. The database still has the old schema, so these old
-   commands can pass its schema guard.
-4. Run the new binary's `setup` again. After the schema upgrade succeeds,
-   automatic downgrade to the old schema is refused.
+A database file written by a release with a different default file name
+records a schema version ahead of the bundled head, so every command refuses
+it and leaves the file untouched. To start on the current schema, unset
+`CAFLEET_DATABASE_URL` (or point it at a new file) and run
+[`cafleet setup`](../spec/cli-options.md#cafleet-setup).
 
 ## Assets-install recording
 

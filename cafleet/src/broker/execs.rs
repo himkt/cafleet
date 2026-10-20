@@ -125,9 +125,22 @@ pub fn oldest_queued_exec(
     )
 }
 
+/// The `finished_at` of the pane's latest finished exec.
+pub fn latest_exec_finished_at(
+    conn: &Connection,
+    member_id: i64,
+) -> Result<Option<String>, CafleetError> {
+    conn.query_row(
+        "SELECT MAX(finished_at) FROM member_execs WHERE member_id=?1",
+        [member_id],
+        |row| row.get(0),
+    )
+    .map_err(db_err)
+}
+
 /// Stamp a queued exec as dispatched; `false` when it is no longer queued.
 pub fn stamp_exec_dispatched(
-    conn: &Connection,
+    conn: &mut Connection,
     exec_id: i64,
     when: &str,
 ) -> Result<bool, CafleetError> {
@@ -186,7 +199,7 @@ pub fn finish_exec(
 
 /// Close a finished exec; `false` when it is already closed.
 pub fn stamp_exec_resumed(
-    conn: &Connection,
+    conn: &mut Connection,
     exec_id: i64,
     when: &str,
 ) -> Result<bool, CafleetError> {

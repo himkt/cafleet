@@ -3,7 +3,6 @@
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
-use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
@@ -14,11 +13,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The capture every pane shows unless [`Cli::set_pane_capture`] overrides it:
 /// a claude composer at rest, so a delivery fires immediately.
-pub static REST_CAPTURE: LazyLock<String> = LazyLock::new(|| {
-    include_str!("../fixtures/pane_state/claude-rest.txt")
-        .trim_end_matches('\n')
-        .to_string()
-});
+pub const REST_CAPTURE: &str = "pane:{pane}\nline1\nline2\n> at rest";
 
 /// A capture file holding this line makes `capture-pane` fail for that pane.
 pub const CAPTURE_FAILS: &str = "CAPTURE-FAILS";
@@ -50,8 +45,7 @@ case "$1" in
                     done < "$CAFLEET_TEST_TMUX_CAPTURE_DIR/$1"
                     exit 0
                 fi
-                printf 'pane:%s\nline1\nline2\n' "$1"
-                printf '%s\n' "$CAFLEET_TEST_TMUX_REST_COMPOSER"
+                printf 'pane:%s\nline1\nline2\n> at rest\n' "$1"
                 exit 0
             fi
             shift
@@ -167,10 +161,6 @@ impl Cli {
             .env("PATH", &self.shim_dir)
             .env("CAFLEET_DATABASE_URL", self.db_url())
             .env("CAFLEET_TEST_TMUX_LOG", &self.shim_log)
-            .env(
-                "CAFLEET_TEST_TMUX_REST_COMPOSER",
-                REST_CAPTURE.lines().skip(3).collect::<Vec<_>>().join("\n"),
-            )
             .env("CAFLEET_TEST_TMUX_CAPTURE_DIR", &self.capture_dir);
         if let Some(fail) = &self.fail_subcommand {
             cmd.env("CAFLEET_TEST_TMUX_FAIL", fail);
@@ -299,9 +289,9 @@ impl Cli {
             .collect()
     }
 
-    /// Hand-write a behind-head database: the refinery ledger at version 5
-    /// with the baseline (path-less) `asset_installs` shape.
-    pub fn seed_pre_v6_database(&self) {
+    /// Hand-write a database file from a release with a different default
+    /// file name: the refinery ledger at versions 1–10, ahead of head.
+    pub fn seed_pre_reset_database(&self) {
         self.sqlite()
             .execute_batch(
                 "CREATE TABLE refinery_schema_history (
@@ -315,11 +305,18 @@ impl Cli {
                      (2, 'drop_director_monitor_enrollment', '2026-01-01T00:00:00Z', '0'),
                      (3, 'strip_monitoring_member_kind', '2026-01-01T00:00:00Z', '0'),
                      (4, 'fleet_level_wake_schedule', '2026-01-01T00:00:00Z', '0'),
-                     (5, 'monitor_wake_interval', '2026-01-01T00:00:00Z', '0');
+                     (5, 'monitor_wake_interval', '2026-01-01T00:00:00Z', '0'),
+                     (6, 'path_aware_asset_installs', '2026-01-01T00:00:00Z', '0'),
+                     (7, 'monitor_wake_request', '2026-01-01T00:00:00Z', '0'),
+                     (8, 'unique_active_monitor', '2026-01-01T00:00:00Z', '0'),
+                     (9, 'held_delivery_and_member_execs', '2026-01-01T00:00:00Z', '0'),
+                     (10, 'composer_safe_delivery', '2026-01-01T00:00:00Z', '0');
                  CREATE TABLE asset_installs (
-                     coding_agent TEXT NOT NULL PRIMARY KEY,
+                     coding_agent TEXT NOT NULL,
+                     path TEXT NOT NULL,
                      cafleet_version TEXT NOT NULL,
-                     installed_at TEXT NOT NULL
+                     installed_at TEXT NOT NULL,
+                     PRIMARY KEY (coding_agent, path)
                  );",
             )
             .unwrap();

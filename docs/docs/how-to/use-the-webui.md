@@ -4,7 +4,7 @@ The admin WebUI is a browser dashboard for watching and joining a fleet's
 message traffic ([Overview](../concepts/overview.md)). It is the only
 surface that needs a running server — CLI commands write to SQLite directly
 and never require one. Its writes are messages and the monitor controls
-(the wake interval and the requested wake); everything else is read-only.
+(the wake interval and the forced wake); everything else is read-only.
 
 ## Start the server
 
@@ -74,9 +74,8 @@ opens a popover with the two monitor controls:
   takes effect within one scan tick, and `0` disables the scheduled wake
   while the loop keeps running.
 - **Wake now** — requests an immediate wake outside the schedule; the loop
-  attempts it on its next scan tick, even when the interval is `0` or the
-  next scheduled wake is not yet due. A drafted, active or ambiguous monitor
-  composer keeps the request pending until the safety checks permit delivery.
+  delivers it within one scan tick, even when the interval is `0` or the
+  next scheduled wake is not yet due.
 
 Both controls are disabled while the monitor is stopped: the interval is
 re-stamped from the CLI/env when the monitor starts, and a wake request

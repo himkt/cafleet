@@ -2,7 +2,7 @@
 //! (SPEC §6.3, §8): the refinery db half, then the offline embedded assets
 //! half, failing independently.
 
-use std::{collections::BTreeMap, path::PathBuf};
+use std::path::PathBuf;
 
 use clap::Args;
 use rusqlite::Connection;
@@ -10,8 +10,6 @@ use rusqlite::Connection;
 use super::InvocationHooks;
 use crate::assets::{TARGET_AGENTS, agent_paths, install_agent};
 use crate::config::Settings;
-#[cfg(test)]
-use crate::diagnosis::recorded_version;
 use crate::diagnosis::{SchemaState, asset_table_exists};
 use crate::error::CafleetError;
 
@@ -29,7 +27,7 @@ pub fn run(
 ) -> Result<(), CafleetError> {
     let mut slot = None;
     let mut failed_halves = Vec::new();
-    let db_result = db_half_in_slot(settings, &mut slot, hooks, || {});
+    let db_result = db_half_in_slot(settings, &mut slot, hooks);
     if let Err(error) = db_result {
         println!("db half failed: {}", error.message());
         failed_halves.push("db");
@@ -58,29 +56,11 @@ pub fn run(
     }
 }
 
-// Preserve the existing per-call migration-race seam for its unit tests.
-#[cfg(test)]
-fn db_half_with_after_diagnosis(
-    settings: &Settings,
-    after_diagnosis: impl FnOnce(),
-) -> Result<(), CafleetError> {
-    db_half_in_slot(
-        settings,
-        &mut None,
-        &InvocationHooks {
-            connect: &crate::db::connect,
-            asset_env: &|name| std::env::var(name).ok(),
-        },
-        after_diagnosis,
-    )
-}
-
 /// Retain ownership across the two independent setup halves.
 fn db_half_in_slot(
     settings: &Settings,
     slot: &mut Option<Connection>,
     hooks: &InvocationHooks<'_>,
-    after_diagnosis: impl FnOnce(),
 ) -> Result<(), CafleetError> {
     let path = settings
         .database_url
@@ -129,18 +109,7 @@ fn db_half_in_slot(
             return Ok(());
         }
     }
-    if let Some(diagnostic) = duplicate_monitor_diagnostic(conn)? {
-        return Err(CafleetError::App(diagnostic));
-    }
-    after_diagnosis();
-    if let Err(original) = crate::db::migrate_to_head(conn) {
-        // The diagnostic and migration do not hold a shared transaction. The
-        // index remains authoritative if a writer committed between them.
-        if let Ok(Some(diagnostic)) = duplicate_monitor_diagnostic(conn) {
-            return Err(CafleetError::App(diagnostic));
-        }
-        return Err(original);
-    }
+    crate::db::migrate_to_head(conn)?;
     let after = crate::diagnosis::classify_schema(conn, head);
     super::helpers::schema_guard(&after)?;
     match recorded {
@@ -151,53 +120,6 @@ fn db_half_in_slot(
         Some(version) => println!("Upgraded from {version} to {head}."),
     }
     Ok(())
-}
-
-fn duplicate_monitor_diagnostic(conn: &Connection) -> Result<Option<String>, CafleetError> {
-    let db_error = |error| CafleetError::App(format!("database error: {error}"));
-    let members_exist: bool = conn
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='members')",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(db_error)?;
-    if !members_exist {
-        return Ok(None);
-    }
-    let mut statement = conn
-        .prepare(
-            "SELECT fleet_id, member_id FROM members WHERE status='active' \
-             AND json_extract(member_card_json, '$.cafleet.kind')='monitor' \
-             ORDER BY fleet_id, member_id",
-        )
-        .map_err(db_error)?;
-    let rows = statement
-        .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))
-        .map_err(db_error)?;
-    let mut fleets: BTreeMap<i64, Vec<i64>> = BTreeMap::new();
-    for row in rows {
-        let (fleet_id, member_id) = row.map_err(db_error)?;
-        fleets.entry(fleet_id).or_default().push(member_id);
-    }
-    let conflicts: Vec<String> = fleets
-        .into_iter()
-        .filter(|(_, members)| members.len() > 1)
-        .map(|(fleet, members)| {
-            let ids = members
-                .iter()
-                .map(i64::to_string)
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("fleet {fleet}: members {ids}")
-        })
-        .collect();
-    Ok((!conflicts.is_empty()).then(|| {
-        format!(
-            "active monitor duplicates prevent migration: {}",
-            conflicts.join("; ")
-        )
-    }))
 }
 
 /// The assets half (SPEC §6.3): the explicit selector installs exactly the
@@ -224,171 +146,6 @@ fn assets_half(
         install_agent(conn, agent, &paths, super::VERSION)?;
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use rusqlite::types::Value;
-    use tempfile::TempDir;
-
-    mod embedded {
-        refinery::embed_migrations!("migrations");
-    }
-
-    struct Fixture {
-        _dir: TempDir,
-        settings: Settings,
-    }
-
-    impl Fixture {
-        fn new() -> Self {
-            let dir = tempfile::Builder::new()
-                .prefix(".setup-race-")
-                .tempdir_in(env!("CARGO_MANIFEST_DIR"))
-                .unwrap();
-            let url = format!("sqlite:///{}", dir.path().join("fixture.db").display());
-            let settings =
-                Settings::from_lookup(|name| (name == "CAFLEET_DATABASE_URL").then(|| url.clone()))
-                    .unwrap();
-            Self {
-                _dir: dir,
-                settings,
-            }
-        }
-
-        fn connect(&self) -> Connection {
-            crate::db::connect(&self.settings.database_url).unwrap()
-        }
-
-        fn seed_version(&self, version: i32) -> Connection {
-            let mut conn = self.connect();
-            embedded::migrations::runner()
-                .set_target(refinery::Target::Version(version))
-                .run(&mut conn)
-                .unwrap();
-            conn
-        }
-    }
-
-    fn rows(conn: &Connection, sql: &str) -> Vec<Vec<Value>> {
-        let mut statement = conn.prepare(sql).unwrap();
-        let count = statement.column_count();
-        statement
-            .query_map([], |row| (0..count).map(|i| row.get(i)).collect())
-            .unwrap()
-            .map(Result::unwrap)
-            .collect()
-    }
-
-    fn snapshot(conn: &Connection) -> Vec<Vec<Vec<Value>>> {
-        let mut data = vec![rows(
-            conn,
-            "SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name",
-        )];
-        for table in [
-            "refinery_schema_history",
-            "fleets",
-            "members",
-            "member_placements",
-            "messages",
-            "monitor_runtime",
-            "asset_installs",
-            "sqlite_sequence",
-        ] {
-            data.push(rows(conn, &format!("SELECT * FROM {table} ORDER BY 1")));
-        }
-        data
-    }
-
-    fn seed_clean_monitors(conn: &Connection) {
-        conn.execute_batch(
-            "INSERT INTO fleets(fleet_id, name, created_at) VALUES (20, 'twenty', 'fixture'), (3, 'three', 'fixture');
-             INSERT INTO members(member_id, fleet_id, name, description, status, registered_at, member_card_json) VALUES
-                (30, 20, 'm30', '', 'active', 'fixture', '{\"cafleet\":{\"kind\":\"monitor\"}}'),
-                (2, 3, 'm2', '', 'active', 'fixture', '{\"cafleet\":{\"kind\":\"monitor\"}}');"
-        ).unwrap();
-    }
-
-    fn insert_competing_monitors(conn: &Connection) {
-        conn.execute_batch(
-            "INSERT INTO members(member_id, fleet_id, name, description, status, registered_at, member_card_json) VALUES
-                (90, 20, 'm90', '', 'active', 'fixture', '{\"cafleet\":{\"kind\":\"monitor\"}}'),
-                (8, 3, 'm8', '', 'active', 'fixture', '{\"cafleet\":{\"kind\":\"monitor\"}}');"
-        ).unwrap();
-    }
-
-    const DUPLICATES: &str = "active monitor duplicates prevent migration: fleet 3: members 2, 8; fleet 20: members 30, 90";
-
-    #[test]
-    fn setup_rediagnoses_competing_commit_and_preserves_pending_schema_and_data() {
-        for version in [5, 7] {
-            let fixture = Fixture::new();
-            let observer = fixture.seed_version(version);
-            seed_clean_monitors(&observer);
-            assert!(duplicate_monitor_diagnostic(&observer).unwrap().is_none());
-            let mut after_competing_commit = None;
-            let mut calls = 0;
-            let error = db_half_with_after_diagnosis(&fixture.settings, || {
-                calls += 1;
-                let writer = fixture.connect();
-                insert_competing_monitors(&writer);
-                assert!(writer.is_autocommit());
-                after_competing_commit = Some(snapshot(&writer));
-            })
-            .unwrap_err();
-            assert_eq!(calls, 1);
-            assert_eq!(error.message(), DUPLICATES);
-            assert_eq!(error.exit_code(), 1);
-            assert_eq!(snapshot(&observer), after_competing_commit.unwrap());
-            assert_eq!(recorded_version(&observer).unwrap(), Some(version as u32));
-        }
-    }
-
-    #[test]
-    fn setup_preserves_unrelated_migration_error_after_clean_rediagnosis() {
-        let fixture = Fixture::new();
-        let observer = fixture.seed_version(5);
-        seed_clean_monitors(&observer);
-        let mut after_interference = None;
-        let error = db_half_with_after_diagnosis(&fixture.settings, || {
-            let writer = fixture.connect();
-            writer
-                .execute_batch(
-                    "CREATE TABLE idx_members_one_active_monitor_per_fleet (fixture TEXT)",
-                )
-                .unwrap();
-            after_interference = Some(snapshot(&writer));
-        })
-        .unwrap_err();
-        assert!(error.message().starts_with("migration failed:"));
-        assert!(
-            error
-                .message()
-                .contains("idx_members_one_active_monitor_per_fleet")
-        );
-        assert!(!error.message().contains("duplicates"));
-        assert_eq!(snapshot(&observer), after_interference.unwrap());
-    }
-
-    #[test]
-    fn setup_preserves_original_migration_error_when_rediagnosis_also_fails() {
-        let fixture = Fixture::new();
-        let observer = fixture.seed_version(7);
-        let mut after_interference = None;
-        let error = db_half_with_after_diagnosis(&fixture.settings, || {
-            let writer = fixture.connect();
-            writer
-                .execute_batch("ALTER TABLE members RENAME COLUMN member_card_json TO broken_card")
-                .unwrap();
-            after_interference = Some(snapshot(&writer));
-        })
-        .unwrap_err();
-        assert!(error.message().starts_with("migration failed:"), "{error}");
-        assert!(error.message().contains("member_card_json"), "{error}");
-        assert!(duplicate_monitor_diagnostic(&observer).is_err());
-        assert_eq!(snapshot(&observer), after_interference.unwrap());
-    }
 }
 
 #[cfg(test)]

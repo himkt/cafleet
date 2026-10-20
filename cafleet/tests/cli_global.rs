@@ -6,7 +6,6 @@ mod common;
 
 use std::process::Command;
 
-use cafleet::db::head_version;
 use common::{Cli, VERSION, code, stderr, stdout, text};
 
 #[test]
@@ -31,12 +30,8 @@ fn an_unknown_pre_subcommand_option_is_a_parse_error() {
 const NO_INSTALL_ERROR: &str =
     "Error: no assets install is recorded at the resolved paths; run 'cafleet setup' to install";
 
-fn outdated_error() -> String {
-    format!(
-        "Error: database schema is outdated (schema 5, head {}); run 'cafleet setup'",
-        head_version()
-    )
-}
+const PRE_RESET_ERROR: &str =
+    "Error: database schema 10 is newer than this cafleet (head 1); upgrade cafleet";
 
 const NO_DATABASE_ERROR: &str = "Error: no cafleet database; run 'cafleet setup'";
 
@@ -107,18 +102,16 @@ fn the_schema_guard_reports_a_newer_database() {
     cli.sqlite()
         .execute(
             "INSERT INTO refinery_schema_history (version, name, applied_on, checksum) \
-             VALUES (?1, 'future', '2026-01-01T00:00:00Z', '0')",
-            [head_version() + 1],
+             VALUES (2, 'future', '2026-01-01T00:00:00Z', '0')",
+            [],
         )
         .unwrap();
     let output = cli.run(&["fleet", "list"]);
     assert_eq!(code(&output), 1);
     assert!(
-        stderr(&output).contains(&format!(
-            "Error: database schema {} is newer than this cafleet (head {}); upgrade cafleet",
-            head_version() + 1,
-            head_version()
-        )),
+        stderr(&output).contains(
+            "Error: database schema 2 is newer than this cafleet (head 1); upgrade cafleet"
+        ),
         "got: {}",
         stderr(&output)
     );
@@ -127,7 +120,7 @@ fn the_schema_guard_reports_a_newer_database() {
 #[test]
 fn the_schema_guard_blocks_every_guarded_group() {
     let cli = Cli::new();
-    cli.seed_pre_v6_database();
+    cli.seed_pre_reset_database();
     for args in [
         ["fleet", "list"].as_slice(),
         ["member", "list", "1"].as_slice(),
@@ -138,13 +131,12 @@ fn the_schema_guard_blocks_every_guarded_group() {
         let output = cli.run(args);
         assert_eq!(code(&output), 1, "guarded: {args:?}");
         assert!(
-            stderr(&output).contains(&outdated_error()),
+            stderr(&output).contains(PRE_RESET_ERROR),
             "{args:?} → {}",
             stderr(&output)
         );
         let err = stderr(&output);
         assert!(!err.contains("no such column"), "{err}");
-        assert!(err.contains("run 'cafleet setup'"), "{err}");
     }
     assert!(cli.shim_calls().is_empty());
 }
@@ -155,14 +147,14 @@ fn the_schema_guard_blocks_server_startup() {
     use std::time::{Duration, Instant};
 
     let cli = Cli::new();
-    cli.seed_pre_v6_database();
+    cli.seed_pre_reset_database();
     let mut child = cli.spawn(&["server", "--port", "0"]);
     let deadline = Instant::now() + Duration::from_secs(5);
     while child.try_wait().unwrap().is_none() {
         if Instant::now() > deadline {
             child.kill().unwrap();
             child.wait().unwrap();
-            panic!("server kept running against a behind-head database");
+            panic!("server kept running against a pre-reset database");
         }
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -175,7 +167,7 @@ fn the_schema_guard_blocks_server_startup() {
         .unwrap()
         .read_to_string(&mut err)
         .unwrap();
-    assert!(err.contains(&outdated_error()), "got: {err}");
+    assert!(err.contains(PRE_RESET_ERROR), "got: {err}");
 }
 
 #[test]
