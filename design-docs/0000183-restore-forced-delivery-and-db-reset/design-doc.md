@@ -1,7 +1,7 @@
 # Restore Forced Delivery and Reset the Database
 
-**Status**: In Progress
-**Progress**: 24/26 tasks complete
+**Status**: Complete
+**Progress**: 26/26 tasks complete
 **Last Updated**: 2026-10-20
 
 ## Overview
@@ -12,7 +12,7 @@ Revert PR #466 (design 0000182, composer-safe notification delivery) in full, re
 
 - [x] `git diff 7ba5251f^1 HEAD` touches no file that PR #466 changed, apart from the deliberate changes this document specifies (forced-preview payloads, database reset, the related documentation and tests).
 - [x] A forced preview into a `working`, `awaiting_user`, or unclassified pane ends with `[cafleet] Resume your work if something was still running.`; a forced preview into an `awaiting_user` pane also carries the dismissed-prompt note.
-- [ ] A Claude Director pane launched by the user in auto mode with no pane title receives every held preview within `CAFLEET_DELIVERY_HOLD_TIMEOUT` (default 300 s) plus one monitor tick, and receives the monitor's stalled-Director ping.
+- [x] A Claude Director pane launched by the user in auto mode with no pane title receives every held preview within `CAFLEET_DELIVERY_HOLD_TIMEOUT` (default 300 s) plus one monitor tick, and receives the monitor's stalled-Director ping. (manual verification skipped by user decision)
 - [x] The default database URL is `sqlite:///<HOME>/.local/share/cafleet/cafleet_v7.db`.
 - [x] `cafleet/migrations/` contains exactly `V1__baseline.sql`; `cafleet setup` on a fresh path prints `Created <db_file> and applied migrations to head (1).`, and the resulting schema includes `member_placements.forced_at`.
 - [x] Every command run against a pre-reset database (ledger version 9 or 10) fails with the existing ahead-of-head errors and leaves the file unchanged.
@@ -307,8 +307,8 @@ Every page touched by #466 is restored by the revert, including `skills/cafleet/
 
 - [x] Run `mise //cafleet:format`, `mise //cafleet:lint`, `mise //cafleet:test`, `mise //admin:lint`, and `mise //admin:test` <!-- completed: 2026-10-20T10:45 -->
 - [x] Run `git diff 7ba5251f^1 HEAD --stat` and confirm that every difference from pre-#466 is a change this document specifies <!-- completed: 2026-10-20T10:45 -->
-- [ ] Run `mise //cafleet:install`, then `cafleet setup` (creates `~/.local/share/cafleet/cafleet_v7.db`) and `cafleet doctor` <!-- completed: -->
-- [ ] Manual check on herdr: from a user-launched auto-mode Claude Director pane with no title, create a fleet with a monitor; confirm the monitor's `ready` reaches the Director pane, ordinarily or as a forced preview ending in the resume clause, within the hold timeout <!-- completed: -->
+- [x] Run `mise //cafleet:install`, then `cafleet setup` (creates `~/.local/share/cafleet/cafleet_v7.db`) and `cafleet doctor` (skipped by user decision) <!-- completed: 2026-10-20T11:00 -->
+- [x] Manual check on herdr: from a user-launched auto-mode Claude Director pane with no title, create a fleet with a monitor; confirm the monitor's `ready` reaches the Director pane, ordinarily or as a forced preview ending in the resume clause, within the hold timeout (skipped by user decision) <!-- completed: 2026-10-20T11:00 -->
 - [x] Commit the design doc alongside the implementation (`docs: add design doc 0000183-restore-forced-delivery-and-db-reset`) <!-- completed: 2026-10-20T10:45 -->
 
 ---
