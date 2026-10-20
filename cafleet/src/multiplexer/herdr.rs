@@ -1015,11 +1015,11 @@ mod tests {
     }
 
     #[test]
-    fn send_inline_preview_sends_the_note_on_its_own_line_after_the_base_payload() {
+    fn send_inline_preview_sends_the_note_lines_after_the_base_payload() {
         let runner = FakeRunner::with_binary("herdr");
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
         let ts = "2026-07-30T09:00:00.000000+00:00";
-        let note = "[cafleet] Resume your work if something was still running.";
+        let note = "[cafleet] Resume your work if something was still running.\n[cafleet] second";
         assert!(
             mux.send_inline_preview("w1:p2", 5, 2, ts, "a\nb", Some(note))
                 .is_ok()

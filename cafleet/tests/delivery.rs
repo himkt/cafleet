@@ -21,7 +21,8 @@ const WORKING: &str = "✻ Cogitating… (12s · esc to interrupt)\n\n> ";
 const UNCLASSIFIED: &str = "⏺ Bash(cargo build)\n  ⎿  Compiling cafleet";
 
 const RESUME_CLAUSE: &str = "[cafleet] Resume your work if something was still running.";
-const BROKER_NOTE: &str = "[cafleet] This delivery's Escape dismissed a pending prompt in your pane; \
+const AWAITING_USER_NOTE: &str = "[cafleet] Resume your work if something was still running.\n\
+     [cafleet] This delivery's Escape dismissed a pending prompt in your pane; \
      that rejection did not come from the user. Re-issue the tool call if you still need it.";
 
 #[derive(Debug, PartialEq)]
@@ -367,9 +368,9 @@ fn a_pane_that_is_not_at_rest_holds_the_preview_below_the_timeout() {
 #[test]
 fn a_hold_at_the_timeout_is_forced_with_the_payload_for_the_observed_state() {
     for (content, note) in [
-        (AWAITING_USER, Some(BROKER_NOTE)),
-        (WORKING, Some(RESUME_CLAUSE)),
-        (UNCLASSIFIED, None),
+        (AWAITING_USER, AWAITING_USER_NOTE),
+        (WORKING, RESUME_CLAUSE),
+        (UNCLASSIFIED, RESUME_CLAUSE),
     ] {
         let mut fixture = fixture();
         let sent = base_time();
@@ -386,7 +387,7 @@ fn a_hold_at_the_timeout_is_forced_with_the_payload_for_the_observed_state() {
         let previews = io.previews.borrow();
         assert_eq!(previews.len(), 1);
         assert_eq!(previews[0].text, "task one");
-        assert_eq!(previews[0].note.as_deref(), note, "{content}");
+        assert_eq!(previews[0].note.as_deref(), Some(note), "{content}");
         assert!(notified_at(&fixture.conn, message_id).is_some());
         assert!(forced_at(&fixture.conn, fixture.member_id).is_some());
     }
@@ -479,7 +480,7 @@ fn overdue_previews_on_an_awaiting_pane_force_one_keystroke_per_timeout() {
         io.previews
             .borrow()
             .iter()
-            .all(|preview| preview.note.as_deref() == Some(BROKER_NOTE))
+            .all(|preview| preview.note.as_deref() == Some(AWAITING_USER_NOTE))
     );
 }
 

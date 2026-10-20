@@ -15,9 +15,18 @@ use crate::time::{format_utc, parse_lenient};
 pub const DELIVERY_CAPTURE_LINES: i64 = 40;
 pub const EXEC_RESUME_GRACE_SECONDS: i64 = 10;
 
-const RESUME_CLAUSE: &str = "[cafleet] Resume your work if something was still running.";
-const BROKER_NOTE: &str = "[cafleet] This delivery's Escape dismissed a pending prompt in your pane; \
-     that rejection did not come from the user. Re-issue the tool call if you still need it.";
+macro_rules! resume_clause {
+    () => {
+        "[cafleet] Resume your work if something was still running."
+    };
+}
+
+const RESUME_CLAUSE: &str = resume_clause!();
+const AWAITING_USER_NOTE: &str = concat!(
+    resume_clause!(),
+    "\n[cafleet] This delivery's Escape dismissed a pending prompt in your pane; \
+     that rejection did not come from the user. Re-issue the tool call if you still need it.",
+);
 
 /// What a delivery needs from the pane-hosting backend. `Err` carries the raw
 /// backend error string.
@@ -94,12 +103,12 @@ fn gate(state: PaneState, hold_age: Duration, hold_timeout: i64) -> Gate {
     }
 }
 
-/// The line a forced preview adds for the state the broker observed.
-fn forced_note(state: PaneState) -> Option<&'static str> {
+/// The lines a forced preview adds for the state the broker observed.
+fn forced_note(state: PaneState) -> &'static str {
     match state {
-        PaneState::AwaitingUser => Some(BROKER_NOTE),
-        PaneState::Working => Some(RESUME_CLAUSE),
-        PaneState::Finished | PaneState::Unclassified => None,
+        PaneState::AwaitingUser => AWAITING_USER_NOTE,
+        PaneState::Working | PaneState::Unclassified => RESUME_CLAUSE,
+        PaneState::Finished => unreachable!("a finished pane receives an ordinary delivery"),
     }
 }
 
@@ -275,7 +284,7 @@ pub fn deliver_pane(
     if forced {
         broker::stamp_forced(conn, member_id, &stamp)?;
     }
-    let note = if forced { forced_note(state) } else { None };
+    let note = forced.then(|| forced_note(state));
     match owed.send(io, settings, &target.pane_id, note) {
         Ok(()) => Ok(PaneOutcome::Fired {
             item: owed.item(),
