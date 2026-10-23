@@ -291,6 +291,23 @@ fn captured_codex_unstyled_and_ambiguous_composer_roles_are_unknown() {
 }
 
 #[test]
+fn captured_codex_unknown_rgb_foreground_channels_preserve_ambiguity() {
+    for foreground in [
+        "38;2;0;0;2",
+        "38;2;2;0;0",
+        "38;2;0;2;0",
+        "38;2;0;0;0",
+        "38;2;2;2;2",
+    ] {
+        let capture = CAPTURED_CODEX_PLACEHOLDER.replace(
+            "\u{1b}[2m\u{1b}[48;2;53;53;53mAsk Codex",
+            &format!("\u{1b}[{foreground}m\u{1b}[48;2;53;53;53mAsk Codex"),
+        );
+        assert_state("codex", &capture, "Unknown");
+    }
+}
+
+#[test]
 fn captured_codex_warning_footer_preserves_the_proven_placeholder_role() {
     let capture = include_str!("fixtures/pane-readiness/codex-herdr-placeholder-warning.ansi");
     let visible = strip_ansi(capture);
