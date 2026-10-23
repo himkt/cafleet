@@ -636,7 +636,7 @@ Timeout is an integer in `1..=1800`, default `300`. Validate an active subject a
 
 Between inbox checks, retry at most one ordinary-member preview per interval with an in-memory round-robin cursor. Exclude the Director, self-notifications, ACKed and already-notified rows. Recheck the inbox before starting another attempt. Shared input locks and under-lock revalidation keep multiple waiters safe.
 
-Each attempt has a five-second total budget for capture, typing, settle and stamp. Cap subprocess/database busy waits to its remaining budget. Start no new I/O after the monotonic receive deadline; return by that deadline plus at most one in-flight five-second attempt/cleanup allowance. Stop between stages when time expires and report uncertainty if bytes may have arrived.
+Start each receive check or notification attempt before the monotonic receive deadline. An attempt already in flight retains its original five-second total budget for revalidation, capture, typing, settle and stamp. Cap subprocess/database busy waits to its remaining budget; return by the receive deadline plus at most one in-flight five-second attempt/cleanup allowance. Stop between stages when the attempt budget expires and report uncertainty if bytes may have arrived.
 
 The ordered JSON result is:
 
@@ -646,7 +646,7 @@ The ordered JSON result is:
 
 `outcome` is `messages` with nonempty full poll records, or `timeout` with an empty array. Each diagnostic is `{member_id, message_id, delivery, error}`, where delivery is `not_sent` or `uncertain`. Keep only the latest error per member in memory.
 
-Unknown/draft diagnostics are `member ID is STATE; preview MESSAGE_ID was not sent.` Working, approval, pending placement and lock contention are ordinary holds. Revalidate diagnostics at every receive check and before return; remove entries after ACK, member departure or successful notification by any invocation. A later error replaces the previous one.
+Unknown/draft diagnostics are `member ID is STATE; preview MESSAGE_ID was not sent.` Working, approval, pending placement and lock contention are ordinary holds. Reconcile diagnostics with each successful receive snapshot and the typed observations of its owned notification attempt. Remove entries when these observations show ACK, member departure or successful notification by any invocation; a later error replaces the previous one. After receive expiry, return the last successful snapshot reconciled with the completed attempt's observations. Subsequent external changes become visible to the next invocation; final reconciliation starts no additional I/O or tail budget.
 
 Text is `Messages available for member ID.` plus normal messages, or `Timed out waiting for member ID.`; diagnostics go to stderr. Both outcomes exit 0. Deleted subject/fleet or corrupt/unreadable state exits 1 with its cause. Ctrl+C terminates the finite process normally.
 
@@ -1357,7 +1357,7 @@ Preserve binary-not-found, nonzero stderr and timeout context in the backend err
 
 ### 6.6 Finite receiving and pane input
 
-The receive task is the synchronous caller-owned process. Its cursor and latest-per-member diagnostics live only in memory. Check the subject/inbox and diagnostic validity before every interval and before returning. Retry one eligible ordinary member per one-second interval and recheck incoming messages before another attempt. Receive timeout uses a monotonic deadline; no new I/O begins afterward.
+The receive task is the synchronous caller-owned process. Its cursor and latest-per-member diagnostics live only in memory. Check the subject/inbox and reconcile diagnostics against each successful snapshot before another attempt. Retry one eligible ordinary member per one-second interval. Start a receive check or attempt only before the monotonic receive deadline; after expiry return the last successful snapshot reconciled with its owned attempt's typed result. A later invocation observes subsequent external changes.
 
 Each notification or explicit input operation has one five-second budget covering capture, literal input, settle, Enter and conditional notification stamping. Bound database busy waits and process calls by remaining budget. A receive returns by its own deadline plus one in-flight attempt/cleanup allowance. Distinguish pre-write failure from possible partial submission at the first writing call.
 

@@ -116,6 +116,21 @@ pub fn oldest_pending_preview(
     .map_err(db_err)
 }
 
+pub(crate) fn is_preview_pending(conn: &Connection, message_id: i64) -> Result<bool, CafleetError> {
+    conn.query_row(
+        "SELECT status_state, notified_at FROM messages WHERE message_id=?1",
+        [message_id],
+        |row| {
+            Ok((
+                row.get::<_, MessageStatus>(0)?,
+                row.get::<_, Option<String>>(1)?,
+            ))
+        },
+    )
+    .map(|(status, notified)| status == MessageStatus::InputRequired && notified.is_none())
+    .map_err(db_err)
+}
+
 /// Stamp a pending preview as keystroked; `false` when the row is no longer
 /// pending, because it was ACKed or another process stamped it first.
 pub fn stamp_notified(

@@ -8,13 +8,13 @@ use rusqlite::Connection;
 use clap::{Args, Subcommand};
 use serde_json::Value;
 
-use super::helpers::{resolve_body, resolve_mux};
+use super::helpers::resolve_body;
 use crate::broker;
 use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::output::{format_indexed_list, format_message, truncate_message_text};
 use crate::presentation;
-use crate::runtime::deliver_preview;
+use crate::receive::{AttemptOutcome, BrokerReceiver, Delivery, SystemClock};
 
 #[derive(Args)]
 #[group(required = true, multiple = false)]
@@ -48,6 +48,18 @@ pub enum MessageCommand {
         /// Recipient whose inbox is fetched.
         #[arg(value_name = "MEMBER_ID")]
         member_id: i64,
+        /// Output in JSON format.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Receive incoming messages and retry pending ordinary-member previews.
+    Wait {
+        /// Recipient whose inbox is received.
+        #[arg(value_name = "MEMBER_ID")]
+        member_id: i64,
+        /// Maximum seconds; use the default for a host-native background task.
+        #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u64).range(1..=1800))]
+        timeout: u64,
         /// Output in JSON format.
         #[arg(long)]
         json: bool,
@@ -103,28 +115,30 @@ pub fn run(
         } => {
             let text = resolve_body(body.text.as_deref(), body.file.as_deref(), "--file")?;
 
-            let message =
-                broker::send_message(conn, from_member_id, &to_member_id.to_string(), &text)?;
+            let message = crate::input::with_database_budget(conn, deadline, |conn| {
+                broker::send_message(conn, from_member_id, &to_member_id.to_string(), &text)
+            })?;
             let message_id = message.message_id;
-            let notification = resolve_mux(settings)
-                .map_err(|error| CafleetError::App(error.to_string()))
-                .and_then(|mux| {
-                    deliver_preview(
-                        conn,
-                        settings,
-                        Some(&mux),
-                        to_member_id,
-                        message_id,
-                        deadline,
-                    )
-                });
-            let notification_sent = match notification {
-                Ok(sent) => sent,
-                Err(error) => {
-                    eprintln!("Message {message_id} was persisted. {}", error.message());
-                    false
-                }
-            };
+            let notification_sent =
+                match crate::runtime::attempt_preview(conn, settings, to_member_id, None, deadline)
+                {
+                    Ok(AttemptOutcome::Sent {
+                        message_id: notified,
+                    }) => notified == message_id,
+                    Ok(
+                        AttemptOutcome::Held
+                        | AttemptOutcome::NoPending
+                        | AttemptOutcome::Settled { .. },
+                    ) => false,
+                    Ok(AttemptOutcome::Failed(error)) => {
+                        eprintln!("Message {message_id} was persisted. {}", error.error);
+                        false
+                    }
+                    Err(error) => {
+                        eprintln!("Message {message_id} was persisted. {}", error.message());
+                        false
+                    }
+                };
             emit_result(
                 settings,
                 presentation::send_outcome(&message, notification_sent),
@@ -142,6 +156,57 @@ pub fn run(
                 let items = result.as_array().expect("poll returns a list");
                 format_indexed_list(items, format_message, "No messages found.")
             });
+            Ok(())
+        }
+        MessageCommand::Wait {
+            member_id,
+            timeout,
+            json,
+        } => {
+            let mut receiver = BrokerReceiver::new(conn, settings, member_id);
+            let outcome = crate::receive::wait(
+                &SystemClock,
+                &mut receiver,
+                std::time::Duration::from_secs(timeout),
+            )?;
+            let mut messages: Vec<_> = outcome.messages.iter().map(presentation::message).collect();
+            let errors: Vec<_> = outcome.notification_errors.iter().map(|error| serde_json::json!({
+                "member_id": error.member_id,
+                "message_id": error.message_id,
+                "delivery": match error.delivery { Delivery::NotSent => "not_sent", Delivery::Uncertain => "uncertain" },
+                "error": error.error,
+            })).collect();
+            if !json {
+                for message in &mut messages {
+                    truncate_message_text(message, settings.max_text_len);
+                }
+                for error in &outcome.notification_errors {
+                    eprintln!("{}", error.error);
+                }
+            }
+            emit_result(
+                settings,
+                serde_json::json!({
+                    "member_id": member_id,
+                    "outcome": if messages.is_empty() { "timeout" } else { "messages" },
+                    "messages": messages,
+                    "notification_errors": errors,
+                }),
+                json,
+                |result| {
+                    let items = result["messages"]
+                        .as_array()
+                        .expect("wait returns a message list");
+                    if items.is_empty() {
+                        format!("Timed out waiting for member {member_id}.")
+                    } else {
+                        format!(
+                            "Messages available for member {member_id}.\n{}",
+                            format_indexed_list(items, format_message, "No messages found.")
+                        )
+                    }
+                },
+            );
             Ok(())
         }
         MessageCommand::Ack { message_id, json } => {

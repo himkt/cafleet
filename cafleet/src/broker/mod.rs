@@ -16,5 +16,4 @@ pub use asset_installs::*;
 pub use fleets::*;
 pub use members::*;
 pub use messaging::*;
-pub use panes::*;
 pub use queries::*;

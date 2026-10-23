@@ -19,20 +19,14 @@ pub fn resolve_mux(settings: &Settings) -> Result<AnyMultiplexer, MultiplexerErr
     )
 }
 
-pub fn deliver_preview(
+pub(crate) fn attempt_preview(
     conn: &mut Connection,
     settings: &Settings,
-    mux: Option<&AnyMultiplexer>,
     member_id: i64,
-    message_id: i64,
+    expected_fleet: Option<i64>,
     deadline: crate::input::Deadline,
-) -> Result<bool, CafleetError> {
-    let Some(mux) = mux else {
-        return Ok(false);
-    };
-    let mux = mux.bounded(deadline);
-    Ok(
-        crate::delivery::deliver_pane(conn, &mux, settings, member_id, deadline)?
-            == Some(message_id),
-    )
+) -> Result<crate::receive::AttemptOutcome, CafleetError> {
+    crate::delivery::attempt_preview(conn, settings, member_id, expected_fleet, deadline, || {
+        resolve_mux(settings)
+    })
 }

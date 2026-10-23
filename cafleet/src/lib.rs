@@ -15,10 +15,6 @@ pub mod multiplexer;
 pub mod output;
 pub mod pane_state;
 pub mod presentation;
-#[allow(
-    dead_code,
-    reason = "Receive behavior awaits reviewed timing contracts."
-)]
 pub(crate) mod receive;
 pub mod runtime;
 pub mod spawn_prompt;

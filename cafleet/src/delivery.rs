@@ -1,120 +1,196 @@
 use crate::broker;
 use crate::config::Settings;
 use crate::error::CafleetError;
-use crate::input::{Deadline, with_database_budget};
-use crate::multiplexer::Multiplexer;
+use crate::input::{Deadline, PaneLock, with_database_budget};
+use crate::multiplexer::{AnyMultiplexer, Multiplexer, MultiplexerError};
 use crate::output::truncate_text;
 use crate::pane_state::{PaneState, classify};
+use crate::receive::{AttemptOutcome, Delivery, NotificationError};
 use crate::time::format_utc;
 use rusqlite::Connection;
 
 pub const DELIVERY_CAPTURE_LINES: i64 = 80;
 
-pub fn deliver_pane(
+pub(crate) fn attempt_preview(
     conn: &mut Connection,
-    io: &dyn Multiplexer,
     settings: &Settings,
     member_id: i64,
+    expected_fleet: Option<i64>,
     deadline: Deadline,
-) -> Result<Option<i64>, CafleetError> {
+    resolve: impl FnOnce() -> Result<AnyMultiplexer, MultiplexerError>,
+) -> Result<AttemptOutcome, CafleetError> {
     let Some(fleet_id) = with_database_budget(conn, deadline, |conn| {
         broker::active_member_fleet(conn, member_id)
     })?
     else {
-        return Ok(None);
+        return Ok(AttemptOutcome::NoPending);
     };
+    if expected_fleet.is_some_and(|expected| expected != fleet_id) {
+        return Ok(AttemptOutcome::NoPending);
+    }
     let member = with_database_budget(conn, deadline, |conn| {
         broker::get_member(conn, member_id, fleet_id)
-    })?
-    .ok_or_else(|| CafleetError::App(format!("Member {member_id} not found")))?;
-    if member.kind == broker::records::MemberKind::Director
-        || member
-            .placement
-            .as_ref()
-            .and_then(|p| p.mux_pane_id.as_ref())
-            .is_none()
-    {
-        return Ok(None);
+    })?;
+    let Some(member) = member else {
+        return Ok(AttemptOutcome::NoPending);
+    };
+    let Some(placement) = member
+        .placement
+        .as_ref()
+        .filter(|p| p.mux_pane_id.is_some())
+    else {
+        return Ok(AttemptOutcome::Held);
+    };
+    if member.kind == broker::records::MemberKind::Director {
+        return Ok(AttemptOutcome::NoPending);
     }
-    let Some(locked) = with_database_budget(conn, deadline, |conn| {
-        crate::input::lock_member(conn, settings, &member)
+    let Some(initial) = with_database_budget(conn, deadline, |conn| {
+        broker::oldest_pending_preview(conn, member_id)
     })?
     else {
-        return Ok(None);
+        return Ok(AttemptOutcome::NoPending);
     };
+    let failed = |message_id, delivery, error| {
+        AttemptOutcome::Failed(NotificationError {
+            member_id,
+            message_id,
+            delivery,
+            error,
+        })
+    };
+    let _guard = match PaneLock::try_acquire(&settings.database_url, placement) {
+        Ok(Some(guard)) => guard,
+        Ok(None) => return Ok(AttemptOutcome::Held),
+        Err(error) => {
+            return Ok(failed(
+                initial.message_id,
+                Delivery::NotSent,
+                format!("member {member_id} pane input: {}", error.message()),
+            ));
+        }
+    };
+    let current = with_database_budget(conn, deadline, |conn| {
+        broker::get_member(conn, member_id, fleet_id)
+    })?;
+    let Some(current) = current else {
+        return Ok(AttemptOutcome::NoPending);
+    };
+    if current.placement != member.placement {
+        return Ok(AttemptOutcome::Held);
+    }
     let Some(message) = with_database_budget(conn, deadline, |conn| {
         broker::oldest_pending_preview(conn, member_id)
     })?
     else {
-        return Ok(None);
+        return Ok(AttemptOutcome::NoPending);
     };
     if message.from_member_id == member_id {
-        return Ok(None);
+        return Ok(AttemptOutcome::Held);
     }
-    let placement = locked
-        .member
-        .placement
-        .as_ref()
-        .expect("locked concrete placement");
+    let mux = match resolve().and_then(|mux| {
+        mux.ensure_available()?;
+        Ok(mux.bounded(deadline))
+    }) {
+        Ok(mux) => mux,
+        Err(error) => {
+            return Ok(failed(
+                message.message_id,
+                Delivery::NotSent,
+                error.to_string(),
+            ));
+        }
+    };
     let pane = placement
         .mux_pane_id
         .as_deref()
-        .expect("locked concrete pane");
-    let content = io
-        .capture_pane(pane, DELIVERY_CAPTURE_LINES)
-        .map_err(|error| CafleetError::App(error.to_string()))?;
+        .expect("concrete preview placement");
+    let content = match mux.capture_pane(pane, DELIVERY_CAPTURE_LINES) {
+        Ok(content) => content,
+        Err(error) => {
+            return Ok(failed(
+                message.message_id,
+                Delivery::NotSent,
+                error.to_string(),
+            ));
+        }
+    };
     let state = classify(&placement.coding_agent, &content);
     if let Some(reason) = state.hold_reason() {
-        return if matches!(state, PaneState::Draft | PaneState::Unknown) {
-            Err(CafleetError::App(format!(
-                "member {member_id} is {reason}; preview {} was not sent.",
-                message.message_id
-            )))
+        return Ok(if matches!(state, PaneState::Draft | PaneState::Unknown) {
+            failed(
+                message.message_id,
+                Delivery::NotSent,
+                format!(
+                    "member {member_id} is {reason}; preview {} was not sent.",
+                    message.message_id
+                ),
+            )
         } else {
-            Ok(None)
-        };
+            AttemptOutcome::Held
+        });
     }
-    let eligible = with_database_budget(conn, deadline, |conn| {
-        let current = broker::get_member(conn, member_id, fleet_id)?;
-        Ok(current
-            .as_ref()
-            .is_some_and(|current| current.placement == locked.member.placement)
-            && broker::oldest_pending_preview(conn, member_id)?
-                .is_some_and(|pending| pending.message_id == message.message_id))
+    let hold = with_database_budget(conn, deadline, |conn| {
+        let Some(current) = broker::get_member(conn, member_id, fleet_id)? else {
+            return Ok(Some(AttemptOutcome::NoPending));
+        };
+        if !broker::messaging::is_preview_pending(conn, message.message_id)? {
+            return Ok(Some(AttemptOutcome::Settled {
+                message_id: message.message_id,
+            }));
+        }
+        if current.placement != member.placement {
+            return Ok(Some(AttemptOutcome::Held));
+        }
+        let Some(pending) = broker::oldest_pending_preview(conn, member_id)? else {
+            return Ok(Some(AttemptOutcome::NoPending));
+        };
+        if pending.message_id != message.message_id {
+            return Ok(Some(AttemptOutcome::Held));
+        }
+        Ok(None)
     })?;
-    if !eligible {
-        return Ok(None);
+    if let Some(hold) = hold {
+        return Ok(hold);
     }
     let text =
         truncate_text(Some(&message.text), settings.max_text_len).expect("present message text");
-    let uncertain = |cause: String| {
-        CafleetError::App(format!(
-            "preview {} delivery to member {member_id} is uncertain: {cause}. Inspect the pane before retrying.",
-            message.message_id
-        ))
+    let uncertain = |cause| {
+        failed(
+            message.message_id,
+            Delivery::Uncertain,
+            format!(
+                "preview {} delivery to member {member_id} is uncertain: {cause}. Inspect the pane before retrying.",
+                message.message_id
+            ),
+        )
     };
-    io.send_inline_preview(
+    if let Err(error) = mux.send_inline_preview(
         pane,
         message.message_id,
         message.from_member_id,
         &message.created_at,
         &text,
         None,
-    )
-    .map_err(|error| {
-        if error.submission_started() {
+    ) {
+        return Ok(if error.submission_started() {
             uncertain(error.to_string())
         } else {
-            CafleetError::App(error.to_string())
-        }
-    })?;
-    let stamped = with_database_budget(conn, deadline, |conn| {
+            failed(message.message_id, Delivery::NotSent, error.to_string())
+        });
+    }
+    match with_database_budget(conn, deadline, |conn| {
         broker::stamp_notified(
             conn,
             message.message_id,
             &format_utc(crate::time::now_utc()),
         )
-    })
-    .map_err(|error| uncertain(error.message().into_owned()))?;
-    Ok(stamped.then_some(message.message_id))
+    }) {
+        Ok(true) => Ok(AttemptOutcome::Sent {
+            message_id: message.message_id,
+        }),
+        Ok(false) => Ok(AttemptOutcome::Settled {
+            message_id: message.message_id,
+        }),
+        Err(error) => Ok(uncertain(error.message().into_owned())),
+    }
 }
