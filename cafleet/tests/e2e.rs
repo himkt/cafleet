@@ -49,6 +49,18 @@ fn registration_spawn_and_point_to_point_message_lifecycle() {
     assert_eq!(code(&acked), 0, "{}", stderr(&acked));
     let ack: serde_json::Value = serde_json::from_str(&stdout(&acked)).unwrap();
     assert_eq!(ack["message"]["status_state"], "completed");
+    let mut expected = payload["message"].clone();
+    expected["status_state"] = "completed".into();
+    expected["status_timestamp"] = ack["message"]["status_timestamp"].clone();
+    assert_eq!(ack["message"], expected);
+    let notification_stamp: String = cli
+        .sqlite()
+        .query_row(
+            "SELECT notified_at FROM messages WHERE message_id=?1",
+            [id],
+            |row| row.get(0),
+        )
+        .unwrap();
     let empty = cli.run(&["message", "poll", &worker.to_string(), "--json"]);
     assert_eq!(code(&empty), 0);
     assert_eq!(stdout(&empty).trim(), "[]");
@@ -59,11 +71,26 @@ fn registration_spawn_and_point_to_point_message_lifecycle() {
     assert_eq!(panes[1]["member_id"], worker);
     let deleted = cli.run(&["fleet", "delete", &fleet_id.to_string(), "--json"]);
     assert_eq!(code(&deleted), 0, "{}", stderr(&deleted));
+    let (retained, retained_stamp) = cli.sqlite().query_row(
+        "SELECT message_id, from_member_id, to_member_id, created_at, status_state, status_timestamp, text, notified_at FROM messages WHERE message_id=?1",
+        [id],
+        |row| Ok((cafleet::broker::records::MessageRecord {
+            message_id: row.get(0)?,
+            from_member_id: row.get(1)?,
+            to_member_id: row.get(2)?,
+            created_at: row.get(3)?,
+            status: row.get(4)?,
+            status_timestamp: row.get(5)?,
+            text: row.get(6)?,
+        }, row.get::<_, String>(7)?)),
+    ).unwrap();
+    assert_eq!(cafleet::presentation::message(&retained), ack["message"]);
+    assert_eq!(retained_stamp, notification_stamp);
     assert_eq!(
         cli.sqlite()
             .query_row("SELECT count(*) FROM messages", [], |row| row
                 .get::<_, i64>(0))
             .unwrap(),
-        0
+        1
     );
 }
