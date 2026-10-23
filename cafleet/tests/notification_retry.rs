@@ -932,7 +932,6 @@ fn a_notification_stamp_wait_is_bounded_and_remains_uncertain() {
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     let message = fixture.assignment(&worker, "blocked stamp");
-    fixture.delay(&worker, "capture", "2");
     let gate = fixture.gate(&worker, "enter");
     let mut waiting = fixture.spawn(fixture.director, 2);
     let start = waiting.started;
