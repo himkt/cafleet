@@ -289,12 +289,12 @@ first` when the file is missing.
 
 The preset's `bash` ruleset is deny-by-default: a `"*": "deny"` base first,
 then an explicit allowlist translated from the operator's Claude Code
-`permissions.allow` set (`cafleet *`, non-destructive `git` subcommands,
+`permissions.allow` set (`cafleet *`, its declared Git commands,
 file-inspection utilities, and the project's cargo-backed mise tasks). opencode selects the
 **last** matching rule, so this order is the safety floor — every check
 resolves to `allow` or `deny`, never `ask`. Explicit `cafleet member prompt *` and `cafleet member exec *` deny
 entries follow the `cafleet *` allow, so they win: the preset configures
-members, and dispatching a command into another pane is the Director's act. A permission popup in an opencode pane is
+members, and dispatching a command into another pane is the Director's act. Tool permission and assignment authority are separate: the assigned role and Director instructions determine which allowed operations a member may perform. A permission popup in an opencode pane is
 therefore a regression escape, not a runtime decision: capture the pane,
 escalate, and extend the allowlist by operator decision — do not answer the
 popup ad hoc.
