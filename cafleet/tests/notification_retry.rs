@@ -541,6 +541,76 @@ fn diagnostics_are_removed_after_ack_or_member_leave_before_return() {
     }
 }
 
+fn assert_late_ack_clears_the_owned_attempt_diagnostic(stage: &str) {
+    assert!(matches!(stage, "capture" | "enter"));
+    let fixture = Fixture::new();
+    let worker = fixture.worker("worker");
+    let peer = fixture.worker("peer");
+    let message = fixture.assignment(&worker, "preview whose earlier attempt failed");
+    fixture.fail(
+        &worker,
+        "capture",
+        "initial capture failure before late ACK",
+    );
+    let mut waiting = fixture.spawn(fixture.director, 3);
+    let started = waiting.started;
+    waiting.until("first notification error", || {
+        fixture.events().iter().any(|event| {
+            event.stage == "failed" && event.detail == "initial capture failure before late ACK"
+        })
+    });
+    let receive_expiry_upper_bound = Instant::now() + Duration::from_secs(3);
+    let gate = fixture.gate(&worker, stage);
+    fixture.view(&worker, IDLE);
+    std::fs::remove_file(
+        fixture
+            .control
+            .join(format!("fail-capture-{}", worker.pane)),
+    )
+    .unwrap();
+    waiting.until("later owned retry reached its gate", || {
+        fixture.count(stage, &worker) == if stage == "capture" { 2 } else { 1 }
+    });
+    assert!(started.elapsed() < Duration::from_secs(3));
+    waiting.until(
+        "receive expired while the owned retry remains in flight",
+        || Instant::now() >= receive_expiry_upper_bound + Duration::from_millis(100),
+    );
+    fixture.ack(message);
+    let reply = fixture.reply(&peer, "observe this only on the next receive invocation");
+    gate.release();
+
+    let result = json(&waiting.output());
+    assert_result(&result, fixture.director, "timeout");
+    assert_eq!(result["messages"], serde_json::json!([]));
+    assert!(started.elapsed() < Duration::from_secs(8));
+    assert_eq!(fixture.count("capture", &worker), 2);
+    let submissions = usize::from(stage == "enter");
+    assert_eq!(fixture.count("literal", &worker), submissions);
+    assert_eq!(fixture.count("enter", &worker), submissions);
+    assert_eq!(fixture.count("enter_done", &worker), submissions);
+    assert_eq!(fixture.stamp(message), None);
+    assert_eq!(result["notification_errors"], serde_json::json!([]));
+
+    let next = json(&fixture.spawn(fixture.director, 1).output());
+    assert_result(&next, fixture.director, "messages");
+    assert_eq!(next["messages"].as_array().unwrap().len(), 1);
+    assert_eq!(next["messages"][0]["message_id"], reply);
+    assert_eq!(next["notification_errors"], serde_json::json!([]));
+    assert_eq!(fixture.count("capture", &worker), 2);
+}
+
+#[test]
+fn a_late_prewrite_revalidation_clears_an_acked_preview_diagnostic_without_a_final_receive_check() {
+    assert_late_ack_clears_the_owned_attempt_diagnostic("capture");
+}
+
+#[test]
+fn a_late_post_enter_stamp_observation_clears_an_acked_preview_diagnostic_without_a_final_receive_check()
+ {
+    assert_late_ack_clears_the_owned_attempt_diagnostic("enter");
+}
+
 #[test]
 fn a_different_pending_preview_replaces_the_member_diagnostic_identity() {
     let fixture = Fixture::new();
