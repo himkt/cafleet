@@ -6,7 +6,7 @@ mod structural_contracts {
     const BACKENDS: &str = "skills/cafleet/reference/coding-agents.md";
     const CORE: &str = "skills/cafleet/SKILL.md";
     const DIRECTOR: &str = "skills/cafleet/roles/director.md";
-    const MONITOR: &str = "skills/cafleet/roles/monitor.md";
+    const MEMBER: &str = "skills/cafleet/roles/member.md";
     const SUPERVISION: &str = "skills/cafleet/reference/supervision.md";
     const ROUTING: &str = "skills/cafleet/reference/prompt-routing.md";
     const CREATE: &str = "skills/cafleet-design-doc/create/create.md";
@@ -31,11 +31,9 @@ mod structural_contracts {
         "note--applies-at",
         "pane-state-capture-cues",
     ];
-    const DEFAULTS: [&str; 6] = [
+    const DEFAULTS: [&str; 4] = [
         "reviewer_model",
         "reviewer_effort",
-        "monitor_model",
-        "monitor_effort",
         "other_model",
         "other_effort",
     ];
@@ -105,7 +103,7 @@ mod structural_contracts {
             let root = root();
             let mut paths = Vec::new();
             let mut directory_visits = 0;
-            for tree in ["skills", "docs/docs", ".claude/skills/clean-docs"] {
+            for tree in ["skills", "docs/docs", ".claude/skills", ".claude/rules"] {
                 walk(
                     &root.join(tree),
                     &mut paths,
@@ -113,11 +111,11 @@ mod structural_contracts {
                     &mut directory_visits,
                 );
             }
-            paths.retain(|path| {
-                !path.starts_with(root.join(".claude/skills/clean-docs"))
-                    || path.components().any(|part| part.as_os_str() == "roles")
-            });
-            paths.extend([root.join(AUTHOR), root.join(BASH), root.join("SPEC.md")]);
+            paths.extend([
+                root.join("README.md"),
+                root.join("CLAUDE.md"),
+                root.join("SPEC.md"),
+            ]);
             paths.sort();
             paths.dedup();
             let mut canonical = BTreeMap::<PathBuf, Arc<str>>::new();
@@ -362,6 +360,41 @@ mod structural_contracts {
                 }
             }
             Ok(())
+        }
+
+        fn require_pattern(&self, description: &str, pattern: &str) {
+            let pattern = regex::Regex::new(pattern).expect("contract pattern must compile");
+            assert!(
+                pattern.is_match(self.text),
+                "{}",
+                self.error(
+                    self.line,
+                    &format!("required contract missing: {description}")
+                )
+            );
+        }
+
+        fn json_examples(&self) -> Vec<serde_json::Value> {
+            let mut examples = Vec::new();
+            let mut remaining = self.text;
+            while let Some((_, after)) = remaining.split_once("```json\n") {
+                let (json, rest) = after.split_once("\n```").unwrap_or_else(|| {
+                    panic!("{}", self.error(self.line, "unclosed JSON example"))
+                });
+                examples.push(serde_json::from_str(json).unwrap_or_else(|error| {
+                    panic!(
+                        "{}",
+                        self.error(self.line, &format!("invalid JSON example: {error}"))
+                    )
+                }));
+                remaining = rest;
+            }
+            assert!(
+                !examples.is_empty(),
+                "{}",
+                self.error(self.line, "JSON example required")
+            );
+            examples
         }
 
         fn ordered(&self, commands: &[&str]) -> Result<(), String> {
@@ -695,7 +728,7 @@ mod structural_contracts {
     }
 
     #[test]
-    fn backend_capture_cues_name_all_four_states() {
+    fn backend_capture_cues_describe_transport_readiness() {
         let document = INVENTORY.document(BACKENDS);
         for backend in ["claude", "codex", "opencode"] {
             let section = document.section(backend).unwrap();
@@ -708,9 +741,12 @@ mod structural_contracts {
                 .collect::<BTreeSet<_>>();
             assert_eq!(
                 actual,
-                BTreeSet::from(["awaiting_user", "finished", "working", "stall_candidate"]),
+                BTreeSet::from(["idle", "working", "awaiting_user", "draft", "unknown"]),
                 "{}",
-                cues.error(cues.line, "capture-state keys must name all four states")
+                cues.error(
+                    cues.line,
+                    "capture cues must distinguish empty, active and retained input"
+                )
             );
             assert_eq!(
                 rows.len() - 2,
@@ -835,7 +871,6 @@ mod structural_contracts {
             template.operational_tokens(&IDENTITIES).unwrap();
         }
         for suffix in [
-            "/skills/cafleet/roles/monitor.md",
             "/skills/cafleet/reference/coding-agents.md",
             "/skills/cafleet/SKILL.md",
             "/skills/cafleet/reference/base-dir.md",
@@ -858,20 +893,19 @@ mod structural_contracts {
         manual
             .require(&[
                 "cafleet doctor --json",
-                "--monitor-file",
-                "--monitor-model",
-                "1 director=2 monitor=3",
+                "cafleet fleet create",
+                "--coding-agent",
                 "cafleet member create --fleet-id 1",
-                "member ID is `4`",
-                "cafleet message send --from-member-id 2 --to-member-id 4",
-                "cafleet message poll 2 --json",
-                "cafleet message ack 10",
+                "cafleet message send --from-member-id",
+                "--to-member-id",
+                "cafleet message wait",
+                "--timeout 300 --json",
+                "cafleet message ack",
             ])
             .unwrap();
         manual
             .ordered(&[
-                "cafleet member delete 3",
-                "cafleet member delete 4",
+                "cafleet member delete",
                 "cafleet member list 1",
                 "cafleet fleet delete 1",
                 "cafleet fleet list",
@@ -899,22 +933,12 @@ mod structural_contracts {
         ] {
             INVENTORY.require_link(&send, target).unwrap();
         }
-        let broadcast = INVENTORY.document(CORE).section("broadcast").unwrap();
-        broadcast
-            .require(&[
-                "cafleet message broadcast --from-member-id",
-                "--file",
-                "--json",
-                "origin_message_id",
-            ])
+        let core = INVENTORY.document(CORE);
+        core.require(&["cafleet message wait", "--timeout", "--json"])
             .unwrap();
-        for target in [
-            "reference/runtime/spec/data-model.md#broadcast-grouping",
-            "reference/runtime/spec/message-envelope.md",
-            "reference/runtime/spec/cli-options.md#message-broadcast",
-        ] {
-            INVENTORY.require_link(&broadcast, target).unwrap();
-        }
+        INVENTORY
+            .require_link(&core, "reference/runtime/spec/cli-options.md#message-wait")
+            .unwrap();
         let routing = INVENTORY.document(ROUTING);
         routing
             .require(&["Need to run: <command>. My harness denied it."])
@@ -973,35 +997,34 @@ mod structural_contracts {
             "skills/cafleet/reference/prompt-routing.md",
         ])
         .unwrap();
-        INVENTORY.document("docs/docs/spec/multiplexer-backends.md")
-            .section("the-monitor-wake-and-the-fixed-direct-ping").unwrap().require(&[
-                "[cafleet] tick: fleet <fleet-id>", "coding_agent=<agent>; unacked=<n>",
-                "Follow your monitor role protocol. Resume your work if something was still running.",
-                "cafleet message poll <member-id> — then\nresume your work if something was still running."
-            ]).unwrap();
+        INVENTORY
+            .document("docs/docs/spec/cli-options.md")
+            .section("member-ping")
+            .unwrap()
+            .require(&[
+                "cafleet message poll",
+                "--json",
+                "pending_placement",
+                "unknown",
+            ])
+            .unwrap();
     }
 
     #[test]
-    fn monitor_summaries_link_to_runtime_and_supervision_owners() {
+    fn receive_and_recovery_instructions_link_to_their_owners() {
         for (path, targets) in [
             (
                 CORE,
                 vec![
-                    "roles/monitor.md",
+                    "roles/director.md",
+                    "roles/member.md",
                     "reference/supervision.md",
                     "reference/coding-agents.md",
                 ],
             ),
-            (
-                DIRECTOR,
-                vec!["monitor.md", "../reference/supervision.md#shutdown"],
-            ),
-            (
-                MONITOR,
-                vec!["../reference/coding-agents.md", "../SKILL.md"],
-            ),
-            (SUPERVISION, vec!["../roles/monitor.md", "coding-agents.md"]),
-            ("skills/cafleet/roles/member.md", vec!["monitor.md"]),
+            (DIRECTOR, vec!["../reference/supervision.md#shutdown"]),
+            (SUPERVISION, vec!["coding-agents.md"]),
+            (MEMBER, vec!["../reference/prompt-routing.md"]),
             (
                 AUTHOR,
                 vec![
@@ -1016,14 +1039,6 @@ mod structural_contracts {
                 ],
             ),
             (
-                "docs/docs/concepts/monitoring.md",
-                vec![
-                    "../spec/multiplexer-backends.md",
-                    "../spec/cli-options.md#monitor-resource-cleanup",
-                    "../spec/cli-options.md#cafleet-monitor-scan",
-                ],
-            ),
-            (
                 "docs/docs/concepts/storage.md",
                 vec![
                     "../spec/cli-options.md#cafleet-setup",
@@ -1031,26 +1046,8 @@ mod structural_contracts {
                 ],
             ),
             (
-                "docs/docs/spec/webui-api.md",
-                vec![
-                    "../concepts/monitoring.md#cadence-and-tick-precision",
-                    "data-model.md#monitor_runtime",
-                ],
-            ),
-            (
                 "docs/docs/spec/cli-options.md",
-                vec![
-                    "../concepts/monitoring.md",
-                    "../concepts/monitoring.md#cadence-and-tick-precision",
-                    "coding-agent-backends.md#spawn-argv",
-                ],
-            ),
-            (
-                "docs/docs/spec/data-model.md",
-                vec![
-                    "../concepts/monitoring.md#cadence-and-tick-precision",
-                    "webui-api.md#get-apimonitor--fleet-monitor-runtime",
-                ],
+                vec!["coding-agent-backends.md#spawn-argv"],
             ),
         ] {
             let document = INVENTORY.document(path);
@@ -1062,7 +1059,7 @@ mod structural_contracts {
             .document(SUPERVISION)
             .section("spawn-protocol")
             .unwrap()
-            .require(&["cafleet fleet create", "--monitor-file", "--monitor-model"])
+            .require(&["cafleet fleet create", "cafleet member create", "ready"])
             .unwrap();
         INVENTORY
             .document(SUPERVISION)
@@ -1079,7 +1076,7 @@ mod structural_contracts {
             .document(AUTHOR)
             .section("resolve-and-bootstrap")
             .unwrap()
-            .require(&["cafleet doctor", "--monitor-file", "--monitor-model"])
+            .require(&["cafleet doctor", "cafleet fleet create"])
             .unwrap();
         let spec = INVENTORY.document("SPEC.md");
         INVENTORY
@@ -1087,27 +1084,15 @@ mod structural_contracts {
             .unwrap();
         spec.section("member-ping")
             .unwrap()
-            .require(&["send_poll_trigger", "{member_id, pane_id, skipped, reason}"])
+            .require(&["member_id", "pane_id", "skipped", "reason", "--json"])
             .unwrap();
         spec.section("member-capture")
             .unwrap()
             .require(&["content_sha256", "--lines", "--ansi"])
             .unwrap();
-        spec.section("monitor")
+        spec.section("message-wait")
             .unwrap()
-            .require(&[
-                "cafleet monitor FLEET_ID [--tick N] [--interval N]",
-                "CAFLEET_MONITOR_WAKE_INTERVAL",
-            ])
-            .unwrap();
-        spec.section("66-monitor-heartbeat-loop")
-            .unwrap()
-            .section("public-surface")
-            .unwrap()
-            .require(&[
-                "wake_due(last_wake_at, started_at, wake_interval_seconds, now)",
-                "run_monitor_loop(fleet_id, tick_seconds, wake_interval_seconds)",
-            ])
+            .require(&["--timeout", "300", "notification_errors", "outcome"])
             .unwrap();
     }
 
@@ -1178,29 +1163,18 @@ mod structural_contracts {
                     "creation-failure-compensation",
                 ],
             ),
-            (
-                "data-model",
-                vec!["tables", "message-visibility-rules", "broadcast-grouping"],
-            ),
+            ("data-model", vec!["tables", "message-visibility-rules"]),
             (
                 "message-envelope",
                 vec!["persisted-shape", "rendered-shape"],
             ),
             (
                 "multiplexer-backends",
-                vec![
-                    "pane-creation-ownership",
-                    "push-notifications",
-                    "esc-safeguard",
-                ],
+                vec!["pane-creation-ownership", "push-notifications"],
             ),
             (
                 "coding-agent-backends",
                 vec!["spawn-argv", "claude", "codex", "opencode"],
-            ),
-            (
-                "webui-api",
-                vec!["request-headers", "endpoints", "error-format"],
             ),
         ] {
             let path = format!("docs/docs/spec/{page}.md");
@@ -1213,6 +1187,617 @@ mod structural_contracts {
                 &INVENTORY.document("docs/docs/spec/message-envelope.md"),
                 "cli-options.md#output-shapes",
             )
+            .unwrap();
+    }
+
+    #[test]
+    fn discovery_selects_independent_sessions_for_delegation() {
+        let core = INVENTORY.document(CORE);
+        let frontmatter = core
+            .text
+            .strip_prefix("---\n")
+            .and_then(|text| text.split_once("\n---"))
+            .expect("CAFleet discovery needs YAML frontmatter")
+            .0;
+        let description = Region {
+            text: frontmatter,
+            ..core.clone()
+        };
+        description
+            .require(&["description:", "tmux", "herdr", "durable"])
+            .unwrap();
+        description.require_pattern("proactive delegation", r"(?i)proactiv\w*");
+        description.require_pattern("subagent substitution", r"(?i)subagents?");
+        description.require_pattern("agent-team substitution", r"(?i)agent teams?");
+        let bindings = INVENTORY
+            .document(BACKENDS)
+            .section("claude")
+            .unwrap()
+            .section("runtime-bindings")
+            .unwrap()
+            .bindings(&RUNTIME)
+            .unwrap();
+        assert_eq!(bindings["skill_loader"], "the Skill tool");
+    }
+
+    #[test]
+    fn director_owns_finite_receiving_until_reply_or_explicit_handoff() {
+        let supervision = INVENTORY.document(SUPERVISION);
+        supervision
+            .require(&[
+                "cafleet message wait <director-member-id> --timeout 300 --json",
+                "cafleet fleet capture",
+                "cafleet member capture",
+            ])
+            .unwrap();
+        supervision.require_pattern(
+            "live host-owned receive handle",
+            r"(?i)(task|session).{0,40}handle",
+        );
+        supervision.require_pattern(
+            "foreground timeout bound",
+            r"(?i)(30.{0,30}second|30[- ]second)",
+        );
+        supervision.require_pattern(
+            "explicit user handoff",
+            r"(?i)explicit.{0,80}(handoff|hand.{0,10}back)",
+        );
+        supervision.require_pattern(
+            "timeout rechecks evidence",
+            r"(?is)timeout.{0,300}(roster|capture|artifact|inspect|check)",
+        );
+        supervision.require_pattern(
+            "retained draft relay",
+            r"(?is)draft.{0,220}(relay|ask the user)",
+        );
+        supervision.require_pattern(
+            "ACK before next receive",
+            r"(?is)ACK.{0,220}(before|then|next).{0,100}(wait|receiv)",
+        );
+        supervision.require_pattern(
+            "deferred actions remain host-owned",
+            r"(?is)deferred.{0,180}(host|task|state)",
+        );
+    }
+
+    #[test]
+    fn members_poll_at_startup_report_boundary_and_wake() {
+        let member = INVENTORY.document(MEMBER);
+        member
+            .ordered(&[
+                "cafleet message send --from-member-id <my-member-id>",
+                "cafleet message poll <my-member-id>",
+            ])
+            .unwrap();
+        member.require_pattern(
+            "poll before reporting completion",
+            r"(?is)poll.{0,150}before.{0,100}(complet|report)",
+        );
+        member.require_pattern(
+            "turn-boundary inbox handling",
+            r"(?is)(queued|new).{0,80}(assignment|message).{0,180}(idle|end.{0,10}turn)",
+        );
+        member.require_pattern("wake inbox check", r"(?i)(on|each|every).{0,30}wake");
+        member
+            .require(&["--json", "Director", "member prompt", "member exec"])
+            .unwrap();
+    }
+
+    #[test]
+    fn wait_specifies_bounded_results_and_notification_retry_ownership() {
+        for path in ["docs/docs/spec/cli-options.md", "SPEC.md"] {
+            let wait = INVENTORY.document(path).section("message-wait").unwrap();
+            wait.require(&[
+                "--timeout",
+                "300",
+                "1800",
+                "member_id",
+                "outcome",
+                "messages",
+                "notification_errors",
+                "message_id",
+                "delivery",
+                "not_sent",
+                "uncertain",
+            ])
+            .unwrap();
+            wait.require_pattern("monotonic deadline", r"(?i)monotonic");
+            wait.require_pattern(
+                "one-second retry interval",
+                r"(?i)(one[- ]second|1[- ]second|every second)",
+            );
+            wait.require_pattern("round-robin member selection", r"(?i)round[- ]robin");
+            wait.require_pattern(
+                "five-second in-flight budget",
+                r"(?i)(five[- ]second|5[- ]second|five seconds|5 seconds)",
+            );
+            wait.require_pattern(
+                "normal outcomes succeed",
+                r"(?is)(exit.{0,40}0|0.{0,40}(exit|outcome))",
+            );
+            wait.require_pattern("diagnostics revalidated", r"(?i)revalidat\w*");
+            wait.require(&["ACK", "Director"]).unwrap();
+        }
+    }
+
+    #[test]
+    fn notification_spec_defines_recipient_selection_and_exact_preview() {
+        let mux = INVENTORY
+            .document("docs/docs/spec/multiplexer-backends.md")
+            .section("push-notifications")
+            .unwrap();
+        mux.require(&["[cafleet msg", "notified_at", "⏎", "␉"])
+            .unwrap();
+        mux.require_pattern(
+            "oldest pending preview",
+            r"(?is)oldest.{0,100}(pending|unack)",
+        );
+        mux.require_pattern(
+            "Director receives through broker reads",
+            r"(?is)Director.{0,160}(wait|read|poll|persist)",
+        );
+        mux.require_pattern("shared input lock", r"(?i)(input|pane).{0,30}lock");
+        mux.require_pattern(
+            "draft and unknown remain visible",
+            r"(?is)draft.{0,240}unknown|unknown.{0,240}draft",
+        );
+        let send = INVENTORY
+            .document("docs/docs/spec/cli-options.md")
+            .section("message-send")
+            .unwrap();
+        send.require(&["notification_sent", "persisted", "preview"])
+            .unwrap();
+        send.require_pattern(
+            "committed send remains successful",
+            r"(?is)(commit|persist).{0,220}(exit.{0,15}0|success)",
+        );
+    }
+
+    #[test]
+    fn message_examples_use_the_point_to_point_record() {
+        fn collect<'a>(value: &'a serde_json::Value, records: &mut Vec<&'a serde_json::Value>) {
+            match value {
+                serde_json::Value::Object(object) if object.contains_key("message_id") => {
+                    records.push(value)
+                }
+                serde_json::Value::Object(object) => {
+                    for value in object.values() {
+                        collect(value, records);
+                    }
+                }
+                serde_json::Value::Array(values) => {
+                    for value in values {
+                        collect(value, records);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let envelope = INVENTORY.document("docs/docs/spec/message-envelope.md");
+        let examples = envelope.json_examples();
+        let mut records = Vec::new();
+        for example in &examples {
+            collect(example, &mut records);
+        }
+        assert!(
+            !records.is_empty(),
+            "message-envelope needs a complete message example"
+        );
+        for record in records {
+            let object = record.as_object().unwrap();
+            assert_eq!(
+                object.keys().map(String::as_str).collect::<Vec<_>>(),
+                [
+                    "message_id",
+                    "from_member_id",
+                    "to_member_id",
+                    "created_at",
+                    "status_state",
+                    "status_timestamp",
+                    "text",
+                ]
+            );
+            assert!(
+                object["to_member_id"].is_i64(),
+                "recipient must be an integer"
+            );
+            assert!(matches!(
+                object["status_state"].as_str(),
+                Some("input_required" | "completed")
+            ));
+        }
+    }
+
+    #[test]
+    fn data_model_documents_current_storage_and_delivery_columns() {
+        let data = INVENTORY.document("docs/docs/spec/data-model.md");
+        let schema = INVENTORY
+            .document("SPEC.md")
+            .section("8-database-schema")
+            .unwrap();
+        for (table, columns) in [
+            (
+                "messages",
+                vec![
+                    "message_id",
+                    "from_member_id",
+                    "to_member_id",
+                    "created_at",
+                    "status_state",
+                    "status_timestamp",
+                    "text",
+                    "notified_at",
+                ],
+            ),
+            (
+                "members",
+                vec![
+                    "member_id",
+                    "fleet_id",
+                    "name",
+                    "description",
+                    "status",
+                    "registered_at",
+                    "deregistered_at",
+                ],
+            ),
+        ] {
+            data.section(table).unwrap();
+            let declaration = regex::Regex::new(&format!(
+                r"(?is)CREATE TABLE(?: IF NOT EXISTS)? {table}\s*\((.*?)\n\);"
+            ))
+            .unwrap();
+            let declaration = declaration
+                .captures(schema.text)
+                .unwrap_or_else(|| panic!("SPEC schema needs CREATE TABLE {table}"));
+            let actual = declaration[1]
+                .lines()
+                .filter_map(|line| {
+                    let column = line.split_whitespace().next()?;
+                    (!matches!(
+                        column,
+                        "PRIMARY" | "FOREIGN" | "UNIQUE" | "CHECK" | "CONSTRAINT"
+                    ))
+                    .then_some(column)
+                })
+                .collect::<BTreeSet<_>>();
+            assert_eq!(
+                actual,
+                columns.into_iter().collect(),
+                "{table}: current columns"
+            );
+        }
+        let storage = INVENTORY.document("docs/docs/concepts/storage.md");
+        storage
+            .require(&["cafleet_v8.db", "application_id", "1128351288"])
+            .unwrap();
+        storage.require_pattern(
+            "incompatible file preservation",
+            r"(?is)incompatib\w*.{0,260}(preserv|unchanged|before.{0,30}writ)",
+        );
+        data.require(&["asset_installs", "member_placements", "foreign"])
+            .unwrap();
+    }
+
+    #[test]
+    fn native_exec_contract_exposes_submission_and_uncertainty() {
+        for path in ["docs/docs/spec/cli-options.md", "SPEC.md"] {
+            let exec = INVENTORY.document(path).section("member-exec").unwrap();
+            exec.require(&[
+                "--file",
+                "COMMAND",
+                "member_id",
+                "pane_id",
+                "coding_agent",
+                "command",
+                "dispatched",
+                "command must be one non-empty line without control characters.",
+                "Inspect the pane before retrying.",
+            ])
+            .unwrap();
+            exec.require_pattern(
+                "visible native shell input",
+                r"(?i)(`! `|! COMMAND|! <command>)",
+            );
+            exec.require_pattern(
+                "successful dispatch is submission only",
+                r"(?is)(exit.{0,30}0|success).{0,180}(submi|dispatch)",
+            );
+            exec.require_pattern(
+                "partial delivery uncertainty",
+                r"(?is)uncertain.{0,120}CAUSE",
+            );
+        }
+        let dispatch = INVENTORY
+            .document(ROUTING)
+            .section("director-side-dispatch")
+            .unwrap();
+        dispatch
+            .ordered(&[
+                "cafleet member exec",
+                "cafleet member capture",
+                "cafleet member prompt",
+            ])
+            .unwrap();
+        dispatch.require_pattern(
+            "resume after native output",
+            r"(?is)(output|result).{0,200}(continu|resum)",
+        );
+        dispatch.require_pattern(
+            "inspect before uncertain retry",
+            r"(?is)uncertain.{0,180}(captur|inspect)",
+        );
+    }
+
+    #[test]
+    fn input_contract_preserves_drafts_and_serializes_complete_submission() {
+        let mux = INVENTORY.document("docs/docs/spec/multiplexer-backends.md");
+        mux.require(&[
+            "idle",
+            "working",
+            "awaiting_user",
+            "draft",
+            "unknown",
+            ".pane-locks/",
+            "SHA-256",
+        ])
+        .unwrap();
+        mux.require_pattern(
+            "process-shared exclusion",
+            r"(?i)(process[- ]shared|cross[- ]process|OS file lock)",
+        );
+        mux.require_pattern(
+            "lock covers Enter and stamp",
+            r"(?is)(lock|guard).{0,400}Enter.{0,180}(stamp|notified_at)",
+        );
+        mux.require_pattern("styled capture", r"(?i)(ANSI|SGR|styled)");
+        mux.require_pattern(
+            "same visible text has different input roles",
+            r"(?is)(same|identical).{0,200}(draft|user.{0,20}(input|text))",
+        );
+        let backends = INVENTORY.document("docs/docs/spec/coding-agent-backends.md");
+        backends
+            .section("spawn-argv")
+            .unwrap()
+            .require(&["--prompt-suggestions false"])
+            .unwrap();
+    }
+
+    #[test]
+    fn backend_notes_preserve_host_evidence_and_consuming_links() {
+        let backend_doc = INVENTORY.document(BACKENDS);
+        let human_doc = INVENTORY.document("docs/docs/spec/coding-agent-backends.md");
+        for backend in ["claude", "codex", "opencode"] {
+            let section = backend_doc.section(backend).unwrap();
+            let notes = section.section("note--applies-at").unwrap();
+            let rows = notes.rows().unwrap();
+            assert!(
+                rows.iter().skip(2).any(|(_, row)| row.iter().any(|cell| {
+                    LINKS.captures_iter(cell).any(|link| {
+                        link[1].contains("supervision.md") || link[1].contains("prompt-routing.md")
+                    })
+                })),
+                "{backend}: bind host facts to their consuming instructions"
+            );
+            let human = human_doc.section(backend).unwrap();
+            for region in [&notes, &human] {
+                region.require_pattern(
+                    "native shell provenance",
+                    r"(?i)native.{0,35}(shell|input|command)",
+                );
+                region.require_pattern(
+                    "permission evidence boundary",
+                    r"(?i)(permission|authoriz|sandbox)",
+                );
+                match backend {
+                    "claude" => {
+                        region.require_pattern(
+                            "transcript evaluator",
+                            r"(?i)(evaluat\w*.{0,100}transcript|transcript.{0,100}evaluat)",
+                        );
+                        region.require_pattern(
+                            "background defers evaluation",
+                            r"(?is)background.{0,220}(defer|evaluat|result)",
+                        );
+                    }
+                    "codex" => {
+                        region.require_pattern(
+                            "thread-owned objective",
+                            r"(?is)(objective|goal).{0,100}thread|thread.{0,100}(objective|goal)",
+                        );
+                        region.require_pattern(
+                            "native handle ownership",
+                            r"(?i)(task|session|tool).{0,40}handle",
+                        );
+                    }
+                    "opencode" => {
+                        region.require_pattern("assignment execution", r"(?i)assign\w*");
+                        region.require_pattern("workspace tool capability", r"(?i)workspace");
+                        region.require_pattern("selected provider/model", r"(?i)(provider|model)");
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn workflows_preserve_phase_gates_and_use_the_shared_receive_procedure() {
+        for path in [CREATE, EXECUTE, INTERVIEW] {
+            let workflow = INVENTORY.document(path);
+            INVENTORY
+                .require_link(&workflow, "../../cafleet/reference/supervision.md")
+                .unwrap();
+            workflow
+                .require(&[
+                    "cafleet fleet create",
+                    "cafleet member create",
+                    "cafleet message wait",
+                    "--json",
+                ])
+                .unwrap();
+            workflow.require_pattern(
+                "finite receive ownership",
+                r"(?i)(handle|background|finite receiv)",
+            );
+        }
+        INVENTORY
+            .document(CREATE)
+            .section("step-2-clarification-phase-director")
+            .unwrap()
+            .require(&["Drafter", "questions", "answers"])
+            .unwrap();
+        INVENTORY
+            .document(CREATE)
+            .section("director-responsibilities")
+            .unwrap()
+            .require(&["Drafter", "Reviewer", "explicit user approval"])
+            .unwrap();
+        let execute = INVENTORY.document(EXECUTE);
+        execute
+            .require(&[
+                "Phase A",
+                "Phase B",
+                "Phase C",
+                "Phase D",
+                "Step 5",
+                "Step 6",
+                "COMMENT(user-relay)",
+            ])
+            .unwrap();
+        let analyzer = INVENTORY.document("skills/cafleet-design-doc/interview/roles/analyzer.md");
+        analyzer
+            .require(&["Total: N questions", "--file -"])
+            .unwrap();
+        analyzer.require_pattern(
+            "Analyzer remains read-only",
+            r"(?is)(read.only|no.file.edit|do NOT.{0,30}edit)",
+        );
+    }
+
+    #[test]
+    fn local_owner_links_and_runtime_mirrors_resolve() {
+        for (path, text) in &INVENTORY.sources {
+            if !path.ends_with(".md") && !path.ends_with(".mdx") {
+                continue;
+            }
+            let source = INVENTORY.document(path);
+            let mut fenced = false;
+            for (offset, line) in text.lines().enumerate() {
+                if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
+                    fenced = !fenced;
+                    continue;
+                }
+                if fenced {
+                    continue;
+                }
+                for link in LINKS.captures_iter(line) {
+                    let matched = link.get(0).unwrap();
+                    if INLINE.find_iter(line).any(|literal| {
+                        literal.start() <= matched.start() && literal.end() >= matched.end()
+                    }) {
+                        continue;
+                    }
+                    let target = &link[1];
+                    if target.contains("://")
+                        || target.starts_with("mailto:")
+                        || target.starts_with('/')
+                        || target.contains(['$', '{', '}'])
+                        || target.contains('<') && !target.ends_with("#<name>")
+                    {
+                        continue;
+                    }
+                    INVENTORY.link(&source, offset + 1, target).unwrap();
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn site_navigation_entries_resolve_to_pages_or_directories() {
+        for path in INVENTORY
+            .sources
+            .keys()
+            .filter(|path| path.starts_with("docs/docs/") && path.ends_with("/_meta.json"))
+        {
+            let document = INVENTORY.document(path);
+            let entries: serde_json::Value = serde_json::from_str(document.text).unwrap();
+            let mut names = BTreeSet::new();
+            for entry in entries.as_array().expect("navigation is an array") {
+                let name = entry["name"].as_str().expect("navigation entry has a name");
+                assert!(names.insert(name), "{path}: duplicate page {name}");
+                let parent = root().join(path).parent().unwrap().to_path_buf();
+                match entry["type"].as_str() {
+                    Some("dir") => assert!(
+                        parent.join(name).is_dir(),
+                        "{path}: missing directory {name}"
+                    ),
+                    Some("file") | None => {
+                        INVENTORY.link(&document, 1, &format!("{name}.md")).unwrap()
+                    }
+                    Some(kind) => panic!("{path}: unknown navigation type {kind}"),
+                }
+            }
+        }
+        let config = std::fs::read_to_string(root().join("docs/rspress.config.ts")).unwrap();
+        assert!(config.contains("checkDeadLinks: true"));
+    }
+
+    #[test]
+    fn human_documentation_keeps_its_independent_audience() {
+        for (path, text) in &INVENTORY.sources {
+            if !path.starts_with("docs/docs/") {
+                continue;
+            }
+            let source = INVENTORY.document(path);
+            for (offset, line) in text.lines().enumerate() {
+                for link in LINKS.captures_iter(line) {
+                    assert!(
+                        !link[1].contains("skills/cafleet"),
+                        "{}",
+                        source.error(
+                            offset + 1,
+                            "human docs explain behavior through their own owner pages"
+                        )
+                    );
+                }
+            }
+        }
+        let backend = INVENTORY.document(BACKENDS);
+        for link in LINKS.captures_iter(backend.text) {
+            assert!(!link[1].contains("docs/docs/spec/coding-agent-backends"));
+        }
+    }
+
+    #[test]
+    fn permissions_documentation_covers_finite_wait_and_director_capture() {
+        let coverage = INVENTORY
+            .document("docs/docs/spec/cli-options.md")
+            .section("permissionsallow-coverage")
+            .unwrap();
+        coverage
+            .require(&["cafleet message wait", "cafleet fleet capture"])
+            .unwrap();
+        for (path, permission) in [
+            (
+                "presets/codex/cafleet.rules",
+                "pattern = [\"cafleet\"], decision = \"allow\"",
+            ),
+            ("presets/opencode/cafleet.md", "\"cafleet *\": \"allow\""),
+        ] {
+            let text = std::fs::read_to_string(root().join(path)).unwrap();
+            assert!(
+                text.contains(permission),
+                "{path}: retain member broker capability"
+            );
+        }
+    }
+
+    #[test]
+    fn migration_rule_points_to_the_current_chain_guard() {
+        INVENTORY
+            .document(".claude/rules/database-migrations.md")
+            .require(&["cafleet/src/db/mod.rs", "embedded", "V1__baseline.sql"])
             .unwrap();
     }
 
@@ -1239,7 +1824,7 @@ mod structural_contracts {
                             .trim_start_matches(['(', '[', '{', '<', '"', '\''])
                             .trim_end_matches([')', ']', '}', '"', '\'', ',', ';', '.', '!', '?']);
                         let token = LOCATOR.replace(token.split('#').next().unwrap(), "");
-                        if !["cafleet/", "skills/", "docs/", "admin/", "presets/"]
+                        if !["cafleet/", "skills/", "docs/", "presets/"]
                             .iter()
                             .any(|prefix| token.starts_with(prefix))
                             || token.contains("://")
@@ -1428,10 +2013,10 @@ mod structural_contracts {
         assert_eq!(explicit.section("owner").unwrap().line, 1);
         let simple = Region {
             path: "heading.md".into(),
-            text: "# `monitor_runtime`\n",
+            text: "# `asset_installs`\n",
             line: 4,
             section: "document".into(),
         };
-        assert_eq!(simple.section("monitor_runtime").unwrap().line, 4);
+        assert_eq!(simple.section("asset_installs").unwrap().line, 4);
     }
 }
