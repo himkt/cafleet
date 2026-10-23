@@ -1,106 +1,27 @@
 # Member lifecycle
 
-The `cafleet member` CLI group wraps the two-step "register + spawn a
-pane" recipe behind `cafleet member create` and persists the member-to-pane
-mapping in the `member_placements` table. An ordinary member is an active
-registry row with a placement row, other than the fleet's root Director: it
-is spawned by a Director via `cafleet member create` and linked to a
-specific multiplexer pane, window, and session. The root Director is instead
-bootstrapped by `cafleet fleet create` and keeps its own placement row since
-it is pane-bound.
+Register the calling session as Director, then create independent member panes and dispatch each assignment after its ready signal.
 
-**Single-Director invariant**: A fleet has exactly one Director — the root
-Director recorded in `fleets.director_member_id` at `fleet create` time. Only
-that root Director may own members: `cafleet member create` resolves the
-Director from the fleet row itself, so a member can never be another member's
-Director by construction. The team model is a single flat tier; there is no
-team nesting.
+## Registration and readiness
 
-## Create flow and compensation {#atomic-create-flow}
+`fleet create` registers the current Director atomically. `member create` inherits that Director's backend unless overridden, validates model/effort and prompt identity, then registers a pending placement, splits a pane and patches its owned pane ID. Creation compensates for failures while preserving the original cause and any cleanup error.
 
-`cafleet member create` registers a pending placement (no pane id yet),
-spawns the member pane in the Director's own window, then patches the placement
-row with the real pane id. It compensates failures across the DB and
-multiplexer: a known owned pane is killed and the registration is deregistered,
-removing the placement. A backend run failure is compensated by the backend
-before the CLI deregisters; a patch failure is compensated by the CLI.
-Cleanup failures preserve the original error and identify the failed cleanup.
-If a split response did not reveal a pane id, pane cleanup remains unconfirmed;
-CAFleet does not guess which pane to close. See the
-[creation failure contract](../spec/cli-options.md#creation-failure-compensation). The pending window
-is ping-tolerant: `cafleet member ping` against a member whose placement has
-no pane yet skips the keystroke and succeeds — the member polls its inbox on
-spawn, so there is nothing a ping would add. The new pane is
-created without stealing focus, so the Director's active window is unchanged.
-Identity reaches the spawned pane as literals rendered into the prompt:
-`cafleet member create` runs `str.format` over the resolved prompt,
-substituting the four identity placeholders — each one and its label line is
-in
-[CLI options § Spawn-prompt substitution](../spec/cli-options.md#spawn-prompt-substitution).
+Each member reads its role and required host rules, sends `ready` as its first operational broker command, and immediately polls its inbox. The Director can assign that member as soon as its ready arrives. The member polls before completion reports and on every subsequent wake, then handles queued assignments before becoming idle.
 
-## Delete ordering
+## Assignment and receiving
 
-`cafleet member delete` tears down the pane (when one exists) and
-soft-deletes the member, exiting 0. An already-gone pane is tolerated, not an
-error.
+Messages are point-to-point. Send individually to every selected recipient. The Director receives through broker reads and finite waits; ordinary-member notifications are delivered only into idle empty composers. ACK every read delivery immediately, retaining unfinished actions in host-owned task state. See [run a fleet](../how-to/mixed-backend-team.md#manual-lifecycle).
 
-| Member state | What `member delete` does | Multiplexer effect |
-|---|---|---|
-| A live pane | Kills the pane immediately, then deregisters | The pane is killed |
-| A pending placement (no pane id yet) | A plain registry soft-delete | none |
-| A placementless registry row (no placement row) | A plain registry soft-delete | none |
+## Command routing
 
-## Spawn-prompt input modes
+A member runs commands its host permits and routes a required denied command to the Director. The Director authorizes `member exec`, which visibly submits the actual native shell command and returns submission metadata. Inspect native output with `member capture`; after completion and idle evidence, send an explicit `member prompt` to continue if the host has not resumed the member. A failed or uncertain dispatch requires inspection before any newly authorized retry.
 
-The spawn prompt is supplied inline as the positional `PROMPT` argument or
-from a file via
-`--file <path>` (an absolute or CWD-relative UTF-8 path; `-` reads the
-whole prompt from stdin); literal braces in prompt text must be doubled (`{{`,
-`}}`) — see [CLI options](../spec/cli-options.md) `member create`.
+The [native dispatch contract](../spec/cli-options.md#member-exec) owns validation, readiness and uncertainty errors. File-edit permission gaps need a matching host rule or a Director edit.
 
-## Commands
+## Inspection and recovery
 
-The lifecycle ops and keystroke interaction all live in the `member` group:
+Use `member list`, `member capture` and `fleet capture` to check roster and pane evidence. A timeout alone establishes neither failure nor completion. Preserve retained user drafts and relay them to the user. Replace an unusable member only under the existing authorization, carrying its assignment, messages and artifacts into the replacement prompt.
 
-| Lifecycle stage | Commands |
-|---|---|
-| Spawn | `member create` |
-| Teardown | `member delete` |
-| Introspection | `member show`, `member list` |
-| Keystroke interaction | `member prompt`, `member ping` |
-| Command dispatch | `member exec` |
-| Pane read | `member capture` |
+## Teardown
 
-`member create` takes no identity flag — the CLI resolves the
-Director from `fleets.director_member_id`; every other lifecycle verb targets
-its member by the positional `MEMBER_ID` subject (the fleet is derived from
-the member row). Each
-subcommand's purpose and argument surface are in
-[CLI options § Subcommand summary](../spec/cli-options.md#subcommand-summary),
-which also carries every flag and the shared resolution rules.
-
-`cafleet member prompt` keystrokes text into a member's pane as a direct user
-turn, for slash commands and other magic commands a broker message body
-cannot trigger — see [CLI options](../spec/cli-options.md#member-prompt).
-
-## Command routing {#command-routing}
-
-A member runs every command its harness allows and routes the rest to the
-Director. Routing is the standard path for a command the harness does not
-run, not a rare fallback:
-
-1. The member asks with `cafleet message send`:
-   `Need to run: <command>. My harness denied it.` For a command that is hard
-   to quote, it writes the command to a file under its base directory and
-   names the path. It then ends its turn.
-2. The Director runs [`cafleet member exec`](../spec/cli-options.md#member-exec)
-   with the command, or with `--file` and the named path. The command runs in
-   the member's own pane and working directory, so its output lands in the
-   member's context.
-3. The broker records the exit status, posts a completion notice to the
-   Director, and resumes the member. The Director sends no ping and reads no
-   pane capture.
-
-A claude member's broker commands are allowed on its spawn command line, so
-asking the Director never depends on an allow rule in the user's settings —
-see [Spawn-time allow rules](../spec/coding-agent-backends.md#spawn-time-allow-rules).
+Delete owned ordinary members before deleting the fleet. Member deletion kills its owned pane and deregisters it; fleet deletion deregisters the registry without closing panes. Both serialize placement changes with pane input and fail without registry changes if lock contention lasts five seconds. The root Director is protected from individual member deletion.

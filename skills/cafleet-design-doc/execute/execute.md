@@ -2,7 +2,7 @@
 
 Implement features based on a design document using up to five roles orchestrated via the CAFleet message broker: Director (orchestrator), Programmer (implements), Tester (writes tests), Verifier (E2E/integration testing), and Reviewer (fresh post-implementation review). Every inter-member message is persisted in SQLite and auditable. The Director judges which members to spawn from the nature of the implementation tasks and drives a per-step TDD cycle (Tester writes unit tests → Director reviews → Programmer implements → Director reviews and commits). After all TDD steps: Phase D E2E verification (if the Verifier was spawned), the Step 5 fresh-Reviewer loop until approval, Step 6 user approval, Step 7 push + PR, Step 8 finalize and teardown.
 
-Resolve runtime tools from the executing agent's backend. For spawns, read the selected member backend's Model catalog and Role defaults under the CAFleet Director's model-selection policy; validate its effort and launch capabilities there. Monitor bootstrap and recovery inherit the Director's backend. Interpret captured panes using the observed member's backend cues.
+Resolve runtime tools from the executing agent's backend. For spawns, read the selected member backend's Model catalog and Role defaults under the CAFleet Director's model-selection policy; validate its effort and launch capabilities there. Interpret captured panes using the observed member's backend cues.
 
 ## Required reading
 
@@ -13,7 +13,7 @@ Read these prerequisites in order before orchestration. Your `CODING AGENT:` ide
 | 1 | Your backend section in [coding-agents.md](../../cafleet/reference/coding-agents.md) | Resolve local Runtime bindings and bound notes before acting. |
 | 2 | [Generic Director role](../../cafleet/roles/director.md) | Before setup; obey its selected-backend, spawn skeleton, audit, size and action-triggered reads. |
 | 3 | [Guidelines File Layout](../reference/guidelines.md#file-layout), then [BASE](../../cafleet/reference/base-dir.md) | Before argument normalization and output-root resolution. |
-| 4 | [Supervision](../../cafleet/reference/supervision.md) | Before orchestration; monitor bootstrap and ready gate, broker-held delivery, dispatch and authorization scope. |
+| 4 | [Supervision](../../cafleet/reference/supervision.md) | Before orchestration; atomic registration, finite receiving, dispatch and authorization scope. |
 | 5 | [Coordination](../reference/coordination.md) | Before messages, payload retrieval or markers. |
 | 6 | [Guidelines](../reference/guidelines.md) | Before document-format or phase-completion actions. |
 
@@ -31,13 +31,13 @@ Read [Recovery](../../cafleet/reference/supervision.md#recovery) immediately bef
 
 Own a correct implementation and eligible phase commits. Validate the document and arbitrate unclear/conflicting markers before spawning. Choose only needed roles, drive each step through test review and implementation review, and keep tests and implementation in separate commits. Members own their assigned code/test regions; the Director owns orchestration, specification decisions, reviews and all Git operations.
 
-Drive ready work through completion while preserving user halt/abort signals and new-decision escalations. Run applicable Phase D verification and independently check Success Criteria before spawning the fresh Step 5 Reviewer. Its uncapped review loop precedes user approval. Preserve the user's publication scope through Steps 7–8, then finalize and shut down the monitor first.
+Drive ready work through completion while preserving user halt/abort signals and new-decision escalations. Run applicable Phase D verification and independently check Success Criteria before spawning the fresh Step 5 Reviewer. Its uncapped review loop precedes user approval. Preserve the user's publication scope through Steps 7–8, then finalize and shut down the owned members.
 
 Store literal fleet/member IDs from CLI JSON. Poll complete messages with `--json`, ACK consumed deliveries, and route verb/pointer messages with paired issue markers. Coordination owns marker grammar and per-file Git recovery for test, implementation, review-fix and finalization commits.
 
 ### Diagnostics and progress
 
-Inbound member replies and monitor events/pings resume the supervision loop. Use `cafleet member capture <member-id> --lines 200` for stalled-member diagnostics. Disclose deletion and re-spawn to the user; never silently replace a member. Apply [generic replacement](../../cafleet/roles/director.md#model-replacement) with this disclosure constraint. Route test-defect arbitration through Step 4 and commit test corrections separately.
+Finite receive results resume evidence-based facilitation. Use `cafleet member capture <member-id> --lines 200` for stalled-member diagnostics. Disclose deletion and re-spawn to the user; never silently replace a member. Apply [generic replacement](../../cafleet/roles/director.md#model-replacement) with this disclosure constraint. Route test-defect arbitration through Step 4 and commit test corrections separately.
 
 ### Free-form user replies
 
@@ -75,7 +75,7 @@ Render ordinary-member prompts from the required [shared frame](../../cafleet/ro
 When you see cafleet message poll output with a message from the Director, act on those instructions.
 ```
 
-The shared frame supplies identity placeholders, reader/startup ordering, complete backend-supported skill loading and the supplied host-rule source. Preserve each table's hard lines and start cue verbatim. The role opens first, sends operational ready and loads its prerequisites before substantive work. Selected roles load both `cafleet` and `cafleet-design-doc`; members continue this assigned workflow. The monitor retains its own startup delta.
+The shared frame supplies identity placeholders, reader/startup ordering, complete backend-supported skill loading and the supplied host-rule source. Preserve each table's hard lines and start cue verbatim. The role opens first, sends operational ready and loads its prerequisites before substantive work. Selected roles load both `cafleet` and `cafleet-design-doc`; members continue this assigned workflow.
 
 ## Process
 
@@ -177,20 +177,20 @@ Members report when they have no work and may request shutdown if unnecessary. T
 
 Load the `cafleet` skill; its `reference/supervision.md` governance is § Required reading above.
 
-#### 3a. Establish a CAFleet fleet (monitor included) and capture the ids
+#### 3a. Register the current Director and capture the IDs
 
-Bootstrap the fleet per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap (monitor included)* (write the monitor's spawn prompt first and pass it via `--monitor-file`; the reuse-a-running-fleet rule is there too). Use `--json` so the IDs are machine-parseable:
+Follow the shared [Spawn Protocol](../../cafleet/reference/supervision.md#spawn-protocol). Register the calling session atomically and capture its literal IDs:
 
 ```bash
-cafleet fleet create --name "design-doc-execute-{slug}" --coding-agent <backend> --monitor-file <abs path to ${BASE}/.prompts/monitor-<UTC-compact>.md> --monitor-model {monitor_model} [--monitor-effort {monitor_effort}] --json
-# → { "fleet_id": <int>, "director": { "member_id": <int>, ... }, "monitor": { "member_id": <int>, ... } }
+cafleet fleet create --name "design-doc-execute-<slug>" --coding-agent <backend> --json
 ```
 
-Capture `fleet_id` and `director.member_id` from the JSON response and substitute them for `<fleet-id>` and `<director-member-id>` in every subsequent command.
+Retain `fleet_id` and `director.member_id` for subsequent commands. Ordinary member creation can begin immediately.
 
-#### 3b. Wait for the monitor's ready (before any ordinary member)
 
-Wait for the monitor member's `ready` signal per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Wait for the monitor's ready* — it gates the first ordinary `member create`. The monitor member runs unchanged through Steps 3–8 and is deleted first (first-out) in Step 8's cleanup.
+#### 3b. Own finite receiving
+
+After creating/dispatching a member, run `cafleet message wait <director-member-id> --timeout 300 --json` as a host-native background task and retain its live task/session handle. Collect replies and ACK every consumed delivery before the next wait; keep deferred actions in host-owned state. A foreground-only mechanism uses at most 30 seconds. Inspect roster/panes/artifacts on timeout and receive again until the delegated reply or explicit user handoff. Follow [supervision](../../cafleet/reference/supervision.md).
 
 #### 3c. Analyze implementation tasks to decide team composition
 
@@ -301,7 +301,7 @@ For each step in the design document:
    cafleet message send --from-member-id <director-member-id> \
      --to-member-id <tester-member-id> "ready (paragraph-Implementation > Step N)"
    ```
-2. **End or yield the turn — the assignment is an asynchronous handoff, and the Tester's `complete (paragraph-Implementation > Step N) — <count> tests` (or `blocked (paragraph-Implementation > Step N)` if the spec is unclear) re-opens a later turn**, where you poll and ACK it. On `blocked`, read the Tester's `COMMENT(tester)` marker at the same pointer (pairing rule, coordination.md); if the test framework is ambiguous (per the Tester's `Phase 1` selection step, which uses `blocked (doc)` with the marker at doc-top), ask the user via {decision_surface}, write the answer back as `COMMENT(user-relay): <choice>` at the same doc-top location, and reply with `ready (doc)` so the Tester resumes.
+2. **Retain finite receiving until the Tester’s `complete (paragraph-Implementation > Step N) — <count> tests` (or `blocked (paragraph-Implementation > Step N)` if the spec is unclear) arrives**, then poll and ACK it. On `blocked`, read the Tester's `COMMENT(tester)` marker at the same pointer (pairing rule, coordination.md); if the test framework is ambiguous (per the Tester's `Phase 1` selection step, which uses `blocked (doc)` with the marker at doc-top), ask the user via {decision_surface}, write the answer back as `COMMENT(user-relay): <choice>` at the same doc-top location, and reply with `ready (doc)` so the Tester resumes.
 3. **Review tests** against the design doc. If issues are found, write `COMMENT(director): <issue>` markers at `paragraph-Implementation > Step N` (pairing rule) and reply `ready (paragraph-Implementation > Step N)`; the Tester resolves the markers and replies `addressed (paragraph-Implementation > Step N)`. Repeat until satisfied.
 4. **Commit tests** per the [Commit protocol](#commit-protocol). Recover the per-test file list directly via git (`git status` / `git diff --stat` / `git log --name-only`) — the Tester does not embed file lists in cafleet bodies under the verb + pointer schema.
    - `git add <test-files>`
@@ -314,7 +314,7 @@ For each step in the design document:
    cafleet message send --from-member-id <director-member-id> \
      --to-member-id <programmer-member-id> "ready (paragraph-Implementation > Step N)"
    ```
-2. **End or yield the turn — the Programmer's `complete (paragraph-Implementation > Step N)` re-opens a later turn**, where you poll and ACK it. On `escalating (paragraph-Implementation > Step N)` (suspected test defect), see the **Escalation Protocol (Test Defect)** at the end of Step 4; the rationale lives in a `COMMENT(programmer)` marker at the pointer, not in the cafleet body.
+2. **Retain finite receiving until the Programmer’s `complete (paragraph-Implementation > Step N)` arrives**, then poll and ACK it. On `escalating (paragraph-Implementation > Step N)` (suspected test defect), see the **Escalation Protocol (Test Defect)** at the end of Step 4; the rationale lives in a `COMMENT(programmer)` marker at the pointer, not in the cafleet body.
 3. **Programmer updates design doc**: Checkboxes, timestamps, and Progress counter.
 
 #### Phase C: Code Review (Director)
@@ -354,7 +354,7 @@ If the Verifier was spawned, assign verification:
 
 ### Step 5: Reviewer Review Loop (Director)
 
-After all TDD steps (and Phase D, if run) complete, the Director runs a fresh-context review loop before anything is presented to the user. **Run to completion / stop means stop**: the loop is uncapped and ends only on Reviewer approval or an explicit user halt/abort. When the user signals halt (explicit "stop", "wait", "pause", profanity / frustration, or repeated rejection of tool calls), the Director halts dispatch immediately, treats monitor pings and event messages as notification-only, and waits for explicit re-authorization; an explicit abort triggers the Abort Flow (Step 6).
+After all TDD steps (and Phase D, if run) complete, the Director runs a fresh-context review loop before anything is presented to the user. **Run to completion / stop means stop**: the loop is uncapped and ends only on Reviewer approval or an explicit user halt/abort. When the user signals halt (explicit "stop", "wait", "pause", profanity / frustration, or repeated rejection of tool calls), the Director halts dispatch immediately, retains pending work in host-owned state, and waits for explicit re-authorization; an explicit abort triggers the Abort Flow (Step 6).
 
 #### Success Criteria Verification (gate)
 
@@ -491,5 +491,5 @@ Runs after Step 7 completes, or directly after Step 6 when Step 7 was skipped (g
 1. Confirm the design document is marker-free, then set Status to "Complete" and add the final Changelog entry.
 2. Stage and commit eligible finalization changes under [Commit protocol](#commit-protocol), using `docs: mark design doc as complete` when applicable. Keep excluded design/audit files uncommitted and skip an empty metadata-only commit.
 3. **Apply the recorded approval scope before considering upstream tracking.** On approve-local, skip every push and PR action regardless of an existing upstream. For remote-authorized work, inspect whether Step 7's push succeeded: a failed push or precondition failure stays local; report that outcome instead of retrying from finalization. If the authorized push succeeded (including push-success/PR-failure), check `git rev-parse --abbrev-ref <branch-name>@{upstream}` and push eligible finalization commits only when tracked. Report exact push failures; never force-push. With no upstream, leave the finalization commit local.
-4. Read [Shutdown](../../cafleet/reference/supervision.md#shutdown) immediately before teardown. Delete the monitor first, then Programmer, Tester, Verifier and Reviewer if spawned; confirm the root-only registry, delete the fleet and confirm closure. Teardown follows local finalization and any authorized final push attempt.
+4. Read [Shutdown](../../cafleet/reference/supervision.md#shutdown) immediately before teardown. Delete every spawned ordinary member; confirm the root-only registry, delete the fleet and confirm closure. Teardown follows local finalization and any authorized final push attempt.
 5. Report the PR URL if created or reused, Reviewer rounds/outcome, publication scope, successful push versus failed/missing PR, and every skipped-step reason.

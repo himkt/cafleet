@@ -2,7 +2,7 @@
 
 Validate an existing design document through structured, fine-grained Q&A across multiple sessions. The Director (main agent) drives the conversation and writes annotations; an Analyzer member spawned via `cafleet member create` reads the document and returns the question list, then is torn down before the interview rounds begin. Discrepancies surface as inline `COMMENT(user-relay)` annotations in the design document. Multi-session splitting via `question.md` prevents context compaction for large interviews.
 
-Resolve runtime tools from the executing agent's backend. For spawns, read the selected member backend's Model catalog and Role defaults under the CAFleet Director's model-selection policy; validate its effort and launch capabilities there. Monitor bootstrap and recovery inherit the Director's backend. Interpret captured panes using the observed member's backend cues.
+Resolve runtime tools from the executing agent's backend. For spawns, read the selected member backend's Model catalog and Role defaults under the CAFleet Director's model-selection policy; validate its effort and launch capabilities there. Interpret captured panes using the observed member's backend cues.
 
 ## Required reading
 
@@ -13,7 +13,7 @@ Read these prerequisites in order before orchestration. Your `CODING AGENT:` ide
 | 1 | Your backend section in [coding-agents.md](../../cafleet/reference/coding-agents.md) | Resolve local Runtime bindings and bound notes before acting. |
 | 2 | [Generic Director role](../../cafleet/roles/director.md) | Before setup; obey its selected-backend, spawn skeleton, audit, size and action-triggered reads. |
 | 3 | [Guidelines File Layout](../reference/guidelines.md#file-layout), then [BASE](../../cafleet/reference/base-dir.md) | Before argument normalization and output-root resolution. |
-| 4 | [Supervision](../../cafleet/reference/supervision.md) | Before orchestration; monitor bootstrap and ready gate, broker-held delivery, dispatch and authorization scope. |
+| 4 | [Supervision](../../cafleet/reference/supervision.md) | Before orchestration; atomic registration, finite receiving, dispatch and authorization scope. |
 | 5 | [Coordination](../reference/coordination.md) | Before messages, payload retrieval or markers. |
 | 6 | [Guidelines](../reference/guidelines.md) | Before document-format or phase-completion actions. |
 
@@ -49,7 +49,7 @@ Render ordinary-member prompts from the required [shared frame](../../cafleet/ro
 When you see cafleet message poll output with a message from the Director, act on those instructions.
 ```
 
-The shared frame supplies identity placeholders, reader/startup ordering, complete backend-supported skill loading and the supplied host-rule source. Preserve each table's hard lines and start cue verbatim. The role opens first, sends operational ready and loads its prerequisites before substantive work. Selected roles load both `cafleet` and `cafleet-design-doc`; members continue this assigned workflow. The monitor retains its own startup delta.
+The shared frame supplies identity placeholders, reader/startup ordering, complete backend-supported skill loading and the supplied host-rule source. Preserve each table's hard lines and start cue verbatim. The role opens first, sends operational ready and loads its prerequisites before substantive work. Selected roles load both `cafleet` and `cafleet-design-doc`; members continue this assigned workflow.
 
 ## Process
 
@@ -79,19 +79,19 @@ In resume mode where Step 2 IS run, parse the JSON array from the existing `inte
 
 **Skip this step entirely when `SKIP_ANALYZER=true`** (Step 1 found unanswered questions still in `question.md` from a prior invocation — the Director already has the question list).
 
-#### 2a. Establish a CAFleet fleet (monitor included)
+#### 2a. Register the current Director and capture the IDs
 
-Bootstrap the fleet per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap (monitor included)* — write the monitor member's spawn prompt first and pass it via `--monitor-file`:
+Follow the shared [Spawn Protocol](../../cafleet/reference/supervision.md#spawn-protocol). Register the calling session atomically and capture its literal IDs:
 
 ```bash
-cafleet fleet create --name "design-doc-interview-{slug}" --coding-agent <backend> --monitor-file <abs path to ${BASE}/.prompts/monitor-<UTC-compact>.md> --monitor-model {monitor_model} [--monitor-effort {monitor_effort}] --json
+cafleet fleet create --name "design-doc-interview-<slug>" --coding-agent <backend> --json
 ```
 
-Capture `fleet_id` and `director.member_id` from the JSON response and substitute them for `<fleet-id>` and `<director-member-id>` in every subsequent command.
+Retain `fleet_id` and `director.member_id` for subsequent commands. Ordinary member creation can begin immediately.
 
-#### 2b. Wait for the monitor's ready (before the Analyzer)
+#### 2b. Own finite receiving
 
-Wait for the monitor member's `ready` signal per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Wait for the monitor's ready* — it gates the Analyzer spawn (2d). The monitor member is deleted first (first-out) in the 2f teardown.
+After creating/dispatching a member, run `cafleet message wait <director-member-id> --timeout 300 --json` as a host-native background task and retain its live task/session handle. Collect replies and ACK every consumed delivery before the next wait; keep deferred actions in host-owned state. A foreground-only mechanism uses at most 30 seconds. Inspect roster/panes/artifacts on timeout and receive again until the delegated reply or explicit user handoff. Follow [supervision](../../cafleet/reference/supervision.md).
 
 #### 2c. Locate the Analyzer role file (path-by-reference)
 
@@ -101,7 +101,7 @@ Resolve the absolute path of `<this skill>/roles/analyzer.md`. The spawn prompt 
 
 #### 2d. Spawn the Analyzer
 
-**Gate**: spawn the Analyzer only after the monitor member's `ready` signal (2b) has arrived.
+**Gate**: register the fleet before spawning the Analyzer; its own ready gates its assignment.
 
 Render the canonical [spawn-prompt skeleton](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with the Analyzer delta below (two-stage rendering + brace rules at the skeleton):
 
@@ -127,13 +127,13 @@ Render the prompt to `${BASE}/.prompts/analyzer-<UTC-compact>.md` per the 2c aud
 
 #### 2e. Wait for the Analyzer's question list
 
-The Analyzer dispatch is a turn boundary: end or yield your turn, and the broker notification re-opens a later turn when the Analyzer's reply arrives. In that later turn run one `cafleet message poll <director-member-id> --json`. **The `--json` flag is required**: text-mode `cafleet message poll` truncates each message body to 200 codepoints + `…`, which would silently mangle the Analyzer's numbered question list — `--json` carries the complete body. Acknowledge with `cafleet message ack <message-id>`.
+Retain the finite receive task handle until the Analyzer reply, then run `cafleet message poll <director-member-id> --json`. **The `--json` flag is required**: text-mode `cafleet message poll` truncates each message body to 200 codepoints + `…`, which would silently mangle the Analyzer's numbered question list — `--json` carries the complete body. Acknowledge with `cafleet message ack <message-id>`.
 
-The Analyzer follows the read-only stdin branch in [Payload exemptions](../reference/coordination.md#payload-exemptions); a concrete unavailable transport is routed to the Director, and no delivery is inferred. The reply must be a flat numbered list following the format specified in [roles/analyzer.md](roles/analyzer.md), terminated by a `Total: N questions` line. If the Analyzer returns a malformed list, send a single corrective `cafleet message send` requesting the canonical format — a fresh turn boundary; when the corrected reply re-opens a later turn, run `cafleet message poll <director-member-id> --json` again. After 2 corrective rounds, escalate to the user via {decision_surface} (options: retry the Analyzer once more / abort the interview / proceed with the partial list).
+The Analyzer follows the read-only stdin branch in [Payload exemptions](../reference/coordination.md#payload-exemptions); a concrete unavailable transport is routed to the Director, and no delivery is inferred. The reply must be a flat numbered list following the format specified in [roles/analyzer.md](roles/analyzer.md), terminated by a `Total: N questions` line. If the Analyzer returns a malformed list, send a single corrective `cafleet message send` requesting the canonical format — retain finite receiving until the corrected reply and run `cafleet message poll <director-member-id> --json` again. After 2 corrective rounds, escalate to the user via {decision_surface} (options: retry the Analyzer once more / abort the interview / proceed with the partial list).
 
-#### 2f. Tear down the monitor member and the Analyzer
+#### 2f. Tear down the Analyzer
 
-The Analyzer is stateless and the heavy supervision work is done once its question list arrives — keeping it alive through the Q&A rounds wastes a pane. Run the canonical teardown after reading [Shutdown](../../cafleet/reference/supervision.md#shutdown) immediately before teardown (the monitor member goes first, first-out). Workflow delta: teardown fires immediately after the question list is acked; then delete the Analyzer.
+After reading and ACKing its complete question list, read [Shutdown](../../cafleet/reference/supervision.md#shutdown), delete the Analyzer, verify the root-only roster and deregister the fleet. The Director performs the remaining interview itself.
 
 #### 2g. Persist the question list to `question.md`
 

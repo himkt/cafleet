@@ -32,9 +32,7 @@ implementing the approved work.
 
 ## Watch the team work
 
-Every inter-member message is persisted in SQLite, so you can follow the
-team's coordination live: open the WebUI timeline for the team's fleet —
-see [Use the admin WebUI](use-the-webui.md).
+Read durable coordination with message poll/show and inspect the team’s visible panes with member/fleet capture. The Director owns finite receiving, evidence checks and continuation until delegated work resolves.
 
 ## Invocation syntax
 

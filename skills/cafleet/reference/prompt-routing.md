@@ -1,52 +1,57 @@
 # Routing a command through the Director
 
-A member runs every command its harness allows and routes the rest to the Director. Routing is the standard path for a command the harness does not run, not a rare fallback: the member asks with a plain CAFleet message, the Director runs the command in the member's pane with `cafleet member exec`, and the broker reports completion and resumes the member.
-
-How often a member routes depends on its backend: what your harness runs and what it denies is the `{permission_flags}` note in your overlay section of [`coding-agents.md`](coding-agents.md).
+A member runs each command its host permits. A required unavailable command routes through the Director, whose host rules authorize the native pane action. Preserve the actual command and inspect native output.
 
 ## The Director's pane primitives
 
-| Primitive | Purpose | Permission gate |
-|---|---|---|
-| [`cafleet member exec`](../roles/director.md#member-exec) | Runs a shell command to completion in a member's pane, records its exit status, notifies the Director, and resumes the member. | Asked per invocation: the body is operator-controlled |
-| [`cafleet member prompt`](../roles/director.md#member-prompt) | Keystrokes one line of `TEXT` + `Enter` into a member's pane as a submitted user turn. | Asked per invocation: the body is operator-controlled |
-| [`cafleet member ping`](../roles/director.md#member-ping-manual-inbox-poll) | Fixed-action inbox-poll; no operator-controlled body. | Not asked: the action is fixed by the command |
+| Primitive | Responsibility |
+|---|---|
+| [member exec](../roles/director.md#member-exec) | Submit the actual one-line native shell command and return dispatch metadata |
+| [member prompt](../roles/director.md#member-prompt) | Submit explicitly authorized composer input or post-command continuation |
+| member ping | Submit a fixed inbox-poll prompt to an idle member |
 
-`cafleet member prompt` exists for text that only takes effect when it arrives as a direct user turn in the member's pane — slash commands, skill invocations, and other magic commands a broker message body cannot trigger (a `message send` inline preview arrives as content, not as a typed command). Broker messaging remains the canonical coordination channel: `member prompt` is not a substitute for `message send`, and a shell command goes through `member exec`.
+Every writer shares input locking and fresh readiness checks. Successful submission establishes no command exit status.
 
 ## Member-side: reconsider, then route
 
-Reconsider first, using your overlay's `{permission_flags}` note: check whether the flag or path is wrong, whether the command is unnecessary, and whether a command your posture approves covers the need. Fix or drop what you can yourself. A correct, needed, still-denied command gets routed:
+Follow [member command execution](../roles/member.md#command-execution). Try an authorized command, inspect its observed result, and reconsider incorrect flags/paths or an appropriate permitted alternative.
 
-1. Send a plain CAFleet message to the Director:
-   ```bash
-   cafleet message send --from-member-id <my-member-id> \
-     --to-member-id <director-member-id> \
-     "Need to run: <command>. My harness denied it."
-   ```
-   For a command that is hard to quote, write it to a file under your `BASE` and name the path in the message; the Director passes that path to `cafleet member exec --file`.
-2. **End your turn.** The Director's dispatch lands in your pane as a `!` command, and its output appears in your context.
-3. Continue with the output when your turn reopens. The harness either answers the output itself or the broker sends one line telling you the command finished.
+If the necessary command remains denied, send:
 
-Observed-result reporting and actual-command attempts are required by [`roles/member.md`](../roles/member.md#command-execution). One routing-specific addition: never offer the operator a list of routing options — the operator already asked for the command to run; routing is implementation. If your `cafleet message send` is *also* harness-denied, tell the operator both are denied (the only time you ask the operator for help); otherwise route silently.
+```bash
+cafleet message send --from-member-id <my-member-id> --to-member-id <director-member-id> "Need to run: <command>. My harness denied it."
+```
+
+For hard-to-quote commands, write the exact one-line command under supplied BASE and name its path. End the turn so the Director can submit native input. A denied file edit needs a host allow rule or Director edit. If the broker send is also denied, report both observed failures to the operator.
+
+Native output remains visible in the host transcript. Continue from it when the host resumes you or the Director sends an explicit continuation prompt. Report only output you actually observed.
 
 ## Director-side dispatch
 
-On a member's request: read it (`cafleet message poll` / `message show`), verify it is reasonable and from a real team member, then run it and ACK the request:
+Read the request, record the outstanding action in host-owned state, authorize its exact command, then dispatch and ACK consumption:
 
 ```bash
 cafleet member exec <member-id> "<command>"
+```
+
+```bash
 cafleet message ack <message-id>
 ```
 
-Run each command in its own shell invocation. When the member named a file, pass it instead of the inline body: `cafleet member exec <member-id> --file <path>`.
+The CLI types `! ` plus the actual command once after lock/revalidation/idle capture. It returns submission metadata. The host owns environment, permissions, execution and visible output.
 
-`member exec` is the whole exchange. The broker holds the dispatch until the member's pane is at rest, runs the command there, records its exit status, posts a `[cafleet] exec <id> … exited <code>` notice to your inbox, and resumes the member. Send no `member ping` and read no pane capture afterwards. ACK the completion notice when it arrives, and act on a non-zero exit as you would on any member report.
+Inspect the result and terminal state:
 
-A command the broker could not run surfaces as its own notice — `did not start within 30 s of dispatch` or `ended without reporting an exit status`. Inspect the pane with `cafleet member capture <member-id>` and run the command again if it is still needed.
+```bash
+cafleet member capture <member-id> --lines 80
+```
 
-**Refuse or escalate.** Answer a request you will not run with a plain `cafleet message send` explaining why, then ACK it. Escalate to the user through your decision surface when the command needs a judgment only the user can make. Always close the loop: the member ended its turn waiting for either the command or your reply.
+After completion and idle evidence, continue a member that has not resumed:
 
-**Order.** Process requests in poll order. Several execs for one member queue in the broker and run one at a time, so no manual serialization is needed.
+```bash
+cafleet member prompt <member-id> "Use the native command output and continue your assignment."
+```
 
-**Targeting boundary.** `member exec` reaches any active member with a pane except the fleet's root Director; an unknown or inactive id returns "not found" (see [`cli-options.md`](runtime/spec/cli-options.md#member-exec)). A request naming a member you cannot serve is answered with a plain `cafleet message send` explaining the mismatch.
+An uncertain dispatch requires capture/inspection before a newly authorized retry. The first writing call can partially type; a failure after Enter can mean the command ran. Preserve the pane and evidence instead of automatically resubmitting.
+
+Refuse with a plain broker reply explaining why, then ACK. Relay a new user decision through the executing backend's decision surface. Keep live receiving while an authorized command/result/continuation remains outstanding. Native shell probes establish visibility; [backend notes](coding-agents.md) state the permission evidence limits.

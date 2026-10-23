@@ -16,11 +16,6 @@
   },
   {
     "type": "file",
-    "name": "monitoring",
-    "label": "Monitoring"
-  },
-  {
-    "type": "file",
     "name": "storage",
     "label": "Storage"
   }

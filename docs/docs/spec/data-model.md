@@ -1,272 +1,58 @@
 # Data model
 
-The `Message` payload is fully relational: every routing field plus the message
-body lives in its own typed column. The only JSON `TEXT` blob is
-`members.member_card_json`. The database is SQLite, accessed synchronously
-and bundled into the binary; the schema is managed by a chain of SQL
-migrations embedded in the binary — run `cafleet setup` to migrate to head
-(idempotent, data-preserving; see [Storage](../concepts/storage.md)). The complete column-level DDL contract is an optional reference for
-reimplementers: [Repository specification](https://github.com/himkt/cafleet/blob/main/SPEC.md).
-Fleet operation uses the CLI and bundled contract pages; opening that URL
-is not required for offline operation.
-
-Minted ids are **never reused** and real ids are always `>= 1`.
-
-## Query and activity contracts
-
-CLI member lists include send/receive/ACK activity; WebUI rosters query member
-and placement data directly. Include deregistered roster members only when
-they own messages. Name lookup deduplicates ids and binds batches of at most
-500, returning known active or deregistered members in id order.
-
-Rows are ordered by `member_id ASC`. `last_sent` is the maximum creation time
-of every message sent by the member, including broadcast summaries;
-`last_recv` is the maximum creation time of owned unicast deliveries;
-`last_ack` is the maximum status timestamp of owned completed unicast
-deliveries. `idle` uses the greatest non-null string among all three, parsed
-with the existing lenient reader against one `now` for the list. All null or
-an unparseable selected value yields null; no older timestamp fallback is
-used.
-A zero clamp applies to the final whole-second idle result; it does not
-change stored future timestamps or parsing.
+The broker uses typed SQLite columns with per-connection foreign-key enforcement. The selected file must pass current-format diagnosis before writes.
 
 ## Tables
 
-| Table | Primary key | Parent | FK ON DELETE | Row removal |
-|---|---|---|---|---|
-| `fleets` | `INTEGER PRIMARY KEY AUTOINCREMENT` | `members.member_id`, via the nullable `director_member_id` back-reference | `RESTRICT` | Soft-delete keyed on `deleted_at` |
-| `members` | `INTEGER PRIMARY KEY AUTOINCREMENT` | `fleets.fleet_id` | `RESTRICT` | Soft-delete (`status='deregistered'` + `deregistered_at`) |
-| `messages` | `INTEGER PRIMARY KEY AUTOINCREMENT` | `members.member_id`, via `owner_member_id` | `RESTRICT` | Not deleted |
-| `member_placements` | Reuses `members.member_id` | `members` | `CASCADE` | Hard-deleted on deregistration |
-| `member_execs` | `INTEGER PRIMARY KEY AUTOINCREMENT` | `members.member_id` | `RESTRICT` | Not deleted |
-| `monitor_runtime` | Reuses `fleets.fleet_id` | `fleets` | `RESTRICT` | Removed inside the `fleet delete` transaction; "no monitor" is modeled as "no row" |
-| `asset_installs` | `(coding_agent, path)` composite | — | — | Upserted, one row per coding agent and install path |
-
-### `fleets`
-
-`cafleet fleet create` writes the fleet row, the root Director (and its
-placement), the `director_member_id` back-reference, and the monitor member
-(its row, its monitor card marker, and — after the pane spawn — its
-placement) in one all-or-nothing transaction. The `director_member_id`
-back-reference is nullable during bootstrap and required afterward. The pane
-spawn occurs inside the transaction, between monitor registration and placement
-insertion. The [CLI compensation contract](cli-options.md#creation-failure-compensation)
-owns failure ordering and diagnostics. The connection holds
-SQLite's write lock across the pane-spawn subprocess call, so a concurrent
-cafleet writer on the shared database blocks for the duration of the
-multiplexer call, backstopped by the connection's `busy_timeout=5000`
-PRAGMA. After the commit the command starts the fleet's monitor loop, and
-soft-deletes the fleet it just committed when the loop does not start — see
-[Loop start](cli-options.md#monitor-loop-start).
-
-### `members`
-
-Active query paths filter `status='active'`. A member's `kind` (`director` /
-`monitor` / `member`) is derived at read time from the fleet's
-`director_member_id` back-reference plus the member card: a monitor-member
-registration writes the application-level marker
-`"cafleet": {"kind": "monitor"}` into `member_card_json`, while the Director
-and ordinary members write no `$.cafleet` object. The marker remains plain JSON with no dedicated column. Schema V8 adds a
-partial unique index enforcing at most one active monitor per fleet:
-
-```sql
-CREATE UNIQUE INDEX idx_members_one_active_monitor_per_fleet
-ON members(fleet_id)
-WHERE status = 'active'
-  AND json_extract(member_card_json, '$.cafleet.kind') = 'monitor';
-```
-
-The predicate is the same one used by the active-monitor lookup. It applies
-to inserts and updates of status, card, or fleet id. Ordinary members and
-deregistered monitors are outside the constraint; different fleets are
-independent. Root Director cards continue to omit the monitor marker, and
-read-time kind resolution still gives the Director back-reference priority.
-Registration takes an `IMMEDIATE` transaction and rechecks the monitor slot
-inside it, before inserting either a member or placement. The CLI's early
-check preserves validation order; the DB constraint also protects direct
-broker callers and concurrent registrations. A conflict retains the existing
-CLI error and exit 1, without creating a losing member, placement, or pane.
-
-### `messages`
-
-One row per unicast delivery, plus a separate summary row for each broadcast.
-Broadcast deliveries also have type `unicast`; their summary has type
-`broadcast_summary` (see [Broadcast grouping](#broadcast-grouping)). `from_member_id`,
-`to_member_id`, and `origin_message_id` are deliberately not foreign keys —
-historical messages may outlive their sender. `status_timestamp` is updated on
-every state change and drives `ORDER BY DESC` listing. The rendered envelope is specified in
-[Message envelope](message-envelope.md).
-
-Deliveries transition once from `input_required → completed` on ACK.
-
-`notified_at` records the pane keystroke of the row's inline preview: `NULL`
-while the preview is owed, and the UTC timestamp of the keystroke once it
-landed. The column is storage-only; the message envelope does not carry it.
-The migration that adds the column stamps every existing row with its
-`created_at`, so no stored message is owed a preview.
-
-A **pending preview** is a row with `type = 'unicast'`,
-`status_state = 'input_required'`, and `notified_at IS NULL` whose recipient
-is active and owns a pane. An ACK settles a preview without a keystroke,
-because the row leaves `input_required`. A CLI self-send is inserted with
-`notified_at = created_at`, so it never owes a preview. The delivery rules
-for a pending preview are in
-[Held delivery](multiplexer-backends.md#held-delivery).
-
-### `member_placements`
-
-Links a member to its multiplexer pane; pane ids are stored verbatim as opaque
-strings. The root Director keeps its own placement row (it is pane-bound); an
-ordinary member is a placed row other than the fleet's root Director
-(`member_id != fleets.director_member_id`). Placement rows have no historical
-value.
-
-Three nullable timestamp columns carry the pane's delivery state:
-
-| Column | Meaning |
+| Table | Responsibility |
 |---|---|
-| `keystroke_at` | The last time a cafleet process claimed this pane for a keystroke — see [Pane claim](multiplexer-backends.md#pane-claim). |
-| `forced_at` | The time of the pane's last forced delivery. `NULL` until one happens. |
-| `silence_notice_at` | When the ready watchdog reported this member. `NULL` until then. |
+| `fleets` | Fleet identity, creation/deletion and root Director reference |
+| `members` | Member registration and active/deregistered state |
+| `member_placements` | Multiplexer and coding-agent association |
+| `messages` | Point-to-point delivery, acknowledgement and preview stamp |
+| `asset_installs` | Installed asset versions by backend and config path |
+| `refinery_schema_history` | Embedded migration ledger |
 
-### `member_execs`
+### fleets
 
-One row per [`cafleet member exec`](cli-options.md#member-exec). Rows are
-ordered by `exec_id`, and a closed row stays as the record of the command.
+`fleet_id` is an autoincrement integer primary key; `name` is nullable text; `created_at` is required text; `deleted_at` is nullable text; `director_member_id` references members with delete restricted. A live fleet requires an active valid Director with placement. Bootstrap inserts fleet, Director and placement and backfills the Director reference before one commit.
 
-| Column | Type | Meaning |
-|---|---|---|
-| `exec_id` | `INTEGER`, primary key | The id the dispatch keystroke carries. |
-| `member_id` | `INTEGER NOT NULL` | The member whose pane runs the command. |
-| `command` | `TEXT NOT NULL` | The command body, stored verbatim. |
-| `created_at` | `TEXT NOT NULL` | When the exec was queued. |
-| `dispatched_at` | `TEXT` | When the dispatch keystroke landed in the pane. |
-| `started_at` | `TEXT` | When the pane-side runner claimed the row. |
-| `pid` | `INTEGER` | The runner's process id, set with `started_at`. |
-| `finished_at` | `TEXT` | When the command ended, or when the loop closed a lost exec. |
-| `exit_code` | `INTEGER` | The command's exit status; `128 +` the signal number for a signal death. `NULL` for a lost exec. |
-| `resumed_at` | `TEXT` | When the member was resumed or observed working again. |
+### members
 
-An exec's state is derived from its timestamps:
+Columns are `member_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT`, `fleet_id INTEGER NOT NULL REFERENCES fleets(fleet_id) ON DELETE RESTRICT`, required text `name`, `description`, `status`, `registered_at`, and nullable text `deregistered_at`. Index `idx_members_fleet_status` covers fleet/status. Decode `status` as `active` or `deregistered`; unknown values fail. Public `kind` is `director` exactly when the fleet's Director reference matches, otherwise `member`.
 
-| State | Condition | Pane effect |
-|---|---|---|
-| queued | `dispatched_at` is `NULL` | The dispatch is the pane's next item |
-| dispatched | `dispatched_at` set, `started_at` `NULL` | Every other item holds |
-| running | `started_at` set, `finished_at` `NULL` | Every other item holds |
-| finished | `finished_at` set, `resumed_at` `NULL` | The resume observation is the pane's next item |
-| closed | `resumed_at` set | none |
+### member_placements
 
-A fleet has **owed work** while any of its members has a pending preview or a
-`member_execs` row whose `resumed_at` is `NULL`.
+`member_id` is the primary key and references members with cascade delete. Required text columns are `mux_session`, `mux_window_id`, `backend` (default `tmux`), `coding_agent` and `created_at`. `mux_pane_id` is nullable during pending member creation. A concrete placement selects the shared pane-input lock; duplicate entries targeting the same backend/session/pane share ownership.
 
-### `monitor_runtime`
+### messages
 
-`monitor_runtime` is the one-row-per-fleet loop pid/heartbeat table:
+Required columns are `message_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT`, `from_member_id` and `to_member_id` integer references to members with delete restricted, and text `created_at`, `status_state`, `status_timestamp`, `text`. `notified_at` is nullable text. Indexes cover `(to_member_id, status_timestamp)` and `(from_member_id, status_timestamp)`.
 
-| Field | Rust type | Meaning and lifecycle |
-|---|---|---|
-| `fleet_id` | `i64` | Non-null fleet key; an absent row is `None`, not an id-zero row. |
-| `pid` | `Option<i64>` | Null means no claim; claim stores the direct loop pid and normal clear nulls it. Preserve the existing process probe's handling of zero. |
-| `started_at` | `Option<String>` | Null means no claim start time; claim/reclaim stamps it and normal clear nulls it. |
-| `last_tick_at` | `Option<String>` | Null or an unparseable timestamp is not a fresh heartbeat. Claim/tick updates it and normal clear nulls it. |
-| `last_wake_at` | `Option<String>` | Null means no successful wake is recorded; cadence then falls back to `started_at`. A delivered wake, scheduled or requested, updates it, and clear/reclaim preserve it. |
-| `wake_requested_at` | `Option<String>` | Null means no forced-wake request; repeated requests overwrite/coalesce. Successful delivery or reclaim clears it; normal clear alone preserves it. |
-| `tick_seconds` | `i64` | Non-null tick cadence, DB default 5; CLI rejects zero rather than treating it as disabled. A claim without `--tick` keeps the stored value, and normal clear preserves it. |
-| `wake_interval_seconds` | `Option<i64>` | Null is the legacy state before a row has been claimed since V5 added the column; zero disables scheduled wakes while permitting a requested wake. Positive values are seconds; a claim stamps the value resolved by the [loop precedence](cli-options.md#monitor-loop-precedence), PATCH overwrites it, and normal clear preserves it. |
+`status_state` decodes as `input_required` or `completed`. Pending previews require an active ordinary recipient, an unacknowledged row and null `notified_at`; choose the oldest by creation time/message ID. Stamp only after successful complete input while holding the pane lock and revalidating eligibility. The public [message record](message-envelope.md#persisted-shape) omits the internal notification stamp.
 
-A claimed loop always has a non-null wake interval. Do not normalize the legacy
-null interval into zero or treat a stopped HTTP response as the stored row:
-[the monitor response](webui-api.md#get-apimonitor--fleet-monitor-runtime) hides
-process timestamps when stopped but preserves stored intervals. The cadence
-rules are defined in
-[Monitoring](../concepts/monitoring.md#cadence-and-tick-precision).
+### asset_installs
 
-### `asset_installs`
+Required text columns are `coding_agent`, `path`, `cafleet_version` and `installed_at`; the first two form the primary key. Each successful backend asset installation upserts its CLI version and timestamp. Records track assets independently of member registration.
 
-One upserted row per `(coding_agent, path)`, recording the CLI version whose
-skills and preset (where one exists) install last landed at that path — the
-row attests both. `path` is the agent's resolved identity path (see
-[CLI options](cli-options.md#config-dir-resolution)), stored absolute exactly
-as resolved. Consumers partition an agent's rows by comparing `path` against
-the currently-resolved identity path: the row at the resolved path (at most
-one, by the primary key) is **current**; every other row of that agent is
-**superseded**. Written by the assets half of `cafleet setup`; the current
-row feeds the stale-assets guard and the `cafleet doctor` setup column, while
-superseded rows surface only as informational doctor footnotes (see
-[CLI options](cli-options.md#stale-assets-guard)).
+## Message visibility rules
 
-## Typed broker records
-
-Broker queries decode rows into typed member, placement, message, exec, and
-monitor records. Presenters preserve the wire shapes below. Missing placements differ
-from pending panes, and absent monitor rows differ from nullable fields.
-Unknown stored enums are integrity errors; free-form skills retain their
-existing JSON representation.
-
-## Foreign key enforcement
-
-SQLite ignores FK declarations unless `PRAGMA foreign_keys=ON` is issued per
-connection; the connection opener applies it on every connection. FKs use
-`ON DELETE RESTRICT` except the `member_id` PK=FK of the 1:1 child table
-(`member_placements`), which uses `CASCADE` so a hard-deleted member cannot
-leave dangling rows. Normal delete paths are soft-deletes, so neither fires
-in practice.
-
-## Message Visibility Rules
-
-Read access is **by id** — the subject row carries its own fleet and
-recipient, so existence (plus, for ACK, message state) is the enforcement:
-
-| Operation | Enforcement |
+| Operation | Selection or transition |
 |---|---|
-| `message poll` | Returns the `input_required` deliveries whose `owner_member_id` equals the positional `MEMBER_ID`; the member must exist, and any caller can poll any inbox by id. |
-| `message show` | Returns the message iff the `MESSAGE_ID` exists; unknown ids return "not found". |
-| `message ack` | Transitions the message iff it exists and is in the `input_required` state; the recipient is derived from the message row. |
+| Send | Active sender and recipient in the same live fleet; persist one exact body |
+| Poll / wait | Unacknowledged incoming deliveries by descending status timestamp, then message ID |
+| Show | One message by its global ID |
+| ACK | Transition an existing `input_required` row to `completed` and stamp consumption |
+| Fan-out | The Director sends individually, retaining each committed ID and reporting each recipient failure |
 
-## Broker notices {#broker-notices}
+Consumed questions and deferred approvals are ACKed before another wait; the Director retains unfinished actions in host-owned state.
 
-A broker notice is a message the broker writes to tell the Director about an
-event no member reported. It is a `unicast` row whose `owner_member_id`,
-`from_member_id`, and `to_member_id` are all the fleet's root Director,
-inserted with `notified_at` `NULL`, so it is delivered, polled, and ACKed like
-any other message. Every notice body starts with `[cafleet] `.
+## Query and activity contracts
 
-| Notice | Text |
-|---|---|
-| Exec finished | `[cafleet] exec <id> on member <member_id> (<name>) exited <code> after <n> s.` |
-| Exec never started | `[cafleet] exec <id> on member <member_id> (<name>) did not start within 30 s of dispatch. Inspect the pane with cafleet member capture <member_id> and run it again if still needed.` |
-| Exec lost | `[cafleet] exec <id> on member <member_id> (<name>) ended without reporting an exit status. Inspect the pane with cafleet member capture <member_id>.` |
-| Silent member | `[cafleet] member <member_id> (<name>) has sent no message <n> s after spawn. Its broker commands may be denied: inspect it with cafleet member capture <member_id> and run cafleet doctor.` |
+Roster/list queries filter active members in live fleets. Activity is the maximum sent, received and ACK timestamp; `idle` is elapsed seconds from the latest known activity or null when none exists. Detailed views retain registration/description/placement data. Fleet soft deletion deregisters members and retains messages; member deletion protects the root Director. Placement mutations acquire the same input locks as writers.
 
-The exec notices are raised by [`member exec`](cli-options.md#member-exec) and
-the monitor loop; the silent-member notice is raised by the
-[ready watchdog](../concepts/monitoring.md#ready-watchdog).
+## Format and connection invariants
 
-## Broadcast Grouping
+The fresh baseline creates exactly the application tables declared in the schema. Compatibility diagnosis verifies current application identity, ledger version, every required table’s column shape, and required indexes/foreign keys. Unrelated auxiliary tables, indexes and triggers are compatible while those required definitions remain intact.
 
-A broadcast produces N+1 rows — one delivery message per active recipient plus
-one `broadcast_summary` message — grouped by `origin_message_id`:
-
-| Row kind | `origin_message_id` value |
-|---|---|
-| Unicast delivery | `NULL` |
-| Broadcast delivery row (one per recipient) | The summary message's `message_id` |
-| Broadcast summary row | Its own `message_id` (self-reference) |
-
-Because ids are DB-assigned, the summary row is inserted first with a
-temporarily `NULL` `origin_message_id`, then self-linked before the delivery rows
-are inserted. The timeline first selects only `type = 'unicast'` delivery rows,
-then groups non-null `origin_message_id` values into broadcasts; a null origin
-identifies a standalone unicast. Summary rows remain in the database and in
-`message show` / broadcast results, but do not count as recipients or ACKs.
-
-The per-recipient ACK time is read from the `completed` delivery row's
-`status_timestamp`, which is valid because a delivery message makes exactly one
-state transition over its lifetime. A summary is already `completed` when
-created, without any recipient having acknowledged it.
-
-The timeline's 200-row limit can return only part of a broadcast. Its recipient
-and ACK counts describe the returned deliveries, not the entire broadcast.
-See [timeline selection and grouping](webui-api.md#get-apitimeline--unified-fleet-timeline)
-for SQL ordering and the separate UI creation-time ordering.
+The current identity is `PRAGMA application_id = 1128351288`; the baseline ledger is version 1 in this format family. Require expected current table/column shapes in addition to the identity. Empty zero-identity files initialize transactionally; incompatible populated or identified files remain byte-preserved. [Storage](../concepts/storage.md) explains operation and the [CLI guard](cli-options.md#schema-version-guard) owns exact errors.

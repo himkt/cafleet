@@ -1,17 +1,16 @@
 ---
 name: cafleet
 description: >-
-  Interact with the CAFleet message broker and supervise CAFleet member teams.
-  Use when an agent needs to register as a member, send/receive messages, poll
-  inbox, acknowledge messages, or discover other members; or when a Director is
-  about to spawn, monitor, health-check, or recover a stalled team of CAFleet
-  members (any `cafleet member create`), which requires the monitor-member
-  heartbeat and the supervision governance.
+  Multiplex coding agents in tmux or herdr and coordinate them through durable
+  messages. Proactively use CAFleet when delegating work that calls for
+  subagents or agent teams, including parallel research, implementation, and
+  independent review. Also use for CAFleet member lifecycle, messaging, and
+  pane interaction.
 ---
 
 # CAFleet — Message Broker CLI
 
-Use the `cafleet` CLI to register as a member, send and receive messages, and discover other members on the CAFleet message broker. CLI commands access SQLite directly — no running server is required.
+Use the `cafleet` CLI to register as a member, send and receive messages, and discover other members on the CAFleet message broker. CLI commands access SQLite directly.
 
 ## Required reading
 
@@ -27,11 +26,9 @@ Load skills through your executing backend's supported loader. Absolute-path loa
 | Required read | Action boundary |
 |---|---|
 | [Member role](roles/member.md) | Ordinary-member startup and command authority. |
-| [Monitor role](roles/monitor.md) | Monitor startup and wake handling. |
-| [Director role](roles/director.md) and [Supervision](reference/supervision.md) | Director setup, before orchestration; the role gates selected-backend and spawn-prompt reads. |
+| [Director role](roles/director.md) and [Supervision](reference/supervision.md) | Director setup, before orchestration; the role gates backend and prompt reads. |
 | [Command routing](reference/prompt-routing.md) | Before routing a command your harness denied, or running one a member routed to you. |
 | [Recovery](reference/supervision.md#recovery) / [Shutdown](reference/supervision.md#shutdown) | Director reads the applicable section immediately before that action. |
-| [Broadcast](#broadcast) | Before fan-out or origin-message threading. |
 
 Use the [command index](#command-index) on demand for exact runtime flags, outputs and errors.
 
@@ -40,11 +37,10 @@ Use the [command index](#command-index) on demand for exact runtime flags, outpu
 You have read `reference/coding-agents.md` (Required-reading row #1). Resolve values by the subject of the action:
 
 1. **Select the subject.** For your current instructions, use your `CODING AGENT:` identity (your own identity when standalone) and its Runtime bindings. For a member spawn, select the backend under [Director model-selection policy](roles/director.md#model-selection), then read that backend's Model catalog and Role defaults and validate target effort and launch capabilities against its Runtime bindings. For captured panes, use the observed member's recorded backend and its Pane-state capture cues. Keep the observer's own tools and decision surface.
-2. **Materialize values.** Resolve the five runtime placeholders from Runtime bindings for the relevant operation, and the role's model and effort from the selected spawn backend's Role defaults. Monitor bootstrap and recovery inherit the Director's backend; reviewer selection may use a different backend. Use the documented neutral defaults below only for their explicitly allowed missing/unknown-backend cases. Report a missing required supported-backend section, malformed table, or broken reference as a documentation defect.
-3. **Apply notes.** At each instruction named in the selected backend's *Note → applies at* table, follow that note's caveat. An ordinary member resolves its own runtime section; it acquires no model-selection duty.
+2. **Materialize values.** Resolve the five runtime placeholders from Runtime bindings for the relevant operation, and the role's model and effort from the selected spawn backend's Role defaults. 3. **Apply notes.** At each instruction named in the selected backend's *Note → applies at* table, follow that note's caveat. An ordinary member resolves its own runtime section; it acquires no model-selection duty.
 4. **Self-check at emission.** Emit concrete values in commands and messages. Resolve any remaining literal `{token}` before emitting it.
 
-For example, a Codex Director spawning an OpenCode reviewer reads OpenCode Role defaults and effort capability while retaining Codex decision and execution tools. A Claude monitor observing Codex applies Codex capture cues while keeping its own Claude tools.
+For example, a Codex Director spawning an OpenCode reviewer reads OpenCode Role defaults and effort capability while retaining Codex decision and execution tools. A Claude Director inspecting Codex applies the target backend’s capture cues.
 
 ### Documented defaults
 
@@ -55,8 +51,6 @@ Used only when your backend's section omits a token or your backend is unknown. 
 | `{decision_surface}` | a Director-relayed operator message (a member always routes to the Director) |
 | `{reviewer_model}` | the spawning Director's own model (inherit the parent) — a safe floor, possibly intelligence-suboptimal |
 | `{reviewer_effort}` | omit `--effort` to use the backend default |
-| `{monitor_model}` | the spawning Director's own model (inherit the parent) — a safe floor, possibly cost-suboptimal |
-| `{monitor_effort}` | omit `--monitor-effort` or `--effort` to use the backend default |
 | `{other_model}` | the spawning Director's own model (inherit the parent) |
 | `{other_effort}` | omit `--effort` to use the backend default |
 | `{permission_flags}` | describe the mode neutrally as "workspace-scoped auto-approval" — for prose uses only; spawn-flag construction never falls here |
@@ -70,8 +64,8 @@ Every `cafleet` invocation that touches members or messages names its **subject*
 
 - Positional `MEMBER_ID` — **the member in question**: the requester on `message poll`, and the target on `member delete` / `show` / `prompt` / `exec` / `ping` / `capture`. The fleet is derived from the member row.
 - Positional `MESSAGE_ID` — the message on `message ack` / `message show`; recipient and fleet are derived from the message row.
-- Positional `FLEET_ID` — the fleet on `fleet show` / `fleet delete` / `member list` / `monitor`.
-- `--from-member-id <int>` / `--to-member-id <int>` — the two parties of a two-party command: the **sender** and the **recipient** on `message send`; `message broadcast` takes the sender only. The fleet is derived from the sender row.
+- Positional `FLEET_ID` — the fleet on `fleet show` / `fleet delete` / `member list` / `fleet capture`.
+- `--from-member-id <int>` / `--to-member-id <int>` — the two parties of a two-party command: the **sender** and the **recipient** on `message send`. The fleet is derived from the sender row.
 - `--fleet-id <int>` — only on `member create`: the fleet the new member joins (the subject of the command is the member being created; the Director is auto-resolved from the fleet row).
 
 In the Director's own commands, substitute the literal ids printed by `cafleet fleet create` / `cafleet member create` — never your own exported shell variables. `permissions.allow` matches Bash invocations as fixed strings, so an ad-hoc `export MEMBER_ID=…; cafleet message poll $MEMBER_ID` breaks the match and forces prompts. See [`cli-options.md`](reference/runtime/spec/cli-options.md#positional-subject-ids) for the rationale and [`permissions.allow` coverage](reference/runtime/spec/cli-options.md#permissionsallow-coverage) for the pattern set.
@@ -87,13 +81,19 @@ In the Director's own commands, substitute the literal ids printed by `cafleet f
 
 An author writes the spawn prompt with those brace placeholders; after spawn the member reads its identity as literal labeled lines (e.g. `FLEET ID: 24`, `YOUR MEMBER ID: 88`). **Any literal brace in prompt text must be doubled** (`{{` / `}}`) to survive `.format()`; an unknown placeholder fails with `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}. Double literal braces ({{, }}) to keep them as text.` and a malformed brace expression with `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` — both exit 2. No identity environment variable is injected into the pane — the member takes the literal ids from its prompt and passes them explicitly: a poll is `cafleet message poll 88`; a self-attributed send is `cafleet message send --from-member-id 88 --to-member-id <director-member-id> "..."`.
 
-CLI environment variables (the `CAFLEET_`-prefixed `CAFLEET_DATABASE_URL`, `CAFLEET_BROKER_HOST` / `CAFLEET_BROKER_PORT`, `CAFLEET_MAX_TEXT_LEN`) are catalogued in [runtime Environment variables](reference/runtime/spec/cli-options.md#environment-variables).
+The supported CLI environment variables are catalogued in [runtime Environment variables](reference/runtime/spec/cli-options.md#environment-variables).
 
-## Team supervision
+## Finite receiving
 
-`cafleet fleet create` bootstraps supervision in one command: it spawns the fleet's **monitor member** before any ordinary `cafleet member create`, starts the fleet's `cafleet monitor` loop as a detached process, and returns once the loop is live. The loop delivers the keystrokes the broker is holding for busy panes and, once per wake interval, wakes the monitor member. The monitor member's `ready` gates the first ordinary spawn (the CLI's monitor-first guard backstops it). On each wake it classifies the fleet's panes and contacts the Director only when something actually needs attention. A dead monitor is re-spawned mid-run with `cafleet member create --role monitor`.
+The Director owns receiving while delegated work remains:
 
-For the full governance + heartbeat mechanism, Read [`reference/supervision.md`](reference/supervision.md); the monitor member's own protocol is [`roles/monitor.md`](roles/monitor.md).
+```bash
+cafleet message wait <director-member-id> --timeout 300 --json
+```
+
+Run it as a host-native background task, retain the live task/session handle and collect its terminal result. A foreground-only mechanism uses an explicit timeout of at most 30 seconds. ACK consumed deliveries before the next wait and track deferred actions in host-owned state. On timeout inspect relevant roster, panes and artifacts, then receive again. Keep receiving until a reply or explicit user handoff. Follow [supervision](reference/supervision.md).
+
+The [wait contract](reference/runtime/spec/cli-options.md#message-wait) owns full results and bounded ordinary-member preview retries.
 
 ## Placeholder convention
 
@@ -119,24 +119,23 @@ Leading `NAME=value` assignments that set the environment of the CAFleet process
 
 **Permission-error diagnostic.** A CAFleet command that fails with an operating-system permission error — `Operation not permitted` / `Permission denied`, commonly surfacing as a multiplexer socket or pane-command failure — signals that the invocation likely ran outside your coding agent's command auto-approval scope: a compound invocation does not match single-command allow rules, so the shell tool executes it under the agent's restricted sandbox or permission set. The response is to re-run the CAFleet command as its own isolated invocation. A message whose persisted id was already reported is committed (§ *Send (Unicast)*): send its body once only.
 
-Command isolation complements, but does not replace, the Director-side dispatch boundary in [`reference/supervision.md`](reference/supervision.md) § *Asynchronous Wait Rule*: after dispatching work to a member, a Director ends or yields its turn and a notification resumes the workflow in a later turn.
+Command isolation complements, but does not replace, the Director-side dispatch boundary in [`reference/supervision.md`](reference/supervision.md) § *Asynchronous Wait Rule*: after dispatching work, retain the host-owned finite receive task/session handle until its result.
 
 ## Send (Unicast)
 
 ```bash
-cafleet message send --from-member-id <my-member-id> \
-  --to-member-id <target-member-id> "Did the API schema change?"
+cafleet message send --from-member-id <my-member-id> --to-member-id <target-member-id> "Assignment or reply"
 ```
 
-`--to-member-id` (recipient id) is required, plus exactly one of the positional `TEXT` (inline body) or `--file <path>` (a UTF-8 file, or `-` for stdin — use it for long or multi-line bodies that would exceed the shell's `ARG_MAX`). The delivered body is truncated to `CAFLEET_MAX_TEXT_LEN` codepoints + `…` in the inline preview and text output. `--json` carries the complete untruncated body per [runtime JSON output](reference/runtime/spec/cli-options.md#json-output).
+Supply exactly one positional text body or `--file <path>`; `--file -` reads stdin. Use file input for long/multiline bodies. Text previews truncate by `CAFLEET_MAX_TEXT_LEN`; use `--json` for full payloads. [JSON](reference/runtime/spec/cli-options.md#json-output) returns the full record.
 
-**Held delivery.** The broker persists the message, then keystrokes a 2-line inline preview into the recipient's pane — an `Esc`-safeguarded keystroke the recipient consumes as a fresh user-turn (the same path serves `message broadcast`). The keystroke is sent only into a pane at rest. When the recipient is mid-turn or shows a permission prompt the preview is **held**: the command still exits 0 (`notification_sent: false` in `--json`), and the fleet's monitor loop delivers the preview within one tick of the pane coming to rest. So send when you have something to send — no check of the recipient's pane comes first, and a held message needs no follow-up. A hold longer than `CAFLEET_DELIVERY_HOLD_TIMEOUT` (default 300 s) is forced into the pane with a `[cafleet]` line telling the recipient to resume its work if something was still running, plus a note naming a dismissed prompt when one was open; full mechanics in [`multiplexer-backends.md`](reference/runtime/spec/multiplexer-backends.md#push-notifications).
+The Director receives through broker reads, without injected previews. Ordinary-member [push notifications](reference/runtime/spec/multiplexer-backends.md#push-notifications) submit the oldest eligible preview when an empty composer is idle. Holds and post-commit delivery errors preserve the committed ID and successful stdout record; consume that existing row. A finite receive or later send owns pending retries. [Send outcomes](reference/runtime/spec/cli-options.md#message-send) define exact diagnostics.
 
-A `message send` that exits nonzero while stating that `Message <id> was persisted` has committed the message: the fleet's monitor loop could not be started. Keep the ID and send the body once only; the recipient consumes and ACKs the existing row. The exact outcomes are in the [runtime send contract](reference/runtime/spec/cli-options.md#message-send).
+Fan out with an individual send per selected recipient. Retain each committed ID and report a failed recipient explicitly.
 
 ## Poll (Check Inbox)
 
-Returns only un-acked (`input_required`) deliveries addressed to this member, newest first; ACKing one drops it from `poll` output. The `id:` integer printed by `poll` is the cafleet message id — **distinct from** any harness task-list id (present only where your backend has a task list). `--json` emits the untruncated envelopes. Poll is an on-demand inbox check — run it on wake or when you have a reason to check now, never on a self-scheduled `sleep`-timer loop; the broker re-opens your turn when work arrives.
+Returns only un-acked (`input_required`) deliveries addressed to this member, newest first; ACKing one drops it from `poll` output. The `id:` integer printed by `poll` is the cafleet message id — **distinct from** any harness task-list id (present only where your backend has a task list). `--json` emits the untruncated envelopes. Members poll after ready, before reporting completion and on every wake. Handle queued assignments before becoming idle; Director finite receiving retries pending notifications across the final-poll/idle race.
 
 ```bash
 cafleet message poll <my-member-id> [--json]
@@ -150,42 +149,21 @@ Moves a message from `input_required` to `completed`. The positional `MESSAGE_ID
 cafleet message ack <message-id>
 ```
 
-## Broadcast
 
-Send to every active recipient in the sender's fleet except the sender. Supply the literal sender ID and exactly one inline `TEXT` or `--file <path>` body (UTF-8; `-` reads stdin). Use file input for long or multiline bodies.
-
-```bash
-cafleet message broadcast --from-member-id <my-member-id> "Build failed on main branch"
-```
-
-The broker persists one delivery per recipient plus a sender-side `broadcast_summary` row, and returns only the summary with `recipients` (real recipient count N) and `delivered` (the previews this command keystroked). A `delivered` below `recipients` means the other previews are held, and the monitor loop delivers each when its pane is at rest. Text output is:
-
-```text
-broadcast id=<id> recipients=<N> delivered=<k>
-```
-
-Use trailing `--json` for the full untruncated summary envelope and counts. Each recipient polls and ACKs its own delivery, as for unicast; recipients do not ACK the sender's summary. A broadcast needs no check of the recipients' panes first: the broker holds each preview per recipient, as described under [Send](#send-unicast).
-
-The exact `"Broadcast sent to N recipients"` summary, `origin_message_id` grouping and row schema are owned by [Broadcast grouping](reference/runtime/spec/data-model.md#broadcast-grouping) and the [message envelope](reference/runtime/spec/message-envelope.md); flags and outcomes are in [message broadcast](reference/runtime/spec/cli-options.md#message-broadcast).
 
 ## Command index
 
-Use the offline runtime owners below for commands beyond Send/Poll/ACK. Command access remains role-specific; an on-demand link supplies syntax, not additional authority.
+Use the runtime owner for exact flags, outputs and errors. Ordinary members retain Send/Poll/Wait/ACK/show authority; Director actions follow [Director policy](roles/director.md).
 
-| Need | Complete owner |
+| Need | Owner |
 |---|---|
-| Subject IDs, every subcommand and JSON availability | [Subcommand summary](reference/runtime/spec/cli-options.md#subcommand-summary) |
-| Global `--version`, trailing per-command `--json`, full untruncated JSON versus text truncation | [Global options](reference/runtime/spec/cli-options.md#global-options), [JSON output](reference/runtime/spec/cli-options.md#json-output), [message-body truncation](reference/runtime/spec/cli-options.md#message-body-truncation) |
-| Database/server/output environment defaults | [Environment variables](reference/runtime/spec/cli-options.md#environment-variables) |
-| One message by positional MESSAGE_ID; full body with `--json` | [Message show](reference/runtime/spec/cli-options.md#message-show) and [envelopes](reference/runtime/spec/message-envelope.md) |
-| Active registry entries, detailed member view, placement/pending/idle and timestamps | [Member list](reference/runtime/spec/cli-options.md#member-list), [member show](reference/runtime/spec/cli-options.md#member-show), [output shapes](reference/runtime/spec/cli-options.md#output-shapes) |
-| Doctor's complete multiplexer/database/agent/member-permissions diagnosis and gating exit | [Doctor](reference/runtime/spec/cli-options.md#cafleet-doctor) |
-| Running a member's routed command to completion, its output and notices | [Member exec](reference/runtime/spec/cli-options.md#member-exec), [command routing](reference/prompt-routing.md) |
-| Held delivery, the hold timeout and forced previews | [Held delivery](reference/runtime/spec/multiplexer-backends.md#held-delivery) |
-| Backend selection, inherited/default/pinned models and effort | [Director model selection](roles/director.md#model-selection), [backend catalog](reference/coding-agents.md), [member create](reference/runtime/spec/cli-options.md#member-create) |
-| Monitor loop interval/tick/startup, scan/capture and pending-ping output | [Monitor](reference/runtime/spec/cli-options.md#cafleet-monitor), [Director actions](roles/director.md#fleet-scan), [monitor role](roles/monitor.md) |
-| Member deletion, pending/placementless registration and root guard | [Member delete](reference/runtime/spec/cli-options.md#member-delete) |
-| Fleet transaction/idempotence/message retention and pane teardown distinction | [Fleet delete](reference/runtime/spec/cli-options.md#fleet-delete); read [Shutdown](reference/supervision.md#shutdown) immediately before teardown |
-| Bootstrap, doctor → monitor ready → per-member ready, dispatch and closure | [Supervision](reference/supervision.md#spawn-protocol), [manual lifecycle](reference/runtime/how-to/mixed-backend-team.md#manual-lifecycle) |
-| ACK state transitions | [Persistence contracts](reference/runtime/spec/data-model.md#query-and-activity-contracts) |
-| Exact error strings and exit codes | [Error messages](reference/runtime/spec/cli-options.md#error-messages); application errors remain text on stderr even with `--json` |
+| Current command registry and subjects | [CLI summary](reference/runtime/spec/cli-options.md#subcommand-summary) |
+| Full JSON/text outputs | [Output shapes](reference/runtime/spec/cli-options.md#output-shapes) |
+| Finite receive results and retries | [Message wait](reference/runtime/spec/cli-options.md#message-wait) |
+| Fleet/member creation and compensation | [Lifecycle contracts](reference/runtime/spec/cli-options.md#member-create) |
+| Read-only roster pane snapshot | [Fleet capture](reference/runtime/spec/cli-options.md#fleet-capture) |
+| Explicit native shell input | [Member exec](reference/runtime/spec/cli-options.md#member-exec), [routing](reference/prompt-routing.md) |
+| Pane readiness, exclusion and previews | [Multiplexer contracts](reference/runtime/spec/multiplexer-backends.md) |
+| Host continuation, native waiting and evidence boundaries | Selected backend's bound notes in [coding-agents.md](reference/coding-agents.md) |
+| Setup, configuration and diagnosis | [CLI configuration](reference/runtime/spec/cli-options.md#cafleet-setup) |
+| Recovery / teardown | [Recovery](reference/supervision.md#recovery) / [Shutdown](reference/supervision.md#shutdown) |

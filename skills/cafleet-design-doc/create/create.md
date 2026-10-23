@@ -2,7 +2,7 @@
 
 Create high-quality design documents using a three-role team orchestrated via the CAFleet message broker: Director (orchestrator), Drafter (writes the document), and Reviewer (critically reviews drafts). Every inter-member message is persisted in SQLite and auditable. The team iterates through an internal quality loop before presenting a polished draft to the user.
 
-Resolve runtime tools from the executing agent's backend. For spawns, read the selected member backend's Model catalog and Role defaults under the CAFleet Director's model-selection policy; validate its effort and launch capabilities there. Monitor bootstrap and recovery inherit the Director's backend. Interpret captured panes using the observed member's backend cues.
+Resolve runtime tools from the executing agent's backend. For spawns, read the selected member backend's Model catalog and Role defaults under the CAFleet Director's model-selection policy; validate its effort and launch capabilities there. Interpret captured panes using the observed member's backend cues.
 
 ## Required reading
 
@@ -13,7 +13,7 @@ Read these prerequisites in order before orchestration. Your `CODING AGENT:` ide
 | 1 | Your backend section in [coding-agents.md](../../cafleet/reference/coding-agents.md) | Resolve local Runtime bindings and bound notes before acting. |
 | 2 | [Generic Director role](../../cafleet/roles/director.md) | Before setup; obey its selected-backend, spawn skeleton, audit, size and action-triggered reads. |
 | 3 | [Guidelines File Layout](../reference/guidelines.md#file-layout), then [BASE](../../cafleet/reference/base-dir.md) | Before argument normalization and output-root resolution. |
-| 4 | [Supervision](../../cafleet/reference/supervision.md) | Before orchestration; monitor bootstrap and ready gate, broker-held delivery, dispatch and authorization scope. |
+| 4 | [Supervision](../../cafleet/reference/supervision.md) | Before orchestration; atomic registration, finite receiving, dispatch and authorization scope. |
 | 5 | [Coordination](../reference/coordination.md) | Before messages, payload retrieval or markers. |
 | 6 | [Guidelines](../reference/guidelines.md) | Before document-format or phase-completion actions. |
 
@@ -33,7 +33,7 @@ Store literal fleet and member IDs from CLI JSON and use them on every broker co
 
 ### Diagnostics and progress
 
-Each inbound member reply or monitor event/ping resumes the full supervision loop. Inspect a suspected stall with `cafleet member capture <member-id> --lines 200`; disclose deletion and re-spawn to the user rather than silently replacing a member. Apply [generic replacement](../../cafleet/roles/director.md#model-replacement) with that local disclosure constraint. Elapsed time supplies no completion signal.
+Each finite receive result resumes evidence-based facilitation. Inspect a suspected stall with `cafleet member capture <member-id> --lines 200`; disclose deletion and re-spawn to the user rather than silently replacing a member. Apply [generic replacement](../../cafleet/roles/director.md#model-replacement) with that local disclosure constraint. Elapsed time supplies no completion signal.
 
 ### Free-form user replies
 
@@ -69,7 +69,7 @@ Render ordinary-member prompts from the required [shared frame](../../cafleet/ro
 When you see cafleet message poll output with a message from the Director, act on those instructions.
 ```
 
-The shared frame supplies identity placeholders, reader/startup ordering, complete backend-supported skill loading and the supplied host-rule source. Preserve each table's hard lines and start cue verbatim. The role opens first, sends operational ready and loads its prerequisites before substantive work. Selected roles load both `cafleet` and `cafleet-design-doc`; members continue this assigned workflow. The monitor retains its own startup delta.
+The shared frame supplies identity placeholders, reader/startup ordering, complete backend-supported skill loading and the supplied host-rule source. Preserve each table's hard lines and start cue verbatim. The role opens first, sends operational ready and loads its prerequisites before substantive work. Selected roles load both `cafleet` and `cafleet-design-doc`; members continue this assigned workflow.
 
 ## Process
 
@@ -100,20 +100,20 @@ Pass `${DOC_PATH}` to the Drafter as OUTPUT PATH in the spawn prompt. The audit-
 
 Load the `cafleet` skill; its `reference/supervision.md` governance is § Required reading above.
 
-#### 1a. Establish a CAFleet fleet (monitor included) and capture the ids
+#### 1a. Register the current Director and capture the IDs
 
-Bootstrap the fleet per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Fleet bootstrap (monitor included)* (write the monitor's spawn prompt first and pass it via `--monitor-file`; the reuse-a-running-fleet rule is there too). Use `--json` so the IDs are machine-parseable:
+Follow the shared [Spawn Protocol](../../cafleet/reference/supervision.md#spawn-protocol). Register the calling session atomically and capture its literal IDs:
 
 ```bash
-cafleet fleet create --name "design-doc-create-{slug}" --coding-agent <backend> --monitor-file <abs path to ${BASE}/.prompts/monitor-<UTC-compact>.md> --monitor-model {monitor_model} [--monitor-effort {monitor_effort}] --json
-# → { "fleet_id": <int>, "director": { "member_id": <int>, ... }, "monitor": { "member_id": <int>, ... } }
+cafleet fleet create --name "design-doc-create-<slug>" --coding-agent <backend> --json
 ```
 
-Capture `fleet_id` and `director.member_id` from the JSON response and substitute them for `<fleet-id>` and `<director-member-id>` in every subsequent command.
+Retain `fleet_id` and `director.member_id` for subsequent commands. Ordinary member creation can begin immediately.
 
-#### 1b. Wait for the monitor's ready (before any ordinary member)
 
-Wait for the monitor member's `ready` signal per the `cafleet` skill's `reference/supervision.md` § *Spawn Protocol* → *Wait for the monitor's ready* — it gates the Drafter and Reviewer spawns (1d/1e). The monitor member runs unchanged through the quality loop and is deleted first (first-out) in Step 6's teardown.
+#### 1b. Own finite receiving
+
+After creating/dispatching a member, run `cafleet message wait <director-member-id> --timeout 300 --json` as a host-native background task and retain its live task/session handle. Collect replies and ACK every consumed delivery before the next wait; keep deferred actions in host-owned state. A foreground-only mechanism uses at most 30 seconds. Inspect roster/panes/artifacts on timeout and receive again until the delegated reply or explicit user handoff. Follow [supervision](../../cafleet/reference/supervision.md).
 
 #### 1c. Locate role definitions (path-by-reference)
 
@@ -128,7 +128,7 @@ Substitute these absolute paths into the spawn prompts below.
 
 #### 1d. Spawn the Drafter
 
-**Gate**: spawn the Drafter only after the monitor member's `ready` signal (1b) has arrived.
+**Gate**: register the fleet before spawning the Drafter; receive its own ready before assigning drafting work.
 
 **Drafter spawn prompt** — render the canonical [spawn-prompt skeleton](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with the per-role delta below (two-stage rendering + brace rules at the skeleton). Keep the prompt compact and reference installed roles by path. Use the normal-mode column for fresh creation, the resume column for interview-marker resolution, and the review-only delta below when `QUALITY_REVIEW_ONLY=true`.
 
@@ -189,7 +189,7 @@ Placement-audit semantics — non-gating, retry a missing or pending row, dispat
 
 > Read [Payload exemptions](../reference/coordination.md#payload-exemptions) for this pre-draft exchange. Both ends use `--json` for complete questions and answers and `--file` for long bodies. Hidden question payload artifacts are allowed; design-document content waits for answers.
 
-1. The Drafter's clarification work is a turn boundary: end or yield your turn. The broker's inline-preview keystroke on the Drafter's `message send` re-opens a later turn once the questions arrive; retrieve the full body there with one on-demand `cafleet message poll <director-member-id> --json`.
+1. Keep the finite receive task handle until the Drafter’s questions arrive; retrieve the full body with `cafleet message poll <director-member-id> --json`.
 2. `cafleet message ack <message-id>` each received message after reading it.
 3. Relay the questions to the user via {decision_surface}. If {decision_surface} caps how many questions it shows at once (your overlay states the cap) and the number exceeds it, split them into multiple sequential calls to relay all questions without omission.
 4. Relay the user's answers back to the Drafter (free-form, per the Clarification Exemption above):
@@ -213,13 +213,13 @@ Enter this step after a fresh Drafter reports `complete (doc)` or a resume Draft
    cafleet message send --from-member-id <director-member-id> \
      --to-member-id <reviewer-member-id> "ready (doc)"
    ```
-2. **End or yield the turn** — the review route is a turn boundary, and the Reviewer's notification re-opens a later turn where you poll and ACK the response. Round-1 fresh review arrives as `complete (doc) — N issues`; approval arrives as `approved (doc)`. Each finding is recorded as a `COMMENT(reviewer): [TAG] <body>` marker inline in the design doc — the Director does NOT relay the finding text in cafleet.
+2. **Retain finite receiving** until the Reviewer reply; read the full response and ACK it. Round-1 fresh review arrives as `complete (doc) — N issues`; approval arrives as `approved (doc)`. Each finding is recorded as a `COMMENT(reviewer): [TAG] <body>` marker inline in the design doc — the Director does NOT relay the finding text in cafleet.
 3. **On feedback**: Route the Drafter to address the markers in-doc:
    ```bash
    cafleet message send --from-member-id <director-member-id> \
      --to-member-id <drafter-member-id> "ready (doc)"
    ```
-4. The correction route is again a turn boundary. When the Drafter's `addressed (doc)` reply re-opens a later turn (revisions resolve the `COMMENT(reviewer)` markers), loop back to step 1 (re-route to Reviewer with `ready (doc)`).
+4. Retain finite receiving through the correction route. When the Drafter’s `addressed (doc)` arrives and its markers are resolved, ACK the reply and loop back to step 1, routing `ready (doc)` to the Reviewer.
 5. Repeat until the Reviewer explicitly signals `approved (doc)`.
 6. **Iteration limit**: Aim for 2–3 rounds. If not converging, escalate to the user: summarize the remaining issues at a high level (read directly from the surviving `COMMENT(reviewer)` markers in the doc) and use {decision_surface} to ask whether to continue iterating or abort. Do not proceed to Step 4 until the Reviewer has approved.
 
@@ -259,8 +259,8 @@ the review or approval gate.
    ```bash
    cafleet message send --from-member-id <director-member-id> --to-member-id <drafter-member-id> "ready (doc) — user approved; finalize"
    ```
-   The Drafter rechecks marker absence, sets Status to Approved, refreshes Last Updated and Progress consistently, verifies actionable implementation steps, and returns `addressed (doc)`. End/yield until that confirmation arrives. Plain `ready (doc)` routes revision or a work nudge; neither that message nor a marker-free document alone authorizes finalization.
+   The Drafter rechecks marker absence, sets Status to Approved, refreshes Last Updated and Progress consistently, verifies actionable implementation steps, and returns `addressed (doc)`. Retain the finite native receive task/session handle until that confirmation arrives, then read and ACK it before teardown. Plain `ready (doc)` routes revision or a work nudge; neither that message nor a marker-free document alone authorizes finalization.
 
-2. Run the canonical teardown after reading [Shutdown](../../cafleet/reference/supervision.md#shutdown) immediately before teardown (the monitor member goes first, first-out). Workflow delta: then delete the Drafter and Reviewer.
+2. Run the canonical teardown after reading [Shutdown](../../cafleet/reference/supervision.md#shutdown) immediately before teardown. Delete the Drafter and Reviewer before deregistering the fleet.
 
 The fleet row is soft-deleted and `messages` rows are preserved so the message trail remains inspectable in the broker database.

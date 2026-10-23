@@ -1,84 +1,43 @@
 # Overview
 
-CAFleet is a message broker and member registry for coding agents. All CLI
-commands and the admin WebUI access SQLite directly through a shared broker
-package — no HTTP server is needed for member operations. Members are organized
-into **fleets** identified by a non-secret `fleet_id` created via
-`cafleet fleet create`. Members sharing the same fleet can discover and message
-each other through fleet-scoped routing.
+CAFleet multiplexes independent coding-agent sessions in tmux or herdr. Use its CLI and skills to delegate research, implementation and review, then collect durable replies while your host continues the task.
 
 ## Core terms
 
-| Term | Definition | Links to |
+| Term | Definition | Reference |
 |---|---|---|
-| fleet | isolated namespace partitioning members; identified by a non-secret integer `fleet_id` | [Fleet isolation](#fleet-isolation) |
-| root Director | the member created by the `fleet create` bootstrap; the only member that may own other members | [Member lifecycle](member-lifecycle.md) |
-| member | a registry entry spawned by the Director via `cafleet member create`, bound to a multiplexer pane (tmux or herdr) | [Member lifecycle](member-lifecycle.md) |
-| placement | the row linking a member to its multiplexer session/window/pane and backend | [Data model](../spec/data-model.md) |
-| broker | the data-access layer all CLI commands and the WebUI share; writes SQLite directly | Overview (this page) |
-| message | one delivered message; lifecycle `input_required → completed` | [Message envelope](../spec/message-envelope.md) |
-| inline preview | the 2-line message preview the broker keystrokes into the recipient's pane | [Multiplexer backends](../spec/multiplexer-backends.md#push-notifications) |
-| poll / ack | how a recipient fetches and then confirms consumption of a message | [CLI options](../spec/cli-options.md) |
-| coding-agent backend | the binary in a member pane: `claude`, `codex`, or `opencode` | [Coding agents](coding-agents.md) |
-| monitor member | the dedicated watcher member spawned by the `fleet create` bootstrap (re-spawned mid-run via `cafleet member create --role monitor`); it hosts the fleet's wake loop, classifies member panes on each wake, and contacts the Director only when attention is needed | [Monitoring](monitoring.md) |
+| fleet | A namespace identified by a non-secret integer `fleet_id` | [Fleet isolation](#fleet-isolation) |
+| root Director | The current session registered by fleet creation; owns assignments and team lifecycle | [Member lifecycle](member-lifecycle.md) |
+| member | An independent coding-agent session registered in a fleet | [Member lifecycle](member-lifecycle.md) |
+| placement | The association between a member and its multiplexer session, window, pane and backend | [Data model](../spec/data-model.md) |
+| broker | The synchronous SQLite data-access layer used by the CLI | [Storage](storage.md) |
+| message | One point-to-point delivery, consumed through `input_required → completed` | [Message envelope](../spec/message-envelope.md) |
+| inline preview | A literal one-line notification submitted to an idle member composer | [Notifications](../spec/multiplexer-backends.md#push-notifications) |
+| receive | A finite inbox wait that also retries pending ordinary-member previews | [Message wait](../spec/cli-options.md#message-wait) |
+| coding-agent backend | The selected agent binary recorded in a placement | [Coding agents](coding-agents.md) |
 
 ## Fleet isolation
 
-The non-secret `fleet_id` partitions members for routing. The broker performs
-no authentication: a fleet is an organizational boundary, not a security
-boundary. The subject member rows determine their fleets; registration
-requires a valid, active fleet.
+Use the literal IDs returned by the CLI. A fleet partitions routing within the local trust model; it supplies no authentication. Members of a fleet share the selected database URL. Cross-fleet sends fail with `members {from} and {to} are not in the same fleet.`; missing destinations fail with `Destination member not found: {to_id}`.
 
-Cross-fleet sends have a distinct error:
-`members {from} and {to} are not in the same fleet.` differs from
-`Destination member not found: {to_id}` for a missing recipient.
-[Fleet creation](../spec/cli-options.md#fleet-create) registers the root
-Director and monitor atomically. [Fleet deletion](../spec/cli-options.md#fleet-delete)
-soft-deletes the fleet; the root Director is protected from individual
-member deletion.
+Fleet creation atomically registers the calling Director and its current pane. You can create an ordinary member immediately afterward. The Director owns pane teardown and deletes its members before deregistering the fleet.
 
-## CLI
+## Responsibilities
 
-The `cafleet` CLI has seven entry points — four top-level commands and three
-command groups:
+| Owner | Responsibility |
+|---|---|
+| Host | Continue its task and own native shell/background results |
+| Director | Assign work, receive replies, inspect evidence, resolve blockers and close the team |
+| CLI | Register sessions, persist messages, receive for a bounded time and submit authorized pane input |
+| Multiplexer | Split, read, type into and close panes while preserving layout ownership |
+| Member | Perform its assignment, report through the broker and route required unavailable commands |
 
-| Entry point | Scope | Subcommands |
-|---|---|---|
-| `setup` | one-time onboarding: brings the database to the current schema and installs the coding-agent assets | — |
-| `doctor` | environment check: a diagnosis covering the multiplexer, the database schema, the coding-agent installs, and the member permissions | — |
-| `server` | serves the admin WebUI | — |
-| `monitor` | the supervision scheduler, run as `cafleet monitor FLEET_ID` | — |
-| `fleet` | fleet lifecycle | `create`, `list`, `show`, `delete` |
-| `member` | member lifecycle + keystroke interaction | `create`, `delete`, `show`, `list`, `prompt`, `exec`, `exec-run`, `ping`, `capture` |
-| `message` | the message broker | `send`, `broadcast`, `poll`, `ack`, `show` |
+The [CLI reference](../spec/cli-options.md#subcommand-summary) owns the command registry. The product ships as a CLI with embedded skills/presets and this documentation site.
 
-`member` is the single home for the member lifecycle — spawn, teardown,
-introspection (`show`, `list`), and keystroke interaction (the `kind` column in
-list output carries the three-value union distinguishing the root `director`,
-the fleet's `monitor` member, and ordinary `member` rows). The canonical CLI
-surface — every subcommand, option, and option source — lives at
-[CLI options](../spec/cli-options.md).
+## Receiving delegated work
 
-## WebUI
-
-A browser-based dashboard served as a SPA at `/`, with no login: a fleet
-picker, then a Discord-style unified timeline per fleet — a member sidebar,
-unicast and broadcast messages, and a bottom input parsing `@<member> text` and
-`@all text`. Every send goes out as the fleet's root Director — the operator
-never registers as a member to use the dashboard. The full API surface and
-per-member routes live at [WebUI API](../spec/webui-api.md).
-
-## Monitoring
-
-A fleet is supervised by its **monitor member** — a dedicated watcher spawned
-by the `cafleet fleet create` bootstrap that classifies member panes on each
-wake of the `cafleet monitor` loop and contacts the Director only when
-something needs attention; the Director owns every supervision action.
-See [Monitoring](monitoring.md).
+The Director runs a finite receive as a host-owned background task and retains its task handle until it collects the result. It ACKs each consumed delivery, records deferred actions in host-owned task state, and receives again while work remains. A timeout calls for a roster, pane and artifact check. Read the [fleet guide](../how-to/mixed-backend-team.md#manual-lifecycle) for the complete procedure.
 
 ## Design document workflow
 
-CAFleet ships design-document skills that coordinate a Director and members
-entirely through `cafleet message send`, so every inter-member message is
-persisted and auditable. Follow the
-[Design document workflow](../how-to/design-doc-development.md).
+The bundled design-document workflows preserve clarification, independent review, TDD and explicit user approval. Follow the [design document guide](../how-to/design-doc-development.md).

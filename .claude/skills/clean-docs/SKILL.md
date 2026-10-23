@@ -25,7 +25,7 @@ workflow body (`<workflow>/<workflow>.md`) carries only its own trigger
 scenario, scan mechanics, artifact spec, and guarantees, citing the spine here
 rather than restating it.
 
-Resolve runtime tools from the executing agent's backend. For spawns, read the selected member backend's Model catalog and Role defaults under the CAFleet Director's model-selection policy; validate its effort and launch capabilities there. Monitor bootstrap and recovery inherit the Director's backend. Interpret captured panes using the observed member's backend cues.
+Resolve runtime tools from the executing agent's backend. For spawns, read the selected member backend's Model catalog and Role defaults under the CAFleet Director's model-selection policy; validate its effort and launch capabilities there. Interpret captured panes using the observed member's backend cues.
 
 ## Required reading
 
@@ -101,10 +101,9 @@ Per surface, the scope of what may change:
 
 ```
 User → /clean-docs (one workflow)
- └─ Director (main session — resolves BASE, bootstraps fleet + monitor
-              member atomically, partitions slices, merges partials,
-              holds the apply behind review, verifies, commits when asked,
-              deletes the monitor member first at teardown)
+ └─ Director (resolves BASE, registers the current session, partitions slices,
+              merges partials, owns finite receiving, holds apply behind review,
+              verifies and closes owned members)
      ├─ scanner-1  (owns a disjoint file slice: scan → propose → apply after gate)
      ├─ scanner-N  (…)
      └─ reviewer   (the workflow's guard, --model {reviewer_model})
@@ -112,7 +111,7 @@ User → /clean-docs (one workflow)
 
 | Role | Responsibility |
 |---|---|
-| **Director** | Resolve task-scoped `${BASE}`; bootstrap the fleet with the monitor member included (`cafleet fleet create --monitor-file <abs path> --monitor-model {monitor_model}` plus supported monitor effort) and gate the first ordinary spawn on its `ready` message (the CLI monitor-first guard backstops); partition the in-scope tree into **disjoint file-ownership** slices (one file → one scanner, whole surfaces per scanner); merge partial artifacts into the run's canonical artifact; route it to the reviewer and **hold the apply until the reviewer's approval**; relay approval to scanners; apply a denied write through the full-file staging protocol; run verification; escalate observations to the user; delete the monitor member first (first-out) at teardown. |
+| **Director** | Resolve task-scoped `${BASE}`; register the current Director atomically and retain finite receiving; partition the in-scope tree into **disjoint file-ownership** slices (one file → one scanner, whole surfaces per scanner); merge partial artifacts into the run's canonical artifact; route it to the reviewer and **hold the apply until the reviewer's approval**; relay approval to scanners; apply a denied write through the full-file staging protocol; run verification; escalate observations to the user; close owned members before deregistering the fleet. |
 | **scanner** (×N) | For its slice: run the workflow's scan mechanics, propose actions per the workflow's rubric, record observations separately, write its partial artifact under `${BASE}`. After approval is relayed: apply its own slice's approved rows exactly as written, re-verify its diff, route harness-denied writes to the Director. |
 | **reviewer** | Validate the merged artifact **before** any edit, per the workflow's guarantees and guardrails. After apply: run the workflow verification (parameter table below). |
 
@@ -120,7 +119,7 @@ User → /clean-docs (one workflow)
 the same file, so parallel apply is safe without worktrees. **One scanner owns
 every edit to a given file, regardless of class** — a file touched by several
 classes is assigned whole to one scanner. A useful default partition:
-docs+root files / skills+`.claude` / source+admin / tests — merge or split
+docs+root files / skills+`.claude` / source / tests — merge or split
 slices to balance the scanner count against the tree size.
 
 ## Coordination
@@ -142,12 +141,7 @@ extensions, since a run produces a run artifact, not a design document:
    `reference/base-dir.md`, convention
    `researches/clean-docs-<workflow>-<UTC-compact>/` (gitignored, one folder
    per run).
-2. **Bootstrap** — `cafleet doctor` (gating), then `cafleet fleet create
-   --monitor-file <abs path to ${BASE}/.prompts/monitor-<UTC-compact>.md>
-   --monitor-model {monitor_model} [--monitor-effort {monitor_effort}]` (one atomic command: fleet + Director +
-   monitor member + the monitor loop; members spawned `{permission_flags}`); gate the first
-   ordinary spawn on the monitor's `ready` message (the CLI
-   monitor-first guard backstops).
+2. **Bootstrap** — run `cafleet doctor`, then `cafleet fleet create --name <name> --coding-agent <backend> --json`; retain the returned literal IDs.
 3. **Spawn workers** — scanners (one per disjoint slice, using the other-member defaults) and the reviewer
    (`--model {reviewer_model}` with supported reviewer effort), each from a rendered prompt at
    `${BASE}/.prompts/<role>-<UTC-compact>.md`.
@@ -164,10 +158,7 @@ extensions, since a run produces a run artifact, not a design document:
    `mise //cafleet:typecheck` green, plus the **workflow verification**
    (parameter table below).
 8. **Report + teardown** — the Director reports the applied set and the
-   escalated observations, commits only when the user asks, and tears down
-   (delete the monitor member first
-   → delete the remaining members → verify via `member list` →
-   `fleet delete`, which also stops the monitor loop).
+   escalated observations, commits only when the user asks, and tears down owned ordinary members, verifies the root-only roster and deregisters the fleet.
 
 ### Full-file staging
 
@@ -275,3 +266,7 @@ use `--file`.
     roles/scanner.md
     roles/reviewer.md
 ```
+
+## Finite receiving
+
+The Director runs `cafleet message wait <director-member-id> --timeout 300 --json` as a native background task, retains its live task/session handle and collects the result. ACK consumed deliveries before another wait and keep deferred actions in host-owned state. A foreground-only mechanism uses at most 30 seconds. Inspect roster/panes/artifacts on timeout and receive again until delegated work resolves or explicit user handoff. Follow [supervision](../../../skills/cafleet/reference/supervision.md).

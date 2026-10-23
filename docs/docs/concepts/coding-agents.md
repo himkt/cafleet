@@ -1,9 +1,6 @@
 # Coding agents
 
-cafleet supports three coding-agent binaries inside member panes. The backend
-is selected per member with `--coding-agent {claude,codex,opencode}`, and
-mixed-backend teams are allowed: a single Director may spawn all three in the
-same fleet with no broker-level differences. The value is recorded in the
+Select a member backend through the CLI’s `--coding-agent` choices. Mixed-backend members share the same broker contracts. The value is recorded in the
 placement's `coding_agent` column.
 
 | Backend | Product | How the pane loads the cafleet skill |
@@ -12,7 +9,7 @@ placement's `coding_agent` column.
 | `codex` | OpenAI Codex CLI | Reads the cafleet skill files by absolute path |
 | `opencode` | opencode.ai | Reads the cafleet skill files by absolute path |
 
-Plain `cafleet setup` installs the skills and preset for all three backends
+Plain `cafleet setup` installs assets for every supported backend
 in one run; `--coding-agent` narrows the selection — see
 [CLI options § cafleet setup](../spec/cli-options.md#cafleet-setup).
 
@@ -23,8 +20,7 @@ The flag means slightly different things per command:
   auto-detect what is already running in the calling pane, so the operator
   states the backend the Director is actually running on.
 - `cafleet member create --coding-agent` both selects which backend is spawned
-  and is recorded as placement metadata. When the flag is omitted, the member —
-  every role — inherits the spawning Director's placement backend (an explicit
+  and is recorded as placement metadata. When the flag is omitted, the member inherits the spawning Director's placement backend (an explicit
   value still wins).
 
 Each backend is spawned with flags that enable its Bash tool with no runtime
@@ -43,7 +39,7 @@ command. Each placeholder and its label line is in
 [CLI options § Spawn-prompt substitution](../spec/cli-options.md#spawn-prompt-substitution). The only environment variable forwarded into the pane is
 `CAFLEET_DATABASE_URL`.
 All three honor a leading-`!` shell shortcut on the coding agent's input line,
-so `cafleet member exec` runs a command in any pane shape; a member routes a
+so `cafleet member exec` submits a visible native command after idle revalidation; a member routes a
 command its harness does not run through the Director — see
 [Command routing](member-lifecycle.md#command-routing). For the full
 broker CLI reference, see [CLI options](../spec/cli-options.md).
@@ -79,19 +75,12 @@ Claude aliases, reviewed capability classes, standard input/output prices
 and official sources, ordered from most to least capable within each backend.
 OpenCode's curated models retain their `opencode/` prefix.
 
-| Backend | Reviewer | Monitor | Other members |
-|---|---|---|---|
-| Codex | `gpt-6-astra` (high) | `gpt-6-luna` (low) | `gpt-6.1-sol` (xhigh) |
-| Claude Code | `claude-opus-5-5` (high) | `claude-haiku-5-5` (low) | `claude-opus-5-5` (high) |
-| OpenCode | `opencode/deepseek-v4.1-flash-free` | `opencode/big-pickle` | `opencode/glm-5.3-flash-free` |
-
-OpenCode spawns omit effort because the backend does not offer an effort setting.
+Use the selected backend’s role defaults and catalog as the source of truth. OpenCode omits unsupported effort.
 
 Only the exact phrase `cost efficiency mode` in the originating user request
 activates cheapest-capable selection for ordinary members. The Director
 chooses a backend first and compares models within that backend. Otherwise,
-ordinary members use the backend's other-member default. Monitors and
-reviewers use their respective role defaults, including supported effort
+ordinary members use the backend's other-member default. Reviewers use their role defaults, including supported effort
 levels.
 
 Explicit backend, model and effort values remain overrides. A mismatch or
@@ -134,8 +123,10 @@ accepted levels, forwarding forms, and rejection strings are in
 column of `cafleet member list` is ground truth for all three. Operators who
 need kernel-enforced isolation should use the `codex` backend.
 
-## Complete monitor prompts {#complete-monitor-prompts}
+## Complete member prompts
 
-Use the [Run a fleet monitor prompt](../how-to/mixed-backend-team.md#manual-lifecycle),
-substituting the skill path for your backend. Codex uses
-`~/.codex/skills/cafleet`; Opencode uses `~/.config/opencode/skills/cafleet`.
+Use the [manual lifecycle](../how-to/mixed-backend-team.md#manual-lifecycle) for a complete role-by-path member prompt. Preserve supplied identities, BASE and host prerequisites.
+
+## Host-owned receiving
+
+The Director retains a finite native receive task/session handle until a reply or explicit user handoff. ACK consumed deliveries before the next receive, keeping deferred work in host-owned task state. Timeouts call for evidence checks. Follow [the manual lifecycle](../how-to/mixed-backend-team.md#manual-lifecycle).

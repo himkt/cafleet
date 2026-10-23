@@ -1,6 +1,6 @@
 # Member Role
 
-You are an ordinary member spawned by `cafleet member create`, with workspace-scoped auto-approval ({permission_flags}). Run every command your harness allows, route the rest through the Director, and communicate through the Director. The [monitor role](monitor.md) owns its distinct startup and wake authority.
+You are an ordinary member spawned by `cafleet member create`, with workspace-scoped auto-approval ({permission_flags}). Run every command your harness allows, route the rest through the Director, and communicate through the Director.
 
 ## Required reading
 
@@ -30,7 +30,7 @@ The body is `ready`, optionally followed by a brief role recap after `:`. The Di
 cafleet message poll <my-member-id>
 ```
 
-ACK and process queued messages. If the inbox is empty and no assigned work remains, end your turn and go idle. A broker preview reopens your turn: the broker holds it while you are mid-turn and delivers it once your pane is at rest, so ending the turn is what lets the next message in. Poll on wake or when there is a concrete reason to check now, including a reply just routed to the Director. Waiting happens by ending the turn; never schedule a wait-then-poll cycle.
+ACK and process queued messages. Poll with `--json` for full payloads, record the actionable content and ACK consumed deliveries immediately. Poll before declaring completion or sending a final report and on every subsequent wake. Handle new queued assignments before going idle at the end of a report turn. If a message arrives after the final poll while you are busy, the Director’s next finite receive retries its pending preview. Waiting happens by ending the turn when no assignment remains.
 
 ## Command execution
 
@@ -44,14 +44,14 @@ Report only observed results. Run a fresh command when current state is needed; 
 cafleet message send --from-member-id <my-member-id> --to-member-id <director-member-id> "Need to run: <command>. My harness denied it."
 ```
 
-For a command that is hard to quote, write it to a file under your `BASE` and name the path in the message. Then end your turn: the Director runs the command in your pane with `cafleet member exec`, its output lands in your context, and your turn reopens to continue. The full exchange is in [command routing](../reference/prompt-routing.md#member-side-reconsider-then-route). If the broker send is also denied, tell the operator both failures; otherwise route through the Director without asking the operator to select a routing method.
+For a command that is hard to quote, write it to a file under your `BASE` and name the path in the message. Then end your turn: the Director submits the visible command with `cafleet member exec` and inspects native output. Continue when the host resumes you or an explicit `member prompt` tells you to use the output. The full exchange is in [command routing](../reference/prompt-routing.md#member-side-reconsider-then-route). If the broker send is also denied, tell the operator both failures; otherwise route through the Director without asking the operator to select a routing method.
 
 ## Identity and authority
 
 Take literal integer IDs from `FLEET ID:`, `YOUR MEMBER ID:` and `DIRECTOR MEMBER ID:` in the CLI-rendered spawn prompt. Pass them explicitly on every command; environment variables supply no member identity. Missing IDs surface through the CLI's own validation rather than an invented value.
 
-Poll your own inbox and use permitted Send/Poll/ACK/show operations. The Director owns member creation, deletion, listing, capture and prompt dispatch. `member ping` belongs to the Director and the monitor's fixed-ping exception; `member prompt` and `member exec` belong to the Director alone. A `message send` that exits nonzero while stating that `Message <id> was persisted` has committed the message: keep the id and send the body once only, as described in [Send](../SKILL.md#send-unicast).
+Poll your own inbox and use permitted Send/Poll/ACK/show operations. The Director owns member creation, deletion, listing, capture and prompt dispatch. `member ping` belongs to the Director; `member prompt` and `member exec` belong to the Director alone. A committed send retains its ID and successful output even if preview delivery reports a diagnostic. Keep the existing message and consume it once.
 
 ## Shutdown
 
-The Director's `member delete` kills your pane and process immediately; no shutdown action is required. If asked to wrap up first, send one final report through CAFleet and return to the prompt.
+The Director’s `member delete` acquires and revalidates the concrete placement’s shared input lock before killing your pane/process and deregistering you; a busy timeout leaves the pane and registry unchanged. No shutdown action is required of you. If asked to wrap up first, send one final report through CAFleet and return to the prompt.
