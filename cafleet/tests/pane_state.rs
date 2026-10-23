@@ -33,6 +33,21 @@ const COMPOSERS: &[ComposerFixture] = &[
     },
 ];
 
+const CAPTURED_CLAUDE_HERDR_EMPTY: &str =
+    include_str!("fixtures/pane-readiness/claude-herdr-empty.ansi");
+const CAPTURED_CLAUDE_TMUX_EMPTY: &str =
+    include_str!("fixtures/pane-readiness/claude-tmux-empty.ansi");
+const CAPTURED_CLAUDE_EMPTY: &[(&str, &str)] = &[
+    (
+        CAPTURED_CLAUDE_HERDR_EMPTY,
+        "cafleet-evidence-claude-herdr-1105Z",
+    ),
+    (
+        CAPTURED_CLAUDE_TMUX_EMPTY,
+        "cafleet-evidence-claude-tmux-1105Z",
+    ),
+];
+
 const CAPTURED_CODEX_HINT: &str = "Ask Codex to do anything";
 const CAPTURED_CODEX_PLACEHOLDER: &str =
     include_str!("fixtures/pane-readiness/codex-herdr-placeholder.ansi");
@@ -51,6 +66,13 @@ const CAPTURED_OPENCODE_TMUX_DRAFT: &str =
     include_str!("fixtures/pane-readiness/opencode-tmux-draft.ansi");
 const CAPTURED_OPENCODE_TMUX_HINT_STYLE: &str = "\x1b[38;2;128;128;128m";
 const CAPTURED_OPENCODE_TMUX_INPUT_STYLE: &str = "\x1b[38;2;238;238;238m";
+
+fn captured_claude_composer_index(lines: &[String]) -> usize {
+    lines
+        .iter()
+        .position(|line| strip_ansi(line).trim_start().starts_with('❯'))
+        .expect("actual empty Claude frame has its live composer row")
+}
 
 fn captured_opencode_composer_text(capture: &str) -> String {
     strip_ansi(capture)
@@ -219,6 +241,116 @@ fn an_unknown_backend_has_unknown_readiness() {
         for backend in ["", "unrecognized-agent"] {
             assert_state(backend, fixture.placeholder, "Unknown");
         }
+    }
+}
+
+#[test]
+fn captured_claude_herdr_empty_named_composer_is_idle_with_the_actual_agents_footer() {
+    let visible = strip_ansi(CAPTURED_CLAUDE_HERDR_EMPTY);
+    assert!(visible.contains("Claude Code v2.1.301"));
+    assert!(visible.contains("cafleet-evidence-claude-herdr-1105Z"));
+    assert!(visible.contains("⏵⏵ don't ask on (shift+tab to cycle) · ← for agents"));
+    assert!(!visible.contains("? for shortcuts"));
+    let lines: Vec<_> = visible.lines().map(str::to_owned).collect();
+    let composer = captured_claude_composer_index(&lines);
+    assert_eq!(lines[composer].trim(), "❯");
+    assert!(lines[composer - 1].starts_with('─'));
+    assert!(lines[composer - 1].ends_with("cafleet-evidence-claude-herdr-1105Z ─"));
+    assert!(
+        lines[composer + 1]
+            .chars()
+            .all(|character| character == '─')
+    );
+    assert_eq!(
+        classify("claude", CAPTURED_CLAUDE_HERDR_EMPTY),
+        PaneState::Idle
+    );
+}
+
+#[test]
+fn captured_claude_tmux_empty_named_composer_is_idle_with_the_actual_agents_and_effort_footer() {
+    let visible = strip_ansi(CAPTURED_CLAUDE_TMUX_EMPTY);
+    assert!(visible.contains("Claude Code v2.1.301"));
+    assert!(visible.contains("cafleet-evidence-claude-tmux-1105Z"));
+    assert!(visible.contains("⏵⏵ don't ask on (shift+tab to cycle) · ← for agents"));
+    assert!(visible.contains("◐ medium · /effort"));
+    assert!(!visible.contains("? for shortcuts"));
+    let lines: Vec<_> = visible.lines().map(str::to_owned).collect();
+    let composer = captured_claude_composer_index(&lines);
+    assert_eq!(lines[composer].trim(), "❯");
+    assert!(lines[composer - 1].ends_with("cafleet-evidence-claude-tmux-1105Z ─"));
+    assert!(
+        lines[composer + 1]
+            .chars()
+            .all(|character| character == '─')
+    );
+    assert!(CAPTURED_CLAUDE_TMUX_EMPTY.contains("❯\u{a0}\x1b[7m \x1b[0m"));
+    assert_eq!(
+        classify("claude", CAPTURED_CLAUDE_TMUX_EMPTY),
+        PaneState::Idle
+    );
+}
+
+#[test]
+fn captured_claude_derived_named_borders_accept_changed_names_with_the_shortcuts_footer() {
+    for &(capture, title) in CAPTURED_CLAUDE_EMPTY {
+        let mut lines: Vec<_> = capture.lines().map(str::to_owned).collect();
+        let composer = captured_claude_composer_index(&lines);
+        assert_eq!(lines[composer - 1].matches(title).count(), 1);
+        lines[composer - 1] = lines[composer - 1].replace(title, "independent-review-session-42");
+        lines[composer + 2] = "? for shortcuts".to_string();
+        assert_eq!(classify("claude", &lines.join("\n")), PaneState::Idle);
+    }
+}
+
+#[test]
+fn captured_claude_derived_actual_status_footers_accept_a_plain_upper_border() {
+    for &(capture, _) in CAPTURED_CLAUDE_EMPTY {
+        let mut lines: Vec<_> = capture.lines().map(str::to_owned).collect();
+        let composer = captured_claude_composer_index(&lines);
+        assert!(strip_ansi(&lines[composer + 2]).contains("don't ask on"));
+        lines[composer - 1] = "────────────────────────────".to_string();
+        assert_eq!(classify("claude", &lines.join("\n")), PaneState::Idle);
+    }
+}
+
+#[test]
+fn captured_claude_derived_missing_borders_history_and_ambiguous_input_remain_unknown() {
+    for &(capture, _) in CAPTURED_CLAUDE_EMPTY {
+        let lines: Vec<_> = capture.lines().map(str::to_owned).collect();
+        let composer = captured_claude_composer_index(&lines);
+        let mut no_upper_border = lines.clone();
+        no_upper_border.remove(composer - 1);
+        let mut no_lower_border = lines.clone();
+        no_lower_border.remove(composer + 1);
+        let mut ambiguous_input = lines.clone();
+        ambiguous_input[composer] = "❯ \x1b[38;2;255;0;0mretained user input\x1b[0m".to_string();
+        let mut unstyled_input: Vec<_> = strip_ansi(capture).lines().map(str::to_owned).collect();
+        unstyled_input[composer] = "❯ retained user input".to_string();
+        for content in [
+            no_upper_border.join("\n"),
+            no_lower_border.join("\n"),
+            ambiguous_input.join("\n"),
+            unstyled_input.join("\n"),
+            lines[composer + 2].clone(),
+            format!("Archived terminal output:\n```text\n{capture}\n```\nMore output follows."),
+        ] {
+            assert_eq!(classify("claude", &content), PaneState::Unknown);
+        }
+    }
+}
+
+#[test]
+fn captured_claude_derived_work_and_approval_outrank_both_actual_empty_composers() {
+    let fixture = COMPOSERS
+        .iter()
+        .find(|fixture| fixture.agent == "claude")
+        .unwrap();
+    for &(capture, _) in CAPTURED_CLAUDE_EMPTY {
+        let working = format!("{capture}\n{}", fixture.working);
+        assert_eq!(classify("claude", &working), PaneState::Working);
+        let approval = format!("{working}\n{}", fixture.approval);
+        assert_eq!(classify("claude", &approval), PaneState::AwaitingUser);
     }
 }
 
