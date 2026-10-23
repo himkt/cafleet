@@ -219,7 +219,6 @@ fn malformed_current_shapes_gate_setup_and_normal_writes() {
         "ALTER TABLE members RENAME COLUMN name TO missing_name;",
         "ALTER TABLE member_placements RENAME COLUMN coding_agent TO missing_agent;",
         "ALTER TABLE members ADD COLUMN unexpected TEXT;",
-        "CREATE TABLE unexpected(value TEXT);",
         "ALTER TABLE refinery_schema_history RENAME COLUMN version TO missing_version;",
         "DELETE FROM refinery_schema_history;",
         "DROP TABLE messages; CREATE TABLE messages(message_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, from_member_id TEXT NOT NULL REFERENCES members(member_id) ON DELETE RESTRICT, to_member_id INTEGER NOT NULL REFERENCES members(member_id) ON DELETE RESTRICT, created_at TEXT NOT NULL, status_state TEXT NOT NULL, status_timestamp TEXT NOT NULL, text TEXT NOT NULL, notified_at TEXT);",
@@ -241,6 +240,41 @@ fn malformed_current_shapes_gate_setup_and_normal_writes() {
             "format rejection precedes pane operations"
         );
     }
+}
+
+#[test]
+fn compatible_current_format_accepts_auxiliary_tables_indexes_and_triggers() {
+    let cli = Cli::new();
+    current_fixture(&cli);
+    cli.sqlite()
+        .execute_batch(
+            "CREATE TABLE auxiliary_audit(event TEXT);
+         CREATE INDEX auxiliary_event ON auxiliary_audit(event);
+         CREATE TRIGGER auxiliary_insert AFTER INSERT ON auxiliary_audit BEGIN SELECT 1; END;
+         INSERT INTO auxiliary_audit VALUES('keep');",
+        )
+        .unwrap();
+    for args in [
+        ["fleet", "list"].as_slice(),
+        ["setup"].as_slice(),
+        ["doctor", "--json"].as_slice(),
+    ] {
+        let output = cli.run(args);
+        assert_eq!(
+            code(&output),
+            0,
+            "{args:?}: {}{}",
+            stdout(&output),
+            stderr(&output)
+        );
+    }
+    assert_eq!(
+        cli.sqlite()
+            .query_row("SELECT event FROM auxiliary_audit", [], |row| row
+                .get::<_, String>(0))
+            .unwrap(),
+        "keep"
+    );
 }
 
 #[test]
