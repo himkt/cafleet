@@ -22,13 +22,27 @@ impl PaneState {
     }
 }
 
+#[derive(Clone, Copy)]
+enum Foreground {
+    Basic(u16),
+    Indexed(u16),
+    Rgb([u16; 3]),
+}
+
 #[derive(Clone, Copy, Default)]
 struct Style {
-    foreground: Option<u16>,
+    foreground: Option<Foreground>,
     background: Option<[u16; 3]>,
     dim: bool,
     ambiguous: bool,
     explicit: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ComposerProfile {
+    Standard,
+    Codex,
+    OpenCodeRgb,
 }
 
 #[derive(Clone, Copy)]
@@ -39,17 +53,36 @@ enum Role {
 }
 
 impl Style {
-    fn role(self, coding_agent: &str) -> Role {
+    fn role(self, profile: ComposerProfile) -> Role {
         if self.ambiguous {
             Role::Unknown
+        } else if let Some(Foreground::Rgb(rgb)) = self.foreground {
+            if profile == ComposerProfile::OpenCodeRgb
+                && self.background == Some([30, 30, 30])
+                && !self.dim
+            {
+                match rgb {
+                    [128, 128, 128] => Role::Decoration,
+                    [238, 238, 238] => Role::Input,
+                    _ => Role::Unknown,
+                }
+            } else {
+                Role::Unknown
+            }
         } else if self.dim
-            && (matches!(self.foreground, Some(240..=248))
-                || (coding_agent == "codex"
+            && (matches!(self.foreground, Some(Foreground::Indexed(240..=248)))
+                || (profile == ComposerProfile::Codex
                     && self.foreground.is_none()
                     && self.background == Some([53, 53, 53])))
         {
             Role::Decoration
-        } else if self.explicit && matches!(self.foreground, None | Some(37 | 97)) && !self.dim {
+        } else if self.explicit
+            && matches!(
+                self.foreground,
+                None | Some(Foreground::Basic(37 | 97) | Foreground::Indexed(37 | 97))
+            )
+            && !self.dim
+        {
             Role::Input
         } else {
             Role::Unknown
@@ -83,12 +116,12 @@ impl Style {
                 1 | 3 | 4 | 23 | 24 => {}
                 2 => self.dim = true,
                 22 => self.dim = false,
-                30..=37 | 90..=97 => self.foreground = Some(codes[i]),
+                30..=37 | 90..=97 => self.foreground = Some(Foreground::Basic(codes[i])),
                 39 => self.foreground = None,
                 38 | 48 => match &codes[i + 1..] {
                     [5, index, ..] => {
                         if codes[i] == 38 && *index <= 255 {
-                            self.foreground = Some(*index);
+                            self.foreground = Some(Foreground::Indexed(*index));
                         } else {
                             self.ambiguous = true;
                         }
@@ -96,8 +129,12 @@ impl Style {
                     }
                     [2, red, green, blue, ..] => {
                         let rgb = [*red, *green, *blue];
-                        if codes[i] == 48 && rgb.iter().all(|channel| *channel <= 255) {
-                            self.background = Some(rgb);
+                        if rgb.iter().all(|channel| *channel <= 255) {
+                            if codes[i] == 38 {
+                                self.foreground = Some(Foreground::Rgb(rgb));
+                            } else {
+                                self.background = Some(rgb);
+                            }
                         } else {
                             self.ambiguous = true;
                         }
@@ -119,10 +156,10 @@ impl Style {
 
 struct Line {
     text: String,
-    characters: Vec<(char, Role)>,
+    characters: Vec<(char, Style)>,
 }
 
-fn styled_lines(coding_agent: &str, content: &str) -> Vec<Line> {
+fn styled_lines(content: &str) -> Vec<Line> {
     static CSI: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"\x1b\[([0-?]*)([ -/]*)([@-~])").expect("valid CSI pattern"));
     let mut style = Style::default();
@@ -135,11 +172,7 @@ fn styled_lines(coding_agent: &str, content: &str) -> Vec<Line> {
                 let escape = capture
                     .get(0)
                     .expect("a CSI capture has its complete match");
-                characters.extend(
-                    line[offset..escape.start()]
-                        .chars()
-                        .map(|ch| (ch, style.role(coding_agent))),
-                );
+                characters.extend(line[offset..escape.start()].chars().map(|ch| (ch, style)));
                 if &capture[3] == "m" && capture[2].is_empty() {
                     style.apply(&capture[1]);
                 } else {
@@ -147,11 +180,7 @@ fn styled_lines(coding_agent: &str, content: &str) -> Vec<Line> {
                 }
                 offset = escape.end();
             }
-            characters.extend(
-                line[offset..]
-                    .chars()
-                    .map(|ch| (ch, style.role(coding_agent))),
-            );
+            characters.extend(line[offset..].chars().map(|ch| (ch, style)));
             Line {
                 text: characters.iter().map(|(ch, _)| ch).collect(),
                 characters,
@@ -168,18 +197,18 @@ fn is_border(line: &str) -> bool {
             .all(|ch| matches!(ch, '─' | '━' | '│' | '┌' | '┐' | '└' | '┘'))
 }
 
-fn composer_state(lines: &[&Line], marker: char) -> PaneState {
+fn composer_state(lines: &[&Line], marker: char, profile: ComposerProfile) -> PaneState {
     let mut draft = false;
     let mut unknown = false;
     for line in lines {
         let Some(start) = line.characters.iter().position(|(ch, _)| *ch == marker) else {
             return PaneState::Unknown;
         };
-        for (ch, role) in &line.characters[start + 1..] {
+        for (ch, style) in &line.characters[start + 1..] {
             if ch.is_whitespace() {
                 continue;
             }
-            match role {
+            match style.role(profile) {
                 Role::Decoration => {}
                 Role::Input => draft = true,
                 Role::Unknown => unknown = true,
@@ -195,11 +224,56 @@ fn composer_state(lines: &[&Line], marker: char) -> PaneState {
     }
 }
 
+fn opencode_state(lines: &[&Line]) -> PaneState {
+    let (metadata, profile) = if lines
+        .last()
+        .is_some_and(|line| line.text.trim_start().starts_with('┃'))
+    {
+        (lines.len() - 1, ComposerProfile::Standard)
+    } else {
+        let Some(shortcuts) = lines.iter().rposition(|line| {
+            line.text
+                .split_whitespace()
+                .eq(["tab", "agents", "ctrl+p", "commands"])
+        }) else {
+            return PaneState::Unknown;
+        };
+        if shortcuts < 2 {
+            return PaneState::Unknown;
+        }
+        let Some(border) = lines[shortcuts - 1].text.trim().strip_prefix('╹') else {
+            return PaneState::Unknown;
+        };
+        if border.is_empty() || !border.chars().all(|ch| ch == '▀') {
+            return PaneState::Unknown;
+        }
+        (shortcuts - 2, ComposerProfile::OpenCodeRgb)
+    };
+    let Some(footer) = lines[metadata].text.trim().strip_prefix('┃') else {
+        return PaneState::Unknown;
+    };
+    if footer.trim().is_empty() {
+        return PaneState::Unknown;
+    }
+    let start = lines[..metadata]
+        .iter()
+        .rposition(|line| !line.text.trim_start().starts_with('┃'))
+        .map_or(0, |index| index + 1);
+    let composer = &lines[start..metadata];
+    if composer.len() < 3
+        || composer[0].text.trim() != "┃"
+        || composer[composer.len() - 1].text.trim() != "┃"
+    {
+        return PaneState::Unknown;
+    }
+    composer_state(composer, '┃', profile)
+}
+
 pub fn classify(coding_agent: &str, content: &str) -> PaneState {
     if !matches!(coding_agent, "claude" | "codex" | "opencode") {
         return PaneState::Unknown;
     }
-    let lines = styled_lines(coding_agent, content);
+    let lines = styled_lines(content);
     let lines: Vec<_> = lines
         .iter()
         .filter(|line| !line.text.trim().is_empty())
@@ -246,7 +320,7 @@ pub fn classify(coding_agent: &str, content: &str) -> PaneState {
             {
                 return PaneState::Unknown;
             }
-            composer_state(&[lines[index]], '❯')
+            composer_state(&[lines[index]], '❯', ComposerProfile::Standard)
         }
         "codex" => {
             let Some(index) = lines
@@ -266,21 +340,9 @@ pub fn classify(coding_agent: &str, content: &str) -> PaneState {
             {
                 return PaneState::Unknown;
             }
-            composer_state(&[lines[index]], '›')
+            composer_state(&[lines[index]], '›', ComposerProfile::Codex)
         }
-        "opencode" if last.text.trim_start().starts_with('┃') && last.text.contains("Build") => {
-            let Some(start) = lines[..lines.len() - 1]
-                .iter()
-                .rposition(|line| !line.text.trim_start().starts_with('┃'))
-            else {
-                return PaneState::Unknown;
-            };
-            let composer = &lines[start + 1..lines.len() - 1];
-            if composer.len() < 3 {
-                return PaneState::Unknown;
-            }
-            composer_state(composer, '┃')
-        }
+        "opencode" => opencode_state(&lines),
         _ => PaneState::Unknown,
     }
 }
