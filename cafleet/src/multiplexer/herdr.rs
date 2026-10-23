@@ -901,7 +901,7 @@ mod tests {
         let runner = FakeRunner::with_binary("herdr");
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
         let ts = "2026-10-23T00:00:00.000000+00:00";
-        mux.send_inline_preview("w1:p2", 5, 2, ts, "a\r\nb\nc\rd\tx\x1b\x7f", None)
+        mux.send_inline_preview("w1:p2", 5, 2, ts, "a\r\nb\nc\rd\tx\x1b\x7f")
             .unwrap();
         let expected = format!("[cafleet msg 5 from 2 {ts}] a⏎b⏎c⏎d␉x\\x1b\\x7f");
         let text = expected.as_str();
@@ -923,7 +923,7 @@ mod tests {
         }));
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
         let error = mux
-            .send_inline_preview("w1:p2", 5, 2, "timestamp", "hello", None)
+            .send_inline_preview("w1:p2", 5, 2, "timestamp", "hello")
             .unwrap_err();
         assert!(
             error.to_string().contains("injected first write failure"),
@@ -946,7 +946,7 @@ mod tests {
         }));
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
         let error = mux
-            .send_inline_preview("w1:p2", 5, 2, "timestamp", "hello", None)
+            .send_inline_preview("w1:p2", 5, 2, "timestamp", "hello")
             .unwrap_err();
         assert!(
             error.to_string().contains("injected enter failure"),
@@ -968,7 +968,7 @@ mod tests {
         let runner = FakeRunner::without_binaries();
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
         let error = mux
-            .send_inline_preview("w1:p2", 5, 2, "timestamp", "hello", None)
+            .send_inline_preview("w1:p2", 5, 2, "timestamp", "hello")
             .unwrap_err();
         assert_eq!(error.to_string(), "herdr binary not found on PATH");
         assert!(runner.events().is_empty());

@@ -529,7 +529,7 @@ mod tests {
         let runner = FakeRunner::with_binary("tmux");
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
         let ts = "2026-10-23T00:00:00.000000+00:00";
-        mux.send_inline_preview("%5", 5, 2, ts, "a\r\nb\nc\rd\tx\x1b\x7f", None)
+        mux.send_inline_preview("%5", 5, 2, ts, "a\r\nb\nc\rd\tx\x1b\x7f")
             .unwrap();
         let expected = format!("[cafleet msg 5 from 2 {ts}] a⏎b⏎c⏎d␉x\\x1b\\x7f");
         let text = expected.as_str();
@@ -551,7 +551,7 @@ mod tests {
         }));
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
         let error = mux
-            .send_inline_preview("%5", 5, 2, "timestamp", "hello", None)
+            .send_inline_preview("%5", 5, 2, "timestamp", "hello")
             .unwrap_err();
         assert!(
             error.to_string().contains("injected first write failure"),
@@ -574,7 +574,7 @@ mod tests {
         }));
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
         let error = mux
-            .send_inline_preview("%5", 5, 2, "timestamp", "hello", None)
+            .send_inline_preview("%5", 5, 2, "timestamp", "hello")
             .unwrap_err();
         assert!(
             error.to_string().contains("injected enter failure"),
@@ -596,7 +596,7 @@ mod tests {
         let runner = FakeRunner::without_binaries();
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
         let error = mux
-            .send_inline_preview("%5", 5, 2, "timestamp", "hello", None)
+            .send_inline_preview("%5", 5, 2, "timestamp", "hello")
             .unwrap_err();
         assert_eq!(error.to_string(), "tmux binary not found on PATH");
         assert!(runner.events().is_empty());
