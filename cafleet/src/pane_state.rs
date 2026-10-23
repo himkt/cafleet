@@ -1,5 +1,6 @@
 use regex::Regex;
 use std::sync::LazyLock;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaneState {
@@ -79,7 +80,7 @@ impl Style {
             && (matches!(self.foreground, Some(Foreground::Indexed(240..=248)))
                 || (profile == ComposerProfile::Codex
                     && self.foreground.is_none()
-                    && self.background == Some(Background::Rgb([53, 53, 53]))))
+                    && matches!(self.background, None | Some(Background::Rgb([53, 53, 53])))))
         {
             Role::Decoration
         } else if self.explicit
@@ -169,6 +170,43 @@ struct Line {
     characters: Vec<(char, Style)>,
 }
 
+impl Line {
+    fn columns(&self, start: usize, end: usize) -> Option<Self> {
+        if start >= end {
+            return None;
+        }
+        let mut column = 0;
+        let mut characters = Vec::new();
+        for &(ch, style) in &self.characters {
+            let width = ch.width()?;
+            if column == end {
+                if width == 0 {
+                    return None;
+                }
+                break;
+            }
+            let next = column + width;
+            if (column < start && next > start)
+                || (column < end && next > end)
+                || (column == start && width == 0)
+            {
+                return None;
+            }
+            if column >= start {
+                characters.push((ch, style));
+            }
+            column = next;
+        }
+        if column < end {
+            return None;
+        }
+        Some(Self {
+            text: characters.iter().map(|(ch, _)| ch).collect(),
+            characters,
+        })
+    }
+}
+
 fn styled_lines(content: &str) -> Vec<Line> {
     static CSI: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"\x1b\[([0-?]*)([ -/]*)([@-~])").expect("valid CSI pattern"));
@@ -253,7 +291,7 @@ fn claude_state(lines: &[&Line]) -> PaneState {
     };
     static STATUS: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
-            r"^⏵⏵ don't ask on \(shift\+tab to cycle\)(?: · ← for agents)?(?:\s+◐ \S+ · /effort)?$",
+            r"^⏵⏵ don't ask on \(shift\+tab to cycle\)(?: · ← for agents)?(?:\s+◐ \S+ · /effort)?(?:\s+Ctrl\+Y to paste deleted text)?$",
         )
         .expect("valid Claude status pattern")
     });
@@ -277,6 +315,116 @@ fn claude_state(lines: &[&Line]) -> PaneState {
     composer_state(&[lines[index]], '❯', ComposerProfile::Standard)
 }
 
+fn opencode_border(line: &Line) -> Option<(usize, usize)> {
+    let text = line.text.trim_start();
+    let border = text.strip_prefix('╹')?;
+    let width = border.chars().take_while(|ch| *ch == '▀').count();
+    if width == 0 || border[width * '▀'.len_utf8()..].starts_with(|ch: char| !ch.is_whitespace())
+    {
+        return None;
+    }
+    let left = line.text[..line.text.len() - text.len()].width();
+    Some((left, left + 1 + width))
+}
+
+fn opencode_region(line: &Line, left: usize, right: usize) -> Option<Line> {
+    if left > 0 && !line.columns(0, left)?.text.trim().is_empty() {
+        return None;
+    }
+    let region = line.columns(left, right)?;
+    region.text.starts_with('┃').then_some(region)
+}
+
+fn shortcut_columns(line: &Line, expected: &[&str]) -> Option<Vec<usize>> {
+    static WORD: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\S+").expect("valid shortcut word pattern"));
+    let words: Vec<_> = WORD.find_iter(&line.text).collect();
+    let suffix = words.get(words.len().checked_sub(expected.len())?..)?;
+    if !suffix
+        .iter()
+        .map(|word| word.as_str())
+        .eq(expected.iter().copied())
+    {
+        return None;
+    }
+    Some(
+        suffix
+            .iter()
+            .map(|word| line.text[..word.start()].width())
+            .collect(),
+    )
+}
+
+fn opencode_shortcuts(lines: &[&Line], border: usize, left: usize, right: usize) -> bool {
+    let Some(first) = lines
+        .get(border + 1)
+        .and_then(|line| line.columns(left, right))
+    else {
+        return false;
+    };
+    if shortcut_columns(&first, &["tab", "agents", "ctrl+p", "commands"]).is_some() {
+        return true;
+    }
+    let Some(columns) = shortcut_columns(&first, &["tab", "ctrl+p"]) else {
+        return false;
+    };
+    lines
+        .get(border + 2)
+        .and_then(|line| line.columns(left, right))
+        .and_then(|line| shortcut_columns(&line, &["agents", "commands"]))
+        .is_some_and(|second| columns == second)
+}
+
+fn opencode_rgb_state(lines: &[&Line]) -> PaneState {
+    let Some(border) = lines
+        .iter()
+        .rposition(|line| line.text.trim_start().starts_with('╹'))
+    else {
+        return PaneState::Unknown;
+    };
+    let Some((left, right)) = opencode_border(lines[border]) else {
+        return PaneState::Unknown;
+    };
+    if border < 4 || !opencode_shortcuts(lines, border, left, right) {
+        return PaneState::Unknown;
+    }
+    let metadata = border - 1;
+    let Some(footer) = opencode_region(lines[metadata], left, right) else {
+        return PaneState::Unknown;
+    };
+    if footer
+        .text
+        .strip_prefix('┃')
+        .expect("validated metadata marker")
+        .trim()
+        .is_empty()
+    {
+        return PaneState::Unknown;
+    }
+    let start = lines[..metadata]
+        .iter()
+        .rposition(|line| !line.text.trim_start().starts_with('┃'))
+        .map_or(0, |index| index + 1);
+    let Some(composer) = lines[start..metadata]
+        .iter()
+        .map(|line| opencode_region(line, left, right))
+        .collect::<Option<Vec<_>>>()
+    else {
+        return PaneState::Unknown;
+    };
+    if composer.len() < 3
+        || composer[0].text.trim() != "┃"
+        || composer[composer.len() - 1].text.trim() != "┃"
+    {
+        return PaneState::Unknown;
+    }
+    composer_state(
+        &composer.iter().collect::<Vec<_>>(),
+        '┃',
+        ComposerProfile::OpenCodeRgb,
+    )
+}
+
 fn opencode_state(lines: &[&Line]) -> PaneState {
     let (metadata, profile) = if lines
         .last()
@@ -289,7 +437,7 @@ fn opencode_state(lines: &[&Line]) -> PaneState {
                 .split_whitespace()
                 .eq(["tab", "agents", "ctrl+p", "commands"])
         }) else {
-            return PaneState::Unknown;
+            return opencode_rgb_state(lines);
         };
         if shortcuts < 2 {
             return PaneState::Unknown;
