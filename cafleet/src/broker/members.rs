@@ -112,6 +112,16 @@ pub fn active_member_fleet(conn: &Connection, member_id: i64) -> Result<Option<i
 
 pub fn deregister_member(conn: &mut Connection, member_id: i64) -> Result<bool, CafleetError> {
     crate::db::require_current(conn)?;
+    let tx = conn.transaction().map_err(db_err)?;
+    let changed = deregister_member_rows(&tx, member_id)?;
+    tx.commit().map_err(db_err)?;
+    Ok(changed)
+}
+
+pub(crate) fn deregister_member_rows(
+    conn: &Connection,
+    member_id: i64,
+) -> Result<bool, CafleetError> {
     let is_root: bool = conn
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM fleets \
@@ -126,8 +136,7 @@ pub fn deregister_member(conn: &mut Connection, member_id: i64) -> Result<bool, 
         ));
     }
     let now = format_utc(now_utc());
-    let tx = conn.transaction().map_err(db_err)?;
-    let changed = tx
+    let changed = conn
         .execute(
             "UPDATE members SET status='deregistered', deregistered_at=?1 \
              WHERE member_id=?2 AND status='active'",
@@ -137,12 +146,11 @@ pub fn deregister_member(conn: &mut Connection, member_id: i64) -> Result<bool, 
     if changed == 0 {
         return Ok(false);
     }
-    tx.execute(
+    conn.execute(
         "DELETE FROM member_placements WHERE member_id=?1",
         [member_id],
     )
     .map_err(db_err)?;
-    tx.commit().map_err(db_err)?;
     Ok(true)
 }
 

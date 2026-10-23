@@ -268,7 +268,40 @@ pub enum AnyMultiplexer {
     Herdr(HerdrMultiplexer),
 }
 
+pub(crate) enum PostCloseLayout {
+    None,
+    HerdrTab(String),
+}
+
 impl AnyMultiplexer {
+    pub(crate) fn close_pane(
+        &self,
+        target_pane_id: &str,
+        ignore_missing: bool,
+    ) -> Result<PostCloseLayout, MultiplexerError> {
+        match self {
+            Self::Tmux(mux) => {
+                mux.kill_pane(target_pane_id, ignore_missing)?;
+                Ok(PostCloseLayout::None)
+            }
+            Self::Herdr(mux) => Ok(mux
+                .close_pane(target_pane_id, ignore_missing)?
+                .map_or(PostCloseLayout::None, PostCloseLayout::HerdrTab)),
+        }
+    }
+
+    pub(crate) fn restore_after_close(&self, layout: PostCloseLayout) {
+        match (self, layout) {
+            (_, PostCloseLayout::None) => {}
+            (Self::Herdr(mux), PostCloseLayout::HerdrTab(tab_id)) => {
+                let _ = mux.resize_after_close(&tab_id);
+            }
+            (Self::Tmux(_), PostCloseLayout::HerdrTab(_)) => {
+                unreachable!("post-close layout belongs to its multiplexer backend");
+            }
+        }
+    }
+
     pub fn bounded(&self, deadline: crate::input::Deadline) -> Self {
         match self {
             Self::Tmux(mux) => Self::Tmux(mux.bounded(deadline)),

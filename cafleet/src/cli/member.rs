@@ -404,7 +404,7 @@ fn delete(
         ));
     }
 
-    let (member, _guard) = loop {
+    let pane_status = loop {
         let member = crate::input::with_database_budget(conn, deadline, |conn| {
             load_member(conn, member_id, true)
         })?;
@@ -434,48 +434,66 @@ fn delete(
         } else {
             None
         };
-        let current = crate::input::with_database_budget(conn, deadline, |conn| {
-            load_member(conn, member_id, true)
+        let deleted = crate::input::with_database_budget(conn, deadline, |conn| {
+            let tx = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .map_err(crate::broker::members::db_err)?;
+            let current = load_member(&tx, member_id, true)?;
+            if current.placement != member.placement {
+                return Ok(None);
+            }
+            if current.kind == crate::broker::records::MemberKind::Director {
+                return Err(CafleetError::App(
+                    "cannot deregister the root Director; use 'cafleet fleet delete' instead"
+                        .into(),
+                ));
+            }
+            let pane = current
+                .placement
+                .as_ref()
+                .and_then(|placement| placement.mux_pane_id.as_deref());
+            let (pane_status, layout) = if let Some(pane_id) = pane {
+                let mux = resolve_mux(settings)
+                    .map_err(|error| CafleetError::App(error.to_string()))?
+                    .bounded(deadline);
+                mux.ensure_available()
+                    .map_err(|error| CafleetError::App(error.to_string()))?;
+                let layout = mux.close_pane(pane_id, true).map_err(|error| {
+                    CafleetError::App(format!(
+                        "kill_pane failed for pane {pane_id}: {error}. The {} server may be \
+                         unreachable. Verify with 'cafleet doctor', then re-run the command.",
+                        mux.name()
+                    ))
+                })?;
+                (format!("{pane_id} (killed)"), Some((mux, layout)))
+            } else if current.placement.is_none() {
+                ("(no placement)".to_string(), None)
+            } else {
+                ("(pending — no pane)".to_string(), None)
+            };
+            let finalize = || -> Result<(), CafleetError> {
+                let changed = crate::broker::members::deregister_member_rows(&tx, member_id)?;
+                assert!(
+                    changed,
+                    "the locked member remains active until deregistration"
+                );
+                deadline.remaining()?;
+                tx.commit().map_err(crate::broker::members::db_err)
+            };
+            finalize().map_err(|error| {
+                CafleetError::App(format!("deregister failed: {}", error.message()))
+            })?;
+            Ok(Some((pane_status, layout)))
         })?;
-        if current.placement != member.placement {
-            drop(guard);
-            deadline.remaining()?;
-            continue;
+        if let Some((pane_status, layout)) = deleted {
+            if let Some((mux, layout)) = layout {
+                mux.restore_after_close(layout);
+            }
+            break pane_status;
         }
-        if current.kind == crate::broker::records::MemberKind::Director {
-            return Err(CafleetError::App(
-                "cannot deregister the root Director; use 'cafleet fleet delete' instead".into(),
-            ));
-        }
-        break (current, guard);
+        drop(guard);
+        deadline.remaining()?;
     };
-    let pane = member
-        .placement
-        .as_ref()
-        .and_then(|p| p.mux_pane_id.clone());
-    let pane_status = if member.placement.is_none() {
-        "(no placement)".to_string()
-    } else if let Some(pane_id) = &pane {
-        let mux = resolve_mux(settings)
-            .map_err(|e| CafleetError::App(e.to_string()))?
-            .bounded(deadline);
-        mux.ensure_available()
-            .map_err(|e| CafleetError::App(e.to_string()))?;
-        mux.kill_pane(pane_id, true).map_err(|error| {
-            CafleetError::App(format!(
-                "kill_pane failed for pane {pane_id}: {error}. The {} server may be \
-                 unreachable. Verify with 'cafleet doctor', then re-run the command.",
-                mux.name()
-            ))
-        })?;
-        format!("{pane_id} (killed)")
-    } else {
-        "(pending — no pane)".to_string()
-    };
-    crate::input::with_database_budget(conn, deadline, |conn| {
-        broker::deregister_member(conn, member_id)
-    })
-    .map_err(|e| CafleetError::App(format!("deregister failed: {}", e.message())))?;
 
     let result = json!({"member_id": member_id, "pane_status": pane_status});
     emit(json, &result, || {

@@ -431,16 +431,24 @@ impl HerdrMultiplexer {
         target_pane_id: &str,
         ignore_missing: bool,
     ) -> Result<(), MultiplexerError> {
+        if let Some(tab_id) = self.close_pane(target_pane_id, ignore_missing)? {
+            let _ = self.resize_after_close(&tab_id);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn close_pane(
+        &self,
+        target_pane_id: &str,
+        ignore_missing: bool,
+    ) -> Result<Option<String>, MultiplexerError> {
         let target_tab_id = self.pane_tab_id(target_pane_id);
         self.run_tolerating_missing(
             &herdr_argv(&["herdr", "pane", "close", target_pane_id]),
             ignore_missing,
             None,
         )?;
-        if let Some(tab_id) = target_tab_id {
-            let _ = self.resize_after_close(&tab_id);
-        }
-        Ok(())
+        Ok(target_tab_id)
     }
 
     /// Best-effort pre-close read of the target pane's tab; `None` (the
@@ -453,7 +461,7 @@ impl HerdrMultiplexer {
         result["pane"]["tab_id"].as_str().map(str::to_string)
     }
 
-    fn resize_after_close(&self, target_tab_id: &str) -> Result<(), MultiplexerError> {
+    pub(crate) fn resize_after_close(&self, target_tab_id: &str) -> Result<(), MultiplexerError> {
         let Some(anchor_pane_id) = self.surviving_pane_in_tab(target_tab_id)? else {
             return Ok(()); // the tab has no panes left — nothing to rebalance
         };
