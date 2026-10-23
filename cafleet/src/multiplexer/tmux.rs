@@ -485,240 +485,130 @@ mod tests {
     }
 
     #[test]
-    fn send_poll_trigger_keystrokes_esc_payload_enter_with_the_two_delays() {
+    fn send_prompt_preserves_literal_text_and_settles_before_enter() {
+        let runner = FakeRunner::with_binary("tmux");
+        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
+        let text = "  /help with literal $HOME; !  ";
+        mux.send_prompt("%5", text).unwrap();
+        assert_eq!(
+            runner.run_argvs(),
+            vec![
+                argv(&["tmux", "send-keys", "-t", "%5", "-l", text]),
+                argv(&["tmux", "send-keys", "-t", "%5", "Enter"])
+            ]
+        );
+        let events = runner.events();
+        assert_eq!(events.len(), 3, "{events:?}");
+        assert_eq!(events[1], sleep_event(1.0));
+        for event in events {
+            if let crate::multiplexer::test_support::Event::Run { timeout_secs, .. } = event {
+                assert!(timeout_secs.is_some_and(|seconds| seconds > 0 && seconds <= 5));
+            }
+        }
+    }
+
+    #[test]
+    fn send_poll_trigger_uses_only_literal_json_poll_settle_and_enter() {
         let runner = FakeRunner::with_binary("tmux");
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
         assert!(mux.send_poll_trigger("%5", 14));
+        let text = "cafleet message poll 14 --json";
         assert_eq!(
-            runner.events(),
+            runner.run_argvs(),
             vec![
-                run_event(&["tmux", "send-keys", "-t", "%5", "Escape"], Some(5)),
-                sleep_event(0.1),
-                run_event(
-                    &[
-                        "tmux",
-                        "send-keys",
-                        "-t",
-                        "%5",
-                        "-l",
-                        "cafleet message poll 14 — then resume \
-                         your work if something was still running.",
-                    ],
-                    Some(5),
-                ),
-                sleep_event(1.0),
-                run_event(&["tmux", "send-keys", "-t", "%5", "Enter"], Some(5)),
+                argv(&["tmux", "send-keys", "-t", "%5", "-l", text]),
+                argv(&["tmux", "send-keys", "-t", "%5", "Enter"])
             ]
         );
+        assert_eq!(runner.events()[1], sleep_event(1.0));
     }
 
     #[test]
-    fn send_poll_trigger_is_best_effort() {
-        let runner = FakeRunner::without_binaries();
-        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        assert!(!mux.send_poll_trigger("%5", 14), "tmux missing → false");
-        assert!(runner.events().is_empty(), "no keystroke is attempted");
-
-        let runner = FakeRunner::with_binary("tmux");
-        runner.respond(Err(RunError::Failed {
-            stderr: "boom".to_string(),
-        }));
-        let mux = TmuxMultiplexer::new(runner, tmux_env());
-        assert!(!mux.send_poll_trigger("%5", 14), "any error → false");
-    }
-
-    #[test]
-    fn send_inline_preview_types_the_two_line_payload_esc_first() {
+    fn send_inline_preview_submits_one_visible_literal_line() {
         let runner = FakeRunner::with_binary("tmux");
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        let ts = "2026-07-30T09:00:00.000000+00:00";
-        assert!(
-            mux.send_inline_preview("%5", 5, 2, ts, "a\r\nb\nc\rd", None)
-                .is_ok()
-        );
+        let ts = "2026-10-23T00:00:00.000000+00:00";
+        mux.send_inline_preview("%5", 5, 2, ts, "a\r\nb\nc\rd\tx\x1b\x7f", None)
+            .unwrap();
+        let expected = format!("[cafleet msg 5 from 2 {ts}] a⏎b⏎c⏎d␉x\\x1b\\x7f");
+        let text = expected.as_str();
         assert_eq!(
-            runner.events(),
+            runner.run_argvs(),
             vec![
-                run_event(&["tmux", "send-keys", "-t", "%5", "Escape"], Some(5)),
-                sleep_event(0.1),
-                run_event(
-                    &[
-                        "tmux",
-                        "send-keys",
-                        "-t",
-                        "%5",
-                        "-l",
-                        &format!("[cafleet msg 5 from 2 {ts}]\na⏎b⏎c⏎d"),
-                    ],
-                    Some(5),
-                ),
-                sleep_event(1.0),
-                run_event(&["tmux", "send-keys", "-t", "%5", "Enter"], Some(5)),
-            ],
-            "one -l keystroke + one Enter: the embedded newline is a soft break"
-        );
-    }
-
-    #[test]
-    fn send_inline_preview_without_the_binary_is_the_exact_path_error() {
-        let runner = FakeRunner::without_binaries();
-        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        let err = mux
-            .send_inline_preview("%5", 5, 2, "2026-07-30T09:00:00.000000+00:00", "hi", None)
-            .unwrap_err();
-        assert_eq!(err.to_string(), "tmux binary not found on PATH");
-        assert!(
-            runner.events().is_empty(),
-            "the precheck precedes any keystroke"
-        );
-    }
-
-    #[test]
-    fn send_inline_preview_propagates_an_escape_failure_with_the_raw_detail() {
-        let runner = FakeRunner::with_binary("tmux");
-        runner.respond(Err(RunError::Failed {
-            stderr: "  pane died  ".to_string(),
-        }));
-        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        let err = mux
-            .send_inline_preview("%5", 5, 2, "2026-07-30T09:00:00.000000+00:00", "hi", None)
-            .unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "tmux command failed: tmux send-keys -t %5 Escape\nstderr: pane died"
-        );
-        assert_eq!(
-            runner.events(),
-            vec![run_event(
-                &["tmux", "send-keys", "-t", "%5", "Escape"],
-                Some(5),
-            )],
-            "a failed Escape aborts before the payload"
-        );
-    }
-
-    #[test]
-    fn send_inline_preview_propagates_a_payload_failure_with_argv_and_stderr() {
-        let runner = FakeRunner::with_binary("tmux");
-        runner.respond(Ok(String::new()));
-        runner.respond(Err(RunError::Failed {
-            stderr: "no such pane: %5".to_string(),
-        }));
-        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        let ts = "2026-07-30T09:00:00.000000+00:00";
-        let err = mux
-            .send_inline_preview("%5", 5, 2, ts, "a\nb", None)
-            .unwrap_err();
-        let payload = format!("[cafleet msg 5 from 2 {ts}]\na⏎b");
-        assert_eq!(
-            err.to_string(),
-            format!(
-                "tmux command failed: tmux send-keys -t %5 -l {payload}\nstderr: no such pane: %5"
-            )
-        );
-        assert_eq!(
-            runner.events(),
-            vec![
-                run_event(&["tmux", "send-keys", "-t", "%5", "Escape"], Some(5)),
-                sleep_event(0.1),
-                run_event(&["tmux", "send-keys", "-t", "%5", "-l", &payload], Some(5)),
-            ],
-            "one attempt only — the payload failure aborts before Enter"
-        );
-    }
-
-    #[test]
-    fn send_inline_preview_propagates_a_trailing_enter_failure() {
-        let runner = FakeRunner::with_binary("tmux");
-        runner.respond(Ok(String::new()));
-        runner.respond(Ok(String::new()));
-        runner.respond(Err(RunError::Failed {
-            stderr: "submit lost".to_string(),
-        }));
-        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        let ts = "2026-07-30T09:00:00.000000+00:00";
-        let err = mux
-            .send_inline_preview("%5", 5, 2, ts, "hi", None)
-            .unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "tmux command failed: tmux send-keys -t %5 Enter\nstderr: submit lost"
-        );
-        assert_eq!(
-            runner.events(),
-            vec![
-                run_event(&["tmux", "send-keys", "-t", "%5", "Escape"], Some(5)),
-                sleep_event(0.1),
-                run_event(
-                    &[
-                        "tmux",
-                        "send-keys",
-                        "-t",
-                        "%5",
-                        "-l",
-                        &format!("[cafleet msg 5 from 2 {ts}]\nhi"),
-                    ],
-                    Some(5),
-                ),
-                sleep_event(1.0),
-                run_event(&["tmux", "send-keys", "-t", "%5", "Enter"], Some(5)),
-            ],
-            "the full choreography ran once; no retry follows the lost Enter"
-        );
-    }
-
-    #[test]
-    fn send_prompt_is_esc_safeguarded_and_stripped() {
-        let runner = FakeRunner::with_binary("tmux");
-        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        mux.send_prompt("%5", "  hi tmux  ").unwrap();
-        assert_eq!(
-            runner.events(),
-            vec![
-                run_event(&["tmux", "send-keys", "-t", "%5", "Escape"], None),
-                sleep_event(0.1),
-                run_event(&["tmux", "send-keys", "-t", "%5", "-l", "hi tmux"], None),
-                sleep_event(1.0),
-                run_event(&["tmux", "send-keys", "-t", "%5", "Enter"], None),
+                argv(&["tmux", "send-keys", "-t", "%5", "-l", text]),
+                argv(&["tmux", "send-keys", "-t", "%5", "Enter"])
             ]
         );
-
-        let runner = FakeRunner::with_binary("tmux");
-        runner.respond(Err(RunError::Failed {
-            stderr: "boom".to_string(),
-        }));
-        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        assert!(mux.send_prompt("%5", "hi tmux").is_err());
-        assert_eq!(
-            runner.events(),
-            vec![run_event(
-                &["tmux", "send-keys", "-t", "%5", "Escape"],
-                None,
-            )],
-            "a failed Esc aborts before the payload"
-        );
+        assert_eq!(runner.events()[1], sleep_event(1.0));
     }
 
     #[test]
-    fn send_prompt_rejects_empty_and_multiline_text() {
+    fn first_preview_write_failure_propagates_cause_without_enter_or_retry() {
+        let runner = FakeRunner::with_binary("tmux");
+        runner.respond(Err(RunError::Failed {
+            stderr: "injected first write failure".into(),
+        }));
+        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
+        let error = mux
+            .send_inline_preview("%5", 5, 2, "timestamp", "hello", None)
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("injected first write failure"),
+            "{error}"
+        );
+        let text = "[cafleet msg 5 from 2 timestamp] hello";
+        assert_eq!(
+            runner.run_argvs(),
+            vec![argv(&["tmux", "send-keys", "-t", "%5", "-l", text])]
+        );
+        assert_eq!(runner.events().len(), 1);
+    }
+
+    #[test]
+    fn lost_preview_enter_propagates_cause_after_one_literal_write() {
+        let runner = FakeRunner::with_binary("tmux");
+        runner.respond(Ok(String::new()));
+        runner.respond(Err(RunError::Failed {
+            stderr: "injected enter failure".into(),
+        }));
+        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
+        let error = mux
+            .send_inline_preview("%5", 5, 2, "timestamp", "hello", None)
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("injected enter failure"),
+            "{error}"
+        );
+        let text = "[cafleet msg 5 from 2 timestamp] hello";
+        assert_eq!(
+            runner.run_argvs(),
+            vec![
+                argv(&["tmux", "send-keys", "-t", "%5", "-l", text]),
+                argv(&["tmux", "send-keys", "-t", "%5", "Enter"])
+            ]
+        );
+        assert_eq!(runner.events().len(), 3);
+    }
+
+    #[test]
+    fn inline_preview_requires_the_backend_binary_before_any_io() {
+        let runner = FakeRunner::without_binaries();
+        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
+        let error = mux
+            .send_inline_preview("%5", 5, 2, "timestamp", "hello", None)
+            .unwrap_err();
+        assert_eq!(error.to_string(), "tmux binary not found on PATH");
+        assert!(runner.events().is_empty());
+    }
+
+    #[test]
+    fn prompt_line_validation_precedes_transport() {
         let runner = FakeRunner::with_binary("tmux");
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        assert_eq!(
-            mux.send_prompt("%5", "   ").unwrap_err().to_string(),
-            "send_prompt: text may not be empty"
-        );
-        assert_eq!(
-            mux.send_prompt("%5", "a\nb").unwrap_err().to_string(),
-            "send_prompt: text may not contain newlines"
-        );
-        assert_eq!(
-            mux.send_prompt("%5", "a\rb").unwrap_err().to_string(),
-            "send_prompt: text may not contain newlines"
-        );
-        assert!(
-            runner.events().is_empty(),
-            "validation precedes any keystroke"
-        );
+        for text in ["", "  ", "a\nb", "a\rb", "a\tb", "a\0b", "a\x1bb", "a\x7fb"] {
+            assert!(mux.send_prompt("%5", text).is_err(), "{text:?}");
+        }
+        assert!(runner.events().is_empty());
     }
 
     #[test]
@@ -745,7 +635,16 @@ mod tests {
         assert_eq!(
             runner.events(),
             vec![run_event(
-                &["tmux", "capture-pane", "-p", "-t", "%5", "-S", "-1002"],
+                &[
+                    "tmux",
+                    "capture-pane",
+                    "-p",
+                    "-e",
+                    "-t",
+                    "%5",
+                    "-S",
+                    "-1002"
+                ],
                 None,
             )],
             "A8 over-fetches by the fixed 1000-line margin"
@@ -770,6 +669,7 @@ mod tests {
                 "tmux",
                 "capture-pane",
                 "-p",
+                "-e",
                 "-t",
                 "%5",
                 "-S",

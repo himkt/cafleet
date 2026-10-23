@@ -778,103 +778,6 @@ fn member_delete_of_the_root_director_is_rejected() {
 }
 
 #[test]
-fn member_prompt_dispatches_and_validates_the_text() {
-    let cli = Cli::new();
-    let (fleet_id, _) = cli.seeded_fleet();
-    let member_id = cli.seed_member(fleet_id, "worker");
-    let pane = format!("%{}", member_id + 4);
-    let calls_before = cli.shim_calls().len();
-    let output = cli.run(&["member", "prompt", &member_id.to_string(), "hello worker"]);
-    assert_eq!(code(&output), 0, "{}", stderr(&output));
-    let out = stdout(&output);
-    assert!(out.contains("Sent prompt"), "{out}");
-    assert!(out.contains(&format!("worker ({pane}).")), "{out}");
-    let calls = cli.shim_calls();
-    assert!(
-        calls[calls_before..]
-            .iter()
-            .any(|line| line == &format!("send-keys -t {pane} -l hello worker")),
-        "{calls:?}"
-    );
-
-    let delta = &calls[calls_before..];
-    let payload = delta
-        .iter()
-        .position(|line| line == &format!("send-keys -t {pane} -l hello worker"))
-        .unwrap();
-    assert!(payload > 0, "{delta:?}");
-    assert_eq!(delta[payload - 1], format!("send-keys -t {pane} Escape"));
-
-    let calls_before = calls.len();
-    let output = cli.run(&["member", "prompt", &member_id.to_string(), "a\nb"]);
-    assert_eq!(code(&output), 2);
-    assert!(
-        stderr(&output).contains("text may not contain newlines."),
-        "{}",
-        stderr(&output)
-    );
-    let calls = cli.shim_calls();
-    assert!(
-        calls[calls_before..]
-            .iter()
-            .all(|line| !line.starts_with("send-keys")),
-        "{calls:?}"
-    );
-}
-
-#[test]
-fn member_prompt_takes_the_pane_claim_and_fails_while_another_keystroke_holds_it() {
-    let cli = Cli::new();
-    let (fleet_id, _) = cli.seeded_fleet();
-    let member_id = cli.seed_member(fleet_id, "worker");
-    let keystroke_at = || -> Option<String> {
-        cli.sqlite()
-            .query_row(
-                "SELECT keystroke_at FROM member_placements WHERE member_id=?1",
-                [member_id],
-                |row| row.get(0),
-            )
-            .unwrap()
-    };
-
-    let output = cli.run(&["member", "prompt", &member_id.to_string(), "hello worker"]);
-    assert_eq!(code(&output), 0, "{}", stderr(&output));
-    assert!(keystroke_at().is_some(), "a dispatch claims the pane");
-
-    let held = cafleet::time::format_utc(chrono::Utc::now() + chrono::Duration::hours(1));
-    cli.sqlite()
-        .execute(
-            "UPDATE member_placements SET keystroke_at=?1 WHERE member_id=?2",
-            rusqlite::params![held, member_id],
-        )
-        .unwrap();
-    let calls_before = cli.shim_calls().len();
-    let output = cli.run(&["member", "prompt", &member_id.to_string(), "second prompt"]);
-    assert_eq!(code(&output), 1);
-    assert_eq!(stdout(&output), "");
-    assert!(
-        stderr(&output).contains(&format!(
-            "Error: member {member_id}'s pane is receiving another keystroke; \
-             retry in a few seconds."
-        )),
-        "{}",
-        stderr(&output)
-    );
-    let calls = cli.shim_calls();
-    assert!(
-        calls[calls_before..]
-            .iter()
-            .all(|line| !line.starts_with("send-keys")),
-        "{calls:?}"
-    );
-    assert_eq!(
-        keystroke_at(),
-        Some(held),
-        "a refused claim changes nothing"
-    );
-}
-
-#[test]
 fn member_ping_skips_a_pending_placement_and_exits_zero() {
     let cli = Cli::new();
     let (fleet_id, _) = cli.seeded_fleet();
@@ -941,6 +844,10 @@ fn member_ping_skips_a_pending_placement_and_exits_zero() {
     cafleet::broker::update_placement_pane_id(&mut cli.sqlite(), member_id, &pane)
         .unwrap()
         .unwrap();
+    cli.set_pane_capture(
+        &pane,
+        "Ready.\n────────────\n❯ \x1b[0m\n────────────\n? for shortcuts",
+    );
     let calls_before = calls.len();
     let output = cli.run(&["member", "ping", &member_id.to_string(), "--json"]);
     assert_eq!(code(&output), 0);
@@ -951,9 +858,15 @@ fn member_ping_skips_a_pending_placement_and_exits_zero() {
     assert_eq!(payload["skipped"], false);
     assert_eq!(payload["reason"], serde_json::Value::Null);
     let calls = cli.shim_calls();
-    assert_eq!(calls[calls_before..].iter().filter(|line| line.as_str() == format!(
-        "send-keys -t {pane} -l cafleet message poll {member_id} — then resume your work if something was still running."
-    )).count(), 1, "{calls:?}");
+    assert_eq!(
+        calls[calls_before..]
+            .iter()
+            .filter(|line| line.as_str()
+                == format!("send-keys -t {pane} -l cafleet message poll {member_id} --json"))
+            .count(),
+        1,
+        "{calls:?}"
+    );
 }
 
 #[test]
@@ -961,11 +874,12 @@ fn member_capture_text_emits_the_content_only() {
     let cli = Cli::new();
     let (fleet_id, _) = cli.seeded_fleet();
     let member_id = cli.seed_member(fleet_id, "worker");
+    let pane = format!("%{}", member_id + 4);
     let output = cli.run(&["member", "capture", &member_id.to_string()]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     assert_eq!(
         stdout(&output),
-        REST_CAPTURE.replace("{pane}", "%7"),
+        REST_CAPTURE.replace("{pane}", &pane),
         "the raw capture content, no envelope, no trailing newline"
     );
 
@@ -993,14 +907,14 @@ fn member_capture_text_emits_the_content_only() {
         ],
     );
     assert_eq!(payload["member_id"], member_id);
-    assert_eq!(payload["pane_id"], "%7");
+    assert_eq!(payload["pane_id"], pane);
     assert_eq!(payload["lines"], 20);
-    assert_capture_content(&payload, "%7");
+    assert_capture_content(&payload, &pane);
     let calls = cli.shim_calls();
     assert!(
         calls[calls_before..]
             .iter()
-            .any(|line| line == "capture-pane -p -t %7 -S -1020"),
+            .any(|line| line == &format!("capture-pane -p -e -t {pane} -S -1020")),
         "{calls:?}"
     );
 }
@@ -1043,7 +957,7 @@ fn fleet_capture_prints_director_first_then_members_ascending() {
         assert!(
             calls[calls_before..]
                 .iter()
-                .any(|line| line == &format!("capture-pane -p -t {pane} -S -1020")),
+                .any(|line| line == &format!("capture-pane -p -e -t {pane} -S -1020")),
             "{calls:?}"
         );
     }
@@ -1095,7 +1009,7 @@ fn fleet_capture_prints_director_first_then_members_ascending() {
         assert!(
             calls[calls_before..]
                 .iter()
-                .any(|line| line == &format!("capture-pane -p -t {pane} -S -1005")),
+                .any(|line| line == &format!("capture-pane -p -e -t {pane} -S -1005")),
             "{calls:?}"
         );
     }
