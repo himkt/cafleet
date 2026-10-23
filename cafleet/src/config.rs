@@ -24,7 +24,7 @@ impl Settings {
                         "HOME is not set; cannot derive the default database path".to_string(),
                     )
                 })?;
-                format!("sqlite:///{home}/.local/share/cafleet/cafleet_v7.db")
+                format!("sqlite:///{home}/.local/share/cafleet/cafleet_v8.db")
             }
         };
         Ok(Settings {

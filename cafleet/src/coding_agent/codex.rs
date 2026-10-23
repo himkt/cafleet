@@ -48,7 +48,6 @@ impl CodingAgent for Codex {
         _display_name: &str,
         model: Option<&str>,
         effort: Option<&str>,
-        _monitor: bool,
     ) -> Vec<String> {
         let mut argv = vec![
             "codex".to_string(),

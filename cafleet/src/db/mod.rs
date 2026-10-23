@@ -1,4 +1,4 @@
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 use crate::error::CafleetError;
 
@@ -58,6 +58,90 @@ pub fn head_version() -> u32 {
         .last()
         .expect("the embedded migration chain has at least the baseline")
         .0
+}
+
+pub(crate) fn require_current(conn: &Connection) -> Result<(), CafleetError> {
+    crate::diagnosis::classify_schema(conn, head_version()).require_current()
+}
+
+pub const APPLICATION_ID: i64 = 1128351288;
+
+fn metadata_rows(
+    conn: &Connection,
+    sql: &str,
+    name: &str,
+) -> Result<Vec<Vec<rusqlite::types::Value>>, CafleetError> {
+    let mut statement = conn.prepare(sql).map_err(crate::broker::members::db_err)?;
+    let rows = statement
+        .query_map([name], |row| {
+            (0..row.as_ref().column_count())
+                .map(|column| row.get(column))
+                .collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .map_err(crate::broker::members::db_err)?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(crate::broker::members::db_err)
+}
+
+pub(crate) fn current_schema_matches(conn: &Connection) -> Result<bool, CafleetError> {
+    let mut expected = Connection::open_in_memory().map_err(crate::broker::members::db_err)?;
+    migrate_to_head(&mut expected)?;
+    let mut tables = expected.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+    ).map_err(crate::broker::members::db_err)?;
+    let names = tables
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(crate::broker::members::db_err)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(crate::broker::members::db_err)?;
+    for name in names {
+        for sql in [
+            "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info(?1) ORDER BY cid",
+            "SELECT \"table\", \"from\", \"to\", on_update, on_delete, \"match\" FROM pragma_foreign_key_list(?1) ORDER BY \"from\", \"to\"",
+        ] {
+            if metadata_rows(conn, sql, &name)? != metadata_rows(&expected, sql, &name)? {
+                return Ok(false);
+            }
+        }
+        let mut indexes = expected
+            .prepare("SELECT name, \"unique\", partial FROM pragma_index_list(?1)")
+            .map_err(crate::broker::members::db_err)?;
+        let indexes = indexes
+            .query_map([&name], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })
+            .map_err(crate::broker::members::db_err)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(crate::broker::members::db_err)?;
+        for (index, unique, partial) in indexes {
+            let definition: Option<(i64, i64)> = conn
+                .query_row(
+                    "SELECT \"unique\", partial FROM pragma_index_list(?1) WHERE name=?2",
+                    rusqlite::params![name, index],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()
+                .map_err(crate::broker::members::db_err)?;
+            if definition != Some((unique, partial))
+                || metadata_rows(
+                    conn,
+                    "SELECT seqno, cid, name FROM pragma_index_info(?1) ORDER BY seqno",
+                    &index,
+                )? != metadata_rows(
+                    &expected,
+                    "SELECT seqno, cid, name FROM pragma_index_info(?1) ORDER BY seqno",
+                    &index,
+                )?
+            {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
 }
 
 #[cfg(test)]

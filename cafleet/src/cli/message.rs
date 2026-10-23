@@ -14,7 +14,7 @@ use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::output::{format_indexed_list, format_message, truncate_message_text};
 use crate::presentation;
-use crate::runtime::{deliver_preview, ensure_loop_for_owed_work};
+use crate::runtime::deliver_preview;
 
 #[derive(Args)]
 #[group(required = true, multiple = false)]
@@ -37,17 +37,6 @@ pub enum MessageCommand {
         /// Recipient member ID.
         #[arg(long = "to-member-id")]
         to_member_id: i64,
-        #[command(flatten)]
-        body: BodyArgs,
-        /// Output in JSON format.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Broadcast a message to all fleet members.
-    Broadcast {
-        /// Sender's member ID.
-        #[arg(long = "from-member-id")]
-        from_member_id: i64,
         #[command(flatten)]
         body: BodyArgs,
         /// Output in JSON format.
@@ -99,12 +88,6 @@ fn emit_result(
     }
 }
 
-/// The fleet of a sender the broker has just validated as active.
-fn sender_fleet(conn: &Connection, from_member_id: i64) -> Result<i64, CafleetError> {
-    Ok(broker::active_member_fleet(conn, from_member_id)?
-        .expect("the broker persisted a message from this active sender"))
-}
-
 pub fn run(
     conn: &mut Connection,
     settings: &Settings,
@@ -122,63 +105,23 @@ pub fn run(
             let message =
                 broker::send_message(conn, from_member_id, &to_member_id.to_string(), &text)?;
             let message_id = message.message_id;
-            let mux = resolve_mux(settings).ok();
-            let notification_sent =
-                deliver_preview(conn, settings, mux.as_ref(), to_member_id, message_id)?;
-            ensure_loop_for_owed_work(conn, settings, sender_fleet(conn, from_member_id)?)
-                .map_err(|error| {
-                    CafleetError::App(format!(
-                        "Message {message_id} was persisted, but {}. \
-                         Do not resend this message; run 'cafleet doctor'.",
-                        error.message()
-                    ))
-                })?;
+            let notification = resolve_mux(settings)
+                .map_err(|error| CafleetError::App(error.to_string()))
+                .and_then(|mux| {
+                    deliver_preview(conn, settings, Some(&mux), to_member_id, message_id)
+                });
+            let notification_sent = match notification {
+                Ok(sent) => sent,
+                Err(error) => {
+                    eprintln!("Message {message_id} was persisted. {}", error.message());
+                    false
+                }
+            };
             emit_result(
                 settings,
                 presentation::send_outcome(&message, notification_sent),
                 json,
                 |result| format!("Message sent.\n{}", format_message(result)),
-            );
-            Ok(())
-        }
-        MessageCommand::Broadcast {
-            from_member_id,
-            body,
-            json,
-        } => {
-            let text = resolve_body(body.text.as_deref(), body.file.as_deref(), "--file")?;
-
-            let rows = broker::broadcast_message(conn, from_member_id, &text)?;
-            let summary_id = rows.summary.message_id;
-            let recipients = rows.deliveries.len();
-            let mux = resolve_mux(settings).ok();
-            let mut delivered = 0;
-            for (member_id, message_id) in rows.deliveries {
-                if deliver_preview(conn, settings, mux.as_ref(), member_id, message_id)? {
-                    delivered += 1;
-                }
-            }
-            ensure_loop_for_owed_work(conn, settings, sender_fleet(conn, from_member_id)?)
-                .map_err(|error| {
-                    CafleetError::App(format!(
-                        "Broadcast {summary_id} was persisted, but {}. \
-                         Do not resend it; run 'cafleet doctor'.",
-                        error.message()
-                    ))
-                })?;
-            emit_result(
-                settings,
-                Value::Array(vec![presentation::broadcast_outcome(
-                    &rows.summary,
-                    recipients,
-                    delivered,
-                )]),
-                json,
-                |_| {
-                    format!(
-                        "broadcast id={summary_id} recipients={recipients} delivered={delivered}"
-                    )
-                },
             );
             Ok(())
         }

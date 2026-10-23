@@ -11,29 +11,19 @@ fn scalar(value: &Value) -> String {
     }
 }
 
-/// `[<id> | from:<from> | <ts>[ | kind:<kind>][ | origin:<id>]]` + the body
-/// line (omitted when empty) — the only text form; the full envelope is
-/// `--json` (SPEC §6.4).
 pub fn format_message(message: &Value) -> String {
     let message = match message.get("message") {
         Some(inner) if inner.is_object() => inner,
         _ => message,
     };
     let rendered = render_message(message);
-    let mut line1 = format!(
-        "[{} | from:{} | {}",
+    let line1 = format!(
+        "[{} | from:{} | {}]",
         scalar(&rendered["id"]),
         scalar(&rendered["from"]),
         scalar(&rendered["ts"]),
     );
-    if let Some(kind) = rendered.get("kind") {
-        line1.push_str(&format!(" | kind:{}", scalar(kind)));
-    }
-    if let Some(origin) = rendered.get("origin") {
-        line1.push_str(&format!(" | origin:{}", scalar(origin)));
-    }
-    line1.push(']');
-    let body = rendered.get("text").map(scalar).unwrap_or_default();
+    let body = scalar(&rendered["text"]);
     if body.is_empty() {
         return line1;
     }
@@ -64,15 +54,11 @@ pub fn format_member_detail(member: &Value) -> String {
     )
 }
 
-/// `<fleet_id> director=<id> monitor=<id>`, then `monitor loop: pid <pid>` —
-/// the only text form (SPEC §6.4).
 pub fn format_fleet_create(data: &Value) -> String {
     format!(
-        "{} director={} monitor={}\nmonitor loop: pid {}",
+        "{} director={}",
         scalar(&data["fleet_id"]),
         scalar(&data["director"]["member_id"]),
-        scalar(&data["monitor"]["member_id"]),
-        scalar(&data["monitor_loop"]["pid"]),
     )
 }
 

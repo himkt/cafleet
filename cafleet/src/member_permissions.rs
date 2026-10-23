@@ -9,14 +9,12 @@ use serde_json::Value;
 
 /// One invocation of every broker command a claude member is spawned allowed
 /// to run; a setting blocks a member when it blocks any of these.
-pub(crate) const PROBE_COMMANDS: [&str; 7] = [
+pub(crate) const PROBE_COMMANDS: [&str; 5] = [
     "cafleet message send --from-member-id 1 --to-member-id 2 x",
-    "cafleet message broadcast --from-member-id 1 x",
     "cafleet message poll 1",
+    "cafleet message wait 1 --timeout 300 --json",
     "cafleet message ack 1",
     "cafleet message show 1",
-    "cafleet monitor scan 1",
-    "cafleet member ping 1",
 ];
 
 const MANAGED_SETTINGS_PATH: &str = if cfg!(target_os = "macos") {

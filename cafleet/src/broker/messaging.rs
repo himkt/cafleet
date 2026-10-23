@@ -1,19 +1,14 @@
-//! Message send/broadcast/poll/ack and the pending-preview state (SPEC §6.2
-//! *Messaging*). The broker persists only; the caller delivers. The colocated
-//! tests pin the contract; see [`super::test_support`] for the API.
-
 use rusqlite::{Connection, OptionalExtension, params};
 
 use super::members::db_err;
-use super::records::{BroadcastRows, MemberStatus, MessageRecord, MessageStatus};
+use super::records::{MemberStatus, MessageRecord, MessageStatus};
 use crate::error::CafleetError;
 use crate::time::{format_utc, now_utc};
 
-pub(crate) const MESSAGE_COLUMNS: &str = "message_id, owner_member_id, from_member_id, \
-     to_member_id, type, created_at, status_state, status_timestamp, origin_message_id, text";
+pub(crate) const MESSAGE_COLUMNS: &str =
+    "message_id, from_member_id, to_member_id, created_at, status_state, status_timestamp, text";
 
-const PENDING_PREVIEW: &str =
-    "type='unicast' AND status_state='input_required' AND notified_at IS NULL";
+const PENDING_PREVIEW: &str = "status_state='input_required' AND notified_at IS NULL";
 
 /// Read one full typed-column message row in the pinned key order.
 pub(crate) fn message_row(
@@ -32,15 +27,12 @@ pub(crate) fn message_row(
 pub(crate) fn map_message_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageRecord> {
     Ok(MessageRecord {
         message_id: row.get(0)?,
-        owner_member_id: row.get(1)?,
-        from_member_id: row.get(2)?,
-        to_member_id: row.get(3)?,
-        kind: row.get(4)?,
-        created_at: row.get(5)?,
-        status: row.get(6)?,
-        status_timestamp: row.get(7)?,
-        origin_message_id: row.get(8)?,
-        text: row.get(9)?,
+        from_member_id: row.get(1)?,
+        to_member_id: row.get(2)?,
+        created_at: row.get(3)?,
+        status: row.get(4)?,
+        status_timestamp: row.get(5)?,
+        text: row.get(6)?,
     })
 }
 
@@ -65,7 +57,9 @@ pub fn send_message(
     to: &str,
     text: &str,
 ) -> Result<MessageRecord, CafleetError> {
+    crate::db::require_current(conn)?;
     let fleet_id = sender_fleet(conn, from_member_id)?;
+    super::fleets::require_live_fleet(conn, fleet_id)?;
     let to_id: i64 = to
         .parse()
         .map_err(|_| CafleetError::Value(format!("Invalid destination format: {to}")))?;
@@ -97,88 +91,9 @@ pub fn send_message(
     // A self-send owes no keystroke, so it is settled at insert.
     let notified_at = (to_id == from_member_id).then_some(&now);
     conn.execute(
-        "INSERT INTO messages (owner_member_id, from_member_id, to_member_id, type, \
-         created_at, status_state, status_timestamp, origin_message_id, text, notified_at) \
-         VALUES (?1, ?2, ?3, 'unicast', ?4, 'input_required', ?4, NULL, ?5, ?6)",
-        params![to_id, from_member_id, to_id, now, text, notified_at],
-    )
-    .map_err(db_err)?;
-    required_message_row(conn, conn.last_insert_rowid())
-}
-
-pub fn broadcast_message(
-    conn: &mut Connection,
-    from_member_id: i64,
-    text: &str,
-) -> Result<BroadcastRows, CafleetError> {
-    let fleet_id = sender_fleet(conn, from_member_id)?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT member_id FROM members \
-             WHERE fleet_id=?1 AND status='active' AND member_id != ?2 \
-             ORDER BY member_id",
-        )
-        .map_err(db_err)?;
-    let recipients: Vec<i64> = stmt
-        .query_map(params![fleet_id, from_member_id], |row| row.get(0))
-        .map_err(db_err)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(db_err)?;
-    drop(stmt);
-
-    let now = format_utc(now_utc());
-    let summary_text = format!("Broadcast sent to {} recipients", recipients.len());
-    let tx = conn.transaction().map_err(db_err)?;
-    tx.execute(
-        "INSERT INTO messages (owner_member_id, from_member_id, to_member_id, type, \
-         created_at, status_state, status_timestamp, origin_message_id, text, notified_at) \
-         VALUES (?1, ?1, NULL, 'broadcast_summary', ?2, 'completed', ?2, NULL, ?3, ?2)",
-        params![from_member_id, now, summary_text],
-    )
-    .map_err(db_err)?;
-    let summary_id = tx.last_insert_rowid();
-    tx.execute(
-        "UPDATE messages SET origin_message_id=?1 WHERE message_id=?1",
-        [summary_id],
-    )
-    .map_err(db_err)?;
-    let mut deliveries: Vec<(i64, i64)> = Vec::with_capacity(recipients.len());
-    for recipient_id in recipients {
-        tx.execute(
-            "INSERT INTO messages (owner_member_id, from_member_id, to_member_id, type, \
-             created_at, status_state, status_timestamp, origin_message_id, text) \
-             VALUES (?1, ?2, ?1, 'unicast', ?3, 'input_required', ?3, ?4, ?5)",
-            params![recipient_id, from_member_id, now, summary_id, text],
-        )
-        .map_err(db_err)?;
-        deliveries.push((recipient_id, tx.last_insert_rowid()));
-    }
-    tx.commit().map_err(db_err)?;
-
-    Ok(BroadcastRows {
-        summary: required_message_row(conn, summary_id)?,
-        deliveries,
-    })
-}
-
-/// Insert a broker notice: a unicast row from and to the fleet's root
-/// Director, delivered, polled and ACKed like any message.
-pub fn post_notice(
-    conn: &mut Connection,
-    fleet_id: i64,
-    text: &str,
-) -> Result<MessageRecord, CafleetError> {
-    let director_id = super::fleets::fetch_fleet(conn, fleet_id)?
-        .and_then(|fleet| fleet.director_member_id)
-        .ok_or_else(|| {
-            CafleetError::App(format!("fleet {fleet_id} has no root Director recorded"))
-        })?;
-    let now = format_utc(now_utc());
-    conn.execute(
-        "INSERT INTO messages (owner_member_id, from_member_id, to_member_id, type, \
-         created_at, status_state, status_timestamp, origin_message_id, text) \
-         VALUES (?1, ?1, ?1, 'unicast', ?2, 'input_required', ?2, NULL, ?3)",
-        params![director_id, now, text],
+        "INSERT INTO messages (from_member_id, to_member_id, created_at, status_state, status_timestamp, text, notified_at)
+         VALUES (?1, ?2, ?3, 'input_required', ?3, ?4, ?5)",
+        params![from_member_id, to_id, now, text, notified_at],
     )
     .map_err(db_err)?;
     required_message_row(conn, conn.last_insert_rowid())
@@ -191,7 +106,7 @@ pub fn oldest_pending_preview(
     conn.query_row(
         &format!(
             "SELECT {MESSAGE_COLUMNS} FROM messages \
-             WHERE owner_member_id=?1 AND {PENDING_PREVIEW} \
+             WHERE to_member_id=?1 AND {PENDING_PREVIEW} \
              ORDER BY created_at, message_id LIMIT 1"
         ),
         [member_id],
@@ -208,6 +123,7 @@ pub fn stamp_notified(
     message_id: i64,
     when: &str,
 ) -> Result<bool, CafleetError> {
+    crate::db::require_current(conn)?;
     let changed = conn
         .execute(
             &format!(
@@ -221,6 +137,7 @@ pub fn stamp_notified(
 
 /// Return a preview to pending after its keystroke failed.
 pub fn clear_notified(conn: &mut Connection, message_id: i64) -> Result<(), CafleetError> {
+    crate::db::require_current(conn)?;
     conn.execute(
         "UPDATE messages SET notified_at=NULL WHERE message_id=?1",
         [message_id],
@@ -239,7 +156,7 @@ pub fn poll_messages(
     let mut stmt = conn
         .prepare(&format!(
             "SELECT {MESSAGE_COLUMNS} FROM messages \
-             WHERE owner_member_id=?1 AND status_state='input_required' AND type='unicast' \
+             WHERE to_member_id=?1 AND status_state='input_required' \
              ORDER BY status_timestamp DESC, message_id DESC"
         ))
         .map_err(db_err)?;
@@ -252,6 +169,7 @@ pub fn poll_messages(
 }
 
 pub fn ack_message(conn: &mut Connection, message_id: i64) -> Result<MessageRecord, CafleetError> {
+    crate::db::require_current(conn)?;
     let row: Option<MessageStatus> = conn
         .query_row(
             "SELECT status_state FROM messages WHERE message_id=?1",

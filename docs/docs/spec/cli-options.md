@@ -249,7 +249,7 @@ One operation-wide five-second deadline bounds lock acquisition, with 50-millise
 
 ### `fleet capture`
 
-`cafleet fleet capture FLEET_ID [--lines N] [--ansi] [--json]` captures the current active roster once, Director first then placement-owning members by ascending ID. The default depth is 20. Per-pane failures annotate entries and leave the rest available. It writes no broker state.
+`cafleet fleet capture FLEET_ID [--lines N] [--ansi] [--json]` checks fleet existence and soft-deletion before resolving the multiplexer. An absent or deleted fleet exits 1 with `Error: fleet ID not found`. Capture reads the current active roster once, Director first then placement-owning members by ascending ID. The default depth is 20. Per-pane failures, including a pending Director placement, annotate entries and leave the rest available. It writes no broker state.
 
 Text sections begin `=== ID (NAME; kind=KIND; coding_agent=AGENT; pane=PANE; captured_at=TS) ===`, separated by a blank line. A failed/pending pane omits capture time and carries its diagnostic.
 

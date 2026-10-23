@@ -54,7 +54,7 @@ pub fn run(
     let conn = (hooks.connect)(&settings.database_url);
     let head = crate::db::head_version();
     let schema = match &conn {
-        Ok(conn) => diagnosis::classify_schema(conn, head),
+        Ok(conn) => diagnosis::classify_selected_schema(conn, head, &settings.database_url),
         Err(cause) => SchemaState::Unreachable {
             cause: cause.clone(),
         },

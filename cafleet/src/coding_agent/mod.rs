@@ -32,7 +32,6 @@ pub trait CodingAgent {
         display_name: &str,
         model: Option<&str>,
         effort: Option<&str>,
-        monitor: bool,
     ) -> Vec<String>;
 }
 

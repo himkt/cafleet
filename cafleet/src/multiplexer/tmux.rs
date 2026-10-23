@@ -289,6 +289,7 @@ impl TmuxMultiplexer {
                 "tmux",
                 "capture-pane",
                 "-p",
+                "-e",
                 "-t",
                 target_pane_id,
                 "-S",

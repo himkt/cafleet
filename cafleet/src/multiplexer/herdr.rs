@@ -473,6 +473,8 @@ impl HerdrMultiplexer {
                 "pane",
                 "read",
                 target_pane_id,
+                "--format",
+                "ansi",
                 "--source",
                 "recent-unwrapped",
                 "--lines",

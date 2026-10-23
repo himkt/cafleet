@@ -69,7 +69,6 @@ impl CodingAgent for Opencode {
         _display_name: &str,
         model: Option<&str>,
         _effort: Option<&str>,
-        _monitor: bool,
     ) -> Vec<String> {
         let mut argv = vec![
             "opencode".to_string(),

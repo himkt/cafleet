@@ -86,8 +86,6 @@ fn truncate_item(item: &mut Value, limit: usize) {
     }
 }
 
-/// Project a typed-column message to the compact rendered shape
-/// `{id, from, ts, text[, kind][, origin]}`.
 pub fn render_message(message: &Value) -> Value {
     let field = |name: &str| -> Value {
         message
@@ -100,26 +98,7 @@ pub fn render_message(message: &Value) -> Value {
     out.insert("from".to_string(), field("from_member_id"));
     out.insert("ts".to_string(), field("status_timestamp"));
     out.insert("text".to_string(), field("text"));
-    let kind = field("type");
-    if kind != "unicast" {
-        out.insert("kind".to_string(), kind);
-    }
-    let origin = &message["origin_message_id"];
-    if is_truthy(origin) {
-        out.insert("origin".to_string(), origin.clone());
-    }
     Value::Object(out)
-}
-
-pub(crate) fn is_truthy(value: &Value) -> bool {
-    match value {
-        Value::Null => false,
-        Value::Bool(b) => *b,
-        Value::Number(n) => n.as_f64() != Some(0.0),
-        Value::String(s) => !s.is_empty(),
-        Value::Array(a) => !a.is_empty(),
-        Value::Object(o) => !o.is_empty(),
-    }
 }
 
 #[cfg(test)]

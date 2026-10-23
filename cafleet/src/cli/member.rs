@@ -7,7 +7,6 @@ use rusqlite::Connection;
 use serde_json::{Value, json};
 
 use super::creation::{PaneGuard, RegistrationGuard};
-use std::os::unix::process::ExitStatusExt;
 
 use super::helpers::{emit, resolve_body, resolve_command_body, resolve_mux};
 use crate::broker::records::MemberRecord;
@@ -15,11 +14,8 @@ use crate::broker::{self, NewPlacement};
 use crate::capture::{CaptureSnapshot, MemberCapture, write_member_capture};
 use crate::coding_agent::coding_agent;
 use crate::config::Settings;
-use crate::delivery::{DELIVERY_CAPTURE_LINES, Item, PaneOutcome, deliver_pane};
+use crate::delivery::DELIVERY_CAPTURE_LINES;
 use crate::error::CafleetError;
-use crate::notices;
-use crate::runtime::{deliver_preview, ensure_monitor_loop};
-use crate::time::format_utc;
 
 use crate::multiplexer::Multiplexer;
 use crate::output::{format_member, format_member_detail, format_member_list, strip_ansi};
@@ -73,9 +69,6 @@ pub enum MemberCommand {
         /// Reasoning-effort level (claude, codex only).
         #[arg(long)]
         effort: Option<String>,
-        /// Register the fleet's monitor member (sole accepted value: monitor).
-        #[arg(long, value_parser = ["monitor"])]
-        role: Option<String>,
         #[command(flatten)]
         body: PromptArgs,
         /// Output in JSON format.
@@ -128,18 +121,9 @@ pub enum MemberCommand {
         member_id: i64,
         #[command(flatten)]
         body: ExecBodyArgs,
-        /// Block until the exec closes, then print its exit status.
-        #[arg(long)]
-        wait: bool,
         /// Output in JSON format.
         #[arg(long)]
         json: bool,
-    },
-    /// Run one dispatched exec; cafleet types this into the member's pane.
-    ExecRun {
-        /// The exec to run.
-        #[arg(value_name = "EXEC_ID")]
-        exec_id: i64,
     },
     /// Inject an inbox-poll keystroke into a member's pane.
     Ping {
@@ -255,7 +239,6 @@ pub fn run(
             coding_agent,
             model,
             effort,
-            role,
             body,
             json,
         } => create(
@@ -267,7 +250,6 @@ pub fn run(
             coding_agent.as_deref(),
             model.as_deref(),
             effort.as_deref(),
-            role.is_some(),
             &body,
             json,
         ),
@@ -282,10 +264,8 @@ pub fn run(
         MemberCommand::Exec {
             member_id,
             body,
-            wait,
             json,
-        } => exec(conn, settings, member_id, &body, wait, json),
-        MemberCommand::ExecRun { exec_id } => exec_run(conn, settings, exec_id),
+        } => exec(conn, settings, member_id, &body, json),
         MemberCommand::Ping { member_id, json } => ping(conn, settings, member_id, json),
         MemberCommand::Capture {
             member_id,
@@ -306,11 +286,9 @@ fn create(
     explicit_agent: Option<&str>,
     model: Option<&str>,
     effort: Option<&str>,
-    monitor: bool,
     body: &PromptArgs,
     json: bool,
 ) -> Result<(), CafleetError> {
-    // 1. Auto-resolve the Director from the fleet row, first thing.
     let fleet = broker::fleets::fetch_fleet(conn, fleet_id)?
         .ok_or_else(|| CafleetError::Usage(format!("Fleet '{fleet_id}' not found.")))?;
     if fleet.deleted_at.is_some() {
@@ -326,30 +304,11 @@ fn create(
     let backend = coding_agent(&agent_name)
         .unwrap_or_else(|| panic!("'{agent_name}' is a registry-validated backend"));
 
-    // 2. Model and effort validation, before any registration or pane effect.
     backend.validate_model(model)?;
     backend.validate_effort(effort)?;
 
-    // 3. Monitor-role guards, one-per-fleet first, before any registration
-    //    or pane effect (the broker also enforces monitor uniqueness).
-    let active_monitor = broker::active_monitor_member_id(conn, fleet_id)?;
-    if monitor {
-        if let Some(existing) = active_monitor {
-            return Err(CafleetError::App(format!(
-                "fleet {fleet_id} already has an active monitor member (member {existing})"
-            )));
-        }
-    } else if active_monitor.is_none() {
-        return Err(CafleetError::App(format!(
-            "fleet {fleet_id} has no active monitor member; spawn one with --role monitor first"
-        )));
-    }
-
-    // 4. Resolve the body before any side effect; substitution is deferred
-    //    until the new member id exists.
     let prompt_body = resolve_body(body.prompt.as_deref(), body.file.as_deref(), "--file")?;
 
-    // 5. Preconditions.
     let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
@@ -364,8 +323,6 @@ fn create(
         .into_iter()
         .collect();
 
-    // 6. Register the member with a pending placement, threading the
-    //    monitor role into its card marker.
     let placement = NewPlacement {
         backend: mux.name().to_string(),
         mux_session: context.session.clone(),
@@ -373,19 +330,9 @@ fn create(
         mux_pane_id: None,
         coding_agent: agent_name.clone(),
     };
-    let registered = broker::register_member(
-        conn,
-        fleet_id,
-        name,
-        description,
-        &[],
-        Some(&placement),
-        monitor,
-    )
-    .map_err(|error| match error {
-        CafleetError::App(_)
-        | CafleetError::Usage(_)
-        | CafleetError::ActiveMonitorExists { .. } => error,
+    let registered = broker::register_member(conn, fleet_id, name, description, Some(&placement))
+        .map_err(|error| match error {
+        CafleetError::App(_) | CafleetError::Usage(_) => error,
         other => CafleetError::App(format!("register failed: {}", other.message())),
     })?;
     let member_id = registered.member_id;
@@ -400,7 +347,7 @@ fn create(
         Ok(prompt) => prompt,
         Err(original) => return Err(registration.rollback(original)),
     };
-    let argv = backend.build_spawn_argv(&prompt, name, model, effort, monitor);
+    let argv = backend.build_spawn_argv(&prompt, name, model, effort);
     let pane_id = match mux.split_window(&context, &env, &argv) {
         Ok(pane_id) => pane_id,
         Err(error) => {
@@ -411,7 +358,6 @@ fn create(
     };
     let mut pane = PaneGuard::with_kill(pane_id.clone(), Box::new(|id| mux.kill_pane(id, true)));
 
-    // 10. A failed placement patch compensates the pane before registration.
     let patched = broker::update_placement_pane_id(registration.connection(), member_id, &pane_id);
     let placement_view = match patched {
         Ok(Some(placement)) => placement,
@@ -429,7 +375,6 @@ fn create(
     pane.finish();
     registration.finish();
 
-    // 11. Emit with the placement view attached.
     let result = json!({
         "member_id": member_id,
         "name": name,
@@ -507,6 +452,58 @@ fn list(conn: &mut Connection, fleet_id: i64, json: bool) -> Result<(), CafleetE
     Ok(())
 }
 
+fn input_state(state: PaneState) -> Option<&'static str> {
+    match state {
+        PaneState::Finished => None,
+        PaneState::Working => Some("working"),
+        PaneState::AwaitingUser => Some("awaiting_user"),
+        PaneState::Unclassified => Some("unknown"),
+    }
+}
+
+fn dispatch_input(
+    conn: &Connection,
+    settings: &Settings,
+    member: &MemberRecord,
+    text: &str,
+    label: &str,
+) -> Result<(), CafleetError> {
+    let id = member.member_id;
+    let Some(locked) = crate::input::lock_member(conn, settings, member)? else {
+        return Err(CafleetError::App(format!(
+            "member {id}'s pane is receiving another input; retry after it is idle."
+        )));
+    };
+    let placement = locked.member.placement.as_ref().expect("locked placement");
+    let pane = placement
+        .mux_pane_id
+        .as_deref()
+        .expect("locked concrete pane");
+    let prewrite = |cause| {
+        CafleetError::App(format!(
+            "{label} was not dispatched to member {id}: {cause}"
+        ))
+    };
+    let mux = resolve_mux(settings).map_err(|e| prewrite(e.to_string()))?;
+    mux.ensure_available()
+        .map_err(|e| prewrite(e.to_string()))?;
+    let content = mux
+        .capture_pane(pane, DELIVERY_CAPTURE_LINES)
+        .map_err(|e| prewrite(e.to_string()))?;
+    if let Some(state) = input_state(classify(&placement.coding_agent, &strip_ansi(&content))) {
+        return Err(CafleetError::App(format!(
+            "member {id} is {state}; {label} was not dispatched."
+        )));
+    }
+    mux.send_prompt(pane, text).map_err(|error| CafleetError::App(format!(
+        "{label} delivery to member {id} is uncertain: {error}. Inspect the pane before retrying."
+    )))
+}
+
+fn valid_input(text: &str) -> bool {
+    !text.trim().is_empty() && !text.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
+}
+
 fn prompt(
     conn: &mut Connection,
     settings: &Settings,
@@ -514,38 +511,19 @@ fn prompt(
     text: &str,
     json: bool,
 ) -> Result<(), CafleetError> {
-    if text.contains('\n') || text.contains('\r') {
+    if !valid_input(text) {
         return Err(CafleetError::Usage(
-            "text may not contain newlines.".to_string(),
+            "text must be one non-empty line without control characters.".into(),
         ));
     }
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return Err(CafleetError::Usage("text may not be empty.".to_string()));
-    }
-    let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
-    mux.ensure_available()
-        .map_err(|e| CafleetError::App(e.to_string()))?;
-
     let member = load_member(conn, member_id, false)?;
-    let pane_id = require_pane(&member, member_id, "prompt")?;
-    if !broker::claim_pane(conn, member_id, now_utc())? {
-        return Err(CafleetError::App(format!(
-            "member {member_id}'s pane is receiving another keystroke; retry in a few seconds."
-        )));
-    }
-    mux.send_prompt(&pane_id, trimmed)
-        .map_err(|e| CafleetError::App(format!("send failed: {e}")))?;
-
-    let name = member.name.as_str();
-    let result = json!({
-        "member_id": member_id,
-        "pane_id": pane_id,
-        "text": trimmed,
-    });
-    emit(json, &result, || {
-        format!("Sent prompt {trimmed:?} to member {name} ({pane_id}).")
-    });
+    let pane = require_pane(&member, member_id, "prompt")?;
+    dispatch_input(conn, settings, &member, text, "prompt")?;
+    emit(
+        json,
+        &json!({"member_id":member_id,"pane_id":pane,"text":text}),
+        || format!("Sent prompt {text:?} to member {} ({pane}).", member.name),
+    );
     Ok(())
 }
 
@@ -554,129 +532,39 @@ fn exec(
     settings: &Settings,
     member_id: i64,
     body: &ExecBodyArgs,
-    wait: bool,
     json: bool,
 ) -> Result<(), CafleetError> {
     let command = resolve_command_body(body.command.as_deref(), body.file.as_deref())?;
-    let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
-    mux.ensure_available()
-        .map_err(|e| CafleetError::App(e.to_string()))?;
-
     let member = load_member(conn, member_id, false)?;
-    let fleet = broker::fleets::fetch_fleet(conn, member.fleet_id)?
-        .ok_or_else(|| CafleetError::App(format!("fleet '{}' not found.", member.fleet_id)))?;
-    if fleet.director_member_id == Some(member_id) {
+    if member.kind == crate::broker::records::MemberKind::Director {
         return Err(CafleetError::App(
-            "cannot exec in the Director's own pane".to_string(),
+            "cannot exec in the Director's own pane".into(),
         ));
     }
-    let pane_id = require_pane(&member, member_id, "exec")?;
-
-    let exec_id = broker::queue_exec(conn, member_id, &command)?.exec_id;
-    let outcome = deliver_pane(conn, &mux, settings, member_id, now_utc())?;
-    let dispatched = matches!(
-        outcome,
-        PaneOutcome::Fired { item: Item::ExecDispatch { exec_id: fired }, .. } if fired == exec_id
-    );
-    ensure_monitor_loop(conn, settings, member.fleet_id).map_err(|error| {
-        CafleetError::App(format!(
-            "Exec {exec_id} was queued, but {}",
-            error.message()
-        ))
-    })?;
-
-    let name = member.name.as_str();
-    let result = json!({
-        "exec_id": exec_id,
-        "member_id": member_id,
-        "pane_id": pane_id,
-        "dispatched": dispatched,
-    });
-    emit(json, &result, || {
-        let state = if dispatched { "dispatched" } else { "held" };
-        format!("Queued exec {exec_id} for member {name} ({pane_id}): {state}.")
-    });
-    if wait {
-        wait_for_exec(conn, exec_id)?;
-    }
-    Ok(())
-}
-
-/// Block until the exec closes, then print its exit status; an exec closed
-/// as lost prints its notice text and exits 1.
-fn wait_for_exec(conn: &Connection, exec_id: i64) -> Result<(), CafleetError> {
-    loop {
-        let exec = broker::get_exec(conn, exec_id)?.expect("the exec row was just queued");
-        if exec.resumed_at.is_some() {
-            let Some(exit_code) = exec.exit_code else {
-                let member = broker::exec_member(conn, exec.member_id)?;
-                println!("{}", notices::exec_lost(&exec, &member));
-                std::process::exit(1);
-            };
-            println!(
-                "exec {exec_id} exited {exit_code} after {} s.",
-                notices::exec_run_seconds(&exec)?
-            );
-            return Ok(());
-        }
-        std::thread::sleep(std::time::Duration::from_secs(1));
-    }
-}
-
-/// The pane-side half of `member exec`: claim the dispatched row, run its
-/// command with the pane's stdio, record the exit status, tell the Director,
-/// and exit with the command's code.
-fn exec_run(conn: &mut Connection, settings: &Settings, exec_id: i64) -> Result<(), CafleetError> {
-    let pid = i64::from(std::process::id());
-    if !broker::start_exec(conn, exec_id, pid, &format_utc(now_utc()))? {
-        return Err(CafleetError::App(format!("exec {exec_id} is not runnable")));
-    }
-    let command = broker::get_exec(conn, exec_id)?
-        .expect("the start claim just matched this row")
-        .command;
-    let status = std::process::Command::new("sh")
-        .arg("-c")
-        .arg(&command)
-        .status()
-        .map_err(|error| CafleetError::App(format!("cannot run sh: {error}")))?;
-    let exit_code = match status.code() {
-        Some(code) => code,
-        None => {
-            128 + status
-                .signal()
-                .expect("a process without an exit code was ended by a signal")
-        }
-    };
-
-    broker::finish_exec(conn, exec_id, i64::from(exit_code), &format_utc(now_utc()))?;
-    let exec = broker::get_exec(conn, exec_id)?.expect("the exec row was just finished");
-    let member = broker::exec_member(conn, exec.member_id)?;
-    let notice = broker::post_notice(
-        conn,
-        member.fleet_id,
-        &notices::exec_finished(&exec, &member, i64::from(exit_code))?,
-    )?;
-    let mux = resolve_mux(settings).ok();
-    deliver_preview(
+    let pane = require_pane(&member, member_id, "exec")?;
+    dispatch_input(
         conn,
         settings,
-        mux.as_ref(),
-        notice.owner_member_id,
-        notice.message_id,
+        &member,
+        &format!("! {command}"),
+        "native command",
     )?;
-
-    println!("[cafleet] exec {exec_id} exited {exit_code}");
-    std::process::exit(exit_code);
-}
-
-/// Why a gated ping sends no keystroke into a pane in `state`; `None` when
-/// the state lets the ping through.
-fn ping_hold_reason(state: PaneState) -> Option<&'static str> {
-    match state {
-        PaneState::AwaitingUser => Some("awaiting_user"),
-        PaneState::Working => Some("working"),
-        PaneState::Finished | PaneState::Unclassified => None,
-    }
+    let agent = &member
+        .placement
+        .as_ref()
+        .expect("placed member")
+        .coding_agent;
+    emit(
+        json,
+        &json!({"member_id":member_id,"pane_id":pane,"coding_agent":agent,
+        "command":command,"dispatched":true}),
+        || {
+            format!(
+                "Dispatched native command to member {member_id} ({pane}). Inspect the pane for its result."
+            )
+        },
+    );
+    Ok(())
 }
 
 fn ping(
@@ -685,73 +573,53 @@ fn ping(
     member_id: i64,
     json: bool,
 ) -> Result<(), CafleetError> {
-    let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
-    mux.ensure_available()
-        .map_err(|e| CafleetError::App(e.to_string()))?;
-
     let member = load_member(conn, member_id, false)?;
-    let name = member.name.as_str();
-    let placement = member
-        .placement
-        .as_ref()
-        .expect("load_member requires a placement row");
-
-    let Some(pane_id) = placement.mux_pane_id.as_deref() else {
-        // The pending-placement skip path: no keystroke, exit 0.
-        let result = json!({
-            "member_id": member_id,
-            "pane_id": Value::Null,
-            "skipped": true,
-            "reason": "pending_placement",
-        });
-        emit(json, &result, || {
-            format!(
-                "Member {name} has no pane yet (pending placement) — ping skipped; \
-                 it will poll its inbox on spawn."
-            )
-        });
-        return Ok(());
-    };
-
-    let hold_reason = if broker::exec_in_flight(conn, member_id)? {
-        Some("exec_running")
+    let placement = member.placement.as_ref().expect("placed member");
+    let pane = placement.mux_pane_id.as_deref();
+    let reason;
+    if let Some(pane) = pane {
+        let locked = crate::input::lock_member(conn, settings, &member)?;
+        reason = match locked {
+            None => Some("busy"),
+            Some(_locked) => {
+                let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
+                mux.ensure_available()
+                    .map_err(|e| CafleetError::App(e.to_string()))?;
+                let content = mux
+                    .capture_pane(pane, DELIVERY_CAPTURE_LINES)
+                    .map_err(|e| CafleetError::App(e.to_string()))?;
+                let reason = input_state(classify(&placement.coding_agent, &strip_ansi(&content)));
+                if reason.is_none() {
+                    mux.send_prompt(pane, &format!("cafleet message poll {member_id} --json"))
+                        .map_err(|e| CafleetError::App(format!(
+                            "poll-trigger delivery to member {member_id} is uncertain: {e}. Inspect the pane before retrying."
+                        )))?;
+                }
+                reason
+            }
+        };
     } else {
-        let content = mux
-            .capture_pane(pane_id, DELIVERY_CAPTURE_LINES)
-            .map_err(|e| CafleetError::App(format!("capture failed: {e}")))?;
-        match ping_hold_reason(classify(&placement.coding_agent, &strip_ansi(&content))) {
-            Some(reason) => Some(reason),
-            None => (!broker::claim_pane(conn, member_id, now_utc())?).then_some("busy"),
-        }
-    };
-    if let Some(reason) = hold_reason {
-        let result = json!({
-            "member_id": member_id,
-            "pane_id": pane_id,
-            "skipped": true,
-            "reason": reason,
-        });
-        emit(json, &result, || {
-            format!("Member {name} ({pane_id}) is {reason} — ping skipped.")
-        });
-        return Ok(());
+        reason = Some("pending_placement");
     }
-
-    if !mux.send_poll_trigger(pane_id, member_id) {
-        return Err(CafleetError::App(format!(
-            "send failed: tmux send-keys did not deliver the poll-trigger keystroke \
-             to pane {pane_id}."
-        )));
-    }
-    let result = json!({
-        "member_id": member_id,
-        "pane_id": pane_id,
-        "skipped": false,
-        "reason": Value::Null,
-    });
-    emit(json, &result, || {
-        format!("Pinged member {name} ({pane_id}) — poll keystroke dispatched.")
-    });
+    emit(
+        json,
+        &json!({"member_id":member_id,"pane_id":pane,
+        "skipped":reason.is_some(),"reason":reason}),
+        || match (pane, reason) {
+            (None, _) => format!(
+                "Member {} has no pane yet (pending placement) — ping skipped; it will poll its inbox on spawn.",
+                member.name
+            ),
+            (Some(pane), Some(reason)) => format!(
+                "Member {} ({pane}) is {reason} — ping skipped.",
+                member.name
+            ),
+            (Some(pane), None) => format!(
+                "Pinged member {} ({pane}) — poll keystroke dispatched.",
+                member.name
+            ),
+        },
+    );
     Ok(())
 }
 

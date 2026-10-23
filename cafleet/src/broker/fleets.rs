@@ -1,12 +1,7 @@
-//! Fleet CRUD (SPEC §6.2 *Fleets*) — atomic fleet + Director + monitor
-//! bootstrap with `director_member_id` backfill and a caller-supplied monitor
-//! spawn callback, list/get/soft-delete + cascade. The colocated tests pin
-//! the contract; see [`super::test_support`] for the API.
-
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 
-use super::members::{db_err, member_card};
+use super::members::db_err;
 use crate::error::CafleetError;
 use crate::time::{format_utc, now_utc};
 
@@ -43,8 +38,6 @@ pub(crate) fn fetch_fleet(
     .map_err(db_err)
 }
 
-/// Bootstrap DB rows in one transaction around the caller's monitor spawn.
-/// Failures explicitly attempt rollback and preserve any recovery diagnostic.
 #[allow(clippy::too_many_arguments)]
 pub fn create_fleet(
     conn: &mut Connection,
@@ -54,145 +47,96 @@ pub fn create_fleet(
     mux_pane_id: &str,
     coding_agent: &str,
     backend: &str,
-    monitor_name: &str,
-    monitor_description: &str,
-    spawn_monitor: impl FnOnce(i64, i64, i64) -> Result<String, CafleetError>,
 ) -> Result<Value, CafleetError> {
+    crate::db::require_current(conn)?;
     let now = format_utc(now_utc());
-    let director_card = member_card(DIRECTOR_NAME, DIRECTOR_DESCRIPTION, &[], false);
-    let monitor_card = member_card(monitor_name, monitor_description, &[], true);
-    let mut tx = conn.transaction().map_err(db_err)?;
-    let mut allocated_fleet_id = None;
-    let result: Result<Value, CafleetError> = (|| {
-        tx.execute(
-            "INSERT INTO fleets (name, created_at) VALUES (?1, ?2)",
-            params![name, now],
-        )
-        .map_err(db_err)?;
-        let fleet_id = tx.last_insert_rowid();
-        allocated_fleet_id = Some(fleet_id);
-        tx.execute(
-        "INSERT INTO members (fleet_id, name, description, status, registered_at, member_card_json) \
-         VALUES (?1, ?2, ?3, 'active', ?4, ?5)",
+    let tx = conn.transaction().map_err(db_err)?;
+    tx.execute(
+        "INSERT INTO fleets (name, created_at) VALUES (?1, ?2)",
+        params![name, now],
+    )
+    .map_err(db_err)?;
+    let fleet_id = tx.last_insert_rowid();
+    tx.execute(
+        "INSERT INTO members (fleet_id, name, description, status, registered_at)
+         VALUES (?1, ?2, ?3, 'active', ?4)",
+        params![fleet_id, DIRECTOR_NAME, DIRECTOR_DESCRIPTION, now],
+    )
+    .map_err(db_err)?;
+    let director_id = tx.last_insert_rowid();
+    tx.execute(
+        "INSERT INTO member_placements
+         (member_id, mux_session, mux_window_id, mux_pane_id, backend, coding_agent, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
-            fleet_id,
-            DIRECTOR_NAME,
-            DIRECTOR_DESCRIPTION,
-            now,
-            director_card
+            director_id,
+            mux_session,
+            mux_window_id,
+            mux_pane_id,
+            backend,
+            coding_agent,
+            now
         ],
     )
     .map_err(db_err)?;
-        let director_id = tx.last_insert_rowid();
-        tx.execute(
-            "INSERT INTO member_placements \
-         (member_id, mux_session, mux_window_id, mux_pane_id, backend, coding_agent, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![
-                director_id,
-                mux_session,
-                mux_window_id,
-                mux_pane_id,
-                backend,
-                coding_agent,
-                now
-            ],
-        )
-        .map_err(db_err)?;
-        tx.execute(
-            "UPDATE fleets SET director_member_id=?1 WHERE fleet_id=?2",
-            params![director_id, fleet_id],
-        )
-        .map_err(db_err)?;
-        tx.execute(
-        "INSERT INTO members (fleet_id, name, description, status, registered_at, member_card_json) \
-         VALUES (?1, ?2, ?3, 'active', ?4, ?5)",
-        params![fleet_id, monitor_name, monitor_description, now, monitor_card],
+    tx.execute(
+        "UPDATE fleets SET director_member_id=?1 WHERE fleet_id=?2",
+        params![director_id, fleet_id],
     )
     .map_err(db_err)?;
-        let monitor_id = tx.last_insert_rowid();
-        let monitor_pane_id = spawn_monitor(fleet_id, director_id, monitor_id)?;
-        tx.execute(
-            "INSERT INTO member_placements \
-         (member_id, mux_session, mux_window_id, mux_pane_id, backend, coding_agent, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![
-                monitor_id,
-                mux_session,
-                mux_window_id,
-                monitor_pane_id,
-                backend,
-                coding_agent,
-                now
-            ],
-        )
-        .map_err(db_err)?;
-        tx.execute_batch("COMMIT").map_err(db_err)?;
-        Ok(json!({
-            "fleet_id": fleet_id,
-            "name": name,
-            "created_at": now,
-            "director": {
-                "member_id": director_id,
-                "name": DIRECTOR_NAME,
-                "description": DIRECTOR_DESCRIPTION,
-                "registered_at": now,
-                "placement": {
-                    "backend": backend,
-                    "mux_session": mux_session,
-                    "mux_window_id": mux_window_id,
-                    "mux_pane_id": mux_pane_id,
-                    "coding_agent": coding_agent,
-                    "created_at": now,
-                },
+    tx.commit().map_err(db_err)?;
+    Ok(json!({
+        "fleet_id": fleet_id, "name": name, "created_at": now,
+        "director": {
+            "member_id": director_id, "name": DIRECTOR_NAME,
+            "description": DIRECTOR_DESCRIPTION, "registered_at": now,
+            "placement": {
+                "backend": backend, "mux_session": mux_session, "mux_window_id": mux_window_id,
+                "mux_pane_id": mux_pane_id, "coding_agent": coding_agent, "created_at": now,
             },
-            "monitor": {
-                "member_id": monitor_id,
-                "name": monitor_name,
-                "description": monitor_description,
-                "registered_at": now,
-                "placement": {
-                    "backend": backend,
-                    "mux_session": mux_session,
-                    "mux_window_id": mux_window_id,
-                    "mux_pane_id": monitor_pane_id,
-                    "coding_agent": coding_agent,
-                    "created_at": now,
-                },
-            },
-        }))
-    })();
-    match result {
-        Ok(value) => {
-            tx.set_drop_behavior(rusqlite::DropBehavior::Ignore);
-            Ok(value)
-        }
-        Err(mut primary) => {
-            // SQLite may already have rolled back (e.g. RAISE(ROLLBACK)).
-            let rollback = if tx.is_autocommit() {
-                Ok(())
-            } else {
-                tx.execute_batch("ROLLBACK").map_err(db_err)
-            };
-            tx.set_drop_behavior(rusqlite::DropBehavior::Ignore);
-            drop(tx);
-            let autocommit = conn.is_autocommit();
-            let cleanup = match rollback {
-                Ok(()) if autocommit => Ok(()),
-                Ok(()) => Err(CafleetError::App(
-                    "transaction remains open after rollback".into(),
-                )),
-                Err(error) => Err(error),
-            };
-            if let Err(error) = cleanup {
-                let id = allocated_fleet_id.map_or_else(|| "unknown".into(), |id| id.to_string());
-                primary = primary.with_cleanup(format!(
-                    "cleanup failed for fleet {id} transaction: {error}"
-                ));
-            }
-            Err(primary)
-        }
+        },
+    }))
+}
+
+pub(crate) fn require_live_fleet(
+    conn: &Connection,
+    fleet_id: i64,
+) -> Result<FleetRow, CafleetError> {
+    let fleet = fetch_fleet(conn, fleet_id)?
+        .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;
+    if fleet.deleted_at.is_some() {
+        return Err(CafleetError::App(format!("fleet {fleet_id} is deleted")));
     }
+    let director = fleet.director_member_id.ok_or_else(|| CafleetError::App(format!(
+        "fleet {fleet_id} has no root Director recorded; re-create the fleet with 'cafleet fleet create'."
+    )))?;
+    let status: Option<super::records::MemberStatus> = conn
+        .query_row(
+            "SELECT status FROM members WHERE member_id=?1 AND fleet_id=?2",
+            params![director, fleet_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(db_err)?;
+    if status != Some(super::records::MemberStatus::Active) {
+        return Err(CafleetError::App(format!(
+            "fleet {fleet_id}'s root Director (member {director}) is not active."
+        )));
+    }
+    let pane: Option<Option<String>> = conn
+        .query_row(
+            "SELECT mux_pane_id FROM member_placements WHERE member_id=?1",
+            [director],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(db_err)?;
+    if !matches!(pane, Some(Some(ref value)) if !value.is_empty()) {
+        return Err(CafleetError::App(format!(
+            "fleet {fleet_id}'s root Director (member {director}) has no concrete placement."
+        )));
+    }
+    Ok(fleet)
 }
 
 pub fn list_fleets(conn: &Connection) -> Result<Vec<Value>, CafleetError> {
@@ -233,10 +177,8 @@ pub fn get_fleet(conn: &Connection, fleet_id: i64) -> Result<Option<Value>, Cafl
     }))
 }
 
-/// Soft-delete + cascade: stamp `deleted_at`, deregister every active member
-/// (root Director included), drop their placement rows and the fleet's
-/// runtime row; messages are untouched. Idempotent.
 pub fn delete_fleet(conn: &mut Connection, fleet_id: i64) -> Result<Value, CafleetError> {
+    crate::db::require_current(conn)?;
     let fleet = fetch_fleet(conn, fleet_id)?
         .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;
     let now = format_utc(now_utc());
@@ -261,8 +203,6 @@ pub fn delete_fleet(conn: &mut Connection, fleet_id: i64) -> Result<Value, Cafle
         [fleet_id],
     )
     .map_err(db_err)?;
-    tx.execute("DELETE FROM monitor_runtime WHERE fleet_id=?1", [fleet_id])
-        .map_err(db_err)?;
     tx.commit().map_err(db_err)?;
     Ok(json!({
         "fleet_id": fleet_id,

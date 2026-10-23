@@ -1,68 +1,9 @@
-//! Read-only message queries — inbox / sent / timeline / `get_message`
-//! visibility rule (SPEC §6.2 *Queries*). The colocated tests pin the
-//! contract; see [`super::test_support`] for the API.
+use rusqlite::Connection;
 
-use rusqlite::{Connection, params};
-
-use super::members::db_err;
-use super::messaging::{MESSAGE_COLUMNS, map_message_row, message_row};
+use super::messaging::message_row;
 use super::records::MessageRecord;
 use crate::error::CafleetError;
 
-fn message_list(
-    conn: &Connection,
-    sql: &str,
-    params: impl rusqlite::Params,
-) -> Result<Vec<MessageRecord>, CafleetError> {
-    let mut stmt = conn.prepare(sql).map_err(db_err)?;
-    let rows = stmt
-        .query_map(params, map_message_row)
-        .map_err(db_err)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(db_err)?;
-    Ok(rows)
-}
-
-pub fn list_inbox(conn: &Connection, member_id: i64) -> Result<Vec<MessageRecord>, CafleetError> {
-    history_records(conn, "owner_member_id", member_id)
-}
-
-pub fn list_sent(conn: &Connection, member_id: i64) -> Result<Vec<MessageRecord>, CafleetError> {
-    history_records(conn, "from_member_id", member_id)
-}
-
-fn history_records(
-    conn: &Connection,
-    member_column: &str,
-    member_id: i64,
-) -> Result<Vec<MessageRecord>, CafleetError> {
-    let sql = format!(
-        "SELECT {MESSAGE_COLUMNS} FROM messages WHERE {member_column}=?1 AND type='unicast' ORDER BY status_timestamp DESC, message_id DESC"
-    );
-    message_list(conn, &sql, [member_id])
-}
-
-/// The fleet's deliveries (scoped via the owning member's fleet), newest first,
-/// hard-capped at `limit`.
-pub fn list_timeline(
-    conn: &Connection,
-    fleet_id: i64,
-    limit: usize,
-) -> Result<Vec<MessageRecord>, CafleetError> {
-    message_list(
-        conn,
-        "SELECT g.message_id, g.owner_member_id, g.from_member_id, g.to_member_id, \
-                g.type, g.created_at, g.status_state, g.status_timestamp, \
-                g.origin_message_id, g.text \
-         FROM messages g JOIN members m ON m.member_id=g.owner_member_id \
-         WHERE m.fleet_id=?1 AND g.type='unicast' \
-         ORDER BY g.status_timestamp DESC, g.message_id DESC LIMIT ?2",
-        params![fleet_id, limit as i64],
-    )
-}
-
-/// Fetch one message by id — the fleet is derived from the message row;
-/// existence is the only guard (SPEC §6.2).
 pub fn get_message(conn: &Connection, message_id: i64) -> Result<MessageRecord, CafleetError> {
     let message = message_row(conn, message_id)?
         .ok_or_else(|| CafleetError::Value(format!("Message {message_id} not found")))?;

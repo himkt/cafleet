@@ -9,8 +9,6 @@ pub(crate) mod fleet;
 pub(crate) mod helpers;
 pub(crate) mod member;
 mod message;
-pub(crate) mod monitor;
-mod server;
 mod setup;
 
 use clap::{Parser, Subcommand};
@@ -46,8 +44,6 @@ enum Command {
     /// Print the four-section environment diagnosis (multiplexer, database,
     /// coding agents, member permissions).
     Doctor(doctor::DoctorArgs),
-    /// Start the admin WebUI server.
-    Server(server::ServerArgs),
     /// Fleet lifecycle.
     #[command(subcommand)]
     Fleet(fleet::FleetCommand),
@@ -57,8 +53,6 @@ enum Command {
     /// Message broker.
     #[command(subcommand)]
     Message(message::MessageCommand),
-    /// Run the per-fleet scheduler loop in-process.
-    Monitor(monitor::MonitorArgs),
 }
 
 /// Parse the argv and run the selected command. clap's own parse errors exit
@@ -96,9 +90,13 @@ fn dispatch(
         Command::Doctor(cmd) => doctor::run(settings, cmd, hooks),
         command => {
             let conn = (hooks.connect)(&settings.database_url)?;
-            let schema = diagnosis::classify_schema(&conn, crate::db::head_version());
+            let schema = diagnosis::classify_selected_schema(
+                &conn,
+                crate::db::head_version(),
+                &settings.database_url,
+            );
             helpers::schema_guard(&schema)?;
-            if !matches!(command, Command::Server(_)) {
+            {
                 let home = std::path::PathBuf::from(
                     std::env::var("HOME")
                         .map_err(|_| CafleetError::App("HOME is not set".into()))?,
@@ -125,12 +123,6 @@ fn dispatch(
                     settings,
                     cmd,
                 ),
-                Command::Monitor(cmd) => monitor::run(
-                    slot.as_mut().expect("open invocation connection"),
-                    settings,
-                    cmd,
-                ),
-                Command::Server(cmd) => server::run(settings, cmd),
                 Command::Setup(_) | Command::Doctor(_) => unreachable!("handled above"),
             }
         }
