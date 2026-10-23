@@ -243,7 +243,7 @@ fn claude_state(lines: &[&Line]) -> PaneState {
     };
     static STATUS: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
-            r"^⏵⏵ don't ask on \(shift\+tab to cycle\) · ← for agents(?:\s+◐ \S+ · /effort)?$",
+            r"^⏵⏵ don't ask on \(shift\+tab to cycle\)(?: · ← for agents)?(?:\s+◐ \S+ · /effort)?$",
         )
         .expect("valid Claude status pattern")
     });
