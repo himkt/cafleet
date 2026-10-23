@@ -143,7 +143,7 @@ mod tests {
     #[test]
     fn spawn_argv_uses_the_prompt_flag_pair_and_ignores_display_name() {
         assert_eq!(
-            opencode().build_spawn_argv("do it", "ignored", Some("openai/gpt-4"), None, false),
+            opencode().build_spawn_argv("do it", "ignored", Some("openai/gpt-4"), None),
             argv(&[
                 "opencode",
                 "--agent",
@@ -156,16 +156,8 @@ mod tests {
             "the prompt travels as a --prompt flag pair — TWO tokens"
         );
         assert_eq!(
-            opencode().build_spawn_argv("do it", "ignored", None, None, false),
+            opencode().build_spawn_argv("do it", "ignored", None, None),
             argv(&["opencode", "--agent", "cafleet", "--prompt", "do it"])
-        );
-    }
-
-    #[test]
-    fn spawn_argv_is_the_same_for_the_monitor() {
-        assert_eq!(
-            opencode().build_spawn_argv("do it", "monitor", Some("openai/gpt-4"), None, true),
-            opencode().build_spawn_argv("do it", "monitor", Some("openai/gpt-4"), None, false)
         );
     }
 

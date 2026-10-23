@@ -783,9 +783,8 @@ fn capture(
 
 #[cfg(test)]
 mod tests {
-    use clap::Parser;
-
     use super::MemberCommand;
+    use clap::Parser;
 
     #[derive(Parser)]
     struct Harness {
@@ -797,35 +796,33 @@ mod tests {
         Harness::try_parse_from(args).map(|harness| harness.command)
     }
 
-    fn create_role(command: MemberCommand) -> Option<String> {
-        let MemberCommand::Create { role, .. } = command else {
-            panic!("parsed a non-create command");
-        };
-        role
-    }
-
     #[test]
-    fn create_accepts_the_sole_role_value_monitor() {
-        let command = parse(&[
+    fn create_parses_the_supplied_assignment_and_inline_prompt() {
+        let parsed = parse(&[
             "cafleet",
             "create",
             "--fleet-id",
             "1",
             "--name",
-            "monitor",
+            "reviewer",
             "--description",
-            "d",
-            "--role",
-            "monitor",
+            "assignment",
             "PROMPT",
         ])
         .unwrap();
-        assert_eq!(create_role(command).as_deref(), Some("monitor"));
+        let MemberCommand::Create {
+            name, description, ..
+        } = parsed
+        else {
+            panic!("expected member creation");
+        };
+        assert_eq!(name, "reviewer");
+        assert_eq!(description, "assignment");
     }
 
     #[test]
-    fn create_parses_without_a_role() {
-        let command = parse(&[
+    fn create_parses_file_input_and_backend_model_selection() {
+        parse(&[
             "cafleet",
             "create",
             "--fleet-id",
@@ -833,30 +830,17 @@ mod tests {
             "--name",
             "worker",
             "--description",
-            "d",
-            "PROMPT",
+            "assignment",
+            "--coding-agent",
+            "codex",
+            "--model",
+            "gpt-6.1-sol",
+            "--effort",
+            "high",
+            "--file",
+            "prompt.md",
+            "--json",
         ])
         .unwrap();
-        assert_eq!(create_role(command), None);
-    }
-
-    #[test]
-    fn create_rejects_any_other_role_value() {
-        let Err(err) = parse(&[
-            "cafleet",
-            "create",
-            "--fleet-id",
-            "1",
-            "--name",
-            "worker",
-            "--description",
-            "d",
-            "--role",
-            "builder",
-            "PROMPT",
-        ]) else {
-            panic!("monitor is the sole accepted --role value");
-        };
-        assert_eq!(err.kind(), clap::error::ErrorKind::InvalidValue);
     }
 }

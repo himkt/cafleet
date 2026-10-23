@@ -132,7 +132,7 @@ mod tests {
     #[test]
     fn spawn_argv_carries_the_message_allow_rule_the_display_name_and_optional_tokens() {
         assert_eq!(
-            claude().build_spawn_argv("do it", "worker", Some("opus"), Some("high"), false),
+            claude().build_spawn_argv("do it", "worker", Some("opus"), Some("high")),
             argv(&[
                 "claude",
                 "--permission-mode",
@@ -153,7 +153,7 @@ mod tests {
     #[test]
     fn spawn_argv_omits_all_tokens_for_none_model_and_effort() {
         assert_eq!(
-            claude().build_spawn_argv("do it", "worker", None, None, false),
+            claude().build_spawn_argv("do it", "worker", None, None),
             argv(&[
                 "claude",
                 "--permission-mode",
@@ -165,30 +165,6 @@ mod tests {
                 "do it",
             ]),
             "no --model/--effort tokens at all — never an empty value"
-        );
-    }
-
-    #[test]
-    fn spawn_argv_for_the_monitor_adds_the_scan_and_ping_allow_rules() {
-        assert_eq!(
-            claude().build_spawn_argv("do it", "monitor", Some("haiku"), Some("low"), true),
-            argv(&[
-                "claude",
-                "--permission-mode",
-                "dontAsk",
-                "--allowedTools",
-                "Bash(cafleet message *)",
-                "Bash(cafleet monitor scan *)",
-                "Bash(cafleet member ping *)",
-                "--name",
-                "monitor",
-                "--model",
-                "haiku",
-                "--effort",
-                "low",
-                "do it",
-            ]),
-            "--name ends the --allowedTools value list, so the prompt stays positional"
         );
     }
 

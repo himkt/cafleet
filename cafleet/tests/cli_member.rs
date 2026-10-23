@@ -1,10 +1,8 @@
-//! CLI contract tests: the `member` group (create sequencing + rollback,
-//! delete, show/list, prompt, ping, capture) and the flattened `monitor`
-//! command (SPEC §6.3 *member group*, *monitor*).
-
 mod common;
 
-use common::{Cli, REST_CAPTURE, code, stderr, stdout, write_file};
+use common::{
+    CAPTURE_FAILS, Cli, REST_CAPTURE, code, stderr, stdout, write_executable, write_file,
+};
 use sha2::{Digest, Sha256};
 
 fn database_records(cli: &Cli) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
@@ -13,7 +11,6 @@ fn database_records(cli: &Cli) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
         "fleets",
         "members",
         "member_placements",
-        "monitor_runtime",
         "messages",
         "sqlite_sequence",
     ]
@@ -73,7 +70,7 @@ fn step8_capture_mux_guard_precedes_unknown_member_lookup() {
 }
 
 #[test]
-fn step8_scan_live_fleet_guard_precedes_invalid_mux_resolution() {
+fn fleet_capture_live_fleet_guard_precedes_invalid_mux_resolution() {
     let mut cli = Cli::new();
     let (fleet, _) = cli.seeded_fleet();
     let deleted = cli.run(&["fleet", "delete", &fleet.to_string()]);
@@ -91,7 +88,7 @@ fn step8_scan_live_fleet_guard_precedes_invalid_mux_resolution() {
     cli.set_env("CAFLEET_MULTIPLEXER", "invalid-step8-backend");
     for id in [999, fleet] {
         let calls_before = cli.shim_calls().len();
-        let output = cli.run(&["monitor", "scan", &id.to_string()]);
+        let output = cli.run(&["fleet", "capture", &id.to_string()]);
         assert_eq!(code(&output), 1);
         assert_eq!(
             stderr(&output).trim(),
@@ -118,7 +115,7 @@ fn member_create_spawns_patches_the_pane_and_substitutes_identity() {
         "FLEET {fleet_id} ME {member_id} DIRECTOR {director_member_id} AGENT {coding_agent}",
     ]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
-    assert_eq!(stdout(&output), "3 worker backend=claude pane=%7\n");
+    assert_eq!(stdout(&output), "2 worker backend=claude pane=%7\n");
 
     let split_line = cli
         .shim_calls()
@@ -130,17 +127,22 @@ fn member_create_spawns_patches_the_pane_and_substitutes_identity() {
         "only CAFLEET_DATABASE_URL is forwarded, got: {split_line}"
     );
     assert!(
-        split_line.contains(
-            "claude --permission-mode dontAsk --allowedTools Bash(cafleet message *) \
-             --name worker FLEET 1 ME 3 DIRECTOR 1 AGENT claude"
-        ),
+        split_line.contains("FLEET 1 ME 2 DIRECTOR 1 AGENT claude"),
         "the rendered prompt carries literal identity, got: {split_line}"
+    );
+    assert!(
+        split_line.contains("--permission-mode dontAsk"),
+        "{split_line}"
+    );
+    assert!(
+        split_line.contains("--allowedTools Bash(cafleet message *)"),
+        "{split_line}"
     );
 
     let pane: Option<String> = cli
         .sqlite()
         .query_row(
-            "SELECT mux_pane_id FROM member_placements WHERE member_id=3",
+            "SELECT mux_pane_id FROM member_placements WHERE member_id=2",
             [],
             |row| row.get(0),
         )
@@ -218,11 +220,11 @@ fn member_create_split_failure_rolls_back_the_registration() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(members, 2, "no orphan row survives the ladder");
+    assert_eq!(members, 1, "only the Director remains active");
     let placement_count: i64 = cli
         .sqlite()
         .query_row(
-            "SELECT COUNT(*) FROM member_placements WHERE member_id=3",
+            "SELECT COUNT(*) FROM member_placements WHERE member_id=2",
             [],
             |row| row.get(0),
         )
@@ -269,7 +271,7 @@ fn member_create_validates_model_and_effort_before_any_side_effect() {
         .sqlite()
         .query_row("SELECT COUNT(*) FROM members", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(members, 2, "validation precedes registration");
+    assert_eq!(members, 1, "validation precedes registration");
 }
 
 #[test]
@@ -304,7 +306,7 @@ fn member_create_requires_the_backend_binary_on_path() {
         .query_row("SELECT COUNT(*) FROM members", [], |row| row.get(0))
         .unwrap();
     assert_eq!(
-        members, 2,
+        members, 1,
         "no registration side effect before the precondition"
     );
 }
@@ -333,75 +335,305 @@ fn member_create_unknown_fleet_is_a_usage_error() {
 }
 
 #[test]
-fn member_create_without_a_monitor_hits_the_monitor_first_guard() {
+fn member_creation_uses_its_assignment_without_a_registry_role() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.with_cli_bare_fleet();
-    let records = database_records(&cli);
-    let calls_before = cli.shim_calls().len();
+    let (fleet, _) = cli.with_cli_fleet();
     let output = cli.run(&[
         "member",
         "create",
         "--fleet-id",
-        &fleet_id.to_string(),
+        &fleet.to_string(),
+        "--name",
+        "reviewer",
+        "--description",
+        "Review the assigned change",
+        "--json",
+        "read the supplied assignment",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let member: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    let id = member["member_id"].as_i64().expect("new member id");
+    let record: (String, String) = cli
+        .sqlite()
+        .query_row(
+            "SELECT name, description FROM members WHERE member_id=?1",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        record,
+        ("reviewer".into(), "Review the assigned change".into())
+    );
+    assert_eq!(cli.shim_count("split-window"), 1);
+}
+
+#[test]
+fn member_creation_inherits_the_director_backend_and_applies_explicit_overrides() {
+    for (override_backend, model, expected) in [
+        (None, None, "codex"),
+        (None, Some("claude-opus-5-5"), "claude"),
+        (Some("claude"), Some("claude-opus-5-5"), "claude"),
+        (
+            Some("opencode"),
+            Some("opencode/glm-5.3-flash-free"),
+            "opencode",
+        ),
+    ] {
+        let cli = Cli::new();
+        cli.ready();
+        for binary in ["codex", "opencode"] {
+            write_executable(&cli.shim_dir.join(binary), "#!/bin/sh\nexit 0\n");
+        }
+        let fleet = cli.run(&[
+            "fleet",
+            "create",
+            "--name",
+            "backend",
+            "--coding-agent",
+            "codex",
+        ]);
+        assert_eq!(code(&fleet), 0, "{}", stderr(&fleet));
+        let mut args = vec![
+            "member",
+            "create",
+            "--fleet-id",
+            "1",
+            "--name",
+            "worker",
+            "--description",
+            "test",
+        ];
+        if let Some(backend) = override_backend {
+            args.extend(["--coding-agent", backend]);
+        }
+        if let Some(model) = model {
+            args.extend(["--model", model]);
+        }
+        args.push("AGENT {coding_agent} MEMBER {member_id}");
+        let output = cli.run(&args);
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+        assert_eq!(
+            stdout(&output),
+            format!("2 worker backend={expected} pane=%7\n")
+        );
+        let split = cli
+            .shim_calls()
+            .into_iter()
+            .find(|line| line.starts_with("split-window"))
+            .unwrap();
+        assert!(
+            split.contains(&format!("AGENT {expected} MEMBER 2")),
+            "{split}"
+        );
+        if let Some(model) = model {
+            assert!(split.contains(&format!("--model {model}")), "{split}");
+        }
+    }
+}
+
+#[test]
+fn member_creation_rejects_unsupported_effort_before_registration() {
+    let cli = Cli::new();
+    cli.with_cli_fleet();
+    write_executable(&cli.shim_dir.join("opencode"), "#!/bin/sh\nexit 0\n");
+    let records = database_records(&cli);
+    let output = cli.run(&[
+        "member",
+        "create",
+        "--fleet-id",
+        "1",
         "--name",
         "worker",
         "--description",
-        "d",
+        "test",
+        "--coding-agent",
+        "opencode",
+        "--effort",
+        "low",
         "prompt",
     ]);
-    assert_eq!(code(&output), 1);
+    assert_eq!(code(&output), 2);
     assert!(
-        stderr(&output).contains(&format!(
-            "fleet {fleet_id} has no active monitor member; spawn one with --role monitor first"
-        )),
+        stderr(&output).contains("opencode does not support reasoning effort."),
         "{}",
         stderr(&output)
     );
     assert_eq!(database_records(&cli), records);
-    let calls = cli.shim_calls();
-    assert_no_pane_effects(&calls[calls_before..]);
+    assert_no_pane_effects(&cli.shim_calls());
+}
 
-    let monitor_id = cli.create_monitor(fleet_id);
-    let output = cli.run(&["member", "show", &monitor_id.to_string(), "--json"]);
-    assert_eq!(code(&output), 0, "{}", stderr(&output));
-    let monitor: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
-    assert_eq!(monitor["kind"], "monitor");
-    assert_eq!(monitor["member_id"], monitor_id);
-
+#[test]
+fn member_prompt_source_validation_preserves_registration_and_panes() {
+    let cli = Cli::new();
+    cli.with_cli_fleet();
+    let missing = cli
+        .home
+        .path()
+        .join("missing.md")
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let empty = write_file(&cli.home.path().join("empty.md"), b" \n");
+    let invalid = write_file(&cli.home.path().join("invalid.md"), &[0xff]);
+    let valid = write_file(&cli.home.path().join("valid.md"), b"assignment");
     let records = database_records(&cli);
-    let calls_before = cli.shim_calls().len();
-    let output = cli.run(&[
-        "member",
-        "create",
-        "--fleet-id",
-        &fleet_id.to_string(),
-        "--role",
-        "monitor",
-        "--name",
-        "monitor2",
-        "--description",
-        "d",
-        "prompt",
-    ]);
-    assert_eq!(code(&output), 1);
-    assert_eq!(
-        stderr(&output).trim(),
-        format!(
-            "Error: fleet {fleet_id} already has an active monitor member (member {monitor_id})"
-        )
-    );
-    assert_eq!(database_records(&cli), records);
-    let calls = cli.shim_calls();
-    assert_no_pane_effects(&calls[calls_before..]);
+    for (source, expected) in [
+        (vec!["--file", missing.as_str()], 1),
+        (vec!["--file", empty.as_str()], 1),
+        (vec!["--file", invalid.as_str()], 1),
+        (vec!["--file", valid.as_str(), "also inline"], 2),
+        (vec![], 2),
+    ] {
+        let mut args = vec![
+            "member",
+            "create",
+            "--fleet-id",
+            "1",
+            "--name",
+            "worker",
+            "--description",
+            "test",
+        ];
+        args.extend(source);
+        let output = cli.run(&args);
+        assert_eq!(code(&output), expected, "{args:?}: {}", stderr(&output));
+        assert_eq!(database_records(&cli), records);
+        assert_no_pane_effects(&cli.shim_calls());
+    }
+}
 
-    let deleted = cli.run(&["member", "delete", &monitor_id.to_string()]);
-    assert_eq!(code(&deleted), 0, "{}", stderr(&deleted));
-    let replacement = cli.create_monitor(fleet_id);
-    assert_ne!(replacement, monitor_id);
-    assert_eq!(
-        cafleet::broker::active_monitor_member_id(&cli.sqlite(), fleet_id).unwrap(),
-        Some(replacement)
+#[test]
+fn member_creation_reads_stdin_and_preserves_literal_braces() {
+    let cli = Cli::new();
+    cli.with_cli_fleet();
+    let output = cli.run_with_stdin(
+        &[
+            "member",
+            "create",
+            "--fleet-id",
+            "1",
+            "--name",
+            "worker",
+            "--description",
+            "test",
+            "--file",
+            "-",
+        ],
+        "MEMBER {member_id} OBJECT {{value}} AGENT {coding_agent}",
     );
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(
+        cli.shim_calls()
+            .iter()
+            .any(|line| line.contains("MEMBER 2 OBJECT {value} AGENT claude"))
+    );
+}
+
+#[test]
+fn member_placement_is_pending_until_the_owned_pane_is_patched() {
+    let cli = Cli::new();
+    cli.with_cli_fleet();
+    cli.sqlite().execute_batch("CREATE TRIGGER assert_pending_patch BEFORE UPDATE OF mux_pane_id ON member_placements WHEN OLD.mux_pane_id IS NOT NULL BEGIN SELECT RAISE(ABORT, 'placement must begin pending'); END;").unwrap();
+    let member = cli.create_member(1, "worker");
+    assert_eq!(member, 2);
+    assert_eq!(
+        cli.sqlite()
+            .query_row(
+                "SELECT mux_pane_id FROM member_placements WHERE member_id=?1",
+                [member],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+        "%7"
+    );
+}
+
+#[test]
+fn fleet_capture_follows_the_director_back_reference_before_member_id_order() {
+    let cli = Cli::new();
+    let (fleet, first) = cli.seeded_fleet();
+    let second = cli.seed_member(fleet, "second");
+    let director = cli.seed_member(fleet, "new-director");
+    cli.sqlite()
+        .execute(
+            "UPDATE fleets SET director_member_id=?1 WHERE fleet_id=?2",
+            rusqlite::params![director, fleet],
+        )
+        .unwrap();
+    let before = database_records(&cli);
+    let output = cli.run(&["fleet", "capture", &fleet.to_string(), "--json"]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let payload: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    let entries = payload.as_array().unwrap();
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| entry["member_id"].as_i64().unwrap())
+            .collect::<Vec<_>>(),
+        [director, first, second]
+    );
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| entry["kind"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["director", "member", "member"]
+    );
+    assert_eq!(database_records(&cli), before);
+    assert!(
+        cli.shim_calls()
+            .iter()
+            .all(|line| !line.starts_with("send-keys")
+                && !line.starts_with("split-window")
+                && !line.starts_with("kill-pane"))
+    );
+}
+
+#[test]
+fn fleet_capture_reports_a_failed_pane_and_continues_with_healthy_members() {
+    let cli = Cli::new();
+    let (fleet, _) = cli.seeded_fleet();
+    let member = cli.seed_member(fleet, "healthy");
+    cli.set_pane_capture("%0", CAPTURE_FAILS);
+    let output = cli.run(&["fleet", "capture", &fleet.to_string(), "--json"]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let payload: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert!(
+        payload[0]["error"]
+            .as_str()
+            .unwrap()
+            .contains("forced failure")
+    );
+    assert_eq!(payload[1]["member_id"], member);
+    assert_eq!(payload[1]["error"], serde_json::Value::Null);
+    assert_capture_content(&payload[1], &format!("%{}", member + 4));
+}
+
+#[test]
+fn fleet_capture_preserves_requested_ansi_and_hashes_the_presented_content() {
+    let cli = Cli::new();
+    let (fleet, _) = cli.seeded_fleet();
+    let styled = "\u{1b}[90m› suggestion\u{1b}[0m";
+    cli.set_pane_capture("%0", styled);
+    for (flags, content) in [
+        (vec!["--json"], "› suggestion"),
+        (vec!["--ansi", "--json"], styled),
+    ] {
+        let fleet = fleet.to_string();
+        let mut args = vec!["fleet", "capture", fleet.as_str()];
+        args.extend(flags);
+        let output = cli.run(&args);
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+        let payload: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+        assert_eq!(payload[0]["content"], content);
+        let digest = Sha256::digest(content.as_bytes());
+        let expected = digest
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        assert_eq!(payload[0]["content_sha256"], expected);
+    }
 }
 
 #[test]
@@ -420,7 +652,7 @@ fn member_show_takes_the_positional_subject() {
     assert_eq!(payload["member_id"], member_id);
     assert_eq!(payload["kind"], "member");
     assert_eq!(
-        payload["placement"]["mux_pane_id"], "%7",
+        payload["placement"]["mux_pane_id"], "%6",
         "the detailed view is JSON-only"
     );
 
@@ -429,7 +661,7 @@ fn member_show_takes_the_positional_subject() {
     assert_eq!(
         stdout(&output),
         format!(
-            r#"{{"member_id":{member_id},"name":"worker","description":"test member","status":"active","registered_at":"{registered}","kind":"member","skills":[],"placement":{{"backend":"tmux","mux_session":"main","mux_window_id":"@1","mux_pane_id":"%7","coding_agent":"claude","created_at":"{placed}"}}}}"#
+            r#"{{"member_id":{member_id},"name":"worker","description":"test member","status":"active","registered_at":"{registered}","kind":"member","placement":{{"backend":"tmux","mux_session":"main","mux_window_id":"@1","mux_pane_id":"%6","coding_agent":"claude","created_at":"{placed}"}}}}"#
         ) + "\n"
     );
 
@@ -450,13 +682,12 @@ fn member_list_takes_the_positional_fleet_subject() {
     let output = cli.run(&["member", "list", &fleet_id.to_string()]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let out = stdout(&output);
-    assert!(out.starts_with("3 members:\n"), "got: {out}");
+    assert!(out.starts_with("2 members:\n"), "got: {out}");
     assert!(
         out.contains("  member_id  name           kind      backend   pane_id  idle"),
         "got: {out}"
     );
     assert!(out.contains("director"), "got: {out}");
-    assert!(out.contains("monitor"), "got: {out}");
     assert!(out.contains("worker"), "got: {out}");
 
     assert_eq!(
@@ -475,11 +706,11 @@ fn member_delete_kills_the_pane_and_reports_it() {
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let out = stdout(&output);
     assert!(out.starts_with("Member deleted.\n"), "got: {out}");
-    assert!(out.contains("%7 (killed)"), "got: {out}");
+    assert!(out.contains("%6 (killed)"), "got: {out}");
     assert!(
         cli.shim_calls()
             .iter()
-            .any(|line| line.starts_with("kill-pane -t %7")),
+            .any(|line| line.starts_with("kill-pane -t %6")),
         "the pane is killed immediately"
     );
 }
@@ -728,78 +959,18 @@ fn member_capture_text_emits_the_content_only() {
 }
 
 #[test]
-fn monitor_no_longer_parses_a_capture_subcommand() {
-    let cli = Cli::new();
-    let (fleet_id, _) = cli.seeded_fleet();
-    let member_id = cli.seed_member(fleet_id, "worker");
-    let output = cli.run(&[
-        "monitor",
-        "capture",
-        &fleet_id.to_string(),
-        &member_id.to_string(),
-    ]);
-    assert_eq!(
-        code(&output),
-        2,
-        "monitor takes only the positional FLEET_ID: {}",
-        stderr(&output)
-    );
-}
-
-#[test]
-fn monitor_loop_form_still_parses_the_positional_and_flags() {
-    let cli = Cli::new();
-    cli.ready();
-
-    let output = cli.run(&["monitor", "999", "--tick", "1", "--interval", "5"]);
-    assert_eq!(
-        code(&output),
-        1,
-        "the loop form parses and reaches the live-fleet guard"
-    );
-    assert!(
-        stderr(&output).contains("Error: fleet 999 not found"),
-        "got: {}",
-        stderr(&output)
-    );
-
-    let bare = cli.run(&["monitor"]);
-    assert_eq!(code(&bare), 2, "a fleet id or a subcommand is required");
-
-    let leaked = cli.run(&["monitor", "1", "--lines", "20"]);
-    assert_eq!(
-        code(&leaked),
-        2,
-        "scan flags do not parse on the loop form: {}",
-        stderr(&leaked)
-    );
-
-    let no_fleet = cli.run(&["monitor", "scan"]);
-    assert_eq!(
-        code(&no_fleet),
-        2,
-        "the scan form carries its own FLEET_ID positional: {}",
-        stderr(&no_fleet)
-    );
-}
-
-#[test]
-fn monitor_scan_prints_director_first_then_members_ascending() {
+fn fleet_capture_prints_director_first_then_members_ascending() {
     let cli = Cli::new();
     let (fleet_id, director_id) = cli.seeded_fleet();
-    let monitor_id = cafleet::broker::active_monitor_member_id(&cli.sqlite(), fleet_id)
-        .unwrap()
-        .unwrap();
     let alpha_id = cli.seed_member(fleet_id, "alpha");
     let beta_id = cli.seed_member(fleet_id, "beta");
     let identities = [
         (director_id, "Director", "director", "%0".to_string()),
-        (monitor_id, "monitor", "monitor", format!("%{monitor_id}")),
         (alpha_id, "alpha", "member", format!("%{}", alpha_id + 4)),
         (beta_id, "beta", "member", format!("%{}", beta_id + 4)),
     ];
     let calls_before = cli.shim_calls().len();
-    let output = cli.run(&["monitor", "scan", &fleet_id.to_string()]);
+    let output = cli.run(&["fleet", "capture", &fleet_id.to_string()]);
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     let out = stdout(&output);
     let sections = out
@@ -830,10 +1001,10 @@ fn monitor_scan_prints_director_first_then_members_ascending() {
         );
     }
 
-    let with_ansi = cli.run(&["monitor", "scan", &fleet_id.to_string(), "--ansi"]);
+    let with_ansi = cli.run(&["fleet", "capture", &fleet_id.to_string(), "--ansi"]);
     assert_eq!(code(&with_ansi), 0, "--ansi is accepted");
 
-    let output = cli.run(&["monitor", "scan", &fleet_id.to_string(), "--json"]);
+    let output = cli.run(&["fleet", "capture", &fleet_id.to_string(), "--json"]);
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
     let entries = payload.as_array().unwrap();
@@ -870,7 +1041,7 @@ fn monitor_scan_prints_director_first_then_members_ascending() {
     }
 
     let calls_before = cli.shim_calls().len();
-    let output = cli.run(&["monitor", "scan", &fleet_id.to_string(), "--lines", "5"]);
+    let output = cli.run(&["fleet", "capture", &fleet_id.to_string(), "--lines", "5"]);
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     let calls = cli.shim_calls();
     for (_, _, _, pane) in &identities {
@@ -882,7 +1053,7 @@ fn monitor_scan_prints_director_first_then_members_ascending() {
         );
     }
     let calls_before = calls.len();
-    let zero = cli.run(&["monitor", "scan", &fleet_id.to_string(), "--lines", "0"]);
+    let zero = cli.run(&["fleet", "capture", &fleet_id.to_string(), "--lines", "0"]);
     assert_eq!(code(&zero), 2, "{}", stderr(&zero));
     let calls = cli.shim_calls();
     assert!(
@@ -894,7 +1065,7 @@ fn monitor_scan_prints_director_first_then_members_ascending() {
 }
 
 #[test]
-fn monitor_scan_annotates_a_pending_placement_and_exits_zero() {
+fn fleet_capture_annotates_a_pending_placement_and_exits_zero() {
     let cli = Cli::new();
     let (fleet_id, _) = cli.seeded_fleet();
     let member_id = cli.seed_member(fleet_id, "worker");
@@ -915,7 +1086,7 @@ fn monitor_scan_annotates_a_pending_placement_and_exits_zero() {
             .unwrap(),
         1
     );
-    let output = cli.run(&["monitor", "scan", &fleet_id.to_string()]);
+    let output = cli.run(&["fleet", "capture", &fleet_id.to_string()]);
     assert_eq!(
         code(&output),
         0,
@@ -932,11 +1103,11 @@ fn monitor_scan_annotates_a_pending_placement_and_exits_zero() {
     );
 
     assert!(!stdout(&output).contains(&format!("=== {rowless} ")));
-    let output = cli.run(&["monitor", "scan", &fleet_id.to_string(), "--json"]);
+    let output = cli.run(&["fleet", "capture", &fleet_id.to_string(), "--json"]);
     assert_eq!(code(&output), 0);
     let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
     let entries = payload.as_array().unwrap();
-    assert_eq!(entries.len(), 3);
+    assert_eq!(entries.len(), 2);
     assert!(entries.iter().all(|entry| entry["member_id"] != rowless));
     let entry = payload
         .as_array()
@@ -968,13 +1139,13 @@ fn monitor_scan_annotates_a_pending_placement_and_exits_zero() {
 }
 
 #[test]
-fn monitor_scan_annotates_failed_captures_and_exits_zero() {
+fn fleet_capture_annotates_failed_captures_and_exits_zero() {
     let mut cli = Cli::new();
     let (fleet_id, _) = cli.seeded_fleet();
     cli.seed_member(fleet_id, "worker");
     cli.fail_subcommand = Some("capture-pane".to_string());
 
-    let output = cli.run(&["monitor", "scan", &fleet_id.to_string()]);
+    let output = cli.run(&["fleet", "capture", &fleet_id.to_string()]);
     assert_eq!(
         code(&output),
         0,
@@ -993,7 +1164,7 @@ fn monitor_scan_annotates_failed_captures_and_exits_zero() {
         "the backend error rides the annotation, got: {out}"
     );
 
-    let output = cli.run(&["monitor", "scan", &fleet_id.to_string(), "--json"]);
+    let output = cli.run(&["fleet", "capture", &fleet_id.to_string(), "--json"]);
     let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
     let entries = payload.as_array().unwrap();
     assert_eq!(entries[0]["pane_id"], "%0", "the real pane id is kept");
@@ -1013,11 +1184,11 @@ fn monitor_scan_annotates_failed_captures_and_exits_zero() {
 }
 
 #[test]
-fn monitor_scan_of_a_memberless_fleet_captures_the_director_only() {
+fn fleet_capture_of_a_memberless_fleet_captures_the_director_only() {
     let cli = Cli::new();
-    let (fleet_id, _) = cli.seeded_bare_fleet();
+    let (fleet_id, _) = cli.seeded_fleet();
 
-    let output = cli.run(&["monitor", "scan", &fleet_id.to_string()]);
+    let output = cli.run(&["fleet", "capture", &fleet_id.to_string()]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let out = stdout(&output);
     assert!(

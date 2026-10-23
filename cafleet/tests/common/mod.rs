@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
 
-use cafleet::broker::{self, NewPlacement};
+use cafleet::broker;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -332,9 +332,6 @@ impl Cli {
         path.to_str().unwrap().to_string()
     }
 
-    /// `ready()` + a fleet via the atomic `fleet create` bootstrap: fleet 1,
-    /// Director member 1, and monitor member [`Self::BOOTSTRAP_MONITOR_ID`]
-    /// spawned from `--monitor-file`.
     pub fn with_cli_fleet(&self) -> (i64, i64) {
         self.ready();
         let output = self.run(&[
@@ -344,8 +341,6 @@ impl Cli {
             "testfleet",
             "--coding-agent",
             "claude",
-            "--monitor-file",
-            &self.monitor_prompt_path(),
             "--json",
         ]);
         assert!(
@@ -362,20 +357,6 @@ impl Cli {
         )
     }
 
-    pub fn with_cli_bare_fleet(&self) -> (i64, i64) {
-        let ids = self.with_cli_fleet();
-        let monitor = broker::active_monitor_member_id(&self.sqlite(), ids.0)
-            .unwrap()
-            .expect("bootstrap monitor");
-        let output = self.run(&["member", "delete", &monitor.to_string()]);
-        assert!(
-            output.status.success(),
-            "monitor delete: {}",
-            text(&output.stderr)
-        );
-        ids
-    }
-
     pub fn seeded_fleet(&self) -> (i64, i64) {
         self.ready();
         self.seed_fleet("testfleet")
@@ -383,98 +364,44 @@ impl Cli {
 
     pub fn seed_fleet(&self, name: &str) -> (i64, i64) {
         let mut conn = cafleet::db::connect(&self.db_url()).unwrap();
-        let fleet = broker::create_fleet(
-            &mut conn,
-            Some(name),
-            "main",
-            "@1",
-            "%0",
-            "claude",
-            "tmux",
-            "monitor",
-            "Monitor member for this fleet",
-            |_, _, monitor| Ok(format!("%{monitor}")),
+        let tx = conn.transaction().unwrap();
+        let timestamp = "2026-10-23T00:00:00.000000+00:00";
+        tx.execute(
+            "INSERT INTO fleets(name, created_at) VALUES(?1, ?2)",
+            rusqlite::params![name, timestamp],
         )
         .unwrap();
-        (
-            fleet["fleet_id"].as_i64().expect("seeded fleet id"),
-            fleet["director"]["member_id"]
-                .as_i64()
-                .expect("seeded Director id"),
+        let fleet = tx.last_insert_rowid();
+        tx.execute("INSERT INTO members(fleet_id, name, description, status, registered_at) VALUES(?1, 'Director', 'Root Director for this fleet', 'active', ?2)", rusqlite::params![fleet, timestamp]).unwrap();
+        let director = tx.last_insert_rowid();
+        tx.execute("INSERT INTO member_placements(member_id, mux_session, mux_window_id, mux_pane_id, backend, coding_agent, created_at) VALUES(?1, 'main', '@1', '%0', 'tmux', 'claude', ?2)", rusqlite::params![director, timestamp]).unwrap();
+        tx.execute(
+            "UPDATE fleets SET director_member_id=?1 WHERE fleet_id=?2",
+            rusqlite::params![director, fleet],
         )
-    }
-
-    pub fn seeded_bare_fleet(&self) -> (i64, i64) {
-        let ids = self.seeded_fleet();
-        let mut conn = cafleet::db::connect(&self.db_url()).unwrap();
-        let monitor = broker::active_monitor_member_id(&conn, ids.0)
-            .unwrap()
-            .expect("seeded monitor");
-        broker::deregister_member(&mut conn, monitor).unwrap();
-        ids
+        .unwrap();
+        tx.commit().unwrap();
+        (fleet, director)
     }
 
     pub fn seed_member(&self, fleet_id: i64, name: &str) -> i64 {
         let mut conn = cafleet::db::connect(&self.db_url()).unwrap();
-        let member = broker::register_member(
-            &mut conn,
-            fleet_id,
-            name,
-            "test member",
-            &[],
-            Some(&NewPlacement {
-                backend: "tmux".into(),
-                mux_session: "main".into(),
-                mux_window_id: "@1".into(),
-                mux_pane_id: None,
-                coding_agent: "claude".into(),
-            }),
-            false,
-        )
-        .unwrap();
-        let pane_id = format!("%{}", member.member_id + 4);
-        let placement = broker::update_placement_pane_id(&mut conn, member.member_id, &pane_id)
-            .unwrap()
-            .expect("seeded member placement");
-        assert_eq!(placement.mux_pane_id.as_deref(), Some(pane_id.as_str()));
-        member.member_id
+        let tx = conn.transaction().unwrap();
+        let timestamp = "2026-10-23T00:00:00.000000+00:00";
+        tx.execute("INSERT INTO members(fleet_id, name, description, status, registered_at) VALUES(?1, ?2, 'test member', 'active', ?3)", rusqlite::params![fleet_id, name, timestamp]).unwrap();
+        let member = tx.last_insert_rowid();
+        let pane = format!("%{}", member + 4);
+        tx.execute("INSERT INTO member_placements(member_id, mux_session, mux_window_id, mux_pane_id, backend, coding_agent, created_at) VALUES(?1, 'main', '@1', ?2, 'tmux', 'claude', ?3)", rusqlite::params![member, pane, timestamp]).unwrap();
+        tx.commit().unwrap();
+        member
     }
 
     pub fn seed_message(&self, sender: i64, recipient: i64, body: &str) -> i64 {
         let mut conn = cafleet::db::connect(&self.db_url()).unwrap();
         let message =
             broker::send_message(&mut conn, sender, &recipient.to_string(), body).unwrap();
-        assert_eq!(message.owner_member_id, recipient);
         assert_eq!(message.text, body);
         message.message_id
-    }
-
-    /// Spawn the fleet's monitor member through `member create --role monitor`.
-    pub fn create_monitor(&self, fleet_id: i64) -> i64 {
-        let output = self.run(&[
-            "member",
-            "create",
-            "--fleet-id",
-            &fleet_id.to_string(),
-            "--role",
-            "monitor",
-            "--name",
-            "monitor",
-            "--description",
-            "fleet monitor member",
-            "follow your monitor role protocol",
-        ]);
-        assert!(
-            output.status.success(),
-            "monitor member create must succeed: {}",
-            text(&output.stderr)
-        );
-        text(&output.stdout)
-            .split_whitespace()
-            .next()
-            .expect("compact member-create output starts with the id")
-            .parse()
-            .expect("the first token is the member id")
     }
 
     /// Spawn a member through `member create`; returns its id parsed from the
@@ -636,7 +563,7 @@ impl Drop for LoopChild<'_> {
     }
 }
 
-fn write_executable(path: &Path, contents: &str) {
+pub fn write_executable(path: &Path, contents: &str) {
     std::fs::write(path, contents).unwrap();
     #[cfg(unix)]
     {

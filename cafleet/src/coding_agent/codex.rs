@@ -115,7 +115,7 @@ mod tests {
     #[test]
     fn spawn_argv_ignores_display_name_and_packs_effort_into_one_token() {
         assert_eq!(
-            codex().build_spawn_argv("do it", "ignored", Some("o3"), Some("high"), false),
+            codex().build_spawn_argv("do it", "ignored", Some("o3"), Some("high")),
             argv(&[
                 "codex",
                 "--ask-for-approval",
@@ -134,7 +134,7 @@ mod tests {
     #[test]
     fn spawn_argv_omits_all_tokens_for_none_model_and_effort() {
         assert_eq!(
-            codex().build_spawn_argv("do it", "ignored", None, None, false),
+            codex().build_spawn_argv("do it", "ignored", None, None),
             argv(&[
                 "codex",
                 "--ask-for-approval",
@@ -143,14 +143,6 @@ mod tests {
                 "workspace-write",
                 "do it",
             ])
-        );
-    }
-
-    #[test]
-    fn spawn_argv_is_the_same_for_the_monitor() {
-        assert_eq!(
-            codex().build_spawn_argv("do it", "monitor", Some("o3"), Some("high"), true),
-            codex().build_spawn_argv("do it", "monitor", Some("o3"), Some("high"), false)
         );
     }
 

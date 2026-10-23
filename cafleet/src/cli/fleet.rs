@@ -306,9 +306,8 @@ fn delete(conn: &mut Connection, fleet_id: i64, json: bool) -> Result<(), Caflee
 
 #[cfg(test)]
 mod tests {
-    use clap::Parser;
-
     use super::FleetCommand;
+    use clap::Parser;
 
     #[derive(Parser)]
     struct Harness {
@@ -320,77 +319,26 @@ mod tests {
         Harness::try_parse_from(args).map(|harness| harness.command)
     }
 
-    fn create_monitor_flags(command: FleetCommand) -> (String, Option<String>, Option<String>) {
-        let FleetCommand::Create {
-            monitor_file,
-            monitor_model,
-            monitor_effort,
-            ..
-        } = command
-        else {
-            panic!("parsed a non-create command");
-        };
-        (monitor_file, monitor_model, monitor_effort)
-    }
-
     #[test]
-    fn create_requires_the_monitor_file() {
-        let Err(err) = parse(&[
+    fn create_parses_registration_inputs_for_the_current_director() {
+        let parsed = parse(&[
             "cafleet",
             "create",
             "--name",
             "alpha",
             "--coding-agent",
             "claude",
-        ]) else {
-            panic!("--monitor-file is required");
-        };
-        assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
-        assert!(
-            err.to_string().contains("--monitor-file"),
-            "the error names the missing flag, got: {err}"
-        );
-    }
-
-    #[test]
-    fn create_parses_without_a_monitor_model() {
-        let command = parse(&[
-            "cafleet",
-            "create",
-            "--name",
-            "alpha",
-            "--coding-agent",
-            "claude",
-            "--monitor-file",
-            "prompt.md",
+            "--json",
         ])
         .unwrap();
-        let (monitor_file, monitor_model, monitor_effort) = create_monitor_flags(command);
-        assert_eq!(monitor_file, "prompt.md");
-        assert_eq!(monitor_model, None);
-        assert_eq!(monitor_effort, None);
+        assert!(matches!(parsed, FleetCommand::Create { .. }));
     }
 
     #[test]
-    fn create_accepts_stdin_as_the_monitor_file_and_a_monitor_model() {
-        let command = parse(&[
-            "cafleet",
-            "create",
-            "--name",
-            "alpha",
-            "--coding-agent",
-            "claude",
-            "--monitor-file",
-            "-",
-            "--monitor-model",
-            "haiku",
-            "--monitor-effort",
-            "low",
+    fn capture_accepts_the_fleet_subject_depth_and_ansi_presentation() {
+        parse(&[
+            "cafleet", "capture", "1", "--lines", "200", "--ansi", "--json",
         ])
         .unwrap();
-        let (monitor_file, monitor_model, monitor_effort) = create_monitor_flags(command);
-        assert_eq!(monitor_file, "-", "the stdin sentinel is an ordinary value");
-        assert_eq!(monitor_model.as_deref(), Some("haiku"));
-        assert_eq!(monitor_effort.as_deref(), Some("low"));
     }
 }
