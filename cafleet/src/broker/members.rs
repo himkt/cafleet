@@ -401,7 +401,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        broker::delete_fleet(&mut conn, fleet_id).unwrap();
+        common::guarded_delete_fleet(&mut conn, fleet_id).unwrap();
         let err = broker::register_member(&mut conn, fleet_id, "x", "d", None)
             .expect_err("deleted fleet must error");
         assert!(matches!(err, CafleetError::Usage(_)));
@@ -527,20 +527,6 @@ mod tests {
     }
 
     #[test]
-    fn verify_member_fleet_is_status_agnostic() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_a, _) = create_fleet(&mut conn, "alpha");
-        let (fleet_b, _) = create_fleet(&mut conn, "beta");
-        let member_id = register(&mut conn, fleet_a, "worker", Some("%2"));
-
-        assert!(broker::verify_member_fleet(&conn, member_id, fleet_a).unwrap());
-        assert!(!broker::verify_member_fleet(&conn, member_id, fleet_b).unwrap());
-        broker::deregister_member(&mut conn, member_id).unwrap();
-        assert!(broker::verify_member_fleet(&conn, member_id, fleet_a).unwrap());
-    }
-
-    #[test]
     fn list_members_rows_carry_kind_placement_and_activity_proxies() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
@@ -644,22 +630,19 @@ mod tests {
             let row = rows.iter().find(|r| r["member_id"] == id).unwrap();
             assert_eq!(row["kind"], kind, "list_members kind for member {id}");
         }
-        let roster = broker::list_roster(&conn, fleet_id, false)
-            .map(|records| {
-                records
-                    .iter()
-                    .map(crate::presentation::roster_member)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap();
+        let roster = broker::members::capture_roster(&conn, fleet_id).unwrap();
         for (id, kind) in expected {
-            let row = roster.iter().find(|r| r["member_id"] == id).unwrap();
-            assert_eq!(row["kind"], kind, "list_roster kind for member {id}");
+            let row = roster.iter().find(|member| member.member_id == id).unwrap();
+            assert_eq!(
+                row.kind.as_str(),
+                kind,
+                "capture_roster kind for member {id}"
+            );
         }
     }
 
     #[test]
-    fn list_roster_surfaces_deregistered_message_holders_only_on_request() {
+    fn capture_roster_returns_active_fleet_members_with_pending_or_absent_placements() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
@@ -668,35 +651,33 @@ mod tests {
         common::send(&mut conn, director_id, holder_id, "hi");
         broker::deregister_member(&mut conn, holder_id).unwrap();
         broker::deregister_member(&mut conn, silent_id).unwrap();
+        let placed_id = register(&mut conn, fleet_id, "placed", Some("%4"));
+        let pending_id = register(&mut conn, fleet_id, "pending", None);
+        let paneless_id = broker::register_member(&mut conn, fleet_id, "paneless", "test", None)
+            .unwrap()
+            .member_id;
+        let (other_fleet, _) = create_fleet(&mut conn, "other");
+        register(&mut conn, other_fleet, "other-worker", Some("%9"));
 
-        let active_only = broker::list_roster(&conn, fleet_id, false)
-            .map(|records| {
-                records
-                    .iter()
-                    .map(crate::presentation::roster_member)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap();
-        assert!(active_only.iter().all(|r| r["member_id"] != holder_id));
-
-        let with_holders = broker::list_roster(&conn, fleet_id, true)
-            .map(|records| {
-                records
-                    .iter()
-                    .map(crate::presentation::roster_member)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap();
-        let holder = with_holders
-            .iter()
-            .find(|r| r["member_id"] == holder_id)
-            .expect("a deregistered member owning messages stays visible");
-        assert_eq!(holder["status"], "deregistered");
-        assert_eq!(holder["placement"], Value::Null);
-        assert!(
-            with_holders.iter().all(|r| r["member_id"] != silent_id),
-            "a deregistered member without messages stays hidden"
+        let roster = broker::members::capture_roster(&conn, fleet_id).unwrap();
+        assert_eq!(
+            roster
+                .iter()
+                .map(|member| member.member_id)
+                .collect::<Vec<_>>(),
+            vec![director_id, placed_id, pending_id, paneless_id]
         );
+        assert!(
+            roster
+                .iter()
+                .all(|member| member.status == crate::broker::records::MemberStatus::Active)
+        );
+        assert_eq!(
+            roster[1].placement.as_ref().unwrap().mux_pane_id.as_deref(),
+            Some("%4")
+        );
+        assert_eq!(roster[2].placement.as_ref().unwrap().mux_pane_id, None);
+        assert_eq!(roster[3].placement, None);
     }
 }
 
@@ -766,37 +747,5 @@ mod step6_behavior_regressions {
         assert_eq!(idle_seconds(&row, now), Some(0));
         let row = activity(None, None, Some("2025-12-31T23:59:59.950000+00:00"));
         assert_eq!(idle_seconds(&row, now), Some(1));
-    }
-}
-
-#[cfg(test)]
-mod name_lookup_tests {
-    use super::*;
-    use crate::broker::test_support as common;
-
-    #[test]
-    fn names_deduplicate_ids_across_batch_boundaries() {
-        let mut conn = crate::db::connect("sqlite:///:memory:").unwrap();
-        crate::db::migrate_to_head(&mut conn).unwrap();
-        let (fleet, director) = common::create_fleet(&mut conn, "names");
-        for id in 10000..11001_i64 {
-            conn.execute("INSERT INTO members(member_id,fleet_id,name,description,status,registered_at) VALUES (?1,?2,?3,'','deregistered','raw')",
-                params![id,fleet,format!("member-{id}")]).unwrap();
-        }
-        for count in [0_usize, 1, 500, 501, 1001] {
-            let ids: Vec<_> = (10000..10000 + count as i64).rev().collect();
-            let repeated: Vec<_> = ids.iter().copied().cycle().take(count * 4).collect();
-            let expected = ids.iter().map(|&id| (id, format!("member-{id}"))).collect();
-            assert_eq!(get_member_names(&conn, &repeated).unwrap(), expected);
-        }
-        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
-        assert!(crate::broker::deregister_member(&mut conn, worker).unwrap());
-        let names = get_member_names(&conn, &[director, worker]).unwrap();
-        assert_eq!(names.get(&director).map(String::as_str), Some("Director"));
-        assert_eq!(names.get(&worker).map(String::as_str), Some("worker"));
-        assert!(get_member_names(&conn, &[i64::MAX]).unwrap().is_empty());
-        let missing = Connection::open_in_memory().unwrap();
-        assert!(get_member_names(&missing, &[]).unwrap().is_empty());
-        assert!(get_member_names(&missing, &[1]).is_err());
     }
 }

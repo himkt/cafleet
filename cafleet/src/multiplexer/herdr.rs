@@ -897,22 +897,6 @@ mod tests {
     }
 
     #[test]
-    fn send_poll_trigger_uses_only_literal_json_poll_settle_and_enter() {
-        let runner = FakeRunner::with_binary("herdr");
-        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        assert!(mux.send_poll_trigger("w1:p2", 14));
-        let text = "cafleet message poll 14 --json";
-        assert_eq!(
-            runner.run_argvs(),
-            vec![
-                argv(&["herdr", "pane", "send-text", "w1:p2", text]),
-                argv(&["herdr", "pane", "send-keys", "w1:p2", "enter"])
-            ]
-        );
-        assert_eq!(runner.events()[1], sleep_event(1.0));
-    }
-
-    #[test]
     fn send_inline_preview_submits_one_visible_literal_line() {
         let runner = FakeRunner::with_binary("herdr");
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());

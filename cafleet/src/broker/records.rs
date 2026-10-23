@@ -113,9 +113,8 @@ mod tests {
     }
 
     #[test]
-    fn corrupt_member_status_returns_the_domain_variant_from_storage() {
-        let (_dir, mut conn, fleet, director) = fixture();
-        broker::send_message(&mut conn, director, &director.to_string(), "retain history").unwrap();
+    fn corrupt_director_status_returns_the_domain_variant_from_a_live_typed_read() {
+        let (_dir, conn, fleet, director) = fixture();
         conn.execute_batch("PRAGMA ignore_check_constraints=ON")
             .unwrap();
         conn.execute(
@@ -123,8 +122,30 @@ mod tests {
             [director],
         )
         .unwrap();
-        assert!(matches!(broker::list_roster(&conn, fleet, true),
+        assert!(matches!(broker::get_member(&conn, director, fleet),
             Err(CafleetError::InvalidStoredValue { field, value })
             if field == "members.status" && value == "corrupt-status"));
+    }
+
+    #[test]
+    fn corrupt_recipient_status_stops_a_send_with_the_domain_cause_before_inserting() {
+        let (_dir, mut conn, fleet, director) = fixture();
+        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+        conn.execute_batch("PRAGMA ignore_check_constraints=ON")
+            .unwrap();
+        conn.execute(
+            "UPDATE members SET status='corrupt-recipient' WHERE member_id=?1",
+            [worker],
+        )
+        .unwrap();
+        assert!(
+            matches!(broker::send_message(&mut conn, director, &worker.to_string(), "pending assignment"),
+            Err(CafleetError::InvalidStoredValue { field, value })
+            if field == "members.status" && value == "corrupt-recipient")
+        );
+        let messages: i64 = conn
+            .query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(messages, 0);
     }
 }

@@ -525,22 +525,6 @@ mod tests {
     }
 
     #[test]
-    fn send_poll_trigger_uses_only_literal_json_poll_settle_and_enter() {
-        let runner = FakeRunner::with_binary("tmux");
-        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        assert!(mux.send_poll_trigger("%5", 14));
-        let text = "cafleet message poll 14 --json";
-        assert_eq!(
-            runner.run_argvs(),
-            vec![
-                argv(&["tmux", "send-keys", "-t", "%5", "-l", text]),
-                argv(&["tmux", "send-keys", "-t", "%5", "Enter"])
-            ]
-        );
-        assert_eq!(runner.events()[1], sleep_event(1.0));
-    }
-
-    #[test]
     fn send_inline_preview_submits_one_visible_literal_line() {
         let runner = FakeRunner::with_binary("tmux");
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());

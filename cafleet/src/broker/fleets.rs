@@ -327,7 +327,7 @@ mod tests {
         assert_eq!(rows[1]["director_member_id"], director_a);
         assert_eq!(rows[1]["name"], "older");
 
-        broker::delete_fleet(&mut conn, fleet_b).unwrap();
+        common::guarded_delete_fleet(&mut conn, fleet_b).unwrap();
         let rows = broker::list_fleets(&conn).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0]["fleet_id"], fleet_a);
@@ -369,7 +369,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        broker::delete_fleet(&mut conn, fleet_id).unwrap();
+        common::guarded_delete_fleet(&mut conn, fleet_id).unwrap();
         let fleet = broker::get_fleet(&conn, fleet_id).unwrap().unwrap();
         assert!(fleet["deleted_at"].is_string());
     }
@@ -380,29 +380,36 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
         let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
-        common::send(&mut conn, director_id, member_id, "hi");
-        let result = broker::delete_fleet(&mut conn, fleet_id).unwrap();
+        let message =
+            broker::send_message(&mut conn, director_id, &member_id.to_string(), "hi").unwrap();
+        let result = common::guarded_delete_fleet(&mut conn, fleet_id).unwrap();
         assert_eq!(
             result["deregistered_count"], 2,
             "Director and ordinary member"
         );
 
-        let (status, deregistered_at): (String, Option<String>) = conn
-            .query_row(
-                "SELECT status, deregistered_at FROM members WHERE member_id=?1",
-                [member_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(status, "deregistered");
-        assert!(deregistered_at.is_some());
+        for member in [director_id, member_id] {
+            let (status, deregistered_at): (String, String) = conn
+                .query_row(
+                    "SELECT status, deregistered_at FROM members WHERE member_id=?1",
+                    [member],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(status, "deregistered");
+            assert!(crate::time::parse_lenient(&deregistered_at).is_ok());
+        }
 
         let placements = row_count(&conn, "member_placements");
         assert_eq!(placements, 0, "deregistration removes every placement");
         let messages: i64 = conn
             .query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))
             .unwrap();
-        assert!(messages > 0, "messages are never deleted");
+        assert_eq!(messages, 1);
+        assert_eq!(
+            broker::messaging::message_row(&conn, message.message_id).unwrap(),
+            Some(message)
+        );
     }
 
     #[test]
@@ -410,17 +417,82 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        broker::delete_fleet(&mut conn, fleet_id).unwrap();
-        let second = broker::delete_fleet(&mut conn, fleet_id).unwrap();
+        common::guarded_delete_fleet(&mut conn, fleet_id).unwrap();
+        let deleted = broker::get_fleet(&conn, fleet_id).unwrap().unwrap();
+        let second = common::guarded_delete_fleet(&mut conn, fleet_id).unwrap();
         assert_eq!(second["deregistered_count"], 0);
+        assert_eq!(
+            broker::get_fleet(&conn, fleet_id).unwrap().unwrap(),
+            deleted
+        );
     }
 
     #[test]
     fn delete_fleet_missing_is_an_application_error() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
-        let err = broker::delete_fleet(&mut conn, 999).expect_err("missing fleet must error");
+        let err =
+            common::guarded_delete_fleet(&mut conn, 999).expect_err("missing fleet must error");
         assert!(matches!(err, CafleetError::App(_)));
         assert_eq!(err.message(), "fleet '999' not found.");
+    }
+
+    #[test]
+    fn guarded_fleet_deletion_rolls_back_every_stage_and_releases_ownership_on_error() {
+        for trigger in [
+            "BEFORE UPDATE OF deleted_at ON fleets",
+            "BEFORE UPDATE OF status ON members",
+            "BEFORE DELETE ON member_placements",
+        ] {
+            let dir = TempDir::new().unwrap();
+            let mut conn = migrated_conn(&dir);
+            let (fleet, director) = create_fleet(&mut conn, "alpha");
+            let worker = register(&mut conn, fleet, "worker", Some("%2"));
+            let message =
+                broker::send_message(&mut conn, director, &worker.to_string(), "retained history")
+                    .unwrap();
+            let before_fleet = broker::get_fleet(&conn, fleet).unwrap();
+            let before_members =
+                [director, worker].map(|member| broker::get_member(&conn, member, fleet).unwrap());
+            conn.execute_batch(&format!("CREATE TRIGGER fail_deletion {trigger} BEGIN SELECT RAISE(ABORT, 'fleet deletion failure'); END;")).unwrap();
+
+            let error = common::guarded_delete_fleet(&mut conn, fleet).unwrap_err();
+            assert!(matches!(error, CafleetError::App(_)));
+            assert!(error.message().contains("fleet deletion failure"));
+            assert_eq!(
+                broker::get_fleet(&conn, fleet).unwrap(),
+                before_fleet,
+                "{trigger}"
+            );
+            for (member, before) in [director, worker].into_iter().zip(before_members) {
+                assert_eq!(
+                    broker::get_member(&conn, member, fleet).unwrap(),
+                    before,
+                    "{trigger}"
+                );
+                let deregistered_at: Option<String> = conn
+                    .query_row(
+                        "SELECT deregistered_at FROM members WHERE member_id=?1",
+                        [member],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(deregistered_at, None);
+            }
+            assert_eq!(row_count(&conn, "member_placements"), 2);
+            assert_eq!(
+                broker::messaging::message_row(&conn, message.message_id).unwrap(),
+                Some(message.clone())
+            );
+
+            conn.execute_batch("DROP TRIGGER fail_deletion").unwrap();
+            let deleted = common::guarded_delete_fleet(&mut conn, fleet).unwrap();
+            assert_eq!(deleted["deregistered_count"], 2);
+            assert_eq!(row_count(&conn, "member_placements"), 0);
+            assert_eq!(
+                broker::messaging::message_row(&conn, message.message_id).unwrap(),
+                Some(message)
+            );
+        }
     }
 }

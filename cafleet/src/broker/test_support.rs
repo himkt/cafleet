@@ -38,6 +38,25 @@ pub fn register(conn: &mut Connection, fleet_id: i64, name: &str, pane: Option<&
         .member_id
 }
 
+pub fn guarded_delete_fleet(
+    conn: &mut Connection,
+    fleet_id: i64,
+) -> Result<Value, crate::error::CafleetError> {
+    let path = conn
+        .path()
+        .expect("fleet deletion uses a file-backed fixture");
+    assert!(
+        !path.is_empty(),
+        "fleet deletion has a concrete database path"
+    );
+    let database_url = format!("sqlite:///{path}");
+    let settings = crate::config::Settings::from_lookup(|name| {
+        (name == "CAFLEET_DATABASE_URL").then(|| database_url.clone())
+    })
+    .unwrap();
+    crate::input::delete_fleet(conn, &settings, fleet_id, crate::input::Deadline::new())
+}
+
 /// Persist a point-to-point message and return `{"message": <presented row>}`.
 pub fn send(conn: &mut Connection, from: i64, to: i64, text: &str) -> Value {
     let message = broker::send_message(conn, from, &to.to_string(), text).unwrap();
