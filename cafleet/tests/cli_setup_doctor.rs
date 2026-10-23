@@ -948,6 +948,38 @@ fn write_user_settings(cli: &Cli, contents: &str) -> PathBuf {
 }
 
 #[test]
+fn doctor_reports_wait_specific_deny_and_ask_rules() {
+    for list in ["deny", "ask"] {
+        let cli = Cli::new();
+        cli.migrate();
+        seed_all_current(&cli);
+        let settings = write_user_settings(
+            &cli,
+            &format!(r#"{{"permissions": {{"{list}": ["Bash(cafleet message wait *)"]}}}}"#),
+        );
+        let project = tempfile::TempDir::new().unwrap();
+        let (text, payload) = doctor_from(&cli, project.path(), 1);
+        assert!(
+            text.contains("cafleet message wait 1 --timeout 300 --json"),
+            "{text}"
+        );
+        assert_eq!(
+            payload["member_permissions"],
+            serde_json::json!({
+                "ok": false,
+                "findings": [{
+                    "coding_agent": "claude",
+                    "file": settings.to_str().unwrap(),
+                    "list": list,
+                    "rule": "Bash(cafleet message wait *)",
+                    "command": "cafleet message wait 1 --timeout 300 --json"
+                }]
+            })
+        );
+        assert_eq!(payload["issues"], 1);
+    }
+}
+#[test]
 fn doctor_reports_no_member_permission_finding_when_no_setting_blocks_a_broker_command() {
     let cli = Cli::new();
     cli.migrate();

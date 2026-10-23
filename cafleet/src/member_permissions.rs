@@ -220,7 +220,7 @@ mod tests {
             &dir,
             "settings.json",
             r#"{"permissions": {
-                "ask": ["Bash(cafleet member ping *)"],
+                "ask": ["Bash(cafleet message wait *)"],
                 "deny": ["Bash(cafleet *)", "Bash(cafleet message ack:*)"]
             }}"#,
             false,
@@ -245,8 +245,8 @@ mod tests {
                 blocking(
                     &user,
                     "ask",
-                    "Bash(cafleet member ping *)",
-                    "cafleet member ping 1"
+                    "Bash(cafleet message wait *)",
+                    "cafleet message wait 1 --timeout 300 --json"
                 ),
                 blocking(
                     &project,
@@ -282,8 +282,13 @@ mod tests {
             (r#"{"allowManagedPermissionRulesOnly": true}"#, SEND),
             (
                 r#"{"allowManagedPermissionRulesOnly": true,
-                    "permissions": {"allow": ["Bash(cafleet message *)"]}}"#,
-                "cafleet monitor scan 1",
+                    "permissions": {"allow": [
+                        "Bash(cafleet message send *)",
+                        "Bash(cafleet message poll *)",
+                        "Bash(cafleet message ack *)",
+                        "Bash(cafleet message show *)"
+                    ]}}"#,
+                "cafleet message wait 1 --timeout 300 --json",
             ),
         ] {
             let dir = TempDir::new().unwrap();
@@ -302,11 +307,7 @@ mod tests {
 
     #[test]
     fn managed_rules_only_with_a_covering_allow_list_yields_no_finding() {
-        for allow in [
-            r#"["Bash(cafleet *)"]"#,
-            r#"["Bash(cafleet message *)", "Bash(cafleet monitor scan *)",
-                "Bash(cafleet member ping:*)"]"#,
-        ] {
+        for allow in [r#"["Bash(cafleet *)"]"#, r#"["Bash(cafleet message *)"]"#] {
             let dir = TempDir::new().unwrap();
             let managed = managed(
                 &dir,
@@ -332,5 +333,26 @@ mod tests {
                 kind: FindingKind::Unreadable,
             }]
         );
+    }
+    #[test]
+    fn wait_specific_deny_and_ask_rules_report_the_bounded_receive_probe() {
+        for list in ["deny", "ask"] {
+            let dir = TempDir::new().unwrap();
+            let user = settings_file(
+                &dir,
+                "settings.json",
+                &format!(r#"{{"permissions": {{"{list}": ["Bash(cafleet message wait *)"]}}}}"#),
+                false,
+            );
+            assert_eq!(
+                diagnose(std::slice::from_ref(&user)),
+                [blocking(
+                    &user,
+                    list,
+                    "Bash(cafleet message wait *)",
+                    "cafleet message wait 1 --timeout 300 --json"
+                )]
+            );
+        }
     }
 }

@@ -372,7 +372,7 @@ fn member_creation_uses_its_assignment_without_a_registry_role() {
 fn member_creation_inherits_the_director_backend_and_applies_explicit_overrides() {
     for (override_backend, model, expected) in [
         (None, None, "codex"),
-        (None, Some("claude-opus-5-5"), "claude"),
+        (None, Some("claude-opus-5-5"), "codex"),
         (Some("claude"), Some("claude-opus-5-5"), "claude"),
         (
             Some("opencode"),
@@ -381,7 +381,7 @@ fn member_creation_inherits_the_director_backend_and_applies_explicit_overrides(
         ),
     ] {
         let cli = Cli::new();
-        cli.ready();
+        cli.install();
         for binary in ["codex", "opencode"] {
             write_executable(&cli.shim_dir.join(binary), "#!/bin/sh\nexit 0\n");
         }
@@ -588,6 +588,53 @@ fn fleet_capture_follows_the_director_back_reference_before_member_id_order() {
                 && !line.starts_with("split-window")
                 && !line.starts_with("kill-pane"))
     );
+}
+
+#[test]
+fn fleet_capture_annotates_a_pending_director_and_keeps_other_panes_available() {
+    let cli = Cli::new();
+    let (fleet, director) = cli.seeded_fleet();
+    let worker = cli.seed_member(fleet, "healthy");
+    cli.sqlite()
+        .execute(
+            "UPDATE member_placements SET mux_pane_id=NULL WHERE member_id=?1",
+            [director],
+        )
+        .unwrap();
+    let before = database_records(&cli);
+    let output = cli.run(&["fleet", "capture", &fleet.to_string(), "--json"]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let payload: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    let entries = payload.as_array().unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0]["member_id"], director);
+    assert_eq!(entries[0]["kind"], "director");
+    for field in ["pane_id", "content", "captured_at", "content_sha256"] {
+        assert_eq!(entries[0][field], serde_json::Value::Null, "{field}");
+    }
+    assert_eq!(
+        entries[0]["error"],
+        "pane not available (pending placement)"
+    );
+    assert_eq!(entries[1]["member_id"], worker);
+    assert_capture_content(&entries[1], &format!("%{}", worker + 4));
+    let text = cli.run(&["fleet", "capture", &fleet.to_string()]);
+    assert_eq!(code(&text), 0, "{}", stderr(&text));
+    assert!(stdout(&text).contains(&format!(
+        "=== {director} (Director; kind=director; coding_agent=claude; pane=—) ===\npane not available (pending placement)"
+    )), "{}", stdout(&text));
+    assert!(
+        stdout(&text).contains(&format!("=== {worker} (healthy;")),
+        "{}",
+        stdout(&text)
+    );
+    assert_eq!(database_records(&cli), before);
+    let calls = cli.shim_calls();
+    assert!(
+        calls.iter().all(|line| line.starts_with("capture-pane")),
+        "{calls:?}"
+    );
+    assert_eq!(cli.shim_count("capture-pane"), 2);
 }
 
 #[test]
