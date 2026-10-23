@@ -1,40 +1,32 @@
 use crate::broker;
 use crate::config::Settings;
 use crate::error::CafleetError;
-use crate::output::{strip_ansi, truncate_text};
+use crate::input::{Deadline, with_database_budget};
+use crate::multiplexer::Multiplexer;
+use crate::output::truncate_text;
 use crate::pane_state::{PaneState, classify};
 use crate::time::format_utc;
-use chrono::{DateTime, Utc};
 use rusqlite::Connection;
 
 pub const DELIVERY_CAPTURE_LINES: i64 = 80;
 
-pub trait PaneIo {
-    fn capture_pane(&self, pane_id: &str, lines: i64) -> Result<String, String>;
-    fn send_inline_preview(
-        &self,
-        pane_id: &str,
-        message_id: i64,
-        sender_id: i64,
-        ts: &str,
-        text: &str,
-        note: Option<&str>,
-    ) -> Result<(), String>;
-    fn send_prompt(&self, pane_id: &str, text: &str) -> Result<(), String>;
-}
-
 pub fn deliver_pane(
     conn: &mut Connection,
-    io: &dyn PaneIo,
+    io: &dyn Multiplexer,
     settings: &Settings,
     member_id: i64,
-    now: DateTime<Utc>,
+    deadline: Deadline,
 ) -> Result<Option<i64>, CafleetError> {
-    let Some(fleet_id) = broker::active_member_fleet(conn, member_id)? else {
+    let Some(fleet_id) = with_database_budget(conn, deadline, |conn| {
+        broker::active_member_fleet(conn, member_id)
+    })?
+    else {
         return Ok(None);
     };
-    let member = broker::get_member(conn, member_id, fleet_id)?
-        .ok_or_else(|| CafleetError::App(format!("Member {member_id} not found")))?;
+    let member = with_database_budget(conn, deadline, |conn| {
+        broker::get_member(conn, member_id, fleet_id)
+    })?
+    .ok_or_else(|| CafleetError::App(format!("Member {member_id} not found")))?;
     if member.kind == broker::records::MemberKind::Director
         || member
             .placement
@@ -44,10 +36,16 @@ pub fn deliver_pane(
     {
         return Ok(None);
     }
-    let Some(locked) = crate::input::lock_member(conn, settings, &member)? else {
+    let Some(locked) = with_database_budget(conn, deadline, |conn| {
+        crate::input::lock_member(conn, settings, &member)
+    })?
+    else {
         return Ok(None);
     };
-    let Some(message) = broker::oldest_pending_preview(conn, member_id)? else {
+    let Some(message) = with_database_budget(conn, deadline, |conn| {
+        broker::oldest_pending_preview(conn, member_id)
+    })?
+    else {
         return Ok(None);
     };
     if message.from_member_id == member_id {
@@ -64,12 +62,37 @@ pub fn deliver_pane(
         .expect("locked concrete pane");
     let content = io
         .capture_pane(pane, DELIVERY_CAPTURE_LINES)
-        .map_err(CafleetError::App)?;
-    if classify(&placement.coding_agent, &strip_ansi(&content)) != PaneState::Finished {
+        .map_err(|error| CafleetError::App(error.to_string()))?;
+    let state = classify(&placement.coding_agent, &content);
+    if let Some(reason) = state.hold_reason() {
+        return if matches!(state, PaneState::Draft | PaneState::Unknown) {
+            Err(CafleetError::App(format!(
+                "member {member_id} is {reason}; preview {} was not sent.",
+                message.message_id
+            )))
+        } else {
+            Ok(None)
+        };
+    }
+    let eligible = with_database_budget(conn, deadline, |conn| {
+        let current = broker::get_member(conn, member_id, fleet_id)?;
+        Ok(current
+            .as_ref()
+            .is_some_and(|current| current.placement == locked.member.placement)
+            && broker::oldest_pending_preview(conn, member_id)?
+                .is_some_and(|pending| pending.message_id == message.message_id))
+    })?;
+    if !eligible {
         return Ok(None);
     }
     let text =
         truncate_text(Some(&message.text), settings.max_text_len).expect("present message text");
+    let uncertain = |cause: String| {
+        CafleetError::App(format!(
+            "preview {} delivery to member {member_id} is uncertain: {cause}. Inspect the pane before retrying.",
+            message.message_id
+        ))
+    };
     io.send_inline_preview(
         pane,
         message.message_id,
@@ -78,9 +101,20 @@ pub fn deliver_pane(
         &text,
         None,
     )
-    .map_err(CafleetError::App)?;
-    Ok(
-        broker::stamp_notified(conn, message.message_id, &format_utc(now))?
-            .then_some(message.message_id),
-    )
+    .map_err(|error| {
+        if error.submission_started() {
+            uncertain(error.to_string())
+        } else {
+            CafleetError::App(error.to_string())
+        }
+    })?;
+    let stamped = with_database_budget(conn, deadline, |conn| {
+        broker::stamp_notified(
+            conn,
+            message.message_id,
+            &format_utc(crate::time::now_utc()),
+        )
+    })
+    .map_err(|error| uncertain(error.message().into_owned()))?;
+    Ok(stamped.then_some(message.message_id))
 }

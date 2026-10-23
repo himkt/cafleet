@@ -179,31 +179,36 @@ pub fn get_fleet(conn: &Connection, fleet_id: i64) -> Result<Option<Value>, Cafl
 
 pub fn delete_fleet(conn: &mut Connection, fleet_id: i64) -> Result<Value, CafleetError> {
     crate::db::require_current(conn)?;
+    let tx = conn.transaction().map_err(db_err)?;
+    let result = delete_fleet_rows(&tx, fleet_id)?;
+    tx.commit().map_err(db_err)?;
+    Ok(result)
+}
+
+pub(crate) fn delete_fleet_rows(conn: &Connection, fleet_id: i64) -> Result<Value, CafleetError> {
     let fleet = fetch_fleet(conn, fleet_id)?
         .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;
     let now = format_utc(now_utc());
-    let tx = conn.transaction().map_err(db_err)?;
     if fleet.deleted_at.is_none() {
-        tx.execute(
+        conn.execute(
             "UPDATE fleets SET deleted_at=?1 WHERE fleet_id=?2",
             params![now, fleet_id],
         )
         .map_err(db_err)?;
     }
-    let deregistered = tx
+    let deregistered = conn
         .execute(
             "UPDATE members SET status='deregistered', deregistered_at=?1 \
              WHERE fleet_id=?2 AND status='active'",
             params![now, fleet_id],
         )
         .map_err(db_err)?;
-    tx.execute(
+    conn.execute(
         "DELETE FROM member_placements WHERE member_id IN \
          (SELECT member_id FROM members WHERE fleet_id=?1)",
         [fleet_id],
     )
     .map_err(db_err)?;
-    tx.commit().map_err(db_err)?;
     Ok(json!({
         "fleet_id": fleet_id,
         "deregistered_count": deregistered,

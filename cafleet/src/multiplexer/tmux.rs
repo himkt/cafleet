@@ -1,8 +1,3 @@
-//! tmux backend (SPEC §6.5 *TmuxMultiplexer*) — exact argv forms, the
-//! Esc-first matrix, the two keystroke delays, capture semantics, pane-gone
-//! tolerance, and the best-effort-vs-fail-fast split. The colocated tests pin
-//! the contract; see [`super::test_support`] for the API.
-
 use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
 
@@ -30,10 +25,14 @@ fn map_run_error(argv: &[String], timeout_secs: Option<u64>, error: RunError) ->
         RunError::BinaryNotFound(detail) => {
             MultiplexerError::new(format!("tmux binary not found: {detail}"))
         }
-        RunError::Timeout => {
-            let secs = timeout_secs.expect("a timeout error implies a timeout was set");
-            MultiplexerError::new(format!("tmux command timed out after {secs}s: {joined}"))
-        }
+        RunError::Timeout => match timeout_secs {
+            Some(secs) => {
+                MultiplexerError::new(format!("tmux command timed out after {secs}s: {joined}"))
+            }
+            None => MultiplexerError::new(format!(
+                "tmux command timed out at the pane input deadline: {joined}"
+            )),
+        },
         RunError::Failed { stderr } => MultiplexerError::new(format!(
             "tmux command failed: {joined}\nstderr: {}",
             stderr.trim()
@@ -49,6 +48,13 @@ pub struct TmuxMultiplexer {
 impl TmuxMultiplexer {
     pub fn new(runner: Rc<dyn CommandRunner>, env: HashMap<String, String>) -> Self {
         TmuxMultiplexer { runner, env }
+    }
+
+    pub(crate) fn bounded(&self, deadline: crate::input::Deadline) -> Self {
+        Self {
+            runner: super::DeadlineRunner::wrap(self.runner.clone(), deadline),
+            env: self.env.clone(),
+        }
     }
 
     pub fn name(&self) -> &'static str {
@@ -221,11 +227,11 @@ impl TmuxMultiplexer {
     }
 
     pub fn send_poll_trigger(&self, target_pane_id: &str, member_id: i64) -> bool {
-        let payload = format!(
-            "cafleet message poll {member_id} \
-             — then resume your work if something was still running."
-        );
-        self.best_effort_send(target_pane_id, &payload, true)
+        self.send_prompt(
+            target_pane_id,
+            &format!("cafleet message poll {member_id} --json"),
+        )
+        .is_ok()
     }
 
     pub fn send_wake_entries(
@@ -255,20 +261,30 @@ impl TmuxMultiplexer {
             return Err(MultiplexerError::new("tmux binary not found on PATH"));
         }
         let payload = super::inline_preview_payload(message_id, sender_id, ts, text, note);
-        self.send_literal_then_enter(target_pane_id, &payload, Some(5), false, true)
+        self.send_prompt(target_pane_id, &payload)
     }
 
     pub fn send_prompt(&self, target_pane_id: &str, text: &str) -> Result<(), MultiplexerError> {
-        let stripped = text.trim();
-        if stripped.is_empty() {
-            return Err(MultiplexerError::new("send_prompt: text may not be empty"));
-        }
-        if text.contains('\n') || text.contains('\r') {
+        if text.trim().is_empty() || text.chars().any(|ch| ch <= '\u{1f}' || ch == '\u{7f}') {
             return Err(MultiplexerError::new(
-                "send_prompt: text may not contain newlines",
+                "send_prompt: text must be one non-empty line without control characters",
             ));
         }
-        self.send_literal_then_enter(target_pane_id, stripped, None, false, true)
+        let bounded = self.bounded(crate::input::Deadline::new());
+        bounded
+            .run(
+                &tmux_argv(&["tmux", "send-keys", "-t", target_pane_id, "-l", text]),
+                Some(5),
+            )
+            .map_err(MultiplexerError::after_write)?;
+        bounded.runner.sleep(SUBMIT_DELAY);
+        bounded
+            .run(
+                &tmux_argv(&["tmux", "send-keys", "-t", target_pane_id, "Enter"]),
+                Some(5),
+            )
+            .map_err(MultiplexerError::after_write)?;
+        Ok(())
     }
 
     /// Capture the last `lines` drawn lines of the pane buffer via the shared

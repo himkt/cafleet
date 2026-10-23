@@ -10,9 +10,10 @@ pub mod test_support;
 pub mod tmux;
 
 use std::fmt;
+use std::rc::Rc;
+use std::time::Duration;
 
 use crate::coding_agent::coding_agent;
-use crate::delivery::PaneIo;
 
 pub use herdr::HerdrMultiplexer;
 pub use tmux::TmuxMultiplexer;
@@ -43,6 +44,7 @@ pub enum PaneCleanup {
 pub struct MultiplexerError {
     message: String,
     pane_cleanup: Option<PaneCleanup>,
+    submission_started: bool,
 }
 
 impl MultiplexerError {
@@ -50,11 +52,21 @@ impl MultiplexerError {
         Self {
             message: message.into(),
             pane_cleanup: None,
+            submission_started: false,
         }
     }
 
     pub fn pane_cleanup(&self) -> Option<&PaneCleanup> {
         self.pane_cleanup.as_ref()
+    }
+
+    pub fn submission_started(&self) -> bool {
+        self.submission_started
+    }
+
+    pub(crate) fn after_write(mut self) -> Self {
+        self.submission_started = true;
+        self
     }
 
     pub(crate) fn with_pane_cleanup(mut self, cleanup: PaneCleanup) -> Self {
@@ -129,7 +141,58 @@ pub enum RunError {
 pub trait CommandRunner {
     fn binary_exists(&self, name: &str) -> bool;
     fn run(&self, argv: &[String], timeout_secs: Option<u64>) -> Result<String, RunError>;
+    fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError> {
+        self.run(
+            argv,
+            Some(timeout.as_secs() + u64::from(timeout.subsec_nanos() > 0)),
+        )
+    }
     fn sleep(&self, seconds: f64);
+}
+
+pub(crate) struct DeadlineRunner {
+    runner: Rc<dyn CommandRunner>,
+    deadline: crate::input::Deadline,
+}
+
+impl DeadlineRunner {
+    pub(crate) fn wrap(
+        runner: Rc<dyn CommandRunner>,
+        deadline: crate::input::Deadline,
+    ) -> Rc<dyn CommandRunner> {
+        Rc::new(Self { runner, deadline })
+    }
+}
+
+impl CommandRunner for DeadlineRunner {
+    fn binary_exists(&self, name: &str) -> bool {
+        self.runner.binary_exists(name)
+    }
+
+    fn run(&self, argv: &[String], timeout_secs: Option<u64>) -> Result<String, RunError> {
+        let remaining = self.deadline.remaining().map_err(|_| RunError::Timeout)?;
+        self.run_for(
+            argv,
+            timeout_secs
+                .map(Duration::from_secs)
+                .map_or(remaining, |timeout| timeout.min(remaining)),
+        )
+    }
+
+    fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError> {
+        let remaining = self.deadline.remaining().map_err(|_| RunError::Timeout)?;
+        self.runner.run_for(argv, timeout.min(remaining))
+    }
+
+    fn sleep(&self, seconds: f64) {
+        if let Ok(remaining) = self.deadline.remaining() {
+            self.runner.sleep(
+                Duration::from_secs_f64(seconds)
+                    .min(remaining)
+                    .as_secs_f64(),
+            );
+        }
+    }
 }
 
 /// The A8 over-fetch margin: both backends fetch `lines + 1000` so a blank
@@ -237,11 +300,32 @@ pub(crate) fn inline_preview_payload(
     text: &str,
     note: Option<&str>,
 ) -> String {
-    let sanitized = text.replace("\r\n", "⏎").replace(['\n', '\r'], "⏎");
-    let mut payload = format!("[cafleet msg {message_id} from {sender_id} {ts}]\n{sanitized}");
+    fn visible(text: &str) -> String {
+        let mut result = String::new();
+        let mut chars = text.chars().peekable();
+        while let Some(ch) = chars.next() {
+            match ch {
+                '\r' => {
+                    if chars.peek() == Some(&'\n') {
+                        chars.next();
+                    }
+                    result.push('⏎');
+                }
+                '\n' => result.push('⏎'),
+                '\t' => result.push('␉'),
+                '\u{00}'..='\u{1f}' | '\u{7f}' => result.push_str(&format!("\\x{:02x}", ch as u32)),
+                _ => result.push(ch),
+            }
+        }
+        result
+    }
+    let mut payload = format!(
+        "[cafleet msg {message_id} from {sender_id} {ts}] {}",
+        visible(text)
+    );
     if let Some(note) = note {
-        payload.push('\n');
-        payload.push_str(note);
+        payload.push(' ');
+        payload.push_str(&visible(note));
     }
     payload
 }
@@ -290,6 +374,15 @@ pub trait Multiplexer {
 pub enum AnyMultiplexer {
     Tmux(TmuxMultiplexer),
     Herdr(HerdrMultiplexer),
+}
+
+impl AnyMultiplexer {
+    pub fn bounded(&self, deadline: crate::input::Deadline) -> Self {
+        match self {
+            Self::Tmux(mux) => Self::Tmux(mux.bounded(deadline)),
+            Self::Herdr(mux) => Self::Herdr(mux.bounded(deadline)),
+        }
+    }
 }
 
 macro_rules! dispatch {
@@ -490,29 +583,6 @@ macro_rules! implement_backend {
 }
 implement_backend!(TmuxMultiplexer);
 implement_backend!(HerdrMultiplexer);
-
-impl<M: Multiplexer> PaneIo for M {
-    fn capture_pane(&self, pane_id: &str, lines: i64) -> Result<String, String> {
-        Multiplexer::capture_pane(self, pane_id, lines).map_err(|error| error.to_string())
-    }
-
-    fn send_inline_preview(
-        &self,
-        pane_id: &str,
-        message_id: i64,
-        sender_id: i64,
-        ts: &str,
-        text: &str,
-        note: Option<&str>,
-    ) -> Result<(), String> {
-        Multiplexer::send_inline_preview(self, pane_id, message_id, sender_id, ts, text, note)
-            .map_err(|error| error.to_string())
-    }
-
-    fn send_prompt(&self, pane_id: &str, text: &str) -> Result<(), String> {
-        Multiplexer::send_prompt(self, pane_id, text).map_err(|error| error.to_string())
-    }
-}
 
 /// Resolve the backend per the SPEC precedence and construct it over the
 /// given runner and environment snapshot.

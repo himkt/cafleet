@@ -1,8 +1,3 @@
-//! herdr backend (SPEC §6.5 *HerdrMultiplexer*) — JSON envelope parsing, the
-//! layout-ratio equalization arithmetic, `agent_status`, and the kill/rebalance
-//! phases. The colocated tests pin the contract; see [`super::test_support`]
-//! for the API.
-
 use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
 
@@ -35,10 +30,14 @@ fn map_run_error(argv: &[String], timeout_secs: Option<u64>, error: RunError) ->
         RunError::BinaryNotFound(detail) => {
             MultiplexerError::new(format!("herdr binary not found: {detail}"))
         }
-        RunError::Timeout => {
-            let secs = timeout_secs.expect("a timeout error implies a timeout was set");
-            MultiplexerError::new(format!("herdr command timed out after {secs}s: {joined}"))
-        }
+        RunError::Timeout => match timeout_secs {
+            Some(secs) => {
+                MultiplexerError::new(format!("herdr command timed out after {secs}s: {joined}"))
+            }
+            None => MultiplexerError::new(format!(
+                "herdr command timed out at the pane input deadline: {joined}"
+            )),
+        },
         RunError::Failed { stderr } => MultiplexerError::new(format!(
             "herdr command failed: {joined}\nstderr: {}",
             stderr.trim()
@@ -101,6 +100,13 @@ pub struct HerdrMultiplexer {
 impl HerdrMultiplexer {
     pub fn new(runner: Rc<dyn CommandRunner>, env: HashMap<String, String>) -> Self {
         HerdrMultiplexer { runner, env }
+    }
+
+    pub(crate) fn bounded(&self, deadline: crate::input::Deadline) -> Self {
+        Self {
+            runner: super::DeadlineRunner::wrap(self.runner.clone(), deadline),
+            env: self.env.clone(),
+        }
     }
 
     pub fn name(&self) -> &'static str {
@@ -370,22 +376,13 @@ impl HerdrMultiplexer {
     }
 
     pub fn send_poll_trigger(&self, target_pane_id: &str, member_id: i64) -> bool {
-        let payload = format!(
-            "cafleet message poll {member_id} \
-             — then resume your work if something was still running."
-        );
-        self.best_effort(|| {
-            self.send_esc(target_pane_id, false)?;
-            self.run(
-                &herdr_argv(&["herdr", "pane", "run", target_pane_id, &payload]),
-                Some(5),
-            )?;
-            Ok(())
-        })
+        self.send_prompt(
+            target_pane_id,
+            &format!("cafleet message poll {member_id} --json"),
+        )
+        .is_ok()
     }
 
-    /// Esc first: the wake targets the monitor member's own pane, which can
-    /// be parked on a permission prompt.
     pub fn send_wake_entries(
         &self,
         target_pane_id: &str,
@@ -422,34 +419,29 @@ impl HerdrMultiplexer {
             return Err(MultiplexerError::new("herdr binary not found on PATH"));
         }
         let payload = super::inline_preview_payload(message_id, sender_id, ts, text, note);
-        self.send_esc(target_pane_id, false)?;
-        self.run(
-            &herdr_argv(&["herdr", "pane", "send-text", target_pane_id, &payload]),
-            Some(5),
-        )?;
-        self.runner.sleep(SUBMIT_DELAY);
-        self.run(
-            &herdr_argv(&["herdr", "pane", "send-keys", target_pane_id, "enter"]),
-            Some(5),
-        )?;
-        Ok(())
+        self.send_prompt(target_pane_id, &payload)
     }
 
     pub fn send_prompt(&self, target_pane_id: &str, text: &str) -> Result<(), MultiplexerError> {
-        let stripped = text.trim();
-        if stripped.is_empty() {
-            return Err(MultiplexerError::new("send_prompt: text may not be empty"));
-        }
-        if text.contains('\n') || text.contains('\r') {
+        if text.trim().is_empty() || text.chars().any(|ch| ch <= '\u{1f}' || ch == '\u{7f}') {
             return Err(MultiplexerError::new(
-                "send_prompt: text may not contain newlines",
+                "send_prompt: text must be one non-empty line without control characters",
             ));
         }
-        self.send_esc(target_pane_id, false)?;
-        self.run(
-            &herdr_argv(&["herdr", "pane", "run", target_pane_id, stripped]),
-            None,
-        )?;
+        let bounded = self.bounded(crate::input::Deadline::new());
+        bounded
+            .run(
+                &herdr_argv(&["herdr", "pane", "send-text", target_pane_id, text]),
+                Some(5),
+            )
+            .map_err(MultiplexerError::after_write)?;
+        bounded.runner.sleep(SUBMIT_DELAY);
+        bounded
+            .run(
+                &herdr_argv(&["herdr", "pane", "send-keys", target_pane_id, "enter"]),
+                Some(5),
+            )
+            .map_err(MultiplexerError::after_write)?;
         Ok(())
     }
 

@@ -58,6 +58,7 @@ pub fn run(
     slot: &mut Option<Connection>,
     settings: &Settings,
     command: FleetCommand,
+    deadline: crate::input::Deadline,
 ) -> Result<(), CafleetError> {
     let conn = slot.as_mut().expect("open invocation connection");
     match command {
@@ -68,7 +69,7 @@ pub fn run(
         } => create(conn, settings, &name, &coding_agent, json),
         FleetCommand::List { json } => list(conn, json),
         FleetCommand::Show { fleet_id, json } => show(conn, fleet_id, json),
-        FleetCommand::Delete { fleet_id, json } => delete(conn, fleet_id, json),
+        FleetCommand::Delete { fleet_id, json } => delete(conn, settings, fleet_id, json, deadline),
         FleetCommand::Capture {
             fleet_id,
             lines,
@@ -155,8 +156,14 @@ fn show(conn: &mut Connection, fleet_id: i64, json: bool) -> Result<(), CafleetE
     Ok(())
 }
 
-fn delete(conn: &mut Connection, fleet_id: i64, json: bool) -> Result<(), CafleetError> {
-    let result = broker::delete_fleet(conn, fleet_id)?;
+fn delete(
+    conn: &mut Connection,
+    settings: &Settings,
+    fleet_id: i64,
+    json: bool,
+    deadline: crate::input::Deadline,
+) -> Result<(), CafleetError> {
+    let result = crate::input::delete_fleet(conn, settings, fleet_id, deadline)?;
     emit(json, &result, || {
         format!(
             "Deleted fleet {fleet_id}. Deregistered {} members.",

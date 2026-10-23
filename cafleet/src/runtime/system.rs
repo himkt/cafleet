@@ -48,6 +48,10 @@ impl CommandRunner for SystemRunner {
         run_process(argv, timeout_secs.map(Duration::from_secs))
     }
 
+    fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError> {
+        run_process(argv, Some(timeout))
+    }
+
     fn sleep(&self, seconds: f64) {
         std::thread::sleep(Duration::from_secs_f64(seconds));
     }

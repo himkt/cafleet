@@ -85,43 +85,50 @@ fn dispatch(
     args: CliArgs,
     hooks: &InvocationHooks<'_>,
 ) -> Result<(), CafleetError> {
+    let deadline = crate::input::Deadline::new();
     match args.command {
         Command::Setup(cmd) => setup::run(settings, cmd, hooks),
         Command::Doctor(cmd) => doctor::run(settings, cmd, hooks),
         command => {
-            let conn = (hooks.connect)(&settings.database_url)?;
-            let schema = diagnosis::classify_selected_schema(
-                &conn,
-                crate::db::head_version(),
-                &settings.database_url,
-            );
+            let mut conn = (hooks.connect)(&settings.database_url)?;
+            let schema = crate::input::with_database_budget(&mut conn, deadline, |conn| {
+                Ok(diagnosis::classify_selected_schema(
+                    conn,
+                    crate::db::head_version(),
+                    &settings.database_url,
+                ))
+            })?;
             helpers::schema_guard(&schema)?;
             {
                 let home = std::path::PathBuf::from(
                     std::env::var("HOME")
                         .map_err(|_| CafleetError::App("HOME is not set".into()))?,
                 );
-                let assets = diagnosis::diagnose_assets(
-                    Some(&conn),
-                    hooks.asset_env,
-                    &home,
-                    VERSION,
-                    AssetMode::Guard,
-                );
+                let assets = crate::input::with_database_budget(&mut conn, deadline, |conn| {
+                    diagnosis::diagnose_assets(
+                        Some(conn),
+                        hooks.asset_env,
+                        &home,
+                        VERSION,
+                        AssetMode::Guard,
+                    )
+                });
                 helpers::stale_assets_guard(&assets?, VERSION)?;
             }
             let mut slot = Some(conn);
             match command {
-                Command::Fleet(cmd) => fleet::run(&mut slot, settings, cmd),
+                Command::Fleet(cmd) => fleet::run(&mut slot, settings, cmd, deadline),
                 Command::Member(cmd) => member::run(
                     slot.as_mut().expect("open invocation connection"),
                     settings,
                     cmd,
+                    deadline,
                 ),
                 Command::Message(cmd) => message::run(
                     slot.as_mut().expect("open invocation connection"),
                     settings,
                     cmd,
+                    deadline,
                 ),
                 Command::Setup(_) | Command::Doctor(_) => unreachable!("handled above"),
             }

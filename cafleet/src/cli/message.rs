@@ -92,6 +92,7 @@ pub fn run(
     conn: &mut Connection,
     settings: &Settings,
     command: MessageCommand,
+    deadline: crate::input::Deadline,
 ) -> Result<(), CafleetError> {
     match command {
         MessageCommand::Send {
@@ -108,7 +109,14 @@ pub fn run(
             let notification = resolve_mux(settings)
                 .map_err(|error| CafleetError::App(error.to_string()))
                 .and_then(|mux| {
-                    deliver_preview(conn, settings, Some(&mux), to_member_id, message_id)
+                    deliver_preview(
+                        conn,
+                        settings,
+                        Some(&mux),
+                        to_member_id,
+                        message_id,
+                        deadline,
+                    )
                 });
             let notification_sent = match notification {
                 Ok(sent) => sent,

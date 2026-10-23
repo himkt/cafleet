@@ -18,7 +18,7 @@ use crate::delivery::DELIVERY_CAPTURE_LINES;
 use crate::error::CafleetError;
 
 use crate::multiplexer::Multiplexer;
-use crate::output::{format_member, format_member_detail, format_member_list, strip_ansi};
+use crate::output::{format_member, format_member_detail, format_member_list};
 use crate::pane_state::{PaneState, classify};
 use crate::presentation;
 use crate::runtime::system::SystemProbe;
@@ -230,6 +230,7 @@ pub fn run(
     conn: &mut Connection,
     settings: &Settings,
     command: MemberCommand,
+    deadline: crate::input::Deadline,
 ) -> Result<(), CafleetError> {
     match command {
         MemberCommand::Create {
@@ -253,20 +254,22 @@ pub fn run(
             &body,
             json,
         ),
-        MemberCommand::Delete { member_id, json } => delete(conn, settings, member_id, json),
+        MemberCommand::Delete { member_id, json } => {
+            delete(conn, settings, member_id, json, deadline)
+        }
         MemberCommand::Show { member_id, json } => show(conn, member_id, json),
         MemberCommand::List { fleet_id, json } => list(conn, fleet_id, json),
         MemberCommand::Prompt {
             member_id,
             text,
             json,
-        } => prompt(conn, settings, member_id, &text, json),
+        } => prompt(conn, settings, member_id, &text, json, deadline),
         MemberCommand::Exec {
             member_id,
             body,
             json,
-        } => exec(conn, settings, member_id, &body, json),
-        MemberCommand::Ping { member_id, json } => ping(conn, settings, member_id, json),
+        } => exec(conn, settings, member_id, &body, json, deadline),
+        MemberCommand::Ping { member_id, json } => ping(conn, settings, member_id, json, deadline),
         MemberCommand::Capture {
             member_id,
             lines,
@@ -390,19 +393,66 @@ fn delete(
     settings: &Settings,
     member_id: i64,
     json: bool,
+    deadline: crate::input::Deadline,
 ) -> Result<(), CafleetError> {
-    // Root-Director guard, before any pane mutation.
-    let fleet_id = broker::active_member_fleet(conn, member_id)?
-        .ok_or_else(|| CafleetError::App(format!("Member {member_id} not found")))?;
-    let fleet = broker::fleets::fetch_fleet(conn, fleet_id)?
-        .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;
+    let fleet = crate::input::with_database_budget(conn, deadline, |conn| {
+        let fleet_id = broker::active_member_fleet(conn, member_id)?
+            .ok_or_else(|| CafleetError::App(format!("Member {member_id} not found")))?;
+        let fleet = broker::fleets::fetch_fleet(conn, fleet_id)?
+            .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;
+        Ok(fleet)
+    })?;
     if fleet.director_member_id == Some(member_id) {
         return Err(CafleetError::App(
             "cannot deregister the root Director; use 'cafleet fleet delete' instead".to_string(),
         ));
     }
 
-    let member = load_member(conn, member_id, true)?;
+    let (member, _guard) = loop {
+        let member = crate::input::with_database_budget(conn, deadline, |conn| {
+            load_member(conn, member_id, true)
+        })?;
+        let concrete = member
+            .placement
+            .as_ref()
+            .filter(|placement| placement.mux_pane_id.is_some());
+        let guard = if let Some(placement) = concrete {
+            match crate::input::PaneLock::try_acquire(&settings.database_url, placement).map_err(
+                |error| {
+                    CafleetError::App(format!(
+                        "member {member_id} pane input: {}",
+                        error.message()
+                    ))
+                },
+            )? {
+                Some(guard) => Some(guard),
+                None => {
+                    if deadline.retry() {
+                        continue;
+                    }
+                    return Err(CafleetError::App(format!(
+                        "member {member_id}'s pane input remained busy for 5 seconds; member was not deleted."
+                    )));
+                }
+            }
+        } else {
+            None
+        };
+        let current = crate::input::with_database_budget(conn, deadline, |conn| {
+            load_member(conn, member_id, true)
+        })?;
+        if current.placement != member.placement {
+            drop(guard);
+            deadline.remaining()?;
+            continue;
+        }
+        if current.kind == crate::broker::records::MemberKind::Director {
+            return Err(CafleetError::App(
+                "cannot deregister the root Director; use 'cafleet fleet delete' instead".into(),
+            ));
+        }
+        break (current, guard);
+    };
     let pane = member
         .placement
         .as_ref()
@@ -410,7 +460,9 @@ fn delete(
     let pane_status = if member.placement.is_none() {
         "(no placement)".to_string()
     } else if let Some(pane_id) = &pane {
-        let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
+        let mux = resolve_mux(settings)
+            .map_err(|e| CafleetError::App(e.to_string()))?
+            .bounded(deadline);
         mux.ensure_available()
             .map_err(|e| CafleetError::App(e.to_string()))?;
         mux.kill_pane(pane_id, true).map_err(|error| {
@@ -424,8 +476,10 @@ fn delete(
     } else {
         "(pending — no pane)".to_string()
     };
-    broker::deregister_member(conn, member_id)
-        .map_err(|e| CafleetError::App(format!("deregister failed: {}", e.message())))?;
+    crate::input::with_database_budget(conn, deadline, |conn| {
+        broker::deregister_member(conn, member_id)
+    })
+    .map_err(|e| CafleetError::App(format!("deregister failed: {}", e.message())))?;
 
     let result = json!({"member_id": member_id, "pane_status": pane_status});
     emit(json, &result, || {
@@ -453,23 +507,22 @@ fn list(conn: &mut Connection, fleet_id: i64, json: bool) -> Result<(), CafleetE
 }
 
 fn input_state(state: PaneState) -> Option<&'static str> {
-    match state {
-        PaneState::Finished => None,
-        PaneState::Working => Some("working"),
-        PaneState::AwaitingUser => Some("awaiting_user"),
-        PaneState::Unclassified => Some("unknown"),
-    }
+    state.hold_reason()
 }
 
 fn dispatch_input(
-    conn: &Connection,
+    conn: &mut Connection,
     settings: &Settings,
     member: &MemberRecord,
     text: &str,
     label: &str,
+    deadline: crate::input::Deadline,
 ) -> Result<(), CafleetError> {
     let id = member.member_id;
-    let Some(locked) = crate::input::lock_member(conn, settings, member)? else {
+    let Some(locked) = crate::input::with_database_budget(conn, deadline, |conn| {
+        crate::input::lock_member(conn, settings, member)
+    })?
+    else {
         return Err(CafleetError::App(format!(
             "member {id}'s pane is receiving another input; retry after it is idle."
         )));
@@ -484,20 +537,24 @@ fn dispatch_input(
             "{label} was not dispatched to member {id}: {cause}"
         ))
     };
-    let mux = resolve_mux(settings).map_err(|e| prewrite(e.to_string()))?;
+    let mux = resolve_mux(settings)
+        .map_err(|e| prewrite(e.to_string()))?
+        .bounded(deadline);
     mux.ensure_available()
         .map_err(|e| prewrite(e.to_string()))?;
     let content = mux
         .capture_pane(pane, DELIVERY_CAPTURE_LINES)
         .map_err(|e| prewrite(e.to_string()))?;
-    if let Some(state) = input_state(classify(&placement.coding_agent, &strip_ansi(&content))) {
+    if let Some(state) = input_state(classify(&placement.coding_agent, &content)) {
         return Err(CafleetError::App(format!(
             "member {id} is {state}; {label} was not dispatched."
         )));
     }
-    mux.send_prompt(pane, text).map_err(|error| CafleetError::App(format!(
-        "{label} delivery to member {id} is uncertain: {error}. Inspect the pane before retrying."
-    )))
+    mux.send_prompt(pane, text).map_err(|error| {
+        if error.submission_started() { CafleetError::App(format!(
+            "{label} delivery to member {id} is uncertain: {error}. Inspect the pane before retrying."
+        )) } else { prewrite(error.to_string()) }
+    })
 }
 
 fn valid_input(text: &str) -> bool {
@@ -510,15 +567,18 @@ fn prompt(
     member_id: i64,
     text: &str,
     json: bool,
+    deadline: crate::input::Deadline,
 ) -> Result<(), CafleetError> {
     if !valid_input(text) {
         return Err(CafleetError::Usage(
             "text must be one non-empty line without control characters.".into(),
         ));
     }
-    let member = load_member(conn, member_id, false)?;
+    let member = crate::input::with_database_budget(conn, deadline, |conn| {
+        load_member(conn, member_id, false)
+    })?;
     let pane = require_pane(&member, member_id, "prompt")?;
-    dispatch_input(conn, settings, &member, text, "prompt")?;
+    dispatch_input(conn, settings, &member, text, "prompt", deadline)?;
     emit(
         json,
         &json!({"member_id":member_id,"pane_id":pane,"text":text}),
@@ -533,9 +593,12 @@ fn exec(
     member_id: i64,
     body: &ExecBodyArgs,
     json: bool,
+    deadline: crate::input::Deadline,
 ) -> Result<(), CafleetError> {
     let command = resolve_command_body(body.command.as_deref(), body.file.as_deref())?;
-    let member = load_member(conn, member_id, false)?;
+    let member = crate::input::with_database_budget(conn, deadline, |conn| {
+        load_member(conn, member_id, false)
+    })?;
     if member.kind == crate::broker::records::MemberKind::Director {
         return Err(CafleetError::App(
             "cannot exec in the Director's own pane".into(),
@@ -548,6 +611,7 @@ fn exec(
         &member,
         &format!("! {command}"),
         "native command",
+        deadline,
     )?;
     let agent = &member
         .placement
@@ -572,28 +636,35 @@ fn ping(
     settings: &Settings,
     member_id: i64,
     json: bool,
+    deadline: crate::input::Deadline,
 ) -> Result<(), CafleetError> {
-    let member = load_member(conn, member_id, false)?;
+    let member = crate::input::with_database_budget(conn, deadline, |conn| {
+        load_member(conn, member_id, false)
+    })?;
     let placement = member.placement.as_ref().expect("placed member");
     let pane = placement.mux_pane_id.as_deref();
     let reason;
     if let Some(pane) = pane {
-        let locked = crate::input::lock_member(conn, settings, &member)?;
+        let locked = crate::input::with_database_budget(conn, deadline, |conn| {
+            crate::input::lock_member(conn, settings, &member)
+        })?;
         reason = match locked {
             None => Some("busy"),
             Some(_locked) => {
-                let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
+                let mux = resolve_mux(settings)
+                    .map_err(|e| CafleetError::App(e.to_string()))?
+                    .bounded(deadline);
                 mux.ensure_available()
                     .map_err(|e| CafleetError::App(e.to_string()))?;
                 let content = mux
                     .capture_pane(pane, DELIVERY_CAPTURE_LINES)
                     .map_err(|e| CafleetError::App(e.to_string()))?;
-                let reason = input_state(classify(&placement.coding_agent, &strip_ansi(&content)));
+                let reason = input_state(classify(&placement.coding_agent, &content));
                 if reason.is_none() {
                     mux.send_prompt(pane, &format!("cafleet message poll {member_id} --json"))
-                        .map_err(|e| CafleetError::App(format!(
-                            "poll-trigger delivery to member {member_id} is uncertain: {e}. Inspect the pane before retrying."
-                        )))?;
+                        .map_err(|error| if error.submission_started() { CafleetError::App(format!(
+                            "poll-trigger delivery to member {member_id} is uncertain: {error}. Inspect the pane before retrying."
+                        )) } else { CafleetError::App(error.to_string()) })?;
                 }
                 reason
             }

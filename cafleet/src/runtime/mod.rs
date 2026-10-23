@@ -25,12 +25,14 @@ pub fn deliver_preview(
     mux: Option<&AnyMultiplexer>,
     member_id: i64,
     message_id: i64,
+    deadline: crate::input::Deadline,
 ) -> Result<bool, CafleetError> {
     let Some(mux) = mux else {
         return Ok(false);
     };
+    let mux = mux.bounded(deadline);
     Ok(
-        crate::delivery::deliver_pane(conn, mux, settings, member_id, crate::time::now_utc())?
+        crate::delivery::deliver_pane(conn, &mux, settings, member_id, deadline)?
             == Some(message_id),
     )
 }
