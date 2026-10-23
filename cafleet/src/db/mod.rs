@@ -109,14 +109,12 @@ mod tests {
         .unwrap()
     }
 
-    const APP_TABLES: [&str; 7] = [
+    const APP_TABLES: [&str; 5] = [
         "members",
         "fleets",
         "asset_installs",
         "member_placements",
-        "monitor_runtime",
         "messages",
-        "member_execs",
     ];
 
     #[test]
@@ -154,6 +152,117 @@ mod tests {
     }
 
     #[test]
+    fn baseline_sets_the_current_application_identity() {
+        let dir = TempDir::new().unwrap();
+        let conn = migrated_conn(&dir);
+        let identity: i64 = conn
+            .query_row("PRAGMA application_id", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(identity, 1128351288);
+    }
+
+    #[test]
+    fn baseline_columns_match_the_current_storage_contract() {
+        let dir = TempDir::new().unwrap();
+        let conn = migrated_conn(&dir);
+        for (table, expected) in [
+            (
+                "members",
+                vec![
+                    ("member_id", "INTEGER", 1, 1),
+                    ("fleet_id", "INTEGER", 1, 0),
+                    ("name", "TEXT", 1, 0),
+                    ("description", "TEXT", 1, 0),
+                    ("status", "TEXT", 1, 0),
+                    ("registered_at", "TEXT", 1, 0),
+                    ("deregistered_at", "TEXT", 0, 0),
+                ],
+            ),
+            (
+                "fleets",
+                vec![
+                    ("fleet_id", "INTEGER", 1, 1),
+                    ("name", "TEXT", 0, 0),
+                    ("created_at", "TEXT", 1, 0),
+                    ("deleted_at", "TEXT", 0, 0),
+                    ("director_member_id", "INTEGER", 0, 0),
+                ],
+            ),
+            (
+                "asset_installs",
+                vec![
+                    ("coding_agent", "TEXT", 1, 1),
+                    ("path", "TEXT", 1, 2),
+                    ("cafleet_version", "TEXT", 1, 0),
+                    ("installed_at", "TEXT", 1, 0),
+                ],
+            ),
+            (
+                "member_placements",
+                vec![
+                    ("member_id", "INTEGER", 1, 1),
+                    ("mux_session", "TEXT", 1, 0),
+                    ("mux_window_id", "TEXT", 1, 0),
+                    ("mux_pane_id", "TEXT", 0, 0),
+                    ("backend", "TEXT", 1, 0),
+                    ("coding_agent", "TEXT", 1, 0),
+                    ("created_at", "TEXT", 1, 0),
+                ],
+            ),
+            (
+                "messages",
+                vec![
+                    ("message_id", "INTEGER", 1, 1),
+                    ("from_member_id", "INTEGER", 1, 0),
+                    ("to_member_id", "INTEGER", 1, 0),
+                    ("created_at", "TEXT", 1, 0),
+                    ("status_state", "TEXT", 1, 0),
+                    ("status_timestamp", "TEXT", 1, 0),
+                    ("text", "TEXT", 1, 0),
+                    ("notified_at", "TEXT", 0, 0),
+                ],
+            ),
+        ] {
+            let mut statement = conn
+                .prepare(&format!("PRAGMA table_info('{table}')"))
+                .unwrap();
+            let actual = statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(5)?,
+                    ))
+                })
+                .unwrap()
+                .map(Result::unwrap)
+                .collect::<Vec<_>>();
+            let expected = expected
+                .into_iter()
+                .map(|(name, kind, required, pk)| (name.to_owned(), kind.to_owned(), required, pk))
+                .collect::<Vec<_>>();
+            assert_eq!(actual, expected, "{table}");
+        }
+    }
+
+    #[test]
+    fn failed_baseline_initialization_rolls_back_identity_tables_and_ledger() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA max_page_count=1").unwrap();
+        assert!(migrate_to_head(&mut conn).is_err());
+        assert!(conn.is_autocommit());
+        let identity: i64 = conn
+            .query_row("PRAGMA application_id", [], |row| row.get(0))
+            .unwrap();
+        let tables: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!((identity, tables), (0, 0));
+    }
+
+    #[test]
     fn baseline_creates_exactly_the_head_tables() {
         let dir = TempDir::new().unwrap();
         let conn = migrated_conn(&dir);
@@ -172,20 +281,20 @@ mod tests {
             .chain(std::iter::once(&"refinery_schema_history"))
             .map(|s| s.to_string())
             .collect();
-        assert_eq!(names, expected, "no alembic_version, nothing extra");
+        assert_eq!(names, expected);
     }
 
     #[test]
-    fn autoincrement_on_exactly_fleets_members_messages_member_execs() {
+    fn generated_id_tables_use_autoincrement() {
         let dir = TempDir::new().unwrap();
         let conn = migrated_conn(&dir);
-        for table in ["fleets", "members", "messages", "member_execs"] {
+        for table in ["fleets", "members", "messages"] {
             assert!(
                 table_sql(&conn, table).contains("AUTOINCREMENT"),
                 "{table} must AUTOINCREMENT"
             );
         }
-        for table in ["asset_installs", "member_placements", "monitor_runtime"] {
+        for table in ["asset_installs", "member_placements"] {
             assert!(
                 !table_sql(&conn, table).contains("AUTOINCREMENT"),
                 "{table} must not AUTOINCREMENT"
@@ -194,7 +303,7 @@ mod tests {
     }
 
     #[test]
-    fn the_four_head_indexes_exist_and_nothing_more() {
+    fn application_indexes_match_the_current_query_keys() {
         let dir = TempDir::new().unwrap();
         let conn = migrated_conn(&dir);
         let placeholders = APP_TABLES.map(|t| format!("'{t}'")).join(",");
@@ -211,8 +320,7 @@ mod tests {
             .collect();
         let expected: BTreeSet<String> = [
             "idx_members_fleet_status",
-            "idx_members_one_active_monitor_per_fleet",
-            "idx_messages_owner_member_status_ts",
+            "idx_messages_to_member_status_ts",
             "idx_messages_from_member_status_ts",
         ]
         .map(String::from)
@@ -224,10 +332,6 @@ mod tests {
     fn ddl_defaults_match_the_head_schema() {
         let dir = TempDir::new().unwrap();
         let conn = migrated_conn(&dir);
-        assert_eq!(
-            column_info(&conn, "monitor_runtime", "tick_seconds").1,
-            Some("5".to_string())
-        );
         assert_eq!(
             column_info(&conn, "member_placements", "backend").1,
             Some("'tmux'".to_string())
@@ -244,18 +348,14 @@ mod tests {
     fn nullability_matches_the_head_schema() {
         let dir = TempDir::new().unwrap();
         let conn = migrated_conn(&dir);
-        assert_eq!(column_info(&conn, "messages", "to_member_id").0, 0);
-        assert_eq!(column_info(&conn, "messages", "origin_message_id").0, 0);
+        assert_eq!(column_info(&conn, "messages", "from_member_id").0, 1);
+        assert_eq!(column_info(&conn, "messages", "to_member_id").0, 1);
+        assert_eq!(column_info(&conn, "messages", "notified_at").0, 0);
         assert_eq!(column_info(&conn, "messages", "text").0, 1);
         assert_eq!(column_info(&conn, "fleets", "director_member_id").0, 0);
         assert_eq!(column_info(&conn, "fleets", "name").0, 0);
         assert_eq!(column_info(&conn, "members", "deregistered_at").0, 0);
         assert_eq!(column_info(&conn, "member_placements", "mux_pane_id").0, 0);
-        assert_eq!(column_info(&conn, "monitor_runtime", "last_wake_at").0, 0);
-        assert_eq!(
-            column_info(&conn, "monitor_runtime", "wake_interval_seconds").0,
-            0
-        );
     }
 
     #[test]
@@ -275,11 +375,11 @@ mod tests {
             ("members".to_string(), "CASCADE".to_string())
         );
         assert_eq!(
-            fk_rule(&conn, "monitor_runtime", "fleet_id"),
-            ("fleets".to_string(), "RESTRICT".to_string())
+            fk_rule(&conn, "messages", "from_member_id"),
+            ("members".to_string(), "RESTRICT".to_string())
         );
         assert_eq!(
-            fk_rule(&conn, "messages", "owner_member_id"),
+            fk_rule(&conn, "messages", "to_member_id"),
             ("members".to_string(), "RESTRICT".to_string())
         );
     }
@@ -348,11 +448,60 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let conn = migrated_conn(&dir);
         let result = conn.execute(
-            "INSERT INTO members (fleet_id, name, description, status, registered_at, member_card_json) \
-             VALUES (999, 'x', 'y', 'active', '2026-07-30T00:00:00.000000+00:00', '{}')",
+            "INSERT INTO members (fleet_id, name, description, status, registered_at) \
+             VALUES (999, 'x', 'y', 'active', '2026-07-30T00:00:00.000000+00:00')",
             [],
         );
-        assert!(result.is_err(), "an FK to a missing fleet must be rejected");
+        let error = result.unwrap_err();
+        assert!(
+            matches!(&error, rusqlite::Error::SqliteFailure(code, _)
+            if code.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_FOREIGNKEY),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn message_foreign_keys_reject_missing_senders_and_recipients() {
+        let dir = TempDir::new().unwrap();
+        let conn = migrated_conn(&dir);
+        conn.execute_batch(
+            "INSERT INTO fleets(fleet_id, created_at) VALUES (1, '2026-10-23T00:00:00Z');
+             INSERT INTO members(member_id, fleet_id, name, description, status, registered_at)
+             VALUES (1, 1, 'sender', 'test', 'active', '2026-10-23T00:00:00Z');",
+        )
+        .unwrap();
+        for (sender, recipient) in [(999, 1), (1, 999)] {
+            let error = conn.execute(
+                "INSERT INTO messages(from_member_id, to_member_id, created_at, status_state, status_timestamp, text)
+                 VALUES (?1, ?2, '2026-10-23T00:00:00Z', 'input_required', '2026-10-23T00:00:00Z', 'test')",
+                [sender, recipient],
+            ).unwrap_err();
+            assert!(
+                matches!(&error, rusqlite::Error::SqliteFailure(code, _)
+                if code.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_FOREIGNKEY),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn deleting_an_unreferenced_member_cascades_its_placement() {
+        let dir = TempDir::new().unwrap();
+        let conn = migrated_conn(&dir);
+        conn.execute_batch(
+            "INSERT INTO fleets(fleet_id, created_at) VALUES (1, '2026-10-23T00:00:00Z');
+             INSERT INTO members(member_id, fleet_id, name, description, status, registered_at)
+             VALUES (1, 1, 'member', 'test', 'active', '2026-10-23T00:00:00Z');
+             INSERT INTO member_placements(member_id, mux_session, mux_window_id, mux_pane_id, backend, coding_agent, created_at)
+             VALUES (1, 'main', '@1', '%1', 'tmux', 'codex', '2026-10-23T00:00:00Z');
+             DELETE FROM members WHERE member_id=1;"
+        ).unwrap();
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM member_placements", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
     }
 
     #[test]

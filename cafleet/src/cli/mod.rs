@@ -223,10 +223,15 @@ mod tests {
             assert_eq!(opens.get(), if initial == "open failure" { 2 } else { 1 });
             let conn = crate::db::connect(&url).unwrap();
             let rows = broker::list_asset_installs(&conn).unwrap();
-            assert_eq!(rows.len(), 1);
-            assert_eq!(rows[0]["coding_agent"], "claude");
-            assert_eq!(rows[0]["cafleet_version"], VERSION);
-            assert!(dir.path().join("skills/cafleet/SKILL.md").is_file());
+            if initial == "ahead" {
+                assert!(rows.is_empty());
+                assert!(!dir.path().join("skills").exists());
+            } else {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0]["coding_agent"], "claude");
+                assert_eq!(rows[0]["cafleet_version"], VERSION);
+                assert!(dir.path().join("skills/cafleet/SKILL.md").is_file());
+            }
         }
     }
 }

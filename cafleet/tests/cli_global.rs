@@ -30,10 +30,14 @@ fn an_unknown_pre_subcommand_option_is_a_parse_error() {
 const NO_INSTALL_ERROR: &str =
     "Error: no assets install is recorded at the resolved paths; run 'cafleet setup' to install";
 
-const PRE_RESET_ERROR: &str =
-    "Error: database schema 10 is newer than this cafleet (head 1); upgrade cafleet";
-
 const NO_DATABASE_ERROR: &str = "Error: no cafleet database; run 'cafleet setup'";
+
+fn incompatible_format_error(cli: &Cli) -> String {
+    format!(
+        "Error: database format is incompatible at '{}'; choose an empty database path and run 'cafleet setup'.",
+        cli.db_path().display()
+    )
+}
 
 #[test]
 fn the_guard_blocks_fleet_scoped_groups_when_no_install_is_recorded() {
@@ -43,7 +47,6 @@ fn the_guard_blocks_fleet_scoped_groups_when_no_install_is_recorded() {
         ["fleet", "list"].as_slice(),
         ["member", "list", "1"].as_slice(),
         ["message", "poll", "1"].as_slice(),
-        ["monitor", "1"].as_slice(),
     ] {
         let output = cli.run(args);
         assert_eq!(code(&output), 1, "guarded: {args:?}");
@@ -88,8 +91,7 @@ fn the_schema_guard_reports_a_foreign_database() {
     let output = cli.run(&["fleet", "list"]);
     assert_eq!(code(&output), 1);
     assert!(
-        stderr(&output)
-            .contains("Error: database has tables but no schema history — not a cafleet database?"),
+        stderr(&output).contains(&incompatible_format_error(&cli)),
         "got: {}",
         stderr(&output)
     );
@@ -120,18 +122,16 @@ fn the_schema_guard_reports_a_newer_database() {
 #[test]
 fn the_schema_guard_blocks_every_guarded_group() {
     let cli = Cli::new();
-    cli.seed_pre_reset_database();
+    cli.seed_incompatible_database();
     for args in [
         ["fleet", "list"].as_slice(),
         ["member", "list", "1"].as_slice(),
         ["message", "poll", "1"].as_slice(),
-        ["monitor", "1"].as_slice(),
-        ["monitor", "scan", "1"].as_slice(),
     ] {
         let output = cli.run(args);
         assert_eq!(code(&output), 1, "guarded: {args:?}");
         assert!(
-            stderr(&output).contains(PRE_RESET_ERROR),
+            stderr(&output).contains(&incompatible_format_error(&cli)),
             "{args:?} → {}",
             stderr(&output)
         );
@@ -139,35 +139,6 @@ fn the_schema_guard_blocks_every_guarded_group() {
         assert!(!err.contains("no such column"), "{err}");
     }
     assert!(cli.shim_calls().is_empty());
-}
-
-#[test]
-fn the_schema_guard_blocks_server_startup() {
-    use std::io::Read;
-    use std::time::{Duration, Instant};
-
-    let cli = Cli::new();
-    cli.seed_pre_reset_database();
-    let mut child = cli.spawn(&["server", "--port", "0"]);
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while child.try_wait().unwrap().is_none() {
-        if Instant::now() > deadline {
-            child.kill().unwrap();
-            child.wait().unwrap();
-            panic!("server kept running against a pre-reset database");
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    let status = child.try_wait().unwrap().unwrap();
-    assert_eq!(status.code(), Some(1));
-    let mut err = String::new();
-    child
-        .stderr
-        .take()
-        .unwrap()
-        .read_to_string(&mut err)
-        .unwrap();
-    assert!(err.contains(PRE_RESET_ERROR), "got: {err}");
 }
 
 #[test]

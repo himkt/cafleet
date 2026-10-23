@@ -289,9 +289,7 @@ impl Cli {
             .collect()
     }
 
-    /// Hand-write a database file from a release with a different default
-    /// file name: the refinery ledger at versions 1–10, ahead of head.
-    pub fn seed_pre_reset_database(&self) {
+    pub fn seed_incompatible_database(&self) {
         self.sqlite()
             .execute_batch(
                 "CREATE TABLE refinery_schema_history (
@@ -301,16 +299,7 @@ impl Cli {
                      checksum VARCHAR(255)
                  );
                  INSERT INTO refinery_schema_history (version, name, applied_on, checksum) VALUES
-                     (1, 'baseline', '2026-01-01T00:00:00Z', '0'),
-                     (2, 'drop_director_monitor_enrollment', '2026-01-01T00:00:00Z', '0'),
-                     (3, 'strip_monitoring_member_kind', '2026-01-01T00:00:00Z', '0'),
-                     (4, 'fleet_level_wake_schedule', '2026-01-01T00:00:00Z', '0'),
-                     (5, 'monitor_wake_interval', '2026-01-01T00:00:00Z', '0'),
-                     (6, 'path_aware_asset_installs', '2026-01-01T00:00:00Z', '0'),
-                     (7, 'monitor_wake_request', '2026-01-01T00:00:00Z', '0'),
-                     (8, 'unique_active_monitor', '2026-01-01T00:00:00Z', '0'),
-                     (9, 'held_delivery_and_member_execs', '2026-01-01T00:00:00Z', '0'),
-                     (10, 'composer_safe_delivery', '2026-01-01T00:00:00Z', '0');
+                     (1, 'baseline', '2026-01-01T00:00:00Z', '0');
                  CREATE TABLE asset_installs (
                      coding_agent TEXT NOT NULL,
                      path TEXT NOT NULL,

@@ -106,12 +106,12 @@ mod tests {
     }
 
     #[test]
-    fn default_database_url_points_at_expanded_home_cafleet_v7() {
+    fn default_database_url_points_at_expanded_home_cafleet_v8() {
         let s = Settings::from_lookup(|_| None).unwrap();
         assert!(s.database_url.starts_with("sqlite:///"));
         assert!(
             s.database_url
-                .ends_with("/.local/share/cafleet/cafleet_v7.db")
+                .ends_with("/.local/share/cafleet/cafleet_v8.db")
         );
         assert!(
             !s.database_url.contains('~'),
