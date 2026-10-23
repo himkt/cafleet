@@ -9,6 +9,14 @@ use cafleet::broker;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+pub fn process_test_resource_guard() -> std::sync::MutexGuard<'static, ()> {
+    static RESOURCE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    // Each test owns its fixture state, so a prior failure only releases this slot.
+    RESOURCE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// The capture every pane shows unless [`Cli::set_pane_capture`] overrides it:
 /// a claude composer at rest, so a delivery fires immediately.
 pub const REST_CAPTURE: &str = "pane:{pane}\nline1\nline2\n> at rest";

@@ -20,6 +20,7 @@ fn assert_diagnostic(value: &serde_json::Value, worker: &Worker, message: i64, d
 
 #[test]
 fn retries_rotate_members_once_per_second_in_memory() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let first = fixture.worker("first");
     let second = fixture.worker("second");
@@ -69,6 +70,7 @@ fn retries_rotate_members_once_per_second_in_memory() {
 
 #[test]
 fn an_inbox_reply_is_checked_before_another_retry_attempt() {
+    let _test_resource = common::process_test_resource_guard();
     for selection in ["created-at", "id-tie"] {
         let fixture = Fixture::new();
         let first = fixture.worker("first");
@@ -119,6 +121,7 @@ fn an_inbox_reply_is_checked_before_another_retry_attempt() {
 
 #[test]
 fn immediate_incoming_messages_take_priority_over_pending_outgoing_notifications() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     let assignment = fixture.assignment(&worker, "pending outgoing");
@@ -131,6 +134,7 @@ fn immediate_incoming_messages_take_priority_over_pending_outgoing_notifications
 
 #[test]
 fn retries_exclude_director_self_acked_notified_and_pending_placements() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let subject = fixture.worker("observer");
     let worker = fixture.worker("worker");
@@ -168,6 +172,7 @@ fn retries_exclude_director_self_acked_notified_and_pending_placements() {
 
 #[test]
 fn retry_candidates_stay_inside_the_subjects_fleet() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let local = fixture.worker("local");
     fixture.view(&local, WORKING);
@@ -192,6 +197,7 @@ fn retry_candidates_stay_inside_the_subjects_fleet() {
 
 #[test]
 fn a_busy_pane_is_retried_after_ownership_is_released() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     let message = fixture.assignment(&worker, "pending behind input");
@@ -214,6 +220,7 @@ fn a_busy_pane_is_retried_after_ownership_is_released() {
 
 #[test]
 fn a_working_pane_becomes_deliverable_on_a_fresh_idle_capture() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     fixture.view(&worker, WORKING);
@@ -234,6 +241,7 @@ fn a_working_pane_becomes_deliverable_on_a_fresh_idle_capture() {
 
 #[test]
 fn concurrent_waiters_serialize_one_preview_and_revalidate_its_stamp() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     let message = fixture.assignment(&worker, "one preview");
@@ -263,6 +271,7 @@ fn concurrent_waiters_serialize_one_preview_and_revalidate_its_stamp() {
 
 #[test]
 fn ack_during_capture_is_revalidated_before_submission() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     let message = fixture.assignment(&worker, "consumed during capture");
@@ -282,6 +291,7 @@ fn ack_during_capture_is_revalidated_before_submission() {
 
 #[test]
 fn activity_and_placement_are_revalidated_after_capture_before_typing() {
+    let _test_resource = common::process_test_resource_guard();
     for mutation in ["deregistered", "new-pane"] {
         let fixture = Fixture::new();
         let worker = fixture.worker("worker");
@@ -326,6 +336,7 @@ fn activity_and_placement_are_revalidated_after_capture_before_typing() {
 
 #[test]
 fn draft_and_unknown_diagnostics_are_exact_and_deduplicated_per_member() {
+    let _test_resource = common::process_test_resource_guard();
     for (state, view) in [("draft", DRAFT), ("unknown", UNKNOWN)] {
         let fixture = Fixture::new();
         let worker = fixture.worker("worker");
@@ -359,6 +370,7 @@ fn draft_and_unknown_diagnostics_are_exact_and_deduplicated_per_member() {
 
 #[test]
 fn working_approval_and_lock_contention_are_ordinary_holds() {
+    let _test_resource = common::process_test_resource_guard();
     for state in ["working", "approval", "busy"] {
         let fixture = Fixture::new();
         let worker = fixture.worker("worker");
@@ -382,6 +394,7 @@ fn working_approval_and_lock_contention_are_ordinary_holds() {
 
 #[test]
 fn capture_failures_are_not_sent_diagnostics_with_the_actual_cause() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     let message = fixture.assignment(&worker, "capture unavailable");
@@ -402,6 +415,7 @@ fn capture_failures_are_not_sent_diagnostics_with_the_actual_cause() {
 
 #[test]
 fn first_write_and_enter_failures_are_uncertain_and_keep_the_preview_pending() {
+    let _test_resource = common::process_test_resource_guard();
     for stage in ["literal", "enter"] {
         let fixture = Fixture::new();
         let worker = fixture.worker("worker");
@@ -435,6 +449,7 @@ fn first_write_and_enter_failures_are_uncertain_and_keep_the_preview_pending() {
 
 #[test]
 fn a_later_error_replaces_an_earlier_error_for_the_same_member() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     let message = fixture.assignment(&worker, "retry errors");
@@ -474,6 +489,7 @@ fn a_later_error_replaces_an_earlier_error_for_the_same_member() {
 
 #[test]
 fn independent_members_keep_one_latest_diagnostic_each() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let first = fixture.worker("first");
     let second = fixture.worker("second");
@@ -509,6 +525,7 @@ fn independent_members_keep_one_latest_diagnostic_each() {
 
 #[test]
 fn diagnostics_are_removed_after_ack_or_member_leave_before_return() {
+    let _test_resource = common::process_test_resource_guard();
     for cleanup in ["ack", "leave"] {
         let fixture = Fixture::new();
         let worker = fixture.worker("worker");
@@ -609,17 +626,20 @@ fn assert_late_ack_clears_the_owned_attempt_diagnostic(stage: &str) {
 
 #[test]
 fn a_late_prewrite_revalidation_clears_an_acked_preview_diagnostic_without_a_final_receive_check() {
+    let _test_resource = common::process_test_resource_guard();
     assert_late_ack_clears_the_owned_attempt_diagnostic("capture");
 }
 
 #[test]
 fn a_late_post_enter_stamp_observation_clears_an_acked_preview_diagnostic_without_a_final_receive_check()
  {
+    let _test_resource = common::process_test_resource_guard();
     assert_late_ack_clears_the_owned_attempt_diagnostic("enter");
 }
 
 #[test]
 fn a_different_pending_preview_replaces_the_member_diagnostic_identity() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     fixture.view(&worker, UNKNOWN);
@@ -650,6 +670,7 @@ fn a_different_pending_preview_replaces_the_member_diagnostic_identity() {
 
 #[test]
 fn successful_notification_by_another_invocation_clears_the_waiters_diagnostic() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     let blocker = fixture.worker("blocker");
@@ -695,6 +716,7 @@ fn successful_notification_by_another_invocation_clears_the_waiters_diagnostic()
 
 #[test]
 fn text_receives_report_readiness_diagnostics_on_stderr() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     fixture.view(&worker, UNKNOWN);
@@ -728,6 +750,7 @@ fn text_receives_report_readiness_diagnostics_on_stderr() {
 
 #[test]
 fn send_reports_the_new_message_even_when_it_notifies_an_older_preview() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     let old = fixture.assignment(&worker, "oldest preview");
@@ -762,6 +785,7 @@ fn send_reports_the_new_message_even_when_it_notifies_an_older_preview() {
 
 #[test]
 fn committed_send_stdout_survives_notification_failure_with_its_message_id() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     fixture.fail(&worker, "capture", "notification transport is unavailable");
@@ -808,6 +832,7 @@ fn committed_send_stdout_survives_notification_failure_with_its_message_id() {
 
 #[test]
 fn precommit_storage_failure_returns_no_committed_message_or_notification() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     fixture
@@ -854,6 +879,7 @@ fn precommit_storage_failure_returns_no_committed_message_or_notification() {
 
 #[test]
 fn slow_capture_is_bounded_by_one_inflight_attempt_after_receive_deadline() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     let message = fixture.assignment(&worker, "slow capture");
@@ -877,6 +903,7 @@ fn slow_capture_is_bounded_by_one_inflight_attempt_after_receive_deadline() {
 
 #[test]
 fn capture_and_write_share_the_attempt_budget_and_stop_before_enter() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     let message = fixture.assignment(&worker, "partial write timeout");
@@ -901,6 +928,7 @@ fn capture_and_write_share_the_attempt_budget_and_stop_before_enter() {
 
 #[test]
 fn a_notification_stamp_wait_is_bounded_and_remains_uncertain() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     let message = fixture.assignment(&worker, "blocked stamp");

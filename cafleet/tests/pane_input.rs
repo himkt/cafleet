@@ -298,6 +298,7 @@ fn assert_busy(output: &Output, member: i64) {
 
 #[test]
 fn prompt_sends_exact_literal_text_then_enter_and_preserves_json_order() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = InputFixture::new();
     let output = fixture.cli.run(&[
         "member",
@@ -347,6 +348,7 @@ fn prompt_sends_exact_literal_text_then_enter_and_preserves_json_order() {
 
 #[test]
 fn prompt_text_output_retains_the_existing_success_contract() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = InputFixture::new();
     let output = fixture.cli.run(&[
         "member",
@@ -366,6 +368,7 @@ fn prompt_text_output_retains_the_existing_success_contract() {
 
 #[test]
 fn prompt_invalid_lines_fail_before_pane_io() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = InputFixture::new();
     for text in [
         "",
@@ -397,6 +400,7 @@ fn prompt_invalid_lines_fail_before_pane_io() {
 
 #[test]
 fn prompt_and_native_exec_refuse_every_non_idle_state_without_typing() {
+    let _test_resource = common::process_test_resource_guard();
     for (action, label) in [("prompt", "prompt"), ("exec", "native command")] {
         let fixture = InputFixture::new();
         for (state, capture) in [
@@ -428,6 +432,7 @@ fn prompt_and_native_exec_refuse_every_non_idle_state_without_typing() {
 
 #[test]
 fn ping_submits_only_the_json_poll_command_with_literal_settle_enter() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = InputFixture::new();
     let payload = json(&fixture.run("ping"));
     assert_eq!(
@@ -463,6 +468,7 @@ fn ping_submits_only_the_json_poll_command_with_literal_settle_enter() {
 
 #[test]
 fn ping_reports_each_readiness_hold_in_json_and_text() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = InputFixture::new();
     for (state, capture) in [
         ("working", format!("✻ Working (esc to interrupt)\n{IDLE}")),
@@ -497,6 +503,7 @@ fn ping_reports_each_readiness_hold_in_json_and_text() {
 
 #[test]
 fn process_shared_lock_blocks_prompt_exec_and_ping_before_capture() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = InputFixture::new();
     let _lock = fixture.hold_lock();
     for action in ["prompt", "exec"] {
@@ -526,6 +533,7 @@ fn process_shared_lock_blocks_prompt_exec_and_ping_before_capture() {
 
 #[test]
 fn duplicate_registrations_for_one_concrete_pane_share_the_lock() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = InputFixture::new();
     let duplicate = fixture.cli.seed_member(fixture.fleet, "alias");
     fixture
@@ -550,6 +558,7 @@ fn duplicate_registrations_for_one_concrete_pane_share_the_lock() {
 
 #[test]
 fn the_session_and_pane_components_select_independent_input_locks() {
+    let _test_resource = common::process_test_resource_guard();
     for separate_session in [false, true] {
         let fixture = InputFixture::new();
         let other = fixture.cli.seed_member(fixture.fleet, "other");
@@ -587,6 +596,7 @@ fn the_session_and_pane_components_select_independent_input_locks() {
 
 #[test]
 fn canonical_database_aliases_share_the_input_lock_directory() {
+    let _test_resource = common::process_test_resource_guard();
     let mut fixture = InputFixture::new();
     let alias = fixture.cli.home.path().join("database-alias.db");
     symlink(fixture.cli.db_path(), &alias).unwrap();
@@ -608,6 +618,7 @@ fn canonical_database_aliases_share_the_input_lock_directory() {
 
 #[test]
 fn lockfiles_have_stable_identity_owner_only_permissions_and_unmodified_contents() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = InputFixture::new();
     json(&fixture.run("prompt"));
     let path = fixture.lock_path();
@@ -634,6 +645,7 @@ fn lockfiles_have_stable_identity_owner_only_permissions_and_unmodified_contents
 
 #[test]
 fn lock_open_errors_preserve_member_and_path_context_without_typing() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = InputFixture::new();
     let path = fixture.lock_path();
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -649,6 +661,7 @@ fn lock_open_errors_preserve_member_and_path_context_without_typing() {
 
 #[test]
 fn read_only_capture_works_while_an_input_lock_is_held() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = InputFixture::new();
     let _lock = fixture.hold_lock();
     let output = fixture.cli.run(&[
@@ -664,6 +677,7 @@ fn read_only_capture_works_while_an_input_lock_is_held() {
 
 #[test]
 fn lock_is_held_through_capture_literal_and_enter_for_every_explicit_writer() {
+    let _test_resource = common::process_test_resource_guard();
     for action in ["prompt", "ping", "exec"] {
         for stage in ["capture", "literal", "enter"] {
             let mut fixture = InputFixture::new();
@@ -689,6 +703,7 @@ fn lock_is_held_through_capture_literal_and_enter_for_every_explicit_writer() {
 
 #[test]
 fn process_exit_releases_input_ownership_without_replacing_the_lockfile() {
+    let _test_resource = common::process_test_resource_guard();
     let mut fixture = InputFixture::new();
     let mut owner = fixture.gate("prompt", "capture");
     let path = fixture.lock_path();
@@ -708,6 +723,7 @@ fn process_exit_releases_input_ownership_without_replacing_the_lockfile() {
 
 #[test]
 fn slow_literal_submission_retains_process_shared_ownership() {
+    let _test_resource = common::process_test_resource_guard();
     let mut fixture = InputFixture::new();
     let owner = fixture.gate("prompt", "literal");
     std::thread::sleep(Duration::from_millis(3200));
@@ -725,6 +741,7 @@ fn slow_literal_submission_retains_process_shared_ownership() {
 
 #[test]
 fn preview_contention_preserves_the_committed_message_and_pending_stamp() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = InputFixture::new();
     let _lock = fixture.hold_lock();
     let payload = json(&fixture.send("held assignment"));
@@ -752,6 +769,7 @@ fn preview_contention_preserves_the_committed_message_and_pending_stamp() {
 
 #[test]
 fn a_real_prompt_owner_prevents_preview_input_from_joining_its_payload() {
+    let _test_resource = common::process_test_resource_guard();
     let mut fixture = InputFixture::new();
     let owner = fixture.gate("prompt", "literal");
     let before = fixture.cli.shim_calls().len();
@@ -774,6 +792,7 @@ fn a_real_prompt_owner_prevents_preview_input_from_joining_its_payload() {
 
 #[test]
 fn a_preview_owner_holds_the_same_guard_through_literal_and_enter() {
+    let _test_resource = common::process_test_resource_guard();
     for stage in ["literal", "enter"] {
         let mut fixture = InputFixture::new();
         let owner = fixture.gate("preview", stage);
@@ -798,6 +817,7 @@ fn a_preview_owner_holds_the_same_guard_through_literal_and_enter() {
 
 #[test]
 fn prompt_and_native_exec_capture_failures_preserve_the_cause_and_release_the_guard() {
+    let _test_resource = common::process_test_resource_guard();
     for (action, label) in [("prompt", "prompt"), ("exec", "native command")] {
         let mut fixture = InputFixture::new();
         fixture.cli.set_env("CAFLEET_TEST_FAIL_STAGE", "capture");
@@ -824,6 +844,7 @@ fn prompt_and_native_exec_capture_failures_preserve_the_cause_and_release_the_gu
 
 #[test]
 fn prompt_and_ping_report_first_write_and_enter_failures_as_uncertain_once() {
+    let _test_resource = common::process_test_resource_guard();
     for action in ["prompt", "ping", "exec"] {
         for stage in ["literal", "enter"] {
             let mut fixture = InputFixture::new();
@@ -876,6 +897,7 @@ fn prompt_and_ping_report_first_write_and_enter_failures_as_uncertain_once() {
 
 #[test]
 fn ping_capture_failure_exits_one_with_its_cause_and_no_success_record() {
+    let _test_resource = common::process_test_resource_guard();
     let mut fixture = InputFixture::new();
     fixture.cli.set_env("CAFLEET_TEST_FAIL_STAGE", "capture");
     let output = fixture.run("ping");
@@ -891,6 +913,7 @@ fn ping_capture_failure_exits_one_with_its_cause_and_no_success_record() {
 
 #[test]
 fn capture_timeout_is_bounded_and_starts_no_input_after_the_deadline() {
+    let _test_resource = common::process_test_resource_guard();
     for action in ["prompt", "ping", "exec"] {
         let mut fixture = InputFixture::new();
         fixture.cli.set_env("CAFLEET_TEST_CAPTURE_DELAY", "8");
@@ -909,6 +932,7 @@ fn capture_timeout_is_bounded_and_starts_no_input_after_the_deadline() {
 
 #[test]
 fn capture_and_literal_share_one_five_second_attempt_budget() {
+    let _test_resource = common::process_test_resource_guard();
     let mut fixture = InputFixture::new();
     fixture.cli.set_env("CAFLEET_TEST_CAPTURE_DELAY", "3");
     fixture.cli.set_env("CAFLEET_TEST_LITERAL_DELAY", "3");
@@ -936,6 +960,7 @@ fn capture_and_literal_share_one_five_second_attempt_budget() {
 
 #[test]
 fn member_delete_contention_uses_one_bounded_deadline_without_kill_or_mutation() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = InputFixture::new();
     let _lock = fixture.hold_lock();
     let before = fixture.cli.shim_calls().len();
@@ -968,6 +993,7 @@ fn member_delete_contention_uses_one_bounded_deadline_without_kill_or_mutation()
 
 #[test]
 fn member_delete_retries_a_released_lock_and_only_then_kills() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = InputFixture::new();
     let lock = fixture.hold_lock();
     let child = fixture
@@ -995,6 +1021,7 @@ fn member_delete_retries_a_released_lock_and_only_then_kills() {
 
 #[test]
 fn pending_placement_delete_needs_no_pane_lock() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = InputFixture::new();
     let _lock = fixture.hold_lock();
     fixture
@@ -1022,6 +1049,7 @@ fn pending_placement_delete_needs_no_pane_lock() {
 
 #[test]
 fn fleet_delete_contention_preserves_every_row_and_releases_other_guards() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = InputFixture::new();
     let other = fixture.cli.seed_member(fixture.fleet, "other");
     let message = fixture
@@ -1079,6 +1107,7 @@ fn fleet_delete_contention_preserves_every_row_and_releases_other_guards() {
 
 #[test]
 fn fleet_delete_shares_one_deadline_across_multiple_contended_panes() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = InputFixture::new();
     let mut paths = [
         (
@@ -1114,6 +1143,7 @@ fn fleet_delete_shares_one_deadline_across_multiple_contended_panes() {
 
 #[test]
 fn fleet_delete_revalidates_a_changed_placement_set_before_deregistering() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = InputFixture::new();
     let mut paths = [
         placement_lock(&fixture.cli, "tmux", "main", "%0"),
@@ -1171,6 +1201,7 @@ fn fleet_delete_revalidates_a_changed_placement_set_before_deregistering() {
 
 #[test]
 fn the_backend_component_selects_an_independent_input_lock() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = InputFixture::new();
     let _other_backend = hold_lock(&placement_lock(
         &fixture.cli,
@@ -1184,6 +1215,7 @@ fn the_backend_component_selects_an_independent_input_lock() {
 
 #[test]
 fn readiness_uses_the_recorded_target_agent_and_fresh_styled_capture() {
+    let _test_resource = common::process_test_resource_guard();
     for (agent, placeholder, draft) in [
         (
             "claude",
@@ -1233,6 +1265,7 @@ fn readiness_uses_the_recorded_target_agent_and_fresh_styled_capture() {
 
 #[test]
 fn preview_ownership_extends_through_a_blocked_notification_stamp() {
+    let _test_resource = common::process_test_resource_guard();
     let mut fixture = InputFixture::new();
     let mut owner = fixture.gate("preview", "enter");
     let writer = fixture.cli.sqlite();
@@ -1255,6 +1288,7 @@ fn preview_ownership_extends_through_a_blocked_notification_stamp() {
 
 #[test]
 fn preview_prewrite_database_revalidation_obeys_the_remaining_attempt_budget() {
+    let _test_resource = common::process_test_resource_guard();
     let mut fixture = InputFixture::new();
     fixture.cli.set_env("CAFLEET_TEST_CAPTURE_DELAY", "2");
     let start = Instant::now();
@@ -1324,6 +1358,7 @@ fn preview_prewrite_database_revalidation_obeys_the_remaining_attempt_budget() {
 
 #[test]
 fn notification_database_wait_obeys_the_remaining_attempt_budget() {
+    let _test_resource = common::process_test_resource_guard();
     let mut fixture = InputFixture::new();
     fixture.cli.set_env("CAFLEET_TEST_CAPTURE_DELAY", "2");
     let start = Instant::now();
@@ -1352,6 +1387,7 @@ fn notification_database_wait_obeys_the_remaining_attempt_budget() {
 
 #[test]
 fn herdr_uses_the_same_input_guard_and_requests_styled_literal_submission() {
+    let _test_resource = common::process_test_resource_guard();
     let mut fixture = InputFixture::new();
     fixture.cli.set_env("CAFLEET_MULTIPLEXER", "herdr");
     fixture.cli.set_env("HERDR_ENV", "test-herdr");
@@ -1400,6 +1436,7 @@ fi
 
 #[test]
 fn fleet_delete_acquires_sorted_keys_before_later_placements() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = InputFixture::new();
     let mut paths = [
         placement_lock(&fixture.cli, "tmux", "main", "%0"),
