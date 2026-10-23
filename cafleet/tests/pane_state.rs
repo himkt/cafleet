@@ -45,6 +45,12 @@ const CAPTURED_OPENCODE_DRAFT: &str =
     include_str!("fixtures/pane-readiness/opencode-herdr-draft.ansi");
 const CAPTURED_OPENCODE_HINT_STYLE: &str = "\x1b[38;2;128;128;128m\x1b[48;2;30;30;30m";
 const CAPTURED_OPENCODE_INPUT_STYLE: &str = "\x1b[38;2;238;238;238m\x1b[48;2;30;30;30m";
+const CAPTURED_OPENCODE_TMUX_PLACEHOLDER: &str =
+    include_str!("fixtures/pane-readiness/opencode-tmux-placeholder.ansi");
+const CAPTURED_OPENCODE_TMUX_DRAFT: &str =
+    include_str!("fixtures/pane-readiness/opencode-tmux-draft.ansi");
+const CAPTURED_OPENCODE_TMUX_HINT_STYLE: &str = "\x1b[38;2;128;128;128m";
+const CAPTURED_OPENCODE_TMUX_INPUT_STYLE: &str = "\x1b[38;2;238;238;238m";
 
 fn captured_opencode_composer_text(capture: &str) -> String {
     strip_ansi(capture)
@@ -372,6 +378,162 @@ fn captured_opencode_derived_historical_quotes_remain_unknown() {
         let transcript =
             format!("Archived terminal output:\n```text\n{capture}\n```\nMore output follows.");
         assert_eq!(classify("opencode", &transcript), PaneState::Unknown);
+    }
+}
+
+#[test]
+fn captured_opencode_tmux_placeholder_is_idle_with_carried_sgr_and_the_complete_footer() {
+    let visible = strip_ansi(CAPTURED_OPENCODE_TMUX_PLACEHOLDER);
+    assert_eq!(visible, strip_ansi(CAPTURED_OPENCODE_TMUX_DRAFT));
+    assert_eq!(
+        captured_opencode_composer_text(CAPTURED_OPENCODE_TMUX_PLACEHOLDER),
+        format!("┃  {CAPTURED_OPENCODE_HINT}")
+    );
+    for content in [
+        "Cafleet · Big Pickle OpenCode",
+        "tab agents  ctrl+p commands",
+        "Run /connect to add an AI provider and start coding",
+        "workspace:feat/0000184-goal-native-agent-multiplexer",
+    ] {
+        assert!(
+            visible.contains(content),
+            "missing captured layout: {content}"
+        );
+    }
+    let footer = visible
+        .lines()
+        .rfind(|line| !line.trim().is_empty())
+        .unwrap();
+    assert!(footer.contains("workspace:feat/0000184-goal-native-agent-multiplexer"));
+    assert!(footer.ends_with("1.19.1"));
+    let hint = format!("{CAPTURED_OPENCODE_TMUX_HINT_STYLE}{CAPTURED_OPENCODE_HINT}");
+    let input = format!("{CAPTURED_OPENCODE_TMUX_INPUT_STYLE}{CAPTURED_OPENCODE_HINT}");
+    assert!(CAPTURED_OPENCODE_TMUX_PLACEHOLDER.contains(&format!("\x1b[48;2;30;30;30m  {hint}")));
+    assert_eq!(CAPTURED_OPENCODE_TMUX_PLACEHOLDER.matches(&hint).count(), 1);
+    assert_eq!(
+        CAPTURED_OPENCODE_TMUX_PLACEHOLDER.replacen(&hint, &input, 1),
+        CAPTURED_OPENCODE_TMUX_DRAFT
+    );
+    assert_eq!(
+        classify("opencode", CAPTURED_OPENCODE_TMUX_PLACEHOLDER),
+        PaneState::Idle
+    );
+}
+
+#[test]
+fn captured_opencode_tmux_identical_text_with_the_actual_input_foreground_is_a_draft() {
+    assert_eq!(
+        captured_opencode_composer_text(CAPTURED_OPENCODE_TMUX_DRAFT),
+        format!("┃  {CAPTURED_OPENCODE_HINT}")
+    );
+    assert!(CAPTURED_OPENCODE_TMUX_DRAFT.contains(&format!(
+        "\x1b[48;2;30;30;30m  {CAPTURED_OPENCODE_TMUX_INPUT_STYLE}{CAPTURED_OPENCODE_HINT}"
+    )));
+    assert_eq!(
+        classify("opencode", CAPTURED_OPENCODE_TMUX_DRAFT),
+        PaneState::Draft
+    );
+}
+
+#[test]
+fn captured_opencode_tmux_derived_adapter_windows_preserve_roles_and_trailing_layout() {
+    for (capture, expected) in [
+        (CAPTURED_OPENCODE_TMUX_PLACEHOLDER, PaneState::Idle),
+        (CAPTURED_OPENCODE_TMUX_DRAFT, PaneState::Draft),
+    ] {
+        let lines: Vec<_> = capture.lines().collect();
+        let start = lines.len().checked_sub(80).unwrap();
+        let window = lines[start..].join("\n");
+        let visible = strip_ansi(&window);
+        assert!(visible.contains(CAPTURED_OPENCODE_HINT));
+        assert!(visible.contains("Cafleet · Big Pickle OpenCode"));
+        assert!(visible.contains("tab agents  ctrl+p commands"));
+        assert!(visible.contains("workspace:feat/0000184-goal-native-agent-multiplexer"));
+        assert!(visible.contains("1.19.1"));
+        assert_eq!(classify("opencode", &window), expected);
+    }
+}
+
+#[test]
+fn captured_opencode_tmux_derived_hint_and_metadata_changes_preserve_carried_roles() {
+    for (capture, expected) in [
+        (CAPTURED_OPENCODE_TMUX_PLACEHOLDER, PaneState::Idle),
+        (CAPTURED_OPENCODE_TMUX_DRAFT, PaneState::Draft),
+    ] {
+        assert_eq!(capture.matches(CAPTURED_OPENCODE_HINT).count(), 1);
+        for hint in ["An unseen rotating suggestion", "! printf example", "/help"] {
+            let content = capture
+                .replace(CAPTURED_OPENCODE_HINT, hint)
+                .replace("Cafleet", "Planner")
+                .replace("agent-multiplexer", "fixture-workspace");
+            assert_eq!(
+                classify("opencode", &content),
+                expected,
+                "derived hint {hint:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn captured_opencode_tmux_derived_ambiguous_or_incomplete_roles_remain_unknown() {
+    for (capture, style) in [
+        (
+            CAPTURED_OPENCODE_TMUX_PLACEHOLDER,
+            CAPTURED_OPENCODE_TMUX_HINT_STYLE,
+        ),
+        (
+            CAPTURED_OPENCODE_TMUX_DRAFT,
+            CAPTURED_OPENCODE_TMUX_INPUT_STYLE,
+        ),
+    ] {
+        let hint = format!("{style}{CAPTURED_OPENCODE_HINT}");
+        assert_eq!(capture.matches(&hint).count(), 1);
+        for foreground in [
+            "\x1b[38;2;0;0;2m",
+            "\x1b[38;2;0;2;0m",
+            "\x1b[38;2;2;0;0m",
+            "\x1b[38;2;255;0;0m",
+            "\x1b[7;38;2;128;128;128m",
+            "\x1b[999;38;2;128;128;128m",
+        ] {
+            let content =
+                capture.replacen(&hint, &format!("{foreground}{CAPTURED_OPENCODE_HINT}"), 1);
+            assert_eq!(
+                classify("opencode", &content),
+                PaneState::Unknown,
+                "derived foreground {foreground:?}"
+            );
+        }
+        let input_background = format!("\x1b[48;2;30;30;30m  {hint}");
+        assert_eq!(capture.matches(&input_background).count(), 1);
+        let lines: Vec<_> = capture.lines().collect();
+        for content in [
+            capture.replacen(&input_background, &format!("  {hint}"), 1),
+            strip_ansi(capture),
+            lines[..42].join("\n"),
+            lines[lines.len() - 10..].join("\n"),
+            format!("Archived terminal output:\n```text\n{capture}\n```\nMore output follows."),
+        ] {
+            assert_eq!(classify("opencode", &content), PaneState::Unknown);
+        }
+    }
+}
+
+#[test]
+fn captured_opencode_tmux_derived_work_and_approval_outrank_both_input_roles() {
+    let fixture = COMPOSERS
+        .iter()
+        .find(|fixture| fixture.agent == "opencode")
+        .unwrap();
+    for capture in [
+        CAPTURED_OPENCODE_TMUX_PLACEHOLDER,
+        CAPTURED_OPENCODE_TMUX_DRAFT,
+    ] {
+        let working = format!("{capture}\n{}", fixture.working);
+        assert_eq!(classify("opencode", &working), PaneState::Working);
+        let approval = format!("{working}\n{}", fixture.approval);
+        assert_eq!(classify("opencode", &approval), PaneState::AwaitingUser);
     }
 }
 
