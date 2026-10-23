@@ -86,9 +86,6 @@ pub fn resolve_body(
     })
 }
 
-/// The `member exec` command body: the same positional / `--file` reader,
-/// with one empty-body rejection for either source. The body is returned
-/// verbatim.
 pub fn resolve_command_body(
     inline: Option<&str>,
     file: Option<&str>,

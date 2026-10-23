@@ -1,7 +1,3 @@
-//! The `member` group (SPEC §6.3 *member group*): the shared resolution
-//! helpers, the `member create` spawn orchestration + rollback ladder,
-//! delete, show/list, prompt, ping, and capture.
-
 use clap::{Args, Subcommand};
 use rusqlite::Connection;
 use serde_json::{Value, json};
@@ -114,7 +110,7 @@ pub enum MemberCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Run a command to completion in a member's pane and resume the member.
+    /// Submit a native shell command to a member's idle pane.
     Exec {
         /// The target member.
         #[arg(value_name = "MEMBER_ID")]
