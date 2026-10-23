@@ -53,6 +53,8 @@ const CAPTURED_CLAUDE_HERDR_DRAFT: &str =
 const CAPTURED_CLAUDE_TMUX_EMPTY_AGENTS: &str =
     include_str!("fixtures/pane-readiness/claude-tmux-empty-agents.ansi");
 const CAPTURED_CLAUDE_DRAFT_TEXT: &str = "cafleet verification draft 34";
+const CAPTURED_CLAUDE_TMUX_DRAFT: &str =
+    include_str!("fixtures/pane-readiness/claude-tmux-draft.ansi");
 
 const CAPTURED_CODEX_HINT: &str = "Ask Codex to do anything";
 const CAPTURED_CODEX_PLACEHOLDER: &str =
@@ -78,6 +80,12 @@ fn captured_claude_composer_index(lines: &[String]) -> usize {
         .iter()
         .position(|line| strip_ansi(line).trim_start().starts_with('❯'))
         .expect("actual empty Claude frame has its live composer row")
+}
+
+fn derived_claude_color_composer(style: &str) -> String {
+    format!(
+        "Ready.\n────────────────────────────\n❯ {style}retained test input\x1b[0m\n────────────────────────────\n? for shortcuts\n"
+    )
 }
 
 fn captured_opencode_composer_text(capture: &str) -> String {
@@ -521,6 +529,183 @@ fn captured_claude_derived_work_and_approval_outrank_the_actual_draft_and_curren
         assert_eq!(classify("claude", &working), PaneState::Working);
         let approval = format!("{working}\n{}", fixture.approval);
         assert_eq!(classify("claude", &approval), PaneState::AwaitingUser);
+    }
+}
+
+#[test]
+fn captured_claude_tmux_actual_empty_and_typed_pair_preserves_idle_and_draft_roles() {
+    let before: Vec<_> = CAPTURED_CLAUDE_TMUX_EMPTY_AGENTS
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    let after: Vec<_> = CAPTURED_CLAUDE_TMUX_DRAFT
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    let composer = captured_claude_composer_index(&after);
+    assert_eq!(captured_claude_composer_index(&before), composer);
+    assert_eq!(before.len(), after.len());
+    assert_eq!(before[..composer], after[..composer]);
+    assert_eq!(before[composer + 1], after[composer + 1]);
+    assert_eq!(strip_ansi(&before[composer]).trim(), "❯");
+    assert_eq!(
+        strip_ansi(&after[composer]).trim(),
+        format!("❯\u{a0}{CAPTURED_CLAUDE_DRAFT_TEXT}")
+    );
+    assert_eq!(
+        after[composer],
+        format!("\x1b[39m❯\u{a0}{CAPTURED_CLAUDE_DRAFT_TEXT}\x1b[7m \x1b[0m")
+    );
+    assert_eq!(
+        CAPTURED_CLAUDE_TMUX_DRAFT
+            .matches(CAPTURED_CLAUDE_DRAFT_TEXT)
+            .count(),
+        1
+    );
+    assert_eq!(
+        strip_ansi(&before[composer + 2]).trim(),
+        "⏵⏵ don't ask on (shift+tab to cycle) · ← for agents"
+    );
+    assert_eq!(
+        strip_ansi(&after[composer + 2]).trim(),
+        "⏵⏵ don't ask on (shift+tab to cycle)"
+    );
+    assert_ne!(
+        strip_ansi(CAPTURED_CLAUDE_TMUX_EMPTY_AGENTS),
+        strip_ansi(CAPTURED_CLAUDE_TMUX_DRAFT)
+    );
+    assert_eq!(
+        classify("claude", CAPTURED_CLAUDE_TMUX_EMPTY_AGENTS),
+        PaneState::Idle
+    );
+    assert_eq!(
+        classify("claude", CAPTURED_CLAUDE_TMUX_DRAFT),
+        PaneState::Draft
+    );
+}
+
+#[test]
+fn derived_claude_valid_indexed_backgrounds_preserve_default_foreground_input_roles() {
+    for index in [0, 16, 255] {
+        for restore in ["\x1b[39m", "\x1b[49m\x1b[39m"] {
+            let style = format!("\x1b[48;5;{index}m{restore}");
+            assert_eq!(
+                classify("claude", &derived_claude_color_composer(&style)),
+                PaneState::Draft,
+                "indexed background {index}, restore {restore:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn derived_background_reset_preserves_foreground_and_dim_composer_roles() {
+    for (foreground, expected) in [
+        ("2;38;5;244", PaneState::Idle),
+        ("37", PaneState::Draft),
+        ("38;5;97", PaneState::Draft),
+    ] {
+        let style = format!("\x1b[{foreground}m\x1b[48;5;16m\x1b[49m");
+        assert_eq!(
+            classify("claude", &derived_claude_color_composer(&style)),
+            expected,
+            "foreground {foreground}"
+        );
+    }
+}
+
+#[test]
+fn derived_opencode_rgb_background_restoration_preserves_both_composer_roles() {
+    for (capture, style, expected) in [
+        (
+            CAPTURED_OPENCODE_PLACEHOLDER,
+            CAPTURED_OPENCODE_HINT_STYLE,
+            PaneState::Idle,
+        ),
+        (
+            CAPTURED_OPENCODE_DRAFT,
+            CAPTURED_OPENCODE_INPUT_STYLE,
+            PaneState::Draft,
+        ),
+    ] {
+        let original = format!("{style}{CAPTURED_OPENCODE_HINT}");
+        assert_eq!(capture.matches(&original).count(), 1);
+        let restored = format!("{style}\x1b[48;5;16m\x1b[48;2;30;30;30m{CAPTURED_OPENCODE_HINT}");
+        let content = capture.replacen(&original, &restored, 1);
+        assert_eq!(classify("opencode", &content), expected);
+    }
+}
+
+#[test]
+fn derived_opencode_default_and_indexed_backgrounds_remain_distinct_from_the_required_rgb() {
+    for (capture, style) in [
+        (CAPTURED_OPENCODE_PLACEHOLDER, CAPTURED_OPENCODE_HINT_STYLE),
+        (CAPTURED_OPENCODE_DRAFT, CAPTURED_OPENCODE_INPUT_STYLE),
+    ] {
+        let original = format!("{style}{CAPTURED_OPENCODE_HINT}");
+        assert_eq!(capture.matches(&original).count(), 1);
+        for background in ["49", "48;5;16", "48;5;30"] {
+            let changed = format!("{style}\x1b[{background}m{CAPTURED_OPENCODE_HINT}");
+            let content = capture.replacen(&original, &changed, 1);
+            assert_eq!(
+                classify("opencode", &content),
+                PaneState::Unknown,
+                "background {background}"
+            );
+        }
+    }
+}
+
+#[test]
+fn derived_invalid_color_parameters_remain_unknown_after_color_only_resets() {
+    for parameters in [
+        "38;5",
+        "48;5",
+        "38;2;1;2",
+        "48;2;1;2",
+        "38;6;16",
+        "48;6;16",
+        "38;5;256",
+        "48;5;256",
+        "38;5;65535",
+        "48;5;65535",
+        "38;2;256;30;30",
+        "48;2;30;256;30",
+        "38;2;30;30;256",
+        "48;2;30;30;65535",
+    ] {
+        let style = format!("\x1b[{parameters}m\x1b[39m\x1b[49m");
+        assert_eq!(
+            classify("claude", &derived_claude_color_composer(&style)),
+            PaneState::Unknown,
+            "invalid color {parameters}"
+        );
+    }
+}
+
+#[test]
+fn derived_unsupported_modifiers_remain_unknown_across_color_only_resets() {
+    for modifier in ["7", "999"] {
+        for restore in ["39", "49", "39;49", "48;5;16;49;39", "48;2;30;30;30;49;39"] {
+            let style = format!("\x1b[{modifier}m\x1b[{restore}m");
+            assert_eq!(
+                classify("claude", &derived_claude_color_composer(&style)),
+                PaneState::Unknown,
+                "modifier {modifier}, color reset {restore}"
+            );
+        }
+    }
+}
+
+#[test]
+fn derived_full_sgr_reset_restores_known_input_after_unsupported_or_invalid_styles() {
+    for prior in ["7", "999", "48;5;256", "38;2;256;30;30"] {
+        let style = format!("\x1b[{prior}m\x1b[0m\x1b[39m");
+        assert_eq!(
+            classify("claude", &derived_claude_color_composer(&style)),
+            PaneState::Draft,
+            "full reset after {prior}"
+        );
     }
 }
 
