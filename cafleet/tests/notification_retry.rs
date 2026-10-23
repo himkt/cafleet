@@ -568,10 +568,17 @@ fn assert_late_ack_clears_the_owned_attempt_diagnostic(stage: &str) {
             .join(format!("fail-capture-{}", worker.pane)),
     )
     .unwrap();
+    waiting.until("later owned retry started capture", || {
+        fixture.count("capture", &worker) == 2
+    });
+    let capture_observed_after = started.elapsed();
+    assert!(
+        capture_observed_after < Duration::from_secs(3),
+        "retry capture observed at {capture_observed_after:?}"
+    );
     waiting.until("later owned retry reached its gate", || {
         fixture.count(stage, &worker) == if stage == "capture" { 2 } else { 1 }
     });
-    assert!(started.elapsed() < Duration::from_secs(3));
     waiting.until(
         "receive expired while the owned retry remains in flight",
         || Instant::now() >= receive_expiry_upper_bound + Duration::from_millis(100),
