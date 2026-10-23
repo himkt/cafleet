@@ -3,12 +3,8 @@ use crate::error::CafleetError;
 #[derive(Debug, Clone)]
 pub struct Settings {
     pub database_url: String,
-    pub broker_host: String,
-    pub broker_port: u16,
     pub max_text_len: usize,
     pub multiplexer: Option<String>,
-    pub monitor_wake_interval: i64,
-    pub delivery_hold_timeout: i64,
 }
 
 impl Settings {
@@ -29,8 +25,6 @@ impl Settings {
         };
         Ok(Settings {
             database_url,
-            broker_host: lookup("CAFLEET_BROKER_HOST").unwrap_or_else(|| "127.0.0.1".to_string()),
-            broker_port: parse_numeric(&lookup, "CAFLEET_BROKER_PORT", 8000, "a TCP port")?,
             max_text_len: parse_numeric(
                 &lookup,
                 "CAFLEET_MAX_TEXT_LEN",
@@ -38,16 +32,6 @@ impl Settings {
                 "a non-negative integer",
             )?,
             multiplexer: lookup("CAFLEET_MULTIPLEXER"),
-            monitor_wake_interval: parse_non_negative(
-                &lookup,
-                "CAFLEET_MONITOR_WAKE_INTERVAL",
-                600,
-            )?,
-            delivery_hold_timeout: parse_non_negative(
-                &lookup,
-                "CAFLEET_DELIVERY_HOLD_TIMEOUT",
-                300,
-            )?,
         })
     }
 
@@ -67,27 +51,6 @@ fn parse_numeric<T: std::str::FromStr>(
         Some(raw) => raw
             .parse()
             .map_err(|_| CafleetError::App(format!("{name} must be {expectation} (got '{raw}')"))),
-    }
-}
-
-/// An `i64` field constrained to `0..=i64::MAX` (SPEC §7.1): a negative value
-/// parses but is rejected with the same error string as a non-integer.
-fn parse_non_negative(
-    lookup: &impl Fn(&str) -> Option<String>,
-    name: &str,
-    default: i64,
-) -> Result<i64, CafleetError> {
-    match lookup(name) {
-        None => Ok(default),
-        Some(raw) => raw
-            .parse::<i64>()
-            .ok()
-            .filter(|value| *value >= 0)
-            .ok_or_else(|| {
-                CafleetError::App(format!(
-                    "{name} must be a non-negative integer (got '{raw}')"
-                ))
-            }),
     }
 }
 

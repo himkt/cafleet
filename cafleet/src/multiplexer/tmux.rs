@@ -1,10 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
 
-use super::{
-    CommandRunner, ESC_SETTLE_DELAY, MultiplexerContext, MultiplexerError, RunError, SUBMIT_DELAY,
-    WakeEntry, build_wake_payload_from_entries,
-};
+use super::{CommandRunner, MultiplexerContext, MultiplexerError, RunError, SUBMIT_DELAY};
 
 const PANE_GONE_MARKERS: [&str; 2] = ["can't find pane", "no such pane"];
 
@@ -87,46 +84,6 @@ impl TmuxMultiplexer {
             }
             Err(error) => Err(map_run_error(argv, timeout_secs, error)),
         }
-    }
-
-    /// The literal-then-Enter keystroke shape shared by every submit path:
-    /// optional `Escape` safeguard + settle, the `-l` literal payload, the
-    /// submit delay, and the trailing `Enter`.
-    fn send_literal_then_enter(
-        &self,
-        target_pane_id: &str,
-        payload: &str,
-        timeout_secs: Option<u64>,
-        ignore_missing: bool,
-        esc_first: bool,
-    ) -> Result<(), MultiplexerError> {
-        if esc_first {
-            self.run_tolerating_pane_gone(
-                &tmux_argv(&["tmux", "send-keys", "-t", target_pane_id, "Escape"]),
-                ignore_missing,
-                timeout_secs,
-            )?;
-            self.runner.sleep(ESC_SETTLE_DELAY);
-        }
-        self.run_tolerating_pane_gone(
-            &tmux_argv(&["tmux", "send-keys", "-t", target_pane_id, "-l", payload]),
-            ignore_missing,
-            timeout_secs,
-        )?;
-        self.runner.sleep(SUBMIT_DELAY);
-        self.run_tolerating_pane_gone(
-            &tmux_argv(&["tmux", "send-keys", "-t", target_pane_id, "Enter"]),
-            ignore_missing,
-            timeout_secs,
-        )
-    }
-
-    fn best_effort_send(&self, target_pane_id: &str, payload: &str, esc_first: bool) -> bool {
-        if !self.runner.binary_exists("tmux") {
-            return false;
-        }
-        self.send_literal_then_enter(target_pane_id, payload, Some(5), false, esc_first)
-            .is_ok()
     }
 
     pub fn ensure_available(&self) -> Result<(), MultiplexerError> {
@@ -218,36 +175,6 @@ impl TmuxMultiplexer {
         Ok(pane_id)
     }
 
-    pub fn send_exit(
-        &self,
-        target_pane_id: &str,
-        ignore_missing: bool,
-    ) -> Result<(), MultiplexerError> {
-        self.send_literal_then_enter(target_pane_id, "/exit", None, ignore_missing, true)
-    }
-
-    pub fn send_poll_trigger(&self, target_pane_id: &str, member_id: i64) -> bool {
-        self.send_prompt(
-            target_pane_id,
-            &format!("cafleet message poll {member_id} --json"),
-        )
-        .is_ok()
-    }
-
-    pub fn send_wake_entries(
-        &self,
-        target_pane_id: &str,
-        fleet_id: i64,
-        members: &[WakeEntry<'_>],
-        director: &WakeEntry<'_>,
-    ) -> Result<bool, MultiplexerError> {
-        let payload = build_wake_payload_from_entries(fleet_id, members, director)?;
-        Ok(self.best_effort_send(target_pane_id, &payload, true))
-    }
-
-    /// Result-returning (SPEC §6.5): the missing-binary precheck fails with
-    /// the exact PATH string, and any Escape/payload/Enter failure propagates
-    /// as the raw error — no boolean wrapper, no retry.
     pub fn send_inline_preview(
         &self,
         target_pane_id: &str,
@@ -255,12 +182,11 @@ impl TmuxMultiplexer {
         sender_id: i64,
         ts: &str,
         text: &str,
-        note: Option<&str>,
     ) -> Result<(), MultiplexerError> {
         if !self.runner.binary_exists("tmux") {
             return Err(MultiplexerError::new("tmux binary not found on PATH"));
         }
-        let payload = super::inline_preview_payload(message_id, sender_id, ts, text, note);
+        let payload = super::inline_preview_payload(message_id, sender_id, ts, text);
         self.send_prompt(target_pane_id, &payload)
     }
 
@@ -334,11 +260,6 @@ impl TmuxMultiplexer {
             ignore_missing,
             None,
         )
-    }
-
-    /// tmux tracks no native agent state.
-    pub fn agent_status(&self, _target_pane_id: &str) -> Result<Option<String>, MultiplexerError> {
-        Ok(None)
     }
 }
 

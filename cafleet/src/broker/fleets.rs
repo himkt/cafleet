@@ -177,14 +177,6 @@ pub fn get_fleet(conn: &Connection, fleet_id: i64) -> Result<Option<Value>, Cafl
     }))
 }
 
-pub fn delete_fleet(conn: &mut Connection, fleet_id: i64) -> Result<Value, CafleetError> {
-    crate::db::require_current(conn)?;
-    let tx = conn.transaction().map_err(db_err)?;
-    let result = delete_fleet_rows(&tx, fleet_id)?;
-    tx.commit().map_err(db_err)?;
-    Ok(result)
-}
-
 pub(crate) fn delete_fleet_rows(conn: &Connection, fleet_id: i64) -> Result<Value, CafleetError> {
     let fleet = fetch_fleet(conn, fleet_id)?
         .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;

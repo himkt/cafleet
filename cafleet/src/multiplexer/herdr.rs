@@ -4,8 +4,8 @@ use std::rc::Rc;
 use serde_json::Value;
 
 use super::{
-    CommandRunner, ESC_SETTLE_DELAY, MultiplexerContext, MultiplexerError, PaneCleanup,
-    PaneOwnership, RunError, SUBMIT_DELAY, WakeEntry, build_wake_payload_from_entries,
+    CommandRunner, MultiplexerContext, MultiplexerError, PaneCleanup, PaneOwnership, RunError,
+    SUBMIT_DELAY,
 };
 
 const PANE_NOT_FOUND: &str = "pane_not_found";
@@ -150,23 +150,6 @@ impl HerdrMultiplexer {
             }
             Err(error) => Err(map_run_error(argv, timeout_secs, error)),
         }
-    }
-
-    fn send_esc(&self, target_pane_id: &str, ignore_missing: bool) -> Result<(), MultiplexerError> {
-        self.run_tolerating_missing(
-            &herdr_argv(&["herdr", "pane", "send-keys", target_pane_id, "esc"]),
-            ignore_missing,
-            Some(5),
-        )?;
-        self.runner.sleep(ESC_SETTLE_DELAY);
-        Ok(())
-    }
-
-    fn best_effort(&self, steps: impl FnOnce() -> Result<(), MultiplexerError>) -> bool {
-        if !self.runner.binary_exists("herdr") {
-            return false;
-        }
-        steps().is_ok()
     }
 
     pub fn ensure_available(&self) -> Result<(), MultiplexerError> {
@@ -362,50 +345,6 @@ impl HerdrMultiplexer {
         Ok(())
     }
 
-    pub fn send_exit(
-        &self,
-        target_pane_id: &str,
-        ignore_missing: bool,
-    ) -> Result<(), MultiplexerError> {
-        self.send_esc(target_pane_id, ignore_missing)?;
-        self.run_tolerating_missing(
-            &herdr_argv(&["herdr", "pane", "run", target_pane_id, "/exit"]),
-            ignore_missing,
-            None,
-        )
-    }
-
-    pub fn send_poll_trigger(&self, target_pane_id: &str, member_id: i64) -> bool {
-        self.send_prompt(
-            target_pane_id,
-            &format!("cafleet message poll {member_id} --json"),
-        )
-        .is_ok()
-    }
-
-    pub fn send_wake_entries(
-        &self,
-        target_pane_id: &str,
-        fleet_id: i64,
-        members: &[WakeEntry<'_>],
-        director: &WakeEntry<'_>,
-    ) -> Result<bool, MultiplexerError> {
-        let payload = build_wake_payload_from_entries(fleet_id, members, director)?;
-        Ok(self.best_effort(|| {
-            self.send_esc(target_pane_id, false)?;
-            self.run(
-                &herdr_argv(&["herdr", "pane", "run", target_pane_id, &payload]),
-                Some(5),
-            )?;
-            Ok(())
-        }))
-    }
-
-    /// `send-text` delivers the raw 2-line payload without submitting; the
-    /// single trailing enter submits the whole payload as one recipient turn.
-    /// Result-returning (SPEC §6.5): the missing-binary precheck fails with
-    /// the exact PATH string, and any esc/send-text/enter failure propagates
-    /// as the raw error — no boolean wrapper, no retry.
     pub fn send_inline_preview(
         &self,
         target_pane_id: &str,
@@ -413,12 +352,11 @@ impl HerdrMultiplexer {
         sender_id: i64,
         ts: &str,
         text: &str,
-        note: Option<&str>,
     ) -> Result<(), MultiplexerError> {
         if !self.runner.binary_exists("herdr") {
             return Err(MultiplexerError::new("herdr binary not found on PATH"));
         }
-        let payload = super::inline_preview_payload(message_id, sender_id, ts, text, note);
+        let payload = super::inline_preview_payload(message_id, sender_id, ts, text);
         self.send_prompt(target_pane_id, &payload)
     }
 
@@ -581,27 +519,6 @@ impl HerdrMultiplexer {
             None,
         )?;
         Ok(())
-    }
-
-    /// A pane closing between the tick's `list_pane_ids` and this read is a
-    /// teardown race, not an error: `pane_not_found` reads as "no agent".
-    pub fn agent_status(&self, target_pane_id: &str) -> Result<Option<String>, MultiplexerError> {
-        let argv = herdr_argv(&["herdr", "pane", "get", target_pane_id]);
-        let out = match self.runner.run(&argv, None) {
-            Ok(out) => out,
-            Err(RunError::Failed { ref stderr })
-                if error_code(stderr).as_deref() == Some(PANE_NOT_FOUND) =>
-            {
-                return Ok(None);
-            }
-            Err(error) => return Err(map_run_error(&argv, None, error)),
-        };
-        let result = parse_envelope(&out)?;
-        let status = result["pane"]["agent_status"]
-            .as_str()
-            .filter(|value| !value.is_empty())
-            .map(str::to_string);
-        Ok(status)
     }
 }
 

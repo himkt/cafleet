@@ -1,4 +1,4 @@
-//! Explicit CLI/HTTP wire construction, separate from storage records.
+//! CLI output construction from storage records.
 use crate::broker::records::*;
 use serde_json::{Value, json};
 
@@ -117,12 +117,6 @@ pub fn member(row: &MemberRecord) -> Value {
         "status":row.status.as_str(),"registered_at":row.registered_at,
         "kind":row.kind.as_str(),
         "placement":row.placement.as_ref().map(placement)})
-}
-
-pub fn roster_member(row: &MemberRecord) -> Value {
-    json!({"member_id":row.member_id,"name":row.name,"description":row.description,
-        "status":row.status.as_str(),"registered_at":row.registered_at,
-        "kind":row.kind.as_str(),"placement":row.placement.as_ref().map(placement)})
 }
 
 pub fn member_activity(row: &MemberActivity) -> Value {

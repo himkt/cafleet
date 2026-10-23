@@ -1,9 +1,3 @@
-//! Multiplexer — the pane-hosting backends (SPEC §6.5): the shared context /
-//! error types, the injectable `CommandRunner` seam, the `resolve_multiplexer`
-//! precedence, the shared wake-payload builder + unified sanitization map, and
-//! the tmux / herdr backends. The colocated tests pin the contract; the
-//! expected API is catalogued in [`test_support`].
-
 pub mod herdr;
 #[cfg(test)]
 pub mod test_support;
@@ -13,12 +7,9 @@ use std::fmt;
 use std::rc::Rc;
 use std::time::Duration;
 
-use crate::coding_agent::coding_agent;
-
 pub use herdr::HerdrMultiplexer;
 pub use tmux::TmuxMultiplexer;
 
-pub(crate) const ESC_SETTLE_DELAY: f64 = 0.1;
 pub(crate) const SUBMIT_DELAY: f64 = 1.0;
 
 /// Resolved pane identity, returned by `context_discovery` (SPEC §6.5).
@@ -135,9 +126,6 @@ pub enum RunError {
     Failed { stderr: String },
 }
 
-/// The injectable subprocess seam (SPEC §9): `sleep` goes through the runner
-/// so the Esc-settle and submit delays are observable events, not wall-clock
-/// waits.
 pub trait CommandRunner {
     fn binary_exists(&self, name: &str) -> bool;
     fn run(&self, argv: &[String], timeout_secs: Option<u64>) -> Result<String, RunError>;
@@ -218,87 +206,11 @@ pub(crate) fn capture_window(raw: &str, lines: i64) -> String {
     parts[start..].join("\n")
 }
 
-/// Keep a user-controlled field inside the one-line wake envelope: line
-/// breaks and tabs → `⏎`, backtick → `ˋ`, `$(` → `$﹙`, pipe → `│`.
-pub fn sanitize_wake_field(value: &str) -> String {
-    value
-        .replace("\r\n", "⏎")
-        .replace(['\n', '\r', '\t'], "⏎")
-        .replace('`', "ˋ")
-        .replace("$(", "$﹙")
-        .replace('|', "│")
-}
-
-/// Transport-facing wake descriptor. The monitor maps broker records into
-/// these borrowed fields; backends have no dependency on broker records.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WakeEntry<'a> {
-    pub member_id: i64,
-    pub name: &'a str,
-    pub coding_agent: &'a str,
-    pub pending_count: i64,
-}
-
-/// Render one wake descriptor; an unregistered coding agent aborts the wake.
-fn wake_entry(member: &WakeEntry<'_>) -> Result<String, MultiplexerError> {
-    let agent = member.coding_agent;
-    if coding_agent(agent).is_none() {
-        return Err(MultiplexerError::new(format!(
-            "member {} has invalid coding_agent '{agent}'",
-            member.member_id
-        )));
-    }
-    Ok(format!(
-        "{} ({}; coding_agent={agent}; unacked={})",
-        member.member_id,
-        sanitize_wake_field(member.name),
-        member.pending_count
-    ))
-}
-
-/// Build the byte-identical tmux/herdr pure-trigger wake payload (SPEC §6.5):
-/// the roster entries, the trailing `Director:` segment, and the two fixed
-/// protocol sentences. A roster member or Director with an unregistered
-/// coding agent aborts the wake.
-pub fn build_wake_payload_from_entries(
-    fleet_id: i64,
-    members: &[WakeEntry<'_>],
-    director: &WakeEntry<'_>,
-) -> Result<String, MultiplexerError> {
-    let entries = members
-        .iter()
-        .map(wake_entry)
-        .collect::<Result<Vec<_>, _>>()?;
-    let director_entry = wake_entry(director)?;
-    let clause = if entries.is_empty() {
-        "no members to health-check.".to_string()
-    } else {
-        let noun = if entries.len() == 1 {
-            "member"
-        } else {
-            "members"
-        };
-        format!(
-            "health-check your {} {noun}: {}.",
-            entries.len(),
-            entries.join(", ")
-        )
-    };
-    Ok(format!(
-        "[cafleet] tick: fleet {fleet_id} — {clause} Director: {director_entry}. \
-         Follow your monitor role protocol. \
-         Resume your work if something was still running."
-    ))
-}
-
-/// The inline-preview payload shared by both backends: the header line, the
-/// text with its line breaks folded to `⏎`, and the optional broker note line.
 pub(crate) fn inline_preview_payload(
     message_id: i64,
     sender_id: i64,
     ts: &str,
     text: &str,
-    note: Option<&str>,
 ) -> String {
     fn visible(text: &str) -> String {
         let mut result = String::new();
@@ -319,20 +231,12 @@ pub(crate) fn inline_preview_payload(
         }
         result
     }
-    let mut payload = format!(
+    format!(
         "[cafleet msg {message_id} from {sender_id} {ts}] {}",
         visible(text)
-    );
-    if let Some(note) = note {
-        payload.push(' ');
-        payload.push_str(&visible(note));
-    }
-    payload
+    )
 }
 
-/// The pane-hosting backend surface (SPEC §6.5). `agent_status` is the
-/// `Option`-returning native-state capability: herdr reads its native state,
-/// tmux always answers `None`.
 pub trait Multiplexer {
     fn name(&self) -> &'static str;
     fn ensure_available(&self) -> Result<(), MultiplexerError>;
@@ -343,16 +247,6 @@ pub trait Multiplexer {
         env: &[(String, String)],
         command: &[String],
     ) -> Result<String, MultiplexerError>;
-    fn send_exit(&self, target_pane_id: &str, ignore_missing: bool)
-    -> Result<(), MultiplexerError>;
-    fn send_poll_trigger(&self, target_pane_id: &str, member_id: i64) -> bool;
-    fn send_wake_entries(
-        &self,
-        target_pane_id: &str,
-        fleet_id: i64,
-        members: &[WakeEntry<'_>],
-        director: &WakeEntry<'_>,
-    ) -> Result<bool, MultiplexerError>;
     fn send_inline_preview(
         &self,
         target_pane_id: &str,
@@ -360,14 +254,12 @@ pub trait Multiplexer {
         sender_id: i64,
         ts: &str,
         text: &str,
-        note: Option<&str>,
     ) -> Result<(), MultiplexerError>;
     fn send_prompt(&self, target_pane_id: &str, text: &str) -> Result<(), MultiplexerError>;
     fn capture_pane(&self, target_pane_id: &str, lines: i64) -> Result<String, MultiplexerError>;
     fn list_pane_ids(&self) -> Result<std::collections::BTreeSet<String>, MultiplexerError>;
     fn kill_pane(&self, target_pane_id: &str, ignore_missing: bool)
     -> Result<(), MultiplexerError>;
-    fn agent_status(&self, target_pane_id: &str) -> Result<Option<String>, MultiplexerError>;
 }
 
 /// The closed backend dispatch the resolver returns.
@@ -416,28 +308,6 @@ impl Multiplexer for AnyMultiplexer {
         dispatch!(self, mux => mux.split_window(reference, env, command))
     }
 
-    fn send_exit(
-        &self,
-        target_pane_id: &str,
-        ignore_missing: bool,
-    ) -> Result<(), MultiplexerError> {
-        dispatch!(self, mux => mux.send_exit(target_pane_id, ignore_missing))
-    }
-
-    fn send_poll_trigger(&self, target_pane_id: &str, member_id: i64) -> bool {
-        dispatch!(self, mux => mux.send_poll_trigger(target_pane_id, member_id))
-    }
-
-    fn send_wake_entries(
-        &self,
-        target_pane_id: &str,
-        fleet_id: i64,
-        members: &[WakeEntry<'_>],
-        director: &WakeEntry<'_>,
-    ) -> Result<bool, MultiplexerError> {
-        dispatch!(self, mux => mux.send_wake_entries(target_pane_id, fleet_id, members, director))
-    }
-
     fn send_inline_preview(
         &self,
         target_pane_id: &str,
@@ -445,9 +315,8 @@ impl Multiplexer for AnyMultiplexer {
         sender_id: i64,
         ts: &str,
         text: &str,
-        note: Option<&str>,
     ) -> Result<(), MultiplexerError> {
-        dispatch!(self, mux => mux.send_inline_preview(target_pane_id, message_id, sender_id, ts, text, note))
+        dispatch!(self, mux => mux.send_inline_preview(target_pane_id, message_id, sender_id, ts, text))
     }
 
     fn send_prompt(&self, target_pane_id: &str, text: &str) -> Result<(), MultiplexerError> {
@@ -468,10 +337,6 @@ impl Multiplexer for AnyMultiplexer {
         ignore_missing: bool,
     ) -> Result<(), MultiplexerError> {
         dispatch!(self, mux => mux.kill_pane(target_pane_id, ignore_missing))
-    }
-
-    fn agent_status(&self, target_pane_id: &str) -> Result<Option<String>, MultiplexerError> {
-        dispatch!(self, mux => mux.agent_status(target_pane_id))
     }
 }
 
@@ -500,28 +365,6 @@ macro_rules! implement_backend {
                 $backend::split_window(self, reference, env, command)
             }
 
-            fn send_exit(
-                &self,
-                target_pane_id: &str,
-                ignore_missing: bool,
-            ) -> Result<(), MultiplexerError> {
-                $backend::send_exit(self, target_pane_id, ignore_missing)
-            }
-
-            fn send_poll_trigger(&self, target_pane_id: &str, member_id: i64) -> bool {
-                $backend::send_poll_trigger(self, target_pane_id, member_id)
-            }
-
-            fn send_wake_entries(
-                &self,
-                target_pane_id: &str,
-                fleet_id: i64,
-                members: &[WakeEntry<'_>],
-                director: &WakeEntry<'_>,
-            ) -> Result<bool, MultiplexerError> {
-                $backend::send_wake_entries(self, target_pane_id, fleet_id, members, director)
-            }
-
             fn send_inline_preview(
                 &self,
                 target_pane_id: &str,
@@ -529,17 +372,8 @@ macro_rules! implement_backend {
                 sender_id: i64,
                 ts: &str,
                 text: &str,
-                note: Option<&str>,
             ) -> Result<(), MultiplexerError> {
-                $backend::send_inline_preview(
-                    self,
-                    target_pane_id,
-                    message_id,
-                    sender_id,
-                    ts,
-                    text,
-                    note,
-                )
+                $backend::send_inline_preview(self, target_pane_id, message_id, sender_id, ts, text)
             }
 
             fn send_prompt(
@@ -570,13 +404,6 @@ macro_rules! implement_backend {
                 ignore_missing: bool,
             ) -> Result<(), MultiplexerError> {
                 $backend::kill_pane(self, target_pane_id, ignore_missing)
-            }
-
-            fn agent_status(
-                &self,
-                target_pane_id: &str,
-            ) -> Result<Option<String>, MultiplexerError> {
-                $backend::agent_status(self, target_pane_id)
             }
         }
     };

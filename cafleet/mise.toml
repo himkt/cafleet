@@ -1,15 +1,8 @@
-[tasks.dev]
-depends = ["//admin:build"]
-run = "cargo run -- server"
-description = "Start the admin WebUI server on 127.0.0.1:8000 (no hot-reload; restart manually between edits)"
-
 [tasks.test]
-depends = ["//admin:build"]
 run = "cargo test"
 description = "Run all tests (positional args forward to the cargo test harness)"
 
 [tasks.lint]
-depends = ["//admin:build"]
 run = [
   "cargo clippy --all-targets -- -D warnings",
   "cargo fmt --check",
@@ -21,16 +14,13 @@ run = "cargo fmt"
 description = "Format the Rust sources with rustfmt"
 
 [tasks.typecheck]
-depends = ["//admin:build"]
 run = "cargo check"
 description = "Type-check the package without producing a binary"
 
 [tasks.install]
-depends = ["//admin:build"]
 run = "cargo install --path ."
 description = "Install the cafleet CLI from the working tree (re-run after source edits to refresh the installed binary)"
 
 [tasks.build]
-depends = ["//admin:build"]
 run = "cargo build --release"
 description = "Build the release binary into cafleet/target/release/cafleet"

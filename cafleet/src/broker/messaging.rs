@@ -150,17 +150,6 @@ pub fn stamp_notified(
     Ok(changed == 1)
 }
 
-/// Return a preview to pending after its keystroke failed.
-pub fn clear_notified(conn: &mut Connection, message_id: i64) -> Result<(), CafleetError> {
-    crate::db::require_current(conn)?;
-    conn.execute(
-        "UPDATE messages SET notified_at=NULL WHERE message_id=?1",
-        [message_id],
-    )
-    .map_err(db_err)?;
-    Ok(())
-}
-
 pub fn poll_messages(
     conn: &Connection,
     member_id: i64,

@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 use super::records::{MemberActivity, MemberKind, MemberRecord, Placement, RegisteredMember};
@@ -173,52 +171,9 @@ pub fn update_placement_pane_id(
     .map_err(db_err)
 }
 
-pub fn verify_member_fleet(
-    conn: &Connection,
-    member_id: i64,
-    fleet_id: i64,
-) -> Result<bool, CafleetError> {
-    conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM members WHERE member_id=?1 AND fleet_id=?2)",
-        params![member_id, fleet_id],
-        |row| row.get(0),
-    )
-    .map_err(db_err)
-}
-
-pub fn get_member_names(
-    conn: &Connection,
-    member_ids: &[i64],
-) -> Result<BTreeMap<i64, String>, CafleetError> {
-    let ids = member_ids
-        .iter()
-        .copied()
-        .collect::<std::collections::BTreeSet<_>>();
-    let ids = ids.into_iter().collect::<Vec<_>>();
-    let mut names = BTreeMap::new();
-    for chunk in ids.chunks(500) {
-        let placeholders = vec!["?"; chunk.len()].join(",");
-        let mut statement = conn
-            .prepare(&format!(
-                "SELECT member_id, name FROM members WHERE member_id IN ({placeholders})"
-            ))
-            .map_err(db_err)?;
-        let rows = statement
-            .query_map(rusqlite::params_from_iter(chunk), |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-            })
-            .map_err(db_err)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(db_err)?;
-        names.extend(rows);
-    }
-    Ok(names)
-}
-
 fn roster_rows(
     conn: &Connection,
     fleet_id: i64,
-    include_message_holders: bool,
     activity: bool,
 ) -> Result<Vec<MemberActivity>, CafleetError> {
     let activity_columns = if activity {
@@ -234,11 +189,10 @@ fn roster_rows(
                 m.description, m.registered_at {activity_columns}
          FROM members m JOIN fleets f ON f.fleet_id=m.fleet_id
          LEFT JOIN member_placements p ON p.member_id=m.member_id
-         WHERE m.fleet_id=?1 AND (m.status='active' OR (?2 AND EXISTS(
-               SELECT 1 FROM messages WHERE to_member_id=m.member_id)))
+         WHERE m.fleet_id=?1 AND m.status='active'
          ORDER BY m.member_id"
     )).map_err(db_err)?;
-    stmt.query_map(params![fleet_id, include_message_holders], |row| {
+    stmt.query_map([fleet_id], |row| {
         let backend: Option<String> = row.get(4)?;
         Ok(MemberActivity {
             member: MemberRecord {
@@ -278,30 +232,18 @@ fn idle_seconds(row: &MemberActivity, now: chrono::DateTime<chrono::Utc>) -> Opt
 pub fn list_members(conn: &Connection, fleet_id: i64) -> Result<Vec<MemberActivity>, CafleetError> {
     super::fleets::require_live_fleet(conn, fleet_id)?;
     let now = now_utc();
-    let mut rows = roster_rows(conn, fleet_id, false, true)?;
+    let mut rows = roster_rows(conn, fleet_id, true)?;
     for row in &mut rows {
         row.idle = idle_seconds(row, now);
     }
     Ok(rows)
 }
 
-pub fn list_roster(
-    conn: &Connection,
-    fleet_id: i64,
-    include_message_holders: bool,
-) -> Result<Vec<MemberRecord>, CafleetError> {
-    super::fleets::require_live_fleet(conn, fleet_id)?;
-    Ok(roster_rows(conn, fleet_id, include_message_holders, false)?
-        .into_iter()
-        .map(|row| row.member)
-        .collect())
-}
-
 pub(crate) fn capture_roster(
     conn: &Connection,
     fleet_id: i64,
 ) -> Result<Vec<MemberRecord>, CafleetError> {
-    Ok(roster_rows(conn, fleet_id, false, false)?
+    Ok(roster_rows(conn, fleet_id, false)?
         .into_iter()
         .map(|row| row.member)
         .collect())

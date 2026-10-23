@@ -3,7 +3,6 @@ monorepo_root = true
 [monorepo]
 config_roots = [
   "cafleet",
-  "admin",
   "docs",
 ]
 
@@ -23,7 +22,6 @@ description = "Install skills"
 
 [tasks.all-install]
 run = [
-  {"task" = "//admin:build"},
   {"task" = "//cafleet:install"},
   {"task" = "//:skill-install"},
 ]

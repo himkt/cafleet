@@ -4,17 +4,8 @@ use std::{borrow::Cow, fmt};
 pub enum CafleetError {
     Usage(String),
     App(String),
-    /// A broker value error (bad input / missing row), translated by callers:
-    /// the CLI wraps to exit 1, the WebUI maps to an HTTP status.
     Value(String),
-    InvalidStoredValue {
-        field: String,
-        value: String,
-    },
-    ActiveMonitorExists {
-        fleet_id: i64,
-        member_id: i64,
-    },
+    InvalidStoredValue { field: String, value: String },
 }
 
 impl CafleetError {
@@ -24,9 +15,7 @@ impl CafleetError {
         match self {
             Self::Usage(_) => Self::Usage(message),
             Self::Value(_) => Self::Value(message),
-            Self::App(_) | Self::ActiveMonitorExists { .. } | Self::InvalidStoredValue { .. } => {
-                Self::App(message)
-            }
+            Self::App(_) | Self::InvalidStoredValue { .. } => Self::App(message),
         }
     }
 
@@ -35,7 +24,6 @@ impl CafleetError {
             CafleetError::Usage(_) => 2,
             CafleetError::App(_)
             | CafleetError::Value(_)
-            | CafleetError::ActiveMonitorExists { .. }
             | CafleetError::InvalidStoredValue { .. } => 1,
         }
     }
@@ -48,12 +36,6 @@ impl CafleetError {
             CafleetError::InvalidStoredValue { field, value } => {
                 Cow::Owned(format!("invalid stored value for {field}: {value}"))
             }
-            CafleetError::ActiveMonitorExists {
-                fleet_id,
-                member_id,
-            } => Cow::Owned(format!(
-                "fleet {fleet_id} already has an active monitor member (member {member_id})"
-            )),
         }
     }
 }

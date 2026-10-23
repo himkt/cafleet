@@ -170,7 +170,6 @@ pub(crate) fn attempt_preview(
         message.from_member_id,
         &message.created_at,
         &text,
-        None,
     ) {
         return Ok(if error.submission_started() {
             uncertain(error.to_string())
