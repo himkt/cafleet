@@ -84,6 +84,15 @@ const CAPTURED_OPENCODE_HERDR_POST_NATIVE_EMPTY: &str =
 const CAPTURED_OPENCODE_TMUX_POST_NATIVE_EMPTY: &str =
     include_str!("fixtures/pane-readiness/opencode-tmux-post-native-empty.ansi");
 
+const CAPTURED_CODEX_TMUX_PLACEHOLDER: &str =
+    include_str!("fixtures/pane-readiness/codex-tmux-placeholder.ansi");
+const CAPTURED_CODEX_TMUX_DRAFT: &str =
+    include_str!("fixtures/pane-readiness/codex-tmux-draft.ansi");
+const CAPTURED_OPENCODE_HERDR_POST_NATIVE_DRAFT: &str =
+    include_str!("fixtures/pane-readiness/opencode-herdr-post-native-draft.ansi");
+const CAPTURED_OPENCODE_TMUX_POST_NATIVE_DRAFT: &str =
+    include_str!("fixtures/pane-readiness/opencode-tmux-post-native-draft.ansi");
+
 fn captured_claude_composer_index(lines: &[String]) -> usize {
     lines
         .iter()
@@ -159,6 +168,22 @@ fn assert_captured_opencode_post_native_empty_layout(
     for token in ["tab", "agents", "ctrl+p", "commands", "OpenCode 1.19.1"] {
         assert!(shortcuts.contains(token));
     }
+}
+
+fn assert_captured_opencode_post_native_actual_draft_pair(
+    empty: &str,
+    draft: &str,
+    input_style: &str,
+) {
+    let input = "CAFLEET_ROOT_POST_NATIVE_DRAFT_34";
+    assert_eq!(draft.matches(input).count(), 1);
+    assert!(draft.contains(&format!("{input_style}{input}")));
+    let visible_empty = strip_ansi(empty);
+    let visible_draft = strip_ansi(draft);
+    assert_eq!(
+        visible_draft.replacen(input, &" ".repeat(input.chars().count()), 1),
+        visible_empty
+    );
 }
 
 fn derived_claude_color_composer(style: &str) -> String {
@@ -815,6 +840,105 @@ fn captured_post_native_derived_work_and_approval_outrank_the_actual_empty_layou
             PaneState::AwaitingUser
         );
     }
+}
+
+#[test]
+fn captured_codex_tmux_actual_dim_default_background_placeholder_is_idle() {
+    let raw_composer = CAPTURED_CODEX_TMUX_PLACEHOLDER
+        .lines()
+        .find(|line| line.contains(CAPTURED_CODEX_HINT))
+        .expect("actual tmux placeholder has its composer");
+    assert_eq!(
+        raw_composer,
+        format!("\x1b[1m›\x1b[0m \x1b[2m{CAPTURED_CODEX_HINT}\x1b[0m")
+    );
+    assert_eq!(
+        captured_codex_composer_text(CAPTURED_CODEX_TMUX_PLACEHOLDER),
+        format!("› {CAPTURED_CODEX_HINT}")
+    );
+    let visible = strip_ansi(CAPTURED_CODEX_TMUX_PLACEHOLDER);
+    assert!(visible.contains("Context 0% used"));
+    assert!(visible.contains("? for shortcuts"));
+    assert_eq!(
+        classify("codex", CAPTURED_CODEX_TMUX_PLACEHOLDER),
+        PaneState::Idle
+    );
+}
+
+#[test]
+fn captured_codex_tmux_actual_identical_nondim_default_background_input_is_draft() {
+    let raw_composer = CAPTURED_CODEX_TMUX_DRAFT
+        .lines()
+        .find(|line| line.contains(CAPTURED_CODEX_HINT))
+        .expect("actual tmux typed frame has its composer");
+    assert_eq!(
+        raw_composer,
+        format!("\x1b[1m›\x1b[0m {CAPTURED_CODEX_HINT}")
+    );
+    assert_eq!(
+        captured_codex_composer_text(CAPTURED_CODEX_TMUX_DRAFT),
+        captured_codex_composer_text(CAPTURED_CODEX_TMUX_PLACEHOLDER)
+    );
+    let visible = strip_ansi(CAPTURED_CODEX_TMUX_DRAFT);
+    assert!(visible.contains("Context 0% used"));
+    assert!(!visible.contains("? for shortcuts"));
+    assert_ne!(visible, strip_ansi(CAPTURED_CODEX_TMUX_PLACEHOLDER));
+    assert_eq!(
+        classify("codex", CAPTURED_CODEX_TMUX_DRAFT),
+        PaneState::Draft
+    );
+}
+
+#[test]
+fn captured_codex_tmux_derived_dim_default_foreground_with_unproved_background_is_unknown() {
+    let original = format!("\x1b[2m{CAPTURED_CODEX_HINT}");
+    assert_eq!(
+        CAPTURED_CODEX_TMUX_PLACEHOLDER.matches(&original).count(),
+        1
+    );
+    for background in ["48;2;30;30;30", "48;5;53"] {
+        let changed = format!("\x1b[2m\x1b[{background}m{CAPTURED_CODEX_HINT}");
+        let content = CAPTURED_CODEX_TMUX_PLACEHOLDER.replacen(&original, &changed, 1);
+        assert_eq!(
+            classify("codex", &content),
+            PaneState::Unknown,
+            "unproved background {background}"
+        );
+    }
+}
+
+#[test]
+fn captured_opencode_herdr_actual_post_native_sidebar_input_is_draft() {
+    assert_captured_opencode_post_native_actual_draft_pair(
+        CAPTURED_OPENCODE_HERDR_POST_NATIVE_EMPTY,
+        CAPTURED_OPENCODE_HERDR_POST_NATIVE_DRAFT,
+        CAPTURED_OPENCODE_INPUT_STYLE,
+    );
+    assert_eq!(
+        classify("opencode", CAPTURED_OPENCODE_HERDR_POST_NATIVE_EMPTY),
+        PaneState::Idle
+    );
+    assert_eq!(
+        classify("opencode", CAPTURED_OPENCODE_HERDR_POST_NATIVE_DRAFT),
+        PaneState::Draft
+    );
+}
+
+#[test]
+fn captured_opencode_tmux_actual_post_native_sidebar_input_is_draft() {
+    assert_captured_opencode_post_native_actual_draft_pair(
+        CAPTURED_OPENCODE_TMUX_POST_NATIVE_EMPTY,
+        CAPTURED_OPENCODE_TMUX_POST_NATIVE_DRAFT,
+        CAPTURED_OPENCODE_TMUX_INPUT_STYLE,
+    );
+    assert_eq!(
+        classify("opencode", CAPTURED_OPENCODE_TMUX_POST_NATIVE_EMPTY),
+        PaneState::Idle
+    );
+    assert_eq!(
+        classify("opencode", CAPTURED_OPENCODE_TMUX_POST_NATIVE_DRAFT),
+        PaneState::Draft
+    );
 }
 
 #[test]
