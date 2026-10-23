@@ -75,11 +75,90 @@ const CAPTURED_OPENCODE_TMUX_DRAFT: &str =
 const CAPTURED_OPENCODE_TMUX_HINT_STYLE: &str = "\x1b[38;2;128;128;128m";
 const CAPTURED_OPENCODE_TMUX_INPUT_STYLE: &str = "\x1b[38;2;238;238;238m";
 
+const CAPTURED_CLAUDE_HERDR_EMPTY_PASTE_HINT: &str =
+    include_str!("fixtures/pane-readiness/claude-herdr-empty-paste-hint.ansi");
+const CAPTURED_CLAUDE_TMUX_EMPTY_PASTE_HINT: &str =
+    include_str!("fixtures/pane-readiness/claude-tmux-empty-paste-hint.ansi");
+const CAPTURED_OPENCODE_HERDR_POST_NATIVE_EMPTY: &str =
+    include_str!("fixtures/pane-readiness/opencode-herdr-post-native-empty.ansi");
+const CAPTURED_OPENCODE_TMUX_POST_NATIVE_EMPTY: &str =
+    include_str!("fixtures/pane-readiness/opencode-tmux-post-native-empty.ansi");
+
 fn captured_claude_composer_index(lines: &[String]) -> usize {
     lines
         .iter()
         .position(|line| strip_ansi(line).trim_start().starts_with('❯'))
         .expect("actual empty Claude frame has its live composer row")
+}
+
+fn assert_captured_claude_paste_hint_empty_layout(capture: &str) {
+    let lines: Vec<_> = capture.lines().map(str::to_string).collect();
+    let composer = captured_claude_composer_index(&lines);
+    assert_eq!(strip_ansi(&lines[composer]), "❯\u{a0} ");
+    assert!(strip_ansi(&lines[composer - 1]).contains(" cafleet-evidence-claude-"));
+    assert!(strip_ansi(&lines[composer + 1]).chars().all(|ch| ch == '─'));
+    let footer = strip_ansi(&lines[composer + 2]);
+    assert!(
+        footer
+            .trim_start()
+            .starts_with("⏵⏵ don't ask on (shift+tab to cycle) · ← for agents")
+    );
+    assert!(footer.trim_end().ends_with("Ctrl+Y to paste deleted text"));
+    assert_eq!(capture.matches("Ctrl+Y to paste deleted text").count(), 1);
+    assert!(!capture.contains(CAPTURED_CLAUDE_DRAFT_TEXT));
+    assert!(
+        lines[composer + 3..]
+            .iter()
+            .all(|line| strip_ansi(line).trim().is_empty())
+    );
+}
+
+fn captured_opencode_post_native_border_index(lines: &[String]) -> usize {
+    lines
+        .iter()
+        .rposition(|line| strip_ansi(line).trim_start().starts_with('╹'))
+        .expect("actual post-native frame has its live composer's lower border")
+}
+
+fn assert_captured_opencode_post_native_empty_layout(
+    capture: &str,
+    command_marker: &str,
+    expected_width: usize,
+) {
+    let visible = strip_ansi(capture);
+    let lines: Vec<_> = visible.lines().map(str::to_string).collect();
+    assert!(visible.contains(&format!("$  printf {command_marker}")));
+    assert_eq!(visible.matches(command_marker).count(), 2);
+    for sidebar in ["Context", "0 tokens", "$0.00 spent", "LSPs are disabled"] {
+        assert!(visible.contains(sidebar));
+    }
+    let border = captured_opencode_post_native_border_index(&lines);
+    let column = lines[border]
+        .chars()
+        .position(|ch| ch == '╹')
+        .expect("the observed border has its corner");
+    assert_eq!(column, 2);
+    let width = lines[border]
+        .chars()
+        .skip(column + 1)
+        .take_while(|ch| *ch == '▀')
+        .count();
+    assert_eq!(width, expected_width);
+    for line in &lines[border - 4..border - 1] {
+        let composer: String = line.chars().take(column + 1 + width).collect();
+        assert_eq!(composer.trim(), "┃");
+    }
+    assert!(lines[border - 4..border - 1].iter().any(|line| {
+        line.chars()
+            .skip(column + 1 + width)
+            .any(|ch| !ch.is_whitespace())
+    }));
+    let metadata: String = lines[border - 1].chars().take(column + 1 + width).collect();
+    assert_eq!(metadata.trim(), "┃  Cafleet · Big Pickle OpenCode");
+    let shortcuts = lines[border + 1..].join("\n");
+    for token in ["tab", "agents", "ctrl+p", "commands", "OpenCode 1.19.1"] {
+        assert!(shortcuts.contains(token));
+    }
 }
 
 fn derived_claude_color_composer(style: &str) -> String {
@@ -582,6 +661,160 @@ fn captured_claude_tmux_actual_empty_and_typed_pair_preserves_idle_and_draft_rol
         classify("claude", CAPTURED_CLAUDE_TMUX_DRAFT),
         PaneState::Draft
     );
+}
+
+#[test]
+fn captured_claude_herdr_empty_composer_with_actual_paste_deleted_text_hint_is_idle() {
+    assert_captured_claude_paste_hint_empty_layout(CAPTURED_CLAUDE_HERDR_EMPTY_PASTE_HINT);
+    assert_eq!(
+        classify("claude", CAPTURED_CLAUDE_HERDR_EMPTY_PASTE_HINT),
+        PaneState::Idle
+    );
+}
+
+#[test]
+fn captured_claude_tmux_empty_composer_with_actual_paste_deleted_text_hint_is_idle() {
+    assert_captured_claude_paste_hint_empty_layout(CAPTURED_CLAUDE_TMUX_EMPTY_PASTE_HINT);
+    assert_eq!(
+        classify("claude", CAPTURED_CLAUDE_TMUX_EMPTY_PASTE_HINT),
+        PaneState::Idle
+    );
+}
+
+#[test]
+fn captured_opencode_herdr_post_native_sidebar_empty_composer_is_idle() {
+    assert_captured_opencode_post_native_empty_layout(
+        CAPTURED_OPENCODE_HERDR_POST_NATIVE_EMPTY,
+        "CAFLEET_NATIVE_OPENCODE_HERDR_34",
+        291,
+    );
+    let visible = strip_ansi(CAPTURED_OPENCODE_HERDR_POST_NATIVE_EMPTY);
+    assert!(visible.contains("tab agents  ctrl+p commands"));
+    assert_eq!(
+        classify("opencode", CAPTURED_OPENCODE_HERDR_POST_NATIVE_EMPTY),
+        PaneState::Idle
+    );
+}
+
+#[test]
+fn captured_opencode_tmux_post_native_sidebar_empty_composer_is_idle() {
+    assert_captured_opencode_post_native_empty_layout(
+        CAPTURED_OPENCODE_TMUX_POST_NATIVE_EMPTY,
+        "CAFLEET_NATIVE_OPENCODE_TMUX_34",
+        113,
+    );
+    let visible = strip_ansi(CAPTURED_OPENCODE_TMUX_POST_NATIVE_EMPTY);
+    let lines: Vec<_> = visible.lines().map(str::to_string).collect();
+    let border = captured_opencode_post_native_border_index(&lines);
+    assert!(lines[border + 1].contains("tab       ctrl+p"));
+    assert!(lines[border + 2].contains("agents    commands"));
+    assert_eq!(
+        classify("opencode", CAPTURED_OPENCODE_TMUX_POST_NATIVE_EMPTY),
+        PaneState::Idle
+    );
+}
+
+#[test]
+fn captured_claude_derived_paste_hint_unknown_input_and_incomplete_blocks_remain_unknown() {
+    for capture in [
+        CAPTURED_CLAUDE_HERDR_EMPTY_PASTE_HINT,
+        CAPTURED_CLAUDE_TMUX_EMPTY_PASTE_HINT,
+    ] {
+        let lines: Vec<_> = capture.lines().map(str::to_string).collect();
+        let composer = captured_claude_composer_index(&lines);
+        let mut ambiguous = lines.clone();
+        ambiguous[composer] = "❯\u{a0}\x1b[38;2;1;2;3munknown input\x1b[0m".to_string();
+        assert_eq!(
+            classify("claude", &ambiguous.join("\n")),
+            PaneState::Unknown
+        );
+        for missing in [composer - 1, composer + 1] {
+            let mut incomplete = lines.clone();
+            incomplete.remove(missing);
+            assert_eq!(
+                classify("claude", &incomplete.join("\n")),
+                PaneState::Unknown
+            );
+        }
+        assert_eq!(classify("claude", &lines[composer + 2]), PaneState::Unknown);
+        for unproved_hint in [
+            "unrecognized action",
+            "Ctrl+Y to paste deleted text unrecognized action",
+        ] {
+            let unproved_footer = capture.replace("Ctrl+Y to paste deleted text", unproved_hint);
+            assert_eq!(classify("claude", &unproved_footer), PaneState::Unknown);
+        }
+    }
+}
+
+#[test]
+fn captured_opencode_derived_post_native_missing_boundaries_and_unknown_input_remain_unknown() {
+    for capture in [
+        CAPTURED_OPENCODE_HERDR_POST_NATIVE_EMPTY,
+        CAPTURED_OPENCODE_TMUX_POST_NATIVE_EMPTY,
+    ] {
+        let lines: Vec<_> = capture.lines().map(str::to_string).collect();
+        let border = captured_opencode_post_native_border_index(&lines);
+        for missing in [border - 4, border - 1, border] {
+            let mut incomplete = lines.clone();
+            incomplete.remove(missing);
+            assert_eq!(
+                classify("opencode", &incomplete.join("\n")),
+                PaneState::Unknown
+            );
+        }
+        assert_eq!(
+            classify("opencode", &lines[..=border].join("\n")),
+            PaneState::Unknown
+        );
+        let mut history = lines.clone();
+        history.drain(border - 4..=border);
+        assert_eq!(
+            classify("opencode", &history.join("\n")),
+            PaneState::Unknown
+        );
+        let mut ambiguous = lines.clone();
+        let empty_prefix = format!("\x1b[48;2;30;30;30m{}", " ".repeat(13));
+        assert_eq!(ambiguous[border - 3].matches(&empty_prefix).count(), 1);
+        ambiguous[border - 3] = ambiguous[border - 3].replacen(
+            &empty_prefix,
+            "\x1b[48;2;30;30;30m\x1b[38;2;1;2;3munknown input",
+            1,
+        );
+        assert_eq!(
+            classify("opencode", &ambiguous.join("\n")),
+            PaneState::Unknown
+        );
+        assert_eq!(capture.matches("ctrl+p").count(), 1);
+        let unproved_shortcuts = capture.replacen("ctrl+p", "ctrl+q", 1);
+        assert_eq!(
+            classify("opencode", &unproved_shortcuts),
+            PaneState::Unknown
+        );
+    }
+}
+
+#[test]
+fn captured_post_native_derived_work_and_approval_outrank_the_actual_empty_layouts() {
+    for (agent, capture) in [
+        ("claude", CAPTURED_CLAUDE_HERDR_EMPTY_PASTE_HINT),
+        ("claude", CAPTURED_CLAUDE_TMUX_EMPTY_PASTE_HINT),
+        ("opencode", CAPTURED_OPENCODE_HERDR_POST_NATIVE_EMPTY),
+        ("opencode", CAPTURED_OPENCODE_TMUX_POST_NATIVE_EMPTY),
+    ] {
+        let fixture = COMPOSERS
+            .iter()
+            .find(|fixture| fixture.agent == agent)
+            .expect("captured backend has its work and approval evidence");
+        assert_eq!(
+            classify(agent, &format!("{capture}\n{}\n", fixture.working)),
+            PaneState::Working
+        );
+        assert_eq!(
+            classify(agent, &format!("{capture}\n{}\n", fixture.approval)),
+            PaneState::AwaitingUser
+        );
+    }
 }
 
 #[test]
