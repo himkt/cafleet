@@ -10,17 +10,25 @@ use crate::broker::records::{MemberRecord, Placement};
 use crate::config::Settings;
 use crate::error::CafleetError;
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct Deadline(Instant);
 
 impl Deadline {
     pub fn new() -> Self {
-        Self(Instant::now() + Duration::from_secs(5))
+        Self::until(Instant::now() + Duration::from_secs(5))
+    }
+
+    pub(crate) fn until(instant: Instant) -> Self {
+        Self(instant)
     }
 
     pub fn remaining(self) -> Result<Duration, CafleetError> {
+        self.remaining_at(Instant::now())
+    }
+
+    pub(crate) fn remaining_at(self, now: Instant) -> Result<Duration, CafleetError> {
         self.0
-            .checked_duration_since(Instant::now())
+            .checked_duration_since(now)
             .filter(|left| !left.is_zero())
             .ok_or_else(|| {
                 CafleetError::App("pane input attempt exceeded its five-second deadline".into())
