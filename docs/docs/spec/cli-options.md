@@ -206,7 +206,7 @@ that path. Apply the following precedence:
 | Recorded install state | Result | Exit |
 |---|---|---|
 | A config-path variable fails validation | The pinned [validation error](#config-dir-resolution) | 1 |
-| No agent has a row at its currently-resolved path (zero rows, or — on a hand-tampered at-head database — a dropped `asset_installs` table) | `Error: no assets install is recorded at the resolved paths; run 'cafleet setup' to install` | 1 |
+| No agent has a row at its currently-resolved path in a compatible at-head database | `Error: no assets install is recorded at the resolved paths; run 'cafleet setup' to install` | 1 |
 | A row at a resolved path has `cafleet_version` ≠ the runtime CLI version (string inequality — either direction) | `Error: stale assets detected (<agent>=<recorded>[, ...]; CLI <runtime>); run 'cafleet setup' to reinstall`, stale agents in ascending order | 1 |
 | Every row at a resolved path matches | The command proceeds silently | 0 |
 
@@ -309,26 +309,30 @@ single detail line, and the report continues. One issue.
 
 ### Database section
 
-One detail line; the five states (`<M>` recorded version, `<N>` embedded
-head):
+One detail line describes the database state (`<M>` recorded version,
+`<N>` embedded head). An empty database has `application_id=0` and no
+non-internal tables. For every other database, application identity
+`1128351288` and the required table/column, index and foreign-key shapes are
+validated before comparing the ledger version. A missing required table
+(including `asset_installs`), malformed shape, mismatched identity, or missing
+recorded version is incompatible even when a retained ledger version equals
+head. Compatible auxiliary tables, indexes and triggers remain accepted.
 
 | State | Glyph | Detail line | Issue |
 |---|---|---|---|
-| Ledger present, `<M>` = `<N>` | `✓` | `schema <N> (head)` | no |
-| Ledger present, `<M>` < `<N>` | `✗` | `schema <M>, head is <N> — run: cafleet setup` | yes |
-| Ledger present, `<M>` > `<N>` | `✗` | `schema <M> is newer than this CLI (head <N>) — upgrade cafleet` | yes |
-| Ledger absent, foreign tables present | `✗` | `database has tables but no schema history — not a cafleet database?` | yes |
-| Ledger absent, no tables (or no DB file) | `✗` | `no database — run: cafleet setup` | yes |
+| Empty database, or no DB file | `✗` | `no database — run: cafleet setup` | yes |
+| Incompatible identity, required shape or ledger | `✗` | `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.` | yes |
+| Compatible identity/shape and recorded `<M>` = `<N>` | `✓` | `schema <N> (head)` | no |
+| Compatible identity/shape and recorded `<M>` < `<N>` | `✗` | `schema <M>, head is <N> — run: cafleet setup` | yes |
+| Compatible identity/shape and recorded `<M>` > `<N>` | `✗` | `schema <M> is newer than this CLI (head <N>) — upgrade cafleet` | yes |
 
-A connection failure (unreadable path) renders `✗` with the connection error
-as the detail line (one issue). A `✗` database never suppresses the
-coding-agents section, but the recorded rows are read only when the database
-report is `✓` (at head) AND the `asset_installs` table exists. Whenever the
-rows are not read — any non-head state, or an at-head ledger with a
-hand-dropped table — the section renders with no recorded-install data:
-every resolvable agent shows the `–` state. No superseded footnotes render,
-and — in the non-head states — doctor exits 1 for the database issue;
-either way, never a raw SQLite error from `asset_installs`.
+Connection and SQL inspection failures render `✗` with their actual cause as
+the detail line (one issue). Doctor completes the coding-agents section for
+every database result. It reads recorded installs only for a compatible
+at-head database. Every other database state renders resolvable agents as
+`–`, with no recorded versions or superseded footnotes, and contributes one
+database issue to exit status 1. A dropped `asset_installs` table therefore
+produces the incompatible-format diagnosis before any install-row lookup.
 
 ### Coding agents section
 
@@ -491,11 +495,13 @@ agent resolution error the row is `{"coding_agent": "...", "path": null,
 "source": "<VAR>", "recorded_version": null, "installed_at": null, "state":
 "error", "error": "<VAR> must be an absolute path (got '<value>')"}` — the
 raw invalid value appears only inside `error`; `path` stays `null` because
-no path resolved. `schema_version` is `null` when the ledger is absent.
-When the recorded rows are not read (a non-`ok` database report, or a
-missing `asset_installs` table), resolved agents use `"not_installed"`
-and path errors remain
-`"error"`. Recorded fields are null and `superseded` is empty. Exit-code semantics are identical to text mode.
+no path resolved. `schema_version` contains the recorded version only after
+identity and required-shape validation succeeds and the ledger supplies a
+version; otherwise it is `null`. For every non-`ok` database report, recorded
+installs are not read: resolved agents use `"not_installed"`, path errors
+remain `"error"`, recorded fields are null and `superseded` is empty.
+A missing `asset_installs` table is an incompatible database state.
+Exit-code semantics are identical to text mode.
 
 
 ## `cafleet message` — Message Broker
@@ -771,7 +777,7 @@ Application errors print as stderr text even with `--json`; the flag selects suc
 | (any fleet-scoped command) | No agent has an `asset_installs` row at its currently-resolved path | [Stale-assets guard](#stale-assets-guard) | 1 | See [Stale-assets guard](#stale-assets-guard) |
 | (any fleet-scoped command) | An `asset_installs` row at a resolved path differs from the runtime CLI version | [Stale-assets guard](#stale-assets-guard) | 1 | See [Stale-assets guard](#stale-assets-guard) |
 | `member create` | `--coding-agent opencode` with no agent preset at the resolved preset path | `Error: opencode agent preset not found at <preset>; run 'cafleet setup --coding-agent opencode' first` | 1 | `<preset>` is the resolved `<preset base>/agents/cafleet.md` — see [Config-dir resolution](#config-dir-resolution) |
-| `setup` | The `asset_installs` table is missing as the assets half starts | `the database schema is missing or outdated; run 'cafleet setup' first` | 1 | An assets-half failure, after a db-half failure or an externally broken schema |
+| `setup` | No database remains after a failed db half, or `asset_installs` is removed after the assets-half format check | `the database schema is missing or outdated; run 'cafleet setup' first` | 1 | An assets-half failure |
 | (any subject-taking command) | Missing positional subject id | The parser's native missing-required-argument error naming the positional | 2 | — |
 | (any id argument) | A non-integer id | The parser's native invalid-value error | 2 | — |
 | `fleet create` | Run outside a supported multiplexer | `Error: cafleet fleet create must be run inside a tmux or herdr session` | 1 | No DB writes |
