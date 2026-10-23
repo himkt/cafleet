@@ -144,33 +144,15 @@ mod tests {
 
     const TS: &str = "2026-07-30T09:00:00.000000+00:00";
 
-    fn unicast(id: i64, from: i64, to: i64, text: &str) -> Value {
+    fn message_fixture(id: i64, from: i64, to: i64, text: &str) -> Value {
         json!({
             "message_id": id,
-            "owner_member_id": to,
             "from_member_id": from,
             "to_member_id": to,
-            "type": "unicast",
             "created_at": TS,
             "status_state": "input_required",
             "status_timestamp": TS,
-            "origin_message_id": null,
             "text": text,
-        })
-    }
-
-    fn broadcast_summary(id: i64, from: i64, n: usize) -> Value {
-        json!({
-            "message_id": id,
-            "owner_member_id": from,
-            "from_member_id": from,
-            "to_member_id": null,
-            "type": "broadcast_summary",
-            "created_at": TS,
-            "status_state": "completed",
-            "status_timestamp": TS,
-            "origin_message_id": id,
-            "text": format!("Broadcast sent to {n} recipients"),
         })
     }
 
@@ -180,7 +162,7 @@ mod tests {
         #[test]
         fn compact_renders_the_bracket_line_plus_body() {
             assert_eq!(
-                format_message(&unicast(5, 2, 3, "hello")),
+                format_message(&message_fixture(5, 2, 3, "hello")),
                 format!("[5 | from:2 | {TS}]\nhello")
             );
         }
@@ -188,24 +170,15 @@ mod tests {
         #[test]
         fn compact_omits_the_body_line_when_text_is_empty() {
             assert_eq!(
-                format_message(&unicast(5, 2, 3, "")),
+                format_message(&message_fixture(5, 2, 3, "")),
                 format!("[5 | from:2 | {TS}]")
             );
         }
 
         #[test]
-        fn compact_appends_kind_and_origin_segments() {
-            assert_eq!(
-                format_message(&broadcast_summary(6, 2, 2)),
-                format!(
-                    "[6 | from:2 | {TS} | kind:broadcast_summary | origin:6]\nBroadcast sent to 2 recipients"
-                )
-            );
-        }
-
-        #[test]
         fn compact_unwraps_a_message_envelope() {
-            let envelope = json!({"message": unicast(5, 2, 3, "hello"), "notification_sent": true});
+            let envelope =
+                json!({"message": message_fixture(5, 2, 3, "hello"), "notification_sent": true});
             assert_eq!(
                 format_message(&envelope),
                 format!("[5 | from:2 | {TS}]\nhello")
@@ -227,7 +200,7 @@ mod tests {
 
         #[test]
         fn items_are_joined_with_one_blank_line_and_not_numbered() {
-            let items = vec![unicast(1, 2, 3, "a"), unicast(2, 2, 3, "b")];
+            let items = vec![message_fixture(1, 2, 3, "a"), message_fixture(2, 2, 3, "b")];
             assert_eq!(
                 format_indexed_list(&items, format_message, "empty"),
                 format!("[1 | from:2 | {TS}]\na\n\n[2 | from:2 | {TS}]\nb")
@@ -238,7 +211,7 @@ mod tests {
     mod format_member_detail_tests {
         use super::*;
 
-        fn member(skills: Value, placement: Value) -> Value {
+        fn member(placement: Value) -> Value {
             json!({
                 "member_id": 7,
                 "name": "analyst",
@@ -246,7 +219,6 @@ mod tests {
                 "status": "active",
                 "registered_at": TS,
                 "kind": "member",
-                "skills": skills,
                 "placement": placement,
             })
         }
@@ -254,13 +226,13 @@ mod tests {
         #[test]
         fn compact_is_id_name_status() {
             assert_eq!(
-                format_member_detail(&member(json!([]), Value::Null)),
+                format_member_detail(&member(Value::Null)),
                 "7 analyst active"
             );
         }
 
         #[test]
-        fn compact_ignores_skills_and_placement() {
+        fn compact_ignores_placement() {
             let placement = json!({
                 "coding_agent": "claude",
                 "mux_session": "main",
@@ -270,7 +242,7 @@ mod tests {
                 "created_at": TS,
             });
             assert_eq!(
-                format_member_detail(&member(json!(["python", "sql"]), placement)),
+                format_member_detail(&member(placement)),
                 "7 analyst active",
                 "the detailed view is --json only"
             );
@@ -294,24 +266,14 @@ mod tests {
                         "mux_pane_id": "%0",
                     },
                 },
-                "monitor": {
-                    "member_id": 2,
-                    "name": "monitor",
-                    "placement": {
-                        "mux_session": "main",
-                        "mux_window_id": "@1",
-                        "mux_pane_id": "%1",
-                    },
-                },
-                "monitor_loop": {"pid": 4242},
             })
         }
 
         #[test]
-        fn compact_is_fleet_id_director_and_monitor_then_the_loop_pid() {
+        fn compact_is_fleet_id_and_director() {
             assert_eq!(
                 format_fleet_create(&fleet_create_result(json!("alpha"))),
-                "3 director=1 monitor=2\nmonitor loop: pid 4242"
+                "3 director=1"
             );
         }
 
@@ -319,7 +281,7 @@ mod tests {
         fn compact_ignores_the_name_and_placement() {
             assert_eq!(
                 format_fleet_create(&fleet_create_result(Value::Null)),
-                "3 director=1 monitor=2\nmonitor loop: pid 4242",
+                "3 director=1",
                 "the detailed view is --json only"
             );
         }
@@ -434,13 +396,7 @@ mod tests {
                     placed("claude", json!("%10")),
                     json!(3600),
                 ),
-                row(
-                    6,
-                    "monitor",
-                    "monitor",
-                    placed("claude", json!("%2")),
-                    json!(5),
-                ),
+                row(6, "w4", "member", placed("claude", json!("%2")), json!(5)),
             ];
             let expected = [
                 "6 members:",
@@ -451,7 +407,7 @@ mod tests {
                 "  3          helper         member    codex     (pending)  1m",
                 "  4          w2             member    opencode  %9       59m",
                 "  5          w3             member    claude    %10      1h",
-                "  6          monitor        monitor   claude    %2       5s",
+                "  6          w4             member    claude    %2       5s",
             ]
             .join("\n");
             assert_eq!(format_member_list(&members), expected);

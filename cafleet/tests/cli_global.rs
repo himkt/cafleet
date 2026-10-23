@@ -4,9 +4,7 @@
 
 mod common;
 
-use std::process::Command;
-
-use common::{Cli, VERSION, code, stderr, stdout, text};
+use common::{Cli, VERSION, code, stderr, stdout};
 
 #[test]
 fn version_prints_the_pinned_line_and_bypasses_every_guard() {
@@ -277,43 +275,4 @@ fn shim_logs_distinguish_zero_calls_from_read_failure() {
         .expect("contextual log error");
     assert!(detail.contains("cannot read shim log"), "{detail}");
     assert!(detail.contains(cli.shim_log.to_str().unwrap()), "{detail}");
-}
-
-#[test]
-fn server_help_shows_the_settings_derived_defaults() {
-    let cli = Cli::new();
-    let output = cli.run(&["server", "--help"]);
-    assert_eq!(code(&output), 0);
-    let out = stdout(&output);
-    assert!(out.contains("--host"), "got: {out}");
-    assert!(out.contains("--port"), "got: {out}");
-    assert!(
-        out.contains("127.0.0.1"),
-        "the settings default host, got: {out}"
-    );
-    assert!(
-        out.contains("8000"),
-        "the settings default port, got: {out}"
-    );
-}
-
-#[test]
-fn server_help_defaults_follow_the_broker_env_vars() {
-    let output = Command::new(env!("CARGO_BIN_EXE_cafleet"))
-        .args(["server", "--help"])
-        .env_clear()
-        .env("CAFLEET_BROKER_HOST", "0.0.0.0")
-        .env("CAFLEET_BROKER_PORT", "9005")
-        .output()
-        .unwrap();
-    assert_eq!(output.status.code(), Some(0));
-    let out = text(&output.stdout);
-    assert!(
-        out.contains("0.0.0.0"),
-        "CAFLEET_BROKER_HOST is honored, got: {out}"
-    );
-    assert!(
-        out.contains("9005"),
-        "CAFLEET_BROKER_PORT is honored, got: {out}"
-    );
 }

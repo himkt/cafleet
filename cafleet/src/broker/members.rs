@@ -810,6 +810,7 @@ mod tests {
 #[cfg(test)]
 mod step6_behavior_regressions {
     use super::*;
+    use crate::broker::records::MemberStatus;
 
     fn activity(sent: Option<&str>, received: Option<&str>, ack: Option<&str>) -> MemberActivity {
         MemberActivity {

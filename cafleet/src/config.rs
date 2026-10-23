@@ -98,11 +98,8 @@ mod tests {
     #[test]
     fn defaults_when_no_variable_is_set() {
         let s = Settings::from_lookup(|_| None).unwrap();
-        assert_eq!(s.broker_host, "127.0.0.1");
-        assert_eq!(s.broker_port, 8000);
         assert_eq!(s.max_text_len, 200);
         assert_eq!(s.multiplexer, None);
-        assert_eq!(s.monitor_wake_interval, 600);
     }
 
     #[test]
@@ -123,20 +120,14 @@ mod tests {
     fn each_field_binds_to_its_exact_env_var() {
         let s = Settings::from_lookup(|name| match name {
             "CAFLEET_DATABASE_URL" => Some("sqlite:///srv/db/registry.db".to_string()),
-            "CAFLEET_BROKER_HOST" => Some("0.0.0.0".to_string()),
-            "CAFLEET_BROKER_PORT" => Some("9001".to_string()),
             "CAFLEET_MAX_TEXT_LEN" => Some("50".to_string()),
             "CAFLEET_MULTIPLEXER" => Some("herdr".to_string()),
-            "CAFLEET_MONITOR_WAKE_INTERVAL" => Some("900".to_string()),
             _ => None,
         })
         .unwrap();
         assert_eq!(s.database_url, "sqlite:///srv/db/registry.db");
-        assert_eq!(s.broker_host, "0.0.0.0");
-        assert_eq!(s.broker_port, 9001);
         assert_eq!(s.max_text_len, 50);
         assert_eq!(s.multiplexer, Some("herdr".to_string()));
-        assert_eq!(s.monitor_wake_interval, 900);
     }
 
     #[test]
@@ -150,24 +141,6 @@ mod tests {
             s.database_url, "sqlite:///~/custom/path.db",
             "a user-supplied URL gets no ~ expansion and no rewriting"
         );
-    }
-
-    #[test]
-    fn non_integer_broker_port_fails_loudly() {
-        let result = Settings::from_lookup(|name| match name {
-            "CAFLEET_BROKER_PORT" => Some("not-a-port".to_string()),
-            _ => None,
-        });
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn out_of_range_broker_port_fails_loudly() {
-        let result = Settings::from_lookup(|name| match name {
-            "CAFLEET_BROKER_PORT" => Some("65536".to_string()),
-            _ => None,
-        });
-        assert!(result.is_err());
     }
 
     #[test]
@@ -186,55 +159,5 @@ mod tests {
             _ => None,
         });
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn non_integer_monitor_wake_interval_fails_loudly() {
-        let err = Settings::from_lookup(|name| match name {
-            "CAFLEET_MONITOR_WAKE_INTERVAL" => Some("10m".to_string()),
-            _ => None,
-        })
-        .unwrap_err();
-        assert_eq!(
-            err.message(),
-            "CAFLEET_MONITOR_WAKE_INTERVAL must be a non-negative integer (got '10m')"
-        );
-    }
-
-    #[test]
-    fn negative_monitor_wake_interval_fails_loudly() {
-        let err = Settings::from_lookup(|name| match name {
-            "CAFLEET_MONITOR_WAKE_INTERVAL" => Some("-1".to_string()),
-            _ => None,
-        })
-        .unwrap_err();
-        assert_eq!(
-            err.message(),
-            "CAFLEET_MONITOR_WAKE_INTERVAL must be a non-negative integer (got '-1')"
-        );
-    }
-
-    #[test]
-    fn above_i64_max_monitor_wake_interval_fails_loudly() {
-        let err = Settings::from_lookup(|name| match name {
-            "CAFLEET_MONITOR_WAKE_INTERVAL" => Some("9223372036854775808".to_string()),
-            _ => None,
-        })
-        .unwrap_err();
-        assert_eq!(
-            err.message(),
-            "CAFLEET_MONITOR_WAKE_INTERVAL must be a non-negative integer \
-             (got '9223372036854775808')"
-        );
-    }
-
-    #[test]
-    fn zero_monitor_wake_interval_is_valid() {
-        let s = Settings::from_lookup(|name| match name {
-            "CAFLEET_MONITOR_WAKE_INTERVAL" => Some("0".to_string()),
-            _ => None,
-        })
-        .unwrap();
-        assert_eq!(s.monitor_wake_interval, 0);
     }
 }

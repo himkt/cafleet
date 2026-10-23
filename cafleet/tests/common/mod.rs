@@ -1,9 +1,7 @@
 #![allow(dead_code)]
 
-use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Output, Stdio};
-use std::time::{Duration, Instant};
+use std::process::{Command, Output, Stdio};
 
 use tempfile::TempDir;
 
@@ -113,30 +111,6 @@ impl Cli {
     /// of [`CAPTURE_FAILS`] makes the capture fail instead.
     pub fn set_pane_capture(&self, pane: &str, content: &str) {
         std::fs::write(self.capture_dir.join(pane), content).unwrap();
-    }
-
-    /// The fleet's `monitor_runtime` owner pid; `None` when no loop holds it.
-    pub fn monitor_pid(&self, fleet_id: i64) -> Option<i64> {
-        self.sqlite()
-            .query_row(
-                "SELECT pid FROM monitor_runtime WHERE fleet_id=?1",
-                [fleet_id],
-                |row| row.get::<_, Option<i64>>(0),
-            )
-            .ok()
-            .flatten()
-    }
-
-    /// The text `fleet create` prints once the fleet's loop is live.
-    pub fn fleet_create_text(&self, fleet_id: i64, director_id: i64, monitor_id: i64) -> String {
-        let pid = self
-            .monitor_pid(fleet_id)
-            .expect("fleet create returns only after the loop is live");
-        format!("{fleet_id} director={director_id} monitor={monitor_id}\nmonitor loop: pid {pid}\n")
-    }
-
-    pub fn monitor_log_path(&self, fleet_id: i64) -> PathBuf {
-        self.home.path().join(format!("monitor-{fleet_id}.log"))
     }
 
     /// Set an extra environment variable (e.g. a backend config-location
@@ -318,20 +292,6 @@ impl Cli {
         self.seed_asset_row("claude", VERSION);
     }
 
-    /// The monitor member id the atomic `fleet create` bootstrap allocates in
-    /// a fresh database (fleet 1, Director 1, monitor 2).
-    pub const BOOTSTRAP_MONITOR_ID: i64 = 2;
-
-    /// Write (once) and return the monitor spawn-prompt file `fleet create
-    /// --monitor-file` consumes.
-    pub fn monitor_prompt_path(&self) -> String {
-        let path = self.home.path().join("monitor-prompt.md");
-        if !path.exists() {
-            std::fs::write(&path, "follow your monitor role protocol").unwrap();
-        }
-        path.to_str().unwrap().to_string()
-    }
-
     pub fn with_cli_fleet(&self) -> (i64, i64) {
         self.ready();
         let output = self.run(&[
@@ -452,113 +412,6 @@ impl Cli {
             Ok(log) => log.lines().map(str::to_owned).collect(),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
             Err(error) => panic!("cannot read shim log {}: {error}", self.shim_log.display()),
-        }
-    }
-}
-
-const LOOP_DEADLINE: Duration = Duration::from_secs(20);
-const LOOP_POLL_INTERVAL: Duration = Duration::from_millis(20);
-
-/// A foreground `cafleet monitor` child that is always reaped, with its
-/// output and the shim log attached to every failure.
-pub struct LoopChild<'a> {
-    child: Option<Child>,
-    cli: &'a Cli,
-}
-
-impl<'a> LoopChild<'a> {
-    pub fn spawn(cli: &'a Cli, args: &[&str]) -> Self {
-        Self {
-            child: Some(cli.spawn(args)),
-            cli,
-        }
-    }
-
-    /// Spawn the loop for `fleet_id` and wait until it owns the runtime row.
-    pub fn start(cli: &'a Cli, fleet_id: i64, flags: &[&str]) -> Self {
-        let fleet = fleet_id.to_string();
-        let mut args = vec!["monitor", fleet.as_str()];
-        args.extend_from_slice(flags);
-        let mut child = Self::spawn(cli, &args);
-        let pid = child.pid();
-        child.wait_until("the loop to own the runtime row", || {
-            cli.monitor_pid(fleet_id) == Some(pid)
-        });
-        child
-    }
-
-    pub fn pid(&self) -> i64 {
-        i64::from(self.child.as_ref().expect("uncollected child").id())
-    }
-
-    fn reap(&mut self) -> io::Result<Output> {
-        let child = self.child.as_mut().expect("collect each child once");
-        if child.try_wait()?.is_none() {
-            child.kill()?;
-        }
-        self.child.take().unwrap().wait_with_output()
-    }
-
-    fn fail(&mut self, reason: &str) -> ! {
-        let output = self.reap().expect("terminate and reap the failed loop");
-        panic!(
-            "monitor loop: {reason}; status={}; stdout={}; stderr={}; shim={:?}",
-            output.status,
-            stdout(&output),
-            stderr(&output),
-            self.cli.shim_calls()
-        );
-    }
-
-    /// Wait for `observed` while the loop stays alive.
-    pub fn wait_until(&mut self, description: &str, mut observed: impl FnMut() -> bool) {
-        let deadline = Instant::now() + LOOP_DEADLINE;
-        loop {
-            if self.child.as_mut().unwrap().try_wait().unwrap().is_some() {
-                self.fail(&format!("exited before {description}"));
-            }
-            if observed() {
-                return;
-            }
-            if Instant::now() >= deadline {
-                self.fail(&format!("deadline waiting for {description}"));
-            }
-            std::thread::sleep(LOOP_POLL_INTERVAL);
-        }
-    }
-
-    /// Wait until the loop has listed the panes `ticks` more times.
-    pub fn wait_ticks(&mut self, ticks: usize) {
-        let cli = self.cli;
-        let target = cli.shim_count("list-panes") + ticks;
-        self.wait_until("further ticks", || cli.shim_count("list-panes") >= target);
-    }
-
-    pub fn stop(&mut self) -> Output {
-        let pid = nix::unistd::Pid::from_raw(i32::try_from(self.pid()).expect("PID fits i32"));
-        nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGTERM)
-            .expect("request graceful loop shutdown");
-        self.wait_for_exit("graceful loop shutdown")
-    }
-
-    pub fn wait_for_exit(&mut self, description: &str) -> Output {
-        let deadline = Instant::now() + LOOP_DEADLINE;
-        loop {
-            if self.child.as_mut().unwrap().try_wait().unwrap().is_some() {
-                return self.reap().expect("collect the completed loop");
-            }
-            if Instant::now() >= deadline {
-                self.fail(&format!("deadline waiting for {description}"));
-            }
-            std::thread::sleep(LOOP_POLL_INTERVAL);
-        }
-    }
-}
-
-impl Drop for LoopChild<'_> {
-    fn drop(&mut self) {
-        if self.child.is_some() {
-            let _ = self.reap();
         }
     }
 }

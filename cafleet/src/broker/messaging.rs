@@ -282,12 +282,11 @@ pub fn ack_message(conn: &mut Connection, message_id: i64) -> Result<MessageReco
 
 #[cfg(test)]
 mod tests {
-    use serde_json::Value;
     use tempfile::TempDir;
 
     use crate::broker;
     use crate::broker::test_support as common;
-    use crate::broker::test_support::{bootstrap_monitor, create_fleet, migrated_conn, register};
+    use crate::broker::test_support::{create_fleet, migrated_conn, register};
     use crate::error::CafleetError;
     use crate::output::format_json;
 
@@ -314,7 +313,7 @@ mod tests {
         let message_id = sent.message_id;
         let ts = sent.created_at.clone();
         let expected = format!(
-            r#"{{"message_id":{message_id},"owner_member_id":{member_id},"from_member_id":{director_id},"to_member_id":{member_id},"type":"unicast","created_at":"{ts}","status_state":"input_required","status_timestamp":"{ts}","origin_message_id":null,"text":"{text}"}}"#
+            r#"{{"message_id":{message_id},"from_member_id":{director_id},"to_member_id":{member_id},"created_at":"{ts}","status_state":"input_required","status_timestamp":"{ts}","text":"{text}"}}"#
         );
         assert_eq!(format_json(&message), expected);
 
@@ -350,9 +349,8 @@ mod tests {
             (&pending_send, pending_id, "hi"),
         ] {
             let stored = broker::get_message(&conn, sent.message_id).unwrap();
-            assert_eq!(stored.owner_member_id, recipient);
             assert_eq!(stored.from_member_id, director_id);
-            assert_eq!(stored.to_member_id, Some(recipient));
+            assert_eq!(stored.to_member_id, recipient);
             assert_eq!(stored.text, text);
             assert_eq!(stored.status.as_str(), "input_required");
             assert_eq!(
@@ -413,96 +411,7 @@ mod tests {
     }
 
     #[test]
-    fn broadcast_writes_a_summary_and_one_delivery_per_peer() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
-        let monitor_id = bootstrap_monitor(&conn, fleet_id);
-        let member_a = register(&mut conn, fleet_id, "a", Some("%2"));
-        let member_b = register(&mut conn, fleet_id, "b", Some("%3"));
-
-        let rows = broker::broadcast_message(&mut conn, director_id, "all hands").unwrap();
-        assert_eq!(
-            rows.deliveries
-                .iter()
-                .map(|(member_id, _)| *member_id)
-                .collect::<Vec<_>>(),
-            [monitor_id, member_a, member_b],
-            "monitor + two workers"
-        );
-
-        let summary = &crate::presentation::message(&rows.summary);
-        let summary_id = rows.summary.message_id;
-        assert_eq!(summary["owner_member_id"], director_id);
-        assert_eq!(summary["from_member_id"], director_id);
-        assert_eq!(summary["to_member_id"], Value::Null);
-        assert_eq!(summary["type"], "broadcast_summary");
-        assert_eq!(summary["status_state"], "completed");
-        assert_eq!(
-            summary["origin_message_id"], summary_id,
-            "self-referential origin"
-        );
-        assert_eq!(summary["text"], "Broadcast sent to 3 recipients");
-
-        for (recipient, delivery_id) in rows.deliveries.iter().copied() {
-            let pending = broker::poll_messages(&conn, recipient)
-                .map(|records| {
-                    records
-                        .iter()
-                        .map(crate::presentation::message)
-                        .collect::<Vec<_>>()
-                })
-                .unwrap();
-            assert_eq!(pending.len(), 1);
-            let delivery = &pending[0];
-            assert_eq!(delivery["type"], "unicast");
-            assert_eq!(delivery["status_state"], "input_required");
-            assert_eq!(delivery["origin_message_id"], summary_id);
-            assert_eq!(delivery["text"], "all hands");
-            assert_eq!(
-                delivery["message_id"], delivery_id,
-                "the returned id is the recipient's own delivery — the id the recipient acks"
-            );
-            assert_eq!(notified_at(&conn, delivery_id), None);
-        }
-    }
-
-    #[test]
-    fn broadcast_excludes_the_sender() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        let sender_id = register(&mut conn, fleet_id, "sender", Some("%2"));
-        register(&mut conn, fleet_id, "helper", Some("%3"));
-        register(&mut conn, fleet_id, "pending", None);
-
-        let rows = broker::broadcast_message(&mut conn, sender_id, "hello").unwrap();
-        assert_eq!(
-            rows.deliveries.len(),
-            4,
-            "director + monitor + pane-bound peer + pending peer; sender excluded"
-        );
-        assert!(
-            rows.deliveries
-                .iter()
-                .all(|(member_id, _)| *member_id != sender_id)
-        );
-        assert_eq!(rows.summary.text, "Broadcast sent to 4 recipients");
-    }
-
-    #[test]
-    fn broadcast_rejects_an_inactive_sender() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let _ = create_fleet(&mut conn, "alpha");
-        let err = broker::broadcast_message(&mut conn, 999, "hi")
-            .expect_err("an unknown sender must error");
-        assert!(matches!(err, CafleetError::Value(_)));
-        assert_eq!(err.message(), "Sender member not found or not active: 999");
-    }
-
-    #[test]
-    fn poll_returns_unacked_deliveries_newest_first_without_summaries() {
+    fn poll_returns_only_the_recipients_unacked_messages_newest_first() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
@@ -537,21 +446,41 @@ mod tests {
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0]["message_id"], second_id);
 
-        broker::broadcast_message(&mut conn, member_id, "fanout").unwrap();
-        let sender_pending = broker::poll_messages(&conn, member_id)
-            .map(|records| {
-                records
-                    .iter()
-                    .map(crate::presentation::message)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap();
-        assert!(
-            sender_pending.iter().all(|m| m["type"] == "unicast"),
-            "broadcast_summary rows never appear in poll"
+        common::send(&mut conn, member_id, director_id, "outgoing");
+        let pending = broker::poll_messages(&conn, member_id).unwrap();
+        assert_eq!(
+            pending.iter().map(|row| row.message_id).collect::<Vec<_>>(),
+            [second_id]
         );
     }
 
+    #[test]
+    fn poll_scopes_by_recipient_and_orders_by_status_timestamp_then_descending_id() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet(&mut conn, "ordering");
+        let worker = register(&mut conn, fleet, "worker", None);
+        let peer = register(&mut conn, fleet, "peer", None);
+        let mut ids = Vec::new();
+        for text in ["first", "second", "third"] {
+            ids.push(
+                broker::send_message(&mut conn, director, &worker.to_string(), text)
+                    .unwrap()
+                    .message_id,
+            );
+        }
+        broker::send_message(&mut conn, director, &peer.to_string(), "other inbox").unwrap();
+        broker::send_message(&mut conn, worker, &director.to_string(), "outgoing").unwrap();
+        conn.execute("UPDATE messages SET status_timestamp='2026-02-01T00:00:00+00:00',created_at='2020-01-01T00:00:00+00:00' WHERE message_id IN (?1,?2)",
+            rusqlite::params![ids[0], ids[1]]).unwrap();
+        conn.execute("UPDATE messages SET status_timestamp='2026-01-01T00:00:00+00:00',created_at='2099-01-01T00:00:00+00:00' WHERE message_id=?1", [ids[2]]).unwrap();
+        let rows = broker::poll_messages(&conn, worker).unwrap();
+        assert_eq!(
+            rows.iter().map(|row| row.message_id).collect::<Vec<_>>(),
+            [ids[1], ids[0], ids[2]]
+        );
+        assert!(rows.iter().all(|row| row.to_member_id == worker));
+    }
     #[test]
     fn poll_rejects_an_unknown_member() {
         let dir = TempDir::new().unwrap();
@@ -612,5 +541,64 @@ mod tests {
             .expect_err("a completed message cannot be acked again");
         assert!(matches!(err, CafleetError::Value(_)));
         assert_eq!(err.message(), "Cannot ACK message in state completed");
+    }
+    #[test]
+    fn send_failure_rolls_back_the_message_without_leaving_an_identifier_gap() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet(&mut conn, "atomic");
+        let worker = register(&mut conn, fleet, "worker", None);
+        conn.execute_batch(
+            "CREATE TRIGGER reject_message BEFORE INSERT ON messages
+            BEGIN SELECT RAISE(ABORT, 'injected message failure'); END;",
+        )
+        .unwrap();
+        let error =
+            broker::send_message(&mut conn, director, &worker.to_string(), "first").unwrap_err();
+        assert!(
+            error.message().contains("injected message failure"),
+            "{error}"
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM messages", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        conn.execute_batch("DROP TRIGGER reject_message").unwrap();
+        let message =
+            broker::send_message(&mut conn, director, &worker.to_string(), "second").unwrap();
+        assert_eq!(message.message_id, 1);
+    }
+
+    #[test]
+    fn oldest_pending_preview_uses_creation_order_and_skips_acked_and_notified_rows() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet(&mut conn, "preview");
+        let worker = register(&mut conn, fleet, "worker", None);
+        let mut ids = Vec::new();
+        for text in ["acked", "notified", "oldest", "newest"] {
+            ids.push(
+                broker::send_message(&mut conn, director, &worker.to_string(), text)
+                    .unwrap()
+                    .message_id,
+            );
+        }
+        broker::ack_message(&mut conn, ids[0]).unwrap();
+        conn.execute(
+            "UPDATE messages SET notified_at='2026-10-23T00:00:00+00:00' WHERE message_id=?1",
+            [ids[1]],
+        )
+        .unwrap();
+        conn.execute_batch("UPDATE messages SET created_at='2026-01-01T00:00:00+00:00', status_timestamp='2099-01-01T00:00:00+00:00' WHERE message_id=3;
+            UPDATE messages SET created_at='2026-02-01T00:00:00+00:00', status_timestamp='2020-01-01T00:00:00+00:00' WHERE message_id=4;").unwrap();
+        assert_eq!(
+            broker::oldest_pending_preview(&conn, worker)
+                .unwrap()
+                .unwrap()
+                .message_id,
+            ids[2]
+        );
     }
 }

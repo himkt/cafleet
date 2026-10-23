@@ -23,10 +23,6 @@ pub fn placement(pane: Option<&str>) -> NewPlacement {
     }
 }
 
-pub const MONITOR_NAME: &str = "monitor";
-pub const MONITOR_DESCRIPTION: &str = "Monitor member for this fleet";
-pub const MONITOR_PANE: &str = "%1";
-
 pub fn create_fleet(conn: &mut Connection, name: &str) -> (i64, i64) {
     let fleet =
         broker::create_fleet(conn, Some(name), "main", "@1", "%0", "claude", "tmux").unwrap();
@@ -36,39 +32,13 @@ pub fn create_fleet(conn: &mut Connection, name: &str) -> (i64, i64) {
     )
 }
 
-/// The monitor member the atomic bootstrap registered for `fleet_id`.
-pub fn bootstrap_monitor(conn: &Connection, fleet_id: i64) -> i64 {
-    broker::active_monitor_member_id(conn, fleet_id)
-        .unwrap()
-        .expect("the atomic bootstrap registers the monitor member")
-}
-
 pub fn register(conn: &mut Connection, fleet_id: i64, name: &str, pane: Option<&str>) -> i64 {
     broker::register_member(conn, fleet_id, name, "test member", Some(&placement(pane)))
         .unwrap()
         .member_id
 }
 
-pub fn register_monitor(
-    conn: &mut Connection,
-    fleet_id: i64,
-    name: &str,
-    pane: Option<&str>,
-) -> i64 {
-    broker::register_member(
-        conn,
-        fleet_id,
-        name,
-        "monitor member",
-        &[],
-        Some(&placement(pane)),
-        true,
-    )
-    .unwrap()
-    .member_id
-}
-
-/// Persist a unicast message and return `{"message": <presented row>}`.
+/// Persist a point-to-point message and return `{"message": <presented row>}`.
 pub fn send(conn: &mut Connection, from: i64, to: i64, text: &str) -> Value {
     let message = broker::send_message(conn, from, &to.to_string(), text).unwrap();
     json!({"message": crate::presentation::message(&message)})

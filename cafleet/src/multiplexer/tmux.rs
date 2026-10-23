@@ -327,12 +327,9 @@ impl TmuxMultiplexer {
 
 #[cfg(test)]
 mod tests {
-    use crate::multiplexer::WakeEntry;
 
     use crate::multiplexer::test_support::{FakeRunner, argv, env, run_event, sleep_event};
-    use crate::multiplexer::{
-        MultiplexerContext, RunError, TmuxMultiplexer, build_wake_payload_from_entries,
-    };
+    use crate::multiplexer::{MultiplexerContext, RunError, TmuxMultiplexer};
 
     fn tmux_env() -> std::collections::HashMap<String, String> {
         env(&[
@@ -563,32 +560,6 @@ mod tests {
     }
 
     #[test]
-    fn send_inline_preview_types_the_note_lines_after_the_base_payload() {
-        let runner = FakeRunner::with_binary("tmux");
-        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        let ts = "2026-07-30T09:00:00.000000+00:00";
-        let note = "[cafleet] Resume your work if something was still running.\n[cafleet] second";
-        assert!(
-            mux.send_inline_preview("%5", 5, 2, ts, "a\nb", Some(note))
-                .is_ok()
-        );
-        assert_eq!(
-            runner.events()[2],
-            run_event(
-                &[
-                    "tmux",
-                    "send-keys",
-                    "-t",
-                    "%5",
-                    "-l",
-                    &format!("[cafleet msg 5 from 2 {ts}]\na⏎b\n{note}"),
-                ],
-                Some(5),
-            )
-        );
-    }
-
-    #[test]
     fn send_inline_preview_without_the_binary_is_the_exact_path_error() {
         let runner = FakeRunner::without_binaries();
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
@@ -697,92 +668,6 @@ mod tests {
     }
 
     #[test]
-    fn send_wake_entries_is_esc_first_and_types_the_shared_payload() {
-        let runner = FakeRunner::with_binary("tmux");
-        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        let members = [WakeEntry {
-            member_id: 4,
-            name: "worker",
-            coding_agent: "codex",
-            pending_count: 0,
-        }];
-        let director = WakeEntry {
-            member_id: 2,
-            name: "Director",
-            coding_agent: "claude",
-            pending_count: 1,
-        };
-        assert!(mux.send_wake_entries("%9", 3, &members, &director).unwrap());
-
-        let payload = build_wake_payload_from_entries(3, &members, &director).unwrap();
-        assert_eq!(
-            runner.events(),
-            vec![
-                run_event(&["tmux", "send-keys", "-t", "%9", "Escape"], Some(5)),
-                sleep_event(0.1),
-                run_event(&["tmux", "send-keys", "-t", "%9", "-l", &payload], Some(5)),
-                sleep_event(1.0),
-                run_event(&["tmux", "send-keys", "-t", "%9", "Enter"], Some(5)),
-            ],
-            "the wake matches the established Esc-first keystroke norm"
-        );
-    }
-
-    #[test]
-    fn send_wake_entries_aborts_on_an_invalid_agent_without_keystrokes() {
-        let runner = FakeRunner::with_binary("tmux");
-        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        let members = [WakeEntry {
-            member_id: 4,
-            name: "worker",
-            coding_agent: "python",
-            pending_count: 0,
-        }];
-        let director = WakeEntry {
-            member_id: 2,
-            name: "Director",
-            coding_agent: "claude",
-            pending_count: 0,
-        };
-        assert!(mux.send_wake_entries("%9", 3, &members, &director).is_err());
-        assert!(runner.events().is_empty());
-    }
-
-    #[test]
-    fn send_wake_entries_remains_best_effort_on_delivery_failure() {
-        let members = [WakeEntry {
-            member_id: 4,
-            name: "worker",
-            coding_agent: "codex",
-            pending_count: 0,
-        }];
-        let director = WakeEntry {
-            member_id: 2,
-            name: "Director",
-            coding_agent: "claude",
-            pending_count: 0,
-        };
-
-        let runner = FakeRunner::without_binaries();
-        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        assert!(
-            !mux.send_wake_entries("%9", 3, &members, &director).unwrap(),
-            "tmux missing → Ok(false)"
-        );
-        assert!(runner.events().is_empty());
-
-        let runner = FakeRunner::with_binary("tmux");
-        runner.respond(Err(RunError::Failed {
-            stderr: "boom".to_string(),
-        }));
-        let mux = TmuxMultiplexer::new(runner, tmux_env());
-        assert!(
-            !mux.send_wake_entries("%9", 3, &members, &director).unwrap(),
-            "a keystroke error stays Ok(false), never an Err"
-        );
-    }
-
-    #[test]
     fn send_prompt_is_esc_safeguarded_and_stripped() {
         let runner = FakeRunner::with_binary("tmux");
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
@@ -833,50 +718,6 @@ mod tests {
         assert!(
             runner.events().is_empty(),
             "validation precedes any keystroke"
-        );
-    }
-
-    #[test]
-    fn send_exit_is_esc_safeguarded_and_tolerates_a_missing_pane() {
-        for missing_keystroke in 0..3 {
-            let runner = FakeRunner::with_binary("tmux");
-            for _ in 0..missing_keystroke {
-                runner.respond(Ok(String::new()));
-            }
-            runner.respond(Err(RunError::Failed {
-                stderr: "can't find pane %5".to_string(),
-            }));
-            let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-            mux.send_exit("%5", true).unwrap();
-            assert_eq!(
-                runner.events(),
-                vec![
-                    run_event(&["tmux", "send-keys", "-t", "%5", "Escape"], None),
-                    sleep_event(0.1),
-                    run_event(&["tmux", "send-keys", "-t", "%5", "-l", "/exit"], None),
-                    sleep_event(1.0),
-                    run_event(&["tmux", "send-keys", "-t", "%5", "Enter"], None),
-                ],
-                "a missing pane at keystroke {missing_keystroke} is tolerated"
-            );
-        }
-    }
-
-    #[test]
-    fn send_exit_without_tolerance_propagates_the_failure() {
-        let runner = FakeRunner::with_binary("tmux");
-        runner.respond(Err(RunError::Failed {
-            stderr: "can't find pane %5".to_string(),
-        }));
-        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        assert!(mux.send_exit("%5", false).is_err());
-        assert_eq!(
-            runner.events(),
-            vec![run_event(
-                &["tmux", "send-keys", "-t", "%5", "Escape"],
-                None,
-            )],
-            "without tolerance, an Esc failure aborts before the payload"
         );
     }
 
@@ -1061,13 +902,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn agent_status_is_always_absent_on_tmux() {
-        let runner = FakeRunner::with_binary("tmux");
-        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        assert_eq!(mux.agent_status("%5").unwrap(), None);
-        assert!(runner.events().is_empty(), "no native state to query");
-    }
     #[test]
     fn creation_unknown_id_failure_never_guesses_or_closes_a_pane() {
         for response in [
