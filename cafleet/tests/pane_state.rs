@@ -33,6 +33,21 @@ const COMPOSERS: &[ComposerFixture] = &[
     },
 ];
 
+const CAPTURED_CODEX_HINT: &str = "Ask Codex to do anything";
+const CAPTURED_CODEX_PLACEHOLDER: &str =
+    include_str!("fixtures/pane-readiness/codex-herdr-placeholder.ansi");
+const CAPTURED_CODEX_DRAFT: &str = include_str!("fixtures/pane-readiness/codex-herdr-draft.ansi");
+
+fn captured_codex_composer_text(capture: &str) -> String {
+    strip_ansi(capture)
+        .lines()
+        .rev()
+        .find(|line| line.trim_start().starts_with('›'))
+        .expect("captured Codex fixture has a composer")
+        .trim()
+        .to_string()
+}
+
 fn assert_state(agent: &str, content: &str, expected: &str) {
     assert_eq!(
         format!("{:?}", classify(agent, content)),
@@ -181,4 +196,106 @@ fn an_unknown_backend_has_unknown_readiness() {
             assert_state(backend, fixture.placeholder, "Unknown");
         }
     }
+}
+
+#[test]
+fn captured_codex_dim_placeholder_is_idle_for_the_real_identical_text_pair() {
+    let placeholder = strip_ansi(CAPTURED_CODEX_PLACEHOLDER);
+    let draft = strip_ansi(CAPTURED_CODEX_DRAFT);
+    assert_eq!(
+        captured_codex_composer_text(CAPTURED_CODEX_PLACEHOLDER),
+        captured_codex_composer_text(CAPTURED_CODEX_DRAFT)
+    );
+    assert_eq!(
+        captured_codex_composer_text(CAPTURED_CODEX_PLACEHOLDER),
+        "› Ask Codex to do anything"
+    );
+    assert!(
+        CAPTURED_CODEX_PLACEHOLDER
+            .contains("\u{1b}[2m\u{1b}[48;2;53;53;53mAsk Codex to do anything")
+    );
+    assert!(placeholder.contains("Context 10% used"));
+    assert!(placeholder.contains("? for shortcuts"));
+    assert!(!draft.contains("? for shortcuts"));
+    assert_ne!(placeholder, draft);
+    assert_state("codex", CAPTURED_CODEX_PLACEHOLDER, "Idle");
+}
+
+#[test]
+fn captured_codex_identical_text_without_dim_is_a_user_draft() {
+    assert!(
+        CAPTURED_CODEX_DRAFT.contains("\u{1b}[0m\u{1b}[48;2;53;53;53m Ask Codex to do anything")
+    );
+    assert_state("codex", CAPTURED_CODEX_DRAFT, "Draft");
+}
+
+#[test]
+fn captured_codex_shortcuts_footer_is_optional_for_both_composer_roles() {
+    let shortcut = CAPTURED_CODEX_PLACEHOLDER
+        .lines()
+        .find(|line| strip_ansi(line).contains("? for shortcuts"))
+        .unwrap();
+    let without_shortcuts = CAPTURED_CODEX_PLACEHOLDER
+        .lines()
+        .filter(|line| !strip_ansi(line).contains("? for shortcuts"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let with_shortcuts = format!("{CAPTURED_CODEX_DRAFT}{shortcut}\n");
+    assert_state("codex", &without_shortcuts, "Idle");
+    assert_state("codex", &with_shortcuts, "Draft");
+}
+
+#[test]
+fn captured_codex_roles_follow_style_across_hint_and_context_changes() {
+    for (capture, expected) in [
+        (CAPTURED_CODEX_PLACEHOLDER, "Idle"),
+        (CAPTURED_CODEX_DRAFT, "Draft"),
+    ] {
+        for hint in [
+            "Review next week's invoices",
+            "! printf example",
+            "A previously unseen rotating hint",
+        ] {
+            for context in [0, 100] {
+                let content = capture
+                    .replace(CAPTURED_CODEX_HINT, hint)
+                    .replace("Context 10% used", &format!("Context {context}% used"));
+                assert_state("codex", &content, expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn captured_codex_work_and_approval_outrank_both_composer_roles() {
+    for capture in [CAPTURED_CODEX_PLACEHOLDER, CAPTURED_CODEX_DRAFT] {
+        let working = format!("• Working (8s • esc to interrupt)\n{capture}");
+        assert_state("codex", &working, "Working");
+        let approval = format!("› 1. Yes, proceed\n{working}");
+        assert_state("codex", &approval, "AwaitingUser");
+    }
+}
+
+#[test]
+fn captured_codex_unstyled_and_ambiguous_composer_roles_are_unknown() {
+    for capture in [CAPTURED_CODEX_PLACEHOLDER, CAPTURED_CODEX_DRAFT] {
+        assert_state("codex", &strip_ansi(capture), "Unknown");
+    }
+    for style in ["\u{1b}[31m", "\u{1b}[7m", "\u{1b}[999m"] {
+        let capture = CAPTURED_CODEX_PLACEHOLDER.replace(
+            "\u{1b}[2m\u{1b}[48;2;53;53;53mAsk Codex",
+            &format!("{style}\u{1b}[48;2;53;53;53mAsk Codex"),
+        );
+        assert_state("codex", &capture, "Unknown");
+    }
+}
+
+#[test]
+fn captured_codex_warning_footer_preserves_the_proven_placeholder_role() {
+    let capture = include_str!("fixtures/pane-readiness/codex-herdr-placeholder-warning.ansi");
+    let visible = strip_ansi(capture);
+    assert!(visible.contains("Context 47% used"));
+    assert!(visible.contains("? for shortcuts"));
+    assert!(visible.contains("1 warning"));
+    assert_state("codex", capture, "Idle");
 }
