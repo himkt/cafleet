@@ -224,6 +224,49 @@ fn composer_state(lines: &[&Line], marker: char, profile: ComposerProfile) -> Pa
     }
 }
 
+fn is_claude_upper_border(line: &str) -> bool {
+    if is_border(line) {
+        return true;
+    }
+    let Some((rule, title)) = line.trim().split_once(' ') else {
+        return false;
+    };
+    let Some(name) = title.strip_suffix(" ─") else {
+        return false;
+    };
+    !rule.is_empty() && rule.chars().all(|ch| ch == '─') && !name.trim().is_empty()
+}
+
+fn claude_state(lines: &[&Line]) -> PaneState {
+    let Some(last) = lines.last() else {
+        return PaneState::Unknown;
+    };
+    static STATUS: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r"^⏵⏵ don't ask on \(shift\+tab to cycle\) · ← for agents(?:\s+◐ \S+ · /effort)?$",
+        )
+        .expect("valid Claude status pattern")
+    });
+    let footer = last.text.trim();
+    if footer != "? for shortcuts" && !STATUS.is_match(footer) {
+        return PaneState::Unknown;
+    }
+    let Some(index) = lines
+        .iter()
+        .rposition(|line| line.text.trim_start().starts_with('❯'))
+    else {
+        return PaneState::Unknown;
+    };
+    if index == 0
+        || index + 2 != lines.len() - 1
+        || !is_claude_upper_border(&lines[index - 1].text)
+        || !is_border(&lines[index + 1].text)
+    {
+        return PaneState::Unknown;
+    }
+    composer_state(&[lines[index]], '❯', ComposerProfile::Standard)
+}
+
 fn opencode_state(lines: &[&Line]) -> PaneState {
     let (metadata, profile) = if lines
         .last()
@@ -302,26 +345,8 @@ pub fn classify(coding_agent: &str, content: &str) -> PaneState {
     {
         return PaneState::Working;
     }
-    let Some(last) = lines.last() else {
-        return PaneState::Unknown;
-    };
     match coding_agent {
-        "claude" if last.text.trim() == "? for shortcuts" => {
-            let Some(index) = lines
-                .iter()
-                .rposition(|line| line.text.trim_start().starts_with('❯'))
-            else {
-                return PaneState::Unknown;
-            };
-            if index == 0
-                || index + 2 != lines.len() - 1
-                || !is_border(&lines[index - 1].text)
-                || !is_border(&lines[index + 1].text)
-            {
-                return PaneState::Unknown;
-            }
-            composer_state(&[lines[index]], '❯', ComposerProfile::Standard)
-        }
+        "claude" => claude_state(&lines),
         "codex" => {
             let Some(index) = lines
                 .iter()
