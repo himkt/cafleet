@@ -396,31 +396,33 @@ fn prompt_invalid_lines_fail_before_pane_io() {
 }
 
 #[test]
-fn prompt_refuses_every_non_idle_state_without_typing() {
-    let fixture = InputFixture::new();
-    for (state, capture) in [
-        ("working", format!("✻ Working (esc to interrupt)\n{IDLE}")),
-        ("awaiting_user", format!(" ❯ 1. Yes, proceed\n{IDLE}")),
-        (
-            "draft",
-            IDLE.replace("❯ \x1b[0m", "❯ \x1b[0;37munsent user draft\x1b[0m"),
-        ),
-        ("unknown", "unrecognized truncated screen".into()),
-    ] {
-        fixture.cli.set_pane_capture(&fixture.pane, &capture);
-        let before = fixture.cli.shim_calls().len();
-        let output = fixture.run("prompt");
-        assert_eq!(code(&output), 1);
-        assert_eq!(stdout(&output), "");
-        assert!(
-            stderr(&output).contains(&format!(
-                "member {} is {state}; prompt was not dispatched.",
-                fixture.member
-            )),
-            "{}",
-            stderr(&output)
-        );
-        assert_no_input(&fixture.cli.shim_calls()[before..]);
+fn prompt_and_native_exec_refuse_every_non_idle_state_without_typing() {
+    for (action, label) in [("prompt", "prompt"), ("exec", "native command")] {
+        let fixture = InputFixture::new();
+        for (state, capture) in [
+            ("working", format!("✻ Working (esc to interrupt)\n{IDLE}")),
+            ("awaiting_user", format!(" ❯ 1. Yes, proceed\n{IDLE}")),
+            (
+                "draft",
+                IDLE.replace("❯ \x1b[0m", "❯ \x1b[0;37munsent user draft\x1b[0m"),
+            ),
+            ("unknown", "unrecognized truncated screen".into()),
+        ] {
+            fixture.cli.set_pane_capture(&fixture.pane, &capture);
+            let before = fixture.cli.shim_calls().len();
+            let output = fixture.run(action);
+            assert_eq!(code(&output), 1);
+            assert_eq!(stdout(&output), "");
+            assert!(
+                stderr(&output).contains(&format!(
+                    "member {} is {state}; {label} was not dispatched.",
+                    fixture.member
+                )),
+                "{}",
+                stderr(&output)
+            );
+            assert_no_input(&fixture.cli.shim_calls()[before..]);
+        }
     }
 }
 
@@ -795,27 +797,29 @@ fn a_preview_owner_holds_the_same_guard_through_literal_and_enter() {
 }
 
 #[test]
-fn prompt_capture_failure_is_not_dispatched_and_releases_the_guard() {
-    let mut fixture = InputFixture::new();
-    fixture.cli.set_env("CAFLEET_TEST_FAIL_STAGE", "capture");
-    let output = fixture.run("prompt");
-    assert_eq!(code(&output), 1);
-    assert_eq!(stdout(&output), "");
-    let error = stderr(&output);
-    assert!(
-        error.contains(&format!(
-            "prompt was not dispatched to member {}:",
-            fixture.member
-        )),
-        "{error}"
-    );
-    assert!(
-        error.contains("injected capture transport failure"),
-        "{error}"
-    );
-    assert_no_input(&fixture.cli.shim_calls());
-    fixture.cli.extra_env.clear();
-    json(&fixture.run("prompt"));
+fn prompt_and_native_exec_capture_failures_preserve_the_cause_and_release_the_guard() {
+    for (action, label) in [("prompt", "prompt"), ("exec", "native command")] {
+        let mut fixture = InputFixture::new();
+        fixture.cli.set_env("CAFLEET_TEST_FAIL_STAGE", "capture");
+        let output = fixture.run(action);
+        assert_eq!(code(&output), 1);
+        assert_eq!(stdout(&output), "");
+        let error = stderr(&output);
+        assert!(
+            error.contains(&format!(
+                "{label} was not dispatched to member {}:",
+                fixture.member
+            )),
+            "{error}"
+        );
+        assert!(
+            error.contains("injected capture transport failure"),
+            "{error}"
+        );
+        assert_no_input(&fixture.cli.shim_calls());
+        fixture.cli.extra_env.clear();
+        json(&fixture.run(action));
+    }
 }
 
 #[test]

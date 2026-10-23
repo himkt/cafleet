@@ -165,6 +165,10 @@ impl Cli {
     }
 
     pub fn run_with_stdin(&self, args: &[&str], stdin: &str) -> Output {
+        self.run_with_stdin_bytes(args, stdin.as_bytes())
+    }
+
+    pub fn run_with_stdin_bytes(&self, args: &[&str], stdin: &[u8]) -> Output {
         use std::io::Write;
         let mut child = self
             .command(args, true)
@@ -173,12 +177,7 @@ impl Cli {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(stdin.as_bytes())
-            .unwrap();
+        child.stdin.take().unwrap().write_all(stdin).unwrap();
         child.wait_with_output().unwrap()
     }
 
