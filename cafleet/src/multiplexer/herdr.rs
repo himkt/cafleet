@@ -655,7 +655,9 @@ mod tests {
         let options = &calls[0][4..];
         assert_eq!(options.len(), 6);
         let options: std::collections::BTreeMap<_, _> = options
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| (pair[0].as_str(), pair[1].as_str()))
             .collect();
         assert_eq!(
