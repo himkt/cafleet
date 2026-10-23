@@ -1480,6 +1480,41 @@ mod structural_contracts {
     }
 
     #[test]
+    fn database_diagnosis_documents_identity_and_shape_before_versions_and_assets() {
+        for path in ["docs/docs/spec/cli-options.md", "SPEC.md"] {
+            let document = INVENTORY.document(path);
+            let database = document.section("database-section").unwrap();
+            database
+                .require(&[
+                    "application_id=0",
+                    "1128351288",
+                    "asset_installs",
+                    "database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.",
+                ])
+                .unwrap();
+            database.require_pattern(
+                "identity and required shapes precede ledger comparison",
+                r"(?is)application identity.{0,60}1128351288.{0,140}required table/column.{0,120}before comparing the ledger version",
+            );
+            database.require_pattern(
+                "a matching ledger does not replace format validation",
+                r"(?is)missing required table.{0,260}incompatible.{0,100}ledger version equals\s+head",
+            );
+            database.require_pattern(
+                "a missing install table has the format diagnosis",
+                r"(?is)dropped.{0,30}asset_installs.{0,70}incompatible-format diagnosis before any install-row lookup",
+            );
+            document
+                .section("stale-assets-guard")
+                .unwrap()
+                .require_pattern(
+                    "missing install rows belong to a compatible current database",
+                    r"(?is)No agent has a row.{0,120}compatible at-head database",
+                );
+        }
+    }
+
+    #[test]
     fn native_exec_contract_exposes_submission_and_uncertainty() {
         for path in ["docs/docs/spec/cli-options.md", "SPEC.md"] {
             let exec = INVENTORY.document(path).section("member-exec").unwrap();

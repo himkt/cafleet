@@ -134,6 +134,74 @@ fn assert_killed_once(cli: &Cli, pane: &str) {
     assert_no_exit_commands(cli);
 }
 
+#[test]
+fn member_delete_finalizes_registry_when_optional_herdr_layout_times_out() {
+    let _test_resource = common::process_test_resource_guard();
+    let cli = herdr_fixture(true);
+    let member = cli.seed_member(1, "worker");
+    cli.sqlite()
+        .execute(
+            "UPDATE member_placements SET backend='herdr',mux_session='w1',mux_window_id='w1:t1',mux_pane_id='w1:p9' WHERE member_id=?1",
+            [member],
+        )
+        .unwrap();
+    write_shim(
+        &cli,
+        "herdr",
+        r#"#!/bin/sh
+printf '%s\n' "$*" >> "$CAFLEET_TEST_TMUX_LOG"
+case "$1 $2" in
+  'pane get') printf '%s\n' '{"result":{"pane":{"pane_id":"w1:p9","tab_id":"w1:t1"}}}' ;;
+  'pane close') printf 'closed\n' > "$HOME/closed-pane" ;;
+  'pane list')
+    [ -e "$HOME/closed-pane" ] || exit 91
+    printf 'started\n' > "$HOME/layout-started"
+    exec /bin/sleep 8 ;;
+  *) exit 92 ;;
+esac
+"#,
+    );
+    let started = std::time::Instant::now();
+    let output = cli.run(&["member", "delete", &member.to_string(), "--json"]);
+    let elapsed = started.elapsed();
+    assert_killed_once(&cli, "w1:p9");
+    assert!(cli.home.path().join("closed-pane").exists());
+    assert!(cli.home.path().join("layout-started").exists());
+    assert!(
+        elapsed < std::time::Duration::from_millis(6500),
+        "{elapsed:?}"
+    );
+    let conn = cli.sqlite();
+    let (status, deregistered_at): (String, Option<String>) = conn
+        .query_row(
+            "SELECT status,deregistered_at FROM members WHERE member_id=?1",
+            [member],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        status,
+        "deregistered",
+        "the pane closed successfully; stdout={}, stderr={}",
+        common::stdout(&output),
+        stderr(&output)
+    );
+    assert!(deregistered_at.is_some());
+    let placements: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM member_placements WHERE member_id=?1",
+            [member],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(placements, 0);
+    assert_eq!(count(&cli, "compensation_events"), 1);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["member_id"], member);
+    assert_eq!(result["pane_status"], "w1:p9 (killed)");
+}
+
 fn assert_member_compensated(cli: &Cli) {
     let conn = cli.sqlite();
     let status: String = conn

@@ -721,6 +721,191 @@ mod tests {
     use super::MemberCommand;
     use clap::Parser;
 
+    struct DeleteKillRelease(std::path::PathBuf);
+
+    impl Drop for DeleteKillRelease {
+        fn drop(&mut self) {
+            std::fs::write(&self.0, b"release").unwrap();
+        }
+    }
+
+    fn pending_delete_in_private_process(home: &std::path::Path) {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization, TransactionOperation};
+        use std::sync::mpsc;
+        use std::time::{Duration, Instant};
+
+        let database_url = format!("sqlite:///{}", home.join("broker_test.db").display());
+        let mut deletion = crate::db::connect(&database_url).unwrap();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let mut gated = false;
+        deletion
+            .authorizer(Some(move |context: AuthContext<'_>| {
+                if !gated
+                    && matches!(
+                        context.action,
+                        AuthAction::Transaction {
+                            operation: TransactionOperation::Begin
+                        }
+                    )
+                {
+                    gated = true;
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+                }
+                Authorization::Allow
+            }))
+            .unwrap();
+        let settings = crate::config::Settings {
+            database_url: database_url.clone(),
+            max_text_len: 200,
+            multiplexer: Some("tmux".into()),
+        };
+        let _kill_release = DeleteKillRelease(home.join("release-kill"));
+        let deleting = std::thread::spawn(move || {
+            super::delete(
+                &mut deletion,
+                &settings,
+                2,
+                true,
+                crate::input::Deadline::new(),
+            )
+        });
+        entered_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("deletion reaches its first registry transaction");
+        let mut creation = crate::db::connect(&database_url).unwrap();
+        let patched = crate::broker::update_placement_pane_id(&mut creation, 2, "%9")
+            .unwrap()
+            .expect("creation patches the pending placement before deletion mutates it");
+        assert_eq!(patched.mux_pane_id.as_deref(), Some("%9"));
+        release_tx.send(()).unwrap();
+
+        let entered = home.join("kill-entered");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !entered.exists() && !deleting.is_finished() {
+            assert!(
+                Instant::now() < deadline,
+                "deletion reaches concrete pane close"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            entered.exists(),
+            "deletion must close the pane published after its pending snapshot"
+        );
+        assert!(
+            crate::input::PaneLock::try_acquire(&database_url, &patched)
+                .unwrap()
+                .is_none(),
+            "the concrete pane close retains exclusive input ownership"
+        );
+        std::fs::write(home.join("release-kill"), b"release").unwrap();
+        deleting.join().unwrap().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(home.join("mux-calls")).unwrap(),
+            "kill-pane -t %9\n"
+        );
+        let (status, deregistered_at): (String, Option<String>) = creation
+            .query_row(
+                "SELECT status,deregistered_at FROM members WHERE member_id=2",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "deregistered");
+        assert!(deregistered_at.is_some());
+        let placements: i64 = creation
+            .query_row(
+                "SELECT count(*) FROM member_placements WHERE member_id=2",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(placements, 0);
+        let director_status: String = creation
+            .query_row("SELECT status FROM members WHERE member_id=1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(director_status, "active");
+    }
+
+    #[test]
+    fn member_delete_revalidates_a_pending_placement_before_registry_mutation() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::process::{Command, Stdio};
+        use std::time::{Duration, Instant};
+
+        if let Some(home) = std::env::var_os("CAFLEET_TEST_PENDING_DELETE_UNIT_HOME") {
+            pending_delete_in_private_process(std::path::Path::new(&home));
+            return;
+        }
+        let home = tempfile::TempDir::new().unwrap();
+        let mut conn = crate::broker::test_support::migrated_conn(&home);
+        let (fleet, _) = crate::broker::test_support::create_fleet(&mut conn, "pending-delete");
+        let member = crate::broker::test_support::register(&mut conn, fleet, "worker", None);
+        assert_eq!(member, 2);
+        drop(conn);
+        let bin = home.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let tmux = bin.join("tmux");
+        std::fs::write(
+            &tmux,
+            r#"#!/bin/sh
+[ "$*" = 'kill-pane -t %9' ] || exit 91
+printf '%s\n' "$*" >> "$HOME/mux-calls"
+printf 'entered\n' > "$HOME/kill-entered"
+loops=0
+while [ ! -e "$HOME/release-kill" ] && [ "$loops" -lt 600 ]; do
+    /bin/sleep 0.01
+    loops=$((loops + 1))
+done
+[ -e "$HOME/release-kill" ] || exit 92
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&tmux, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "cli::member::tests::member_delete_revalidates_a_pending_placement_before_registry_mutation",
+                "--nocapture",
+            ])
+            .env_clear()
+            .env("HOME", home.path())
+            .env("PATH", &bin)
+            .env("TMUX", "/tmp/cafleet-test,1,0")
+            .env("TMUX_PANE", "%0")
+            .env("CAFLEET_TEST_PENDING_DELETE_UNIT_HOME", home.path())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(9);
+        loop {
+            if child.try_wait().unwrap().is_some() {
+                let output = child.wait_with_output().unwrap();
+                assert!(
+                    output.status.success(),
+                    "private deletion regression: stdout={}, stderr={}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                break;
+            }
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                let output = child.wait_with_output().unwrap();
+                panic!(
+                    "private deletion regression exceeded cleanup bound: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     #[derive(Parser)]
     struct Harness {
         #[command(subcommand)]
