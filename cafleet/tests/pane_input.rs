@@ -1250,6 +1250,75 @@ fn preview_ownership_extends_through_a_blocked_notification_stamp() {
 }
 
 #[test]
+fn preview_prewrite_database_revalidation_obeys_the_remaining_attempt_budget() {
+    let mut fixture = InputFixture::new();
+    fixture.cli.set_env("CAFLEET_TEST_CAPTURE_DELAY", "2");
+    let start = Instant::now();
+    let owner = fixture.gate("preview", "capture");
+    let writer = fixture.cli.sqlite();
+    let journal: String = writer
+        .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(journal, "delete");
+    let committed: (i64, String, String, Option<String>) = writer
+        .query_row(
+            "SELECT message_id,text,status_state,notified_at FROM messages",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(committed.1, "preview body");
+    assert_eq!(committed.2, "input_required");
+    assert_eq!(committed.3, None);
+    writer.execute_batch("BEGIN EXCLUSIVE").unwrap();
+    let output = owner.release();
+    let elapsed = start.elapsed();
+    let payload = json(&output);
+    assert_eq!(payload["message"]["message_id"], committed.0);
+    assert_eq!(payload["message"]["text"], committed.1);
+    assert_eq!(payload["notification_sent"], false);
+    let error = stderr(&output);
+    assert!(
+        error.contains(&format!("Message {} was persisted.", committed.0)),
+        "{error}"
+    );
+    assert!(error.contains("database is locked"), "{error}");
+    assert!(!error.contains("uncertain"), "{error}");
+    let retained: (String, String, Option<String>) = writer
+        .query_row(
+            "SELECT text,status_state,notified_at FROM messages WHERE message_id=?1",
+            [committed.0],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(retained, (committed.1, committed.2, None));
+    assert_eq!(
+        writer
+            .query_row("SELECT count(*) FROM messages", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    drop(writer);
+    let calls = fixture.cli.shim_calls();
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|line| line.starts_with("capture-pane"))
+            .count(),
+        1
+    );
+    assert_no_input(&calls);
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(fixture.lock_path())
+        .unwrap();
+    lock.try_lock().unwrap();
+    assert!(elapsed < Duration::from_millis(6500), "{elapsed:?}");
+}
+
+#[test]
 fn notification_database_wait_obeys_the_remaining_attempt_budget() {
     let mut fixture = InputFixture::new();
     fixture.cli.set_env("CAFLEET_TEST_CAPTURE_DELAY", "2");
