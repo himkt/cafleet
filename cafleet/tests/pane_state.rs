@@ -1,5 +1,5 @@
 use cafleet::output::strip_ansi;
-use cafleet::pane_state::classify;
+use cafleet::pane_state::{PaneState, classify};
 
 struct ComposerFixture {
     agent: &'static str,
@@ -37,6 +37,24 @@ const CAPTURED_CODEX_HINT: &str = "Ask Codex to do anything";
 const CAPTURED_CODEX_PLACEHOLDER: &str =
     include_str!("fixtures/pane-readiness/codex-herdr-placeholder.ansi");
 const CAPTURED_CODEX_DRAFT: &str = include_str!("fixtures/pane-readiness/codex-herdr-draft.ansi");
+
+const CAPTURED_OPENCODE_HINT: &str = "Ask anything… \"Fix broken tests\"";
+const CAPTURED_OPENCODE_PLACEHOLDER: &str =
+    include_str!("fixtures/pane-readiness/opencode-herdr-placeholder.ansi");
+const CAPTURED_OPENCODE_DRAFT: &str =
+    include_str!("fixtures/pane-readiness/opencode-herdr-draft.ansi");
+const CAPTURED_OPENCODE_HINT_STYLE: &str = "\x1b[38;2;128;128;128m\x1b[48;2;30;30;30m";
+const CAPTURED_OPENCODE_INPUT_STYLE: &str = "\x1b[38;2;238;238;238m\x1b[48;2;30;30;30m";
+
+fn captured_opencode_composer_text(capture: &str) -> String {
+    strip_ansi(capture)
+        .lines()
+        .filter(|line| line.trim_start().starts_with('┃'))
+        .nth(1)
+        .expect("captured OpenCode fixture has its input row after the empty top row")
+        .trim()
+        .to_string()
+}
 
 fn captured_codex_composer_text(capture: &str) -> String {
     strip_ansi(capture)
@@ -195,6 +213,165 @@ fn an_unknown_backend_has_unknown_readiness() {
         for backend in ["", "unrecognized-agent"] {
             assert_state(backend, fixture.placeholder, "Unknown");
         }
+    }
+}
+
+#[test]
+fn captured_opencode_placeholder_is_idle_with_the_real_cafleet_and_trailing_footer_layout() {
+    let placeholder = strip_ansi(CAPTURED_OPENCODE_PLACEHOLDER);
+    assert_eq!(placeholder, strip_ansi(CAPTURED_OPENCODE_DRAFT));
+    assert_eq!(
+        captured_opencode_composer_text(CAPTURED_OPENCODE_PLACEHOLDER),
+        format!("┃  {CAPTURED_OPENCODE_HINT}")
+    );
+    for content in [
+        "Cafleet · Big Pickle OpenCode",
+        "tab agents  ctrl+p commands",
+        "Run /connect to add an AI provider and start coding",
+        "workspace:feat/0000184-goal-native-",
+        "1.19.1",
+    ] {
+        assert!(
+            placeholder.contains(content),
+            "missing captured layout: {content}"
+        );
+    }
+    assert_eq!(
+        placeholder
+            .lines()
+            .rfind(|line| !line.trim().is_empty())
+            .unwrap()
+            .trim(),
+        "agent-multiplexer"
+    );
+    let hint = format!("{CAPTURED_OPENCODE_HINT_STYLE}{CAPTURED_OPENCODE_HINT}");
+    let input = format!("{CAPTURED_OPENCODE_INPUT_STYLE}{CAPTURED_OPENCODE_HINT}");
+    assert_eq!(CAPTURED_OPENCODE_PLACEHOLDER.matches(&hint).count(), 1);
+    assert_eq!(
+        CAPTURED_OPENCODE_PLACEHOLDER.replacen(&hint, &input, 1),
+        CAPTURED_OPENCODE_DRAFT
+    );
+    assert_eq!(
+        classify("opencode", CAPTURED_OPENCODE_PLACEHOLDER),
+        PaneState::Idle
+    );
+}
+
+#[test]
+fn captured_opencode_identical_text_in_the_actual_input_role_is_a_draft() {
+    assert_eq!(
+        captured_opencode_composer_text(CAPTURED_OPENCODE_DRAFT),
+        format!("┃  {CAPTURED_OPENCODE_HINT}")
+    );
+    assert!(CAPTURED_OPENCODE_DRAFT.contains(&format!(
+        "{CAPTURED_OPENCODE_INPUT_STYLE}{CAPTURED_OPENCODE_HINT}"
+    )));
+    assert_eq!(
+        classify("opencode", CAPTURED_OPENCODE_DRAFT),
+        PaneState::Draft
+    );
+}
+
+#[test]
+fn captured_opencode_derived_hints_and_agent_footer_values_preserve_their_input_roles() {
+    for (capture, expected) in [
+        (CAPTURED_OPENCODE_PLACEHOLDER, PaneState::Idle),
+        (CAPTURED_OPENCODE_DRAFT, PaneState::Draft),
+    ] {
+        assert_eq!(capture.matches(CAPTURED_OPENCODE_HINT).count(), 1);
+        for hint in [
+            "Review a new task",
+            "! printf example",
+            "/help",
+            "An unseen rotating suggestion",
+        ] {
+            for alternate_metadata in [false, true] {
+                let mut content = capture.replace(CAPTURED_OPENCODE_HINT, hint);
+                if alternate_metadata {
+                    content = content
+                        .replace("Cafleet", "Planner")
+                        .replace("agent-multiplexer", "fixture-workspace");
+                }
+                assert_eq!(
+                    classify("opencode", &content),
+                    expected,
+                    "derived hint {hint:?}, alternate metadata {alternate_metadata}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn captured_opencode_derived_adapter_window_keeps_the_composer_and_complete_trailing_layout() {
+    for (capture, expected) in [
+        (CAPTURED_OPENCODE_PLACEHOLDER, PaneState::Idle),
+        (CAPTURED_OPENCODE_DRAFT, PaneState::Draft),
+    ] {
+        let lines: Vec<_> = capture.lines().collect();
+        let window = lines[lines.len() - 80..].join("\n");
+        let visible = strip_ansi(&window);
+        assert!(visible.contains(CAPTURED_OPENCODE_HINT));
+        assert!(visible.contains("Cafleet · Big Pickle OpenCode"));
+        assert!(visible.contains("agent-multiplexer"));
+        assert_eq!(classify("opencode", &window), expected);
+    }
+}
+
+#[test]
+fn captured_opencode_derived_ambiguous_composer_styles_remain_unknown() {
+    let hint = format!("{CAPTURED_OPENCODE_HINT_STYLE}{CAPTURED_OPENCODE_HINT}");
+    for foreground in [
+        "\x1b[38;2;0;0;2m",
+        "\x1b[38;2;0;2;0m",
+        "\x1b[38;2;2;0;0m",
+        "\x1b[38;2;2;2;2m",
+        "\x1b[38;2;255;0;0m",
+        "\x1b[7;38;2;128;128;128m",
+        "\x1b[999;38;2;128;128;128m",
+    ] {
+        let replacement = format!("{foreground}\x1b[48;2;30;30;30m{CAPTURED_OPENCODE_HINT}");
+        let content = CAPTURED_OPENCODE_PLACEHOLDER.replacen(&hint, &replacement, 1);
+        assert_eq!(
+            classify("opencode", &content),
+            PaneState::Unknown,
+            "derived foreground {foreground:?}"
+        );
+    }
+}
+
+#[test]
+fn captured_opencode_derived_unstyled_truncated_and_footer_only_frames_remain_unknown() {
+    let lines: Vec<_> = CAPTURED_OPENCODE_PLACEHOLDER.lines().collect();
+    for content in [
+        strip_ansi(CAPTURED_OPENCODE_PLACEHOLDER),
+        lines[..42].join("\n"),
+        lines[lines.len() - 10..].join("\n"),
+    ] {
+        assert_eq!(classify("opencode", &content), PaneState::Unknown);
+    }
+}
+
+#[test]
+fn captured_opencode_derived_work_and_approval_evidence_outrank_both_input_roles() {
+    let fixture = COMPOSERS
+        .iter()
+        .find(|fixture| fixture.agent == "opencode")
+        .unwrap();
+    for capture in [CAPTURED_OPENCODE_PLACEHOLDER, CAPTURED_OPENCODE_DRAFT] {
+        let working = format!("{capture}\n{}", fixture.working);
+        assert_eq!(classify("opencode", &working), PaneState::Working);
+        let approval = format!("{working}\n{}", fixture.approval);
+        assert_eq!(classify("opencode", &approval), PaneState::AwaitingUser);
+    }
+}
+
+#[test]
+fn captured_opencode_derived_historical_quotes_remain_unknown() {
+    for capture in [CAPTURED_OPENCODE_PLACEHOLDER, CAPTURED_OPENCODE_DRAFT] {
+        let transcript =
+            format!("Archived terminal output:\n```text\n{capture}\n```\nMore output follows.");
+        assert_eq!(classify("opencode", &transcript), PaneState::Unknown);
     }
 }
 
