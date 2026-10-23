@@ -29,10 +29,16 @@ enum Foreground {
     Rgb([u16; 3]),
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Background {
+    Indexed(u16),
+    Rgb([u16; 3]),
+}
+
 #[derive(Clone, Copy, Default)]
 struct Style {
     foreground: Option<Foreground>,
-    background: Option<[u16; 3]>,
+    background: Option<Background>,
     dim: bool,
     ambiguous: bool,
     explicit: bool,
@@ -58,7 +64,7 @@ impl Style {
             Role::Unknown
         } else if let Some(Foreground::Rgb(rgb)) = self.foreground {
             if profile == ComposerProfile::OpenCodeRgb
-                && self.background == Some([30, 30, 30])
+                && self.background == Some(Background::Rgb([30, 30, 30]))
                 && !self.dim
             {
                 match rgb {
@@ -73,7 +79,7 @@ impl Style {
             && (matches!(self.foreground, Some(Foreground::Indexed(240..=248)))
                 || (profile == ComposerProfile::Codex
                     && self.foreground.is_none()
-                    && self.background == Some([53, 53, 53])))
+                    && self.background == Some(Background::Rgb([53, 53, 53]))))
         {
             Role::Decoration
         } else if self.explicit
@@ -120,8 +126,12 @@ impl Style {
                 39 => self.foreground = None,
                 38 | 48 => match &codes[i + 1..] {
                     [5, index, ..] => {
-                        if codes[i] == 38 && *index <= 255 {
-                            self.foreground = Some(Foreground::Indexed(*index));
+                        if *index <= 255 {
+                            if codes[i] == 38 {
+                                self.foreground = Some(Foreground::Indexed(*index));
+                            } else {
+                                self.background = Some(Background::Indexed(*index));
+                            }
                         } else {
                             self.ambiguous = true;
                         }
@@ -133,7 +143,7 @@ impl Style {
                             if codes[i] == 38 {
                                 self.foreground = Some(Foreground::Rgb(rgb));
                             } else {
-                                self.background = Some(rgb);
+                                self.background = Some(Background::Rgb(rgb));
                             }
                         } else {
                             self.ambiguous = true;
