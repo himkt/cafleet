@@ -48,6 +48,12 @@ const CAPTURED_CLAUDE_EMPTY: &[(&str, &str)] = &[
     ),
 ];
 
+const CAPTURED_CLAUDE_HERDR_DRAFT: &str =
+    include_str!("fixtures/pane-readiness/claude-herdr-draft.ansi");
+const CAPTURED_CLAUDE_TMUX_EMPTY_AGENTS: &str =
+    include_str!("fixtures/pane-readiness/claude-tmux-empty-agents.ansi");
+const CAPTURED_CLAUDE_DRAFT_TEXT: &str = "cafleet verification draft 34";
+
 const CAPTURED_CODEX_HINT: &str = "Ask Codex to do anything";
 const CAPTURED_CODEX_PLACEHOLDER: &str =
     include_str!("fixtures/pane-readiness/codex-herdr-placeholder.ansi");
@@ -347,6 +353,170 @@ fn captured_claude_derived_work_and_approval_outrank_both_actual_empty_composers
         .find(|fixture| fixture.agent == "claude")
         .unwrap();
     for &(capture, _) in CAPTURED_CLAUDE_EMPTY {
+        let working = format!("{capture}\n{}", fixture.working);
+        assert_eq!(classify("claude", &working), PaneState::Working);
+        let approval = format!("{working}\n{}", fixture.approval);
+        assert_eq!(classify("claude", &approval), PaneState::AwaitingUser);
+    }
+}
+
+#[test]
+fn captured_claude_herdr_actual_typed_input_is_a_draft_with_the_observed_shorter_footer() {
+    let before: Vec<_> = CAPTURED_CLAUDE_HERDR_EMPTY
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    let after: Vec<_> = CAPTURED_CLAUDE_HERDR_DRAFT
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    let composer = captured_claude_composer_index(&after);
+    assert_eq!(captured_claude_composer_index(&before), composer);
+    assert_eq!(before.len(), after.len());
+    assert_eq!(before[..composer], after[..composer]);
+    assert_eq!(before[composer + 1], after[composer + 1]);
+    assert_eq!(strip_ansi(&before[composer]).trim(), "❯");
+    assert_eq!(
+        strip_ansi(&after[composer]).trim(),
+        format!("❯\u{a0}{CAPTURED_CLAUDE_DRAFT_TEXT}")
+    );
+    assert_eq!(
+        CAPTURED_CLAUDE_HERDR_DRAFT
+            .matches(CAPTURED_CLAUDE_DRAFT_TEXT)
+            .count(),
+        1
+    );
+    assert_eq!(
+        after[composer],
+        format!("❯\u{a0}{CAPTURED_CLAUDE_DRAFT_TEXT}\x1b[0m\x1b[7m \x1b[0m")
+    );
+    assert!(strip_ansi(&before[composer + 2]).contains("← for agents"));
+    assert_eq!(
+        strip_ansi(&after[composer + 2]).trim(),
+        "⏵⏵ don't ask on (shift+tab to cycle)"
+    );
+    assert_ne!(
+        strip_ansi(CAPTURED_CLAUDE_HERDR_EMPTY),
+        strip_ansi(CAPTURED_CLAUDE_HERDR_DRAFT)
+    );
+    assert_eq!(
+        classify("claude", CAPTURED_CLAUDE_HERDR_DRAFT),
+        PaneState::Draft
+    );
+}
+
+#[test]
+fn captured_claude_tmux_actual_empty_agents_footer_is_idle_without_effort_metadata() {
+    let visible = strip_ansi(CAPTURED_CLAUDE_TMUX_EMPTY_AGENTS);
+    let lines: Vec<_> = visible.lines().map(str::to_owned).collect();
+    let composer = captured_claude_composer_index(&lines);
+    assert_eq!(lines[composer].trim(), "❯");
+    assert!(lines[composer - 1].ends_with("cafleet-evidence-claude-tmux-1105Z ─"));
+    assert_eq!(
+        lines[composer + 2].trim(),
+        "⏵⏵ don't ask on (shift+tab to cycle) · ← for agents"
+    );
+    assert!(visible.contains("1 more notice hidden"));
+    assert!(!visible.contains("/effort"));
+    assert!(strip_ansi(CAPTURED_CLAUDE_TMUX_EMPTY).contains("◐ medium · /effort"));
+    assert_eq!(
+        classify("claude", CAPTURED_CLAUDE_TMUX_EMPTY_AGENTS),
+        PaneState::Idle
+    );
+}
+
+#[test]
+fn captured_claude_derived_empty_permission_footer_without_agents_remains_idle() {
+    assert_eq!(
+        CAPTURED_CLAUDE_HERDR_DRAFT
+            .matches(CAPTURED_CLAUDE_DRAFT_TEXT)
+            .count(),
+        1
+    );
+    let content = CAPTURED_CLAUDE_HERDR_DRAFT.replacen(CAPTURED_CLAUDE_DRAFT_TEXT, "", 1);
+    let visible = strip_ansi(&content);
+    let lines: Vec<_> = visible.lines().map(str::to_owned).collect();
+    let composer = captured_claude_composer_index(&lines);
+    assert_eq!(lines[composer].trim(), "❯");
+    assert_eq!(
+        lines[composer + 2].trim(),
+        "⏵⏵ don't ask on (shift+tab to cycle)"
+    );
+    assert_eq!(classify("claude", &content), PaneState::Idle);
+}
+
+#[test]
+fn captured_claude_derived_actual_draft_role_follows_input_style_across_text_changes() {
+    assert_eq!(
+        CAPTURED_CLAUDE_HERDR_DRAFT
+            .matches(CAPTURED_CLAUDE_DRAFT_TEXT)
+            .count(),
+        1
+    );
+    for text in [
+        "Ask Claude to do anything",
+        "! printf example",
+        "/help",
+        "An unseen suggestion",
+    ] {
+        let content = CAPTURED_CLAUDE_HERDR_DRAFT.replacen(CAPTURED_CLAUDE_DRAFT_TEXT, text, 1);
+        assert_eq!(
+            classify("claude", &content),
+            PaneState::Draft,
+            "derived text {text:?}"
+        );
+    }
+}
+
+#[test]
+fn captured_claude_derived_optional_footers_keep_ambiguous_input_and_incomplete_blocks_unknown() {
+    let lines: Vec<_> = CAPTURED_CLAUDE_HERDR_DRAFT
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    let composer = captured_claude_composer_index(&lines);
+    let mut no_upper = lines.clone();
+    no_upper.remove(composer - 1);
+    let mut no_lower = lines.clone();
+    no_lower.remove(composer + 1);
+    let mut unknown_footer = lines.clone();
+    unknown_footer[composer + 2] = "unrecognized session status".to_string();
+    for foreground in [
+        "\x1b[38;2;255;0;0m",
+        "\x1b[38;2;0;0;2m",
+        "\x1b[7m",
+        "\x1b[999m",
+    ] {
+        let content = CAPTURED_CLAUDE_HERDR_DRAFT.replacen(
+            CAPTURED_CLAUDE_DRAFT_TEXT,
+            &format!("{foreground}{CAPTURED_CLAUDE_DRAFT_TEXT}"),
+            1,
+        );
+        assert_eq!(classify("claude", &content), PaneState::Unknown);
+    }
+    for content in [
+        no_upper.join("\n"),
+        no_lower.join("\n"),
+        unknown_footer.join("\n"),
+        strip_ansi(CAPTURED_CLAUDE_HERDR_DRAFT),
+        format!(
+            "Archived terminal output:\n```text\n{CAPTURED_CLAUDE_HERDR_DRAFT}\n```\nMore output follows."
+        ),
+    ] {
+        assert_eq!(classify("claude", &content), PaneState::Unknown);
+    }
+}
+
+#[test]
+fn captured_claude_derived_work_and_approval_outrank_the_actual_draft_and_current_empty_frame() {
+    let fixture = COMPOSERS
+        .iter()
+        .find(|fixture| fixture.agent == "claude")
+        .unwrap();
+    for capture in [
+        CAPTURED_CLAUDE_HERDR_DRAFT,
+        CAPTURED_CLAUDE_TMUX_EMPTY_AGENTS,
+    ] {
         let working = format!("{capture}\n{}", fixture.working);
         assert_eq!(classify("claude", &working), PaneState::Working);
         let approval = format!("{working}\n{}", fixture.approval);
