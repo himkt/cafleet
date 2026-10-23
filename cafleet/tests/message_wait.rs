@@ -10,6 +10,7 @@ use receive::{Fixture, WORKING, assert_keys, assert_no_input, assert_result, jso
 
 #[test]
 fn wait_help_declares_the_background_receive_default() {
+    let _test_resource = common::process_test_resource_guard();
     let cli = Cli::new();
     let output = cli.run(&["message", "wait", "--help"]);
     assert_eq!(code(&output), 0, "{}", stderr(&output));
@@ -27,6 +28,7 @@ fn wait_help_declares_the_background_receive_default() {
 
 #[test]
 fn wait_rejects_timeout_values_outside_the_integer_range_before_io() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     for timeout in ["0", "-1", "1801", "1.5", "abc", "18446744073709551616"] {
         let timeout_arg = format!("--timeout={timeout}");
@@ -48,6 +50,7 @@ fn wait_rejects_timeout_values_outside_the_integer_range_before_io() {
 
 #[test]
 fn existing_inbox_returns_full_ordered_poll_records_for_default_and_range_endpoints() {
+    let _test_resource = common::process_test_resource_guard();
     for timeout in [None, Some("1"), Some("1800")] {
         let fixture = Fixture::new();
         let worker = fixture.worker("worker");
@@ -99,6 +102,7 @@ fn existing_inbox_returns_full_ordered_poll_records_for_default_and_range_endpoi
 
 #[test]
 fn equal_status_timestamps_keep_descending_message_id_order() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     let first = fixture.reply(&worker, "first");
@@ -115,6 +119,7 @@ fn equal_status_timestamps_keep_descending_message_id_order() {
 
 #[test]
 fn timeout_json_is_one_ordered_object_and_starts_no_synthetic_input() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let before = fixture.records();
     let run = fixture.spawn(fixture.director, 1);
@@ -132,6 +137,7 @@ fn timeout_json_is_one_ordered_object_and_starts_no_synthetic_input() {
 
 #[test]
 fn wait_text_preserves_timeout_and_full_message_lifecycle_output() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let subject = fixture.director.to_string();
     let timeout = fixture
@@ -164,6 +170,7 @@ fn wait_text_preserves_timeout_and_full_message_lifecycle_output() {
 
 #[test]
 fn incoming_messages_are_available_without_a_multiplexer() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     let id = fixture.reply(&worker, "broker-only reply");
@@ -182,6 +189,7 @@ fn incoming_messages_are_available_without_a_multiplexer() {
 
 #[test]
 fn repeated_reads_keep_unacknowledged_messages_and_do_not_ack_implicitly() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     fixture.reply(&worker, "question requiring a later action");
@@ -195,6 +203,7 @@ fn repeated_reads_keep_unacknowledged_messages_and_do_not_ack_implicitly() {
 
 #[test]
 fn arrival_during_a_finite_receive_returns_the_new_unacknowledged_reply() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     fixture.view(&worker, WORKING);
@@ -214,6 +223,7 @@ fn arrival_during_a_finite_receive_returns_the_new_unacknowledged_reply() {
 
 #[test]
 fn ack_on_read_allows_a_deferred_question_and_a_later_reply() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     fixture.view(&worker, WORKING);
@@ -241,6 +251,7 @@ fn ack_on_read_allows_a_deferred_question_and_a_later_reply() {
 
 #[test]
 fn unknown_and_deregistered_subjects_fail_before_retrying() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("deregistered");
     fixture
@@ -269,6 +280,7 @@ fn unknown_and_deregistered_subjects_fail_before_retrying() {
 
 #[test]
 fn a_subject_or_fleet_invalidated_during_receive_exits_with_its_cause() {
+    let _test_resource = common::process_test_resource_guard();
     for invalidation in ["subject", "fleet"] {
         let fixture = Fixture::new();
         let worker = fixture.worker("worker");
@@ -315,6 +327,7 @@ fn a_subject_or_fleet_invalidated_during_receive_exits_with_its_cause() {
 
 #[test]
 fn a_deleted_fleet_is_rejected_before_waiting() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     fixture
@@ -333,6 +346,7 @@ fn a_deleted_fleet_is_rejected_before_waiting() {
 
 #[test]
 fn receive_preserves_a_storage_read_failure_during_the_loop() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     fixture.view(&worker, WORKING);
@@ -358,6 +372,7 @@ fn receive_preserves_a_storage_read_failure_during_the_loop() {
 
 #[test]
 fn receive_reports_the_actual_corrupt_database_error() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     std::fs::write(fixture.cli.db_path(), b"this is not a SQLite database").unwrap();
     let output = fixture.spawn(fixture.director, 1).output();
@@ -373,6 +388,7 @@ fn receive_reports_the_actual_corrupt_database_error() {
 
 #[test]
 fn ctrl_c_terminates_the_owned_finite_receive_without_registry_state() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     fixture.view(&worker, WORKING);
