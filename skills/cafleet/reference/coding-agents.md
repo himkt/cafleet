@@ -62,8 +62,8 @@ Sources: [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pr
 | Note | Applies at |
 |---|---|
 | `AskUserQuestion` supports up to four options; its built-in Other path accepts free text. Members relay a concrete question to the Director. | `{decision_surface}`; [user relay](supervision.md#user-delegation-protocol) |
-| A separate evaluator checks the session condition against the transcript; native background work defers evaluation and returns a host result. External CAFleet panes supply evidence when the Director reads broker/pane state. | [Director receiving](supervision.md#asynchronous-wait-rule) |
-| Without native background work an unmet condition can immediately start another turn; consecutive tool-free stops reach the configured block cap, eight by default. Retain the finite receive task handle while delegated work remains. | [Turn boundaries](supervision.md#asynchronous-wait-rule) |
+| A separate evaluator checks the session condition against the transcript; native background work defers evaluation and returns a host result. External CAFleet panes supply evidence when the Director reads broker/pane state. | [Director wake](supervision.md#director-wake) |
+| Without native background work an unmet condition can immediately start another turn; consecutive tool-free stops reach the configured block cap, eight by default. While a goal is active, end each continued turn with the bounded foreground wait in Director wake. | [Turn boundaries](supervision.md#director-wake) |
 | Composer controls act at the beginning of submitted input; a local probe merged control text into a concurrent preview. Serialize complete input and inspect its capture. | [Native dispatch](prompt-routing.md#director-side-dispatch) |
 | Native shell probes displayed command/stdout/stderr followed by a model turn; its trigger and a second permission check were not established. The Director authorizes routed native input under its host rules. | [Command authorization](prompt-routing.md#director-side-dispatch) |
 | `dontAsk` permits spawn-allowed broker tools, built-in read-only work and matching host allow rules; denied work routes to the Director. Protected file edits need the Director or a host-rule change. | `{permission_flags}`; [routing](prompt-routing.md#member-side-reconsider-then-route) |
@@ -72,7 +72,7 @@ Evidence: Claude Code 2.1.296, checked 2026-10-22; [host continuation](https://c
 
 ### Pane-state capture cues
 
-Use fresh styled capture as transport evidence. Approval/work outranks idle cues; preserve drafts and treat ambiguity as unknown.
+Use these cues for Director visual inspection of a fresh `member capture` / `fleet capture`; delivery and dispatch do not consult them. Approval/work outranks idle cues; preserve drafts and treat ambiguity as unknown.
 
 | State | claude capture cue |
 |---|---|
@@ -82,7 +82,7 @@ Use fresh styled capture as transport evidence. Approval/work outranks idle cues
 | `draft` | User-input styled unsent text in the composer, including text identical to a host suggestion |
 | `unknown` | Missing, truncated, unrecognized or ambiguous composer/style evidence |
 
-Follow [Director evidence handling](supervision.md#idle-semantics). Empty readiness establishes no task completion.
+Follow [Director evidence handling](supervision.md#idle-semantics). An empty composer establishes no task completion.
 
 ## codex
 
@@ -123,7 +123,7 @@ Sources: [OpenAI pricing](https://developers.openai.com/api/docs/pricing) and [C
 | Note | Applies at |
 |---|---|
 | A member sends a concrete question to the Director; the Director relays the operator's answer as a message. | `{decision_surface}`; [user relay](supervision.md#user-delegation-protocol) |
-| The objective belongs to the thread with model-callable lifecycle tools and optional token-budget accounting; a two-turn tool-bearing probe verified continuation and model-reported completion. Preserve the user's objective, activation authority and budget, retain live tool/session handles and collect broker/pane evidence. | [Director receiving](supervision.md#asynchronous-wait-rule) |
+| The objective belongs to the thread with model-callable lifecycle tools and optional token-budget accounting; a two-turn tool-bearing probe verified continuation and model-reported completion. Preserve the user's objective, activation authority and budget, retain live tool/session handles and collect broker/pane evidence; while the objective is active, each continued turn ends with the bounded foreground wait in Director wake. | [Director wake](supervision.md#director-wake) |
 | Native shell input displayed command, exit code, duration and output. Installed protocol metadata describes unsandboxed dispatch while public CLI guidance describes current approval/sandbox settings; the effective TUI boundary and protocol path were not established. | [Native authorization](prompt-routing.md#director-side-dispatch) |
 | The Director authorizes routed native input under its host rules; harmless command visibility establishes no second member-tool permission check. Inspect output before explicit continuation. | [Dispatch and continuation](prompt-routing.md#director-side-dispatch) |
 | Run host-permitted workspace commands directly and route required denied operations. The configured sandbox and approval posture remain authoritative. | `{permission_flags}`; [member routing](prompt-routing.md#member-side-reconsider-then-route) |
@@ -132,7 +132,7 @@ Evidence: Codex CLI 0.162.1, checked 2026-10-22; [host continuation](https://dev
 
 ### Pane-state capture cues
 
-Use fresh styled capture as transport evidence. Approval/work outranks idle cues; preserve drafts and treat ambiguity as unknown.
+Use these cues for Director visual inspection of a fresh `member capture` / `fleet capture`; delivery and dispatch do not consult them. Approval/work outranks idle cues; preserve drafts and treat ambiguity as unknown.
 
 | State | codex capture cue |
 |---|---|
@@ -142,7 +142,7 @@ Use fresh styled capture as transport evidence. Approval/work outranks idle cues
 | `draft` | Unsent user-styled composer text, including text identical to a placeholder |
 | `unknown` | Missing, truncated, unrecognized or ambiguous composer/style evidence |
 
-Follow [Director evidence handling](supervision.md#idle-semantics). Empty readiness establishes no task completion.
+Follow [Director evidence handling](supervision.md#idle-semantics). An empty composer establishes no task completion.
 
 ## opencode
 
@@ -192,7 +192,7 @@ Source: [OpenCode Console models and pricing](https://opencode.ai/v2/docs/consol
 | Note | Applies at |
 |---|---|
 | A member routes concrete questions to the Director and receives the operator's answer as a message. | `{decision_surface}`; [user relay](supervision.md#user-delegation-protocol) |
-| Members perform assignments using the selected provider/model, workspace reads/edits, permitted tools and broker communication. The Director coordinates next steps and retains finite receiving. | [Director receiving](supervision.md#asynchronous-wait-rule) |
+| Members perform assignments using the selected provider/model, workspace reads/edits, permitted tools and broker communication. The Director coordinates next steps and wakes on delivered lines. | [Director wake](supervision.md#director-wake) |
 | The TUI documents leading `!` native shell input and conversation-visible output. A local native-input permission probe was outside this investigation; preserve member-tool permissions and Director authorization. | [Native dispatch](prompt-routing.md#director-side-dispatch) |
 | The `cafleet` preset allows its declared workspace/broker tools and denies unmatched shell commands; route a required denied command. A permission popup is an issue to capture and relay. | `{permission_flags}`; [member routing](prompt-routing.md#member-side-reconsider-then-route) |
 
@@ -200,7 +200,7 @@ Provenance: [OpenCode shell input](https://docs.opencode.ai/docs/tui/#shell-comm
 
 ### Pane-state capture cues
 
-Use fresh styled capture as transport evidence. Approval/work outranks idle cues; preserve drafts and treat ambiguity as unknown.
+Use these cues for Director visual inspection of a fresh `member capture` / `fleet capture`; delivery and dispatch do not consult them. Approval/work outranks idle cues; preserve drafts and treat ambiguity as unknown.
 
 | State | opencode capture cue |
 |---|---|
@@ -210,7 +210,7 @@ Use fresh styled capture as transport evidence. Approval/work outranks idle cues
 | `draft` | Unsent user-input styled text in the recognized composer |
 | `unknown` | Missing, truncated, unrecognized or ambiguous composer/style evidence |
 
-Follow [Director evidence handling](supervision.md#idle-semantics). Empty readiness establishes no task completion.
+Follow [Director evidence handling](supervision.md#idle-semantics). An empty composer establishes no task completion.
 
 ## Template
 

@@ -63,7 +63,7 @@ Used only when your backend's section omits a token or your backend is unknown. 
 
 Every `cafleet` invocation that touches members or messages names its **subject** as a positional integer id placed immediately after the subcommand name; ids that describe a relationship stay as flags:
 
-- Positional `MEMBER_ID` — **the member in question**: the requester on `message poll`, and the target on `member delete` / `show` / `prompt` / `exec` / `ping` / `capture`. The fleet is derived from the member row.
+- Positional `MEMBER_ID` — **the member in question**: the requester on `message poll`, and the target on `member delete` / `show` / `prompt` / `exec` / `capture`. The fleet is derived from the member row.
 - Positional `MESSAGE_ID` — the message on `message ack` / `message show`; recipient and fleet are derived from the message row.
 - Positional `FLEET_ID` — the fleet on `fleet show` / `fleet delete` / `member list` / `fleet capture`.
 - `--from-member-id <int>` / `--to-member-id <int>` — the two parties of a two-party command: the **sender** and the **recipient** on `message send`. The fleet is derived from the sender row.
@@ -84,18 +84,6 @@ An author writes the spawn prompt with those brace placeholders; after spawn the
 
 The supported CLI environment variables are catalogued in [runtime Environment variables](reference/runtime/spec/cli-options.md#environment-variables).
 
-## Finite receiving
-
-The Director owns receiving while delegated work remains:
-
-```bash
-cafleet message wait <director-member-id> --timeout 300 --json
-```
-
-Run it as a host-native background task, retain the live task/session handle and collect its terminal result. A foreground-only mechanism uses an explicit timeout of at most 30 seconds. ACK consumed deliveries before the next wait and track deferred actions in host-owned state. On timeout inspect relevant roster, panes and artifacts, then receive again. Keep receiving until a reply or explicit user handoff. Follow [supervision](reference/supervision.md).
-
-The [wait contract](reference/runtime/spec/cli-options.md#message-wait) owns full results and bounded ordinary-member preview retries.
-
 ## Placeholder convention
 
 In every example, substitute the literal integer ids printed by `cafleet fleet create` / `cafleet member create`. Angle-bracket tokens are placeholders, **not** shell variables:
@@ -114,13 +102,13 @@ When you need a recorded user reaction — **approve**, **choose among options**
 
 ## One-shot command isolation
 
-Every one-shot `cafleet` process is the **only command in its shell-tool invocation**. Run a sequence of CAFleet operations as separate shell-tool calls. Do not place a one-shot CAFleet command beside another command using a newline, `;`, `&&`, a pipe, shell `&`, or any other setup/follow-up command — a compound invocation keeps your shell tool occupied after the CAFleet process exits, so your pane is not at rest and the broker holds every inbound preview while the extra command runs.
+Every one-shot `cafleet` process is the **only command in its shell-tool invocation**. Run a sequence of CAFleet operations as separate shell-tool calls. Do not place a one-shot CAFleet command beside another command using a newline, `;`, `&&`, a pipe, shell `&`, or any other setup/follow-up command — a compound invocation does not match the host's single-command allow rules.
 
 Leading `NAME=value` assignments that set the environment of the CAFleet process are allowed; they do not start another process. They must immediately precede the CAFleet executable — do not substitute an `env` helper process or append another command. Shell redirection does not authorize another process either; a command that needs a long body uses the positional argument or `--file <path>`, not a pipe.
 
 **Permission-error diagnostic.** A CAFleet command that fails with an operating-system permission error — `Operation not permitted` / `Permission denied`, commonly surfacing as a multiplexer socket or pane-command failure — signals that the invocation likely ran outside your coding agent's command auto-approval scope: a compound invocation does not match single-command allow rules, so the shell tool executes it under the agent's restricted sandbox or permission set. The response is to re-run the CAFleet command as its own isolated invocation. A message whose persisted id was already reported is committed (§ *Send (Unicast)*): send its body once only.
 
-Command isolation complements, but does not replace, the Director-side dispatch boundary in [`reference/supervision.md`](reference/supervision.md) § *Asynchronous Wait Rule*: after dispatching work, retain the host-owned finite receive task/session handle until its result.
+Command isolation complements the Director-side wake procedure in [`reference/supervision.md`](reference/supervision.md#director-wake).
 
 ## Send (Unicast)
 
@@ -130,13 +118,13 @@ cafleet message send --from-member-id <my-member-id> --to-member-id <target-memb
 
 Supply exactly one positional text body or `--file <path>`; `--file -` reads stdin. Use file input for long/multiline bodies. Text previews truncate by `CAFLEET_MAX_TEXT_LEN`; use `--json` for full payloads. [JSON](reference/runtime/spec/cli-options.md#json-output) returns the full record.
 
-The Director receives through broker reads, without injected previews. Ordinary-member [push notifications](reference/runtime/spec/multiplexer-backends.md#push-notifications) submit the oldest eligible preview when an empty composer is idle. Holds and post-commit delivery errors preserve the committed ID and successful stdout record; consume that existing row. A finite receive or later send owns pending retries. [Send outcomes](reference/runtime/spec/cli-options.md#message-send) define exact diagnostics.
+[Push notifications](reference/runtime/spec/multiplexer-backends.md#push-notifications) deliver every message Escape-first into its recipient's pane, the Director's included, as one `[cafleet msg ID from SENDER TIMESTAMP]` line carrying the full body or a `cafleet message show ID --json` pointer. The recipient ACKs that ID after acting on it. Holds and post-commit delivery errors preserve the committed ID and successful stdout record; consume that existing row. The next send to the recipient retries a pending notification. [Send outcomes](reference/runtime/spec/cli-options.md#message-send) define exact diagnostics.
 
 Fan out with an individual send per selected recipient. Retain each committed ID and report a failed recipient explicitly.
 
 ## Poll (Check Inbox)
 
-Returns only un-acked (`input_required`) deliveries addressed to this member, newest first; ACKing one drops it from `poll` output. The `id:` integer printed by `poll` is the cafleet message id — **distinct from** any harness task-list id (present only where your backend has a task list). `--json` emits the untruncated envelopes. Members poll after ready, before reporting completion and on every wake. Handle queued assignments before becoming idle; Director finite receiving retries pending notifications across the final-poll/idle race.
+Returns only un-acked (`input_required`) deliveries addressed to this member, newest first; ACKing one drops it from `poll` output. The `id:` integer printed by `poll` is the cafleet message id — **distinct from** any harness task-list id (present only where your backend has a task list). `--json` emits the untruncated envelopes. Members poll after ready, before reporting completion and on every wake; the Director also polls on every wake. Handle queued assignments before becoming idle; a later send to the recipient retries a pending notification.
 
 ```bash
 cafleet message poll <my-member-id> [--json]
@@ -160,11 +148,11 @@ Use the runtime owner for exact flags, outputs and errors. Ordinary members reta
 |---|---|
 | Current command registry and subjects | [CLI summary](reference/runtime/spec/cli-options.md#subcommand-summary) |
 | Full JSON/text outputs | [Output shapes](reference/runtime/spec/cli-options.md#output-shapes) |
-| Finite receive results and retries | [Message wait](reference/runtime/spec/cli-options.md#message-wait) |
+| Scripted receive and retries | [Message wait](reference/runtime/spec/cli-options.md#message-wait) |
 | Fleet/member creation and compensation | [Lifecycle contracts](reference/runtime/spec/cli-options.md#member-create) |
 | Read-only roster pane snapshot | [Fleet capture](reference/runtime/spec/cli-options.md#fleet-capture) |
 | Explicit native shell input | [Member exec](reference/runtime/spec/cli-options.md#member-exec), [routing](reference/prompt-routing.md) |
-| Pane readiness, exclusion and previews | [Multiplexer contracts](reference/runtime/spec/multiplexer-backends.md) |
+| Pane input, exclusion and previews | [Multiplexer contracts](reference/runtime/spec/multiplexer-backends.md) |
 | Host continuation, native waiting and evidence boundaries | Selected backend's bound notes in [coding-agents.md](reference/coding-agents.md) |
 | Setup, configuration and diagnosis | [CLI configuration](reference/runtime/spec/cli-options.md#cafleet-setup) |
 | Recovery / teardown | [Recovery](reference/supervision.md#recovery) / [Shutdown](reference/supervision.md#shutdown) |

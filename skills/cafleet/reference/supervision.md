@@ -4,13 +4,13 @@ The Director owns the delegated task from assignment through evidence-backed com
 
 ## Core Principle
 
-The host continues its own task and owns native tool/background work. CAFleet registers sessions, persists messages, receives for a finite interval and submits authorized input. The Director retains outstanding work in host-owned task state and collects broker, artifact and pane evidence.
+The host continues its own task and owns native tool/background work. CAFleet registers sessions, persists messages, delivers each message into its recipient's pane and submits authorized input. The Director retains outstanding work in host-owned task state and collects broker, artifact and pane evidence.
 
 ## Communication Model
 
 Use point-to-point `cafleet message send` for coordination. Fan out with an individual send to each selected recipient, retaining each committed message ID and reporting recipient failures. Retrieve complete payloads with `--json`; long/multiline bodies use `--file <path>`.
 
-Read every delivery, record any deferred action with its ID/artifact pointer in host-owned task state, then ACK it immediately. ACK means consumption; a pending user decision or unfinished assignment remains tracked outside the inbox. ACK every consumed delivery before the next wait.
+Read every delivery, record any deferred action with its ID/artifact pointer in host-owned task state, then ACK it immediately. ACK means consumption; a pending user decision or unfinished assignment remains tracked outside the inbox. ACK every consumed delivery before ending the turn.
 
 ## Spawn Protocol
 
@@ -19,34 +19,53 @@ Read every delivery, record any deferred action with its ID/artifact pointer in 
 3. Register the current Director: `cafleet fleet create --name <name> --coding-agent <backend> --json`. Capture literal fleet and Director IDs. This performs one atomic registration without starting another process.
 4. Write scoped role-by-path prompts under the supplied BASE, retaining host prerequisites and literal identity placeholders. Create each member with `cafleet member create --fleet-id <fleet-id> ... --file <absolute-path>`.
 5. Receive each member's ready and ACK it. Dispatch that member's assignment as soon as its inputs exist; other members' readiness does not delay it.
-6. Retain a host-owned finite receive until work resolves or an explicit user handoff occurs.
+6. End the turn after dispatch; a delivered line wakes you, and you follow [Director wake](#director-wake) until work resolves or an explicit user handoff occurs.
 
-### Asynchronous Wait Rule
+### Director wake
 
-Run `cafleet message wait <director-member-id> --timeout 300 --json` as a host-native background task. Retain its live task/session handle, collect the terminal result, ACK consumed messages and act on their evidence. A foreground mechanism without a live task handle uses an explicit timeout of at most 30 seconds.
+Every message addressed to you is delivered into your pane as one `[cafleet msg ID from SENDER TIMESTAMP]` line, led by Escape. Your pane is the one that ran `cafleet fleet create`, so register from your coding-agent session.
 
-On timeout, check the relevant roster with `cafleet member list`, panes with `cafleet fleet capture` or `cafleet member capture`, and artifacts, then start another finite receive while useful work remains. The default receive retries eligible ordinary-member previews every second, at most one member per interval. Receiving injects no input into the Director.
+1. After dispatching work, continue independent authorized work or end your turn. Without an active host continuation, ending the turn with outstanding delegated work is the normal waiting state.
+2. A delivered line wakes you. The inline body is the full message; a pointer line names the `cafleet message show ID --json` command for the full body.
+3. On every wake and before ending a turn, run `cafleet message poll <director-member-id> --json`, which also surfaces messages whose delivery failed. Record deferred actions in host-owned task state, ACK each consumed delivery and act on it.
+4. On every wake, run `cafleet member list <fleet-id> --json` and check each member's `unconfirmed_previews` and the assignments past their expected reply point, using `cafleet member capture` / `cafleet fleet capture` and artifacts as evidence.
+5. For each ID in a member's `unconfirmed_previews`, capture the member pane. When the line is absent, or the capture cannot establish it, run `cafleet member prompt <member-id> "cafleet message poll <member-id> --json"`. The member ACKs the message normally, which removes it from the list.
+6. Retain the operator's decision gates. A delivery that dismissed an open decision-surface question calls for re-asking it.
 
-When host automatic continuation is unavailable, keep the active tool/background receive handle until the delegated reply or explicit handoff to the user. Ending a Director turn with outstanding work requires owned receiving/continuation. Read host-specific evidence and limits in [coding-agents.md](coding-agents.md).
+A delivery's Escape can interrupt your running turn; its resume clause tells you to continue that work. Text the operator typed but did not submit in your pane can merge with a delivered line; relay it to the operator rather than acting on the merged input.
+
+#### Waiting under host continuation
+
+A host continuation is an active Claude Code `/goal` condition or an active Codex thread objective. While one is active, the host starts another Director turn as soon as a turn ends with the goal unmet, and consecutive tool-free Claude Code turns reach the block cap. During an active host continuation, end each continued turn that has outstanding delegated work with one bounded foreground receive, then apply steps 3–6:
+
+```bash
+cafleet message wait <director-member-id> --timeout 30 --json
+```
+
+The 30-second timeout paces the loop and keeps every continued turn tool-bearing. A delivery that arrives during the wait still reaches your pane; the wait returns the same persisted message. Read host-specific evidence and limits in [coding-agents.md](coding-agents.md).
+
+#### Sender follow-up
+
+When your `cafleet message send` prints `Message N was persisted. …` on stderr, send exactly one follow-up to the same recipient with the body `message N was not delivered to your pane; poll your inbox`. Its drain delivers an unclaimed `N` first; for a durable claim, its line wakes the recipient, whose poll lists `N`. When the follow-up also prints `Message M was persisted. …`, inspect the target pane and continue with step 5's `member prompt`.
 
 ## Idle Semantics
 
-Classify fresh captured evidence using the target's backend cues. Transport readiness establishes whether an empty composer accepts input; it does not establish task completion.
+Classify fresh captured evidence using the target's backend cues. Captures guide your next action only; delivery and dispatch never wait on them, and an idle composer does not establish task completion. A retained draft can merge with a later delivery or prompt.
 
 | Evidence | Director response |
 |---|---|
-| Active tool, streaming or native shell work | Continue finite receiving and inspect later |
+| Active tool, streaming or native shell work | End the turn; a delivered line or the operator wakes you |
 | Explicit question/approval | Relay a received question or inspect the complete prompt |
 | Idle empty composer with unfinished work | Check messages/artifacts and send the next concrete instruction |
-| Retained draft | Preserve its input, relay the capture and ask the user how to preserve or submit it |
-| Unknown/truncated/unrecognized capture | Inspect more deeply while leaving input untouched |
+| Retained draft | Relay the capture and ask the user how to preserve or submit it before prompting |
+| Unknown/truncated/unrecognized capture | Inspect more deeply before choosing an action |
 | Missing/dead pane or concrete failure | Recover within existing authorization |
 
 A timeout, idle duration or unread count alone proves no failure. Expected ready/reply deadlines belong to the assignment and are checked by the Director.
 
 ## Authorization-Scope Guard (CRITICAL)
 
-Carry the user's authorization forward across receives and checks. Dispatch already authorized work when inputs arrive; an inbox check renews no permission. Keep explicit user review/approval gates authoritative. Relay a new decision only when its meaning, scope or risk requires the operator.
+Carry the user's authorization forward across wakes and checks. Dispatch already authorized work when inputs arrive; an inbox check renews no permission. Keep explicit user review/approval gates authoritative. Relay a new decision only when its meaning, scope or risk requires the operator.
 
 ### Real stop signals (treat as halt; everything else is a tick to evaluate)
 
@@ -58,17 +77,17 @@ Use the executing backend's decision surface for a concrete choice. State the ev
 
 ## Team-facilitation instructions
 
-At every receive result and active workflow boundary:
+At every wake and active workflow boundary:
 
 1. Read full broker payloads and artifacts; ACK every consumed message.
 2. Record deferred user decisions and remaining actions in host-owned state.
 3. Dispatch ready work immediately.
-4. Inspect overdue/failed work using roster, targeted captures and artifacts.
-5. Resume finite receiving until completion, a required user gate or explicit handoff.
+4. Inspect overdue/failed work using roster, `unconfirmed_previews`, targeted captures and artifacts.
+5. End the turn while delegated work remains, until completion, a required user gate or explicit handoff.
 
 ### Routing member command requests
 
-A member runs host-permitted commands and sends required denied commands through [prompt-routing](prompt-routing.md). Authorize native dispatch, inspect the actual result and explicitly continue the member after idle evidence when its host has not resumed it. Process requests in inbox order and close every request with an action or reasoned reply.
+A member runs host-permitted commands and sends required denied commands through [prompt-routing](prompt-routing.md). Authorize native dispatch, inspect the actual result and explicitly continue the member after completion evidence when its host has not resumed it. Process requests in inbox order and close every request with an action or reasoned reply.
 
 ## Stall Response
 
@@ -84,7 +103,7 @@ Use `cafleet member capture <member-id> --lines <depth>` for complete backend UI
 
 ### Escalation
 
-When two actually delivered concrete re-engagement messages produce no progress and captures establish an unresponsive session, relay the evidence and recovery choices through the host decision surface. Held previews do not count as delivered. Active work and pending user decisions retain their own handling.
+When two actually delivered concrete re-engagement messages produce no progress and captures establish an unresponsive session, relay the evidence and recovery choices through the host decision surface. Pending previews and `unconfirmed_previews` entries do not count as delivered. Active work and pending user decisions retain their own handling.
 
 ## User Delegation Protocol
 

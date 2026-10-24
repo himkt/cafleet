@@ -12,7 +12,7 @@ Read these prerequisites in order before orchestration. Your `CODING AGENT:` ide
 |---|---|---|
 | 1 | Your backend section in [coding-agents.md](../reference/coding-agents.md) | Resolve your Runtime bindings and bound notes before acting. |
 | 2 | [BASE contract](../reference/base-dir.md) | Read before resolving output paths or writing scratch/audit files. |
-| 3 | [Supervision](../reference/supervision.md) | Read before orchestration: atomic bootstrap, finite receiving, evidence checks and authorization scope. |
+| 3 | [Supervision](../reference/supervision.md) | Read before orchestration: atomic bootstrap, Director wake, evidence checks and authorization scope. |
 
 Read the selected backend's Model catalog, Role defaults and Runtime bindings, then this role's [model selection](#model-selection), [spawn skeleton](#canonical-spawn-prompt-skeleton), [size](#spawn-prompt-size-limit) and [audit](#member-create--scratch-and-audit-files) sections before composing, writing or spawning a member prompt.
 
@@ -43,9 +43,8 @@ Substitute the literal integer ids for every angle-bracket token (the placeholde
 ## Director-only primitives
 
 You own these; ordinary members do NOT call them: `member create`, `member
-delete`, `member list`, `member capture`, `member prompt`, `member exec`,
-`member ping` (plus the backend-specific decision-relay primitive your overlay
-names). The permission split between the pane primitives is canonical in
+delete`, `member list`, `member capture`, `member prompt`, `member exec`
+(plus the backend-specific decision-relay primitive your overlay names). The permission split between the pane primitives is canonical in
 [`reference/prompt-routing.md`](../reference/prompt-routing.md) § *The
 Director's pane primitives*. Full flags and behavior live in the command
 sections below; the routing exchange built on `member exec` is in
@@ -218,7 +217,7 @@ An unknown or inactive `MEMBER_ID` exits 1 (`Error: Member <member-id> not found
 cafleet member list <fleet-id>
 ```
 
-One output shape: every **active** registry entry of the fleet, one row each — the column enumeration and the `--json` timestamp additions are canonical in [runtime Member list output](../reference/runtime/spec/cli-options.md#member-list-output). Use the `idle` column for routine supervision ticks instead of capturing every member every tick — capture is reserved for the cases the idle column flags.
+One output shape: every **active** registry entry of the fleet, one row each — the column enumeration and the `--json` timestamp additions are canonical in [runtime Member list output](../reference/runtime/spec/cli-options.md#member-list-output). On every wake, use the `idle` column and the `--json` `unconfirmed_previews` field instead of capturing every member — capture is reserved for the cases they flag.
 
 ## Fleet Capture
 
@@ -239,17 +238,11 @@ A fleet member never talks to the user. When it needs a recorded user reaction (
 
 ## Member Exec
 
-Authorize the required one-line command and call `cafleet member exec <member-id> COMMAND` or `--file PATH`. The CLI submits visible native shell input and returns dispatch metadata. Inspect `member capture` for output and completion. After idle evidence, send an explicit continuation prompt if the host has not resumed the member. On failed/uncertain dispatch, inspect before authorizing a retry. Follow [routing](../reference/prompt-routing.md).
+Authorize the required one-line command and call `cafleet member exec <member-id> COMMAND` or `--file PATH`. The CLI submits visible native shell input and returns dispatch metadata. Inspect `member capture` for output and completion. After completion evidence, send an explicit continuation prompt if the host has not resumed the member. On failed/uncertain dispatch, inspect before authorizing a retry. Follow [routing](../reference/prompt-routing.md).
 
 ## Member Prompt
 
-Use `cafleet member prompt <member-id> TEXT` for explicitly authorized composer input. Require an idle empty composer; preserve drafts and user decisions. Success means submission only.
-
-## Member Ping (manual inbox-poll)
-
-`cafleet member ping <member-id>` submits the fixed `cafleet message poll <member-id> --json` prompt only when idle. Busy, approval, draft, unknown and pending placement skip safely. Use it as an explicit Director action after evidence checks; finite receiving retries actual messages.
-
-
+Use `cafleet member prompt <member-id> TEXT` for explicitly authorized composer input. The prompt leads with Escape, so it can interrupt a working turn or dismiss an open prompt in the member pane, and it rejects the Director's own pane. Check a capture for a retained draft before prompting, and relay a user draft before replacing it. Success means submission only.
 
 ## Cross-references
 
@@ -257,6 +250,6 @@ Use `cafleet member prompt <member-id> TEXT` for explicitly authorized composer 
 - Read [Recovery](../reference/supervision.md#recovery) before recovery and [Shutdown](../reference/supervision.md#shutdown) before teardown.
 - For the `--json` output switch, see [runtime JSON output](../reference/runtime/spec/cli-options.md#json-output).
 
-## Finite receiving
+## Director wake
 
-Follow [supervision](../reference/supervision.md#asynchronous-wait-rule): retain the host-native finite receive task/session handle, ACK consumed messages before the next wait and keep deferred actions in host-owned state. Inspect roster, panes and artifacts on timeout. Keep receiving until delegated work resolves or explicit user handoff.
+Follow [supervision](../reference/supervision.md#director-wake): end your turn after dispatch, wake on delivered lines, then poll, ACK consumed messages before ending the turn and keep deferred actions in host-owned state. On every wake inspect roster, `unconfirmed_previews`, panes and artifacts.

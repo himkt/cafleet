@@ -2,7 +2,7 @@
 
 https://github.com/user-attachments/assets/bd2b195a-f3de-4fa3-bcc8-3c6ef9f1016a
 
-CAFleet multiplexes independent coding-agent sessions in tmux or herdr and coordinates them through durable messages. Use its CLI and skills for delegated research, implementation and review across coding-agent backends. The host owns continuation; the Director collects replies with finite receiving and inspects visible native command results.
+CAFleet multiplexes independent coding-agent sessions in tmux or herdr and coordinates them through durable messages. Use its CLI and skills for delegated research, implementation and review across coding-agent backends. The host owns continuation; replies are delivered into the Director's pane, and the Director inspects visible native command results.
 
 ## Install
 

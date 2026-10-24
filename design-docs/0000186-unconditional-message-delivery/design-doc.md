@@ -1,7 +1,7 @@
 # Unconditional Message Delivery
 
 **Status**: Approved
-**Progress**: 0/53 tasks complete
+**Progress**: 13/53 tasks complete
 **Last Updated**: 2026-10-24
 
 ## Overview
@@ -402,22 +402,22 @@ Installed-host manual checks are waived by the owner; automated tests are the ve
 
 ### Step 1: Documentation site
 
-- [ ] Rewrite `docs/docs/spec/multiplexer-backends.md` per § Documentation updates <!-- completed: -->
-- [ ] Rewrite `docs/docs/spec/cli-options.md` per § Documentation updates, removing every `member ping` mention <!-- completed: -->
-- [ ] Update `docs/docs/spec/message-envelope.md` and `docs/docs/spec/data-model.md` <!-- completed: -->
-- [ ] Update `docs/docs/concepts/overview.md`, `docs/docs/concepts/coding-agents.md`, `docs/docs/concepts/member-lifecycle.md` and `docs/docs/how-to/mixed-backend-team.md` <!-- completed: -->
-- [ ] Update `docs/docs/how-to/design-doc-development.md` and `docs/docs/spec/coding-agent-backends.md` for Director wake <!-- completed: -->
-- [ ] Run `mise //docs:build` and fix broken links or anchors (removed `#member-ping`, `#pane-state-classification`) <!-- completed: -->
+- [x] Rewrite `docs/docs/spec/multiplexer-backends.md` per § Documentation updates <!-- completed: 2026-10-24T19:43 -->
+- [x] Rewrite `docs/docs/spec/cli-options.md` per § Documentation updates, removing every `member ping` mention <!-- completed: 2026-10-24T19:43 -->
+- [x] Update `docs/docs/spec/message-envelope.md` and `docs/docs/spec/data-model.md` <!-- completed: 2026-10-24T19:43 -->
+- [x] Update `docs/docs/concepts/overview.md`, `docs/docs/concepts/coding-agents.md`, `docs/docs/concepts/member-lifecycle.md` and `docs/docs/how-to/mixed-backend-team.md` <!-- completed: 2026-10-24T19:43 -->
+- [x] Update `docs/docs/how-to/design-doc-development.md` and `docs/docs/spec/coding-agent-backends.md` for Director wake <!-- completed: 2026-10-24T19:43 -->
+- [x] Run `mise //docs:build` and fix broken links or anchors (removed `#member-ping`, `#pane-state-classification`) <!-- completed: 2026-10-24T19:45 -->
 
 ### Step 2: SPEC, README, skills and rules
 
-- [ ] Mirror the contract changes into `SPEC.md` through the `/update-readme` skill, covering every section listed in its § Documentation updates row, and check `README.md` <!-- completed: -->
-- [ ] Update `skills/cafleet/SKILL.md`, `skills/cafleet/roles/director.md` and `skills/cafleet/roles/member.md` <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/prompt-routing.md`, `skills/cafleet/reference/supervision.md` (including § Director wake replacing § Asynchronous Wait Rule) and the cue intros in `skills/cafleet/reference/coding-agents.md` <!-- completed: -->
-- [ ] Rebind each backend's Director-receiving notes in `skills/cafleet/reference/coding-agents.md` to `supervision.md#director-wake` <!-- completed: -->
-- [ ] Replace finite receiving with the wake procedure in `skills/cafleet-design-doc/create/create.md`, `execute/execute.md` and `interview/interview.md` <!-- completed: -->
-- [ ] Remove the `member ping` bullet from `.claude/rules/bash-tool.md` <!-- completed: -->
-- [ ] Confirm no living document still mentions `member ping`, pane-state classification as an input gate, `CAFLEET_MAX_TEXT_LEN` preview truncation, `supervision.md#asynchronous-wait-rule`, or `message wait` as the Director's background or repeated receive <!-- completed: -->
+- [x] Mirror the contract changes into `SPEC.md` through the `/update-readme` skill, covering every section listed in its § Documentation updates row, and check `README.md` <!-- completed: 2026-10-24T19:50 -->
+- [x] Update `skills/cafleet/SKILL.md`, `skills/cafleet/roles/director.md` and `skills/cafleet/roles/member.md` <!-- completed: 2026-10-24T19:50 -->
+- [x] Update `skills/cafleet/reference/prompt-routing.md`, `skills/cafleet/reference/supervision.md` (including § Director wake replacing § Asynchronous Wait Rule) and the cue intros in `skills/cafleet/reference/coding-agents.md` <!-- completed: 2026-10-24T19:50 -->
+- [x] Rebind each backend's Director-receiving notes in `skills/cafleet/reference/coding-agents.md` to `supervision.md#director-wake` <!-- completed: 2026-10-24T19:50 -->
+- [x] Replace finite receiving with the wake procedure in `skills/cafleet-design-doc/create/create.md`, `execute/execute.md` and `interview/interview.md` <!-- completed: 2026-10-24T19:50 -->
+- [x] Remove the `member ping` bullet from `.claude/rules/bash-tool.md` <!-- completed: 2026-10-24T19:50 -->
+- [x] Confirm no living document still mentions `member ping`, pane-state classification as an input gate, `CAFLEET_MAX_TEXT_LEN` preview truncation, `supervision.md#asynchronous-wait-rule`, or `message wait` as the Director's background or repeated receive <!-- completed: 2026-10-24T19:50 -->
 
 ### Step 3: Escape-first transport
 

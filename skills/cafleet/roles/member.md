@@ -30,7 +30,11 @@ The body is `ready`, optionally followed by a brief role recap after `:`. The Di
 cafleet message poll <my-member-id>
 ```
 
-ACK and process queued messages. Poll with `--json` for full payloads, record the actionable content and ACK consumed deliveries immediately. Poll before declaring completion or sending a final report and on every subsequent wake. Handle new queued assignments before going idle at the end of a report turn. If a message arrives after the final poll while you are busy, the Director’s next finite receive retries its pending preview. Waiting happens by ending the turn when no assignment remains.
+ACK and process queued messages. Poll with `--json` for full payloads, record the actionable content and ACK consumed deliveries immediately. Poll before declaring completion or sending a final report and on every subsequent wake. Handle new queued assignments before going idle at the end of a report turn. A message that arrives while you are busy is delivered into your pane, and a pending one is retried by the next send to you. Waiting happens by ending the turn when no assignment remains.
+
+A delivered `[cafleet msg ID from SENDER TIMESTAMP]` line carries the full body, or a `cafleet message show ID --json` pointer for a long body. Act on it, then ACK that ID. Its trailing `[cafleet]` clauses tell you to resume interrupted work and to re-issue a tool call whose prompt the delivery's Escape dismissed.
+
+When your own send prints `Message N was persisted. …` on stderr, send exactly one follow-up to the same recipient with the body `message N was not delivered to your pane; poll your inbox`. If the follow-up also prints a persisted diagnostic, end your turn.
 
 ## Command execution
 
@@ -50,7 +54,7 @@ For a command that is hard to quote, write it to a file under your `BASE` and na
 
 Take literal integer IDs from `FLEET ID:`, `YOUR MEMBER ID:` and `DIRECTOR MEMBER ID:` in the CLI-rendered spawn prompt. Pass them explicitly on every command; environment variables supply no member identity. Missing IDs surface through the CLI's own validation rather than an invented value.
 
-Poll your own inbox and use permitted Send/Poll/ACK/show operations. The Director owns member creation, deletion, listing, capture and prompt dispatch. `member ping` belongs to the Director; `member prompt` and `member exec` belong to the Director alone. A committed send retains its ID and successful output even if preview delivery reports a diagnostic. Keep the existing message and consume it once.
+Poll your own inbox and use permitted Send/Poll/ACK/show operations. The Director owns member creation, deletion, listing, capture and prompt dispatch; `member prompt` and `member exec` belong to the Director alone. A committed send retains its ID and successful output even if preview delivery reports a diagnostic. Keep the existing message and consume it once.
 
 ## Shutdown
 

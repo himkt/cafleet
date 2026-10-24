@@ -6,7 +6,6 @@ A CAFleet member runs commands directly through its available shell tool under t
 
 - Member authority and observed-result reporting: `skills/cafleet/roles/member.md`.
 - Required denied-command routing: `skills/cafleet/reference/prompt-routing.md`.
-- `cafleet member ping` submits the fixed literal `cafleet message poll <your-member-id> --json` only into an idle composer.
 - `cafleet member exec` visibly submits native `! COMMAND`. Use the host's actual output; the Director inspects completion and sends explicit continuation when needed.
 
 Run one command per shell invocation, preserve literal IDs and use a file writer for output. The selected backend's runtime bindings define its permission posture. A broad tool permission remains subject to the assigned role and Director-owned lifecycle/Git boundaries.
