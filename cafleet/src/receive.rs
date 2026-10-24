@@ -1675,12 +1675,7 @@ mod tests {
     #[test]
     fn a_hold_after_a_partial_drain_keeps_entries_unchanged() {
         let clock = TestClock::new();
-        let error = diagnostic(
-            11,
-            101,
-            Delivery::NotSent,
-            "escape failed before input",
-        );
+        let error = diagnostic(11, 101, Delivery::NotSent, "escape failed before input");
         let mut io = ScriptedIo::new(
             &clock,
             |_, attempts, _| {

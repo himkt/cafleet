@@ -10,12 +10,10 @@ use crate::broker::{self, NewPlacement};
 use crate::capture::{CaptureSnapshot, MemberCapture, write_member_capture};
 use crate::coding_agent::coding_agent;
 use crate::config::Settings;
-use crate::delivery::DELIVERY_CAPTURE_LINES;
 use crate::error::CafleetError;
 
 use crate::multiplexer::{Lead, Multiplexer};
 use crate::output::{format_member, format_member_detail, format_member_list};
-use crate::pane_state::{PaneState, classify};
 use crate::presentation;
 use crate::runtime::system::SystemProbe;
 use crate::time::now_utc;
@@ -110,22 +108,13 @@ pub enum MemberCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Submit a native shell command to a member's idle pane.
+    /// Submit a native shell command to a member's pane, Escape first.
     Exec {
         /// The target member.
         #[arg(value_name = "MEMBER_ID")]
         member_id: i64,
         #[command(flatten)]
         body: ExecBodyArgs,
-        /// Output in JSON format.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Inject an inbox-poll keystroke into a member's pane.
-    Ping {
-        /// The target member.
-        #[arg(value_name = "MEMBER_ID")]
-        member_id: i64,
         /// Output in JSON format.
         #[arg(long)]
         json: bool,
@@ -276,7 +265,6 @@ pub fn run(
             body,
             json,
         } => exec(conn, settings, member_id, &body, json, deadline),
-        MemberCommand::Ping { member_id, json } => ping(conn, settings, member_id, json, deadline),
         MemberCommand::Capture {
             member_id,
             lines,
@@ -358,7 +346,8 @@ fn create(
         Err(original) => return Err(registration.rollback(original)),
     };
     let argv = backend.build_spawn_argv(&prompt, name, model, effort);
-    let span = crate::signals::DeferTermination::begin().map_err(|error| registration.rollback(error))?;
+    let span =
+        crate::signals::DeferTermination::begin().map_err(|error| registration.rollback(error))?;
     let pane_id = match mux.split_window(&context, &env, &argv) {
         Ok(pane_id) => pane_id,
         Err(error) => {
@@ -549,10 +538,6 @@ fn list(conn: &mut Connection, fleet_id: i64, json: bool) -> Result<(), CafleetE
     Ok(())
 }
 
-fn input_state(state: PaneState) -> Option<&'static str> {
-    state.hold_reason()
-}
-
 fn dispatch_input(
     conn: &mut Connection,
     settings: &Settings,
@@ -564,7 +549,7 @@ fn dispatch_input(
     let id = member.member_id;
     let Some(locked) = crate::input::lock_member(conn, settings, member, deadline)? else {
         return Err(CafleetError::App(format!(
-            "member {id}'s pane is receiving another input; retry after it is idle."
+            "member {id}'s pane input remained busy; {label} was not dispatched."
         )));
     };
     let _span = crate::signals::DeferTermination::begin()?;
@@ -583,15 +568,7 @@ fn dispatch_input(
         .bounded(deadline);
     mux.ensure_available()
         .map_err(|e| prewrite(e.to_string()))?;
-    let content = mux
-        .capture_pane(pane, DELIVERY_CAPTURE_LINES)
-        .map_err(|e| prewrite(e.to_string()))?;
-    if let Some(state) = input_state(classify(&placement.coding_agent, &content)) {
-        return Err(CafleetError::App(format!(
-            "member {id} is {state}; {label} was not dispatched."
-        )));
-    }
-    mux.send_prompt(pane, text, Lead::Direct).map_err(|error| {
+    mux.send_prompt(pane, text, Lead::Escape).map_err(|error| {
         if error.submission_started() { CafleetError::App(format!(
             "{label} delivery to member {id} is uncertain: {error}. Inspect the pane before retrying."
         )) } else { prewrite(error.to_string()) }
@@ -614,6 +591,11 @@ fn prompt(
     let member = crate::input::with_database_budget(conn, deadline, |conn| {
         load_member(conn, member_id, false)
     })?;
+    if member.kind == crate::broker::records::MemberKind::Director {
+        return Err(CafleetError::App(
+            "cannot prompt the Director's own pane".into(),
+        ));
+    }
     let pane = require_pane(&member, member_id, "prompt")?;
     dispatch_input(conn, settings, &member, text, "prompt", deadline)?;
     emit(
@@ -666,72 +648,6 @@ fn exec(
             format!(
                 "Dispatched native command to member {member_id} ({pane}). Inspect the pane for its result."
             )
-        },
-    );
-    Ok(())
-}
-
-fn ping(
-    conn: &mut Connection,
-    settings: &Settings,
-    member_id: i64,
-    json: bool,
-    deadline: crate::input::Deadline,
-) -> Result<(), CafleetError> {
-    let member = crate::input::with_database_budget(conn, deadline, |conn| {
-        load_member(conn, member_id, false)
-    })?;
-    if member.kind == crate::broker::records::MemberKind::Director {
-        return Err(CafleetError::App(
-            "cannot ping the Director's own pane".into(),
-        ));
-    }
-    let placement = member.placement.as_ref().expect("placed member");
-    let pane = placement.mux_pane_id.as_deref();
-    let reason;
-    if let Some(pane) = pane {
-        let locked = crate::input::lock_member(conn, settings, &member, deadline)?;
-        reason = match locked {
-            None => Some("busy"),
-            Some(_locked) => {
-                let mux = resolve_mux(settings)
-                    .map_err(|e| CafleetError::App(e.to_string()))?
-                    .bounded(deadline);
-                mux.ensure_available()
-                    .map_err(|e| CafleetError::App(e.to_string()))?;
-                let content = mux
-                    .capture_pane(pane, DELIVERY_CAPTURE_LINES)
-                    .map_err(|e| CafleetError::App(e.to_string()))?;
-                let reason = input_state(classify(&placement.coding_agent, &content));
-                if reason.is_none() {
-                    mux.send_prompt(pane, &format!("cafleet message poll {member_id} --json"), Lead::Direct)
-                        .map_err(|error| if error.submission_started() { CafleetError::App(format!(
-                            "poll-trigger delivery to member {member_id} is uncertain: {error}. Inspect the pane before retrying."
-                        )) } else { CafleetError::App(error.to_string()) })?;
-                }
-                reason
-            }
-        };
-    } else {
-        reason = Some("pending_placement");
-    }
-    emit(
-        json,
-        &json!({"member_id":member_id,"pane_id":pane,
-        "skipped":reason.is_some(),"reason":reason}),
-        || match (pane, reason) {
-            (None, _) => format!(
-                "Member {} has no pane yet (pending placement) — ping skipped; it will poll its inbox on spawn.",
-                member.name
-            ),
-            (Some(pane), Some(reason)) => format!(
-                "Member {} ({pane}) is {reason} — ping skipped.",
-                member.name
-            ),
-            (Some(pane), None) => format!(
-                "Pinged member {} ({pane}) — poll keystroke dispatched.",
-                member.name
-            ),
         },
     );
     Ok(())

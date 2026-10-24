@@ -632,7 +632,10 @@ mod tests {
             unconfirmed(&conn, fleet_id, worker),
             serde_json::json!([ids[1], ids[0]])
         );
-        assert_eq!(unconfirmed(&conn, fleet_id, director_id), serde_json::json!([]));
+        assert_eq!(
+            unconfirmed(&conn, fleet_id, director_id),
+            serde_json::json!([])
+        );
     }
 
     #[test]
@@ -650,7 +653,10 @@ mod tests {
                     .unwrap()
                     .is_some()
             );
-            assert_eq!(unconfirmed(&conn, fleet_id, worker), serde_json::json!([id]));
+            assert_eq!(
+                unconfirmed(&conn, fleet_id, worker),
+                serde_json::json!([id])
+            );
             match resolution {
                 "ack" => {
                     broker::ack_message(&mut conn, id).unwrap();

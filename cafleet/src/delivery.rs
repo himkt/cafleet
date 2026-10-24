@@ -12,8 +12,6 @@ use crate::receive::{AttemptEnd, AttemptOutcome, Delivery, NotificationError};
 use crate::time::format_utc;
 use rusqlite::Connection;
 
-pub const DELIVERY_CAPTURE_LINES: i64 = 80;
-
 pub(crate) const INLINE_BODY_LIMIT: usize = 4000;
 const RESUME_CLAUSE: &str = "[cafleet] Resume your work if something was still running.";
 const DISMISSED_PROMPT_NOTE: &str = "[cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.";
@@ -421,8 +419,7 @@ mod tests {
             broker::send_message(&mut conn, director, &worker.to_string(), "gone").unwrap();
         broker::deregister_member(&mut conn, worker).unwrap();
         assert!(matches!(
-            claim_current_preview(&mut conn, &member, message.message_id, Deadline::new())
-                .unwrap(),
+            claim_current_preview(&mut conn, &member, message.message_id, Deadline::new()).unwrap(),
             PreviewClaim::Skipped(ClaimSkip::Gone)
         ));
     }
@@ -674,7 +671,9 @@ mod tests {
         fn the_line_matches_the_specified_example() {
             assert_eq!(
                 notification_line(&record("ready (doc)\nsee the reviewer notes")),
-                format!("[cafleet msg 57 from 15 {TS}] ready (doc)⏎see the reviewer notes {CLAUSES}")
+                format!(
+                    "[cafleet msg 57 from 15 {TS}] ready (doc)⏎see the reviewer notes {CLAUSES}"
+                )
             );
         }
 
@@ -685,10 +684,7 @@ mod tests {
 
         #[test]
         fn multiline_tab_and_control_characters_are_folded_visibly() {
-            assert_eq!(
-                line_body("a\r\nb\nc\rd\tx\x1b\x7f"),
-                "a⏎b⏎c⏎d␉x\\x1b\\x7f"
-            );
+            assert_eq!(line_body("a\r\nb\nc\rd\tx\x1b\x7f"), "a⏎b⏎c⏎d␉x\\x1b\\x7f");
             let line = notification_line(&record("! printf danger\r\nnext\u{0}"));
             assert!(crate::input::valid_input(&line), "{line:?}");
         }

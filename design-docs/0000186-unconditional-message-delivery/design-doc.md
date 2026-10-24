@@ -1,7 +1,7 @@
 # Unconditional Message Delivery
 
 **Status**: Approved
-**Progress**: 33/53 tasks complete
+**Progress**: 46/53 tasks complete
 **Last Updated**: 2026-10-24
 
 ## Overview
@@ -447,26 +447,26 @@ Installed-host manual checks are waived by the owner; automated tests are the ve
 - [x] Update the `message wait` bookkeeping in `receive::wait` per the outcome table <!-- completed: 2026-10-24T20:15 -->
 - [x] Update `message send` in `cafleet/src/cli/message.rs`: `notification_sent` from `sent`, stderr from `Failed` <!-- completed: 2026-10-24T20:15 -->
 - [x] Delete the Director early return in `delivery::preview_snapshot` and the `m.member_id!=f.director_member_id` filter in `broker::panes::pending_previews` <!-- completed: 2026-10-24T20:15 -->
-- [ ] Add the Director delivery, Director self-send and `pending_previews` tests from § Tests <!-- completed: -->
+- [x] Add the Director delivery, Director self-send and `pending_previews` tests from § Tests <!-- completed: 2026-10-24T20:39 -->
 - [x] Add `unconfirmed_previews` to the roster query in `broker::members` and the `member list` / `member show` JSON presenters in `presentation.rs`, with the tests from § Tests <!-- completed: 2026-10-24T20:15 -->
-- [ ] Update the shared fakes in `cafleet/tests/common/mod.rs` and `cafleet/tests/common/receive.rs` per § Tests <!-- completed: -->
-- [ ] Update `cafleet/tests/delivery.rs`, `notification_retry.rs`, `message_wait.rs`, `cli_message.rs` and `receive.rs` unit tests per § Tests <!-- completed: -->
+- [x] Update the shared fakes in `cafleet/tests/common/mod.rs` and `cafleet/tests/common/receive.rs` per § Tests <!-- completed: 2026-10-24T20:39 -->
+- [x] Update `cafleet/tests/delivery.rs`, `notification_retry.rs`, `message_wait.rs`, `cli_message.rs` and `receive.rs` unit tests per § Tests <!-- completed: 2026-10-24T20:39 -->
 
 ### Step 6: `member prompt`, `member exec` and `member ping`
 
-- [ ] Remove capture and classification from `dispatch_input`, send with `Lead::Escape`, and delete `input_state` <!-- completed: -->
-- [ ] Emit the lock-busy errors for prompt and exec <!-- completed: -->
-- [ ] Add the `cannot prompt the Director's own pane` guard to `member prompt` before pane I/O <!-- completed: -->
-- [ ] Delete the `Ping` variant, `fn ping` and its parser test cases in `cafleet/src/cli/mod.rs` <!-- completed: -->
-- [ ] Update `cafleet/tests/cli_member.rs`, `cli_exec.rs` and `pane_input.rs`: remove ping tests, add the ping absence test and the Director-prompt guard test, assert Escape-first argv and no capture <!-- completed: -->
+- [x] Remove capture and classification from `dispatch_input`, send with `Lead::Escape`, and delete `input_state` <!-- completed: 2026-10-24T20:39 -->
+- [x] Emit the lock-busy errors for prompt and exec <!-- completed: 2026-10-24T20:39 -->
+- [x] Add the `cannot prompt the Director's own pane` guard to `member prompt` before pane I/O <!-- completed: 2026-10-24T20:39 -->
+- [x] Delete the `Ping` variant, `fn ping` and its parser test cases in `cafleet/src/cli/mod.rs` <!-- completed: 2026-10-24T20:39 -->
+- [x] Update `cafleet/tests/cli_member.rs`, `cli_exec.rs` and `pane_input.rs`: remove ping tests, add the ping absence test and the Director-prompt guard test, assert Escape-first argv and no capture <!-- completed: 2026-10-24T20:39 -->
 
 ### Step 7: Classifier removal
 
-- [ ] Delete `cafleet/src/pane_state.rs` and its `pub mod` line in `cafleet/src/lib.rs` <!-- completed: -->
-- [ ] Delete `cafleet/tests/pane_state.rs` and `cafleet/tests/fixtures/pane-readiness/` <!-- completed: -->
-- [ ] Remove `DELIVERY_CAPTURE_LINES` and other helpers left without a caller <!-- completed: -->
-- [ ] Update `cafleet/tests/docs_sync.rs` assertions, including the capture-cue test <!-- completed: -->
-- [ ] Rewrite the Director-receiving docs-sync tests and add the `skills/` check per § Tests <!-- completed: -->
+- [x] Delete `cafleet/src/pane_state.rs` and its `pub mod` line in `cafleet/src/lib.rs` <!-- completed: 2026-10-24T20:39 -->
+- [x] Delete `cafleet/tests/pane_state.rs` and `cafleet/tests/fixtures/pane-readiness/` <!-- completed: 2026-10-24T20:39 -->
+- [x] Remove `DELIVERY_CAPTURE_LINES` and other helpers left without a caller <!-- completed: 2026-10-24T20:39 -->
+- [x] Update `cafleet/tests/docs_sync.rs` assertions, including the capture-cue test <!-- completed: 2026-10-24T20:39 -->
+- [x] Rewrite the Director-receiving docs-sync tests and add the `skills/` check per § Tests <!-- completed: 2026-10-24T20:39 -->
 
 ### Step 8: Verification
 

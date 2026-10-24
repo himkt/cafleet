@@ -664,10 +664,9 @@ mod pane_lock_wait_tests {
                 .unwrap()
                 .unwrap();
             let url = format!("sqlite:///{}", conn.path().unwrap());
-            let settings = Settings::from_lookup(|name| {
-                (name == "CAFLEET_DATABASE_URL").then(|| url.clone())
-            })
-            .unwrap();
+            let settings =
+                Settings::from_lookup(|name| (name == "CAFLEET_DATABASE_URL").then(|| url.clone()))
+                    .unwrap();
             Self {
                 _dir: dir,
                 conn,
