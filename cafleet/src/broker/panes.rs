@@ -5,22 +5,22 @@ pub(crate) fn pending_previews(
     conn: &Connection,
     fleet_id: i64,
     subject_id: i64,
-) -> Result<Vec<(i64, i64)>, CafleetError> {
+) -> Result<Vec<(i64, i64, bool)>, CafleetError> {
     let mut statement = conn
-        .prepare(
-            "SELECT m.member_id, g.message_id FROM members m
+        .prepare(&format!(
+            "SELECT m.member_id, g.message_id, g.preview_started_at IS NOT NULL FROM members m
          JOIN fleets f ON f.fleet_id=m.fleet_id
          JOIN member_placements p ON p.member_id=m.member_id AND p.mux_pane_id IS NOT NULL
          JOIN messages g ON g.to_member_id=m.member_id
          WHERE m.fleet_id=?1 AND m.status='active' AND m.member_id!=f.director_member_id
-           AND m.member_id!=?2 AND g.from_member_id!=m.member_id
-           AND g.status_state='input_required' AND g.notified_at IS NULL
+           AND m.member_id!=?2 AND {}
          ORDER BY m.member_id, g.created_at, g.message_id",
-        )
+            super::messaging::PENDING_PREVIEW,
+        ))
         .map_err(super::members::db_err)?;
     statement
         .query_map(params![fleet_id, subject_id], |row| {
-            Ok((row.get(0)?, row.get(1)?))
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
         })
         .map_err(super::members::db_err)?
         .collect::<Result<Vec<_>, _>>()
@@ -50,7 +50,7 @@ mod tests {
             broker::send_message(&mut conn, director, &placed.to_string(), "deliver now").unwrap();
         assert_eq!(
             pending_previews(&conn, fleet, director).unwrap(),
-            vec![(placed, message.message_id)]
+            vec![(placed, message.message_id, false)]
         );
     }
 }

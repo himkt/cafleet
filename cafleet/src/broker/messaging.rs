@@ -1,14 +1,15 @@
 use rusqlite::{Connection, OptionalExtension, params};
 
 use super::members::db_err;
-use super::records::{MemberStatus, MessageRecord, MessageStatus};
+use super::records::{MemberStatus, MessageRecord};
 use crate::error::CafleetError;
 use crate::time::{format_utc, now_utc};
 
 pub(crate) const MESSAGE_COLUMNS: &str =
     "message_id, from_member_id, to_member_id, created_at, status_state, status_timestamp, text";
 
-const PENDING_PREVIEW: &str = "status_state='input_required' AND notified_at IS NULL";
+pub(crate) const PENDING_PREVIEW: &str =
+    "status_state='input_required' AND notified_at IS NULL AND from_member_id!=to_member_id";
 
 /// Read one full typed-column message row in the pinned key order.
 pub(crate) fn message_row(
@@ -120,7 +121,7 @@ pub fn oldest_pending_preview(
     conn.query_row(
         &format!(
             "SELECT {MESSAGE_COLUMNS} FROM messages \
-             WHERE to_member_id=?1 AND {PENDING_PREVIEW} \
+             WHERE to_member_id=?1 AND {PENDING_PREVIEW} AND preview_started_at IS NULL \
              ORDER BY created_at, message_id LIMIT 1"
         ),
         [member_id],
@@ -128,32 +129,6 @@ pub fn oldest_pending_preview(
     )
     .optional()
     .map_err(db_err)
-}
-
-pub(crate) fn is_preview_pending(conn: &Connection, message_id: i64) -> Result<bool, CafleetError> {
-    conn.query_row(
-        "SELECT status_state, notified_at FROM messages WHERE message_id=?1",
-        [message_id],
-        |row| {
-            Ok((
-                row.get::<_, MessageStatus>(0)?,
-                row.get::<_, Option<String>>(1)?,
-            ))
-        },
-    )
-    .map(|(status, notified)| status == MessageStatus::InputRequired && notified.is_none())
-    .map_err(db_err)
-}
-
-/// Stamp a pending preview as keystroked; `false` when the row is no longer
-/// pending, because it was ACKed or another process stamped it first.
-pub fn stamp_notified(
-    conn: &mut Connection,
-    message_id: i64,
-    when: &str,
-) -> Result<bool, CafleetError> {
-    crate::db::require_current(conn)?;
-    stamp_notified_validated(conn, message_id, when)
 }
 
 pub(crate) fn stamp_notified_validated(
@@ -172,21 +147,17 @@ pub(crate) fn stamp_notified_validated(
     Ok(changed == 1)
 }
 
-pub(crate) fn preview_started(conn: &Connection, message_id: i64) -> Result<bool, CafleetError> {
+pub(crate) fn claim_preview(
+    conn: &Connection,
+    message_id: i64,
+    member_id: i64,
+) -> Result<Option<MessageRecord>, CafleetError> {
     conn.query_row(
-        "SELECT preview_started_at IS NOT NULL FROM messages WHERE message_id=?1",
-        [message_id],
-        |row| row.get(0),
+        &format!("UPDATE messages SET preview_started_at=?1 WHERE message_id=?2 AND to_member_id=?3 AND {PENDING_PREVIEW} AND preview_started_at IS NULL RETURNING {MESSAGE_COLUMNS}"),
+        params![format_utc(now_utc()), message_id, member_id],
+        map_message_row,
     )
-    .map_err(db_err)
-}
-
-pub(crate) fn claim_preview(conn: &Connection, message_id: i64) -> Result<bool, CafleetError> {
-    conn.execute(
-        &format!("UPDATE messages SET preview_started_at=?1 WHERE message_id=?2 AND {PENDING_PREVIEW} AND preview_started_at IS NULL"),
-        params![format_utc(now_utc()), message_id],
-    )
-    .map(|changed| changed == 1)
+    .optional()
     .map_err(db_err)
 }
 
@@ -586,6 +557,53 @@ mod tests {
         let message =
             broker::send_message(&mut conn, director, &worker.to_string(), "second").unwrap();
         assert_eq!(message.message_id, 1);
+    }
+
+    #[test]
+    fn preview_selection_skips_claimed_rows_and_self_messages() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet(&mut conn, "selection");
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
+        let self_message =
+            broker::send_message(&mut conn, worker, &worker.to_string(), "self").unwrap();
+        conn.execute(
+            "UPDATE messages SET notified_at=NULL WHERE message_id=?1",
+            [self_message.message_id],
+        )
+        .unwrap();
+        let previous =
+            broker::send_message(&mut conn, director, &worker.to_string(), "claimed").unwrap();
+        let next = broker::send_message(&mut conn, director, &worker.to_string(), "next").unwrap();
+        assert!(
+            super::claim_preview(&conn, previous.message_id, director)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            super::claim_preview(&conn, previous.message_id, worker)
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            super::claim_preview(&conn, previous.message_id, worker)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            broker::oldest_pending_preview(&conn, worker)
+                .unwrap()
+                .unwrap()
+                .message_id,
+            next.message_id
+        );
+        assert_eq!(
+            broker::panes::pending_previews(&conn, fleet, director).unwrap(),
+            vec![
+                (worker, previous.message_id, true),
+                (worker, next.message_id, false)
+            ]
+        );
     }
 
     #[test]

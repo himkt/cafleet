@@ -267,6 +267,25 @@ fn a_notification_stamp_failure_survives_a_new_wait_without_resubmission() {
         1,
         "fresh waits preserve the durable claim and never inject another preview"
     );
+    fixture
+        .cli
+        .sqlite()
+        .execute_batch("DROP TRIGGER reject_notification_stamp")
+        .unwrap();
+    let later = payload(&fixture.send("later message still gets its own notification"));
+    let later_id = later["message"]["message_id"].as_i64().unwrap();
+    assert_eq!(later["notification_sent"], true);
+    assert!(fixture.stamp(later_id).is_some());
+    assert_eq!(fixture.stamp(id), None);
+    assert_eq!(
+        fixture
+            .cli
+            .shim_calls()
+            .iter()
+            .filter(|line| line.ends_with(" Enter"))
+            .count(),
+        2
+    );
 }
 
 #[test]

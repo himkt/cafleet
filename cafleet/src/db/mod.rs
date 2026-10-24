@@ -928,6 +928,9 @@ mod tests {
             chain.iter().all(|(_, name)| !name.is_empty()),
             "every migration carries a slug"
         );
-        assert_eq!(chain.last().unwrap().0, head_version());
+        assert_eq!(
+            chain,
+            vec![(1, "baseline".into()), (2, "preview_attempts".into())]
+        );
     }
 }

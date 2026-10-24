@@ -414,6 +414,86 @@ fn capture_failures_are_not_sent_diagnostics_with_the_actual_cause() {
 }
 
 #[test]
+fn a_confirmed_no_input_failure_keeps_its_classification_when_claim_cleanup_fails() {
+    let _test_resource = common::process_test_resource_guard();
+    let fixture = Fixture::new();
+    let worker = fixture.worker("worker");
+    let previous = fixture.assignment(&worker, "no input arrived");
+    fixture.cli.sqlite().execute_batch(
+        "CREATE TRIGGER reject_claim_release BEFORE UPDATE OF preview_started_at ON messages
+         WHEN NEW.preview_started_at IS NULL BEGIN SELECT RAISE(ABORT, 'claim cleanup unavailable'); END;"
+    ).unwrap();
+    fixture.fail(&worker, "literal", "can't find pane: missing");
+    let result = json(&fixture.spawn(fixture.director, 1).output());
+    let errors = result["notification_errors"].as_array().unwrap();
+    assert_eq!(errors.len(), 1);
+    assert_diagnostic(&errors[0], &worker, previous, "not_sent");
+    assert!(
+        errors[0]["error"]
+            .as_str()
+            .unwrap()
+            .contains("claim cleanup unavailable")
+    );
+    assert_eq!(fixture.count("enter", &worker), 0);
+    std::fs::remove_file(
+        fixture
+            .control
+            .join(format!("fail-literal-{}", worker.pane)),
+    )
+    .unwrap();
+    fixture
+        .cli
+        .sqlite()
+        .execute_batch("DROP TRIGGER reject_claim_release")
+        .unwrap();
+    let next = fixture.assignment(&worker, "a later independent message");
+    let result = json(&fixture.spawn(fixture.director, 2).output());
+    assert!(fixture.stamp(next).is_some());
+    assert_eq!(fixture.stamp(previous), None);
+    assert_eq!(fixture.count("enter", &worker), 1);
+    assert_diagnostic(
+        &result["notification_errors"][0],
+        &worker,
+        previous,
+        "uncertain",
+    );
+}
+
+#[test]
+fn a_claimed_preview_preserves_its_diagnostic_while_later_notifications_progress() {
+    let _test_resource = common::process_test_resource_guard();
+    let fixture = Fixture::new();
+    let worker = fixture.worker("worker");
+    let previous = fixture.assignment(&worker, "previous uncertain notification");
+    fixture
+        .cli
+        .sqlite()
+        .execute(
+            "UPDATE messages SET preview_started_at=created_at WHERE message_id=?1",
+            [previous],
+        )
+        .unwrap();
+    let next = fixture.assignment(&worker, "notify this message");
+    let result = json(&fixture.spawn(fixture.director, 2).output());
+    assert!(fixture.stamp(next).is_some());
+    assert_eq!(fixture.stamp(previous), None);
+    let errors = result["notification_errors"].as_array().unwrap();
+    assert_eq!(errors.len(), 1);
+    assert_diagnostic(&errors[0], &worker, previous, "uncertain");
+    assert_eq!(fixture.count("literal", &worker), 1);
+    assert!(
+        fixture
+            .cli
+            .shim_calls()
+            .iter()
+            .any(|line| line.contains(&format!("[cafleet msg {next} from ")))
+    );
+    fixture.ack(previous);
+    let settled = json(&fixture.spawn(fixture.director, 1).output());
+    assert_eq!(settled["notification_errors"], serde_json::json!([]));
+}
+
+#[test]
 fn first_write_and_enter_failures_suspend_retries_across_wait_invocations() {
     let _test_resource = common::process_test_resource_guard();
     for stage in ["literal", "enter"] {

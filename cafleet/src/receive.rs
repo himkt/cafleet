@@ -31,6 +31,7 @@ impl Clock for SystemClock {
 pub(crate) struct PendingPreview {
     pub member_id: i64,
     pub message_id: i64,
+    pub started: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -140,31 +141,38 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
                 preview.member_id == *member && preview.message_id == error.message_id
             })
         });
+        for preview in snapshot.pending.iter().filter(|preview| preview.started) {
+            errors.entry(preview.member_id).or_insert_with(|| NotificationError {
+                member_id: preview.member_id,
+                message_id: preview.message_id,
+                delivery: Delivery::Uncertain,
+                error: format!("preview {} delivery to member {} is uncertain: an earlier input attempt has no confirmed notification stamp. Inspect the pane before retrying.", preview.message_id, preview.member_id),
+            });
+        }
         messages = snapshot.messages;
         let now = clock.now();
         if !messages.is_empty() || now >= expires {
             break;
         }
         let interval = now.duration_since(started).as_secs();
-        let member = if last_interval == Some(interval) {
+        let selected = if last_interval == Some(interval) {
             None
         } else {
-            let eligible = snapshot
-                .pending
-                .iter()
-                .map(|preview| preview.member_id)
-                .filter(|member| {
-                    !errors
-                        .get(member)
-                        .is_some_and(|error| error.delivery == Delivery::Uncertain)
-                });
+            let eligible = snapshot.pending.iter().filter(|preview| {
+                !preview.started
+                    && !errors.get(&preview.member_id).is_some_and(|error| {
+                        error.delivery == Delivery::Uncertain
+                            && error.message_id == preview.message_id
+                    })
+            });
             eligible
                 .clone()
-                .filter(|member| cursor.is_none_or(|cursor| *member > cursor))
-                .min()
-                .or_else(|| eligible.min())
+                .filter(|preview| cursor.is_none_or(|cursor| preview.member_id > cursor))
+                .min_by_key(|preview| preview.member_id)
+                .or_else(|| eligible.min_by_key(|preview| preview.member_id))
         };
-        if let Some(member) = member {
+        if let Some(preview) = selected {
+            let member = preview.member_id;
             cursor = Some(member);
             last_interval = Some(interval);
             let outcome = match io.attempt(member, Deadline::until(now + Duration::from_secs(5))) {
@@ -172,12 +180,7 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
                 Err(error @ (CafleetError::DatabaseBusy(_) | CafleetError::DeadlineExceeded)) => {
                     AttemptOutcome::Failed(NotificationError {
                         member_id: member,
-                        message_id: snapshot
-                            .pending
-                            .iter()
-                            .find(|preview| preview.member_id == member)
-                            .expect("the selected member has a pending preview")
-                            .message_id,
+                        message_id: preview.message_id,
                         delivery: Delivery::NotSent,
                         error: error.to_string(),
                     })
@@ -187,7 +190,12 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
             match outcome {
                 AttemptOutcome::Held => {}
                 AttemptOutcome::NoPending => {
-                    errors.remove(&member);
+                    if errors
+                        .get(&member)
+                        .is_some_and(|error| error.message_id == preview.message_id)
+                    {
+                        errors.remove(&member);
+                    }
                 }
                 AttemptOutcome::Settled { message_id } | AttemptOutcome::Sent { message_id } => {
                     if errors
@@ -258,9 +266,10 @@ impl ReceiveIo for BrokerReceiver<'_> {
             let messages = broker::poll_messages(&tx, self.member_id)?;
             let pending = broker::panes::pending_previews(&tx, fleet, self.member_id)?
                 .into_iter()
-                .map(|(member_id, message_id)| PendingPreview {
+                .map(|(member_id, message_id, started)| PendingPreview {
                     member_id,
                     message_id,
+                    started,
                 })
                 .collect();
             tx.commit().map_err(broker::members::db_err)?;
@@ -572,6 +581,7 @@ mod tests {
                 .map(|&(member_id, message_id)| PendingPreview {
                     member_id,
                     message_id,
+                    started: false,
                 })
                 .collect(),
         }
@@ -626,6 +636,71 @@ mod tests {
 
     fn unexpected_attempt(_: usize, member_id: i64, _: Duration) -> Step<AttemptOutcome> {
         panic!("unexpected notification attempt for member {member_id}");
+    }
+
+    #[test]
+    fn a_durable_claim_suspends_only_its_exact_preview() {
+        let clock = TestClock::new();
+        let mut io = ScriptedIo::new(
+            &clock,
+            |_, attempts, _| {
+                let mut state = if attempts == 0 {
+                    snapshot(&[(11, 101), (11, 102)])
+                } else {
+                    snapshot(&[(11, 101)])
+                };
+                state.pending[0].started = true;
+                Step::done(state)
+            },
+            |attempt, member, _| {
+                assert_eq!((attempt, member), (1, 11));
+                Step::done(AttemptOutcome::Sent { message_id: 102 })
+            },
+        );
+        let outcome = clock.run(&mut io, 2500).unwrap();
+        assert_eq!(clock.attempts().len(), 1);
+        assert_eq!(outcome.notification_errors.len(), 1);
+        assert_eq!(outcome.notification_errors[0].message_id, 101);
+        assert_eq!(outcome.notification_errors[0].delivery, Delivery::Uncertain);
+    }
+
+    #[test]
+    fn an_obsolete_later_candidate_preserves_the_earlier_claim_diagnostic() {
+        let clock = TestClock::new();
+        let mut io = ScriptedIo::new(
+            &clock,
+            |_, _, _| {
+                let mut state = snapshot(&[(11, 101), (11, 102)]);
+                state.pending[0].started = true;
+                Step::done(state)
+            },
+            |_, _, _| Step::after(2000, AttemptOutcome::NoPending),
+        );
+        let outcome = clock.run(&mut io, 1500).unwrap();
+        assert_eq!(outcome.notification_errors.len(), 1);
+        assert_eq!(outcome.notification_errors[0].message_id, 101);
+        assert_eq!(outcome.notification_errors[0].delivery, Delivery::Uncertain);
+    }
+
+    #[test]
+    fn a_prewrite_database_error_names_the_unclaimed_candidate() {
+        let clock = TestClock::new();
+        let mut io = ScriptedIo::new(
+            &clock,
+            |_, _, _| {
+                let mut state = snapshot(&[(11, 101), (11, 102)]);
+                state.pending[0].started = true;
+                Step::done(state)
+            },
+            |_, member, _| {
+                assert_eq!(member, 11);
+                Step::failed(CafleetError::DatabaseBusy("busy".into()))
+            },
+        );
+        let outcome = clock.run(&mut io, 1500).unwrap();
+        assert_eq!(outcome.notification_errors.len(), 1);
+        assert_eq!(outcome.notification_errors[0].message_id, 102);
+        assert_eq!(outcome.notification_errors[0].delivery, Delivery::NotSent);
     }
 
     #[test]

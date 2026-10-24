@@ -1,7 +1,9 @@
 use crate::broker;
 use crate::config::Settings;
 use crate::error::CafleetError;
-use crate::input::{Deadline, PaneLock, complete_database_budget, with_database_budget};
+use crate::input::{
+    Deadline, PaneLock, complete_database_budget, retry_database_completion, with_database_budget,
+};
 use crate::multiplexer::{AnyMultiplexer, Multiplexer, MultiplexerError};
 use crate::output::truncate_text;
 use crate::pane_state::{PaneState, classify};
@@ -69,6 +71,42 @@ fn preview_snapshot(
     })
 }
 
+enum PreviewClaim {
+    Ready(broker::records::MessageRecord),
+    Skipped(AttemptOutcome),
+}
+
+fn claim_current_preview(
+    conn: &mut Connection,
+    member: &broker::records::MemberRecord,
+    message_id: i64,
+    deadline: Deadline,
+) -> Result<PreviewClaim, CafleetError> {
+    deadline.remaining()?;
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(broker::members::db_err)?;
+    let Some(current) = broker::get_member(&tx, member.member_id, member.fleet_id)? else {
+        return Ok(PreviewClaim::Skipped(AttemptOutcome::NoPending));
+    };
+    if current.placement != member.placement {
+        return Ok(PreviewClaim::Skipped(AttemptOutcome::Held));
+    }
+    let Some(message) = broker::messaging::claim_preview(&tx, message_id, member.member_id)? else {
+        return Ok(PreviewClaim::Skipped(AttemptOutcome::Settled {
+            message_id,
+        }));
+    };
+    if let Some(earlier) = broker::oldest_pending_preview(&tx, member.member_id)?
+        && (&earlier.created_at, earlier.message_id) < (&message.created_at, message.message_id)
+    {
+        return Ok(PreviewClaim::Skipped(AttemptOutcome::Held));
+    }
+    deadline.remaining()?;
+    tx.commit().map_err(broker::members::db_err)?;
+    Ok(PreviewClaim::Ready(message))
+}
+
 fn attempt_preview_scoped(
     conn: &mut Connection,
     settings: &Settings,
@@ -115,21 +153,6 @@ fn attempt_preview_scoped(
     if current.placement != member.placement {
         return Ok(AttemptOutcome::Held);
     }
-    let uncertain = |cause| {
-        failed(
-            message.message_id,
-            Delivery::Uncertain,
-            format!(
-                "preview {} delivery to member {member_id} is uncertain: {cause}. Inspect the pane before retrying.",
-                message.message_id
-            ),
-        )
-    };
-    if broker::messaging::preview_started(conn, message.message_id)? {
-        return Ok(uncertain(
-            "an earlier input attempt has no confirmed notification stamp".to_owned(),
-        ));
-    }
     let mux = match resolve().and_then(|mux| {
         mux.ensure_available()?;
         Ok(mux.bounded(deadline))
@@ -172,35 +195,22 @@ fn attempt_preview_scoped(
             AttemptOutcome::Held
         });
     }
-    let hold = read_snapshot(conn, deadline, |conn| {
-        let Some(current) = broker::get_member(conn, member_id, fleet_id)? else {
-            return Ok(Some(AttemptOutcome::NoPending));
-        };
-        if !broker::messaging::is_preview_pending(conn, message.message_id)? {
-            return Ok(Some(AttemptOutcome::Settled {
-                message_id: message.message_id,
-            }));
-        }
-        if current.placement != member.placement {
-            return Ok(Some(AttemptOutcome::Held));
-        }
-        let Some(pending) = broker::oldest_pending_preview(conn, member_id)? else {
-            return Ok(Some(AttemptOutcome::NoPending));
-        };
-        if pending.message_id != message.message_id {
-            return Ok(Some(AttemptOutcome::Held));
-        }
-        Ok(None)
-    })?;
-    if let Some(hold) = hold {
-        return Ok(hold);
-    }
+    let message = match claim_current_preview(conn, &member, message.message_id, deadline)? {
+        PreviewClaim::Ready(message) => message,
+        PreviewClaim::Skipped(outcome) => return Ok(outcome),
+    };
     let text =
         truncate_text(Some(&message.text), settings.max_text_len).expect("present message text");
-    deadline.remaining()?;
-    if !broker::messaging::claim_preview(conn, message.message_id)? {
-        return Ok(AttemptOutcome::Held);
-    }
+    let uncertain = |cause| {
+        failed(
+            message.message_id,
+            Delivery::Uncertain,
+            format!(
+                "preview {} delivery to member {member_id} is uncertain: {cause}. Inspect the pane before retrying.",
+                message.message_id
+            ),
+        )
+    };
     if let Err(error) = mux.send_inline_preview(
         pane,
         message.message_id,
@@ -211,13 +221,17 @@ fn attempt_preview_scoped(
         return Ok(if error.submission_started() {
             uncertain(error.to_string())
         } else {
-            match complete_database_budget(conn, deadline, |conn| {
+            match retry_database_completion(conn, deadline, |conn| {
                 broker::messaging::release_preview(conn, message.message_id)
             }) {
                 Ok(()) => failed(message.message_id, Delivery::NotSent, error.to_string()),
-                Err(cleanup) => uncertain(format!(
-                    "{error}; releasing the input claim failed: {cleanup}"
-                )),
+                Err(cleanup) => failed(
+                    message.message_id,
+                    Delivery::NotSent,
+                    format!(
+                        "{error}; releasing the input claim failed: {cleanup}. This preview remains suspended; later messages remain eligible."
+                    ),
+                ),
             }
         });
     }
@@ -252,6 +266,82 @@ mod tests {
     struct FinishingRunner {
         deadline: Deadline,
         submitted: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    #[test]
+    fn obsolete_claims_are_settled_without_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        let (fleet, director) = common::create_fleet(&mut conn, "settled");
+        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+        let member = broker::get_member(&conn, worker, fleet).unwrap().unwrap();
+        for state in ["acked", "notified", "claimed"] {
+            let message =
+                broker::send_message(&mut conn, director, &worker.to_string(), state).unwrap();
+            match state {
+                "acked" => {
+                    broker::ack_message(&mut conn, message.message_id).unwrap();
+                }
+                "notified" => {
+                    conn.execute(
+                        "UPDATE messages SET notified_at=created_at WHERE message_id=?1",
+                        [message.message_id],
+                    )
+                    .unwrap();
+                }
+                "claimed" => {
+                    assert!(
+                        broker::messaging::claim_preview(&conn, message.message_id, worker)
+                            .unwrap()
+                            .is_some()
+                    );
+                }
+                _ => unreachable!(),
+            }
+            assert!(matches!(
+                claim_current_preview(&mut conn, &member, message.message_id, Deadline::new()).unwrap(),
+                PreviewClaim::Skipped(AttemptOutcome::Settled { message_id }) if message_id == message.message_id
+            ));
+        }
+    }
+
+    #[test]
+    fn an_earlier_candidate_rolls_back_the_tentative_claim() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        let (fleet, director) = common::create_fleet(&mut conn, "ordering");
+        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+        let member = broker::get_member(&conn, worker, fleet).unwrap().unwrap();
+        let selected =
+            broker::send_message(&mut conn, director, &worker.to_string(), "selected").unwrap();
+        let earlier =
+            broker::send_message(&mut conn, director, &worker.to_string(), "earlier").unwrap();
+        conn.execute(
+            "UPDATE messages SET created_at='1900' WHERE message_id=?1",
+            [earlier.message_id],
+        )
+        .unwrap();
+        assert!(matches!(
+            claim_current_preview(&mut conn, &member, selected.message_id, Deadline::new())
+                .unwrap(),
+            PreviewClaim::Skipped(AttemptOutcome::Held)
+        ));
+        assert!(
+            !conn
+                .query_row(
+                    "SELECT preview_started_at IS NOT NULL FROM messages WHERE message_id=?1",
+                    [selected.message_id],
+                    |row| row.get::<_, bool>(0)
+                )
+                .unwrap()
+        );
+        assert_eq!(
+            broker::oldest_pending_preview(&conn, worker)
+                .unwrap()
+                .unwrap()
+                .message_id,
+            earlier.message_id
+        );
     }
 
     #[test]
