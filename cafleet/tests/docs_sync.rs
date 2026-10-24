@@ -728,11 +728,25 @@ mod structural_contracts {
     }
 
     #[test]
-    fn backend_capture_cues_describe_transport_readiness() {
+    fn backend_capture_cues_are_director_inspection_guidance() {
         let document = INVENTORY.document(BACKENDS);
         for backend in ["claude", "codex", "opencode"] {
             let section = document.section(backend).unwrap();
             let cues = section.section("pane-state-capture-cues").unwrap();
+            cues.require(&["member capture", "fleet capture"]).unwrap();
+            cues.require_pattern(
+                "cues guide Director visual inspection",
+                r"(?i)Director.{0,20}(visual )?inspection",
+            );
+            cues.require_pattern(
+                "delivery and dispatch never consult the cues",
+                r"(?i)delivery and dispatch do not consult",
+            );
+            assert!(
+                !cues.text.contains("transport evidence"),
+                "{}",
+                cues.error(cues.line, "capture cues are not transport readiness evidence")
+            );
             let rows = cues.rows().unwrap();
             let actual = rows
                 .iter()
@@ -934,11 +948,15 @@ mod structural_contracts {
             INVENTORY.require_link(&send, target).unwrap();
         }
         let core = INVENTORY.document(CORE);
-        core.require(&["cafleet message wait", "--timeout", "--json"])
-            .unwrap();
         INVENTORY
             .require_link(&core, "reference/runtime/spec/cli-options.md#message-wait")
             .unwrap();
+        send.require(&["[cafleet msg ID from SENDER TIMESTAMP]", "cafleet message show ID --json"])
+            .unwrap();
+        send.require_pattern(
+            "every recipient, the Director included, receives Escape-first lines",
+            r"(?is)Escape-first.{0,80}recipient's pane.{0,40}Director",
+        );
         let routing = INVENTORY.document(ROUTING);
         routing
             .require(&["Need to run: <command>. My harness denied it."])
@@ -971,14 +989,22 @@ mod structural_contracts {
             ])
             .unwrap();
         INVENTORY
-            .require_link(&isolation, "reference/supervision.md")
+            .require_link(&isolation, "reference/supervision.md#director-wake")
             .unwrap();
-        INVENTORY
+        let prompt = INVENTORY
             .document(DIRECTOR)
-            .section("member-ping-manual-inbox-poll")
-            .unwrap()
-            .require(&["cafleet member ping", "cafleet message poll <member-id>"])
+            .section("member-prompt")
             .unwrap();
+        prompt.require(&["cafleet member prompt <member-id>"]).unwrap();
+        prompt.require_pattern("prompt leads with Escape", r"(?i)leads with Escape");
+        prompt.require_pattern(
+            "prompt rejects the Director's own pane",
+            r"(?i)rejects the Director's own pane",
+        );
+        prompt.require_pattern(
+            "retained draft check before prompting",
+            r"(?is)draft.{0,80}before prompting",
+        );
         INVENTORY
             .document(DIRECTOR)
             .section("member-capture")
@@ -990,24 +1016,48 @@ mod structural_contracts {
             .section("the-owning-protocols")
             .unwrap();
         bash.require(&[
-            "cafleet member ping",
             "cafleet member exec",
-            "cafleet message poll <your-member-id>",
             "skills/cafleet/roles/member.md",
             "skills/cafleet/reference/prompt-routing.md",
         ])
         .unwrap();
-        INVENTORY
-            .document("docs/docs/spec/cli-options.md")
-            .section("member-ping")
-            .unwrap()
-            .require(&[
-                "cafleet message poll",
-                "--json",
-                "pending_placement",
-                "unknown",
-            ])
-            .unwrap();
+        for path in ["docs/docs/spec/cli-options.md", "SPEC.md"] {
+            INVENTORY
+                .document(path)
+                .section("member-prompt")
+                .unwrap()
+                .require(&[
+                    "cannot prompt the Director's own pane",
+                    "member ID's pane input remained busy; prompt was not dispatched.",
+                    "prompt was not dispatched to member ID: CAUSE",
+                    "Inspect the pane before retrying.",
+                    "Escape",
+                ])
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn removed_input_gates_have_no_living_mentions() {
+        let removed = [
+            ["member", "ping"].join(" "),
+            ["asynchronous", "wait", "rule"].join("-"),
+            ["poll", "trigger"].join("-"),
+            ["pane", "state", "classification"].join("-"),
+            ["send", "inline", "preview"].join("_"),
+        ];
+        for (path, text) in &INVENTORY.sources {
+            let source = INVENTORY.document(path);
+            for (offset, line) in text.lines().enumerate() {
+                for needle in &removed {
+                    assert!(
+                        !line.contains(needle.as_str()),
+                        "{}",
+                        source.error(offset + 1, &format!("removed concept {needle:?} is mentioned"))
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -1082,10 +1132,26 @@ mod structural_contracts {
         INVENTORY
             .require_link(&spec, "#6-module-specifications")
             .unwrap();
-        spec.section("member-ping")
-            .unwrap()
-            .require(&["member_id", "pane_id", "skipped", "reason", "--json"])
-            .unwrap();
+        for path in ["docs/docs/spec/cli-options.md", "SPEC.md"] {
+            let document = INVENTORY.document(path);
+            document
+                .section("member-list-output")
+                .unwrap()
+                .require(&[
+                    "unconfirmed_previews",
+                    "idle",
+                    "preview_started_at",
+                    "notified_at",
+                    "input_required",
+                    "(created_at, message_id)",
+                ])
+                .unwrap();
+            document
+                .section("member-show")
+                .unwrap()
+                .require(&["unconfirmed_previews", "last key"])
+                .unwrap();
+        }
         spec.section("member-capture")
             .unwrap()
             .require(&["content_sha256", "--lines", "--ansi"])
@@ -1221,43 +1287,123 @@ mod structural_contracts {
     }
 
     #[test]
-    fn director_owns_finite_receiving_until_reply_or_explicit_handoff() {
+    fn director_wakes_on_delivered_lines_and_polls_each_wake() {
         let supervision = INVENTORY.document(SUPERVISION);
-        supervision
+        let wake = supervision.section("director-wake").unwrap();
+        wake.require(&[
+            "cafleet message poll <director-member-id> --json",
+            "cafleet fleet capture",
+            "cafleet member capture",
+            "cafleet member list <fleet-id> --json",
+            "unconfirmed_previews",
+            "cafleet member prompt <member-id> \"cafleet message poll <member-id> --json\"",
+            "[cafleet msg ID from SENDER TIMESTAMP]",
+            "cafleet message show ID --json",
+        ])
+        .unwrap();
+        wake.require_pattern(
+            "a delivered line wakes the Director",
+            r"(?i)delivered line wakes you",
+        );
+        wake.require_pattern("poll on every wake", r"(?i)(on|every|each).{0,10}wake");
+        wake.require_pattern(
+            "ending the turn is the normal waiting state",
+            r"(?is)end(ing)? (your|the) turn.{0,120}normal waiting state",
+        );
+        wake.require_pattern(
+            "deferred actions remain host-owned",
+            r"(?is)deferred.{0,180}(host|task|state)",
+        );
+        wake.require_pattern(
+            "retained draft relay",
+            r"(?is)(draft|did not submit).{0,220}(relay|ask the user)",
+        );
+        wake.require_pattern(
+            "dismissed decision question is re-asked",
+            r"(?is)dismissed.{0,120}re-ask",
+        );
+        let continuation = wake.section("waiting-under-host-continuation").unwrap();
+        continuation
+            .require(&["cafleet message wait <director-member-id> --timeout 30 --json"])
+            .unwrap();
+        continuation.require_pattern(
+            "bounded foreground wait only under an active host continuation",
+            r"(?is)active host continuation.{0,200}bounded foreground",
+        );
+        let follow_up = wake.section("sender-follow-up").unwrap();
+        follow_up
             .require(&[
-                "cafleet message wait <director-member-id> --timeout 300 --json",
-                "cafleet fleet capture",
-                "cafleet member capture",
+                "Message N was persisted.",
+                "message N was not delivered to your pane; poll your inbox",
             ])
             .unwrap();
+        follow_up.require_pattern("exactly one follow-up", r"(?i)exactly one follow-up");
         supervision.require_pattern(
-            "live host-owned receive handle",
-            r"(?i)(task|session).{0,40}handle",
-        );
-        supervision.require_pattern(
-            "foreground timeout bound",
-            r"(?i)(30.{0,30}second|30[- ]second)",
+            "ACK before ending the turn",
+            r"(?is)ACK.{0,120}before ending the turn",
         );
         supervision.require_pattern(
             "explicit user handoff",
             r"(?i)explicit.{0,80}(handoff|hand.{0,10}back)",
         );
         supervision.require_pattern(
-            "timeout rechecks evidence",
-            r"(?is)timeout.{0,300}(roster|capture|artifact|inspect|check)",
+            "captures never gate delivery",
+            r"(?is)delivery and dispatch never wait on (them|captures)",
         );
-        supervision.require_pattern(
-            "retained draft relay",
-            r"(?is)draft.{0,220}(relay|ask the user)",
-        );
-        supervision.require_pattern(
-            "ACK before next receive",
-            r"(?is)ACK.{0,220}(before|then|next).{0,100}(wait|receiv)",
-        );
-        supervision.require_pattern(
-            "deferred actions remain host-owned",
-            r"(?is)deferred.{0,180}(host|task|state)",
-        );
+        for path in [CORE, DIRECTOR] {
+            INVENTORY
+                .require_link(
+                    &INVENTORY.document(path),
+                    if path == CORE {
+                        "reference/supervision.md#director-wake"
+                    } else {
+                        "../reference/supervision.md#director-wake"
+                    },
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn skills_use_message_wait_for_the_director_only_as_the_bounded_continuation_wait() {
+        let command = "cafleet message wait <director-member-id>";
+        let allowed = INVENTORY
+            .document(SUPERVISION)
+            .section("waiting-under-host-continuation")
+            .unwrap();
+        let allowed_start = allowed.line;
+        let allowed_end = allowed.line + allowed.text.lines().count();
+        let mut found = 0;
+        for (path, text) in INVENTORY
+            .sources
+            .iter()
+            .filter(|(path, _)| {
+                path.starts_with("skills/") && !path.starts_with("skills/cafleet/reference/runtime/")
+            })
+        {
+            let source = INVENTORY.document(path);
+            for (offset, line) in text.lines().enumerate() {
+                let Some(start) = line.find(command) else {
+                    continue;
+                };
+                let number = offset + 1;
+                assert!(
+                    path == SUPERVISION && (allowed_start..allowed_end).contains(&number),
+                    "{}",
+                    source.error(
+                        number,
+                        "the Director's message wait belongs only to Director wake's host-continuation wait"
+                    )
+                );
+                assert!(
+                    line[start + command.len()..].starts_with(" --timeout 30 "),
+                    "{}",
+                    source.error(number, "the Director's message wait uses --timeout 30")
+                );
+                found += 1;
+            }
+        }
+        assert!(found >= 1, "the host-continuation wait must be documented");
     }
 
     #[test]
@@ -1279,8 +1425,20 @@ mod structural_contracts {
         );
         member.require_pattern("wake inbox check", r"(?i)(on|each|every).{0,30}wake");
         member
-            .require(&["--json", "Director", "member prompt", "member exec"])
+            .require(&[
+                "--json",
+                "Director",
+                "member prompt",
+                "member exec",
+                "Message N was persisted.",
+                "message N was not delivered to your pane; poll your inbox",
+            ])
             .unwrap();
+        member.require_pattern("exactly one sender follow-up", r"(?i)exactly one follow-up");
+        member.require_pattern(
+            "a failed follow-up ends the turn",
+            r"(?is)follow-up also.{0,80}end your turn",
+        );
     }
 
     #[test]
@@ -1326,20 +1484,43 @@ mod structural_contracts {
             .document("docs/docs/spec/multiplexer-backends.md")
             .section("push-notifications")
             .unwrap();
-        mux.require(&["[cafleet msg", "notified_at", "⏎", "␉"])
-            .unwrap();
+        mux.require(&[
+            "[cafleet msg",
+            "notified_at",
+            "⏎",
+            "␉",
+            "[cafleet] Resume your work if something was still running.",
+            "[cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.",
+            "Body is N characters; run cafleet message show MESSAGE_ID --json to read it.",
+            "4000",
+            "CAFLEET_MAX_TEXT_LEN",
+            "unconfirmed_previews",
+        ])
+        .unwrap();
         mux.require_pattern(
             "oldest pending preview",
             r"(?is)oldest.{0,100}(pending|unack)",
         );
         mux.require_pattern(
-            "Director receives through broker reads",
-            r"(?is)Director.{0,160}(wait|read|poll|persist)",
+            "the Director is delivered into its pane like any recipient",
+            r"(?is)concrete pane, the Director included",
         );
         mux.require_pattern("shared input lock", r"(?i)(input|pane).{0,30}lock");
         mux.require_pattern(
-            "draft and unknown remain visible",
-            r"(?is)draft.{0,240}unknown|unknown.{0,240}draft",
+            "one lock hold drains oldest-first",
+            r"(?is)drains.{0,80}oldest-first.{0,120}one lock hold",
+        );
+        mux.require_pattern(
+            "delivery leaves the message pending until ACK",
+            r"(?is)leaves `status_state` unchanged.{0,200}ACK",
+        );
+        mux.require_pattern(
+            "a retained draft can merge with a delivery",
+            r"(?is)draft.{0,240}merge",
+        );
+        mux.require_pattern(
+            "rotation includes the Director but never the subject",
+            r"(?is)Director included, never the wait's own subject",
         );
         let send = INVENTORY
             .document("docs/docs/spec/cli-options.md")
@@ -1572,13 +1753,14 @@ mod structural_contracts {
     fn input_contract_preserves_drafts_and_serializes_complete_submission() {
         let mux = INVENTORY.document("docs/docs/spec/multiplexer-backends.md");
         mux.require(&[
-            "idle",
-            "working",
-            "awaiting_user",
-            "draft",
-            "unknown",
             ".pane-locks/",
             "SHA-256",
+            "tmux send-keys -t PANE Escape",
+            "herdr pane send-keys PANE escape",
+            "insufficient pane input budget for literal input, settle and Enter",
+            "member ID's pane input remained busy; preview MESSAGE_ID was not sent.",
+            "member ID's pane input remained busy; prompt was not dispatched.",
+            "member ID's pane input remained busy; native command was not dispatched.",
         ])
         .unwrap();
         mux.require_pattern(
@@ -1589,11 +1771,18 @@ mod structural_contracts {
             "lock covers Enter and stamp",
             r"(?is)(lock|guard).{0,400}Enter.{0,180}(stamp|notified_at)",
         );
-        mux.require_pattern("styled capture", r"(?i)(ANSI|SGR|styled)");
         mux.require_pattern(
-            "same visible text has different input roles",
-            r"(?is)(same|identical).{0,200}(draft|user.{0,20}(input|text))",
+            "no input path reads the pane",
+            r"(?i)No input path captures the pane",
         );
+        mux.require_pattern(
+            "bounded lock wait with the input reservation",
+            r"(?is)3\.5-second input reservation.{0,80}1\.5 seconds",
+        );
+        let termination = mux.section("termination-during-pane-input").unwrap();
+        termination
+            .require(&["SIGINT", "SIGTERM", "SIGHUP", "SIGKILL", "unconfirmed_previews"])
+            .unwrap();
         let backends = INVENTORY.document("docs/docs/spec/coding-agent-backends.md");
         backends
             .section("spawn-argv")
@@ -1671,14 +1860,18 @@ mod structural_contracts {
                 .require(&[
                     "cafleet fleet create",
                     "cafleet member create",
-                    "cafleet message wait",
+                    "cafleet message poll <director-member-id> --json",
                     "--json",
                 ])
                 .unwrap();
             workflow.require_pattern(
-                "finite receive ownership",
-                r"(?i)(handle|background|finite receiv)",
+                "the Director wakes on delivered replies",
+                r"(?i)delivered `\[cafleet msg ID …\]` line wakes you",
             );
+            workflow.require_pattern("poll on every wake", r"(?i)on every wake");
+            INVENTORY
+                .require_link(&workflow, "../../cafleet/reference/supervision.md#director-wake")
+                .unwrap();
         }
         INVENTORY
             .document(CREATE)
@@ -1809,7 +2002,7 @@ mod structural_contracts {
     }
 
     #[test]
-    fn permissions_documentation_covers_finite_wait_and_director_capture() {
+    fn permissions_documentation_covers_message_wait_and_director_capture() {
         let coverage = INVENTORY
             .document("docs/docs/spec/cli-options.md")
             .section("permissionsallow-coverage")
