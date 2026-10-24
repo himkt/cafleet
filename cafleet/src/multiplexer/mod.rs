@@ -11,6 +11,29 @@ pub use herdr::HerdrMultiplexer;
 pub use tmux::TmuxMultiplexer;
 
 pub(crate) const SUBMIT_DELAY: f64 = 1.0;
+pub(crate) const ESCAPE_SETTLE_DELAY: f64 = 0.5;
+pub(crate) const ESCAPE_TIMEOUT: Duration = Duration::from_secs(1);
+pub(crate) const MIN_LITERAL_BUDGET: Duration = Duration::from_millis(500);
+pub(crate) const REVALIDATION_MARGIN: Duration = Duration::from_millis(500);
+/// Revalidation margin + Escape settle + literal minimum + SUBMIT_DELAY + Enter: 3.5 s of the 5 s budget.
+pub(crate) const INPUT_RESERVATION: Duration = Duration::from_millis(3500);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lead {
+    Escape,
+    Direct,
+}
+
+impl Lead {
+    /// The settle and Enter time a submission keeps back from its literal input.
+    pub(crate) fn reserved(self) -> Duration {
+        let submit = Duration::from_secs_f64(SUBMIT_DELAY) + Duration::from_secs(1);
+        match self {
+            Lead::Escape => submit + Duration::from_secs_f64(ESCAPE_SETTLE_DELAY),
+            Lead::Direct => submit,
+        }
+    }
+}
 
 #[cfg(test)]
 mod submission_regressions {
@@ -500,34 +523,57 @@ pub trait CommandRunner {
     }
 }
 
+pub(crate) struct PaneInput {
+    pub escape: Vec<String>,
+    pub literal: Vec<String>,
+    pub enter: Vec<String>,
+}
+
+fn whole_seconds(duration: Duration) -> u64 {
+    duration.as_secs() + u64::from(duration.subsec_nanos() > 0)
+}
+
 fn submit_prompt(
     runner: &dyn CommandRunner,
-    literal: &[String],
-    enter: &[String],
+    input: &PaneInput,
+    lead: Lead,
     map_error: fn(&[String], Option<u64>, RunError) -> MultiplexerError,
     pane_gone: fn(&str) -> bool,
 ) -> Result<(), MultiplexerError> {
-    let remaining = runner
-        .remaining_budget()
-        .map_err(|error| map_error(literal, None, error))?
-        .expect("submission uses a deadline-bounded runner");
-    let reserved = Duration::from_secs_f64(SUBMIT_DELAY) + Duration::from_secs(1);
-    let literal_budget = remaining
-        .checked_sub(reserved)
-        .filter(|budget| !budget.is_zero())
-        .ok_or_else(|| {
-            MultiplexerError::new(
-                "insufficient pane input budget for literal input, settle and Enter",
-            )
-        })?;
+    let PaneInput {
+        escape,
+        literal,
+        enter,
+    } = input;
+    let unreserved = |reserved: Duration| {
+        runner
+            .remaining_budget()
+            .map_err(|error| map_error(literal, None, error))?
+            .expect("submission uses a deadline-bounded runner")
+            .checked_sub(reserved)
+            .filter(|budget| !budget.is_zero())
+            .ok_or_else(|| {
+                MultiplexerError::new(
+                    "insufficient pane input budget for literal input, settle and Enter",
+                )
+            })
+    };
+    let slack = unreserved(lead.reserved())?;
+    if lead == Lead::Escape {
+        let timeout = slack.min(ESCAPE_TIMEOUT);
+        runner
+            .run_for(escape, timeout)
+            .map_err(|error| map_error(escape, Some(whole_seconds(timeout)), error))?;
+        runner.sleep(ESCAPE_SETTLE_DELAY);
+    }
+    let literal_budget = unreserved(Lead::Direct.reserved())?;
     runner.run_for(literal, literal_budget).map_err(|error| {
         let not_sent = match &error {
             RunError::BinaryNotFound(_) | RunError::NotStarted(_) => true,
             RunError::Failed { stderr } => pane_gone(stderr),
             RunError::Timeout => false,
         };
-        let seconds = literal_budget.as_secs() + u64::from(literal_budget.subsec_nanos() > 0);
-        let error = map_error(literal, Some(seconds), error);
+        let error = map_error(literal, Some(whole_seconds(literal_budget)), error);
         if not_sent { error } else { error.after_write() }
     })?;
     runner.sleep(SUBMIT_DELAY);
@@ -621,37 +667,6 @@ pub(crate) fn capture_window(raw: &str, lines: i64) -> String {
     parts[start..].join("\n")
 }
 
-pub(crate) fn inline_preview_payload(
-    message_id: i64,
-    sender_id: i64,
-    ts: &str,
-    text: &str,
-) -> String {
-    fn visible(text: &str) -> String {
-        let mut result = String::new();
-        let mut chars = text.chars().peekable();
-        while let Some(ch) = chars.next() {
-            match ch {
-                '\r' => {
-                    if chars.peek() == Some(&'\n') {
-                        chars.next();
-                    }
-                    result.push('⏎');
-                }
-                '\n' => result.push('⏎'),
-                '\t' => result.push('␉'),
-                '\u{00}'..='\u{1f}' | '\u{7f}' => result.push_str(&format!("\\x{:02x}", ch as u32)),
-                _ => result.push(ch),
-            }
-        }
-        result
-    }
-    format!(
-        "[cafleet msg {message_id} from {sender_id} {ts}] {}",
-        visible(text)
-    )
-}
-
 pub trait Multiplexer {
     fn name(&self) -> &'static str;
     fn ensure_available(&self) -> Result<(), MultiplexerError>;
@@ -662,15 +677,12 @@ pub trait Multiplexer {
         env: &[(String, String)],
         command: &[String],
     ) -> Result<String, MultiplexerError>;
-    fn send_inline_preview(
+    fn send_prompt(
         &self,
         target_pane_id: &str,
-        message_id: i64,
-        sender_id: i64,
-        ts: &str,
         text: &str,
+        lead: Lead,
     ) -> Result<(), MultiplexerError>;
-    fn send_prompt(&self, target_pane_id: &str, text: &str) -> Result<(), MultiplexerError>;
     fn capture_pane(&self, target_pane_id: &str, lines: i64) -> Result<String, MultiplexerError>;
     fn list_pane_ids(&self) -> Result<std::collections::BTreeSet<String>, MultiplexerError>;
     fn kill_pane(&self, target_pane_id: &str, ignore_missing: bool)
@@ -759,19 +771,13 @@ impl Multiplexer for AnyMultiplexer {
         dispatch!(self, mux => mux.split_window(reference, env, command))
     }
 
-    fn send_inline_preview(
+    fn send_prompt(
         &self,
         target_pane_id: &str,
-        message_id: i64,
-        sender_id: i64,
-        ts: &str,
         text: &str,
+        lead: Lead,
     ) -> Result<(), MultiplexerError> {
-        dispatch!(self, mux => mux.send_inline_preview(target_pane_id, message_id, sender_id, ts, text))
-    }
-
-    fn send_prompt(&self, target_pane_id: &str, text: &str) -> Result<(), MultiplexerError> {
-        dispatch!(self, mux => mux.send_prompt(target_pane_id, text))
+        dispatch!(self, mux => mux.send_prompt(target_pane_id, text, lead))
     }
 
     fn capture_pane(&self, target_pane_id: &str, lines: i64) -> Result<String, MultiplexerError> {
@@ -816,23 +822,13 @@ macro_rules! implement_backend {
                 $backend::split_window(self, reference, env, command)
             }
 
-            fn send_inline_preview(
-                &self,
-                target_pane_id: &str,
-                message_id: i64,
-                sender_id: i64,
-                ts: &str,
-                text: &str,
-            ) -> Result<(), MultiplexerError> {
-                $backend::send_inline_preview(self, target_pane_id, message_id, sender_id, ts, text)
-            }
-
             fn send_prompt(
                 &self,
                 target_pane_id: &str,
                 text: &str,
+                lead: Lead,
             ) -> Result<(), MultiplexerError> {
-                $backend::send_prompt(self, target_pane_id, text)
+                $backend::send_prompt(self, target_pane_id, text, lead)
             }
 
             fn capture_pane(

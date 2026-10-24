@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
 
-use super::{CommandRunner, MultiplexerContext, MultiplexerError, RunError};
+use super::{CommandRunner, Lead, MultiplexerContext, MultiplexerError, PaneInput, RunError};
 
 const PANE_GONE_MARKERS: [&str; 2] = ["can't find pane", "no such pane"];
 
@@ -178,22 +178,12 @@ impl TmuxMultiplexer {
         Ok(pane_id)
     }
 
-    pub fn send_inline_preview(
+    pub fn send_prompt(
         &self,
         target_pane_id: &str,
-        message_id: i64,
-        sender_id: i64,
-        ts: &str,
         text: &str,
+        lead: Lead,
     ) -> Result<(), MultiplexerError> {
-        if !self.runner.binary_exists("tmux") {
-            return Err(MultiplexerError::new("tmux binary not found on PATH"));
-        }
-        let payload = super::inline_preview_payload(message_id, sender_id, ts, text);
-        self.send_prompt(target_pane_id, &payload)
-    }
-
-    pub fn send_prompt(&self, target_pane_id: &str, text: &str) -> Result<(), MultiplexerError> {
         if !crate::input::valid_input(text) {
             return Err(MultiplexerError::new(
                 "send_prompt: text must be one non-empty line without control characters",
@@ -202,8 +192,12 @@ impl TmuxMultiplexer {
         let bounded = self.bounded(crate::input::Deadline::new());
         super::submit_prompt(
             bounded.runner.as_ref(),
-            &tmux_argv(&["tmux", "send-keys", "-t", target_pane_id, "-l", "--", text]),
-            &tmux_argv(&["tmux", "send-keys", "-t", target_pane_id, "Enter"]),
+            &PaneInput {
+                escape: tmux_argv(&["tmux", "send-keys", "-t", target_pane_id, "Escape"]),
+                literal: tmux_argv(&["tmux", "send-keys", "-t", target_pane_id, "-l", "--", text]),
+                enter: tmux_argv(&["tmux", "send-keys", "-t", target_pane_id, "Enter"]),
+            },
+            lead,
             map_run_error,
             is_pane_gone,
         )

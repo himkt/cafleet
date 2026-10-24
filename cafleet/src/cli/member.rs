@@ -13,7 +13,7 @@ use crate::config::Settings;
 use crate::delivery::DELIVERY_CAPTURE_LINES;
 use crate::error::CafleetError;
 
-use crate::multiplexer::Multiplexer;
+use crate::multiplexer::{Lead, Multiplexer};
 use crate::output::{format_member, format_member_detail, format_member_list};
 use crate::pane_state::{PaneState, classify};
 use crate::presentation;
@@ -590,7 +590,7 @@ fn dispatch_input(
             "member {id} is {state}; {label} was not dispatched."
         )));
     }
-    mux.send_prompt(pane, text).map_err(|error| {
+    mux.send_prompt(pane, text, Lead::Direct).map_err(|error| {
         if error.submission_started() { CafleetError::App(format!(
             "{label} delivery to member {id} is uncertain: {error}. Inspect the pane before retrying."
         )) } else { prewrite(error.to_string()) }
@@ -705,7 +705,7 @@ fn ping(
                     .map_err(|e| CafleetError::App(e.to_string()))?;
                 let reason = input_state(classify(&placement.coding_agent, &content));
                 if reason.is_none() {
-                    mux.send_prompt(pane, &format!("cafleet message poll {member_id} --json"))
+                    mux.send_prompt(pane, &format!("cafleet message poll {member_id} --json"), Lead::Direct)
                         .map_err(|error| if error.submission_started() { CafleetError::App(format!(
                             "poll-trigger delivery to member {member_id} is uncertain: {error}. Inspect the pane before retrying."
                         )) } else { CafleetError::App(error.to_string()) })?;

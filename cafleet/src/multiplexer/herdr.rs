@@ -4,7 +4,8 @@ use std::rc::Rc;
 use serde_json::Value;
 
 use super::{
-    CommandRunner, MultiplexerContext, MultiplexerError, PaneCleanup, PaneOwnership, RunError,
+    CommandRunner, Lead, MultiplexerContext, MultiplexerError, PaneCleanup, PaneInput,
+    PaneOwnership, RunError,
 };
 
 const PANE_NOT_FOUND: &str = "pane_not_found";
@@ -347,22 +348,12 @@ impl HerdrMultiplexer {
         Ok(())
     }
 
-    pub fn send_inline_preview(
+    pub fn send_prompt(
         &self,
         target_pane_id: &str,
-        message_id: i64,
-        sender_id: i64,
-        ts: &str,
         text: &str,
+        lead: Lead,
     ) -> Result<(), MultiplexerError> {
-        if !self.runner.binary_exists("herdr") {
-            return Err(MultiplexerError::new("herdr binary not found on PATH"));
-        }
-        let payload = super::inline_preview_payload(message_id, sender_id, ts, text);
-        self.send_prompt(target_pane_id, &payload)
-    }
-
-    pub fn send_prompt(&self, target_pane_id: &str, text: &str) -> Result<(), MultiplexerError> {
         if !crate::input::valid_input(text) {
             return Err(MultiplexerError::new(
                 "send_prompt: text must be one non-empty line without control characters",
@@ -371,8 +362,12 @@ impl HerdrMultiplexer {
         let bounded = self.bounded(crate::input::Deadline::new());
         super::submit_prompt(
             bounded.runner.as_ref(),
-            &herdr_argv(&["herdr", "pane", "send-text", target_pane_id, "--", text]),
-            &herdr_argv(&["herdr", "pane", "send-keys", target_pane_id, "enter"]),
+            &PaneInput {
+                escape: herdr_argv(&["herdr", "pane", "send-keys", target_pane_id, "escape"]),
+                literal: herdr_argv(&["herdr", "pane", "send-text", target_pane_id, "--", text]),
+                enter: herdr_argv(&["herdr", "pane", "send-keys", target_pane_id, "enter"]),
+            },
+            lead,
             map_run_error,
             |stderr| error_code(stderr).as_deref() == Some(PANE_NOT_FOUND),
         )
