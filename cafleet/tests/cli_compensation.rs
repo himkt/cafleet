@@ -231,6 +231,7 @@ fn fleet_insert_error(cli: &Cli) {
 
 #[test]
 fn member_registration_failure_never_creates_a_pane_or_partial_placement() {
+    let _test_resource = common::process_test_resource_guard();
     let cli = fixture(true);
     cli.sqlite().execute_batch("CREATE TRIGGER fail_registration BEFORE INSERT ON members BEGIN SELECT RAISE(ABORT, 'primary registration failure'); END;").unwrap();
     let output = member_create(&cli, "prompt", false);
@@ -247,6 +248,7 @@ fn member_registration_failure_never_creates_a_pane_or_partial_placement() {
 
 #[test]
 fn member_placeholder_failure_keeps_usage_exit_and_deregisters_without_a_pane() {
+    let _test_resource = common::process_test_resource_guard();
     let cli = fixture(true);
     let output = member_create(&cli, "{unknown}", false);
     assert_eq!(code(&output), 2);
@@ -269,6 +271,7 @@ fn member_placeholder_failure_keeps_usage_exit_and_deregisters_without_a_pane() 
 
 #[test]
 fn member_placeholder_cleanup_failure_follows_usage_error_without_success_claim() {
+    let _test_resource = common::process_test_resource_guard();
     let cli = fixture(true);
     cli.sqlite().execute_batch("CREATE TRIGGER fail_deregister BEFORE UPDATE OF status ON members BEGIN SELECT RAISE(ABORT, 'secondary deregister failure'); END;").unwrap();
     let output = member_create(&cli, "{unknown}", false);
@@ -285,6 +288,7 @@ fn member_placeholder_cleanup_failure_follows_usage_error_without_success_claim(
 
 #[test]
 fn member_placement_error_kills_pane_and_compensates_registration() {
+    let _test_resource = common::process_test_resource_guard();
     let cli = fixture(true);
     placement_error(&cli);
     let output = member_create(&cli, "prompt", false);
@@ -296,6 +300,7 @@ fn member_placement_error_kills_pane_and_compensates_registration() {
 
 #[test]
 fn member_vanished_placement_kills_the_owned_pane_and_deregisters_once() {
+    let _test_resource = common::process_test_resource_guard();
     let cli = fixture(true);
     cli.sqlite().execute_batch("CREATE TRIGGER vanish_patch BEFORE UPDATE OF mux_pane_id ON member_placements BEGIN DELETE FROM member_placements WHERE member_id=NEW.member_id; SELECT RAISE(IGNORE); END;").unwrap();
     let output = member_create(&cli, "prompt", false);
@@ -307,6 +312,7 @@ fn member_vanished_placement_kills_the_owned_pane_and_deregisters_once() {
 
 #[test]
 fn member_pane_cleanup_failure_still_deregisters_and_retains_primary_error() {
+    let _test_resource = common::process_test_resource_guard();
     let mut cli = fixture(true);
     cli.set_env("CAFLEET_TEST_CLOSE_FAIL", "1");
     placement_error(&cli);
@@ -325,6 +331,7 @@ fn member_pane_cleanup_failure_still_deregisters_and_retains_primary_error() {
 
 #[test]
 fn member_deregister_failure_does_not_repeat_pane_cleanup_or_claim_full_rollback() {
+    let _test_resource = common::process_test_resource_guard();
     let cli = fixture(true);
     placement_error(&cli);
     cli.sqlite().execute_batch("CREATE TRIGGER fail_deregister BEFORE UPDATE OF status ON members BEGIN SELECT RAISE(ABORT, 'secondary deregister failure'); END;").unwrap();
@@ -343,6 +350,7 @@ fn member_deregister_failure_does_not_repeat_pane_cleanup_or_claim_full_rollback
 
 #[test]
 fn fleet_placement_insert_failure_rolls_back_without_pane_mutation() {
+    let _test_resource = common::process_test_resource_guard();
     let cli = fixture(false);
     fleet_insert_error(&cli);
     let output = fleet_create(&cli, false);
@@ -358,6 +366,7 @@ fn fleet_placement_insert_failure_rolls_back_without_pane_mutation() {
 
 #[test]
 fn fleet_deferred_commit_failure_rolls_back_all_registration_rows() {
+    let _test_resource = common::process_test_resource_guard();
     let cli = fixture(false);
     cli.sqlite().execute_batch(
         "CREATE TABLE compensation_parent(id INTEGER PRIMARY KEY);
@@ -383,6 +392,7 @@ fn fleet_deferred_commit_failure_rolls_back_all_registration_rows() {
 
 #[test]
 fn herdr_member_run_failure_closes_once_and_deregisters_even_when_close_fails() {
+    let _test_resource = common::process_test_resource_guard();
     for fail_close in [false, true] {
         let mut cli = herdr_fixture(true);
         if fail_close {
@@ -405,6 +415,7 @@ fn herdr_member_run_failure_closes_once_and_deregisters_even_when_close_fails() 
 
 #[test]
 fn herdr_fleet_registration_uses_the_current_pane_without_launching_or_closing() {
+    let _test_resource = common::process_test_resource_guard();
     let cli = herdr_fixture(false);
     let output = fleet_create(&cli, true);
     assert_eq!(code(&output), 0, "{}", stderr(&output));
@@ -424,6 +435,7 @@ fn herdr_fleet_registration_uses_the_current_pane_without_launching_or_closing()
 
 #[test]
 fn herdr_unknown_split_keeps_unowned_panes_untouched() {
+    let _test_resource = common::process_test_resource_guard();
     let mut cli = herdr_fixture(true);
     cli.set_env("CAFLEET_TEST_UNKNOWN_PANE", "1");
     let output = member_create(&cli, "prompt", false);
