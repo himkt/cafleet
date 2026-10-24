@@ -554,7 +554,7 @@ mod tests {
     use crate::multiplexer::test_support::{
         FakeRunner, argv, env, herdr_envelope, herdr_error_stderr, run_event, sleep_event,
     };
-    use crate::multiplexer::{HerdrMultiplexer, MultiplexerContext, RunError};
+    use crate::multiplexer::{HerdrMultiplexer, Lead, MultiplexerContext, RunError};
 
     fn herdr_env() -> std::collections::HashMap<String, String> {
         env(&[("HERDR_ENV", "1")])
@@ -798,7 +798,7 @@ mod tests {
         let runner = FakeRunner::with_binary("herdr");
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
         let text = "  /help with literal $HOME; !  ";
-        mux.send_prompt("w1:p2", text).unwrap();
+        mux.send_prompt("w1:p2", text, Lead::Direct).unwrap();
         assert_eq!(
             runner.run_argvs(),
             vec![
@@ -817,89 +817,111 @@ mod tests {
     }
 
     #[test]
-    fn send_inline_preview_submits_one_visible_literal_line() {
+    fn escape_lead_sends_the_escape_key_and_settles_before_the_literal() {
         let runner = FakeRunner::with_binary("herdr");
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        let ts = "2026-10-23T00:00:00.000000+00:00";
-        mux.send_inline_preview("w1:p2", 5, 2, ts, "a\r\nb\nc\rd\tx\x1b\x7f")
-            .unwrap();
-        let expected = format!("[cafleet msg 5 from 2 {ts}] a⏎b⏎c⏎d␉x\\x1b\\x7f");
-        let text = expected.as_str();
+        let text = "[cafleet msg 5 from 2 timestamp] hello";
+        mux.send_prompt("w1:p2", text, Lead::Escape).unwrap();
         assert_eq!(
             runner.run_argvs(),
             vec![
+                argv(&["herdr", "pane", "send-keys", "w1:p2", "escape"]),
                 argv(&["herdr", "pane", "send-text", "w1:p2", "--", text]),
                 argv(&["herdr", "pane", "send-keys", "w1:p2", "enter"])
             ]
         );
-        assert_eq!(runner.events()[1], sleep_event(1.0));
+        let events = runner.events();
+        assert_eq!(events.len(), 5, "{events:?}");
+        assert_eq!(
+            events[0],
+            run_event(&["herdr", "pane", "send-keys", "w1:p2", "escape"], Some(1))
+        );
+        assert_eq!(events[1], sleep_event(0.5));
+        assert_eq!(events[3], sleep_event(1.0));
     }
 
     #[test]
-    fn first_preview_write_failure_propagates_cause_without_enter_or_retry() {
+    fn escape_failure_propagates_cause_without_literal_input() {
+        for stderr in [
+            "injected escape failure".to_string(),
+            herdr_error_stderr("pane_not_found"),
+        ] {
+            let runner = FakeRunner::with_binary("herdr");
+            runner.respond(Err(RunError::Failed {
+                stderr: stderr.clone(),
+            }));
+            let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+            let error = mux.send_prompt("w1:p2", "hello", Lead::Escape).unwrap_err();
+            assert!(error.to_string().contains(stderr.trim()), "{error}");
+            assert!(!error.submission_started(), "{error}");
+            assert_eq!(
+                runner.run_argvs(),
+                vec![argv(&["herdr", "pane", "send-keys", "w1:p2", "escape"])]
+            );
+            assert_eq!(runner.events().len(), 1);
+        }
+    }
+
+    #[test]
+    fn first_write_failure_propagates_cause_without_enter_or_retry() {
         let runner = FakeRunner::with_binary("herdr");
         runner.respond(Err(RunError::Failed {
             stderr: "injected first write failure".into(),
         }));
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        let error = mux
-            .send_inline_preview("w1:p2", 5, 2, "timestamp", "hello")
-            .unwrap_err();
+        let error = mux.send_prompt("w1:p2", "hello", Lead::Direct).unwrap_err();
         assert!(
             error.to_string().contains("injected first write failure"),
             "{error}"
         );
-        let text = "[cafleet msg 5 from 2 timestamp] hello";
         assert_eq!(
             runner.run_argvs(),
-            vec![argv(&["herdr", "pane", "send-text", "w1:p2", "--", text])]
+            vec![argv(&[
+                "herdr",
+                "pane",
+                "send-text",
+                "w1:p2",
+                "--",
+                "hello"
+            ])]
         );
         assert_eq!(runner.events().len(), 1);
     }
 
     #[test]
-    fn lost_preview_enter_propagates_cause_after_one_literal_write() {
+    fn lost_enter_propagates_cause_after_one_literal_write() {
         let runner = FakeRunner::with_binary("herdr");
+        runner.respond(Ok(String::new()));
         runner.respond(Ok(String::new()));
         runner.respond(Err(RunError::Failed {
             stderr: "injected enter failure".into(),
         }));
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        let error = mux
-            .send_inline_preview("w1:p2", 5, 2, "timestamp", "hello")
-            .unwrap_err();
+        let error = mux.send_prompt("w1:p2", "hello", Lead::Escape).unwrap_err();
         assert!(
             error.to_string().contains("injected enter failure"),
             "{error}"
         );
-        let text = "[cafleet msg 5 from 2 timestamp] hello";
+        assert!(error.submission_started(), "{error}");
         assert_eq!(
             runner.run_argvs(),
             vec![
-                argv(&["herdr", "pane", "send-text", "w1:p2", "--", text]),
+                argv(&["herdr", "pane", "send-keys", "w1:p2", "escape"]),
+                argv(&["herdr", "pane", "send-text", "w1:p2", "--", "hello"]),
                 argv(&["herdr", "pane", "send-keys", "w1:p2", "enter"])
             ]
         );
-        assert_eq!(runner.events().len(), 3);
-    }
-
-    #[test]
-    fn inline_preview_requires_the_backend_binary_before_any_io() {
-        let runner = FakeRunner::without_binaries();
-        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        let error = mux
-            .send_inline_preview("w1:p2", 5, 2, "timestamp", "hello")
-            .unwrap_err();
-        assert_eq!(error.to_string(), "herdr binary not found on PATH");
-        assert!(runner.events().is_empty());
+        assert_eq!(runner.events().len(), 5);
     }
 
     #[test]
     fn prompt_line_validation_precedes_transport() {
         let runner = FakeRunner::with_binary("herdr");
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        for text in ["", "  ", "a\nb", "a\rb", "a\tb", "a\0b", "a\x1bb", "a\x7fb"] {
-            assert!(mux.send_prompt("w1:p2", text).is_err(), "{text:?}");
+        for lead in [Lead::Escape, Lead::Direct] {
+            for text in ["", "  ", "a\nb", "a\rb", "a\tb", "a\0b", "a\x1bb", "a\x7fb"] {
+                assert!(mux.send_prompt("w1:p2", text, lead).is_err(), "{text:?}");
+            }
         }
         assert!(runner.events().is_empty());
     }
