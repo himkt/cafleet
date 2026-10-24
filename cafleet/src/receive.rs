@@ -55,12 +55,27 @@ pub(crate) struct NotificationError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum AttemptOutcome {
-    Held,
+pub(crate) struct AttemptOutcome {
+    pub sent: Vec<i64>,
+    pub end: AttemptEnd,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum AttemptEnd {
     NoPending,
-    Settled { message_id: i64 },
-    Sent { message_id: i64 },
+    Drained,
+    BudgetExhausted,
+    Held,
     Failed(NotificationError),
+}
+
+impl AttemptOutcome {
+    pub(crate) fn ended(end: AttemptEnd) -> Self {
+        Self {
+            sent: Vec::new(),
+            end,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -178,18 +193,18 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
             let outcome = match io.attempt(member, Deadline::until(now + Duration::from_secs(5))) {
                 Ok(outcome) => outcome,
                 Err(error @ (CafleetError::DatabaseBusy(_) | CafleetError::DeadlineExceeded)) => {
-                    AttemptOutcome::Failed(NotificationError {
+                    AttemptOutcome::ended(AttemptEnd::Failed(NotificationError {
                         member_id: member,
                         message_id: preview.message_id,
                         delivery: Delivery::NotSent,
                         error: error.to_string(),
-                    })
+                    }))
                 }
                 Err(error) => return Err(preserve_uncertainty(error, &errors)),
             };
-            match outcome {
-                AttemptOutcome::Held => {}
-                AttemptOutcome::NoPending => {
+            match outcome.end {
+                AttemptEnd::Held => {}
+                AttemptEnd::NoPending => {
                     if errors
                         .get(&member)
                         .is_some_and(|error| error.message_id == preview.message_id)
@@ -197,15 +212,15 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
                         errors.remove(&member);
                     }
                 }
-                AttemptOutcome::Settled { message_id } | AttemptOutcome::Sent { message_id } => {
+                AttemptEnd::Drained | AttemptEnd::BudgetExhausted => {
                     if errors
                         .get(&member)
-                        .is_some_and(|error| error.message_id == message_id)
+                        .is_some_and(|error| outcome.sent.contains(&error.message_id))
                     {
                         errors.remove(&member);
                     }
                 }
-                AttemptOutcome::Failed(error) => {
+                AttemptEnd::Failed(error) => {
                     assert_eq!(
                         error.member_id, member,
                         "the owned attempt reports its selected member"
@@ -287,7 +302,7 @@ impl ReceiveIo for BrokerReceiver<'_> {
         let fleet = crate::input::with_database_budget(self.conn, deadline, |conn| {
             subject_fleet(conn, self.member_id, self.fleet_id)
         })?;
-        crate::runtime::attempt_preview(self.conn, self.settings, member_id, Some(fleet), deadline)
+        crate::runtime::deliver_pending(self.conn, self.settings, member_id, Some(fleet), deadline)
     }
 }
 
@@ -630,8 +645,27 @@ mod tests {
         }
     }
 
+    fn outcome(sent: &[i64], end: AttemptEnd) -> AttemptOutcome {
+        AttemptOutcome {
+            sent: sent.to_vec(),
+            end,
+        }
+    }
+
+    fn hold() -> AttemptOutcome {
+        outcome(&[], AttemptEnd::Held)
+    }
+
+    fn drained(sent: &[i64]) -> AttemptOutcome {
+        outcome(sent, AttemptEnd::Drained)
+    }
+
+    fn failed(error: NotificationError) -> AttemptOutcome {
+        outcome(&[], AttemptEnd::Failed(error))
+    }
+
     fn held(_: usize, _: i64, _: Duration) -> Step<AttemptOutcome> {
-        Step::done(AttemptOutcome::Held)
+        Step::done(hold())
     }
 
     fn unexpected_attempt(_: usize, member_id: i64, _: Duration) -> Step<AttemptOutcome> {
@@ -654,7 +688,7 @@ mod tests {
             },
             |attempt, member, _| {
                 assert_eq!((attempt, member), (1, 11));
-                Step::done(AttemptOutcome::Sent { message_id: 102 })
+                Step::done(drained(&[102]))
             },
         );
         let outcome = clock.run(&mut io, 2500).unwrap();
@@ -674,7 +708,7 @@ mod tests {
                 state.pending[0].started = true;
                 Step::done(state)
             },
-            |_, _, _| Step::after(2000, AttemptOutcome::NoPending),
+            |_, _, _| Step::after(2000, outcome(&[], AttemptEnd::NoPending)),
         );
         let outcome = clock.run(&mut io, 1500).unwrap();
         assert_eq!(outcome.notification_errors.len(), 1);
@@ -718,9 +752,9 @@ mod tests {
             |attempt, member, _| match member {
                 11 => {
                     assert_eq!(attempt, 1, "the uncertain member is attempted once");
-                    Step::done(AttemptOutcome::Failed(error.clone()))
+                    Step::done(failed(error.clone()))
                 }
-                22 => Step::done(AttemptOutcome::Held),
+                22 => Step::done(hold()),
                 _ => panic!("unexpected member"),
             },
         );
@@ -754,7 +788,7 @@ mod tests {
             },
             |attempt, _, _| {
                 assert_eq!(attempt, 1);
-                Step::done(AttemptOutcome::Failed(diagnostic(
+                Step::done(failed(diagnostic(
                     11,
                     101,
                     Delivery::Uncertain,
@@ -798,7 +832,7 @@ mod tests {
                 },
                 |attempt, _, _| {
                     assert_eq!(attempt, 1);
-                    Step::done(AttemptOutcome::Failed(error.clone()))
+                    Step::done(failed(error.clone()))
                 },
             );
             let outcome = clock.run(&mut io, 2500).unwrap();
@@ -840,7 +874,7 @@ mod tests {
             |_, _, _| Step::done(snapshot(&[(11, 101), (22, 202)])),
             |attempt, _, _| {
                 if attempt == 1 {
-                    Step::done(AttemptOutcome::Failed(first.clone()))
+                    Step::done(failed(first.clone()))
                 } else {
                     Step {
                         duration: Duration::from_secs(5),
@@ -1014,7 +1048,7 @@ mod tests {
                 if attempt == 1 {
                     first_member.set(Some(member));
                 }
-                Step::done(AttemptOutcome::Held)
+                Step::done(hold())
             },
         );
         let outcome = clock.run(&mut io, 10_000).unwrap();
@@ -1052,7 +1086,7 @@ mod tests {
                     snapshot(&pending)
                 })
             },
-            |attempt, _, _| Step::after(if attempt == 1 { 3250 } else { 0 }, AttemptOutcome::Held),
+            |attempt, _, _| Step::after(if attempt == 1 { 3250 } else { 0 }, hold()),
         );
         let outcome = clock.run(&mut io, 12_000).unwrap();
         assert_eq!(outcome.messages, messages());
@@ -1126,8 +1160,8 @@ mod tests {
             |attempt, member, _| {
                 assert_eq!(member, 11);
                 match attempt {
-                    1 => Step::done(AttemptOutcome::Held),
-                    2 => Step::after(5000, AttemptOutcome::Sent { message_id: 101 }),
+                    1 => Step::done(hold()),
+                    2 => Step::after(5000, drained(&[101])),
                     _ => panic!("receive started another attempt after its deadline"),
                 }
             },
@@ -1197,14 +1231,14 @@ mod tests {
             11,
             101,
             Delivery::NotSent,
-            "member 11 is draft; preview 101 was not sent.",
+            "member 11's pane input remained busy; preview 101 was not sent.",
         );
         let mut io = ScriptedIo::new(
             &clock,
             |_, _, _| Step::done(snapshot(&[(11, 101)])),
             |attempt, _, _| match attempt {
-                1 => Step::done(AttemptOutcome::Failed(error.clone())),
-                2 => Step::after(5000, AttemptOutcome::Held),
+                1 => Step::done(failed(error.clone())),
+                2 => Step::after(5000, hold()),
                 _ => panic!("late hold started another attempt"),
             },
         );
@@ -1239,16 +1273,11 @@ mod tests {
                             "capture transport failed before writing: owned attempt",
                         );
                         errors.borrow_mut().push(error.clone());
-                        Step::done(AttemptOutcome::Failed(error))
+                        Step::done(failed(error))
                     }
                     3 => {
                         sent_member.set(Some(member));
-                        Step::after(
-                            5000,
-                            AttemptOutcome::Sent {
-                                message_id: message,
-                            },
-                        )
+                        Step::after(5000, drained(&[message]))
                     }
                     _ => panic!("late success started another attempt"),
                 }
@@ -1284,7 +1313,7 @@ mod tests {
                 |attempt, member, _| {
                     assert_eq!(attempt, 1);
                     assert_eq!(member, 11);
-                    Step::after(5000, AttemptOutcome::Failed(error.clone()))
+                    Step::after(5000, failed(error.clone()))
                 },
             );
             let outcome = clock.run(&mut io, 2000).unwrap();
@@ -1301,7 +1330,7 @@ mod tests {
             11,
             101,
             Delivery::NotSent,
-            "member 11 is unknown; preview 101 was not sent.",
+            "member 11's pane input remained busy; preview 101 was not sent.",
         );
         let latest = diagnostic(
             11,
@@ -1319,7 +1348,7 @@ mod tests {
                 })
             },
             |attempt, _, _| {
-                Step::done(AttemptOutcome::Failed(match attempt {
+                Step::done(failed(match attempt {
                     1 => first.clone(),
                     2 => latest.clone(),
                     _ => panic!("inbox was not checked before another retry"),
@@ -1353,7 +1382,7 @@ mod tests {
                     2 => 102,
                     _ => panic!("unexpected retry"),
                 };
-                Step::done(AttemptOutcome::Failed(diagnostic(
+                Step::done(failed(diagnostic(
                     member,
                     message,
                     Delivery::NotSent,
@@ -1391,7 +1420,7 @@ mod tests {
                 |attempt, member, _| {
                     assert_eq!(attempt, 1);
                     assert_eq!(member, 11);
-                    Step::done(AttemptOutcome::Failed(diagnostic(
+                    Step::done(failed(diagnostic(
                         member,
                         101,
                         Delivery::Uncertain,
@@ -1433,9 +1462,9 @@ mod tests {
                         "unsupported composer",
                     );
                     first_error.replace(Some(error.clone()));
-                    Step::done(AttemptOutcome::Failed(error))
+                    Step::done(failed(error))
                 }
-                2 => Step::done(AttemptOutcome::Held),
+                2 => Step::done(hold()),
                 _ => panic!("held member delayed the next inbox check"),
             },
         );
@@ -1484,11 +1513,11 @@ mod tests {
                 }
             },
             |_, _, _| {
-                Step::done(AttemptOutcome::Failed(diagnostic(
+                Step::done(failed(diagnostic(
                     11,
                     101,
                     Delivery::NotSent,
-                    "draft remains",
+                    "escape refused",
                 )))
             },
         );
@@ -1507,11 +1536,11 @@ mod tests {
             &clock,
             |_, _, _| Step::done(snapshot(&[(11, 101)])),
             |attempt, _, _| match attempt {
-                1 => Step::done(AttemptOutcome::Failed(diagnostic(
+                1 => Step::done(failed(diagnostic(
                     11,
                     101,
                     Delivery::NotSent,
-                    "capture failed before input",
+                    "escape failed before input",
                 ))),
                 2 => Step::failed(CafleetError::InvalidStoredValue {
                     field: "messages.status_state".into(),
@@ -1552,6 +1581,126 @@ mod tests {
     }
 
     #[test]
+    fn drained_and_budget_exhausted_attempts_clear_the_entry_for_a_delivered_message() {
+        for end in [AttemptEnd::Drained, AttemptEnd::BudgetExhausted] {
+            let clock = TestClock::new();
+            let mut io = ScriptedIo::new(
+                &clock,
+                |_, attempts, _| {
+                    Step::done(if attempts == 2 {
+                        incoming(&[(11, 101), (11, 102)])
+                    } else {
+                        snapshot(&[(11, 101), (11, 102)])
+                    })
+                },
+                |attempt, _, _| match attempt {
+                    1 => Step::done(failed(diagnostic(
+                        11,
+                        101,
+                        Delivery::NotSent,
+                        "member 11's pane input remained busy; preview 101 was not sent.",
+                    ))),
+                    2 => Step::done(outcome(&[101], end.clone())),
+                    _ => panic!("return the incoming messages"),
+                },
+            );
+            let outcome = clock.run(&mut io, 5000).unwrap();
+            assert_eq!(outcome.messages, messages());
+            assert!(outcome.notification_errors.is_empty(), "{end:?}");
+            clock.assert_retry_cadence();
+        }
+    }
+
+    #[test]
+    fn a_drain_that_missed_the_errored_message_keeps_its_entry() {
+        let clock = TestClock::new();
+        let error = diagnostic(
+            11,
+            101,
+            Delivery::NotSent,
+            "member 11's pane input remained busy; preview 101 was not sent.",
+        );
+        let mut io = ScriptedIo::new(
+            &clock,
+            |_, attempts, _| {
+                Step::done(if attempts == 2 {
+                    incoming(&[(11, 101)])
+                } else {
+                    snapshot(&[(11, 101)])
+                })
+            },
+            |attempt, _, _| match attempt {
+                1 => Step::done(failed(error.clone())),
+                2 => Step::done(outcome(&[102], AttemptEnd::BudgetExhausted)),
+                _ => panic!("return the incoming messages"),
+            },
+        );
+        let outcome = clock.run(&mut io, 5000).unwrap();
+        assert_eq!(outcome.notification_errors, vec![error]);
+    }
+
+    #[test]
+    fn a_failure_after_a_partial_drain_replaces_the_members_entry() {
+        let clock = TestClock::new();
+        let latest = diagnostic(
+            11,
+            102,
+            Delivery::Uncertain,
+            "preview 102 delivery to member 11 is uncertain: lost Enter. Inspect the pane before retrying.",
+        );
+        let mut io = ScriptedIo::new(
+            &clock,
+            |_, attempts, _| {
+                Step::done(if attempts == 2 {
+                    incoming(&[(11, 102)])
+                } else {
+                    snapshot(&[(11, 101), (11, 102)])
+                })
+            },
+            |attempt, _, _| match attempt {
+                1 => Step::done(failed(diagnostic(
+                    11,
+                    101,
+                    Delivery::NotSent,
+                    "escape failed before input",
+                ))),
+                2 => Step::done(outcome(&[101], AttemptEnd::Failed(latest.clone()))),
+                _ => panic!("return the incoming messages"),
+            },
+        );
+        let outcome = clock.run(&mut io, 5000).unwrap();
+        assert_eq!(outcome.notification_errors, vec![latest]);
+    }
+
+    #[test]
+    fn a_hold_after_a_partial_drain_keeps_entries_unchanged() {
+        let clock = TestClock::new();
+        let error = diagnostic(
+            11,
+            101,
+            Delivery::NotSent,
+            "escape failed before input",
+        );
+        let mut io = ScriptedIo::new(
+            &clock,
+            |_, attempts, _| {
+                Step::done(if attempts == 2 {
+                    incoming(&[(11, 101)])
+                } else {
+                    snapshot(&[(11, 101)])
+                })
+            },
+            |attempt, _, _| match attempt {
+                1 => Step::done(failed(error.clone())),
+                2 => Step::done(outcome(&[], AttemptEnd::Held)),
+                _ => panic!("return the incoming messages"),
+            },
+        );
+        let outcome = clock.run(&mut io, 5000).unwrap();
+        assert_eq!(outcome.notification_errors, vec![error]);
+    }
+
+    #[test]
     fn a_new_invocation_has_fresh_diagnostics_and_a_new_receive_deadline() {
         let clock = TestClock::new();
         let error = diagnostic(
@@ -1565,7 +1714,7 @@ mod tests {
             |_, _, _| Step::done(snapshot(&[(11, 101)])),
             |attempt, _, _| {
                 assert_eq!(attempt, 1);
-                Step::after(5000, AttemptOutcome::Failed(error.clone()))
+                Step::after(5000, failed(error.clone()))
             },
         );
         let first_outcome = clock.run(&mut first, 2000).unwrap();

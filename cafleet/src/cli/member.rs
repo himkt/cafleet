@@ -358,6 +358,7 @@ fn create(
         Err(original) => return Err(registration.rollback(original)),
     };
     let argv = backend.build_spawn_argv(&prompt, name, model, effort);
+    let span = crate::signals::DeferTermination::begin().map_err(|error| registration.rollback(error))?;
     let pane_id = match mux.split_window(&context, &env, &argv) {
         Ok(pane_id) => pane_id,
         Err(error) => {
@@ -384,6 +385,7 @@ fn create(
     };
     pane.finish();
     registration.finish();
+    drop(span);
 
     let result = json!({
         "member_id": member_id,
@@ -530,7 +532,8 @@ fn delete(
 
 fn show(conn: &mut Connection, member_id: i64, json: bool) -> Result<(), CafleetError> {
     let member = load_member(conn, member_id, true)?;
-    let value = presentation::member(&member);
+    let unconfirmed = broker::members::unconfirmed_previews(conn, member_id)?;
+    let value = presentation::member_detail(&member, &unconfirmed);
     emit(json, &value, || format_member_detail(&value));
     Ok(())
 }
@@ -559,14 +562,12 @@ fn dispatch_input(
     deadline: crate::input::Deadline,
 ) -> Result<(), CafleetError> {
     let id = member.member_id;
-    let Some(locked) = crate::input::with_database_budget(conn, deadline, |conn| {
-        crate::input::lock_member(conn, settings, member)
-    })?
-    else {
+    let Some(locked) = crate::input::lock_member(conn, settings, member, deadline)? else {
         return Err(CafleetError::App(format!(
             "member {id}'s pane is receiving another input; retry after it is idle."
         )));
     };
+    let _span = crate::signals::DeferTermination::begin()?;
     let placement = locked.member.placement.as_ref().expect("locked placement");
     let pane = placement
         .mux_pane_id
@@ -689,9 +690,7 @@ fn ping(
     let pane = placement.mux_pane_id.as_deref();
     let reason;
     if let Some(pane) = pane {
-        let locked = crate::input::with_database_budget(conn, deadline, |conn| {
-            crate::input::lock_member(conn, settings, &member)
-        })?;
+        let locked = crate::input::lock_member(conn, settings, &member, deadline)?;
         reason = match locked {
             None => Some("busy"),
             Some(_locked) => {

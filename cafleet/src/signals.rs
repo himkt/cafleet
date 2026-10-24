@@ -1,3 +1,34 @@
+use nix::sys::signal::{SigSet, SigmaskHow, Signal, pthread_sigmask};
+
+use crate::error::CafleetError;
+
+/// Blocks SIGINT, SIGTERM and SIGHUP for the calling thread until dropped;
+/// a signal received meanwhile takes its default action when the previous mask is restored.
+pub(crate) struct DeferTermination {
+    previous: SigSet,
+}
+
+impl DeferTermination {
+    pub(crate) fn begin() -> Result<Self, CafleetError> {
+        let mut deferred = SigSet::empty();
+        for signal in [Signal::SIGINT, Signal::SIGTERM, Signal::SIGHUP] {
+            deferred.add(signal);
+        }
+        let mut previous = SigSet::empty();
+        pthread_sigmask(SigmaskHow::SIG_BLOCK, Some(&deferred), Some(&mut previous)).map_err(
+            |error| CafleetError::App(format!("cannot defer termination signals: {error}")),
+        )?;
+        Ok(Self { previous })
+    }
+}
+
+impl Drop for DeferTermination {
+    fn drop(&mut self) {
+        pthread_sigmask(SigmaskHow::SIG_SETMASK, Some(&self.previous), None)
+            .expect("restoring a mask previously returned by pthread_sigmask succeeds");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::DeferTermination;

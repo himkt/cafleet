@@ -285,7 +285,6 @@ mod parser_contracts {
             (&["message", "poll", "1", "--fleet-id", "1"], "--fleet-id"),
             (&["message", "ack", "1", "--fleet-id", "1"], "--fleet-id"),
             (&["member", "show", "--member-id", "1"], "--member-id"),
-            (&["member", "ping", "--member-id", "1"], "--member-id"),
             (&["message", "poll", "--member-id", "1"], "--member-id"),
             (&["message", "ack", "--message-id", "1"], "--message-id"),
             (&["message", "show", "--message-id", "1"], "--message-id"),
@@ -320,7 +319,6 @@ mod parser_contracts {
                 "--quiet",
             ),
             (&["message", "ack", "1", "--quiet"], "--quiet"),
-            (&["member", "ping", "1", "--quiet"], "--quiet"),
             (&["member", "capture", "1", "--no-ansi"], "--no-ansi"),
             (
                 &[

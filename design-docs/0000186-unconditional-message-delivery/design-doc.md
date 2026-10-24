@@ -1,7 +1,7 @@
 # Unconditional Message Delivery
 
 **Status**: Approved
-**Progress**: 13/53 tasks complete
+**Progress**: 33/53 tasks complete
 **Last Updated**: 2026-10-24
 
 ## Overview
@@ -421,34 +421,34 @@ Installed-host manual checks are waived by the owner; automated tests are the ve
 
 ### Step 3: Escape-first transport
 
-- [ ] Add `Lead`, `ESCAPE_SETTLE_DELAY`, `ESCAPE_TIMEOUT`, `MIN_LITERAL_BUDGET`, `REVALIDATION_MARGIN` and `INPUT_RESERVATION` to `cafleet/src/multiplexer/mod.rs` <!-- completed: -->
-- [ ] Extend `submit_prompt` with the capped Escape argv, the Escape reservation, the post-Escape `literal_budget` recomputation and not-started Escape failures <!-- completed: -->
-- [ ] Change `send_prompt` to take `lead` in the trait, `TmuxMultiplexer`, `HerdrMultiplexer`, `AnyMultiplexer` and the test mock <!-- completed: -->
-- [ ] Confirm the herdr Escape key token with `herdr pane send-keys --help` and use it in the herdr argv <!-- completed: -->
-- [ ] Delete `send_inline_preview` and `inline_preview_payload` <!-- completed: -->
-- [ ] Add the transport tests from § Tests <!-- completed: -->
+- [x] Add `Lead`, `ESCAPE_SETTLE_DELAY`, `ESCAPE_TIMEOUT`, `MIN_LITERAL_BUDGET`, `REVALIDATION_MARGIN` and `INPUT_RESERVATION` to `cafleet/src/multiplexer/mod.rs` <!-- completed: 2026-10-24T19:55 -->
+- [x] Extend `submit_prompt` with the capped Escape argv, the Escape reservation, the post-Escape `literal_budget` recomputation and not-started Escape failures <!-- completed: 2026-10-24T19:55 -->
+- [x] Change `send_prompt` to take `lead` in the trait, `TmuxMultiplexer`, `HerdrMultiplexer`, `AnyMultiplexer` and the test mock <!-- completed: 2026-10-24T19:55 -->
+- [x] Confirm the herdr Escape key token with `herdr pane send-keys --help` and use it in the herdr argv <!-- completed: 2026-10-24T19:55 -->
+- [x] Delete `send_inline_preview` and `inline_preview_payload` <!-- completed: 2026-10-24T19:55 -->
+- [x] Add the transport tests from § Tests <!-- completed: 2026-10-24T20:15 -->
 
 ### Step 4: Notification line, pane lock and termination deferral
 
-- [ ] Add `fold_visible`, `INLINE_BODY_LIMIT`, `RESUME_CLAUSE`, `DISMISSED_PROMPT_NOTE` and `notification_line` to `cafleet/src/delivery.rs` <!-- completed: -->
-- [ ] Add the notification-line unit tests <!-- completed: -->
-- [ ] Add `Deadline::reserving` and `PaneLock::acquire_within` to `cafleet/src/input.rs` <!-- completed: -->
-- [ ] Change `lock_member` to `lock_member(conn, settings, member, deadline)`: file lock first, then reload under `with_database_budget` <!-- completed: -->
-- [ ] Add lock-wait tests (released within the wait, released just before `deadline − INPUT_RESERVATION`, still busy at that point) <!-- completed: -->
-- [ ] Add `cafleet/src/signals.rs` with `DeferTermination` and open its span at each call site in § Termination during pane input <!-- completed: -->
+- [x] Add `fold_visible`, `INLINE_BODY_LIMIT`, `RESUME_CLAUSE`, `DISMISSED_PROMPT_NOTE` and `notification_line` to `cafleet/src/delivery.rs` <!-- completed: 2026-10-24T19:59 -->
+- [x] Add the notification-line unit tests <!-- completed: 2026-10-24T20:15 -->
+- [x] Add `Deadline::reserving` and `PaneLock::acquire_within` to `cafleet/src/input.rs` <!-- completed: 2026-10-24T19:59 -->
+- [x] Change `lock_member` to `lock_member(conn, settings, member, deadline)`: file lock first, then reload under `with_database_budget` <!-- completed: 2026-10-24T19:59 -->
+- [x] Add lock-wait tests (released within the wait, released just before `deadline − INPUT_RESERVATION`, still busy at that point) <!-- completed: 2026-10-24T20:15 -->
+- [x] Add `cafleet/src/signals.rs` with `DeferTermination` and open its span at each call site in § Termination during pane input <!-- completed: 2026-10-24T19:59 -->
 - [ ] Confirm on tmux and herdr that a spawned member session's process does not inherit the blocked signal set <!-- completed: -->
-- [ ] Add the termination-deferral tests and the blocking-literal fake option <!-- completed: -->
+- [x] Add the termination-deferral tests and the blocking-literal fake option <!-- completed: 2026-10-24T20:15 -->
 
 ### Step 5: Draining delivery
 
-- [ ] Replace `AttemptOutcome` with the `sent` + `AttemptEnd` shape in `cafleet/src/receive.rs` <!-- completed: -->
-- [ ] Implement `deliver_pending` in `cafleet/src/delivery.rs` per § Delivery procedure, with no capture, the `ClaimSkip` enum and the post-timeout revalidation read <!-- completed: -->
-- [ ] Rename `runtime::attempt_preview` to `runtime::deliver_pending` and update `BrokerReceiver::attempt` <!-- completed: -->
-- [ ] Update the `message wait` bookkeeping in `receive::wait` per the outcome table <!-- completed: -->
-- [ ] Update `message send` in `cafleet/src/cli/message.rs`: `notification_sent` from `sent`, stderr from `Failed` <!-- completed: -->
-- [ ] Delete the Director early return in `delivery::preview_snapshot` and the `m.member_id!=f.director_member_id` filter in `broker::panes::pending_previews` <!-- completed: -->
+- [x] Replace `AttemptOutcome` with the `sent` + `AttemptEnd` shape in `cafleet/src/receive.rs` <!-- completed: 2026-10-24T20:15 -->
+- [x] Implement `deliver_pending` in `cafleet/src/delivery.rs` per § Delivery procedure, with no capture, the `ClaimSkip` enum and the post-timeout revalidation read <!-- completed: 2026-10-24T20:15 -->
+- [x] Rename `runtime::attempt_preview` to `runtime::deliver_pending` and update `BrokerReceiver::attempt` <!-- completed: 2026-10-24T20:15 -->
+- [x] Update the `message wait` bookkeeping in `receive::wait` per the outcome table <!-- completed: 2026-10-24T20:15 -->
+- [x] Update `message send` in `cafleet/src/cli/message.rs`: `notification_sent` from `sent`, stderr from `Failed` <!-- completed: 2026-10-24T20:15 -->
+- [x] Delete the Director early return in `delivery::preview_snapshot` and the `m.member_id!=f.director_member_id` filter in `broker::panes::pending_previews` <!-- completed: 2026-10-24T20:15 -->
 - [ ] Add the Director delivery, Director self-send and `pending_previews` tests from § Tests <!-- completed: -->
-- [ ] Add `unconfirmed_previews` to the roster query in `broker::members` and the `member list` / `member show` JSON presenters in `presentation.rs`, with the tests from § Tests <!-- completed: -->
+- [x] Add `unconfirmed_previews` to the roster query in `broker::members` and the `member list` / `member show` JSON presenters in `presentation.rs`, with the tests from § Tests <!-- completed: 2026-10-24T20:15 -->
 - [ ] Update the shared fakes in `cafleet/tests/common/mod.rs` and `cafleet/tests/common/receive.rs` per § Tests <!-- completed: -->
 - [ ] Update `cafleet/tests/delivery.rs`, `notification_retry.rs`, `message_wait.rs`, `cli_message.rs` and `receive.rs` unit tests per § Tests <!-- completed: -->
 

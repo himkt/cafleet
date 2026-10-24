@@ -37,6 +37,15 @@ impl Deadline {
             .ok_or(CafleetError::DeadlineExceeded)
     }
 
+    /// The deadline `reserve` earlier; already expired when less than `reserve` remains.
+    pub(crate) fn reserving(self, reserve: Duration) -> Self {
+        Self(
+            self.0
+                .checked_sub(reserve)
+                .expect("a monotonic deadline lies far past the clock origin"),
+        )
+    }
+
     pub fn retry(self) -> bool {
         match self.remaining() {
             Ok(left) => {
@@ -502,6 +511,23 @@ impl PaneLock {
             ))),
         }
     }
+
+    /// Retry a held lock every 50 ms until `lock_deadline`; `None` means it stayed busy.
+    pub fn acquire_within(
+        database_url: &str,
+        placement: &Placement,
+        lock_deadline: Deadline,
+    ) -> Result<Option<Self>, CafleetError> {
+        loop {
+            if let Some(guard) = Self::try_acquire(database_url, placement)? {
+                return Ok(Some(guard));
+            }
+            let Ok(left) = lock_deadline.remaining() else {
+                return Ok(None);
+            };
+            std::thread::sleep(left.min(Duration::from_millis(50)));
+        }
+    }
 }
 
 pub struct LockedMember {
@@ -512,6 +538,7 @@ pub struct LockedMember {
 pub(crate) struct LockedDeletion<S, T> {
     pub snapshot: S,
     pub value: T,
+    _span: crate::signals::DeferTermination,
     _guards: Vec<PaneLock>,
 }
 
@@ -558,40 +585,50 @@ pub(crate) fn lock_deletion<S, T>(
             };
             guards.push(guard);
         }
+        let span = crate::signals::DeferTermination::begin()?;
         let value = with_database_budget(conn, deadline, |conn| revalidate(conn, &snapshot))?;
         if let Some(value) = value {
             return Ok(LockedDeletion {
                 snapshot,
                 value,
+                _span: span,
                 _guards: guards,
             });
         }
+        drop(span);
         drop(guards);
         deadline.remaining()?;
     }
 }
 
 pub fn lock_member(
-    conn: &Connection,
+    conn: &mut Connection,
     settings: &Settings,
     member: &MemberRecord,
+    deadline: Deadline,
 ) -> Result<Option<LockedMember>, CafleetError> {
     let placement = member.placement.as_ref().ok_or_else(|| {
         CafleetError::App(format!("member {} has no placement row", member.member_id))
     })?;
-    let Some(guard) =
-        PaneLock::try_acquire(&settings.database_url, placement).map_err(|error| {
-            CafleetError::App(format!(
-                "member {} pane input: {}",
-                member.member_id,
-                error.message()
-            ))
-        })?
+    let Some(guard) = PaneLock::acquire_within(
+        &settings.database_url,
+        placement,
+        deadline.reserving(crate::multiplexer::INPUT_RESERVATION),
+    )
+    .map_err(|error| {
+        CafleetError::App(format!(
+            "member {} pane input: {}",
+            member.member_id,
+            error.message()
+        ))
+    })?
     else {
         return Ok(None);
     };
-    let current = crate::broker::get_member(conn, member.member_id, member.fleet_id)?
-        .ok_or_else(|| CafleetError::App(format!("Member {} not found", member.member_id)))?;
+    let current = with_database_budget(conn, deadline, |conn| {
+        crate::broker::get_member(conn, member.member_id, member.fleet_id)
+    })?
+    .ok_or_else(|| CafleetError::App(format!("Member {} not found", member.member_id)))?;
     if current.placement != member.placement {
         return Err(CafleetError::App(format!(
             "member {} placement changed while acquiring pane input",

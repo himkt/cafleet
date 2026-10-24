@@ -15,8 +15,13 @@ pub(crate) const ESCAPE_SETTLE_DELAY: f64 = 0.5;
 pub(crate) const ESCAPE_TIMEOUT: Duration = Duration::from_secs(1);
 pub(crate) const MIN_LITERAL_BUDGET: Duration = Duration::from_millis(500);
 pub(crate) const REVALIDATION_MARGIN: Duration = Duration::from_millis(500);
-/// Revalidation margin + Escape settle + literal minimum + SUBMIT_DELAY + Enter: 3.5 s of the 5 s budget.
-pub(crate) const INPUT_RESERVATION: Duration = Duration::from_millis(3500);
+pub(crate) const INPUT_RESERVATION: Duration = REVALIDATION_MARGIN
+    .saturating_add(Duration::from_millis((ESCAPE_SETTLE_DELAY * 1000.0) as u64))
+    .saturating_add(MIN_LITERAL_BUDGET)
+    .saturating_add(Duration::from_millis((SUBMIT_DELAY * 1000.0) as u64))
+    .saturating_add(Duration::from_secs(1));
+pub(crate) const INSUFFICIENT_INPUT_BUDGET: &str =
+    "insufficient pane input budget for literal input, settle and Enter";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lead {
@@ -552,11 +557,7 @@ fn submit_prompt(
             .expect("submission uses a deadline-bounded runner")
             .checked_sub(reserved)
             .filter(|budget| !budget.is_zero())
-            .ok_or_else(|| {
-                MultiplexerError::new(
-                    "insufficient pane input budget for literal input, settle and Enter",
-                )
-            })
+            .ok_or_else(|| MultiplexerError::new(INSUFFICIENT_INPUT_BUDGET))
     };
     let slack = unreserved(lead.reserved())?;
     if lead == Lead::Escape {

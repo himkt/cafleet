@@ -227,6 +227,7 @@ fn roster_rows(
             last_recv: if activity { row.get(13)? } else { None },
             last_ack: if activity { row.get(14)? } else { None },
             idle: None,
+            unconfirmed_previews: Vec::new(),
         })
     })
     .map_err(db_err)?
@@ -249,8 +250,25 @@ pub fn list_members(conn: &Connection, fleet_id: i64) -> Result<Vec<MemberActivi
     let mut rows = roster_rows(conn, fleet_id, true)?;
     for row in &mut rows {
         row.idle = idle_seconds(row, now);
+        row.unconfirmed_previews = unconfirmed_previews(conn, row.member.member_id)?;
     }
     Ok(rows)
+}
+
+/// Durable delivery claims that automatic delivery skips: started, never stamped, still unread.
+pub fn unconfirmed_previews(conn: &Connection, member_id: i64) -> Result<Vec<i64>, CafleetError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT message_id FROM messages
+             WHERE to_member_id=?1 AND status_state='input_required'
+               AND preview_started_at IS NOT NULL AND notified_at IS NULL
+             ORDER BY created_at, message_id",
+        )
+        .map_err(db_err)?;
+    stmt.query_map([member_id], |row| row.get(0))
+        .map_err(db_err)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(db_err)
 }
 
 pub(crate) fn capture_roster(
@@ -541,6 +559,142 @@ mod tests {
         assert!(worker["last_ack"].is_string());
     }
 
+    fn roster_json(conn: &rusqlite::Connection, fleet_id: i64) -> Vec<Value> {
+        broker::list_members(conn, fleet_id)
+            .unwrap()
+            .iter()
+            .map(crate::presentation::member_activity)
+            .collect()
+    }
+
+    fn unconfirmed(conn: &rusqlite::Connection, fleet_id: i64, member_id: i64) -> Value {
+        roster_json(conn, fleet_id)
+            .into_iter()
+            .find(|row| row["member_id"] == member_id)
+            .unwrap()["unconfirmed_previews"]
+            .clone()
+    }
+
+    #[test]
+    fn roster_rows_append_unconfirmed_previews_after_idle() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
+        register(&mut conn, fleet_id, "worker", Some("%2"));
+        for row in roster_json(&conn, fleet_id) {
+            assert_eq!(
+                row.as_object().unwrap().keys().collect::<Vec<_>>(),
+                [
+                    "member_id",
+                    "name",
+                    "kind",
+                    "placement",
+                    "last_sent",
+                    "last_recv",
+                    "last_ack",
+                    "idle",
+                    "unconfirmed_previews"
+                ]
+            );
+            assert_eq!(row["unconfirmed_previews"], serde_json::json!([]));
+        }
+        assert_eq!(
+            unconfirmed(&conn, fleet_id, director_id),
+            serde_json::json!([]),
+            "the Director row carries the field too"
+        );
+    }
+
+    #[test]
+    fn unconfirmed_previews_list_started_claims_without_a_stamp_in_creation_order() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
+        let worker = register(&mut conn, fleet_id, "worker", Some("%2"));
+        let ids: Vec<i64> = ["later", "earlier", "unclaimed", "stamped", "acked"]
+            .into_iter()
+            .map(|text| {
+                broker::send_message(&mut conn, director_id, &worker.to_string(), text)
+                    .unwrap()
+                    .message_id
+            })
+            .collect();
+        conn.execute_batch(&format!(
+            "UPDATE messages SET created_at='2026-01-02T00:00:00+00:00' WHERE message_id={};
+             UPDATE messages SET created_at='2026-01-01T00:00:00+00:00' WHERE message_id={};
+             UPDATE messages SET preview_started_at=created_at WHERE message_id IN ({}, {}, {}, {});
+             UPDATE messages SET notified_at=created_at WHERE message_id={};",
+            ids[0], ids[1], ids[0], ids[1], ids[3], ids[4], ids[3]
+        ))
+        .unwrap();
+        broker::ack_message(&mut conn, ids[4]).unwrap();
+        assert_eq!(
+            unconfirmed(&conn, fleet_id, worker),
+            serde_json::json!([ids[1], ids[0]])
+        );
+        assert_eq!(unconfirmed(&conn, fleet_id, director_id), serde_json::json!([]));
+    }
+
+    #[test]
+    fn ack_stamp_or_claim_release_removes_an_unconfirmed_preview() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
+        let worker = register(&mut conn, fleet_id, "worker", Some("%2"));
+        for resolution in ["ack", "stamp", "release"] {
+            let id = broker::send_message(&mut conn, director_id, &worker.to_string(), resolution)
+                .unwrap()
+                .message_id;
+            assert!(
+                broker::messaging::claim_preview(&conn, id, worker)
+                    .unwrap()
+                    .is_some()
+            );
+            assert_eq!(unconfirmed(&conn, fleet_id, worker), serde_json::json!([id]));
+            match resolution {
+                "ack" => {
+                    broker::ack_message(&mut conn, id).unwrap();
+                }
+                "stamp" => {
+                    assert!(
+                        broker::messaging::stamp_notified_validated(
+                            &conn,
+                            id,
+                            "2026-10-24T00:00:00.000000+00:00"
+                        )
+                        .unwrap()
+                    );
+                }
+                _ => broker::messaging::release_preview(&conn, id).unwrap(),
+            }
+            assert_eq!(unconfirmed(&conn, fleet_id, worker), serde_json::json!([]));
+            if resolution == "release" {
+                broker::ack_message(&mut conn, id).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn a_directors_unconfirmed_preview_is_listed_on_the_director_row() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
+        let worker = register(&mut conn, fleet_id, "worker", Some("%2"));
+        let id = broker::send_message(&mut conn, worker, &director_id.to_string(), "reply")
+            .unwrap()
+            .message_id;
+        assert!(
+            broker::messaging::claim_preview(&conn, id, director_id)
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            unconfirmed(&conn, fleet_id, director_id),
+            serde_json::json!([id])
+        );
+        assert_eq!(unconfirmed(&conn, fleet_id, worker), serde_json::json!([]));
+    }
+
     #[test]
     fn list_members_excludes_deregistered_rows() {
         let dir = TempDir::new().unwrap();
@@ -658,6 +812,7 @@ mod step6_behavior_regressions {
             last_recv: received.map(str::to_owned),
             last_ack: ack.map(str::to_owned),
             idle: None,
+            unconfirmed_previews: Vec::new(),
         }
     }
 
