@@ -789,8 +789,14 @@ fn a_preview_owner_holds_the_same_guard_through_escape_literal_and_enter() {
             notified, None,
             "notification is stamped after complete submission"
         );
-        let payload = json(&owner.release());
-        assert_eq!(payload["notification_sent"], true, "{stage}");
+        let output = owner.release();
+        let payload = json(&output);
+        assert_eq!(
+            payload["notification_sent"],
+            true,
+            "{stage}: stderr={}; payload={payload}",
+            stderr(&output)
+        );
     }
 }
 

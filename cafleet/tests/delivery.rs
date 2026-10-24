@@ -279,7 +279,12 @@ fn a_message_acked_between_claim_and_stamp_counts_as_sent_and_the_next_line_has_
     assert_eq!(result["notification_sent"], true);
     assert_eq!(fixture.stamp(first), None);
     assert_eq!(fixture.state(first), "completed");
-    assert!(fixture.stamp(second).is_some());
+    assert!(
+        fixture.stamp(second).is_some(),
+        "second message {second} needs a notification stamp; stderr={}; result={result}; shim_calls={:?}",
+        stderr(&output),
+        fixture.cli.shim_calls()
+    );
     assert_eq!(fixture.escapes_to(&fixture.pane), 1);
     let literals = fixture.cli.literal_calls();
     assert_eq!(literals.len(), 2, "{literals:?}");
