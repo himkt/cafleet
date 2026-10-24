@@ -169,7 +169,7 @@ pub fn run(
                 &mut receiver,
                 std::time::Duration::from_secs(timeout),
             )?;
-            let mut messages: Vec<_> = outcome.messages.iter().map(presentation::message).collect();
+            let messages: Vec<_> = outcome.messages.iter().map(presentation::message).collect();
             let errors: Vec<_> = outcome.notification_errors.iter().map(|error| serde_json::json!({
                 "member_id": error.member_id,
                 "message_id": error.message_id,
@@ -177,9 +177,6 @@ pub fn run(
                 "error": error.error,
             })).collect();
             if !json {
-                for message in &mut messages {
-                    truncate_message_text(message, settings.max_text_len);
-                }
                 for error in &outcome.notification_errors {
                     eprintln!("{}", error.error);
                 }

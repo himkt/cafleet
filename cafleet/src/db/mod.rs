@@ -1,4 +1,5 @@
 use rusqlite::{Connection, OptionalExtension};
+use std::{collections::BTreeMap, sync::OnceLock};
 
 use crate::error::CafleetError;
 
@@ -83,10 +84,67 @@ fn metadata_rows(
         .map_err(crate::broker::members::db_err)
 }
 
-pub(crate) fn current_schema_matches(conn: &Connection) -> Result<bool, CafleetError> {
-    let mut expected = Connection::open_in_memory().map_err(crate::broker::members::db_err)?;
-    migrate_to_head(&mut expected)?;
-    let mut tables = expected.prepare(
+const COLUMNS: &str =
+    "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info(?1) ORDER BY cid";
+const FOREIGN_KEYS: &str = "SELECT \"table\", \"from\", \"to\", on_update, on_delete, \"match\" FROM pragma_foreign_key_list(?1) ORDER BY \"from\", \"to\"";
+const INDEX_COLUMNS: &str = "SELECT seqno, cid, name FROM pragma_index_info(?1) ORDER BY seqno";
+type Metadata = Vec<Vec<rusqlite::types::Value>>;
+
+struct SchemaIndex {
+    name: String,
+    unique: i64,
+    partial: i64,
+    columns: Metadata,
+}
+
+struct SchemaTable {
+    name: String,
+    columns: Metadata,
+    foreign_keys: Metadata,
+    indexes: Vec<SchemaIndex>,
+}
+
+impl SchemaTable {
+    fn matches(&self, conn: &Connection) -> Result<bool, CafleetError> {
+        if metadata_rows(conn, COLUMNS, &self.name)? != self.columns
+            || metadata_rows(conn, FOREIGN_KEYS, &self.name)? != self.foreign_keys
+        {
+            return Ok(false);
+        }
+        for index in &self.indexes {
+            let definition: Option<(i64, i64)> = conn
+                .query_row(
+                    "SELECT \"unique\", partial FROM pragma_index_list(?1) WHERE name=?2",
+                    rusqlite::params![self.name, index.name],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()
+                .map_err(crate::broker::members::db_err)?;
+            if definition != Some((index.unique, index.partial))
+                || metadata_rows(conn, INDEX_COLUMNS, &index.name)? != index.columns
+            {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+}
+
+struct SchemaShape(Vec<SchemaTable>);
+
+impl SchemaShape {
+    fn matches(&self, conn: &Connection) -> Result<bool, CafleetError> {
+        for table in &self.0 {
+            if !table.matches(conn)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+}
+
+fn read_schema(conn: &Connection) -> Result<SchemaShape, CafleetError> {
+    let mut tables = conn.prepare(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
     ).map_err(crate::broker::members::db_err)?;
     let names = tables
@@ -94,16 +152,9 @@ pub(crate) fn current_schema_matches(conn: &Connection) -> Result<bool, CafleetE
         .map_err(crate::broker::members::db_err)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(crate::broker::members::db_err)?;
+    let mut schema = Vec::new();
     for name in names {
-        for sql in [
-            "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info(?1) ORDER BY cid",
-            "SELECT \"table\", \"from\", \"to\", on_update, on_delete, \"match\" FROM pragma_foreign_key_list(?1) ORDER BY \"from\", \"to\"",
-        ] {
-            if metadata_rows(conn, sql, &name)? != metadata_rows(&expected, sql, &name)? {
-                return Ok(false);
-            }
-        }
-        let mut indexes = expected
+        let mut indexes = conn
             .prepare("SELECT name, \"unique\", partial FROM pragma_index_list(?1)")
             .map_err(crate::broker::members::db_err)?;
         let indexes = indexes
@@ -117,31 +168,75 @@ pub(crate) fn current_schema_matches(conn: &Connection) -> Result<bool, CafleetE
             .map_err(crate::broker::members::db_err)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(crate::broker::members::db_err)?;
-        for (index, unique, partial) in indexes {
-            let definition: Option<(i64, i64)> = conn
-                .query_row(
-                    "SELECT \"unique\", partial FROM pragma_index_list(?1) WHERE name=?2",
-                    rusqlite::params![name, index],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .optional()
-                .map_err(crate::broker::members::db_err)?;
-            if definition != Some((unique, partial))
-                || metadata_rows(
-                    conn,
-                    "SELECT seqno, cid, name FROM pragma_index_info(?1) ORDER BY seqno",
-                    &index,
-                )? != metadata_rows(
-                    &expected,
-                    "SELECT seqno, cid, name FROM pragma_index_info(?1) ORDER BY seqno",
-                    &index,
-                )?
-            {
-                return Ok(false);
-            }
-        }
+        let indexes = indexes
+            .into_iter()
+            .map(|(name, unique, partial)| {
+                Ok(SchemaIndex {
+                    columns: metadata_rows(conn, INDEX_COLUMNS, &name)?,
+                    name,
+                    unique,
+                    partial,
+                })
+            })
+            .collect::<Result<Vec<_>, CafleetError>>()?;
+        schema.push(SchemaTable {
+            columns: metadata_rows(conn, COLUMNS, &name)?,
+            foreign_keys: metadata_rows(conn, FOREIGN_KEYS, &name)?,
+            name,
+            indexes,
+        });
     }
-    Ok(true)
+    Ok(SchemaShape(schema))
+}
+
+fn build_schema_versions(
+    migrations: &[refinery::Migration],
+) -> Result<BTreeMap<u32, SchemaShape>, CafleetError> {
+    let mut expected = Connection::open_in_memory().map_err(crate::broker::members::db_err)?;
+    let mut shapes = BTreeMap::new();
+    for migration in migrations {
+        refinery::Runner::new(migrations)
+            .set_grouped(true)
+            .set_target(refinery::Target::Version(migration.version()))
+            .run(&mut expected)
+            .map_err(|error| CafleetError::App(format!("reference migration failed: {error}")))?;
+        shapes.insert(
+            u32::try_from(migration.version()).expect("positive embedded version"),
+            read_schema(&expected)?,
+        );
+    }
+    Ok(shapes)
+}
+
+fn schema_versions() -> Result<&'static BTreeMap<u32, SchemaShape>, CafleetError> {
+    static SHAPES: OnceLock<Result<BTreeMap<u32, SchemaShape>, CafleetError>> = OnceLock::new();
+    SHAPES
+        .get_or_init(|| {
+            let mut migrations = embedded::migrations::runner().get_migrations().to_vec();
+            migrations.sort_by_key(refinery::Migration::version);
+            build_schema_versions(&migrations)
+        })
+        .as_ref()
+        .map_err(Clone::clone)
+}
+
+pub(crate) fn migration_ledger_matches(conn: &Connection) -> Result<bool, CafleetError> {
+    schema_versions()?[&head_version()]
+        .0
+        .iter()
+        .find(|table| table.name == "refinery_schema_history")
+        .expect("refinery migrations create their ledger")
+        .matches(conn)
+}
+
+pub(crate) fn schema_matches_version(
+    conn: &Connection,
+    version: u32,
+) -> Result<bool, CafleetError> {
+    match schema_versions()?.get(&version) {
+        Some(schema) => schema.matches(conn),
+        None => Ok(false),
+    }
 }
 
 #[cfg(test)]
@@ -151,6 +246,45 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+
+    #[test]
+    fn reference_shapes_are_cached_and_match_the_recorded_migration_version() {
+        let first = schema_versions().unwrap();
+        assert!(std::ptr::eq(first, schema_versions().unwrap()));
+        let mut migrations = embedded::migrations::runner().get_migrations().to_vec();
+        let next = head_version() + 1;
+        migrations.push(
+            refinery::Migration::unapplied(
+                &format!("V{next}__future_column"),
+                "ALTER TABLE messages ADD COLUMN future_value TEXT;",
+            )
+            .unwrap(),
+        );
+        let shapes = build_schema_versions(&migrations).unwrap();
+        let mut conn = connect("sqlite:///:memory:").unwrap();
+        migrate_to_head(&mut conn).unwrap();
+        assert!(!shapes[&next].matches(&conn).unwrap());
+        let classify = |conn: &Connection| {
+            crate::diagnosis::classify_schema_with(conn, next, |conn, version| {
+                shapes[&version].matches(conn)
+            })
+        };
+        assert!(matches!(
+            classify(&conn),
+            crate::diagnosis::SchemaState::Behind { .. }
+        ));
+        refinery::Runner::new(&migrations)
+            .set_grouped(true)
+            .run(&mut conn)
+            .unwrap();
+        assert!(
+            matches!(classify(&conn), crate::diagnosis::SchemaState::Head { version } if version == next)
+        );
+        assert!(matches!(
+            crate::diagnosis::classify_schema(&conn, head_version()),
+            crate::diagnosis::SchemaState::Ahead { .. }
+        ));
+    }
 
     fn temp_db_url(dir: &TempDir) -> String {
         format!("sqlite:///{}", dir.path().join("core_db_test.db").display())

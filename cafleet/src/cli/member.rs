@@ -384,6 +384,11 @@ fn create(
     Ok(())
 }
 
+enum DeleteAction {
+    Deregistered(&'static str),
+    Close(String),
+}
+
 fn delete(
     conn: &mut Connection,
     settings: &Settings,
@@ -452,44 +457,62 @@ fn delete(
                 .placement
                 .as_ref()
                 .and_then(|placement| placement.mux_pane_id.as_deref());
-            let (pane_status, layout) = if let Some(pane_id) = pane {
-                let mux = resolve_mux(settings)
-                    .map_err(|error| CafleetError::App(error.to_string()))?
-                    .bounded(deadline);
-                mux.ensure_available()
-                    .map_err(|error| CafleetError::App(error.to_string()))?;
-                let layout = mux.close_pane(pane_id, true).map_err(|error| {
-                    CafleetError::App(format!(
-                        "kill_pane failed for pane {pane_id}: {error}. The {} server may be \
-                         unreachable. Verify with 'cafleet doctor', then re-run the command.",
-                        mux.name()
-                    ))
-                })?;
-                (format!("{pane_id} (killed)"), Some((mux, layout)))
-            } else if current.placement.is_none() {
-                ("(no placement)".to_string(), None)
+            let action = if let Some(pane_id) = pane {
+                DeleteAction::Close(pane_id.to_owned())
             } else {
-                ("(pending — no pane)".to_string(), None)
+                let changed = crate::broker::members::deregister_member_rows(&tx, member_id)?;
+                assert!(changed, "the revalidated member remains active");
+                DeleteAction::Deregistered(if current.placement.is_none() {
+                    "(no placement)"
+                } else {
+                    "(pending — no pane)"
+                })
             };
-            let finalize = || -> Result<(), CafleetError> {
+            tx.commit().map_err(crate::broker::members::db_err)?;
+            Ok(Some(action))
+        })?;
+        if let Some(action) = deleted {
+            let pane_id = match action {
+                DeleteAction::Deregistered(status) => break status.to_owned(),
+                DeleteAction::Close(pane_id) => pane_id,
+            };
+            let mux = resolve_mux(settings)
+                .map_err(|error| CafleetError::App(error.to_string()))?
+                .bounded(deadline);
+            mux.ensure_available()
+                .map_err(|error| CafleetError::App(error.to_string()))?;
+            let layout = mux.close_pane(&pane_id, true).map_err(|error| {
+                CafleetError::App(format!(
+                    "kill_pane failed for pane {pane_id}: {error}. The {} server may be \
+                     unreachable. Verify with 'cafleet doctor', then re-run the command.",
+                    mux.name()
+                ))
+            })?;
+            crate::input::complete_database_budget(conn, deadline, |conn| {
+                let tx = conn
+                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                    .map_err(crate::broker::members::db_err)?;
+                let current = load_member(&tx, member_id, true)?;
+                if current.placement != member.placement {
+                    return Err(CafleetError::App(
+                        "member placement changed after pane close".into(),
+                    ));
+                }
                 let changed = crate::broker::members::deregister_member_rows(&tx, member_id)?;
                 assert!(
                     changed,
-                    "the locked member remains active until deregistration"
+                    "the input-locked member remains active until deregistration"
                 );
-                deadline.remaining()?;
                 tx.commit().map_err(crate::broker::members::db_err)
-            };
-            finalize().map_err(|error| {
-                CafleetError::App(format!("deregister failed: {}", error.message()))
+            })
+            .map_err(|error| {
+                CafleetError::App(format!(
+                    "pane {pane_id} was closed, but deregister failed: {}",
+                    error.message()
+                ))
             })?;
-            Ok(Some((pane_status, layout)))
-        })?;
-        if let Some((pane_status, layout)) = deleted {
-            if let Some((mux, layout)) = layout {
-                mux.restore_after_close(layout);
-            }
-            break pane_status;
+            mux.restore_after_close(layout);
+            break format!("{pane_id} (killed)");
         }
         drop(guard);
         deadline.remaining()?;
@@ -655,6 +678,11 @@ fn ping(
     let member = crate::input::with_database_budget(conn, deadline, |conn| {
         load_member(conn, member_id, false)
     })?;
+    if member.kind == crate::broker::records::MemberKind::Director {
+        return Err(CafleetError::App(
+            "cannot ping the Director's own pane".into(),
+        ));
+    }
     let placement = member.placement.as_ref().expect("placed member");
     let pane = placement.mux_pane_id.as_deref();
     let reason;
@@ -757,6 +785,9 @@ mod tests {
         let (entered_tx, entered_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let mut gated = false;
+        let expire_after_close =
+            std::env::var_os("CAFLEET_TEST_DELETE_EXPIRE_AFTER_CLOSE").is_some();
+        let expires = Instant::now() + Duration::from_secs(5);
         deletion
             .authorizer(Some(move |context: AuthContext<'_>| {
                 if !gated
@@ -770,6 +801,20 @@ mod tests {
                     gated = true;
                     entered_tx.send(()).unwrap();
                     release_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+                }
+                if expire_after_close
+                    && matches!(
+                        context.action,
+                        AuthAction::Update {
+                            table_name: "members",
+                            ..
+                        }
+                    )
+                {
+                    std::thread::sleep(
+                        expires.saturating_duration_since(Instant::now())
+                            + Duration::from_millis(10),
+                    );
                 }
                 Authorization::Allow
             }))
@@ -786,7 +831,7 @@ mod tests {
                 &settings,
                 2,
                 true,
-                crate::input::Deadline::new(),
+                crate::input::Deadline::until(expires),
             )
         });
         entered_rx
@@ -818,6 +863,10 @@ mod tests {
                 .is_none(),
             "the concrete pane close retains exclusive input ownership"
         );
+        creation.busy_timeout(Duration::ZERO).unwrap();
+        creation
+            .execute_batch("BEGIN IMMEDIATE; ROLLBACK;")
+            .expect("a blocked multiplexer close leaves the SQLite writer available");
         std::fs::write(home.join("release-kill"), b"release").unwrap();
         deleting.join().unwrap().unwrap();
         assert_eq!(
@@ -851,6 +900,15 @@ mod tests {
 
     #[test]
     fn member_delete_revalidates_a_pending_placement_before_registry_mutation() {
+        run_private_delete_regression(false);
+    }
+
+    #[test]
+    fn successful_pane_close_is_finalized_when_the_operation_budget_expires() {
+        run_private_delete_regression(true);
+    }
+
+    fn run_private_delete_regression(expire_after_close: bool) {
         use std::os::unix::fs::PermissionsExt;
         use std::process::{Command, Stdio};
         use std::time::{Duration, Instant};
@@ -884,8 +942,8 @@ done
         )
         .unwrap();
         std::fs::set_permissions(&tmux, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let mut child = Command::new(std::env::current_exe().unwrap())
-            .args([
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command.args([
                 "--exact",
                 "cli::member::tests::member_delete_revalidates_a_pending_placement_before_registry_mutation",
                 "--nocapture",
@@ -897,9 +955,11 @@ done
             .env("TMUX_PANE", "%0")
             .env("CAFLEET_TEST_PENDING_DELETE_UNIT_HOME", home.path())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
+            .stderr(Stdio::piped());
+        if expire_after_close {
+            command.env("CAFLEET_TEST_DELETE_EXPIRE_AFTER_CLOSE", "1");
+        }
+        let mut child = command.spawn().unwrap();
         let deadline = Instant::now() + Duration::from_secs(9);
         loop {
             if child.try_wait().unwrap().is_some() {

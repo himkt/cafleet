@@ -14,7 +14,7 @@ Typed columns store every routing field and required enum. The [data model](../s
 
 ## Schema management
 
-The fresh baseline creates exactly the application tables declared in the schema. Compatibility diagnosis verifies current application identity, ledger version, every required table’s column shape, and required indexes/foreign keys. Unrelated auxiliary tables, indexes and triggers are compatible while those required definitions remain intact.
+The fresh baseline creates exactly the application tables declared in the schema. Compatibility diagnosis verifies current application identity, ledger version, every required table’s column shape, and required indexes/foreign keys. Known versions use their recorded migration shape; newer versions are diagnosed before any head-shape comparison. Unrelated auxiliary tables, indexes and triggers are compatible while those required definitions remain intact.
 
 The current format requires `PRAGMA application_id = 1128351288` (`CAF8`), a compatible embedded migration ledger and the expected table/column shapes. An incompatible selected file is preserved unchanged: diagnosis runs before database content writes or either setup half installs assets.
 

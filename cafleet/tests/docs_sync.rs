@@ -1480,7 +1480,7 @@ mod structural_contracts {
     }
 
     #[test]
-    fn database_diagnosis_documents_identity_and_shape_before_versions_and_assets() {
+    fn database_diagnosis_documents_recorded_version_shapes_and_asset_precedence() {
         for path in ["docs/docs/spec/cli-options.md", "SPEC.md"] {
             let document = INVENTORY.document(path);
             let database = document.section("database-section").unwrap();
@@ -1493,8 +1493,12 @@ mod structural_contracts {
                 ])
                 .unwrap();
             database.require_pattern(
-                "identity and required shapes precede ledger comparison",
-                r"(?is)application identity.{0,60}1128351288.{0,140}required table/column.{0,120}before comparing the ledger version",
+                "supported shapes follow the recorded migration version",
+                r"(?is)application identity.{0,60}1128351288.{0,100}read the recorded version.{0,150}against that recorded version's migrations",
+            );
+            database.require_pattern(
+                "newer versions retain their upgrade diagnosis",
+                r"(?is)newer version reports\s+ahead without comparing its unknown shape to the current head",
             );
             database.require_pattern(
                 "a matching ledger does not replace format validation",

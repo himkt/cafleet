@@ -475,24 +475,43 @@ pub fn classify(coding_agent: &str, content: &str) -> PaneState {
         return PaneState::Unknown;
     }
     let lines = styled_lines(content);
+    let mut fenced = false;
     let lines: Vec<_> = lines
         .iter()
-        .filter(|line| !line.text.trim().is_empty())
+        .filter(|line| {
+            if line.text.trim_start().starts_with("```") {
+                fenced = !fenced;
+                false
+            } else {
+                !fenced && !line.text.trim().is_empty()
+            }
+        })
         .collect();
     let recent = &lines[lines.len().saturating_sub(20)..];
-    if recent
-        .iter()
-        .any(|line| line.text.trim_start().starts_with("```"))
-    {
-        return PaneState::Unknown;
-    }
+    let composer = agent_composer_state(coding_agent, &lines);
+    let draft_row = if composer == PaneState::Draft {
+        let marker = match coding_agent {
+            "claude" => Some('❯'),
+            "codex" => Some('›'),
+            _ => None,
+        };
+        marker.and_then(|marker| {
+            lines
+                .iter()
+                .rfind(|line| line.text.trim_start().starts_with(marker))
+        })
+    } else {
+        None
+    };
     static APPROVAL: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"^[\s│]*[❯›]\s+\d+\.\s|\[y/n\]|Permission required")
             .expect("valid approval pattern")
     });
     static WORKING: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?i)esc\s+(to\s+)?interrupt").expect("valid work pattern"));
-    if recent.iter().any(|line| APPROVAL.is_match(&line.text)) {
+    if recent.iter().any(|line| {
+        !draft_row.is_some_and(|draft| std::ptr::eq(*draft, *line)) && APPROVAL.is_match(&line.text)
+    }) {
         return PaneState::AwaitingUser;
     }
     if recent
@@ -503,8 +522,12 @@ pub fn classify(coding_agent: &str, content: &str) -> PaneState {
     {
         return PaneState::Working;
     }
+    composer
+}
+
+fn agent_composer_state(coding_agent: &str, lines: &[&Line]) -> PaneState {
     match coding_agent {
-        "claude" => claude_state(&lines),
+        "claude" => claude_state(lines),
         "codex" => {
             let Some(index) = lines
                 .iter()
@@ -525,7 +548,7 @@ pub fn classify(coding_agent: &str, content: &str) -> PaneState {
             }
             composer_state(&[lines[index]], '›', ComposerProfile::Codex)
         }
-        "opencode" => opencode_state(&lines),
+        "opencode" => opencode_state(lines),
         _ => PaneState::Unknown,
     }
 }

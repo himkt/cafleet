@@ -37,6 +37,16 @@ fn assert_no_pane_effects(calls: &[String]) {
     );
 }
 
+#[test]
+fn member_ping_excludes_the_director_before_capture_or_input() {
+    let cli = Cli::new();
+    let (_, director) = cli.seeded_fleet();
+    let output = cli.run(&["member", "ping", &director.to_string(), "--json"]);
+    assert_eq!(code(&output), 1);
+    assert!(stderr(&output).contains("cannot ping the Director's own pane"));
+    assert!(cli.shim_calls().is_empty());
+}
+
 fn assert_keys(value: &serde_json::Value, expected: &[&str]) {
     assert_eq!(
         value

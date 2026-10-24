@@ -78,11 +78,11 @@ Broker records carry typed values independently of CLI formatting. Public messag
 
 ### 6.1 Persistence & Schema
 
-The fresh baseline creates exactly the application tables declared in the schema. Compatibility diagnosis verifies current application identity, ledger version, every required table’s column shape, and required indexes/foreign keys. Unrelated auxiliary tables, indexes and triggers are compatible while those required definitions remain intact.
+The fresh baseline creates exactly the application tables declared in the schema. Compatibility diagnosis verifies current application identity, ledger version, every required table’s column shape, and required indexes/foreign keys. Known versions use their recorded migration shape; newer versions are diagnosed before any head-shape comparison. Unrelated auxiliary tables, indexes and triggers are compatible while those required definitions remain intact.
 
 Connections use SQLite foreign-key enforcement and a normal five-second busy timeout. A bounded operation caps that wait to its remaining budget. Resolve a relative selected SQLite file path against the invoking working directory and canonicalize the database file before lock-key directory construction.
 
-Classify database identity, ledger version and required current table/column shapes before every write and before either setup half installs assets. Empty zero-identity files initialize with the baseline atomically. Current-family known older versions migrate; an ahead ledger version rejects both setup write paths before database mutation, asset installation or asset-install recording. Independent half-error reporting applies only after the compatibility gate. Other populated/identified or malformed files fail without content writes:
+Classify database identity, ledger version and required table/column shapes for the recorded supported version before every write and before either setup half installs assets. Empty zero-identity files initialize with the baseline atomically. Current-family known older versions migrate; an ahead ledger version rejects both setup write paths before database mutation, asset installation or asset-install recording. Independent half-error reporting applies only after the compatibility gate. Other populated/identified or malformed files fail without content writes:
 
 `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.`
 
@@ -303,7 +303,7 @@ Use the invocation’s shared classifier and connection for guard/setup work. Do
 
 #### Schema-version guard {#schema-version-guard}
 
-The fresh baseline creates exactly the application tables declared in the schema. Compatibility diagnosis verifies current application identity, ledger version, every required table’s column shape, and required indexes/foreign keys. Unrelated auxiliary tables, indexes and triggers are compatible while those required definitions remain intact.
+The fresh baseline creates exactly the application tables declared in the schema. Compatibility diagnosis verifies current application identity, ledger version, every required table’s column shape, and required indexes/foreign keys. Known versions use their recorded migration shape; newer versions are diagnosed before any head-shape comparison. Unrelated auxiliary tables, indexes and triggers are compatible while those required definitions remain intact.
 
 Every fleet/member/message command validates current format before writes and asset checks. Identity is `application_id=1128351288`; malformed or incompatible files fail with `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.` Preserve file bytes and existing sidecars. Empty state reports `no cafleet database; run 'cafleet setup'`. Behind state reports `database schema is outdated (schema M, head N); run 'cafleet setup'`; ahead reports `database schema M is newer than this cafleet (head N); upgrade cafleet`. Database-open/read errors preserve their cause. Setup initializes/repairs compatible known versions; doctor reports rather than blocks its other diagnostics.
 
@@ -423,11 +423,14 @@ single detail line, and the report continues. One issue.
 
 One detail line describes the database state (`<M>` recorded version,
 `<N>` embedded head). An empty database has `application_id=0` and no
-non-internal tables. For every other database, application identity
-`1128351288` and the required table/column, index and foreign-key shapes are
-validated before comparing the ledger version. A missing required table
-(including `asset_installs`), malformed shape, mismatched identity, or missing
-recorded version is incompatible even when a retained ledger version equals
+non-internal tables. Validate application identity `1128351288` and the
+migration ledger first, then read the recorded version. For supported
+versions, validate required table/column, index and foreign-key shapes
+against that recorded version's migrations. Older supported versions
+therefore remain eligible for in-place migration. A newer version reports
+ahead without comparing its unknown shape to the current head.
+A missing required table (including `asset_installs`) or malformed shape in
+a supported version is incompatible even when its ledger version equals
 head. Compatible auxiliary tables, indexes and triggers remain accepted.
 
 | State | Glyph | Detail line | Issue |
@@ -436,7 +439,7 @@ head. Compatible auxiliary tables, indexes and triggers remain accepted.
 | Incompatible identity, required shape or ledger | `✗` | `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.` | yes |
 | Compatible identity/shape and recorded `<M>` = `<N>` | `✓` | `schema <N> (head)` | no |
 | Compatible identity/shape and recorded `<M>` < `<N>` | `✗` | `schema <M>, head is <N> — run: cafleet setup` | yes |
-| Compatible identity/shape and recorded `<M>` > `<N>` | `✗` | `schema <M> is newer than this CLI (head <N>) — upgrade cafleet` | yes |
+| Valid application identity/ledger and recorded `<M>` > `<N>` | `✗` | `schema <M> is newer than this CLI (head <N>) — upgrade cafleet` | yes |
 
 Connection and SQL inspection failures render `✗` with their actual cause as
 the detail line (one issue). Doctor completes the coding-agents section for
@@ -607,9 +610,10 @@ agent resolution error the row is `{"coding_agent": "...", "path": null,
 "source": "<VAR>", "recorded_version": null, "installed_at": null, "state":
 "error", "error": "<VAR> must be an absolute path (got '<value>')"}` — the
 raw invalid value appears only inside `error`; `path` stays `null` because
-no path resolved. `schema_version` contains the recorded version only after
-identity and required-shape validation succeeds and the ledger supplies a
-version; otherwise it is `null`. For every non-`ok` database report, recorded
+no path resolved. `schema_version` contains the recorded version after identity
+and ledger validation, plus shape validation for supported versions. A newer
+version retains its recorded version without a head-shape comparison;
+incompatible or missing state uses `null`. For every non-`ok` database report, recorded
 installs are not read: resolved agents use `"not_installed"`, path errors
 remain `"error"`, recorded fields are null and `superseded` is empty.
 A missing `asset_installs` table is an incompatible database state.
@@ -670,7 +674,7 @@ The Director ACKs every consumed delivery before the next wait, including questi
 
 ##### Member targeting and key delivery
 
-Require an active member and placement for pane operations; concrete pane IDs remain opaque. Pending placement is valid during creation and yields contextual prompt/exec/capture errors, or a ping skip. Missing placement fails pane actions; list/show retain diagnostic nulls. Exec rejects the root Director; individual member deletion protects it.
+Require an active member and placement for pane operations; concrete pane IDs remain opaque. Pending placement is valid during creation and yields contextual prompt/exec/capture errors, or a ping skip. Missing placement fails pane actions; list/show retain diagnostic nulls. Exec and ping reject the root Director before pane I/O; individual member deletion protects it.
 
 ##### `member create` {#member-create}
 
@@ -772,6 +776,8 @@ is introduced.
 
 Lock the concrete placement before kill/deregistration. A member without a concrete pane needs no lock. Retry contention every 50 milliseconds against one five-second deadline; expiry exits 1 with `member ID's pane input remained busy for 5 seconds; member was not deleted.` and leaves state unchanged. Preserve pane/registry errors and layout cleanup ownership.
 
+Revalidate pending or absent placement and deregister atomically. For a concrete pane, retain input ownership while closing it outside a SQLite write transaction, then revalidate and finalize the registry. After successful close, an expired budget permits uncontended finalization and permits no further lock wait; actual database failures report that the pane was closed and preserve the database cause. Optional layout work follows mandatory finalization.
+
 ##### `member show` {#member-show}
 
 `cafleet member show MEMBER_ID [--json]` — the positional `MEMBER_ID` names
@@ -838,7 +844,7 @@ After native completion and idle evidence, send an explicit prompt to use the ou
 
 ##### `member ping` {#member-ping}
 
-`cafleet member ping MEMBER_ID [--json]` is an explicit Director action. Lock/revalidate the target, require idle, then submit exactly `cafleet message poll ID --json` with settle/Enter.
+`cafleet member ping MEMBER_ID [--json]` is an explicit Director action. A Director target exits 1 with `cannot ping the Director's own pane` before capture or input. Lock/revalidate the target, require idle, then submit exactly `cafleet message poll ID --json` with settle/Enter.
 
 Successful JSON is `{member_id, pane_id, skipped:false, reason:null}`; text is `Pinged member NAME (PANE) — poll keystroke dispatched.`
 
@@ -1703,7 +1709,7 @@ Each CAFleet process is the only command in its shell-tool invocation. Run seque
 
 ## 8. Database schema
 
-The baseline is version 1 in the current distinct format family. The fresh baseline creates exactly the application tables declared in the schema. Compatibility diagnosis verifies current application identity, ledger version, every required table’s column shape, and required indexes/foreign keys. Unrelated auxiliary tables, indexes and triggers are compatible while those required definitions remain intact. Exact DDL:
+The baseline is version 1 in the current distinct format family. The fresh baseline creates exactly the application tables declared in the schema. Compatibility diagnosis verifies current application identity, ledger version, every required table’s column shape, and required indexes/foreign keys. Known versions use their recorded migration shape; newer versions are diagnosed before any head-shape comparison. Unrelated auxiliary tables, indexes and triggers are compatible while those required definitions remain intact. Exact DDL:
 
 ```sql
 PRAGMA application_id = 1128351288;

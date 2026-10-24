@@ -58,12 +58,15 @@ pub fn send_message(
     text: &str,
 ) -> Result<MessageRecord, CafleetError> {
     crate::db::require_current(conn)?;
-    let fleet_id = sender_fleet(conn, from_member_id)?;
-    super::fleets::require_live_fleet(conn, fleet_id)?;
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(db_err)?;
+    let fleet_id = sender_fleet(&tx, from_member_id)?;
+    super::fleets::require_live_fleet(&tx, fleet_id)?;
     let to_id: i64 = to
         .parse()
         .map_err(|_| CafleetError::Value(format!("Invalid destination format: {to}")))?;
-    let recipient: Option<(i64, MemberStatus)> = conn
+    let recipient: Option<(i64, MemberStatus)> = tx
         .query_row(
             "SELECT fleet_id, status FROM members WHERE member_id=?1",
             [to_id],
@@ -90,13 +93,15 @@ pub fn send_message(
     let now = format_utc(now_utc());
     // A self-send owes no keystroke, so it is settled at insert.
     let notified_at = (to_id == from_member_id).then_some(&now);
-    conn.execute(
+    tx.execute(
         "INSERT INTO messages (from_member_id, to_member_id, created_at, status_state, status_timestamp, text, notified_at)
          VALUES (?1, ?2, ?3, 'input_required', ?3, ?4, ?5)",
         params![from_member_id, to_id, now, text, notified_at],
     )
     .map_err(db_err)?;
-    required_message_row(conn, conn.last_insert_rowid())
+    let message = required_message_row(&tx, tx.last_insert_rowid())?;
+    tx.commit().map_err(db_err)?;
+    Ok(message)
 }
 
 pub fn oldest_pending_preview(
@@ -174,32 +179,30 @@ pub fn poll_messages(
 
 pub fn ack_message(conn: &mut Connection, message_id: i64) -> Result<MessageRecord, CafleetError> {
     crate::db::require_current(conn)?;
-    let row: Option<MessageStatus> = conn
+    let now = format_utc(now_utc());
+    let updated = conn
         .query_row(
-            "SELECT status_state FROM messages WHERE message_id=?1",
-            [message_id],
-            |row| row.get(0),
+            &format!(
+                "UPDATE messages SET status_state='completed', status_timestamp=?1 \
+                WHERE message_id=?2 AND status_state='input_required' RETURNING {MESSAGE_COLUMNS}"
+            ),
+            params![now, message_id],
+            map_message_row,
         )
         .optional()
         .map_err(db_err)?;
-    let Some(status) = row else {
+    if let Some(message) = updated {
+        return Ok(message);
+    }
+    let Some(message) = message_row(conn, message_id)? else {
         return Err(CafleetError::Value(format!(
             "Message {message_id} not found"
         )));
     };
-    if status != MessageStatus::InputRequired {
-        return Err(CafleetError::Value(format!(
-            "Cannot ACK message in state {}",
-            status.as_str()
-        )));
-    }
-    let now = format_utc(now_utc());
-    conn.execute(
-        "UPDATE messages SET status_state='completed', status_timestamp=?1 WHERE message_id=?2",
-        params![now, message_id],
-    )
-    .map_err(db_err)?;
-    required_message_row(conn, message_id)
+    Err(CafleetError::Value(format!(
+        "Cannot ACK message in state {}",
+        message.status.as_str()
+    )))
 }
 
 #[cfg(test)]
@@ -211,6 +214,47 @@ mod tests {
     use crate::broker::test_support::{create_fleet, migrated_conn, register};
     use crate::error::CafleetError;
     use crate::output::format_json;
+
+    #[test]
+    fn an_ack_that_loses_the_pending_transition_reports_completed() {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        let dir = TempDir::new().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet(&mut conn, "ack-race");
+        let member = register(&mut conn, fleet, "worker", Some("%2"));
+        let message =
+            broker::send_message(&mut conn, director, &member.to_string(), "ready").unwrap();
+        let path = conn.path().unwrap().to_owned();
+        let won = Arc::new(AtomicBool::new(false));
+        let observed = won.clone();
+        let mut intercepted = false;
+        conn.authorizer(Some(move |context: AuthContext<'_>| {
+            if !intercepted
+                && matches!(
+                    context.action,
+                    AuthAction::Update {
+                        table_name: "messages",
+                        ..
+                    }
+                )
+            {
+                intercepted = true;
+                let mut other = rusqlite::Connection::open(&path).unwrap();
+                broker::ack_message(&mut other, message.message_id).unwrap();
+                observed.store(true, Ordering::SeqCst);
+            }
+            Authorization::Allow
+        }))
+        .unwrap();
+        let error = broker::ack_message(&mut conn, message.message_id).unwrap_err();
+        assert!(won.load(Ordering::SeqCst));
+        assert_eq!(error.message(), "Cannot ACK message in state completed");
+    }
 
     fn notified_at(conn: &rusqlite::Connection, message_id: i64) -> Option<String> {
         conn.query_row(

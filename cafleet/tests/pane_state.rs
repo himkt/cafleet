@@ -354,6 +354,29 @@ fn transcript_quotes_do_not_become_a_live_composer() {
 }
 
 #[test]
+fn completed_code_blocks_do_not_hide_the_live_composer() {
+    for fixture in COMPOSERS {
+        for (composer, expected) in [(fixture.placeholder, "Idle"), (fixture.draft, "Draft")] {
+            let capture = format!("```rust\nfn example() {{}}\n```\n{composer}");
+            assert_state(fixture.agent, &capture, expected);
+        }
+    }
+}
+
+#[test]
+fn numbered_live_drafts_are_not_approval_choices() {
+    for fixture in COMPOSERS
+        .iter()
+        .filter(|fixture| fixture.agent != "opencode")
+    {
+        for text in ["1. fix the failing test", "1. Yes, proceed"] {
+            let capture = fixture.draft.replace(&hint(fixture), text);
+            assert_state(fixture.agent, &capture, "Draft");
+        }
+    }
+}
+
+#[test]
 fn an_unknown_backend_has_unknown_readiness() {
     for fixture in COMPOSERS {
         for backend in ["", "unrecognized-agent"] {

@@ -52,57 +52,120 @@ impl Default for Deadline {
     }
 }
 
-// rusqlite's safe busy handler accepts a function pointer; these scoped values
-// supply its deadline during synchronous operations on the borrowed connection.
-thread_local! {
-    static DATABASE_WAITS: std::cell::RefCell<Vec<(usize, Deadline)>> = const { std::cell::RefCell::new(Vec::new()) };
+struct DatabaseWait {
+    identity: usize,
+    deadline: Deadline,
+    handler: usize,
 }
 
-fn remaining_database_wait() -> Option<Duration> {
+thread_local! {
+    static DATABASE_WAITS: std::cell::RefCell<Vec<DatabaseWait>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+const DATABASE_HANDLERS: &[fn(i32) -> bool] = &[
+    wait_for_database_deadline::<0>,
+    wait_for_database_deadline::<1>,
+    wait_for_database_deadline::<2>,
+    wait_for_database_deadline::<3>,
+    wait_for_database_deadline::<4>,
+    wait_for_database_deadline::<5>,
+    wait_for_database_deadline::<6>,
+    wait_for_database_deadline::<7>,
+    wait_for_database_deadline::<8>,
+    wait_for_database_deadline::<9>,
+    wait_for_database_deadline::<10>,
+    wait_for_database_deadline::<11>,
+    wait_for_database_deadline::<12>,
+    wait_for_database_deadline::<13>,
+    wait_for_database_deadline::<14>,
+    wait_for_database_deadline::<15>,
+    wait_for_database_deadline::<16>,
+    wait_for_database_deadline::<17>,
+    wait_for_database_deadline::<18>,
+    wait_for_database_deadline::<19>,
+    wait_for_database_deadline::<20>,
+    wait_for_database_deadline::<21>,
+    wait_for_database_deadline::<22>,
+    wait_for_database_deadline::<23>,
+    wait_for_database_deadline::<24>,
+    wait_for_database_deadline::<25>,
+    wait_for_database_deadline::<26>,
+    wait_for_database_deadline::<27>,
+    wait_for_database_deadline::<28>,
+    wait_for_database_deadline::<29>,
+    wait_for_database_deadline::<30>,
+    wait_for_database_deadline::<31>,
+];
+
+fn remaining_database_wait(handler: usize) -> Option<Duration> {
     DATABASE_WAITS.with(|waits| {
         let waits = waits.borrow();
         assert!(
-            !waits.is_empty(),
-            "a database deadline handler has an active scope"
+            waits.iter().any(|wait| wait.handler == handler),
+            "a busy handler has an owning connection scope"
         );
         waits
             .iter()
-            .try_fold(Duration::MAX, |remaining, (_, deadline)| {
-                deadline.remaining().map(|left| remaining.min(left))
+            .filter(|wait| wait.handler == handler)
+            .try_fold(Duration::MAX, |remaining, wait| {
+                wait.deadline.remaining().map(|left| remaining.min(left))
             })
             .ok()
     })
 }
 
-fn wait_for_database_deadline(_: i32) -> bool {
-    let Some(remaining) = remaining_database_wait() else {
+fn wait_for_database_deadline<const HANDLER: usize>(_: i32) -> bool {
+    let Some(remaining) = remaining_database_wait(HANDLER) else {
         return false;
     };
     std::thread::sleep(remaining.min(Duration::from_millis(10)));
-    remaining_database_wait().is_some()
+    remaining_database_wait(HANDLER).is_some()
 }
 
 struct DatabaseBudget<'a> {
     conn: &'a mut Connection,
     identity: usize,
     previous_timeout: Duration,
+    handler: usize,
     active: bool,
 }
 
 impl<'a> DatabaseBudget<'a> {
     fn new(conn: &'a mut Connection, deadline: Deadline) -> Result<Self, CafleetError> {
-        deadline.remaining()?;
         let previous: u32 = conn
             .query_row("PRAGMA busy_timeout", [], |row| row.get(0))
             .map_err(crate::broker::members::db_err)?;
         let identity = std::ptr::from_ref(conn).addr();
-        conn.busy_handler(Some(wait_for_database_deadline))
+        // Distinct safe function pointers give rusqlite a connection-specific callback.
+        let handler = DATABASE_WAITS
+            .with(|waits| {
+                let waits = waits.borrow();
+                waits
+                    .iter()
+                    .find(|wait| wait.identity == identity)
+                    .map(|wait| wait.handler)
+                    .or_else(|| {
+                        (0..DATABASE_HANDLERS.len())
+                            .find(|handler| waits.iter().all(|wait| wait.handler != *handler))
+                    })
+            })
+            .ok_or_else(|| {
+                CafleetError::App("all scoped database deadline handlers are in use".into())
+            })?;
+        conn.busy_handler(Some(DATABASE_HANDLERS[handler]))
             .map_err(crate::broker::members::db_err)?;
-        DATABASE_WAITS.with(|waits| waits.borrow_mut().push((identity, deadline)));
+        DATABASE_WAITS.with(|waits| {
+            waits.borrow_mut().push(DatabaseWait {
+                identity,
+                deadline,
+                handler,
+            })
+        });
         Ok(Self {
             conn,
             identity,
             previous_timeout: Duration::from_millis(u64::from(previous)),
+            handler,
             active: true,
         })
     }
@@ -111,27 +174,32 @@ impl<'a> DatabaseBudget<'a> {
         if !self.active {
             return Ok(());
         }
-        let nested = DATABASE_WAITS.with(|waits| {
+        let previous = DATABASE_WAITS.with(|waits| {
             let waits = waits.borrow();
             assert_eq!(
                 waits
                     .last()
                     .expect("an active database budget is registered")
-                    .0,
+                    .identity,
                 self.identity
             );
+            assert_eq!(waits.last().unwrap().handler, self.handler);
             waits
                 .iter()
                 .rev()
                 .skip(1)
-                .any(|(identity, _)| *identity == self.identity)
+                .find(|wait| wait.identity == self.identity)
+                .map(|wait| wait.handler)
         });
-        if nested {
-            self.conn.busy_handler(Some(wait_for_database_deadline))
+        if let Some(handler) = previous {
+            self.conn
+                .busy_handler(Some(DATABASE_HANDLERS[handler]))
+                .map_err(crate::broker::members::db_err)
         } else {
-            self.conn.busy_timeout(self.previous_timeout)
-        }
-        .map_err(crate::broker::members::db_err)?;
+            self.conn
+                .busy_timeout(self.previous_timeout)
+                .map_err(crate::broker::members::db_err)
+        }?;
         DATABASE_WAITS.with(|waits| {
             waits
                 .borrow_mut()
@@ -155,6 +223,17 @@ pub fn with_database_budget<T>(
     deadline: Deadline,
     operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
 ) -> Result<T, CafleetError> {
+    deadline.remaining()?;
+    complete_database_budget(conn, deadline, operation)
+}
+
+// An irreversible pane close still needs uncontended finalization after expiry;
+// the original deadline continues to bound every SQLite lock wait.
+pub(crate) fn complete_database_budget<T>(
+    conn: &mut Connection,
+    deadline: Deadline,
+    operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
+) -> Result<T, CafleetError> {
     let mut budget = DatabaseBudget::new(conn, deadline)?;
     let result = operation(budget.conn);
     let restored = budget.restore();
@@ -166,6 +245,84 @@ pub fn with_database_budget<T>(
             primary.message(),
             cleanup.message()
         ))),
+    }
+}
+
+#[cfg(test)]
+mod database_scope_tests {
+    use super::*;
+
+    #[test]
+    fn expired_completion_commits_uncontended_work_without_starting_a_new_budget() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE probe(value INTEGER);")
+            .unwrap();
+        let expired = Deadline::until(Instant::now() - Duration::from_millis(1));
+        assert!(with_database_budget(&mut conn, expired, |_| Ok(())).is_err());
+        complete_database_budget(&mut conn, expired, |conn| {
+            conn.execute_batch("BEGIN IMMEDIATE; INSERT INTO probe VALUES(42); COMMIT;")
+                .map_err(crate::broker::members::db_err)
+        })
+        .unwrap();
+        assert_eq!(
+            conn.query_row("SELECT value FROM probe", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            42
+        );
+    }
+
+    #[test]
+    fn expired_completion_reports_real_contention_without_waiting() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("completion.db");
+        let writer = Connection::open(&path).unwrap();
+        writer
+            .execute_batch("CREATE TABLE probe(value INTEGER); BEGIN IMMEDIATE;")
+            .unwrap();
+        let mut conn = Connection::open(&path).unwrap();
+        let started = Instant::now();
+        let expired = Deadline::until(started - Duration::from_millis(1));
+        let error = complete_database_budget(&mut conn, expired, |conn| {
+            conn.execute("INSERT INTO probe VALUES(42)", [])
+                .map_err(crate::broker::members::db_err)
+        })
+        .unwrap_err();
+        assert!(error.message().contains("database is locked"));
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn a_nested_connection_uses_its_own_deadline() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("separate.db");
+        let writer = Connection::open(&path).unwrap();
+        writer
+            .execute_batch(
+                "CREATE TABLE probe(value INTEGER); INSERT INTO probe VALUES(42); BEGIN EXCLUSIVE;",
+            )
+            .unwrap();
+        let mut inner = Connection::open(&path).unwrap();
+        let mut outer = Connection::open_in_memory().unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(400));
+            writer.execute_batch("ROLLBACK").unwrap();
+        });
+        let result = with_database_budget(
+            &mut outer,
+            Deadline::until(Instant::now() + Duration::from_millis(200)),
+            |_| {
+                with_database_budget(
+                    &mut inner,
+                    Deadline::until(Instant::now() + Duration::from_secs(2)),
+                    |conn| {
+                        conn.query_row("SELECT value FROM probe", [], |row| row.get::<_, i64>(0))
+                            .map_err(crate::broker::members::db_err)
+                    },
+                )
+            },
+        );
+        release.join().unwrap();
+        assert_eq!(result.unwrap(), 42);
     }
 }
 

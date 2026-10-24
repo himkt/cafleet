@@ -61,6 +61,14 @@ pub fn truncate_message_text(result: &mut Value, max_text_len: usize) {
                 truncate_item(item, max_text_len);
             }
         }
+        Value::Object(object) if object.contains_key("messages") => {
+            truncate_message_text(
+                object
+                    .get_mut("messages")
+                    .expect("the result contains messages"),
+                max_text_len,
+            );
+        }
         other => truncate_item(other, max_text_len),
     }
 }
@@ -219,6 +227,22 @@ mod tests {
 
     mod truncate_message_text_tests {
         use super::*;
+
+        #[test]
+        fn truncates_wait_messages_without_changing_diagnostics() {
+            let mut result = json!({
+                "member_id": 2,
+                "outcome": "messages",
+                "messages": [message_fixture(1, 2, &"界".repeat(10))],
+                "notification_errors": [{"error": "keep this full diagnostic"}],
+            });
+            truncate_message_text(&mut result, 3);
+            assert_eq!(result["messages"][0]["text"], "界界界…");
+            assert_eq!(
+                result["notification_errors"][0]["error"],
+                "keep this full diagnostic"
+            );
+        }
 
         #[test]
         fn truncates_a_bare_message_dict_in_place() {
