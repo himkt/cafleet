@@ -124,7 +124,10 @@ pub fn run(
                 )
             })?;
             let message_id = message.message_id;
-            let notification_sent =
+            // Escape into the sender's own pane would interrupt the turn running this command.
+            let notification_sent = if from_member_id == to_member_id {
+                false
+            } else {
                 match crate::runtime::deliver_pending(conn, settings, to_member_id, None, deadline)
                 {
                     Ok(outcome) => {
@@ -137,7 +140,8 @@ pub fn run(
                         eprintln!("Message {message_id} was persisted. {}", error.message());
                         false
                     }
-                };
+                }
+            };
             emit_result(
                 settings,
                 presentation::send_outcome(&message, notification_sent),
