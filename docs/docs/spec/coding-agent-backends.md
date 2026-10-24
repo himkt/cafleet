@@ -52,8 +52,8 @@ Per-backend capabilities:
 | Backend | Accepted value format | Example values | Create-time validation |
 |---|---|---|---|
 | `claude` | Passes through verbatim | `haiku`, `sonnet`, `opus`, `fable` | none — the binary rejects unknown models |
-| `codex` | Passes through verbatim | `gpt-5.6-sol` (default), `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5` | none — the binary rejects unknown models |
-| `opencode` | `<provider-id>/<model-id>`, split on the **first** `/` into two non-empty segments (model ids may contain further slashes) | `anthropic/claude-sonnet-4-6`, `openai/gpt-5.5` | exit 2 with `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').` |
+| `codex` | Passes through verbatim | `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-luna` | none — the binary rejects unknown models |
+| `opencode` | `<provider-id>/<model-id>`, split on the **first** `/` into two non-empty segments (model ids may contain further slashes) | `opencode/claude-opus-5-5`, `opencode/gpt-6.1-sol`, `anthropic/claude-sonnet-4-6` | exit 2 with `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').` |
 
 ## Reasoning effort {#reasoning-effort}
 
