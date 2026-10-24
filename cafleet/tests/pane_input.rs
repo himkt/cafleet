@@ -9,8 +9,6 @@ use std::time::{Duration, Instant};
 use common::{Cli, code, stderr, stdout, write_executable};
 use sha2::{Digest, Sha256};
 
-const IDLE: &str = "\x1b[0mReady.\n────────────────────────────\n❯ \x1b[0m\n────────────────────────────\n? for shortcuts\n";
-
 const INPUT_SHIM: &str = r#"#!/bin/sh
 printf '%s\n' "$*" >> "$CAFLEET_TEST_TMUX_LOG"
 stage=other
@@ -20,6 +18,7 @@ case "$1" in
         case "$4" in
             -l) stage=literal ;;
             Enter) stage=enter ;;
+            Escape) stage=escape ;;
         esac
         ;;
 esac
@@ -32,7 +31,7 @@ if [ "$stage" = "$CAFLEET_TEST_GATE_STAGE" ]; then
     done
 fi
 case "$stage" in
-    capture) delay="$CAFLEET_TEST_CAPTURE_DELAY" ;;
+    escape) delay="$CAFLEET_TEST_ESCAPE_DELAY" ;;
     literal) delay="$CAFLEET_TEST_LITERAL_DELAY" ;;
     enter) delay="$CAFLEET_TEST_ENTER_DELAY" ;;
     *) delay= ;;
@@ -48,6 +47,10 @@ case "$1" in
         while [ "$#" -gt 0 ]; do
             if [ "$1" = "-t" ]; then
                 shift
+                if [ ! -f "$CAFLEET_TEST_TMUX_CAPTURE_DIR/$1" ]; then
+                    echo "unexpected capture-pane" >&2
+                    exit 1
+                fi
                 while IFS= read -r line || [ -n "$line" ]; do
                     printf '%s\n' "$line"
                 done < "$CAFLEET_TEST_TMUX_CAPTURE_DIR/$1"
@@ -75,8 +78,6 @@ impl InputFixture {
         let (fleet, director) = cli.seeded_fleet();
         let member = cli.seed_member(fleet, "worker");
         let pane = format!("%{}", member + 4);
-        cli.set_pane_capture(&pane, IDLE);
-        cli.set_pane_capture("%0", IDLE);
         write_executable(&cli.shim_dir.join("tmux"), INPUT_SHIM);
         Self {
             cli,
@@ -101,16 +102,14 @@ impl InputFixture {
             ];
         }
         let mut args = vec!["member".into(), action.into(), self.member.to_string()];
-        if matches!(action, "prompt" | "exec") {
-            args.push(
-                if action == "exec" {
-                    "printf example"
-                } else {
-                    "hello worker"
-                }
-                .into(),
-            );
-        }
+        args.push(
+            if action == "exec" {
+                "printf example"
+            } else {
+                "hello worker"
+            }
+            .into(),
+        );
         args.push("--json".into());
         args
     }
@@ -127,6 +126,14 @@ impl InputFixture {
 
     fn hold_lock(&self) -> File {
         hold_lock(&self.lock_path())
+    }
+
+    fn observe_lock(&self) -> File {
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(self.lock_path())
+            .unwrap()
     }
 
     fn gate(&mut self, action: &str, stage: &str) -> InputChild {
@@ -284,12 +291,28 @@ fn assert_no_input(calls: &[String]) {
     );
 }
 
-fn assert_busy(output: &Output, member: i64) {
+fn assert_no_capture(calls: &[String]) {
+    assert!(
+        calls.iter().all(|line| !line.starts_with("capture-pane")),
+        "{calls:?}"
+    );
+}
+
+fn label(action: &str) -> &'static str {
+    match action {
+        "prompt" => "prompt",
+        "exec" => "native command",
+        other => panic!("no dispatch label for {other}"),
+    }
+}
+
+fn assert_busy(output: &Output, member: i64, action: &str) {
     assert_eq!(code(output), 1, "{}", stdout(output));
     assert_eq!(stdout(output), "");
     assert!(
         stderr(output).contains(&format!(
-            "member {member}'s pane is receiving another input; retry after it is idle."
+            "member {member}'s pane input remained busy; {} was not dispatched.",
+            label(action)
         )),
         "{}",
         stderr(output)
@@ -297,7 +320,7 @@ fn assert_busy(output: &Output, member: i64) {
 }
 
 #[test]
-fn prompt_sends_exact_literal_text_then_enter_and_preserves_json_order() {
+fn prompt_sends_escape_then_exact_literal_text_then_enter_and_preserves_json_order() {
     let _test_resource = common::process_test_resource_guard();
     let fixture = InputFixture::new();
     let output = fixture.cli.run(&[
@@ -330,20 +353,13 @@ fn prompt_sends_exact_literal_text_then_enter_and_preserves_json_order() {
     assert_eq!(
         writes,
         [
+            format!("send-keys -t {} Escape", fixture.pane),
             format!("send-keys -t {} -l --   /help  ", fixture.pane),
             format!("send-keys -t {} Enter", fixture.pane),
-        ]
+        ],
+        "the Director-authored payload gets no appended clauses"
     );
-    let capture = calls
-        .iter()
-        .position(|line| line.starts_with("capture-pane"))
-        .unwrap();
-    let literal = calls.iter().position(|line| line.contains(" -l ")).unwrap();
-    assert!(capture < literal);
-    assert!(
-        calls[capture].split_whitespace().any(|arg| arg == "-e"),
-        "{calls:?}"
-    );
+    assert_no_capture(&calls);
 }
 
 #[test]
@@ -399,136 +415,49 @@ fn prompt_invalid_lines_fail_before_pane_io() {
 }
 
 #[test]
-fn prompt_and_native_exec_refuse_every_non_idle_state_without_typing() {
-    let _test_resource = common::process_test_resource_guard();
-    for (action, label) in [("prompt", "prompt"), ("exec", "native command")] {
-        let fixture = InputFixture::new();
-        for (state, capture) in [
-            ("working", format!("✻ Working (esc to interrupt)\n{IDLE}")),
-            ("awaiting_user", format!(" ❯ 1. Yes, proceed\n{IDLE}")),
-            (
-                "draft",
-                IDLE.replace("❯ \x1b[0m", "❯ \x1b[0;37munsent user draft\x1b[0m"),
-            ),
-            ("unknown", "unrecognized truncated screen".into()),
-        ] {
-            fixture.cli.set_pane_capture(&fixture.pane, &capture);
-            let before = fixture.cli.shim_calls().len();
-            let output = fixture.run(action);
-            assert_eq!(code(&output), 1);
-            assert_eq!(stdout(&output), "");
-            assert!(
-                stderr(&output).contains(&format!(
-                    "member {} is {state}; {label} was not dispatched.",
-                    fixture.member
-                )),
-                "{}",
-                stderr(&output)
-            );
-            assert_no_input(&fixture.cli.shim_calls()[before..]);
-        }
-    }
-}
-
-#[test]
-fn ping_submits_only_the_json_poll_command_with_literal_settle_enter() {
-    let _test_resource = common::process_test_resource_guard();
-    let fixture = InputFixture::new();
-    let payload = json(&fixture.run("ping"));
-    assert_eq!(
-        payload
-            .as_object()
-            .unwrap()
-            .keys()
-            .map(String::as_str)
-            .collect::<Vec<_>>(),
-        ["member_id", "pane_id", "skipped", "reason"]
-    );
-    assert_eq!(
-        payload,
-        serde_json::json!({"member_id":fixture.member,"pane_id":fixture.pane,"skipped":false,"reason":null})
-    );
-    let writes: Vec<_> = fixture
-        .cli
-        .shim_calls()
-        .into_iter()
-        .filter(|line| line.starts_with("send-keys"))
-        .collect();
-    assert_eq!(
-        writes,
-        [
-            format!(
-                "send-keys -t {} -l -- cafleet message poll {} --json",
-                fixture.pane, fixture.member
-            ),
-            format!("send-keys -t {} Enter", fixture.pane),
-        ]
-    );
-}
-
-#[test]
-fn ping_reports_each_readiness_hold_in_json_and_text() {
-    let _test_resource = common::process_test_resource_guard();
-    let fixture = InputFixture::new();
-    for (state, capture) in [
-        ("working", format!("✻ Working (esc to interrupt)\n{IDLE}")),
-        ("awaiting_user", format!(" ❯ 1. Yes, proceed\n{IDLE}")),
-        (
-            "draft",
-            IDLE.replace("❯ \x1b[0m", "❯ \x1b[0;37munsent draft\x1b[0m"),
-        ),
-        ("unknown", "unrecognized truncated screen".into()),
-    ] {
-        fixture.cli.set_pane_capture(&fixture.pane, &capture);
-        let before = fixture.cli.shim_calls().len();
-        let payload = json(&fixture.run("ping"));
-        assert_eq!(
-            payload,
-            serde_json::json!({"member_id":fixture.member,"pane_id":fixture.pane,"skipped":true,"reason":state})
-        );
-        let text = fixture
-            .cli
-            .run(&["member", "ping", &fixture.member.to_string()]);
-        assert_eq!(code(&text), 0);
-        assert_eq!(
-            stdout(&text),
-            format!(
-                "Member worker ({}) is {state} — ping skipped.\n",
-                fixture.pane
-            )
-        );
-        assert_no_input(&fixture.cli.shim_calls()[before..]);
-    }
-}
-
-#[test]
-fn process_shared_lock_blocks_prompt_exec_and_ping_before_capture() {
+fn a_held_lock_makes_prompt_and_exec_wait_then_report_busy_without_capture_or_input() {
     let _test_resource = common::process_test_resource_guard();
     let fixture = InputFixture::new();
     let _lock = fixture.hold_lock();
     for action in ["prompt", "exec"] {
-        assert_busy(&fixture.run(action), fixture.member);
+        let started = Instant::now();
+        let output = fixture.run(action);
+        let waited = started.elapsed();
+        assert_busy(&output, fixture.member, action);
+        assert!(
+            waited >= Duration::from_millis(1400),
+            "{action}: {waited:?}"
+        );
+        assert!(waited < Duration::from_secs(4), "{action}: {waited:?}");
     }
-    let payload = json(&fixture.run("ping"));
-    assert_eq!(
-        payload,
-        serde_json::json!({"member_id":fixture.member,"pane_id":fixture.pane,"skipped":true,"reason":"busy"})
-    );
-    let text = fixture
-        .cli
-        .run(&["member", "ping", &fixture.member.to_string()]);
-    assert_eq!(
-        stdout(&text),
-        format!("Member worker ({}) is busy — ping skipped.\n", fixture.pane)
-    );
-    assert!(
-        fixture
-            .cli
-            .shim_calls()
-            .iter()
-            .all(|line| !line.starts_with("capture-pane"))
-    );
+    assert_no_capture(&fixture.cli.shim_calls());
     assert_no_input(&fixture.cli.shim_calls());
+}
+
+#[test]
+fn a_lock_released_during_the_wait_lets_prompt_and_exec_dispatch() {
+    let _test_resource = common::process_test_resource_guard();
+    for action in ["prompt", "exec"] {
+        let fixture = InputFixture::new();
+        let lock = fixture.hold_lock();
+        let holder = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(500));
+            drop(lock);
+        });
+        let output = fixture.run(action);
+        holder.join().unwrap();
+        json(&output);
+        assert_eq!(
+            fixture
+                .cli
+                .shim_calls()
+                .iter()
+                .filter(|line| line.contains(" -l "))
+                .count(),
+            1,
+            "{action}"
+        );
+    }
 }
 
 #[test]
@@ -552,7 +481,7 @@ fn duplicate_registrations_for_one_concrete_pane_share_the_lock() {
         "hello alias",
         "--json",
     ]);
-    assert_busy(&output, duplicate);
+    assert_busy(&output, duplicate, "prompt");
     assert_no_input(&fixture.cli.shim_calls());
 }
 
@@ -580,7 +509,6 @@ fn the_session_and_pane_components_select_independent_input_locks() {
                 rusqlite::params![session, pane, other],
             )
             .unwrap();
-        fixture.cli.set_pane_capture(&pane, IDLE);
         let _lock = fixture.hold_lock();
         let output = fixture.cli.run(&[
             "member",
@@ -605,7 +533,7 @@ fn canonical_database_aliases_share_the_input_lock_directory() {
         "CAFLEET_DATABASE_URL",
         &format!("sqlite:///{}", alias.display()),
     );
-    assert_busy(&fixture.run("prompt"), fixture.member);
+    assert_busy(&fixture.run("prompt"), fixture.member, "prompt");
     assert!(
         !fixture
             .cli
@@ -625,15 +553,11 @@ fn lockfiles_have_stable_identity_owner_only_permissions_and_unmodified_contents
     let before = std::fs::metadata(&path).unwrap();
     assert_eq!(before.permissions().mode() & 0o777, 0o600);
     std::fs::write(&path, b"stable identity sentinel").unwrap();
-    json(&fixture.run("ping"));
+    json(&fixture.run("exec"));
     let after = std::fs::metadata(&path).unwrap();
     assert_eq!((before.dev(), before.ino()), (after.dev(), after.ino()));
     assert_eq!(std::fs::read(&path).unwrap(), b"stable identity sentinel");
-    let lock = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(&path)
-        .unwrap();
+    let lock = fixture.observe_lock();
     lock.try_lock().unwrap();
     drop(lock);
     let output = fixture
@@ -655,7 +579,7 @@ fn lock_open_errors_preserve_member_and_path_context_without_typing() {
     let error = stderr(&output);
     assert!(error.contains(&fixture.member.to_string()), "{error}");
     assert!(error.contains(path.to_str().unwrap()), "{error}");
-    assert!(!error.contains("receiving another input"), "{error}");
+    assert!(!error.contains("remained busy"), "{error}");
     assert_no_input(&fixture.cli.shim_calls());
 }
 
@@ -663,6 +587,7 @@ fn lock_open_errors_preserve_member_and_path_context_without_typing() {
 fn read_only_capture_works_while_an_input_lock_is_held() {
     let _test_resource = common::process_test_resource_guard();
     let fixture = InputFixture::new();
+    fixture.cli.set_pane_capture(&fixture.pane, "captured pane");
     let _lock = fixture.hold_lock();
     let output = fixture.cli.run(&[
         "member",
@@ -676,24 +601,20 @@ fn read_only_capture_works_while_an_input_lock_is_held() {
 }
 
 #[test]
-fn lock_is_held_through_capture_literal_and_enter_for_every_explicit_writer() {
+fn lock_is_held_through_escape_literal_and_enter_for_every_explicit_writer() {
     let _test_resource = common::process_test_resource_guard();
-    for action in ["prompt", "ping", "exec"] {
-        for stage in ["capture", "literal", "enter"] {
+    for action in ["prompt", "exec"] {
+        for stage in ["escape", "literal", "enter"] {
             let mut fixture = InputFixture::new();
             let owner = fixture.gate(action, stage);
-            let observer = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(fixture.lock_path())
-                .unwrap();
+            let observer = fixture.observe_lock();
             assert!(
                 matches!(observer.try_lock(), Err(TryLockError::WouldBlock)),
                 "{action}/{stage}"
             );
-            assert_busy(&fixture.run("prompt"), fixture.member);
-            let ping = json(&fixture.run("ping"));
-            assert_eq!(ping["reason"], "busy");
+            if stage == "enter" {
+                assert_busy(&fixture.run("prompt"), fixture.member, "prompt");
+            }
             let output = owner.release();
             assert_eq!(code(&output), 0, "{action}/{stage}: {}", stderr(&output));
             observer.try_lock().unwrap();
@@ -705,14 +626,10 @@ fn lock_is_held_through_capture_literal_and_enter_for_every_explicit_writer() {
 fn process_exit_releases_input_ownership_without_replacing_the_lockfile() {
     let _test_resource = common::process_test_resource_guard();
     let mut fixture = InputFixture::new();
-    let mut owner = fixture.gate("prompt", "capture");
+    let mut owner = fixture.gate("prompt", "literal");
     let path = fixture.lock_path();
     let before = std::fs::metadata(&path).unwrap();
-    let observer = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(&path)
-        .unwrap();
+    let observer = fixture.observe_lock();
     assert!(matches!(observer.try_lock(), Err(TryLockError::WouldBlock)));
     owner.kill();
     observer.try_lock().unwrap();
@@ -726,11 +643,7 @@ fn a_literal_timeout_retains_ownership_until_failure_and_releases_it_without_ent
     let _test_resource = common::process_test_resource_guard();
     let mut fixture = InputFixture::new();
     let mut owner = fixture.gate("prompt", "literal");
-    let contender = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(fixture.lock_path())
-        .unwrap();
+    let contender = fixture.observe_lock();
     assert!(matches!(
         contender.try_lock(),
         Err(TryLockError::WouldBlock)
@@ -764,9 +677,18 @@ fn preview_contention_preserves_the_committed_message_and_pending_stamp() {
     let _test_resource = common::process_test_resource_guard();
     let fixture = InputFixture::new();
     let _lock = fixture.hold_lock();
-    let payload = json(&fixture.send("held assignment"));
+    let output = fixture.send("held assignment");
+    let payload = json(&output);
     assert_eq!(payload["notification_sent"], false);
     let id = payload["message"]["message_id"].as_i64().unwrap();
+    assert!(
+        stderr(&output).contains(&format!(
+            "member {}'s pane input remained busy; preview {id} was not sent.",
+            fixture.member
+        )),
+        "{}",
+        stderr(&output)
+    );
     let stamp: Option<String> = fixture
         .cli
         .sqlite()
@@ -778,45 +700,82 @@ fn preview_contention_preserves_the_committed_message_and_pending_stamp() {
         .unwrap();
     assert_eq!(stamp, None);
     assert_no_input(&fixture.cli.shim_calls());
-    assert!(
-        fixture
-            .cli
-            .shim_calls()
-            .iter()
-            .all(|line| !line.starts_with("capture-pane"))
-    );
+    assert_no_capture(&fixture.cli.shim_calls());
 }
 
 #[test]
 fn a_real_prompt_owner_prevents_preview_input_from_joining_its_payload() {
     let _test_resource = common::process_test_resource_guard();
     let mut fixture = InputFixture::new();
-    let owner = fixture.gate("prompt", "literal");
+    let owner = fixture.gate("prompt", "enter");
     let before = fixture.cli.shim_calls().len();
-    let payload = json(&fixture.send("queued behind native input"));
-    assert_eq!(payload["notification_sent"], false);
+    let started = Instant::now();
+    let sender = fixture.cli.spawn(&[
+        "message",
+        "send",
+        "--from-member-id",
+        &fixture.director.to_string(),
+        "--to-member-id",
+        &fixture.member.to_string(),
+        "queued behind native input",
+        "--json",
+    ]);
+    let writer = fixture.cli.sqlite();
+    while writer
+        .query_row("SELECT count(*) FROM messages", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap()
+        == 0
+    {
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "the send never committed"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    std::thread::sleep(Duration::from_millis(300));
     assert_no_input(&fixture.cli.shim_calls()[before..]);
     let output = owner.release();
     assert_eq!(code(&output), 0, "{}", stderr(&output));
-    let pending: i64 = fixture
-        .cli
-        .sqlite()
-        .query_row(
-            "SELECT count(*) FROM messages WHERE to_member_id=?1 AND notified_at IS NULL",
-            [fixture.member],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(pending, 1);
+    let payload = json(&bounded_output(sender));
+    assert_eq!(
+        payload["notification_sent"], true,
+        "the waiting send delivers after the prompt releases the lock"
+    );
+    let writes: Vec<_> = fixture.cli.shim_calls()[before..]
+        .iter()
+        .filter(|line| line.starts_with("send-keys"))
+        .cloned()
+        .collect();
+    assert_eq!(
+        writes
+            .iter()
+            .map(|line| line.split_whitespace().nth(3).unwrap())
+            .collect::<Vec<_>>(),
+        ["Escape", "-l", "Enter"],
+        "only the preview's own submission follows the prompt's gated Enter: {writes:?}"
+    );
+    assert!(
+        writes[1].contains("[cafleet msg "),
+        "the preview line stays separate from the prompt payload: {writes:?}"
+    );
 }
 
 #[test]
-fn a_preview_owner_holds_the_same_guard_through_literal_and_enter() {
+fn a_preview_owner_holds_the_same_guard_through_escape_literal_and_enter() {
     let _test_resource = common::process_test_resource_guard();
-    for stage in ["literal", "enter"] {
+    for stage in ["escape", "literal", "enter"] {
         let mut fixture = InputFixture::new();
         let owner = fixture.gate("preview", stage);
-        assert_busy(&fixture.run("exec"), fixture.member);
+        let observer = fixture.observe_lock();
+        assert!(
+            matches!(observer.try_lock(), Err(TryLockError::WouldBlock)),
+            "{stage}"
+        );
+        if stage == "enter" {
+            assert_busy(&fixture.run("exec"), fixture.member, "exec");
+        }
         let notified: Option<String> = fixture
             .cli
             .sqlite()
@@ -831,57 +790,62 @@ fn a_preview_owner_holds_the_same_guard_through_literal_and_enter() {
             "notification is stamped after complete submission"
         );
         let payload = json(&owner.release());
-        assert_eq!(payload["notification_sent"], true);
+        assert_eq!(payload["notification_sent"], true, "{stage}");
     }
 }
 
 #[test]
-fn prompt_and_native_exec_capture_failures_preserve_the_cause_and_release_the_guard() {
+fn prompt_and_native_exec_escape_failures_preserve_the_cause_and_release_the_guard() {
     let _test_resource = common::process_test_resource_guard();
-    for (action, label) in [("prompt", "prompt"), ("exec", "native command")] {
+    for action in ["prompt", "exec"] {
         let mut fixture = InputFixture::new();
-        fixture.cli.set_env("CAFLEET_TEST_FAIL_STAGE", "capture");
+        fixture.cli.set_env("CAFLEET_TEST_FAIL_STAGE", "escape");
         let output = fixture.run(action);
         assert_eq!(code(&output), 1);
         assert_eq!(stdout(&output), "");
         let error = stderr(&output);
         assert!(
             error.contains(&format!(
-                "{label} was not dispatched to member {}:",
+                "{} was not dispatched to member {}:",
+                label(action),
                 fixture.member
             )),
             "{error}"
         );
         assert!(
-            error.contains("injected capture transport failure"),
+            error.contains("injected escape transport failure"),
             "{error}"
         );
-        assert_no_input(&fixture.cli.shim_calls());
+        assert!(
+            fixture
+                .cli
+                .shim_calls()
+                .iter()
+                .all(|line| !line.contains(" -l ") && !line.ends_with(" Enter")),
+            "{:?}",
+            fixture.cli.shim_calls()
+        );
+        fixture.observe_lock().try_lock().unwrap();
         fixture.cli.extra_env.clear();
         json(&fixture.run(action));
     }
 }
 
 #[test]
-fn prompt_and_ping_report_first_write_and_enter_failures_as_uncertain_once() {
+fn prompt_and_exec_report_first_write_and_enter_failures_as_uncertain_once() {
     let _test_resource = common::process_test_resource_guard();
-    for action in ["prompt", "ping", "exec"] {
+    for action in ["prompt", "exec"] {
         for stage in ["literal", "enter"] {
             let mut fixture = InputFixture::new();
             fixture.cli.set_env("CAFLEET_TEST_FAIL_STAGE", stage);
             let output = fixture.run(action);
             assert_eq!(code(&output), 1);
             assert_eq!(stdout(&output), "");
-            let label = match action {
-                "prompt" => "prompt",
-                "ping" => "poll-trigger",
-                "exec" => "native command",
-                _ => unreachable!(),
-            };
             let error = stderr(&output);
             assert!(
                 error.contains(&format!(
-                    "{label} delivery to member {} is uncertain:",
+                    "{} delivery to member {} is uncertain:",
+                    label(action),
                     fixture.member
                 )),
                 "{error}"
@@ -896,6 +860,14 @@ fn prompt_and_ping_report_first_write_and_enter_failures_as_uncertain_once() {
             );
             let calls = fixture.cli.shim_calls();
             assert_eq!(
+                calls
+                    .iter()
+                    .filter(|line| line.ends_with(" Escape"))
+                    .count(),
+                1,
+                "{calls:?}"
+            );
+            assert_eq!(
                 calls.iter().filter(|line| line.contains(" -l ")).count(),
                 1,
                 "{calls:?}"
@@ -905,72 +877,41 @@ fn prompt_and_ping_report_first_write_and_enter_failures_as_uncertain_once() {
                 usize::from(stage == "enter"),
                 "{calls:?}"
             );
-            let lock = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(fixture.lock_path())
-                .unwrap();
-            lock.try_lock().unwrap();
+            fixture.observe_lock().try_lock().unwrap();
         }
     }
 }
 
 #[test]
-fn ping_capture_failure_exits_one_with_its_cause_and_no_success_record() {
+fn a_hung_escape_is_bounded_and_types_nothing() {
     let _test_resource = common::process_test_resource_guard();
-    let mut fixture = InputFixture::new();
-    fixture.cli.set_env("CAFLEET_TEST_FAIL_STAGE", "capture");
-    let output = fixture.run("ping");
-    assert_eq!(code(&output), 1);
-    assert_eq!(stdout(&output), "");
-    assert!(
-        stderr(&output).contains("injected capture transport failure"),
-        "{}",
-        stderr(&output)
-    );
-    assert_no_input(&fixture.cli.shim_calls());
-}
-
-#[test]
-fn capture_timeout_is_bounded_and_starts_no_input_after_the_deadline() {
-    let _test_resource = common::process_test_resource_guard();
-    for action in ["prompt", "ping", "exec"] {
+    for action in ["prompt", "exec"] {
         let mut fixture = InputFixture::new();
-        fixture.cli.set_env("CAFLEET_TEST_CAPTURE_DELAY", "8");
+        fixture.cli.set_env("CAFLEET_TEST_ESCAPE_DELAY", "8");
         let start = Instant::now();
         let output = fixture.run(action);
         assert_eq!(code(&output), 1, "{action}: {}", stdout(&output));
         assert!(
-            start.elapsed() < Duration::from_millis(6500),
+            start.elapsed() < Duration::from_secs(4),
             "{action}: {:?}",
             start.elapsed()
         );
         assert_eq!(stdout(&output), "");
-        assert_no_input(&fixture.cli.shim_calls());
+        assert!(
+            stderr(&output).contains(&format!("{} was not dispatched", label(action))),
+            "{}",
+            stderr(&output)
+        );
+        assert!(
+            fixture
+                .cli
+                .shim_calls()
+                .iter()
+                .all(|line| !line.contains(" -l ")),
+            "{:?}",
+            fixture.cli.shim_calls()
+        );
     }
-}
-
-#[test]
-fn insufficient_post_capture_budget_starts_no_literal_input() {
-    let _test_resource = common::process_test_resource_guard();
-    let mut fixture = InputFixture::new();
-    fixture.cli.set_env("CAFLEET_TEST_CAPTURE_DELAY", "3");
-    fixture.cli.set_env("CAFLEET_TEST_LITERAL_DELAY", "3");
-    let start = Instant::now();
-    let output = fixture.run("prompt");
-    assert_eq!(code(&output), 1);
-    assert!(
-        start.elapsed() < Duration::from_millis(6500),
-        "{:?}",
-        start.elapsed()
-    );
-    assert!(
-        stderr(&output).contains("prompt was not dispatched")
-            && stderr(&output).contains("insufficient pane input budget"),
-        "{}",
-        stderr(&output)
-    );
-    assert_no_input(&fixture.cli.shim_calls());
 }
 
 #[test]
@@ -1258,25 +1199,9 @@ fn the_backend_component_selects_an_independent_input_lock() {
 }
 
 #[test]
-fn readiness_uses_the_recorded_target_agent_and_fresh_styled_capture() {
+fn prompt_and_exec_dispatch_regardless_of_the_recorded_coding_agent() {
     let _test_resource = common::process_test_resource_guard();
-    for (agent, placeholder, draft) in [
-        (
-            "claude",
-            include_str!("fixtures/pane-readiness/claude-placeholder.ansi"),
-            include_str!("fixtures/pane-readiness/claude-draft.ansi"),
-        ),
-        (
-            "codex",
-            include_str!("fixtures/pane-readiness/codex-placeholder.ansi"),
-            include_str!("fixtures/pane-readiness/codex-draft.ansi"),
-        ),
-        (
-            "opencode",
-            include_str!("fixtures/pane-readiness/opencode-placeholder.ansi"),
-            include_str!("fixtures/pane-readiness/opencode-draft.ansi"),
-        ),
-    ] {
+    for agent in ["claude", "codex", "opencode"] {
         let fixture = InputFixture::new();
         fixture
             .cli
@@ -1286,24 +1211,18 @@ fn readiness_uses_the_recorded_target_agent_and_fresh_styled_capture() {
                 rusqlite::params![agent, fixture.member],
             )
             .unwrap();
-        fixture.cli.set_pane_capture(&fixture.pane, placeholder);
         json(&fixture.run("prompt"));
-        let before = fixture.cli.shim_calls().len();
-        fixture.cli.set_pane_capture(&fixture.pane, draft);
-        let output = fixture.run("prompt");
-        assert_eq!(code(&output), 1);
-        assert!(
-            stderr(&output).contains(&format!("member {} is draft;", fixture.member)),
-            "{}",
-            stderr(&output)
-        );
+        json(&fixture.run("exec"));
         let calls = fixture.cli.shim_calls();
-        assert!(
-            calls[before..]
+        assert_no_capture(&calls);
+        assert_eq!(
+            calls
                 .iter()
-                .any(|line| line.starts_with("capture-pane"))
+                .filter(|line| line.ends_with(" Escape"))
+                .count(),
+            2,
+            "{agent}: {calls:?}"
         );
-        assert_no_input(&calls[before..]);
     }
 }
 
@@ -1317,13 +1236,8 @@ fn preview_ownership_extends_through_a_blocked_notification_stamp() {
     std::fs::write(&owner.release, b"release").unwrap();
     std::thread::sleep(Duration::from_millis(200));
     assert!(owner.child.as_mut().unwrap().try_wait().unwrap().is_none());
-    let observer = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(fixture.lock_path())
-        .unwrap();
+    let observer = fixture.observe_lock();
     assert!(matches!(observer.try_lock(), Err(TryLockError::WouldBlock)));
-    assert_busy(&fixture.run("prompt"), fixture.member);
     drop(writer);
     let payload = json(&owner.release());
     assert_eq!(payload["notification_sent"], true);
@@ -1333,11 +1247,27 @@ fn preview_ownership_extends_through_a_blocked_notification_stamp() {
 #[test]
 fn preview_prewrite_database_revalidation_obeys_the_remaining_attempt_budget() {
     let _test_resource = common::process_test_resource_guard();
-    let mut fixture = InputFixture::new();
-    fixture.cli.set_env("CAFLEET_TEST_CAPTURE_DELAY", "2");
+    let fixture = InputFixture::new();
+    let lock = fixture.hold_lock();
     let start = Instant::now();
-    let owner = fixture.gate("preview", "capture");
+    let args = fixture.action("preview");
+    let refs: Vec<_> = args.iter().map(String::as_str).collect();
+    let child = fixture.cli.spawn(&refs);
     let writer = fixture.cli.sqlite();
+    while writer
+        .query_row("SELECT count(*) FROM messages", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap()
+        == 0
+    {
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "the send never committed"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    std::thread::sleep(Duration::from_millis(200));
     let journal: String = writer
         .query_row("PRAGMA journal_mode", [], |row| row.get(0))
         .unwrap();
@@ -1353,7 +1283,8 @@ fn preview_prewrite_database_revalidation_obeys_the_remaining_attempt_budget() {
     assert_eq!(committed.2, "input_required");
     assert_eq!(committed.3, None);
     writer.execute_batch("BEGIN EXCLUSIVE").unwrap();
-    let output = owner.release();
+    drop(lock);
+    let output = bounded_output(child);
     let elapsed = start.elapsed();
     let payload = json(&output);
     assert_eq!(payload["message"]["message_id"], committed.0);
@@ -1374,29 +1305,11 @@ fn preview_prewrite_database_revalidation_obeys_the_remaining_attempt_budget() {
         )
         .unwrap();
     assert_eq!(retained, (committed.1, committed.2, None));
-    assert_eq!(
-        writer
-            .query_row("SELECT count(*) FROM messages", [], |row| row
-                .get::<_, i64>(0))
-            .unwrap(),
-        1
-    );
     drop(writer);
     let calls = fixture.cli.shim_calls();
-    assert_eq!(
-        calls
-            .iter()
-            .filter(|line| line.starts_with("capture-pane"))
-            .count(),
-        1
-    );
+    assert_no_capture(&calls);
     assert_no_input(&calls);
-    let lock = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(fixture.lock_path())
-        .unwrap();
-    lock.try_lock().unwrap();
+    fixture.observe_lock().try_lock().unwrap();
     assert!(elapsed < Duration::from_millis(6500), "{elapsed:?}");
 }
 
@@ -1404,7 +1317,6 @@ fn preview_prewrite_database_revalidation_obeys_the_remaining_attempt_budget() {
 fn notification_database_wait_obeys_the_remaining_attempt_budget() {
     let _test_resource = common::process_test_resource_guard();
     let mut fixture = InputFixture::new();
-    fixture.cli.set_env("CAFLEET_TEST_CAPTURE_DELAY", "2");
     let start = Instant::now();
     let owner = fixture.gate("preview", "enter");
     let writer = fixture.cli.sqlite();
@@ -1430,7 +1342,7 @@ fn notification_database_wait_obeys_the_remaining_attempt_budget() {
 }
 
 #[test]
-fn herdr_uses_the_same_input_guard_and_requests_styled_literal_submission() {
+fn herdr_uses_the_same_input_guard_and_submits_escape_first_without_reading() {
     let _test_resource = common::process_test_resource_guard();
     let mut fixture = InputFixture::new();
     fixture.cli.set_env("CAFLEET_MULTIPLEXER", "herdr");
@@ -1438,30 +1350,26 @@ fn herdr_uses_the_same_input_guard_and_requests_styled_literal_submission() {
     fixture.cli.sqlite().execute(
         "UPDATE member_placements SET backend='herdr',mux_session='herdr-session',mux_pane_id='w1:p2' WHERE member_id=?1",
         [fixture.member]).unwrap();
-    fixture.cli.set_pane_capture("w1:p2", IDLE);
     write_executable(
         &fixture.cli.shim_dir.join("herdr"),
         r#"#!/bin/sh
 printf '%s\n' "$*" >> "$CAFLEET_TEST_TMUX_LOG"
 if [ "$1" = "pane" ] && [ "$2" = "read" ]; then
-    while IFS= read -r line || [ -n "$line" ]; do
-        printf '%s\n' "$line"
-    done < "$CAFLEET_TEST_TMUX_CAPTURE_DIR/$3"
+    echo "unexpected pane read" >&2
+    exit 1
 fi
 "#,
     );
     let path = placement_lock(&fixture.cli, "herdr", "herdr-session", "w1:p2");
     let lock = hold_lock(&path);
-    assert_busy(&fixture.run("prompt"), fixture.member);
+    assert_busy(&fixture.run("prompt"), fixture.member, "prompt");
     assert!(fixture.cli.shim_calls().is_empty());
     drop(lock);
     let payload = json(&fixture.run("prompt"));
     assert_eq!(payload["pane_id"], "w1:p2");
     let calls = fixture.cli.shim_calls();
     assert!(
-        calls
-            .iter()
-            .any(|line| line.starts_with("pane read w1:p2 ") && line.contains("--format ansi")),
+        calls.iter().all(|line| !line.starts_with("pane read")),
         "{calls:?}"
     );
     let writes: Vec<_> = calls
@@ -1472,6 +1380,7 @@ fi
     assert_eq!(
         writes,
         [
+            "pane send-keys w1:p2 escape",
             "pane send-text w1:p2 -- hello worker",
             "pane send-keys w1:p2 enter",
         ]

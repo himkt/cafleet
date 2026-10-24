@@ -10,13 +10,13 @@ Each member reads its role and required host rules, sends `ready` as its first o
 
 ## Assignment and receiving
 
-Messages are point-to-point. Send individually to every selected recipient. The Director receives through broker reads and finite waits; ordinary-member notifications are delivered only into idle empty composers. ACK every read delivery immediately, retaining unfinished actions in host-owned task state. See [run a fleet](../how-to/mixed-backend-team.md#manual-lifecycle).
+Messages are point-to-point. Send individually to every selected recipient. Every recipient's messages, the Director's included, are delivered into its pane as one line with Escape first, and the recipient ACKs each delivered ID after acting on it. ACK every read delivery immediately, retaining unfinished actions in host-owned task state. See [run a fleet](../how-to/mixed-backend-team.md#manual-lifecycle).
 
 ## Command routing
 
-A member runs commands its host permits and routes a required denied command to the Director. The Director authorizes `member exec`, which visibly submits the actual native shell command and returns submission metadata. Inspect native output with `member capture`; after completion and idle evidence, send an explicit `member prompt` to continue if the host has not resumed the member. A failed or uncertain dispatch requires inspection before any newly authorized retry.
+A member runs commands its host permits and routes a required denied command to the Director. The Director authorizes `member exec`, which visibly submits the actual native shell command and returns submission metadata. Inspect native output with `member capture`; after completion, send an explicit `member prompt` to continue if the host has not resumed the member. A failed or uncertain dispatch requires inspection before any newly authorized retry.
 
-The [native dispatch contract](../spec/cli-options.md#member-exec) owns validation, readiness and uncertainty errors. File-edit permission gaps need a matching host rule or a Director edit.
+The [native dispatch contract](../spec/cli-options.md#member-exec) owns validation, lock and uncertainty errors. File-edit permission gaps need a matching host rule or a Director edit.
 
 ## Inspection and recovery
 

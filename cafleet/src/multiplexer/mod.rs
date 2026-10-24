@@ -11,11 +11,42 @@ pub use herdr::HerdrMultiplexer;
 pub use tmux::TmuxMultiplexer;
 
 pub(crate) const SUBMIT_DELAY: f64 = 1.0;
+pub(crate) const ESCAPE_SETTLE_DELAY: f64 = 0.5;
+pub(crate) const ESCAPE_TIMEOUT: Duration = Duration::from_secs(1);
+pub(crate) const MIN_LITERAL_BUDGET: Duration = Duration::from_millis(500);
+pub(crate) const REVALIDATION_MARGIN: Duration = Duration::from_millis(500);
+pub(crate) const INPUT_RESERVATION: Duration = REVALIDATION_MARGIN
+    .saturating_add(Duration::from_millis((ESCAPE_SETTLE_DELAY * 1000.0) as u64))
+    .saturating_add(MIN_LITERAL_BUDGET)
+    .saturating_add(Duration::from_millis((SUBMIT_DELAY * 1000.0) as u64))
+    .saturating_add(Duration::from_secs(1));
+pub(crate) const INSUFFICIENT_INPUT_BUDGET: &str =
+    "insufficient pane input budget for literal input, settle and Enter";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lead {
+    Escape,
+    Direct,
+}
+
+impl Lead {
+    /// The settle and Enter time a submission keeps back from its literal input.
+    pub(crate) fn reserved(self) -> Duration {
+        let submit = Duration::from_secs_f64(SUBMIT_DELAY) + Duration::from_secs(1);
+        match self {
+            Lead::Escape => submit + Duration::from_secs_f64(ESCAPE_SETTLE_DELAY),
+            Lead::Direct => submit,
+        }
+    }
+}
 
 #[cfg(test)]
 mod submission_regressions {
-    use super::test_support::{FakeRunner, env, herdr_error_stderr};
+    use super::test_support::{Event, FakeRunner, env, herdr_error_stderr, sleep_event};
     use super::*;
+
+    const INSUFFICIENT_BUDGET: &str =
+        "insufficient pane input budget for literal input, settle and Enter";
 
     fn muxes(runner: Rc<dyn CommandRunner>) -> [AnyMultiplexer; 2] {
         [
@@ -24,19 +55,217 @@ mod submission_regressions {
         ]
     }
 
+    fn escape_argv(backend: usize) -> Vec<String> {
+        let parts: &[&str] = match backend {
+            0 => &["tmux", "send-keys", "-t", "pane", "Escape"],
+            _ => &["herdr", "pane", "send-keys", "pane", "escape"],
+        };
+        super::test_support::argv(parts)
+    }
+
+    fn mux_for(backend: usize, runner: Rc<FakeRunner>) -> AnyMultiplexer {
+        muxes(runner).into_iter().nth(backend).unwrap()
+    }
+
+    #[test]
+    fn transport_constants_match_the_reserved_budget() {
+        assert_eq!(ESCAPE_SETTLE_DELAY, 0.5);
+        assert_eq!(ESCAPE_TIMEOUT, Duration::from_secs(1));
+        assert_eq!(MIN_LITERAL_BUDGET, Duration::from_millis(500));
+        assert_eq!(REVALIDATION_MARGIN, Duration::from_millis(500));
+        assert_eq!(INPUT_RESERVATION, Duration::from_millis(3500));
+        assert_eq!(
+            REVALIDATION_MARGIN
+                + Duration::from_secs_f64(ESCAPE_SETTLE_DELAY)
+                + MIN_LITERAL_BUDGET
+                + Duration::from_secs_f64(SUBMIT_DELAY)
+                + Duration::from_secs(1),
+            INPUT_RESERVATION
+        );
+    }
+
+    #[test]
+    fn escape_lead_presses_escape_settles_then_types_the_literal_and_enter() {
+        for backend in 0..2 {
+            let runner = FakeRunner::without_binaries();
+            mux_for(backend, runner.clone())
+                .send_prompt("pane", "assignment", Lead::Escape)
+                .unwrap();
+            let events = runner.events();
+            assert_eq!(events.len(), 5, "{events:?}");
+            assert!(
+                matches!(&events[0], Event::Run { argv, .. } if *argv == escape_argv(backend)),
+                "{events:?}"
+            );
+            assert_eq!(events[1], sleep_event(ESCAPE_SETTLE_DELAY));
+            assert!(
+                matches!(&events[2], Event::Run { argv, .. } if argv.last().unwrap() == "assignment"),
+                "{events:?}"
+            );
+            assert_eq!(events[3], sleep_event(SUBMIT_DELAY));
+            assert!(
+                matches!(&events[4], Event::Run { argv, .. } if argv.last().unwrap().eq_ignore_ascii_case("enter")),
+                "{events:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn direct_lead_types_the_literal_and_enter_without_escape() {
+        for backend in 0..2 {
+            let runner = FakeRunner::without_binaries();
+            mux_for(backend, runner.clone())
+                .send_prompt("pane", "assignment", Lead::Direct)
+                .unwrap();
+            let events = runner.events();
+            assert_eq!(events.len(), 3, "{events:?}");
+            assert!(
+                matches!(&events[0], Event::Run { argv, .. } if argv.last().unwrap() == "assignment"),
+                "{events:?}"
+            );
+            assert_eq!(events[1], sleep_event(SUBMIT_DELAY));
+            assert!(
+                !runner
+                    .run_argvs()
+                    .iter()
+                    .any(|argv| argv.last().unwrap().eq_ignore_ascii_case("escape")),
+                "{events:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_escape_timeout_is_capped_by_the_escape_timeout_constant() {
+        for backend in 0..2 {
+            let runner = FakeRunner::without_binaries().with_budget(Duration::from_secs(4));
+            mux_for(backend, runner.clone())
+                .send_prompt("pane", "assignment", Lead::Escape)
+                .unwrap();
+            let timeouts = runner.run_timeouts();
+            assert_eq!(timeouts[0].0, escape_argv(backend));
+            assert_eq!(timeouts[0].1, ESCAPE_TIMEOUT);
+        }
+    }
+
+    #[test]
+    fn the_escape_timeout_is_capped_by_the_budget_left_after_the_reservation() {
+        for backend in 0..2 {
+            let runner = FakeRunner::without_binaries().with_budget(Duration::from_secs(3));
+            mux_for(backend, runner.clone())
+                .send_prompt("pane", "assignment", Lead::Escape)
+                .unwrap();
+            let timeouts = runner.run_timeouts();
+            assert_eq!(timeouts[0].0, escape_argv(backend));
+            assert_eq!(
+                timeouts[0].1,
+                Duration::from_millis(500),
+                "3 s remaining minus the 2.5 s Escape reservation"
+            );
+        }
+    }
+
+    #[test]
+    fn the_literal_budget_is_recomputed_after_the_escape_settle() {
+        for backend in 0..2 {
+            let runner = FakeRunner::without_binaries().with_budget(Duration::from_secs(4));
+            mux_for(backend, runner.clone())
+                .send_prompt("pane", "assignment", Lead::Escape)
+                .unwrap();
+            let timeouts = runner.run_timeouts();
+            assert_eq!(timeouts[1].0.last().unwrap(), "assignment");
+            assert_eq!(
+                timeouts[1].1,
+                Duration::from_millis(1500),
+                "4 s − 0.5 s settle − (SUBMIT_DELAY + 1 s)"
+            );
+        }
+    }
+
+    #[test]
+    fn escape_failures_type_no_literal_and_are_not_started() {
+        for backend in 0..2 {
+            for failure in [
+                RunError::NotStarted("deadline expired before launch".into()),
+                RunError::BinaryNotFound("missing executable".into()),
+                RunError::Timeout,
+                RunError::Failed {
+                    stderr: "connection lost".into(),
+                },
+                RunError::Failed {
+                    stderr: "can't find pane: pane".into(),
+                },
+                RunError::Failed {
+                    stderr: herdr_error_stderr("pane_not_found"),
+                },
+            ] {
+                let runner = FakeRunner::without_binaries();
+                runner.respond(Err(failure.clone()));
+                let error = mux_for(backend, runner.clone())
+                    .send_prompt("pane", "assignment", Lead::Escape)
+                    .unwrap_err();
+                assert!(!error.submission_started(), "{failure:?}: {error}");
+                assert_eq!(
+                    runner.run_argvs(),
+                    vec![escape_argv(backend)],
+                    "{failure:?}: no literal input after a failed Escape"
+                );
+                assert_eq!(runner.events().len(), 1, "{failure:?}: no settle either");
+            }
+        }
+    }
+
+    #[test]
+    fn insufficient_budget_for_the_escape_reservation_starts_no_process() {
+        for backend in 0..2 {
+            let runner = FakeRunner::without_binaries().with_budget(Duration::from_millis(2400));
+            let error = mux_for(backend, runner.clone())
+                .send_prompt("pane", "assignment", Lead::Escape)
+                .unwrap_err();
+            assert_eq!(error.to_string(), INSUFFICIENT_BUDGET);
+            assert!(!error.submission_started());
+            assert!(runner.events().is_empty(), "{:?}", runner.events());
+
+            let runner = FakeRunner::without_binaries().with_budget(Duration::from_millis(2400));
+            mux_for(backend, runner.clone())
+                .send_prompt("pane", "assignment", Lead::Direct)
+                .unwrap();
+            assert_eq!(
+                runner.run_argvs().len(),
+                2,
+                "the same budget covers a Direct submission without the Escape settle"
+            );
+        }
+    }
+
+    #[test]
+    fn a_slow_escape_that_consumes_the_slack_starts_no_literal() {
+        for backend in 0..2 {
+            let runner = FakeRunner::without_binaries().with_budget(Duration::from_secs(3));
+            runner.cost_next_run(Duration::from_millis(600));
+            let error = mux_for(backend, runner.clone())
+                .send_prompt("pane", "assignment", Lead::Escape)
+                .unwrap_err();
+            assert_eq!(error.to_string(), INSUFFICIENT_BUDGET);
+            assert!(!error.submission_started());
+            assert_eq!(runner.run_argvs(), vec![escape_argv(backend)]);
+        }
+    }
+
     #[test]
     fn insufficient_settle_and_enter_budget_starts_no_literal_input() {
-        let runner = FakeRunner::without_binaries();
-        for mux in muxes(runner.clone()) {
-            let deadline = crate::input::Deadline::until(
-                std::time::Instant::now() + Duration::from_millis(500),
-            );
-            let error = mux
-                .bounded(deadline)
-                .send_prompt("pane", "assignment")
-                .unwrap_err();
-            assert!(!error.submission_started());
-            assert!(runner.events().is_empty());
+        for lead in [Lead::Escape, Lead::Direct] {
+            let runner = FakeRunner::without_binaries();
+            for mux in muxes(runner.clone()) {
+                let deadline = crate::input::Deadline::until(
+                    std::time::Instant::now() + Duration::from_millis(500),
+                );
+                let error = mux
+                    .bounded(deadline)
+                    .send_prompt("pane", "assignment", lead)
+                    .unwrap_err();
+                assert!(!error.submission_started());
+                assert!(runner.events().is_empty());
+            }
         }
     }
 
@@ -52,7 +281,9 @@ mod submission_regressions {
             let runner = FakeRunner::without_binaries();
             runner.respond(Err(RunError::Failed { stderr }));
             let mux = muxes(runner.clone()).into_iter().nth(index).unwrap();
-            let error = mux.send_prompt("pane", "assignment").unwrap_err();
+            let error = mux
+                .send_prompt("pane", "assignment", Lead::Direct)
+                .unwrap_err();
             assert!(!error.submission_started(), "{error}");
             assert_eq!(runner.run_argvs().len(), 1);
         }
@@ -61,16 +292,47 @@ mod submission_regressions {
     #[test]
     fn option_like_prompt_text_follows_the_literal_option_terminator() {
         for mux_index in 0..2 {
-            let runner = FakeRunner::without_binaries();
-            let mux = muxes(runner.clone()).into_iter().nth(mux_index).unwrap();
-            mux.send_prompt("pane", "-R --help --target=other").unwrap();
-            let calls = runner.run_argvs();
-            let literal = &calls[0];
-            assert_eq!(
-                &literal[literal.len() - 2..],
-                ["--", "-R --help --target=other"]
-            );
-            assert_eq!(calls.len(), 2);
+            for (lead, literal_index) in [(Lead::Direct, 0), (Lead::Escape, 1)] {
+                let runner = FakeRunner::without_binaries();
+                let mux = muxes(runner.clone()).into_iter().nth(mux_index).unwrap();
+                mux.send_prompt("pane", "-R --help --target=other", lead)
+                    .unwrap();
+                let calls = runner.run_argvs();
+                let literal = &calls[literal_index];
+                assert_eq!(
+                    &literal[literal.len() - 2..],
+                    ["--", "-R --help --target=other"]
+                );
+                assert_eq!(calls.len(), literal_index + 2);
+            }
+        }
+    }
+
+    #[test]
+    fn literal_failures_after_a_successful_escape_keep_the_existing_classification() {
+        for backend in 0..2 {
+            for (failure, started) in [
+                (
+                    RunError::NotStarted("deadline expired before launch".into()),
+                    false,
+                ),
+                (RunError::Timeout, true),
+                (
+                    RunError::Failed {
+                        stderr: "connection lost".into(),
+                    },
+                    true,
+                ),
+            ] {
+                let runner = FakeRunner::without_binaries();
+                runner.respond(Ok(String::new()));
+                runner.respond(Err(failure.clone()));
+                let error = mux_for(backend, runner.clone())
+                    .send_prompt("pane", "assignment", Lead::Escape)
+                    .unwrap_err();
+                assert_eq!(error.submission_started(), started, "{failure:?}: {error}");
+                assert_eq!(runner.run_argvs().len(), 2);
+            }
         }
     }
 
@@ -97,7 +359,7 @@ mod submission_regressions {
                     .into_iter()
                     .nth(backend)
                     .unwrap()
-                    .send_prompt("pane", "assignment")
+                    .send_prompt("pane", "assignment", Lead::Direct)
                     .unwrap_err();
                 assert_eq!(error.submission_started(), started, "{error}");
                 assert_eq!(runner.run_argvs().len(), 1);
@@ -111,7 +373,7 @@ mod submission_regressions {
                 .into_iter()
                 .nth(backend)
                 .unwrap()
-                .send_prompt("pane", "assignment")
+                .send_prompt("pane", "assignment", Lead::Direct)
                 .unwrap_err();
             assert!(
                 error.submission_started(),
@@ -266,34 +528,53 @@ pub trait CommandRunner {
     }
 }
 
+pub(crate) struct PaneInput {
+    pub escape: Vec<String>,
+    pub literal: Vec<String>,
+    pub enter: Vec<String>,
+}
+
+fn whole_seconds(duration: Duration) -> u64 {
+    duration.as_secs() + u64::from(duration.subsec_nanos() > 0)
+}
+
 fn submit_prompt(
     runner: &dyn CommandRunner,
-    literal: &[String],
-    enter: &[String],
+    input: &PaneInput,
+    lead: Lead,
     map_error: fn(&[String], Option<u64>, RunError) -> MultiplexerError,
     pane_gone: fn(&str) -> bool,
 ) -> Result<(), MultiplexerError> {
-    let remaining = runner
-        .remaining_budget()
-        .map_err(|error| map_error(literal, None, error))?
-        .expect("submission uses a deadline-bounded runner");
-    let reserved = Duration::from_secs_f64(SUBMIT_DELAY) + Duration::from_secs(1);
-    let literal_budget = remaining
-        .checked_sub(reserved)
-        .filter(|budget| !budget.is_zero())
-        .ok_or_else(|| {
-            MultiplexerError::new(
-                "insufficient pane input budget for literal input, settle and Enter",
-            )
-        })?;
+    let PaneInput {
+        escape,
+        literal,
+        enter,
+    } = input;
+    let unreserved = |reserved: Duration| {
+        runner
+            .remaining_budget()
+            .map_err(|error| map_error(literal, None, error))?
+            .expect("submission uses a deadline-bounded runner")
+            .checked_sub(reserved)
+            .filter(|budget| !budget.is_zero())
+            .ok_or_else(|| MultiplexerError::new(INSUFFICIENT_INPUT_BUDGET))
+    };
+    let slack = unreserved(lead.reserved())?;
+    if lead == Lead::Escape {
+        let timeout = slack.min(ESCAPE_TIMEOUT);
+        runner
+            .run_for(escape, timeout)
+            .map_err(|error| map_error(escape, Some(whole_seconds(timeout)), error))?;
+        runner.sleep(ESCAPE_SETTLE_DELAY);
+    }
+    let literal_budget = unreserved(Lead::Direct.reserved())?;
     runner.run_for(literal, literal_budget).map_err(|error| {
         let not_sent = match &error {
             RunError::BinaryNotFound(_) | RunError::NotStarted(_) => true,
             RunError::Failed { stderr } => pane_gone(stderr),
             RunError::Timeout => false,
         };
-        let seconds = literal_budget.as_secs() + u64::from(literal_budget.subsec_nanos() > 0);
-        let error = map_error(literal, Some(seconds), error);
+        let error = map_error(literal, Some(whole_seconds(literal_budget)), error);
         if not_sent { error } else { error.after_write() }
     })?;
     runner.sleep(SUBMIT_DELAY);
@@ -387,37 +668,6 @@ pub(crate) fn capture_window(raw: &str, lines: i64) -> String {
     parts[start..].join("\n")
 }
 
-pub(crate) fn inline_preview_payload(
-    message_id: i64,
-    sender_id: i64,
-    ts: &str,
-    text: &str,
-) -> String {
-    fn visible(text: &str) -> String {
-        let mut result = String::new();
-        let mut chars = text.chars().peekable();
-        while let Some(ch) = chars.next() {
-            match ch {
-                '\r' => {
-                    if chars.peek() == Some(&'\n') {
-                        chars.next();
-                    }
-                    result.push('⏎');
-                }
-                '\n' => result.push('⏎'),
-                '\t' => result.push('␉'),
-                '\u{00}'..='\u{1f}' | '\u{7f}' => result.push_str(&format!("\\x{:02x}", ch as u32)),
-                _ => result.push(ch),
-            }
-        }
-        result
-    }
-    format!(
-        "[cafleet msg {message_id} from {sender_id} {ts}] {}",
-        visible(text)
-    )
-}
-
 pub trait Multiplexer {
     fn name(&self) -> &'static str;
     fn ensure_available(&self) -> Result<(), MultiplexerError>;
@@ -428,15 +678,12 @@ pub trait Multiplexer {
         env: &[(String, String)],
         command: &[String],
     ) -> Result<String, MultiplexerError>;
-    fn send_inline_preview(
+    fn send_prompt(
         &self,
         target_pane_id: &str,
-        message_id: i64,
-        sender_id: i64,
-        ts: &str,
         text: &str,
+        lead: Lead,
     ) -> Result<(), MultiplexerError>;
-    fn send_prompt(&self, target_pane_id: &str, text: &str) -> Result<(), MultiplexerError>;
     fn capture_pane(&self, target_pane_id: &str, lines: i64) -> Result<String, MultiplexerError>;
     fn list_pane_ids(&self) -> Result<std::collections::BTreeSet<String>, MultiplexerError>;
     fn kill_pane(&self, target_pane_id: &str, ignore_missing: bool)
@@ -525,19 +772,13 @@ impl Multiplexer for AnyMultiplexer {
         dispatch!(self, mux => mux.split_window(reference, env, command))
     }
 
-    fn send_inline_preview(
+    fn send_prompt(
         &self,
         target_pane_id: &str,
-        message_id: i64,
-        sender_id: i64,
-        ts: &str,
         text: &str,
+        lead: Lead,
     ) -> Result<(), MultiplexerError> {
-        dispatch!(self, mux => mux.send_inline_preview(target_pane_id, message_id, sender_id, ts, text))
-    }
-
-    fn send_prompt(&self, target_pane_id: &str, text: &str) -> Result<(), MultiplexerError> {
-        dispatch!(self, mux => mux.send_prompt(target_pane_id, text))
+        dispatch!(self, mux => mux.send_prompt(target_pane_id, text, lead))
     }
 
     fn capture_pane(&self, target_pane_id: &str, lines: i64) -> Result<String, MultiplexerError> {
@@ -582,23 +823,13 @@ macro_rules! implement_backend {
                 $backend::split_window(self, reference, env, command)
             }
 
-            fn send_inline_preview(
-                &self,
-                target_pane_id: &str,
-                message_id: i64,
-                sender_id: i64,
-                ts: &str,
-                text: &str,
-            ) -> Result<(), MultiplexerError> {
-                $backend::send_inline_preview(self, target_pane_id, message_id, sender_id, ts, text)
-            }
-
             fn send_prompt(
                 &self,
                 target_pane_id: &str,
                 text: &str,
+                lead: Lead,
             ) -> Result<(), MultiplexerError> {
-                $backend::send_prompt(self, target_pane_id, text)
+                $backend::send_prompt(self, target_pane_id, text, lead)
             }
 
             fn capture_pane(
@@ -763,41 +994,42 @@ mod tests {
         }
     }
 
-    mod any_multiplexer_inline_preview_tests {
-        use crate::multiplexer::test_support::{FakeRunner, env};
-        use crate::multiplexer::{AnyMultiplexer, HerdrMultiplexer, Multiplexer, TmuxMultiplexer};
-
-        const TS: &str = "2026-07-30T09:00:00.000000+00:00";
+    mod any_multiplexer_send_prompt_tests {
+        use crate::multiplexer::test_support::{FakeRunner, argv, env};
+        use crate::multiplexer::{
+            AnyMultiplexer, HerdrMultiplexer, Lead, Multiplexer, TmuxMultiplexer,
+        };
 
         #[test]
-        fn dispatch_returns_each_backend_inline_preview_result() {
+        fn dispatch_forwards_the_lead_to_each_backend() {
+            let runner = FakeRunner::with_binary("tmux");
             let mux = AnyMultiplexer::Tmux(TmuxMultiplexer::new(
-                FakeRunner::without_binaries(),
+                runner.clone(),
                 env(&[("TMUX", "/tmp/tmux"), ("TMUX_PANE", "%1")]),
             ));
+            mux.send_prompt("%5", "hi", Lead::Escape).unwrap();
             assert_eq!(
-                mux.send_inline_preview("%5", 5, 2, TS, "hi")
-                    .unwrap_err()
-                    .to_string(),
-                "tmux binary not found on PATH"
+                runner.run_argvs(),
+                vec![
+                    argv(&["tmux", "send-keys", "-t", "%5", "Escape"]),
+                    argv(&["tmux", "send-keys", "-t", "%5", "-l", "--", "hi"]),
+                    argv(&["tmux", "send-keys", "-t", "%5", "Enter"]),
+                ]
             );
 
+            let runner = FakeRunner::with_binary("herdr");
             let mux = AnyMultiplexer::Herdr(HerdrMultiplexer::new(
-                FakeRunner::without_binaries(),
+                runner.clone(),
                 env(&[("HERDR_ENV", "1")]),
             ));
+            mux.send_prompt("w1:p2", "hi", Lead::Direct).unwrap();
             assert_eq!(
-                mux.send_inline_preview("w1:p2", 5, 2, TS, "hi")
-                    .unwrap_err()
-                    .to_string(),
-                "herdr binary not found on PATH"
+                runner.run_argvs(),
+                vec![
+                    argv(&["herdr", "pane", "send-text", "w1:p2", "--", "hi"]),
+                    argv(&["herdr", "pane", "send-keys", "w1:p2", "enter"]),
+                ]
             );
-
-            let mux = AnyMultiplexer::Tmux(TmuxMultiplexer::new(
-                FakeRunner::with_binary("tmux"),
-                env(&[("TMUX", "/tmp/tmux"), ("TMUX_PANE", "%1")]),
-            ));
-            assert!(mux.send_inline_preview("%5", 5, 2, TS, "hi").is_ok());
         }
     }
 }

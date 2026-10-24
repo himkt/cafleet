@@ -77,6 +77,7 @@ pub struct MemberActivity {
     pub last_recv: Option<String>,
     pub last_ack: Option<String>,
     pub idle: Option<i64>,
+    pub unconfirmed_previews: Vec<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

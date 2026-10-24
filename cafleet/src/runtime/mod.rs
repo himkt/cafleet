@@ -19,14 +19,14 @@ pub fn resolve_mux(settings: &Settings) -> Result<AnyMultiplexer, MultiplexerErr
     )
 }
 
-pub(crate) fn attempt_preview(
+pub(crate) fn deliver_pending(
     conn: &mut Connection,
     settings: &Settings,
     member_id: i64,
     expected_fleet: Option<i64>,
     deadline: crate::input::Deadline,
 ) -> Result<crate::receive::AttemptOutcome, CafleetError> {
-    crate::delivery::attempt_preview(conn, settings, member_id, expected_fleet, deadline, || {
+    crate::delivery::deliver_pending(conn, settings, member_id, expected_fleet, deadline, || {
         resolve_mux(settings)
     })
 }

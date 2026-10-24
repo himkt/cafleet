@@ -42,11 +42,17 @@ fn fixture() -> (Cli, i64, i64) {
     let cli = Cli::new();
     let (fleet, director) = cli.seeded_fleet();
     let worker = cli.seed_member(fleet, "worker");
-    cli.set_pane_capture(
-        &format!("%{}", worker + 4),
-        "Ready.\n────────────\n❯ \x1b[0m\n────────────\n? for shortcuts",
-    );
     (cli, director, worker)
+}
+
+fn assert_no_capture(cli: &Cli) {
+    assert!(
+        cli.shim_calls()
+            .iter()
+            .all(|line| !line.starts_with("capture-pane") && !line.starts_with("pane read")),
+        "{:?}",
+        cli.shim_calls()
+    );
 }
 
 #[test]
@@ -109,10 +115,12 @@ fn native_exec_dispatches_the_exact_command_and_reduced_metadata_once() {
     assert_eq!(
         writes,
         [
+            format!("send-keys -t {pane} Escape"),
             format!("send-keys -t {pane} -l -- ! {command}"),
             format!("send-keys -t {pane} Enter")
         ]
     );
+    assert_no_capture(&cli);
 }
 
 #[test]
@@ -135,6 +143,7 @@ fn native_exec_file_and_stdin_remove_at_most_one_terminal_line_ending() {
             assert_eq!(
                 writes,
                 [
+                    format!("send-keys -t {pane} Escape"),
                     format!("send-keys -t {pane} -l -- ! {command}"),
                     format!("send-keys -t {pane} Enter"),
                 ]
@@ -296,20 +305,7 @@ fn native_exec_rejects_director_and_pending_placement_without_typing() {
 
 #[test]
 fn native_exec_frames_each_backend_command_through_both_transports() {
-    for (agent, capture) in [
-        (
-            "claude",
-            include_str!("fixtures/pane-readiness/claude-placeholder.ansi"),
-        ),
-        (
-            "codex",
-            include_str!("fixtures/pane-readiness/codex-placeholder.ansi"),
-        ),
-        (
-            "opencode",
-            include_str!("fixtures/pane-readiness/opencode-placeholder.ansi"),
-        ),
-    ] {
+    for agent in ["claude", "codex", "opencode"] {
         for transport in ["tmux", "herdr"] {
             let (mut cli, _, worker) = fixture();
             let pane = if transport == "tmux" {
@@ -321,7 +317,6 @@ fn native_exec_frames_each_backend_command_through_both_transports() {
                 "UPDATE member_placements SET backend=?1,mux_pane_id=?2,coding_agent=?3 WHERE member_id=?4",
                 rusqlite::params![transport, pane, agent, worker],
             ).unwrap();
-            cli.set_pane_capture(&pane, capture);
             if transport == "herdr" {
                 cli.set_env("CAFLEET_MULTIPLEXER", "herdr");
                 cli.set_env("HERDR_ENV", "native-exec-test");
@@ -330,10 +325,8 @@ fn native_exec_frames_each_backend_command_through_both_transports() {
                     r#"#!/bin/sh
 printf '%s\n' "$*" >> "$CAFLEET_TEST_TMUX_LOG"
 if [ "$1" = pane ] && [ "$2" = read ]; then
-    if [ ! -f "$CAFLEET_TEST_TMUX_CAPTURE_DIR/$3" ]; then exit 1; fi
-    while IFS= read -r line || [ -n "$line" ]; do
-        printf '%s\n' "$line"
-    done < "$CAFLEET_TEST_TMUX_CAPTURE_DIR/$3"
+    echo "unexpected pane read" >&2
+    exit 1
 fi
 "#,
                 );
@@ -352,16 +345,19 @@ fi
                 .collect();
             let expected = if transport == "tmux" {
                 vec![
+                    format!("send-keys -t {pane} Escape"),
                     format!("send-keys -t {pane} -l -- ! {command}"),
                     format!("send-keys -t {pane} Enter"),
                 ]
             } else {
                 vec![
+                    format!("pane send-keys {pane} escape"),
                     format!("pane send-text {pane} -- ! {command}"),
                     format!("pane send-keys {pane} enter"),
                 ]
             };
             assert_eq!(writes, expected, "{agent}/{transport}");
+            assert_no_capture(&cli);
         }
     }
 }
@@ -399,7 +395,7 @@ fn native_exec_text_reports_submission_with_unchanged_broker_and_only_input_arti
     );
     assert_eq!(std::fs::read(cli.db_path()).unwrap(), before_database);
     assert_eq!(stable_files(files_under(cli.home.path())), before_files);
-    assert_eq!(cli.shim_count("send-keys"), 2);
+    assert_eq!(cli.shim_count("send-keys"), 3);
 }
 
 #[test]

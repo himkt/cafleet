@@ -22,10 +22,6 @@ fn registration_spawn_and_point_to_point_message_lifecycle() {
     assert_eq!(cli.shim_count("split-window"), 0);
     cli.set_env("CAFLEET_TEST_NEXT_PANE", "%8");
     let worker = cli.create_member(fleet_id, "worker");
-    cli.set_pane_capture(
-        "%8",
-        "Ready.\n────────────\n❯ \x1b[0m\n────────────\n? for shortcuts",
-    );
     let sent = cli.run(&[
         "message",
         "send",
@@ -64,6 +60,7 @@ fn registration_spawn_and_point_to_point_message_lifecycle() {
     let empty = cli.run(&["message", "poll", &worker.to_string(), "--json"]);
     assert_eq!(code(&empty), 0);
     assert_eq!(stdout(&empty).trim(), "[]");
+    cli.allow_rest_capture();
     let capture = cli.run(&["fleet", "capture", &fleet_id.to_string(), "--json"]);
     assert_eq!(code(&capture), 0, "{}", stderr(&capture));
     let panes: serde_json::Value = serde_json::from_str(&stdout(&capture)).unwrap();

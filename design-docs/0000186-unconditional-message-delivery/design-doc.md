@@ -1,7 +1,7 @@
 # Unconditional Message Delivery
 
-**Status**: Approved
-**Progress**: 0/53 tasks complete
+**Status**: Complete
+**Progress**: 53/53 tasks complete
 **Last Updated**: 2026-10-24
 
 ## Overview
@@ -10,23 +10,23 @@ Remove pane-state classification from every CAFleet pane-input path. `message se
 
 ## Success Criteria
 
-- [ ] `cafleet/src/pane_state.rs`, `cafleet/tests/pane_state.rs` and `cafleet/tests/fixtures/pane-readiness/` no longer exist, and no source file references `PaneState`, `classify` (pane variant) or `hold_reason`.
-- [ ] No pane-input path (`message send`, `message wait`, `member prompt`, `member exec`) runs `capture-pane` / `pane read`. Every delivery and dispatch test passes with capture disabled: the in-process mock runner panics on a capture argv, and the integration fake `tmux` exits non-zero on `capture-pane` unless a `member capture` / `fleet capture` test opts in with `set_pane_capture`.
-- [ ] A `message send` to any recipient with a concrete pane, ordinary member or Director, produces, on both tmux and herdr, the argv sequence Escape key → settle → literal line → settle → Enter for the first delivered message, and literal line → settle → Enter for each further message drained in the same lock hold.
-- [ ] A member → Director message follows the same line format, drain, lock wait, `notified_at` stamp and uncertainty handling as a message to an ordinary member. A self-send (sender equals recipient) produces no pane input.
-- [ ] `message wait` rotation retries pending previews for every other placed member of the fleet, the Director included, and never for its own subject.
-- [ ] No skill, workflow body, backend note, documentation page or `SPEC.md` section instructs the Director to run `message wait` as a background receive. The only Director use is the bounded foreground `cafleet message wait <director-member-id> --timeout 30 --json` in supervision § Director wake, limited to an active host continuation; the `message wait` CLI contract stays documented for scripts and manual use.
-- [ ] `member list --json` and `member show --json` carry `unconfirmed_previews`, listing exactly the member's messages with a durable claim and no `notified_at` that are still `input_required`.
-- [ ] A lock wait that times out after another sender delivered every pending message returns `NoPending`: `message send` prints no diagnostic and `message wait` records no entry.
-- [ ] A `SIGTERM` sent to a `cafleet message send` during its delivery span takes effect only after the `notified_at` stamp: the message is stamped and the process then exits by the signal.
-- [ ] Every delivered line matches the format in § Notification line, including the resume clause and the conditional dismissed-prompt note; a folded body of at most 4000 characters is inline, a longer one is replaced by the `cafleet message show` pointer.
-- [ ] After a confirmed submission the message keeps `status_state = 'input_required'`, has `notified_at` stamped, still appears in `message poll`, and leaves the inbox only through `message ack`.
-- [ ] One `message send` delivers every pending message for the recipient oldest-first within its five-second budget; messages left when the budget no longer covers another submission stay pending with no diagnostic.
-- [ ] A pane-input lock held by another writer makes `message send` wait until `deadline − INPUT_RESERVATION` (1.5 seconds). If the lock is still busy then, stderr reports `Message NEW_ID was persisted. member ID's pane input remained busy; preview MESSAGE_ID was not sent.` and the message stays pending. A lock released just before that point still leads to a successful submission.
-- [ ] `member prompt <director-id>` exits 1 with `cannot prompt the Director's own pane` before any pane I/O.
-- [ ] `cafleet member ping 1` fails with clap's default unrecognized-subcommand error (exit 2), and no living documentation, skill, rule or test mentions `member ping`.
-- [ ] `CAFLEET_MAX_TEXT_LEN` no longer affects pane input; it only truncates CLI text output.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build` pass.
+- [x] `cafleet/src/pane_state.rs`, `cafleet/tests/pane_state.rs` and `cafleet/tests/fixtures/pane-readiness/` no longer exist, and no source file references `PaneState`, `classify` (pane variant) or `hold_reason`.
+- [x] No pane-input path (`message send`, `message wait`, `member prompt`, `member exec`) runs `capture-pane` / `pane read`. Every delivery and dispatch test passes with capture disabled: the in-process mock runner panics on a capture argv, and the integration fake `tmux` exits non-zero on `capture-pane` unless a `member capture` / `fleet capture` test opts in with `set_pane_capture`.
+- [x] A `message send` to any recipient with a concrete pane, ordinary member or Director, produces, on both tmux and herdr, the argv sequence Escape key → settle → literal line → settle → Enter for the first delivered message, and literal line → settle → Enter for each further message drained in the same lock hold.
+- [x] A member → Director message follows the same line format, drain, lock wait, `notified_at` stamp and uncertainty handling as a message to an ordinary member. A self-send (sender equals recipient) produces no pane input.
+- [x] `message wait` rotation retries pending previews for every other placed member of the fleet, the Director included, and never for its own subject.
+- [x] No skill, workflow body, backend note, documentation page or `SPEC.md` section instructs the Director to run `message wait` as a background receive. The only Director use is the bounded foreground `cafleet message wait <director-member-id> --timeout 30 --json` in supervision § Director wake, limited to an active host continuation; the `message wait` CLI contract stays documented for scripts and manual use.
+- [x] `member list --json` and `member show --json` carry `unconfirmed_previews`, listing exactly the member's messages with a durable claim and no `notified_at` that are still `input_required`.
+- [x] A lock wait that times out after another sender delivered every pending message returns `NoPending`: `message send` prints no diagnostic and `message wait` records no entry.
+- [x] A `SIGTERM` sent to a `cafleet message send` during its delivery span takes effect only after the `notified_at` stamp: the message is stamped and the process then exits by the signal.
+- [x] Every delivered line matches the format in § Notification line, including the resume clause and the conditional dismissed-prompt note; a folded body of at most 4000 characters is inline, a longer one is replaced by the `cafleet message show` pointer.
+- [x] After a confirmed submission the message keeps `status_state = 'input_required'`, has `notified_at` stamped, still appears in `message poll`, and leaves the inbox only through `message ack`.
+- [x] One `message send` delivers every pending message for the recipient oldest-first within its five-second budget; messages left when the budget no longer covers another submission stay pending with no diagnostic.
+- [x] A pane-input lock held by another writer makes `message send` wait until `deadline − INPUT_RESERVATION` (1.5 seconds). If the lock is still busy then, stderr reports `Message NEW_ID was persisted. member ID's pane input remained busy; preview MESSAGE_ID was not sent.` and the message stays pending. A lock released just before that point still leads to a successful submission.
+- [x] `member prompt <director-id>` exits 1 with `cannot prompt the Director's own pane` before any pane I/O.
+- [x] `cafleet member ping 1` fails with clap's default unrecognized-subcommand error (exit 2), and no living documentation, skill, rule or test mentions `member ping`.
+- [x] `CAFLEET_MAX_TEXT_LEN` no longer affects pane input; it only truncates CLI text output.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build` pass.
 
 ---
 
@@ -402,77 +402,77 @@ Installed-host manual checks are waived by the owner; automated tests are the ve
 
 ### Step 1: Documentation site
 
-- [ ] Rewrite `docs/docs/spec/multiplexer-backends.md` per § Documentation updates <!-- completed: -->
-- [ ] Rewrite `docs/docs/spec/cli-options.md` per § Documentation updates, removing every `member ping` mention <!-- completed: -->
-- [ ] Update `docs/docs/spec/message-envelope.md` and `docs/docs/spec/data-model.md` <!-- completed: -->
-- [ ] Update `docs/docs/concepts/overview.md`, `docs/docs/concepts/coding-agents.md`, `docs/docs/concepts/member-lifecycle.md` and `docs/docs/how-to/mixed-backend-team.md` <!-- completed: -->
-- [ ] Update `docs/docs/how-to/design-doc-development.md` and `docs/docs/spec/coding-agent-backends.md` for Director wake <!-- completed: -->
-- [ ] Run `mise //docs:build` and fix broken links or anchors (removed `#member-ping`, `#pane-state-classification`) <!-- completed: -->
+- [x] Rewrite `docs/docs/spec/multiplexer-backends.md` per § Documentation updates <!-- completed: 2026-10-24T19:43 -->
+- [x] Rewrite `docs/docs/spec/cli-options.md` per § Documentation updates, removing every `member ping` mention <!-- completed: 2026-10-24T19:43 -->
+- [x] Update `docs/docs/spec/message-envelope.md` and `docs/docs/spec/data-model.md` <!-- completed: 2026-10-24T19:43 -->
+- [x] Update `docs/docs/concepts/overview.md`, `docs/docs/concepts/coding-agents.md`, `docs/docs/concepts/member-lifecycle.md` and `docs/docs/how-to/mixed-backend-team.md` <!-- completed: 2026-10-24T19:43 -->
+- [x] Update `docs/docs/how-to/design-doc-development.md` and `docs/docs/spec/coding-agent-backends.md` for Director wake <!-- completed: 2026-10-24T19:43 -->
+- [x] Run `mise //docs:build` and fix broken links or anchors (removed `#member-ping`, `#pane-state-classification`) <!-- completed: 2026-10-24T19:45 -->
 
 ### Step 2: SPEC, README, skills and rules
 
-- [ ] Mirror the contract changes into `SPEC.md` through the `/update-readme` skill, covering every section listed in its § Documentation updates row, and check `README.md` <!-- completed: -->
-- [ ] Update `skills/cafleet/SKILL.md`, `skills/cafleet/roles/director.md` and `skills/cafleet/roles/member.md` <!-- completed: -->
-- [ ] Update `skills/cafleet/reference/prompt-routing.md`, `skills/cafleet/reference/supervision.md` (including § Director wake replacing § Asynchronous Wait Rule) and the cue intros in `skills/cafleet/reference/coding-agents.md` <!-- completed: -->
-- [ ] Rebind each backend's Director-receiving notes in `skills/cafleet/reference/coding-agents.md` to `supervision.md#director-wake` <!-- completed: -->
-- [ ] Replace finite receiving with the wake procedure in `skills/cafleet-design-doc/create/create.md`, `execute/execute.md` and `interview/interview.md` <!-- completed: -->
-- [ ] Remove the `member ping` bullet from `.claude/rules/bash-tool.md` <!-- completed: -->
-- [ ] Confirm no living document still mentions `member ping`, pane-state classification as an input gate, `CAFLEET_MAX_TEXT_LEN` preview truncation, `supervision.md#asynchronous-wait-rule`, or `message wait` as the Director's background or repeated receive <!-- completed: -->
+- [x] Mirror the contract changes into `SPEC.md` through the `/update-readme` skill, covering every section listed in its § Documentation updates row, and check `README.md` <!-- completed: 2026-10-24T19:50 -->
+- [x] Update `skills/cafleet/SKILL.md`, `skills/cafleet/roles/director.md` and `skills/cafleet/roles/member.md` <!-- completed: 2026-10-24T19:50 -->
+- [x] Update `skills/cafleet/reference/prompt-routing.md`, `skills/cafleet/reference/supervision.md` (including § Director wake replacing § Asynchronous Wait Rule) and the cue intros in `skills/cafleet/reference/coding-agents.md` <!-- completed: 2026-10-24T19:50 -->
+- [x] Rebind each backend's Director-receiving notes in `skills/cafleet/reference/coding-agents.md` to `supervision.md#director-wake` <!-- completed: 2026-10-24T19:50 -->
+- [x] Replace finite receiving with the wake procedure in `skills/cafleet-design-doc/create/create.md`, `execute/execute.md` and `interview/interview.md` <!-- completed: 2026-10-24T19:50 -->
+- [x] Remove the `member ping` bullet from `.claude/rules/bash-tool.md` <!-- completed: 2026-10-24T19:50 -->
+- [x] Confirm no living document still mentions `member ping`, pane-state classification as an input gate, `CAFLEET_MAX_TEXT_LEN` preview truncation, `supervision.md#asynchronous-wait-rule`, or `message wait` as the Director's background or repeated receive <!-- completed: 2026-10-24T19:50 -->
 
 ### Step 3: Escape-first transport
 
-- [ ] Add `Lead`, `ESCAPE_SETTLE_DELAY`, `ESCAPE_TIMEOUT`, `MIN_LITERAL_BUDGET`, `REVALIDATION_MARGIN` and `INPUT_RESERVATION` to `cafleet/src/multiplexer/mod.rs` <!-- completed: -->
-- [ ] Extend `submit_prompt` with the capped Escape argv, the Escape reservation, the post-Escape `literal_budget` recomputation and not-started Escape failures <!-- completed: -->
-- [ ] Change `send_prompt` to take `lead` in the trait, `TmuxMultiplexer`, `HerdrMultiplexer`, `AnyMultiplexer` and the test mock <!-- completed: -->
-- [ ] Confirm the herdr Escape key token with `herdr pane send-keys --help` and use it in the herdr argv <!-- completed: -->
-- [ ] Delete `send_inline_preview` and `inline_preview_payload` <!-- completed: -->
-- [ ] Add the transport tests from § Tests <!-- completed: -->
+- [x] Add `Lead`, `ESCAPE_SETTLE_DELAY`, `ESCAPE_TIMEOUT`, `MIN_LITERAL_BUDGET`, `REVALIDATION_MARGIN` and `INPUT_RESERVATION` to `cafleet/src/multiplexer/mod.rs` <!-- completed: 2026-10-24T19:55 -->
+- [x] Extend `submit_prompt` with the capped Escape argv, the Escape reservation, the post-Escape `literal_budget` recomputation and not-started Escape failures <!-- completed: 2026-10-24T19:55 -->
+- [x] Change `send_prompt` to take `lead` in the trait, `TmuxMultiplexer`, `HerdrMultiplexer`, `AnyMultiplexer` and the test mock <!-- completed: 2026-10-24T19:55 -->
+- [x] Confirm the herdr Escape key token with `herdr pane send-keys --help` and use it in the herdr argv <!-- completed: 2026-10-24T19:55 -->
+- [x] Delete `send_inline_preview` and `inline_preview_payload` <!-- completed: 2026-10-24T19:55 -->
+- [x] Add the transport tests from § Tests <!-- completed: 2026-10-24T20:15 -->
 
 ### Step 4: Notification line, pane lock and termination deferral
 
-- [ ] Add `fold_visible`, `INLINE_BODY_LIMIT`, `RESUME_CLAUSE`, `DISMISSED_PROMPT_NOTE` and `notification_line` to `cafleet/src/delivery.rs` <!-- completed: -->
-- [ ] Add the notification-line unit tests <!-- completed: -->
-- [ ] Add `Deadline::reserving` and `PaneLock::acquire_within` to `cafleet/src/input.rs` <!-- completed: -->
-- [ ] Change `lock_member` to `lock_member(conn, settings, member, deadline)`: file lock first, then reload under `with_database_budget` <!-- completed: -->
-- [ ] Add lock-wait tests (released within the wait, released just before `deadline − INPUT_RESERVATION`, still busy at that point) <!-- completed: -->
-- [ ] Add `cafleet/src/signals.rs` with `DeferTermination` and open its span at each call site in § Termination during pane input <!-- completed: -->
-- [ ] Confirm on tmux and herdr that a spawned member session's process does not inherit the blocked signal set <!-- completed: -->
-- [ ] Add the termination-deferral tests and the blocking-literal fake option <!-- completed: -->
+- [x] Add `fold_visible`, `INLINE_BODY_LIMIT`, `RESUME_CLAUSE`, `DISMISSED_PROMPT_NOTE` and `notification_line` to `cafleet/src/delivery.rs` <!-- completed: 2026-10-24T19:59 -->
+- [x] Add the notification-line unit tests <!-- completed: 2026-10-24T20:15 -->
+- [x] Add `Deadline::reserving` and `PaneLock::acquire_within` to `cafleet/src/input.rs` <!-- completed: 2026-10-24T19:59 -->
+- [x] Change `lock_member` to `lock_member(conn, settings, member, deadline)`: file lock first, then reload under `with_database_budget` <!-- completed: 2026-10-24T19:59 -->
+- [x] Add lock-wait tests (released within the wait, released just before `deadline − INPUT_RESERVATION`, still busy at that point) <!-- completed: 2026-10-24T20:15 -->
+- [x] Add `cafleet/src/signals.rs` with `DeferTermination` and open its span at each call site in § Termination during pane input <!-- completed: 2026-10-24T19:59 -->
+- [x] Confirm on tmux and herdr that a spawned member session's process does not inherit the blocked signal set <!-- completed: 2026-10-24T20:50 -->
+- [x] Add the termination-deferral tests and the blocking-literal fake option <!-- completed: 2026-10-24T20:15 -->
 
 ### Step 5: Draining delivery
 
-- [ ] Replace `AttemptOutcome` with the `sent` + `AttemptEnd` shape in `cafleet/src/receive.rs` <!-- completed: -->
-- [ ] Implement `deliver_pending` in `cafleet/src/delivery.rs` per § Delivery procedure, with no capture, the `ClaimSkip` enum and the post-timeout revalidation read <!-- completed: -->
-- [ ] Rename `runtime::attempt_preview` to `runtime::deliver_pending` and update `BrokerReceiver::attempt` <!-- completed: -->
-- [ ] Update the `message wait` bookkeeping in `receive::wait` per the outcome table <!-- completed: -->
-- [ ] Update `message send` in `cafleet/src/cli/message.rs`: `notification_sent` from `sent`, stderr from `Failed` <!-- completed: -->
-- [ ] Delete the Director early return in `delivery::preview_snapshot` and the `m.member_id!=f.director_member_id` filter in `broker::panes::pending_previews` <!-- completed: -->
-- [ ] Add the Director delivery, Director self-send and `pending_previews` tests from § Tests <!-- completed: -->
-- [ ] Add `unconfirmed_previews` to the roster query in `broker::members` and the `member list` / `member show` JSON presenters in `presentation.rs`, with the tests from § Tests <!-- completed: -->
-- [ ] Update the shared fakes in `cafleet/tests/common/mod.rs` and `cafleet/tests/common/receive.rs` per § Tests <!-- completed: -->
-- [ ] Update `cafleet/tests/delivery.rs`, `notification_retry.rs`, `message_wait.rs`, `cli_message.rs` and `receive.rs` unit tests per § Tests <!-- completed: -->
+- [x] Replace `AttemptOutcome` with the `sent` + `AttemptEnd` shape in `cafleet/src/receive.rs` <!-- completed: 2026-10-24T20:15 -->
+- [x] Implement `deliver_pending` in `cafleet/src/delivery.rs` per § Delivery procedure, with no capture, the `ClaimSkip` enum and the post-timeout revalidation read <!-- completed: 2026-10-24T20:15 -->
+- [x] Rename `runtime::attempt_preview` to `runtime::deliver_pending` and update `BrokerReceiver::attempt` <!-- completed: 2026-10-24T20:15 -->
+- [x] Update the `message wait` bookkeeping in `receive::wait` per the outcome table <!-- completed: 2026-10-24T20:15 -->
+- [x] Update `message send` in `cafleet/src/cli/message.rs`: `notification_sent` from `sent`, stderr from `Failed` <!-- completed: 2026-10-24T20:15 -->
+- [x] Delete the Director early return in `delivery::preview_snapshot` and the `m.member_id!=f.director_member_id` filter in `broker::panes::pending_previews` <!-- completed: 2026-10-24T20:15 -->
+- [x] Add the Director delivery, Director self-send and `pending_previews` tests from § Tests <!-- completed: 2026-10-24T20:39 -->
+- [x] Add `unconfirmed_previews` to the roster query in `broker::members` and the `member list` / `member show` JSON presenters in `presentation.rs`, with the tests from § Tests <!-- completed: 2026-10-24T20:15 -->
+- [x] Update the shared fakes in `cafleet/tests/common/mod.rs` and `cafleet/tests/common/receive.rs` per § Tests <!-- completed: 2026-10-24T20:39 -->
+- [x] Update `cafleet/tests/delivery.rs`, `notification_retry.rs`, `message_wait.rs`, `cli_message.rs` and `receive.rs` unit tests per § Tests <!-- completed: 2026-10-24T20:39 -->
 
 ### Step 6: `member prompt`, `member exec` and `member ping`
 
-- [ ] Remove capture and classification from `dispatch_input`, send with `Lead::Escape`, and delete `input_state` <!-- completed: -->
-- [ ] Emit the lock-busy errors for prompt and exec <!-- completed: -->
-- [ ] Add the `cannot prompt the Director's own pane` guard to `member prompt` before pane I/O <!-- completed: -->
-- [ ] Delete the `Ping` variant, `fn ping` and its parser test cases in `cafleet/src/cli/mod.rs` <!-- completed: -->
-- [ ] Update `cafleet/tests/cli_member.rs`, `cli_exec.rs` and `pane_input.rs`: remove ping tests, add the ping absence test and the Director-prompt guard test, assert Escape-first argv and no capture <!-- completed: -->
+- [x] Remove capture and classification from `dispatch_input`, send with `Lead::Escape`, and delete `input_state` <!-- completed: 2026-10-24T20:39 -->
+- [x] Emit the lock-busy errors for prompt and exec <!-- completed: 2026-10-24T20:39 -->
+- [x] Add the `cannot prompt the Director's own pane` guard to `member prompt` before pane I/O <!-- completed: 2026-10-24T20:39 -->
+- [x] Delete the `Ping` variant, `fn ping` and its parser test cases in `cafleet/src/cli/mod.rs` <!-- completed: 2026-10-24T20:39 -->
+- [x] Update `cafleet/tests/cli_member.rs`, `cli_exec.rs` and `pane_input.rs`: remove ping tests, add the ping absence test and the Director-prompt guard test, assert Escape-first argv and no capture <!-- completed: 2026-10-24T20:39 -->
 
 ### Step 7: Classifier removal
 
-- [ ] Delete `cafleet/src/pane_state.rs` and its `pub mod` line in `cafleet/src/lib.rs` <!-- completed: -->
-- [ ] Delete `cafleet/tests/pane_state.rs` and `cafleet/tests/fixtures/pane-readiness/` <!-- completed: -->
-- [ ] Remove `DELIVERY_CAPTURE_LINES` and other helpers left without a caller <!-- completed: -->
-- [ ] Update `cafleet/tests/docs_sync.rs` assertions, including the capture-cue test <!-- completed: -->
-- [ ] Rewrite the Director-receiving docs-sync tests and add the `skills/` check per § Tests <!-- completed: -->
+- [x] Delete `cafleet/src/pane_state.rs` and its `pub mod` line in `cafleet/src/lib.rs` <!-- completed: 2026-10-24T20:39 -->
+- [x] Delete `cafleet/tests/pane_state.rs` and `cafleet/tests/fixtures/pane-readiness/` <!-- completed: 2026-10-24T20:39 -->
+- [x] Remove `DELIVERY_CAPTURE_LINES` and other helpers left without a caller <!-- completed: 2026-10-24T20:39 -->
+- [x] Update `cafleet/tests/docs_sync.rs` assertions, including the capture-cue test <!-- completed: 2026-10-24T20:39 -->
+- [x] Rewrite the Director-receiving docs-sync tests and add the `skills/` check per § Tests <!-- completed: 2026-10-24T20:39 -->
 
 ### Step 8: Verification
 
-- [ ] Run `mise //cafleet:test` <!-- completed: -->
-- [ ] Run `mise //cafleet:lint` <!-- completed: -->
-- [ ] Run `mise //cafleet:typecheck` <!-- completed: -->
-- [ ] Run `mise //docs:build` <!-- completed: -->
-- [ ] Search the repository for `PaneState`, `hold_reason`, `send_inline_preview`, `member ping`, `poll-trigger` and `asynchronous-wait-rule`, plus a whole-word `ping` search (`grep -rnw ping`), outside `design-docs/`, and resolve every hit <!-- completed: -->
-- [ ] Check each Success Criteria item against the test evidence <!-- completed: -->
+- [x] Run `mise //cafleet:test` <!-- completed: 2026-10-24T20:55 -->
+- [x] Run `mise //cafleet:lint` <!-- completed: 2026-10-24T20:55 -->
+- [x] Run `mise //cafleet:typecheck` <!-- completed: 2026-10-24T20:55 -->
+- [x] Run `mise //docs:build` <!-- completed: 2026-10-24T20:55 -->
+- [x] Search the repository for `PaneState`, `hold_reason`, `send_inline_preview`, `member ping`, `poll-trigger` and `asynchronous-wait-rule`, plus a whole-word `ping` search (`grep -rnw ping`), outside `design-docs/`, and resolve every hit <!-- completed: 2026-10-24T20:55 -->
+- [x] Check each Success Criteria item against the test evidence <!-- completed: 2026-10-24T20:55 -->

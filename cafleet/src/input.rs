@@ -37,6 +37,15 @@ impl Deadline {
             .ok_or(CafleetError::DeadlineExceeded)
     }
 
+    /// The deadline `reserve` earlier; already expired when less than `reserve` remains.
+    pub(crate) fn reserving(self, reserve: Duration) -> Self {
+        Self(
+            self.0
+                .checked_sub(reserve)
+                .expect("a monotonic deadline lies far past the clock origin"),
+        )
+    }
+
     pub fn retry(self) -> bool {
         match self.remaining() {
             Ok(left) => {
@@ -502,6 +511,23 @@ impl PaneLock {
             ))),
         }
     }
+
+    /// Retry a held lock every 50 ms until `lock_deadline`; `None` means it stayed busy.
+    pub fn acquire_within(
+        database_url: &str,
+        placement: &Placement,
+        lock_deadline: Deadline,
+    ) -> Result<Option<Self>, CafleetError> {
+        loop {
+            if let Some(guard) = Self::try_acquire(database_url, placement)? {
+                return Ok(Some(guard));
+            }
+            let Ok(left) = lock_deadline.remaining() else {
+                return Ok(None);
+            };
+            std::thread::sleep(left.min(Duration::from_millis(50)));
+        }
+    }
 }
 
 pub struct LockedMember {
@@ -512,6 +538,7 @@ pub struct LockedMember {
 pub(crate) struct LockedDeletion<S, T> {
     pub snapshot: S,
     pub value: T,
+    _span: crate::signals::DeferTermination,
     _guards: Vec<PaneLock>,
 }
 
@@ -558,40 +585,50 @@ pub(crate) fn lock_deletion<S, T>(
             };
             guards.push(guard);
         }
+        let span = crate::signals::DeferTermination::begin()?;
         let value = with_database_budget(conn, deadline, |conn| revalidate(conn, &snapshot))?;
         if let Some(value) = value {
             return Ok(LockedDeletion {
                 snapshot,
                 value,
+                _span: span,
                 _guards: guards,
             });
         }
+        drop(span);
         drop(guards);
         deadline.remaining()?;
     }
 }
 
 pub fn lock_member(
-    conn: &Connection,
+    conn: &mut Connection,
     settings: &Settings,
     member: &MemberRecord,
+    deadline: Deadline,
 ) -> Result<Option<LockedMember>, CafleetError> {
     let placement = member.placement.as_ref().ok_or_else(|| {
         CafleetError::App(format!("member {} has no placement row", member.member_id))
     })?;
-    let Some(guard) =
-        PaneLock::try_acquire(&settings.database_url, placement).map_err(|error| {
-            CafleetError::App(format!(
-                "member {} pane input: {}",
-                member.member_id,
-                error.message()
-            ))
-        })?
+    let Some(guard) = PaneLock::acquire_within(
+        &settings.database_url,
+        placement,
+        deadline.reserving(crate::multiplexer::INPUT_RESERVATION),
+    )
+    .map_err(|error| {
+        CafleetError::App(format!(
+            "member {} pane input: {}",
+            member.member_id,
+            error.message()
+        ))
+    })?
     else {
         return Ok(None);
     };
-    let current = crate::broker::get_member(conn, member.member_id, member.fleet_id)?
-        .ok_or_else(|| CafleetError::App(format!("Member {} not found", member.member_id)))?;
+    let current = with_database_budget(conn, deadline, |conn| {
+        crate::broker::get_member(conn, member.member_id, member.fleet_id)
+    })?
+    .ok_or_else(|| CafleetError::App(format!("Member {} not found", member.member_id)))?;
     if current.placement != member.placement {
         return Err(CafleetError::App(format!(
             "member {} placement changed while acquiring pane input",
@@ -602,6 +639,207 @@ pub fn lock_member(
         member: current,
         _guard: guard,
     }))
+}
+
+#[cfg(test)]
+mod pane_lock_wait_tests {
+    use super::*;
+    use crate::broker::test_support as common;
+    use crate::multiplexer::INPUT_RESERVATION;
+
+    struct LockFixture {
+        _dir: tempfile::TempDir,
+        conn: Connection,
+        settings: Settings,
+        member: MemberRecord,
+    }
+
+    impl LockFixture {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            let mut conn = common::migrated_conn(&dir);
+            let (fleet, _) = common::create_fleet(&mut conn, "locks");
+            let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+            let member = crate::broker::get_member(&conn, worker, fleet)
+                .unwrap()
+                .unwrap();
+            let url = format!("sqlite:///{}", conn.path().unwrap());
+            let settings =
+                Settings::from_lookup(|name| (name == "CAFLEET_DATABASE_URL").then(|| url.clone()))
+                    .unwrap();
+            Self {
+                _dir: dir,
+                conn,
+                settings,
+                member,
+            }
+        }
+
+        fn placement(&self) -> &Placement {
+            self.member.placement.as_ref().unwrap()
+        }
+
+        fn hold_for(&self, hold: Option<Duration>) -> std::thread::JoinHandle<()> {
+            let guard = PaneLock::try_acquire(&self.settings.database_url, self.placement())
+                .unwrap()
+                .expect("the fixture lock is free");
+            std::thread::spawn(move || {
+                match hold {
+                    Some(hold) => std::thread::sleep(hold),
+                    None => std::thread::sleep(Duration::from_secs(3)),
+                }
+                drop(guard);
+            })
+        }
+
+        fn writer_deadline() -> Deadline {
+            Deadline::new().reserving(INPUT_RESERVATION)
+        }
+    }
+
+    #[test]
+    fn reserving_moves_the_deadline_earlier_by_the_reserve() {
+        let deadline = Deadline::until(Instant::now() + Duration::from_secs(5));
+        let left = deadline.reserving(INPUT_RESERVATION).remaining().unwrap();
+        assert!(left <= Duration::from_millis(1500), "{left:?}");
+        assert!(left > Duration::from_millis(1400), "{left:?}");
+    }
+
+    #[test]
+    fn reserving_more_than_remains_is_already_expired() {
+        let deadline = Deadline::until(Instant::now() + Duration::from_secs(3));
+        assert!(deadline.reserving(INPUT_RESERVATION).remaining().is_err());
+    }
+
+    #[test]
+    fn an_uncontended_lock_is_acquired_at_once() {
+        let fixture = LockFixture::new();
+        let started = Instant::now();
+        let guard = PaneLock::acquire_within(
+            &fixture.settings.database_url,
+            fixture.placement(),
+            LockFixture::writer_deadline(),
+        )
+        .unwrap();
+        assert!(guard.is_some());
+        assert!(started.elapsed() < Duration::from_millis(200));
+    }
+
+    #[test]
+    fn a_lock_released_within_the_wait_is_acquired() {
+        let fixture = LockFixture::new();
+        let holder = fixture.hold_for(Some(Duration::from_millis(300)));
+        let started = Instant::now();
+        let guard = PaneLock::acquire_within(
+            &fixture.settings.database_url,
+            fixture.placement(),
+            LockFixture::writer_deadline(),
+        )
+        .unwrap();
+        assert!(guard.is_some());
+        assert!(started.elapsed() >= Duration::from_millis(250));
+        assert!(started.elapsed() < Duration::from_millis(1000));
+        holder.join().unwrap();
+    }
+
+    #[test]
+    fn a_lock_released_just_before_the_reserved_deadline_is_acquired() {
+        let fixture = LockFixture::new();
+        let lock_deadline = LockFixture::writer_deadline();
+        let holder = fixture.hold_for(Some(Duration::from_millis(1300)));
+        let guard = PaneLock::acquire_within(
+            &fixture.settings.database_url,
+            fixture.placement(),
+            lock_deadline,
+        )
+        .unwrap();
+        assert!(guard.is_some(), "the 50 ms retry observes the release");
+        holder.join().unwrap();
+    }
+
+    #[test]
+    fn a_lock_still_busy_at_the_reserved_deadline_returns_none() {
+        let fixture = LockFixture::new();
+        let holder = fixture.hold_for(None);
+        let started = Instant::now();
+        let guard = PaneLock::acquire_within(
+            &fixture.settings.database_url,
+            fixture.placement(),
+            LockFixture::writer_deadline(),
+        )
+        .unwrap();
+        assert!(guard.is_none());
+        let waited = started.elapsed();
+        assert!(waited >= Duration::from_millis(1400), "{waited:?}");
+        assert!(waited < Duration::from_millis(2000), "{waited:?}");
+        holder.join().unwrap();
+    }
+
+    #[test]
+    fn lock_member_waits_for_the_file_lock_then_revalidates_the_placement() {
+        let mut fixture = LockFixture::new();
+        let holder = fixture.hold_for(Some(Duration::from_millis(300)));
+        let member = fixture.member.clone();
+        let locked = lock_member(
+            &mut fixture.conn,
+            &fixture.settings,
+            &member,
+            Deadline::new(),
+        )
+        .unwrap()
+        .expect("the lock frees within the wait");
+        assert_eq!(locked.member, member);
+        holder.join().unwrap();
+    }
+
+    #[test]
+    fn lock_member_reports_a_busy_pane_after_the_bounded_wait() {
+        let mut fixture = LockFixture::new();
+        let holder = fixture.hold_for(None);
+        let member = fixture.member.clone();
+        let started = Instant::now();
+        let locked = lock_member(
+            &mut fixture.conn,
+            &fixture.settings,
+            &member,
+            Deadline::new(),
+        )
+        .unwrap();
+        assert!(locked.is_none());
+        let waited = started.elapsed();
+        assert!(waited >= Duration::from_millis(1400), "{waited:?}");
+        assert!(waited < Duration::from_millis(2000), "{waited:?}");
+        holder.join().unwrap();
+    }
+
+    #[test]
+    fn lock_member_rejects_a_placement_changed_while_acquiring() {
+        let mut fixture = LockFixture::new();
+        let member = fixture.member.clone();
+        fixture
+            .conn
+            .execute(
+                "UPDATE member_placements SET mux_window_id='@9' WHERE member_id=?1",
+                [member.member_id],
+            )
+            .unwrap();
+        let error = match lock_member(
+            &mut fixture.conn,
+            &fixture.settings,
+            &member,
+            Deadline::new(),
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("a changed placement must be rejected"),
+        };
+        assert_eq!(
+            error.message(),
+            format!(
+                "member {} placement changed while acquiring pane input",
+                member.member_id
+            )
+        );
+    }
 }
 
 #[derive(PartialEq, Eq)]

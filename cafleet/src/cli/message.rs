@@ -14,7 +14,7 @@ use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::output::{format_indexed_list, format_message, truncate_message_text};
 use crate::presentation;
-use crate::receive::{AttemptOutcome, BrokerReceiver, Delivery, SystemClock};
+use crate::receive::{AttemptEnd, BrokerReceiver, Delivery, SystemClock};
 
 #[derive(Args)]
 #[group(required = true, multiple = false)]
@@ -124,26 +124,24 @@ pub fn run(
                 )
             })?;
             let message_id = message.message_id;
-            let notification_sent =
-                match crate::runtime::attempt_preview(conn, settings, to_member_id, None, deadline)
+            // Escape into the sender's own pane would interrupt the turn running this command.
+            let notification_sent = if from_member_id == to_member_id {
+                false
+            } else {
+                match crate::runtime::deliver_pending(conn, settings, to_member_id, None, deadline)
                 {
-                    Ok(AttemptOutcome::Sent {
-                        message_id: notified,
-                    }) => notified == message_id,
-                    Ok(
-                        AttemptOutcome::Held
-                        | AttemptOutcome::NoPending
-                        | AttemptOutcome::Settled { .. },
-                    ) => false,
-                    Ok(AttemptOutcome::Failed(error)) => {
-                        eprintln!("Message {message_id} was persisted. {}", error.error);
-                        false
+                    Ok(outcome) => {
+                        if let AttemptEnd::Failed(error) = &outcome.end {
+                            eprintln!("Message {message_id} was persisted. {}", error.error);
+                        }
+                        outcome.sent.contains(&message_id)
                     }
                     Err(error) => {
                         eprintln!("Message {message_id} was persisted. {}", error.message());
                         false
                     }
-                };
+                }
+            };
             emit_result(
                 settings,
                 presentation::send_outcome(&message, notification_sent),

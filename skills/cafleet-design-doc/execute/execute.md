@@ -13,7 +13,7 @@ Read these prerequisites in order before orchestration. Your `CODING AGENT:` ide
 | 1 | Your backend section in [coding-agents.md](../../cafleet/reference/coding-agents.md) | Resolve local Runtime bindings and bound notes before acting. |
 | 2 | [Generic Director role](../../cafleet/roles/director.md) | Before setup; obey its selected-backend, spawn skeleton, audit, size and action-triggered reads. |
 | 3 | [Guidelines File Layout](../reference/guidelines.md#file-layout), then [BASE](../../cafleet/reference/base-dir.md) | Before argument normalization and output-root resolution. |
-| 4 | [Supervision](../../cafleet/reference/supervision.md) | Before orchestration; atomic registration, finite receiving, dispatch and authorization scope. |
+| 4 | [Supervision](../../cafleet/reference/supervision.md) | Before orchestration; atomic registration, Director wake, dispatch and authorization scope. |
 | 5 | [Coordination](../reference/coordination.md) | Before messages, payload retrieval or markers. |
 | 6 | [Guidelines](../reference/guidelines.md) | Before document-format or phase-completion actions. |
 
@@ -37,7 +37,7 @@ Store literal fleet/member IDs from CLI JSON. Poll complete messages with `--jso
 
 ### Diagnostics and progress
 
-Finite receive results resume evidence-based facilitation. Use `cafleet member capture <member-id> --lines 200` for stalled-member diagnostics. Disclose deletion and re-spawn to the user; never silently replace a member. Apply [generic replacement](../../cafleet/roles/director.md#model-replacement) with this disclosure constraint. Route test-defect arbitration through Step 4 and commit test corrections separately.
+Each wake on a delivered reply resumes evidence-based facilitation. Use `cafleet member capture <member-id> --lines 200` for stalled-member diagnostics. Disclose deletion and re-spawn to the user; never silently replace a member. Apply [generic replacement](../../cafleet/roles/director.md#model-replacement) with this disclosure constraint. Route test-defect arbitration through Step 4 and commit test corrections separately.
 
 ### Free-form user replies
 
@@ -188,9 +188,9 @@ cafleet fleet create --name "design-doc-execute-<slug>" --coding-agent <backend>
 Retain `fleet_id` and `director.member_id` for subsequent commands. Ordinary member creation can begin immediately.
 
 
-#### 3b. Own finite receiving
+#### 3b. Wake on delivered replies
 
-After creating/dispatching a member, run `cafleet message wait <director-member-id> --timeout 300 --json` as a host-native background task and retain its live task/session handle. Collect replies and ACK every consumed delivery before the next wait; keep deferred actions in host-owned state. A foreground-only mechanism uses at most 30 seconds. Inspect roster/panes/artifacts on timeout and receive again until the delegated reply or explicit user handoff. Follow [supervision](../../cafleet/reference/supervision.md).
+After creating/dispatching a member, end your turn; a delivered `[cafleet msg ID …]` line wakes you. On every wake run `cafleet message poll <director-member-id> --json`, ACK every consumed delivery before ending the turn and act on it; keep deferred actions in host-owned state. Inspect roster, `unconfirmed_previews`, panes and artifacts on every wake until the delegated reply or explicit user handoff. Follow [Director wake](../../cafleet/reference/supervision.md#director-wake).
 
 #### 3c. Analyze implementation tasks to decide team composition
 
@@ -301,7 +301,7 @@ For each step in the design document:
    cafleet message send --from-member-id <director-member-id> \
      --to-member-id <tester-member-id> "ready (paragraph-Implementation > Step N)"
    ```
-2. **Retain finite receiving until the Tester’s `complete (paragraph-Implementation > Step N) — <count> tests` (or `blocked (paragraph-Implementation > Step N)` if the spec is unclear) arrives**, then poll and ACK it. On `blocked`, read the Tester's `COMMENT(tester)` marker at the same pointer (pairing rule, coordination.md); if the test framework is ambiguous (per the Tester's `Phase 1` selection step, which uses `blocked (doc)` with the marker at doc-top), ask the user via {decision_surface}, write the answer back as `COMMENT(user-relay): <choice>` at the same doc-top location, and reply with `ready (doc)` so the Tester resumes.
+2. **Wake on the Tester’s delivered `complete (paragraph-Implementation > Step N) — <count> tests` (or `blocked (paragraph-Implementation > Step N)` if the spec is unclear)**, then poll and ACK it. On `blocked`, read the Tester's `COMMENT(tester)` marker at the same pointer (pairing rule, coordination.md); if the test framework is ambiguous (per the Tester's `Phase 1` selection step, which uses `blocked (doc)` with the marker at doc-top), ask the user via {decision_surface}, write the answer back as `COMMENT(user-relay): <choice>` at the same doc-top location, and reply with `ready (doc)` so the Tester resumes.
 3. **Review tests** against the design doc. If issues are found, write `COMMENT(director): <issue>` markers at `paragraph-Implementation > Step N` (pairing rule) and reply `ready (paragraph-Implementation > Step N)`; the Tester resolves the markers and replies `addressed (paragraph-Implementation > Step N)`. Repeat until satisfied.
 4. **Commit tests** per the [Commit protocol](#commit-protocol). Recover the per-test file list directly via git (`git status` / `git diff --stat` / `git log --name-only`) — the Tester does not embed file lists in cafleet bodies under the verb + pointer schema.
    - `git add <test-files>`
@@ -314,7 +314,7 @@ For each step in the design document:
    cafleet message send --from-member-id <director-member-id> \
      --to-member-id <programmer-member-id> "ready (paragraph-Implementation > Step N)"
    ```
-2. **Retain finite receiving until the Programmer’s `complete (paragraph-Implementation > Step N)` arrives**, then poll and ACK it. On `escalating (paragraph-Implementation > Step N)` (suspected test defect), see the **Escalation Protocol (Test Defect)** at the end of Step 4; the rationale lives in a `COMMENT(programmer)` marker at the pointer, not in the cafleet body.
+2. **Wake on the Programmer’s delivered `complete (paragraph-Implementation > Step N)`**, then poll and ACK it. On `escalating (paragraph-Implementation > Step N)` (suspected test defect), see the **Escalation Protocol (Test Defect)** at the end of Step 4; the rationale lives in a `COMMENT(programmer)` marker at the pointer, not in the cafleet body.
 3. **Programmer updates design doc**: Checkboxes, timestamps, and Progress counter.
 
 #### Phase C: Code Review (Director)

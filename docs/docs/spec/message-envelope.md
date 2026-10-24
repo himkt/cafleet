@@ -41,4 +41,4 @@ The ordered public record is:
 build OK
 ```
 
-Text bodies use `CAFLEET_MAX_TEXT_LEN` codepoints plus `…`; JSON preserves the complete exact text. Pane previews apply their separate [control-rendering contract](multiplexer-backends.md#push-notifications).
+Text bodies use `CAFLEET_MAX_TEXT_LEN` codepoints plus `…`; JSON preserves the complete exact text. A pane notification line folds the full body under its own [line contract](multiplexer-backends.md#push-notifications), independent of `CAFLEET_MAX_TEXT_LEN`.

@@ -39,7 +39,7 @@ command. Each placeholder and its label line is in
 [CLI options § Spawn-prompt substitution](../spec/cli-options.md#spawn-prompt-substitution). The only environment variable forwarded into the pane is
 `CAFLEET_DATABASE_URL`.
 All three honor a leading-`!` shell shortcut on the coding agent's input line,
-so `cafleet member exec` submits a visible native command after idle revalidation; a member routes a
+so `cafleet member exec` submits a visible native command Escape-first, without idle revalidation; a member routes a
 command its harness does not run through the Director — see
 [Command routing](member-lifecycle.md#command-routing). For the full
 broker CLI reference, see [CLI options](../spec/cli-options.md).
@@ -51,13 +51,10 @@ invocation, and run a sequence of CAFleet operations as separate shell-tool
 calls. This rule is backend-neutral and applies identically to `claude`,
 `codex`, and `opencode` panes.
 
-The reason is the pane push channel: a compound invocation — a one-shot
+The reason is host permission matching: a compound invocation — a one-shot
 CAFleet command placed beside another command with a newline, `;`, `&&`, a
-pipe, or shell `&` — keeps the coding agent's shell tool occupied after the
-CAFleet process exits. While the tool is occupied, the pane is not at rest, so
-the broker holds every keystroke aimed at it and an inbound message waits.
-Isolated invocations return the pane to the composer between operations,
-which is what the push-notification channel depends on.
+pipe, or shell `&` — does not match single-command allow rules, so the host
+prompts for it or runs it under a restricted permission set.
 
 Leading `NAME=value` environment assignments immediately preceding the
 `cafleet` executable are allowed: they set the CAFleet process's environment
@@ -127,6 +124,6 @@ need kernel-enforced isolation should use the `codex` backend.
 
 Use the [manual lifecycle](../how-to/mixed-backend-team.md#manual-lifecycle) for a complete role-by-path member prompt. Preserve supplied identities, BASE and host prerequisites.
 
-## Host-owned receiving
+## Director wake
 
-The Director retains a finite native receive task/session handle until a reply or explicit user handoff. ACK consumed deliveries before the next receive, keeping deferred work in host-owned task state. Timeouts call for evidence checks. Follow [the manual lifecycle](../how-to/mixed-backend-team.md#manual-lifecycle).
+Replies are delivered into the Director's pane on every backend, so the Director ends its turn after dispatch and wakes on each delivered line. On every wake it polls, ACKs consumed deliveries before ending the turn, keeps deferred work in host-owned task state and checks the evidence. Follow [the manual lifecycle](../how-to/mixed-backend-team.md#manual-lifecycle).

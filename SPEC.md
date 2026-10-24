@@ -4,15 +4,15 @@ This is the self-contained interface and observable-behavior specification for t
 
 ## 1. Overview & goals
 
-CAFleet multiplexes coding-agent sessions in tmux or herdr and coordinates them with durable point-to-point SQLite messages. The host owns task continuation and native execution results; the Director owns delegation, finite receiving, evidence inspection, authorization and cleanup. The shipped product consists of the CLI, embedded skills/presets and documentation site.
+CAFleet multiplexes coding-agent sessions in tmux or herdr and coordinates them with durable point-to-point SQLite messages. The host owns task continuation and native execution results; the Director owns delegation, wake handling, evidence inspection, authorization and cleanup. The shipped product consists of the CLI, embedded skills/presets and documentation site.
 
-Reproduce the documented command/option/exit surface, configuration defaults, current schema, enum values, output shapes, lifecycle, finite receive, notification, locking, readiness and native dispatch semantics. The current format identity defines compatibility; required data corruption surfaces at its read boundary.
+Reproduce the documented command/option/exit surface, configuration defaults, current schema, enum values, output shapes, lifecycle, finite receive, notification, locking, termination deferral and native dispatch semantics. The current format identity defines compatibility; required data corruption surfaces at its read boundary.
 
 ## 2. Architecture stance
 
-The core is synchronous. A finite receive invocation owns its bounded wait and notification retries. Separate processes coordinate SQLite changes through transactions and complete pane submissions through process-shared file locks. Host-native background tools own task/session handles and collect terminal results.
+The core is synchronous. A send delivers pending messages into the recipient's pane within its own budget; a finite receive invocation owns its bounded wait and notification retries. Separate processes coordinate SQLite changes through transactions and complete pane submissions through process-shared file locks. Host-native background tools own task/session handles and collect terminal results.
 
-A Director retains live receiving while replies remain outstanding or explicitly hands unfinished work to the user. Consumed deliveries are ACKed immediately; deferred actions remain in host-owned state. Timeout triggers evidence checks rather than a completion/failure inference.
+A Director ends its turn after dispatch and wakes on lines delivered into its pane, or explicitly hands unfinished work to the user. Consumed deliveries are ACKed immediately; deferred actions remain in host-owned state. Every wake triggers evidence checks rather than a completion/failure inference.
 
 ## 3. Module layout
 
@@ -23,8 +23,8 @@ A Director retains live receiving while replies remain outstanding or explicitly
 | Broker | Typed fleet/member/message/asset records and synchronous transactions |
 | Output | Ordered wire presenters, truncation and capture formatting |
 | Multiplexer | Discovery, pane creation/capture/input/kill and layout compensation |
-| Pane input | Stable OS locks, styled readiness and checked literal submission |
-| Notification / receiving | Synchronous preview attempt and caller-owned finite retries |
+| Pane input | Stable OS locks with bounded waits, termination deferral and checked Escape-first literal submission |
+| Notification / receiving | Synchronous draining delivery and caller-owned finite retries |
 | Coding-agent backends | Registry, availability, model/effort validation and spawn argv |
 | CLI | Parse/guard/compose these contracts and emit results |
 
@@ -32,8 +32,7 @@ A Director retains live receiving while replies remain outstanding or explicitly
 
 ```text
 CLI -> receiving / notification -> broker -> persistence
-       pane input -> styled readiness
-                  -> multiplexer -> bounded process runner
+       pane input -> multiplexer -> bounded process runner
 CLI -> coding-agent backends -> availability probes
 CLI -> ordered output presenters
 ```
@@ -60,7 +59,7 @@ The full column and index declarations are in §8. Records decode required colum
 
 ### 5.3 Enums
 
-`MemberStatus` is `active` / `deregistered`; `MessageStatus` is `input_required` / `completed`. Unknown required enum strings fail. Supported backend tokens come from their registries. Readiness is `idle`, `working`, `awaiting_user`, `draft` or `unknown`.
+`MemberStatus` is `active` / `deregistered`; `MessageStatus` is `input_required` / `completed`. Unknown required enum strings fail. Supported backend tokens come from their registries.
 
 ### 5.4 Member kind discriminator
 
@@ -100,13 +99,13 @@ List live fleets by descending creation timestamp/ID. Show includes soft-deleted
 
 Registration requires a live fleet and active valid root Director. Insert the member and pending placement atomically. Creation owns compensation for later prompt/split/patch failures. Root Director individual deletion fails. Member deletion locks its concrete pane, kills it and deregisters it; a placementless/pending member requires no concrete pane lock.
 
-Roster reads active entries, derive kind from the fleet reference and include nullable activity. Sent/received/ACK maxima determine `idle` seconds, truncated to an integer; null is the correct state without activity. Required Director/placement/enum corruption fails rather than producing placeholder values.
+Roster reads active entries, derive kind from the fleet reference and include nullable activity. Sent/received/ACK maxima determine `idle` seconds, truncated to an integer; null is the correct state without activity. `unconfirmed_previews` selects, per member and ordered by `(created_at, message_id)`, the incoming `input_required` messages with non-null `preview_started_at` and null `notified_at`. Required Director/placement/enum corruption fails rather than producing placeholder values.
 
 #### Messaging
 
 Send requires active sender/recipient in the same live fleet and persists exact text. Every individual fan-out send commits independently; keep already committed IDs when another recipient fails. Poll/wait read incoming unread messages by descending status timestamp/message ID. Show requires existence. ACK requires an unread existing row, stamps completion and removes notification eligibility. Consumption is independent of assignment completion.
 
-Pending preview selection chooses the oldest eligible row by `(created_at, message_id)` for an active ordinary recipient. Revalidate fleet, member, placement, message status and null notification stamp while holding pane input ownership. Stamp success conditionally only after complete submission.
+Pending preview selection chooses the oldest eligible row by `(created_at, message_id)` for an active recipient with a concrete pane, the Director included; self-sends are never eligible. Revalidate fleet, member, placement, message status and null notification stamp while holding pane input ownership. Stamp success conditionally only after complete submission; delivery leaves `status_state` unchanged, so a delivered message stays `input_required` until the recipient ACKs it.
 
 #### Broker errors
 
@@ -128,10 +127,9 @@ Preserve the validation boundary and explicit cause. Missing member/message, ina
 | `member delete` | Kill its owned pane and deregister | `MEMBER_ID` | yes |
 | `member show` / `member list` | Read detail / active roster | `MEMBER_ID` / `FLEET_ID` | yes |
 | `member prompt` / `member exec` | Submit authorized native input | `MEMBER_ID` | yes |
-| `member ping` | Submit a fixed inbox-poll prompt when idle | `MEMBER_ID` | yes |
 | `member capture` | Read a pane tail | `MEMBER_ID` | yes |
-| `message send` | Persist a point-to-point message | Sender/recipient flags | yes |
-| `message poll` / `message wait` | Read incoming deliveries / receive finitely | `MEMBER_ID` | yes |
+| `message send` | Persist a point-to-point message and deliver it into the recipient's pane | Sender/recipient flags | yes |
+| `message poll` / `message wait` | Read incoming deliveries / block until deliveries arrive | `MEMBER_ID` | yes |
 | `message ack` / `message show` | Consume / read one message | `MESSAGE_ID` | yes |
 
 #### Environment variables
@@ -140,7 +138,7 @@ Preserve the validation boundary and explicit cause. Missing member/message, ina
 |---|---|---|---|
 | `CAFLEET_DATABASE_URL` | `database_url` | `sqlite:///` + `~/.local/share/cafleet/cafleet_v8.db` | Selected SQLite file path |
 | `CAFLEET_MULTIPLEXER` | `multiplexer` | Auto-detect | Explicit supported multiplexer override |
-| `CAFLEET_MAX_TEXT_LEN` | `max_text_len` | `200` | Text-body and pane-preview codepoint limit |
+| `CAFLEET_MAX_TEXT_LEN` | `max_text_len` | `200` | CLI text-output body codepoint limit |
 
 The default expands HOME once. An explicit URL has the form `sqlite:///<path>`; resolve a relative file path against the invoking working directory before canonicalizing the database file for shared pane-lock identity. A literal tilde in an override is not expanded. Count values accept nonnegative integers and invalid values fail with `<NAME> must be a non-negative integer (got '<value>')`.
 
@@ -167,14 +165,19 @@ The default expands HOME once. An explicit URL has the form `sqlite:///<path>`; 
 | `member list` | Roster rows or `0 members.` | Roster array |
 | `member prompt` | `Sent prompt TEXT_REPR to member NAME (PANE).` | `{member_id, pane_id, text}` |
 | `member exec` | `Dispatched native command to member ID (PANE). Inspect the pane for its result.` | `{member_id, pane_id, coding_agent, command, dispatched}` |
-| `member ping` | Dispatch or skip line | `{member_id, pane_id, skipped, reason}` |
 | `member capture` | Exact selected content | `{member_id, pane_id, lines, content, captured_at, content_sha256}` |
 | `fleet capture` | One annotated section per entry | Ordered capture-entry array |
 | `doctor` | Complete diagnosis and issue footer | Diagnosis object |
 
 ##### Member list output {#member-list-output}
 
-Roster records include `member_id`, `name`, `kind`, `placement`, `last_sent`, `last_recv`, `last_ack` and `idle`. `kind` is `director` when the fleet reference matches, otherwise `member`. Missing activity is null; placement may be null, or its pane ID pending. Text uses `-` for absent values and `(pending)` for a pending pane.
+Roster records include `member_id`, `name`, `kind`, `placement`, `last_sent`, `last_recv`, `last_ack`, `idle` and `unconfirmed_previews`. `kind` is `director` when the fleet reference matches, otherwise `member`. Missing activity is null; placement may be null, or its pane ID pending. Text uses `-` for absent values and `(pending)` for a pending pane.
+
+`unconfirmed_previews` lists, ordered by `(created_at, message_id)`, the IDs of messages addressed to that member that are still `input_required`, have a durable delivery claim (`preview_started_at` set) and no `notified_at`. These are the claims automatic delivery skips. An empty list is `[]`, and the Director row carries the field too. Text output does not show it.
+
+```json
+"unconfirmed_previews": [41, 44]
+```
 
 #### JSON output (`--json`) {#json-output}
 
@@ -198,7 +201,7 @@ Keep `Bash(cafleet member prompt *)` and `Bash(cafleet member exec *)` under `pe
 
 #### Message Body Truncation
 
-CLI text and inline preview bodies use `CAFLEET_MAX_TEXT_LEN` Unicode codepoints followed by `…` when truncated. Full JSON and pane captures preserve their complete content. Message envelope owns the compact rendering.
+CLI text bodies use `CAFLEET_MAX_TEXT_LEN` Unicode codepoints followed by `…` when truncated. Full JSON and pane captures preserve their complete content. Message envelope owns the compact rendering. Pane notification lines follow their own inline-body limit in Push notifications.
 
 #### Text bodies (positional `TEXT` / `--file`) {#text-body-input}
 
@@ -344,6 +347,8 @@ help, even under a missing database or a missing or stale install.
 `cafleet fleet create --name NAME --coding-agent AGENT [--json]`
 
 Require the selected backend token and a valid tmux/herdr context. Outside that context fail with `cafleet fleet create must be run inside a tmux or herdr session`. Insert fleet, current Director member and placement in one transaction and backfill `director_member_id` before commit. The Director has `name="Director"` and `description="Root Director for this fleet"`. Creation splits no pane and launches no process. An ordinary member can be created immediately.
+
+The calling pane becomes the Director's concrete placement and receives every message addressed to the Director as a delivered line. Run `fleet create` from the Director's coding-agent session, the one `--coding-agent` declares; a plain shell registered as Director would receive each delivered line as shell input.
 
 ##### `fleet list`
 
@@ -626,13 +631,23 @@ Exit-code semantics are identical to text mode.
 
 `cafleet message send --from-member-id ID --to-member-id ID (TEXT | --file PATH) [--json]`
 
-Resolve the complete text body before starting the five-second persistence/notification budget, including when `--file -` waits for stdin. Persist one point-to-point delivery, then attempt at most one oldest eligible ordinary-member preview. A committed/persisted send remains successful with exit 0; held/unavailable notifications preserve the stdout record and `notification_sent=false`. The Director receives by broker reads; self-sends have settled notification state.
+Resolve the complete text body before starting the five-second persistence/notification budget, including when `--file -` waits for stdin. Persist one point-to-point delivery, then drain the recipient's pending messages oldest-first into its pane within the remaining budget, the new message included. Every recipient with a concrete pane receives delivered lines, ordinary member and Director alike. A self-send persists with no pane input. A committed/persisted send remains successful with exit 0; held/unavailable notifications preserve the stdout record and `notification_sent=false`.
 
-`notification_sent` refers to the newly committed message; delivery of an older preview leaves it false. Push notifications specifies selection and under-lock revalidation.
+`notification_sent` is `true` exactly when this invocation delivered the newly committed message, including when it was drained after an older one. When another invocation delivered the new message, `notification_sent` stays `false` and stderr carries no diagnostic; the recipient still received the line. Messages left pending when the budget no longer covers another submission stay pending with no diagnostic; the next send to that recipient or a message wait rotation retries them. Push notifications specifies the line, the drain and under-lock revalidation.
 
 ###### Delivery outcome {#message-send-delivery}
 
-On the first attempted unknown/draft capture, stderr is `Message NEW_ID was persisted. member ID is STATE; preview PREVIEW_ID was not sent.` Other post-commit notification/stamp failures also name the persisted ID without suppressing successful stdout. Storage failure before commit exits 1 with its cause. Consume an existing committed ID once; notification failure supplies no reason to create another delivery.
+A failed delivery prints `Message NEW_ID was persisted. ` followed by its diagnostic on stderr, without suppressing successful stdout:
+
+| Condition | Diagnostic after the persisted prefix |
+|---|---|
+| The pane input lock stays busy through the lock wait | `member ID's pane input remained busy; preview MESSAGE_ID was not sent.` |
+| The work between lock acquisition and the first submission outlasts its margin | `insufficient pane input budget for literal input, settle and Enter` |
+| Transport fails before typing, typing may have begun, or the stamp fails | The transport or storage cause, classified `not_sent` or `uncertain` |
+
+A lock wait that ends after another sender delivered every pending message reports nothing. Storage failure before commit exits 1 with its cause. Consume an existing committed ID once; notification failure supplies no reason to create another delivery.
+
+After a failed delivery the sender sends exactly one follow-up to the same recipient with the body `message N was not delivered to your pane; poll your inbox`. For an unclaimed message its drain delivers `N` first; for a durable claim its line wakes the recipient, whose poll lists `N`. When the follow-up also fails, the sender stops.
 
 ##### `message poll`
 
@@ -642,11 +657,11 @@ On the first attempted unknown/draft capture, stderr is `Message NEW_ID was pers
 
 `cafleet message wait MEMBER_ID [--timeout SECONDS] [--json]`
 
-Timeout is an integer in `1..=1800`, default `300`. Validate an active subject and live fleet. Existing unread deliveries return immediately; otherwise check at one-second monotonic intervals. The invocation owns finite receiving and never ACKs messages.
+Timeout is an integer in `1..=1800`, default `300`. Validate an active subject and live fleet. Existing unread deliveries return immediately; otherwise check at one-second monotonic intervals. The invocation is a blocking receive for scripts and manual use and never ACKs messages.
 
-Between inbox checks, retry at most one ordinary-member preview per interval with an in-memory round-robin cursor. Select concrete placements and exclude the Director, self-notifications, ACKed and already-notified rows. Persist an input claim before the first possible keystroke. Read unresolved claims and message eligibility in the same receive snapshot. Preserve their uncertain-delivery diagnostics across invocations, skip those exact messages and continue with the oldest unclaimed message for each member. Recheck the inbox before starting another attempt. Shared input locks and under-lock revalidation keep multiple waiters safe.
+Between inbox checks, retry pending deliveries for at most one member per interval with an in-memory round-robin cursor. Select the concrete placements of every other member of the fleet, the Director included; exclude the wait's own subject, self-notifications, ACKed and already-notified rows. Each attempt drains that member's pending messages under the delivery procedure without consulting pane state. Persist an input claim before the first possible keystroke. Read unresolved claims and message eligibility in the same receive snapshot. Preserve their uncertain-delivery diagnostics across invocations, skip those exact messages and continue with the oldest unclaimed message for each member. Recheck the inbox before starting another attempt. Shared input locks and under-lock revalidation keep multiple waiters safe.
 
-Start each receive check or notification attempt before the monotonic receive deadline. An attempt already in flight retains its original five-second budget for revalidation, capture, typing, settle and Enter. Cap subprocess/database busy waits to its remaining budget and start input only with time reserved for settle and Enter. Mandatory database finalization uses the later of the original deadline and one second after finalization begins, keeping pane transport within its original budget. A receive returns by its deadline plus at most one six-second in-flight attempt/finalization allowance. A snapshot blocked until receive expiry returns `timeout` with retained notification diagnostics; earlier transient contention can retry before expiry. Corruption and other fatal storage errors retain their causes.
+Start each receive check or notification attempt before the monotonic receive deadline. An attempt already in flight retains its original five-second budget for the lock wait, revalidation, Escape, typing, settle and Enter. A busy pane lock makes the attempt wait up to 1.5 seconds; a lock still busy then adds a `not_sent` entry with `member ID's pane input remained busy; preview MESSAGE_ID was not sent.` to `notification_errors`. Cap subprocess/database busy waits to its remaining budget and start input only with time reserved for settle and Enter. Mandatory database finalization uses the later of the original deadline and one second after finalization begins, keeping pane transport within its original budget. A receive returns by its deadline plus at most one six-second in-flight attempt/finalization allowance. A snapshot blocked until receive expiry returns `timeout` with retained notification diagnostics; earlier transient contention can retry before expiry. Corruption and other fatal storage errors retain their causes.
 
 The ordered JSON result is:
 
@@ -656,11 +671,11 @@ The ordered JSON result is:
 
 `outcome` is `messages` with nonempty full poll records, or `timeout` with an empty array. Each diagnostic is `{member_id, message_id, delivery, error}`, where delivery is `not_sent` or `uncertain`. Keep only the latest error per member in memory.
 
-Unknown/draft diagnostics are `member ID is STATE; preview MESSAGE_ID was not sent.` Working, approval, pending placement and lock contention are ordinary holds. Reconcile diagnostics with each successful receive snapshot and the typed observations of its owned notification attempt. Remove entries when these observations show ACK, member departure or successful notification by any invocation; a later error replaces the previous one. After receive expiry, return the last successful snapshot reconciled with the completed attempt's observations. Subsequent external changes become visible to the next invocation; final reconciliation starts no additional I/O or tail budget.
+Pending placement and a placement change at claim time are ordinary holds that keep entries unchanged. A drain that delivers a member's recorded message removes that member's entry. Reconcile diagnostics with each successful receive snapshot and the typed observations of its owned notification attempt. Remove entries when these observations show ACK, member departure or successful notification by any invocation; a later error replaces the previous one. After receive expiry, return the last successful snapshot reconciled with the completed attempt's observations. Subsequent external changes become visible to the next invocation; final reconciliation starts no additional I/O or tail budget.
 
-Text is `Messages available for member ID.` plus normal messages, or `Timed out waiting for member ID.`; diagnostics go to stderr. Both outcomes exit 0. Deleted subject/fleet or corrupt/unreadable state exits 1 with its cause and retains earlier uncertain-delivery diagnostics on stderr, including when JSON output was requested. Ctrl+C terminates the finite process normally.
+Text is `Messages available for member ID.` plus normal messages, or `Timed out waiting for member ID.`; diagnostics go to stderr. Both outcomes exit 0. Deleted subject/fleet or corrupt/unreadable state exits 1 with its cause and retains earlier uncertain-delivery diagnostics on stderr, including when JSON output was requested. Ctrl+C outside a delivery attempt terminates the process normally; inside an attempt it takes effect when the attempt's termination-deferral span ends.
 
-The Director ACKs every consumed delivery before the next wait, including questions or deferred approvals; unfinished actions remain in host-owned task state. Use the default for a host-native background task, retain its live task/session handle and collect the terminal result. A foreground-only mechanism uses an explicit timeout of at most 30 seconds. On timeout inspect roster, panes and artifacts, then receive again while delegated work remains. Keep active receive ownership until the reply or explicit user handoff.
+A script or operator uses `message wait` to block until deliveries arrive, then polls and ACKs the consumed messages. Delivered lines already reach every placed recipient's pane, so the wait is an optional receive path.
 
 ##### `message ack`
 
@@ -674,7 +689,7 @@ The Director ACKs every consumed delivery before the next wait, including questi
 
 ##### Member targeting and key delivery
 
-Require an active member and placement for pane operations; concrete pane IDs remain opaque. Pending placement is valid during creation and yields contextual prompt/exec/capture errors, or a ping skip. Missing placement fails pane actions; list/show retain diagnostic nulls. Exec and ping reject the root Director before pane I/O; individual member deletion protects it.
+Require an active member and placement for pane operations; concrete pane IDs remain opaque. Pending placement is valid during creation and yields contextual prompt/exec/capture errors. Missing placement fails pane actions; list/show retain diagnostic nulls. Prompt and exec reject the root Director before pane I/O; individual member deletion protects it.
 
 ##### `member create` {#member-create}
 
@@ -784,8 +799,9 @@ Revalidate pending or absent placement and deregister atomically. For a concrete
 any active registry entry — placed or placementless (root Director included).
 
 Registry read — no multiplexer requirement. Text is the compact one-line row;
-the detailed view — `kind` (`director` / `member`), and the
-placement sub-dict — is the `--json` payload (see
+the detailed view — `kind` (`director` / `member`), the
+placement sub-dict and, as the last key, `unconfirmed_previews` (selected as in
+Member list output) — is the `--json` payload (see
 Output shapes).
 
 
@@ -809,9 +825,9 @@ Per-member detail such as `description` and `registered_at` lives on
 
 `cafleet member prompt MEMBER_ID TEXT [--json]` validates a nonblank line without CR/LF or C0/DEL controls, otherwise exits 2 with `text must be one non-empty line without control characters.`
 
-Acquire the shared input lock, revalidate activity/placement and require idle. Submit literal text, settle and Enter. Exit 0 means submission only, with `{member_id, pane_id, text}`.
+A root Director target exits 1 with `cannot prompt the Director's own pane` before any pane I/O, because Escape would interrupt the Director's own running turn. Otherwise acquire the shared input lock within its bounded wait and revalidate activity/placement. Submit the Director-authored text unchanged with the Escape lead: Escape, settle, literal text, settle and Enter. Escape can interrupt a working turn or dismiss an open prompt in the member pane. Exit 0 means submission only, with `{member_id, pane_id, text}`.
 
-A held lock uses `member ID's pane is receiving another input; retry after it is idle.` Readiness rejection is `member ID is STATE; prompt was not dispatched.` Pre-write error: `prompt was not dispatched to member ID: CAUSE`. Partial uncertainty: `prompt delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` These exit 1 without a success record.
+A lock still busy when the wait ends uses `member ID's pane input remained busy; prompt was not dispatched.` Pre-write error, including an Escape failure: `prompt was not dispatched to member ID: CAUSE`. Partial uncertainty: `prompt delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` These exit 1 without a success record.
 
 ##### `member exec` {#member-exec}
 
@@ -819,7 +835,7 @@ A held lock uses `member ID's pane is receiving another input; retry after it is
 
 Require a nonblank line without CR/LF, NUL or other C0/DEL controls, including tabs. Invalid input exits 2 before pane I/O with `command must be one non-empty line without control characters.` A multiline task supplies a one-line explicit script invocation.
 
-Resolve an active ordinary member and concrete placement, reject the root Director, lock input, reload and require idle. Type native shell input `! ` followed by the actual command once, settle and Enter. The backend owns working directory, environment, permissions, output and exit rendering.
+Resolve an active ordinary member and concrete placement, reject the root Director, lock input within its bounded wait and reload. With the Escape lead, send Escape, settle, type native shell input `! ` followed by the actual command once, settle and Enter. The backend owns working directory, environment, permissions, output and exit rendering.
 
 Successful exit 0 establishes complete submission/dispatch only. Ordered JSON is:
 
@@ -833,24 +849,13 @@ Text: `Dispatched native command to member ID (PANE). Inspect the pane for its r
 |---|---|
 | Root Director | `cannot exec in the Director's own pane` |
 | Pending placement | `member ID has no pane yet (pending placement) — nothing to exec.` |
-| Input lock held | `member ID's pane is receiving another input; retry after it is idle.` |
-| Non-idle/unknown | `member ID is STATE; native command was not dispatched.` |
-| Capture/transport before typing | `native command was not dispatched to member ID: CAUSE` |
+| Input lock still busy when the wait ends | `member ID's pane input remained busy; native command was not dispatched.` |
+| Escape or transport failure before typing | `native command was not dispatched to member ID: CAUSE` |
 | Typing may have begun | `native command delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` |
 
 The first text-writing call can partially type even if it fails. Failure after Enter may mean execution began. Inspect native pane output before any newly authorized retry. The command writes no execution ledger, helper script or wrapper and returns only dispatch metadata. The Director authorizes native input under its host rules; visibility establishes no second member-tool permission check.
 
-After native completion and idle evidence, send an explicit prompt to use the output and continue when the host has not resumed the member.
-
-##### `member ping` {#member-ping}
-
-`cafleet member ping MEMBER_ID [--json]` is an explicit Director action. A Director target exits 1 with `cannot ping the Director's own pane` before capture or input. Lock/revalidate the target, require idle, then submit exactly `cafleet message poll ID --json` with settle/Enter.
-
-Successful JSON is `{member_id, pane_id, skipped:false, reason:null}`; text is `Pinged member NAME (PANE) — poll keystroke dispatched.`
-
-Pending placement, lock contention and readiness yield exit 0 with `skipped:true`. Reasons are `pending_placement`, `busy`, `working`, `awaiting_user`, `draft`, `unknown`; pane_id is null only for pending placement. Pending text: `Member NAME has no pane yet (pending placement) — ping skipped; it will poll its inbox on spawn.` Other skip text: `Member NAME (PANE) is REASON — ping skipped.`
-
-Capture/transport failures exit 1 with their cause; possible partial input is `poll-trigger delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` Finite receiving creates no ping.
+After native completion, inspect the pane and send an explicit prompt to use the output and continue when the host has not resumed the member.
 
 ##### `member capture` {#member-capture}
 
@@ -883,7 +888,7 @@ newline; JSON retains its existing fields and ordering.
 
 #### Error Messages
 
-Application errors print as stderr text even with `--json`; the flag selects successful output. Input errors use the documented usage/application category. Dispatch, readiness, compatibility and deletion-lock errors are specified at their action owners above.
+Application errors print as stderr text even with `--json`; the flag selects successful output. Input errors use the documented usage/application category. Dispatch, input-lock, compatibility and deletion-lock errors are specified at their action owners above.
 
 | Command | Situation | Error message | Exit | Notes |
 |---|---|---|---|---|
@@ -911,10 +916,11 @@ Application errors print as stderr text even with `--json`; the flag selects suc
 | `message send` | The sender is unknown or inactive | `Error: Sender member not found or not active: <from-member-id>` | 1 | — |
 | `message send` | The recipient is unknown or inactive | `Error: Destination member not found: <to-member-id>` | 1 | — |
 | `message send` | Sender and recipient in different fleets | `Error: members <from-member-id> and <to-member-id> are not in the same fleet.` | 1 | — |
+| `member prompt` | The target is the fleet's root Director | `Error: cannot prompt the Director's own pane` | 1 | Before any pane I/O |
 | `member exec` | The target is the fleet's root Director | `Error: cannot exec in the Director's own pane` | 1 | — |
-| `member capture` / `member prompt` / `member exec` | The member has a pending placement | <code>Error: member &lt;id&gt; has no pane yet (pending placement) — nothing to &lt;capture&#124;prompt&#124;exec&gt;.</code> | 1 | `member ping` instead skips and exits 0 — see member ping |
-| `member show` / `prompt` / `exec` / `ping` / `capture` | An unknown or inactive target member id | `Error: Member <member-id> not found` | 1 | — |
-| `member prompt` / `exec` / `ping` / `capture` | A target with no placement row | ``Error: member <member-id> has no placement row; it was not spawned via `cafleet member create`.`` | 1 | — |
+| `member capture` / `member prompt` / `member exec` | The member has a pending placement | <code>Error: member &lt;id&gt; has no pane yet (pending placement) — nothing to &lt;capture&#124;prompt&#124;exec&gt;.</code> | 1 | — |
+| `member show` / `prompt` / `exec` / `capture` | An unknown or inactive target member id | `Error: Member <member-id> not found` | 1 | — |
+| `member prompt` / `exec` / `capture` | A target with no placement row | ``Error: member <member-id> has no placement row; it was not spawned via `cafleet member create`.`` | 1 | — |
 | `message send` / `member create` | Neither the positional body nor `--file`, or both | The parser's native argument-group error | 2 | — |
 | `message send` / `member create` | Positional body empty or whitespace-only | `Error: text may not be empty.` | 2 | — |
 | `message send` / `member create` | `--file <path>` to an empty (zero-byte or whitespace-only) file | `Error: --file <path>: file is empty.` | 1 | — |
@@ -975,7 +981,7 @@ Output shapes owns each command's wrapper. Poll returns an array of full records
 build OK
 ```
 
-Text bodies use `CAFLEET_MAX_TEXT_LEN` codepoints plus `…`; JSON preserves the complete exact text. Pane previews apply their separate control-rendering contract.
+Text bodies use `CAFLEET_MAX_TEXT_LEN` codepoints plus `…`; JSON preserves the complete exact text. A pane notification line folds the full body under its own line contract, independent of `CAFLEET_MAX_TEXT_LEN`.
 
 
 #### Capture snapshot
@@ -1007,8 +1013,8 @@ Ordinary absent member/fleet cells use ASCII `-`; a fleet-capture absent pane us
 | Pane ID example | `%7` | `w1:p1` |
 | Access | CLI subprocess | CLI subprocess |
 | Spawn working directory | Splitting pane inheritance | Explicit `--cwd` |
-| Capture for readiness | `capture-pane -e` | `pane read --format ansi` |
-| Input | Literal text, settle, Enter | Literal text, settle, Enter |
+| Capture for `member capture` / `fleet capture` | `capture-pane -e` | `pane read --format ansi` |
+| Input | Optional Escape lead, literal text, settle, Enter | Optional Escape lead, literal text, settle, Enter |
 | Delete layout | Native auto-fit | Best-effort rebalance scoped to the closed pane’s tab |
 
 #### Backend selection {#backend-selection}
@@ -1133,16 +1139,26 @@ retains its successful close and deregistration result.
 
 #### Pane input lock {#pane-input-lock}
 
-Every notification, prompt, ping and native command uses one process-shared OS file lock. Acquire the guard before placement revalidation and styled capture; hold it through focus normalization, literal text, settle, Enter and the notification stamp. Close the non-cloned owned handle on every path.
+Every notification, prompt and native command uses one process-shared OS file lock. Acquire the guard before placement revalidation; hold it through the Escape lead, literal text, settle, Enter and the notification stamp of the last drained message. Close the non-cloned owned handle on every path.
 
 | Property | Contract |
 |---|---|
 | Directory | `<canonical-database-file>.pane-locks/` adjacent to the database |
 | Key | SHA-256 of UTF-8 `backend + NUL + mux_session + NUL + mux_pane_id` |
 | File | `<key>.lock`, read/write create without truncation, owner-only creation permissions |
-| Acquisition | Nonblocking exclusive `std::fs::File::try_lock`; preserve unexpected errors with path/member context |
+| Acquisition | Exclusive `std::fs::File::try_lock`, retried every 50 milliseconds while another writer holds it; preserve unexpected errors with path/member context |
 | Identity | Keep lockfiles stable while processes may use the database; unlinking a held file would let another process lock a different inode for the same pane |
-| Contention | Hold notifications, skip ping, reject prompt/exec |
+| Contention | A pane writer waits until its five-second budget minus the 3.5-second input reservation, at most 1.5 seconds. A lock still busy then fails that writer with its lock-busy error |
+
+The 3.5-second input reservation covers a 0.5-second revalidation margin, the 0.5-second Escape settle, a 0.5-second minimum literal budget, the one-second submit settle and one second for Enter. A writer that acquires the lock within its wait therefore still submits; a lock released just before the wait ends still leads to a successful submission. No database statement runs while a writer waits for the lock.
+
+| Writer | Lock still busy when the wait ends |
+|---|---|
+| `message send` / `message wait` delivery | `not_sent`: `member ID's pane input remained busy; preview MESSAGE_ID was not sent.` |
+| `member prompt` | Exit 1: `member ID's pane input remained busy; prompt was not dispatched.` |
+| `member exec` | Exit 1: `member ID's pane input remained busy; native command was not dispatched.` |
+
+When a delivery's lock wait ends, one short read selects the oldest pending unclaimed message for the recipient. When none remains, the lock holder (usually another sender draining the same recipient) delivered or settled every message, and the attempt reports nothing. Otherwise the lock-busy diagnostic names that message.
 
 Duplicate placements for one pane share the same lock key. Process exit releases ownership. Read-only capture needs no input lock.
 
@@ -1150,51 +1166,110 @@ Member deletion locks its concrete placement before killing/deregistering. Fleet
 
 Errors are `member ID's pane input remained busy for 5 seconds; member was not deleted.` and `fleet ID pane input remained busy for 5 seconds at member MEMBER_ID; fleet was not deleted.`
 
-#### Pane-state classification {#pane-state-classification}
+#### Termination during pane input {#termination-during-pane-input}
 
-Use the recorded coding-agent backend and a fresh styled capture after locking. tmux captures with `-e`; herdr reads with `--format ansi`. Parse SGR spans in the recognized composer before stripping ANSI for presentation. Recognize the terminal composer/footer frame independently of transcript filtering. Parse fenced output forward using its marker and closing width; exclude code from approval/work evidence. Historical quoted frames and an explicit unfinished quoted frame remain unknown.
+Interrupting a host turn can also end the turn's in-flight shell tool, including a running `cafleet` command. The CLI therefore blocks `SIGINT`, `SIGTERM` and `SIGHUP` across every pane-input and lifecycle span; a signal received meanwhile takes its default action when the span ends. Spans nest and restore the outer signal mask.
 
-| Readiness | Evidence | Action |
+| Command | Span |
+|---|---|
+| `message send`, each `message wait` attempt | From lock acquisition through the last `notified_at` stamp or claim release |
+| `member prompt`, `member exec` | From lock acquisition through Enter |
+| `member create` | From the pane spawn through the registry commit or its compensation |
+| `member delete`, `fleet delete` | From lock acquisition through deregistration and layout cleanup |
+
+Every span is bounded by its existing deadline, so a deferred signal waits at most one span. `message wait` outside an attempt keeps default signal behavior. Multiplexer client processes started inside a span inherit the blocked set and stay bounded by their timeouts. The spawned member session is started by the multiplexer server and does not inherit it.
+
+`SIGKILL` cannot be deferred. A kill inside a span leaves:
+
+| Killed command | State left | Discovery and recovery |
 |---|---|---|
-| `idle` | Affirmative empty composer or verified host-styled empty placeholder | Submit |
-| `working` | Active turn, streaming, tool/shell execution or interrupt cue | Hold/reject |
-| `awaiting_user` | Question, confirmation or approval UI | Hold/reject |
-| `draft` | Unsent user text in the composer | Preserve and hold/reject |
-| `unknown` | Missing, ambiguous, truncated or unrecognized evidence | Inspect and hold/reject |
-
-Approval and work evidence outrank empty-composer cues. A dim/grey host suggestion or changing placeholder is empty only in its recognized composer decoration style. The same visible text in user-input style is a draft; grey text elsewhere establishes no readiness. Missing or ambiguous style evidence yields unknown. Claude member argv disables prompt suggestions, while the recognizer still handles operator-enabled suggestions.
+| `message send` / `message wait` between claim and stamp | Durable claim; the line may or may not have reached the pane | The claim appears in `unconfirmed_previews`; inspect the pane and prompt the member to poll |
+| `member prompt` / `member exec` after typing began | Partial or complete input | `member capture`; re-dispatch only after inspecting the pane |
+| `member create` | A pane without a registry row, or a row whose placement stays pending | `member list` and `fleet capture`; `member delete` the row, and close an unregistered pane with the multiplexer's own kill command |
+| `member delete` / `fleet delete` | A closed pane whose row remains, or the reverse | `member list`; rerun the delete |
 
 #### Prompt dispatch (`send_prompt`) {#prompt-dispatch}
 
-Validate a nonblank literal line without CR/LF or C0/DEL control characters. After locking and idle revalidation, type the payload once, wait the backend settle interval and submit Enter. Native shell input starts with `! ` followed by the validated actual command. Composer controls begin the submitted input. Place the argument terminator `--` before the literal payload in both multiplexer adapters so leading hyphens remain text.
+Validate a nonblank literal line without CR/LF or C0/DEL control characters before starting any process. No input path captures the pane or consults its state. Every submission selects a lead:
 
-Deletion and explicit pane-input operations start their five-second budgets after invocation schema and asset guards. Resolve native command bodies before starting their input budget. Each submission has one five-second transport budget. Before literal input, reserve the one-second settle delay and one second for Enter; bound the literal command by the remaining unreserved time. Insufficient time starts no input. A confirmed launch failure or recognized missing pane reports no dispatch. A started text write with an ambiguous result, or any failure after successful literal input, is uncertain. A failure after Enter can mean the command ran. Inspect the pane before authorizing any retry.
+| Lead | Input sequence | Used by |
+|---|---|---|
+| Escape | Escape, 0.5-second settle, literal line, settle, Enter | `member prompt`, `member exec` and the first notification of a drain |
+| Direct | Literal line, settle, Enter | Each further notification drained in the same lock hold |
 
-The lock excludes CAFleet writers; the user's keyboard and host UI can still change after a capture. Successful dispatch establishes complete submission only.
+Escape is meant to interrupt a working turn or close an open prompt so the line reaches the composer. A further drained line uses the direct lead because a second Escape would interrupt the turn the first delivered line just started; the host queues or appends it.
+
+| Input | tmux argv | herdr argv |
+|---|---|---|
+| Escape | `tmux send-keys -t PANE Escape` | `herdr pane send-keys PANE escape` |
+| Literal | `tmux send-keys -t PANE -l -- TEXT` | `herdr pane send-text PANE -- TEXT` |
+| Enter | `tmux send-keys -t PANE Enter` | `herdr pane send-keys PANE enter` |
+
+Native shell input starts with `! ` followed by the validated actual command. Composer controls begin the submitted input. The argument terminator `--` before the literal payload keeps leading hyphens as text.
+
+Deletion and explicit pane-input operations start their five-second budgets after invocation schema and asset guards. Resolve native command bodies before starting their input budget. Each submission has one five-second transport budget:
+
+1. Reserve the one-second settle delay and one second for Enter, plus the 0.5-second Escape settle for the Escape lead. When no time remains beyond the reservation, fail with `insufficient pane input budget for literal input, settle and Enter` and start no input.
+2. For the Escape lead, send Escape bounded by one second or the unreserved time, whichever is shorter, then wait the Escape settle. Any Escape failure (launch, missing pane, nonzero exit or timeout) reports no dispatch, because no text was typed.
+3. Recompute the literal budget as the remaining time minus the settle delay and Enter. When Escape consumed the slack, fail with the same insufficient-budget error and type no text. Otherwise type the literal line within that budget, wait the settle delay and submit Enter.
+
+A confirmed launch failure or recognized missing pane reports no dispatch. A started text write with an ambiguous result, or any failure after successful literal input, is uncertain. A failure after Enter can mean the command ran. Inspect the pane before authorizing any retry.
+
+The lock excludes CAFleet writers; the user's keyboard and host UI can change at any time. Successful dispatch establishes complete submission only.
 
 #### Push notifications {#push-notifications}
 
-The Director receives through broker poll/wait reads; sends to the Director persist without injected text. A self-send is already settled. For an ordinary member, a synchronous send attempts at most one oldest pending unacknowledged preview ordered by `(created_at, message_id)`.
+Every recipient with a concrete pane, the Director included, receives its messages as lines typed into its pane. A self-send persists with no pane input. The Director's placement is the pane that ran `fleet create`, so that pane is the Director's coding-agent session.
 
-Read preview eligibility in short consistent snapshots before and after acquiring the shared input lock, then revalidate activity, fleet, concrete placement, message status and `notified_at` before writing. The invocation validates its connection before notification operations. One connection-scoped database budget owns capture/input eligibility; commit every read snapshot before multiplexer I/O. An idle empty composer accepts one literal line:
+Read preview eligibility in short consistent snapshots before and after acquiring the shared input lock, then revalidate activity, fleet, concrete placement, message status and `notified_at` before writing. The invocation validates its connection before notification operations. One connection-scoped database budget owns input eligibility; commit every read snapshot before multiplexer I/O. Each delivered message becomes one literal line:
 
 ```text
-[cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] TEXT
+[cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] BODY [cafleet] Resume your work if something was still running. [cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.
 ```
 
-Stored text remains exact. Truncate the preview body by `CAFLEET_MAX_TEXT_LEN`, fold CRLF/LF/CR to `⏎`, render tabs as `␉`, and escape other C0/DEL controls as visible hexadecimal escapes. The fixed prefix distinguishes message text from native composer controls.
+Stored text remains exact. The line folds the full message body to one line: CRLF/LF/CR become `⏎`, tabs become `␉`, and other C0/DEL controls become visible hexadecimal escapes (`\xNN`). A folded body of at most 4000 Unicode scalar values appears inline. A longer one is replaced by `Body is N characters; run cafleet message show MESSAGE_ID --json to read it.`, where `N` counts the stored text. The line is independent of `CAFLEET_MAX_TEXT_LEN`. Every line, including drained follow-up lines and pointer lines, carries both trailing clauses. The fixed prefix distinguishes message text from native composer controls.
 
-Claim a selected message with one conditional UPDATE inside a short IMMEDIATE transaction while holding the pane input lock. Revalidate placement, preserve oldest-unclaimed ordering and commit before multiplexer input. A zero-row claim settles that obsolete attempt. After a confirmed no-input failure, retry transient claim-release contention within one absolute completion budget and retain `not_sent` plus the storage cause if release still fails. An ambiguous write, process exit or failed stamp leaves the claim durable. Stamp `notified_at` only after complete submission while the message remains pending. Mandatory finalization uses the later of the original deadline and one second after finalization begins. Unresolved claims suspend automatic input for their exact messages; later unclaimed messages remain eligible. After inspecting the pane, explicitly prompt or ping an idle member to poll its durable inbox; the member ACKs consumed messages normally.
+For example:
+
+```text
+[cafleet msg 57 from 15 2026-10-24T09:00:00.000000+00:00] ready (doc)⏎see the reviewer notes [cafleet] Resume your work if something was still running. [cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.
+```
+
+A synchronous send drains the recipient's pending messages oldest-first, ordered by `(created_at, message_id)`, within one lock hold and one five-second budget:
+
+1. Take the eligibility snapshot. An inactive recipient, a fleet mismatch or no pending message ends the attempt with nothing to deliver. A placement without a concrete pane holds delivery.
+2. Wait for the pane input lock.
+3. Under the lock, re-read the snapshot; a changed placement holds delivery. Resolve the multiplexer and check its availability.
+4. Select the oldest pending unclaimed message; the drain ends when none remains.
+5. When the remaining budget no longer covers the lead's reservation plus a 0.5-second minimum literal budget, stop. For the first message this fails as `not_sent` with `insufficient pane input budget for literal input, settle and Enter`; later messages stay pending with no diagnostic.
+6. Claim the message. A departed recipient ends the drain, and a placement change or an earlier candidate holds it. A message ACKed or stamped meanwhile is skipped.
+7. Submit its line, with the Escape lead for the first line and the direct lead afterwards. Stamp `notified_at`, then continue at step 4. A message the recipient ACKed between claim and stamp still counts as delivered.
+
+The lock is held from placement revalidation through the last Enter and the last `notified_at` stamp of the drain.
+
+Claim a selected message with one conditional UPDATE inside a short IMMEDIATE transaction while holding the pane input lock. Revalidate placement, preserve oldest-unclaimed ordering and commit before multiplexer input. A zero-row claim settles that obsolete attempt. After a confirmed no-input failure, retry transient claim-release contention within one absolute completion budget and retain `not_sent` plus the storage cause if release still fails. An ambiguous write, process exit or failed stamp leaves the claim durable. Stamp `notified_at` only after complete submission while the message remains pending. Mandatory finalization uses the later of the original deadline and one second after finalization begins. Unresolved claims suspend automatic input for their exact messages; later unclaimed messages remain eligible. The Director discovers such claims through `unconfirmed_previews` in member list output; after inspecting the pane, it prompts the member with `member prompt` to poll its durable inbox, and the member ACKs consumed messages normally.
+
+Delivery leaves `status_state` unchanged. A delivered message, inline or pointer, stays `input_required` and in `message poll` output until the recipient ACKs the ID shown in the line's `[cafleet msg ID …]` prefix.
 
 ##### Held delivery {#held-delivery}
 
-Working, approval, pending placement and lock contention are ordinary holds. A finite message wait or a later send retries eligible ordinary-member previews. Rotation selects concrete ordinary-member placements and attempts at most one member per interval. After an uncertain delivery, subsequent waits reconstruct diagnostics from the same message snapshots and skip the claimed message while selecting later unclaimed messages for that member. Successful snapshots can establish ACK, departure or notification by another invocation.
+Pending placement and a placement change at claim time are holds. Lock contention waits for the lock within the attempt budget. A message remains pending while the lock stays busy, the pane is not yet placed or the budget runs out. The next send to that recipient, or a message wait rotation, retries it. Rotation selects the concrete placements of every other member of the fleet, the Director included, never the wait's own subject, and attempts at most one member per interval. After an uncertain delivery, subsequent waits reconstruct diagnostics from the same message snapshots and skip the claimed message while selecting later unclaimed messages for that member. Successful snapshots can establish ACK, departure or notification by another invocation.
 
-A first attempted draft or unknown composer yields an immediate diagnostic naming the member and preview ID. Capture and relay retained user drafts before a user decision or authorized replacement. Transport and stamp failures after persistence remain diagnostics alongside a successful send result. No notification outcome erases a committed delivery.
+Transport and stamp failures after persistence remain diagnostics alongside a successful send result. No notification outcome erases a committed delivery.
+
+##### Accepted trade-offs {#accepted-trade-offs}
+
+What a single Escape does depends on the backend, and a backend may need more than one Escape to interrupt a running session. Delivery is correct whatever Escape does: when Escape does not interrupt, the line is still typed into the composer and the host submits or queues it. Both trailing clauses are conditional, so they stay accurate either way.
+
+- Where Escape interrupts a working turn, the delivery interrupts it, the Director's turn included. The resume clause tells the recipient to continue.
+- Where Escape dismisses an open question, confirmation or approval prompt, the delivery dismisses it. In the Director's pane this includes an open question to the operator. The dismissed-prompt note tells the recipient the rejection did not come from the user, and the Director re-asks the question.
+- Escape does not reliably clear typed composer text on every host. A draft typed into a member pane, or text the operator typed but did not submit in the Director's pane, can merge with the delivered line and be submitted with it.
+- Two sends in quick succession from different senders each lead with Escape; the second can interrupt the turn the first delivery started.
+- Interrupting a host turn can also end its in-flight shell tool; the CLI defers termination signals across its spans (Termination during pane input).
 
 ##### Delivery outcomes
 
-`notification_sent` refers to the newly committed message. Delivering an older preview leaves it false. The send contract owns exact output and errors; finite receiving owns diagnostic revalidation and bounded retries.
+`notification_sent` is `true` exactly when this invocation delivered the newly committed message. Delivering only older messages, or another invocation delivering the new message, leaves it `false` without a diagnostic. The send contract owns exact output and errors; message wait owns diagnostic revalidation and bounded retries.
 
 
 
@@ -1363,17 +1438,17 @@ Immutable, three non-nullable string fields, no defaults, constructed only by
 
 #### Literal input and process errors
 
-Use argv subprocesses without a shell for multiplexer utilities. Type literal payload with tmux `send-keys -l` or herdr `pane send-text`, then the configured settle and a separate Enter. Every notification/prompt/ping/exec uses the shared owned guard and operation deadline; automatic interruption keys are absent.
+Use argv subprocesses without a shell for multiplexer utilities. For the Escape lead, send tmux `send-keys Escape` or herdr `pane send-keys escape` and wait the Escape settle. Type literal payload with tmux `send-keys -l` or herdr `pane send-text`, then the configured settle and a separate Enter. Every notification/prompt/exec uses the shared owned guard and operation deadline.
 
 Preserve binary-not-found, nonzero stderr and timeout context in the backend error type. Pane-gone tolerance applies only to an explicit ignore-missing teardown and a recognized pane-not-found cause; other errors propagate. Layout rebalance remains best effort after confirmed close.
 
 ### 6.6 Finite receiving and pane input
 
-The receive task is the synchronous caller-owned process. Its cursor and latest-per-member diagnostics live only in memory. Check the subject/inbox and reconcile diagnostics against each successful snapshot before another attempt. Retry one eligible ordinary member per one-second interval. Start a receive check or attempt only before the monotonic receive deadline; after expiry return the last successful snapshot reconciled with its owned attempt's typed result. A later invocation observes subsequent external changes.
+The receive task is the synchronous caller-owned process. Its cursor and latest-per-member diagnostics live only in memory. Check the subject/inbox and reconcile diagnostics against each successful snapshot before another attempt. Retry one eligible member other than the subject, the Director included, per one-second interval. Start a receive check or attempt only before the monotonic receive deadline; after expiry return the last successful snapshot reconciled with its owned attempt's typed result. A later invocation observes subsequent external changes.
 
-Each notification or explicit input operation has one five-second budget covering capture, literal input, settle, Enter and database lock waits. Reserve settle and Enter time before literal input. Mandatory database finalization uses the later of the original deadline and one second after finalization begins. A receive returns by its own deadline plus one in-flight attempt and at most one second of finalization grace, retaining diagnostics on snapshot contention at expiry. Persist a preview input claim before possible keystrokes and retain unresolved claims across invocations. Distinguish confirmed non-launch or missing-pane failures from ambiguous started writes.
+Each notification or explicit input operation has one five-second budget covering the pane-lock wait, Escape, literal input, settle, Enter and database lock waits. Reserve the Escape settle, settle and Enter time before input, and the 3.5-second input reservation before the pane-lock wait ends. Mandatory database finalization uses the later of the original deadline and one second after finalization begins. A receive returns by its own deadline plus one in-flight attempt and at most one second of finalization grace, retaining diagnostics on snapshot contention at expiry. Persist a preview input claim before possible keystrokes and retain unresolved claims across invocations. Distinguish confirmed non-launch or missing-pane failures from ambiguous started writes.
 
-The shared OS guard uses `File::try_lock`. Store stable, owner-created lockfiles under `<canonical-database-file>.pane-locks/`, keyed by SHA-256 of backend, NUL, session, NUL, pane ID. Acquire before reload/capture; retain ownership through final Enter/stamp. Close on every path. Keep lockfiles in place. Placement deletion locks the same keys with sorted acquisition, revalidation and one five-second deadline.
+The shared OS guard uses `File::try_lock`, retried every 50 milliseconds until the writer's lock deadline (its budget minus the input reservation). Store stable, owner-created lockfiles under `<canonical-database-file>.pane-locks/`, keyed by SHA-256 of backend, NUL, session, NUL, pane ID. Acquire before reload; retain ownership through final Enter/stamp. No pane capture precedes input. Close on every path. Keep lockfiles in place. Placement deletion locks the same keys with sorted acquisition, revalidation and one five-second deadline.
 
 ### 6.7 Coding-agent backends
 
@@ -1661,15 +1736,15 @@ one trailing newline.
 
 #### Host evidence and native-input authorization
 
-**claude**: A separate evaluator checks the session condition against the transcript (Claude Code 2.1.296, checked 2026-10-22). Native background work defers evaluation and returns a host result; external panes supply evidence when the Director reads broker/pane state. An unmet condition can immediately start another turn without native background work; consecutive tool-free stops reach the configured block cap, eight by default. Retain a finite receive task handle while external work remains.
+**claude**: A separate evaluator checks the session condition against the transcript (Claude Code 2.1.296, checked 2026-10-22). Native background work defers evaluation and returns a host result; external panes supply evidence when the Director reads broker/pane state. An unmet condition can immediately start another turn without native background work; consecutive tool-free stops reach the configured block cap, eight by default. While a goal is active, each continued Director turn with outstanding delegated work ends with the bounded foreground wait `cafleet message wait <director-member-id> --timeout 30 --json`.
 
 Native composer controls act at the beginning of submitted input. A local probe merged control text into a concurrent preview, so serialize complete input and inspect capture evidence. Native shell probes displayed command/stdout/stderr followed by a model turn; the trigger and any second permission check were not established. The Director authorizes each routed command under its host rules.
 
-**codex**: The objective belongs to the thread, with model-callable lifecycle tools and optional token-budget accounting (Codex CLI 0.162.1, checked 2026-10-22). A two-turn tool-bearing probe observed continuation and model-reported completion. Preserve the user's objective, activation authority and budget; retain live tool/session handles and collect explicit broker/pane evidence.
+**codex**: The objective belongs to the thread, with model-callable lifecycle tools and optional token-budget accounting (Codex CLI 0.162.1, checked 2026-10-22). A two-turn tool-bearing probe observed continuation and model-reported completion. Preserve the user's objective, activation authority and budget; retain live tool/session handles and collect explicit broker/pane evidence. While a thread objective is active, each continued Director turn with outstanding delegated work ends with the bounded foreground wait `cafleet message wait <director-member-id> --timeout 30 --json`.
 
 A native shell probe displayed the actual command, exit code, duration and output. Installed protocol metadata describes unsandboxed dispatch while public CLI guidance describes current approval/sandbox settings; the TUI's effective boundary and protocol path were not established. Treat native input as a Director-authorized action rather than assume a second member-tool permission check.
 
-**opencode**: OpenCode members perform supplied assignments with their selected provider/model, workspace reads/edits, permitted tools and broker communication. The Director coordinates next steps and routed native shell commands. The TUI documents leading `!` input and conversation-visible output; an actual OpenCode native-input permission probe was outside the investigation. Preserve the preset's member-tool permissions and the Director's command authorization.
+**opencode**: OpenCode members perform supplied assignments with their selected provider/model, workspace reads/edits, permitted tools and broker communication. The Director wakes on delivered lines and coordinates next steps and routed native shell commands. The TUI documents leading `!` input and conversation-visible output; an actual OpenCode native-input permission probe was outside the investigation. Preserve the preset's member-tool permissions and the Director's command authorization.
 
 
 
@@ -1685,11 +1760,11 @@ Expand HOME only for the default `sqlite:///` URL ending in `cafleet_v8.db`. Exp
 
 ### 7.2 Error handling & exit-code policy
 
-Usage/parser/model/effort/line-validation errors exit 2. Application, database and transport errors exit 1. Successful finite timeout and ping skips exit 0. Top-level application errors use `Error: MESSAGE` on stderr. Preserve primary causes alongside explicit cleanup failures. Missing required state or unknown enum/column values propagate instead of substituting meaningless defaults.
+Usage/parser/model/effort/line-validation errors exit 2. Application, database and transport errors exit 1. A successful finite timeout exits 0. Top-level application errors use `Error: MESSAGE` on stderr. Preserve primary causes alongside explicit cleanup failures. Missing required state or unknown enum/column values propagate instead of substituting meaningless defaults.
 
 ### 7.3 Output / JSON / truncation
 
-JSON uses explicit ordered presenters and unescaped UTF-8. Preserve full message bodies and capture bytes selected for presentation. Text truncates only message bodies by Unicode codepoint limit; exact deliberate error and layout strings remain contractual.
+JSON uses explicit ordered presenters and unescaped UTF-8. Preserve full message bodies and capture bytes selected for presentation. CLI text output truncates only message bodies by the `CAFLEET_MAX_TEXT_LEN` codepoint limit; pane notification lines carry the folded full body up to 4000 characters and a `message show` pointer beyond it. Exact deliberate error and layout strings remain contractual.
 
 ### 7.4 Logging & stdout discipline
 
@@ -1767,7 +1842,7 @@ CREATE INDEX idx_messages_from_member_status_ts ON messages (from_member_id, sta
 
 ## 9. Testing strategy
 
-Exercise current schema/identity and incompatible-file preservation; atomic registration and creation compensation; point-to-point/ACK/pending notification behavior; finite receive deadlines, round-robin retries and diagnostic clearing; process-shared exclusion and process-death release; styled empty/decorated/draft/approval/unknown composer fixtures; literal native command visibility and partial uncertainty; explicit continuation; backend/multiplexer smoke coverage; links, embedding and release builds. Preserve general timed pipe draining and owned-child cleanup coverage.
+Exercise current schema/identity and incompatible-file preservation; atomic registration and creation compensation; point-to-point/ACK/pending notification behavior; finite receive deadlines, round-robin retries and diagnostic clearing; process-shared exclusion, bounded lock waits and process-death release; Escape-first argv order, oldest-first drains with one Escape per lock hold, budget exhaustion, Director delivery and no pane capture on any input path; termination deferral across pane-input spans; literal native command visibility and partial uncertainty; explicit continuation; backend/multiplexer smoke coverage; links, embedding and release builds. Preserve general timed pipe draining and owned-child cleanup coverage.
 
 Run repository validation through full-path mise tasks. Report meaningful current test results and production/documentation size reductions excluding generated, vendored, lockfile and design/research evidence.
 
@@ -1783,6 +1858,6 @@ The complete current command registry, subjects, options and outputs are specifi
 | Typed records, recipient ownership and timestamps | §5 and §8 |
 | Registration/compensation and explicit pane actions | §6.2–3 |
 | Full JSON, truncation and capture integrity | §6.4 |
-| Stable input exclusion and readiness | §6.5–6 |
+| Stable input exclusion and Escape-first delivery | §6.5–6 |
 | Backend argv, presets and evidence boundaries | §6.7 |
 | Configuration, errors and release packaging | §7 |

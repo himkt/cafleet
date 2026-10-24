@@ -1,6 +1,6 @@
 # Run a fleet
 
-Create independent coding-agent sessions in tmux or herdr, assign work and collect durable replies through finite receiving.
+Create independent coding-agent sessions in tmux or herdr, assign work and receive durable replies delivered into the Director's pane.
 
 ## Prerequisites
 
@@ -12,7 +12,7 @@ Follow Quickstart to [install](../quickstart.md#install), [configure](../quickst
 Use CAFleet to delegate independent reviews of this change, collect both reports, resolve their findings, and close the team.
 ```
 
-Your agent loads the Director instructions, creates members and assigns each after its ready. The host continues the task; the Director owns receiving and evidence checks.
+Your agent loads the Director instructions, creates members and assigns each after its ready. The host continues the task; the Director wakes on delivered replies and owns evidence checks.
 
 ## Manual lifecycle
 
@@ -28,7 +28,7 @@ Resolve diagnosis issues. Load the Director role, backend reference and supervis
 cafleet fleet create --name demo --coding-agent claude
 ```
 
-Example output: `1 director=2`. Creation registers the current pane without starting another session. The backend flag declares the calling host.
+Example output: `1 director=2`. Creation registers the current pane without starting another session. The backend flag declares the calling host. Run it from the Director's coding-agent session, because replies are delivered into this pane.
 
 ### Create and dispatch a member
 
@@ -57,29 +57,29 @@ Suppose the returned ID is `3`. Receive its ready, ACK its actual message ID, th
 cafleet message send --from-member-id 2 --to-member-id 3 "Review the change and report findings."
 ```
 
-A busy recipient's preview remains pending. The Director's next finite receive retries pending member notifications. The member's startup/report/wake polls also discover durable assignments.
+The send types the assignment into the member's pane as one line, led by Escape. A pending preview remains pending only while the pane lock stays busy, the pane is not yet placed, or the send budget runs out; the next send to that recipient or a `message wait` rotation retries it. The member's startup/report/wake polls also discover durable assignments.
 
 ### Receive results
 
-Run this command as a host-native background task:
-
-```bash
-cafleet message wait 2 --timeout 300 --json
-```
-
-Retain the live task/session handle and collect its terminal result. A foreground-only tool without such a handle uses at most 30 seconds. Full payloads are also available through:
+End your turn after dispatch. Each reply arrives as a `[cafleet msg ID from SENDER TIMESTAMP]` line in the Director's pane and wakes it. On every wake, read full payloads:
 
 ```bash
 cafleet message poll 2 --json
 ```
 
-ACK every consumed delivery immediately, using its returned ID:
+ACK every consumed delivery before ending the turn, using its returned ID:
 
 ```bash
 cafleet message ack 10
 ```
 
-Keep deferred questions/approvals in host-owned task state after ACK. On timeout inspect roster, panes and artifacts, then receive again while useful delegated work remains. When host continuation is unavailable, keep the active receive tool/session until the reply or an explicit handoff to the user.
+Keep deferred questions/approvals in host-owned task state after ACK. On every wake inspect roster, panes and artifacts, including each member's `unconfirmed_previews` in `cafleet member list 1 --json`.
+
+A script or manual check can instead block until deliveries arrive:
+
+```bash
+cafleet message wait 2 --timeout 300 --json
+```
 
 ### Run a command for a member
 
@@ -95,7 +95,7 @@ The CLI returns submission metadata. Inspect the native command and result:
 cafleet member capture 3 --lines 80
 ```
 
-Once the command has finished and the composer is idle, explicitly continue a member that has not resumed:
+Once the command has finished, explicitly continue a member that has not resumed:
 
 ```bash
 cafleet member prompt 3 "Use the native command output and continue your assignment."

@@ -20,7 +20,7 @@ The Analyzer's no-file-edit boundary remains intact. Send long Analyzer payloads
 
 ## Core Principle
 
-`cafleet message send` is a poke, not a payload. Status hops travel as compact `<verb> (<pointer>)` lines on the broker; reasoning, findings, and item-by-item routing live as `COMMENT(role)` markers inside the design document (or, for source-anchored review findings, the source file). Anchorless meta-events (member crashed/restarted, generic ping ack, "still working") do NOT use a verb from the canonical list and do NOT touch the design doc.
+`cafleet message send` is a poke, not a payload. Status hops travel as compact `<verb> (<pointer>)` lines on the broker; reasoning, findings, and item-by-item routing live as `COMMENT(role)` markers inside the design document (or, for source-anchored review findings, the source file). Anchorless meta-events (member crashed/restarted, generic acknowledgement, "still working") do NOT use a verb from the canonical list and do NOT touch the design doc.
 
 ## Verb Vocabulary
 
@@ -133,7 +133,7 @@ verb/pointer pairing, marker removal, or approval preconditions.
 
 ## Anchorless Status
 
-A member may need to communicate something that does not point at any heading, file, or doc — e.g. "I crashed and restarted," "still working, no progress yet," a generic ping ack.
+A member may need to communicate something that does not point at any heading, file, or doc — e.g. "I crashed and restarted," "still working, no progress yet," a generic acknowledgement.
 
 - These ride as a pure cafleet message with a freeform short phrase. The set is **NOT a fixed canonical list** — members may use whatever short phrase fits ("restarted", "still working", "ack", "noted", etc.).
 - They MUST NOT match the `<verb> (<pointer>)` schema (no parentheses) and the Director MUST treat them as informational, not as work signals.

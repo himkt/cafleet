@@ -8,9 +8,8 @@ A member runs each command its host permits. A required unavailable command rout
 |---|---|
 | [member exec](../roles/director.md#member-exec) | Submit the actual one-line native shell command and return dispatch metadata |
 | [member prompt](../roles/director.md#member-prompt) | Submit explicitly authorized composer input or post-command continuation |
-| member ping | Submit a fixed inbox-poll prompt to an idle member |
 
-Every writer shares input locking and fresh readiness checks. Successful submission establishes no command exit status.
+Every writer shares the bounded pane-input lock and leads with Escape; no writer checks pane readiness. Successful submission establishes no command exit status.
 
 ## Member-side: reconsider, then route
 
@@ -38,7 +37,7 @@ cafleet member exec <member-id> "<command>"
 cafleet message ack <message-id>
 ```
 
-The CLI types `! ` plus the actual command once after lock/revalidation/idle capture. It returns submission metadata. The host owns environment, permissions, execution and visible output.
+After Escape, lock and revalidation, the CLI types `! ` plus the actual command once. It returns submission metadata. The host owns environment, permissions, execution and visible output.
 
 Inspect the result and terminal state:
 
@@ -46,7 +45,7 @@ Inspect the result and terminal state:
 cafleet member capture <member-id> --lines 80
 ```
 
-After completion and idle evidence, continue a member that has not resumed:
+After completion evidence, continue a member that has not resumed:
 
 ```bash
 cafleet member prompt <member-id> "Use the native command output and continue your assignment."
@@ -54,4 +53,4 @@ cafleet member prompt <member-id> "Use the native command output and continue yo
 
 An uncertain dispatch requires capture/inspection before a newly authorized retry. The first writing call can partially type; a failure after Enter can mean the command ran. Preserve the pane and evidence instead of automatically resubmitting.
 
-Refuse with a plain broker reply explaining why, then ACK. Relay a new user decision through the executing backend's decision surface. Keep live receiving while an authorized command/result/continuation remains outstanding. Native shell probes establish visibility; [backend notes](coding-agents.md) state the permission evidence limits.
+Refuse with a plain broker reply explaining why, then ACK. Relay a new user decision through the executing backend's decision surface. Track an authorized command/result/continuation in host-owned state while it remains outstanding, and check it on every [wake](supervision.md#director-wake). Native shell probes establish visibility; [backend notes](coding-agents.md) state the permission evidence limits.

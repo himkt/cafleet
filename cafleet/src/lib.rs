@@ -13,10 +13,10 @@ pub mod error;
 pub(crate) mod member_permissions;
 pub mod multiplexer;
 pub mod output;
-pub mod pane_state;
 pub mod presentation;
 pub(crate) mod receive;
 pub mod runtime;
+pub(crate) mod signals;
 pub mod spawn_prompt;
 pub mod time;
 
