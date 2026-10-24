@@ -70,7 +70,14 @@ and policy in the installed CAFleet skill, then passes the chosen
 is a Director responsibility. The catalog provides exact spawn tokens,
 Claude aliases, reviewed capability classes, standard input/output prices
 and official sources, ordered from most to least capable within each backend.
-OpenCode's curated models retain their `opencode/` prefix.
+The OpenCode catalog lists every Console model with its `opencode/` prefix,
+excluding models past their published deprecation date.
+
+A bare Claude or GPT model reference selects Claude Code or Codex on every
+fleet, including an OpenCode fleet. Naming OpenCode for the member selects
+OpenCode with the `opencode/` form of that model. A bare name offered only by
+OpenCode selects OpenCode when it uniquely matches a catalog ID. The Director
+asks the operator to resolve an unknown or ambiguous reference.
 
 Use the selected backend’s role defaults and catalog as the source of truth. OpenCode omits unsupported effort.
 

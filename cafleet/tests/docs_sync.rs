@@ -711,6 +711,69 @@ mod structural_contracts {
     }
 
     #[test]
+    fn opencode_catalog_rows_are_unique_prefixed_and_priced() {
+        let catalog = INVENTORY
+            .document(BACKENDS)
+            .section("opencode")
+            .unwrap()
+            .section("model-catalog")
+            .unwrap();
+        let rows = catalog.rows().unwrap();
+        assert_eq!(
+            rows[0].1,
+            ["Model", "Class", "Input $/MTok", "Output $/MTok"],
+            "{}",
+            catalog.error(rows[0].0, "expected Model / Class / Input / Output table")
+        );
+        let mut models = BTreeSet::new();
+        let decimal = regex::Regex::new(r"^[0-9]+\.[0-9]{2,}$").unwrap();
+        for (line, row) in rows.iter().skip(2) {
+            let model = row[0].trim_matches('`');
+            assert!(
+                model.starts_with("opencode/"),
+                "{}",
+                catalog.error(*line, &format!("model {model} needs the opencode/ prefix"))
+            );
+            assert!(
+                models.insert(model),
+                "{}",
+                catalog.error(*line, &format!("duplicate model {model}"))
+            );
+            assert!(
+                !row[1].is_empty(),
+                "{}",
+                catalog.error(*line, &format!("model {model} needs a Class"))
+            );
+            for (column, price) in ["Input $/MTok", "Output $/MTok"].into_iter().zip(&row[2..]) {
+                assert!(
+                    decimal.is_match(price),
+                    "{}",
+                    catalog.error(
+                        *line,
+                        &format!(
+                            "{model} {column} needs a decimal with at least two fractional digits"
+                        )
+                    )
+                );
+                let amount = price.parse::<f64>().unwrap_or_else(|error| {
+                    panic!(
+                        "{}",
+                        catalog.error(*line, &format!("invalid {model} {column}: {error}"))
+                    )
+                });
+                assert!(
+                    amount.is_finite() && amount >= 0.0,
+                    "{}",
+                    catalog.error(
+                        *line,
+                        &format!("{model} {column} needs a non-negative finite price")
+                    )
+                );
+            }
+        }
+    }
+
+    #[test]
     fn backend_sections_hold_the_canonical_subsections_in_order() {
         let document = INVENTORY.document(BACKENDS);
         for backend in ["claude", "codex", "opencode", "template"] {

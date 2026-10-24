@@ -103,34 +103,47 @@ is never used to price a model.
 
 ## OpenCode Console procedure (the `opencode` table)
 
-The `opencode` backend is priced by the OpenCode Console page, and its catalog
-behaves differently from the two provider pages: model IDs differ from
-display names, the page lists many models while cafleet curates a few, and
-free stealth/preview models appear and disappear. On **every** refresh, even
-when the claude/codex prices are unchanged:
+The `opencode` catalog mirrors every model listed by the OpenCode Console,
+excluding models past their published deprecation date, and uses the Console's
+prices. Model IDs differ from display names, and free/preview models appear
+and disappear. On **every** refresh, even when the claude/codex prices are
+unchanged:
 
 1. **Price from the Console page only.** Console's own USD-per-MTok rates are
    the billing rates for the `opencode` backend. Never price a Console model
    from the upstream vendor's page (Anthropic, OpenAI, DeepSeek, …) — the
    Console rate is the one cafleet members are billed at.
-2. **Copy the Console model ID exactly; never slugify the display name.** The
-   page's *Model list* table maps each display name ("GLM 5.2", "Kimi K2.7
-   Code") to a distinct model ID (`glm-5.2`, `kimi-k2.7-code`), and its
-   *Pricing* table keys prices by the same display name. The row's `--model`
-   value is `opencode/<console-model-id>` — the literal `opencode/` prefix
-   followed by the ID copied verbatim from the page. A hand-derived slug that
-   does not match the Console ID fails at spawn time.
-3. **Re-verify every curated row against the page.** For each existing row,
-   confirm the model is still listed on Console and its price is current. A
-   delisted model's row is removed in the same refresh.
-4. **Handle free models by their published price.** A model Console offers
-   free for a limited time is priced `0.00` in both columns. When the free
-   offer ends: update the row to the newly published Console price, or remove
-   the row if the model disappears or has no published price.
-5. **Keep the table a curated subset.** Do not mirror the full Console catalog —
-   keep a handful of reviewed models spanning the price range. Adding or
-   removing a curated model is a reviewed policy change, approved in the same
-   pull request like any class or ordering change.
+2. **Copy the Console model ID exactly.** Use the *Endpoints* table under
+   `## Endpoints`, whose header is `Model | Model ID | Endpoint | AI SDK Package`,
+   to map each display name ("GLM 5.2", "Kimi K2.7 Code") to its `Model ID`
+   (`glm-5.2`, `kimi-k2.7-code`). The *Pricing* table keys prices by the same
+   display name. Set the row's `--model` value to `opencode/<console-model-id>`:
+   the literal `opencode/` prefix followed by the ID copied verbatim from the
+   *Endpoints* table.
+3. **Mirror the Console catalog.** Add every missing listed model ID, remove
+   every delisted model ID or model past its published deprecation date, and
+   re-verify every remaining row's price. Bind each *Deprecated models* entry
+   to its model ID through the *Endpoints* display-name mapping; a passed date
+   excludes the row even while it appears in active pricing. A deprecated
+   display name with no listed ID is already delisted and needs no action.
+   A deprecated display name mapping to more than one ID is a parse failure:
+   stop the refresh under Refresh procedure step 1.
+4. **Apply the row rules and maintain their notes.** Keep one row per model
+   ID, using the base (shortest-prompt) tier for tiered prices and listing each
+   long-context rate beneath the table. Use the currently billed Console rate
+   for promotional discounts; note the list price and discount end date when
+   published. Record each published free rate as `0.00` in its own column,
+   including models with only one free rate. A model free for a limited time
+   has `0.00` in both columns; update its rates when the offer ends or remove
+   it if delisted. Keep a model with a future deprecation date and record that
+   date beneath the table.
+5. **Order and classify every row.** Keep a single table ordered most → least
+   capable across the whole catalog, with a short `Class` on every row and the
+   same relative order for models shared with the `claude` / `codex` catalogs.
+   Place unverified stealth/preview models at the bottom and state that their
+   capability is unverified in their Class. A new row's Class and position,
+   and changes to existing classes or positions, are reviewed policy changes
+   approved in the same pull request.
 
 ## Cadence and staleness
 
