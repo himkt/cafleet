@@ -745,7 +745,10 @@ mod structural_contracts {
             assert!(
                 !cues.text.contains("transport evidence"),
                 "{}",
-                cues.error(cues.line, "capture cues are not transport readiness evidence")
+                cues.error(
+                    cues.line,
+                    "capture cues are not transport readiness evidence"
+                )
             );
             let rows = cues.rows().unwrap();
             let actual = rows
@@ -951,8 +954,11 @@ mod structural_contracts {
         INVENTORY
             .require_link(&core, "reference/runtime/spec/cli-options.md#message-wait")
             .unwrap();
-        send.require(&["[cafleet msg ID from SENDER TIMESTAMP]", "cafleet message show ID --json"])
-            .unwrap();
+        send.require(&[
+            "[cafleet msg ID from SENDER TIMESTAMP]",
+            "cafleet message show ID --json",
+        ])
+        .unwrap();
         send.require_pattern(
             "every recipient, the Director included, receives Escape-first lines",
             r"(?is)Escape-first.{0,80}recipient's pane.{0,40}Director",
@@ -995,7 +1001,9 @@ mod structural_contracts {
             .document(DIRECTOR)
             .section("member-prompt")
             .unwrap();
-        prompt.require(&["cafleet member prompt <member-id>"]).unwrap();
+        prompt
+            .require(&["cafleet member prompt <member-id>"])
+            .unwrap();
         prompt.require_pattern("prompt leads with Escape", r"(?i)leads with Escape");
         prompt.require_pattern(
             "prompt rejects the Director's own pane",
@@ -1053,7 +1061,10 @@ mod structural_contracts {
                     assert!(
                         !line.contains(needle.as_str()),
                         "{}",
-                        source.error(offset + 1, &format!("removed concept {needle:?} is mentioned"))
+                        source.error(
+                            offset + 1,
+                            &format!("removed concept {needle:?} is mentioned")
+                        )
                     );
                 }
             }
@@ -1374,13 +1385,9 @@ mod structural_contracts {
         let allowed_start = allowed.line;
         let allowed_end = allowed.line + allowed.text.lines().count();
         let mut found = 0;
-        for (path, text) in INVENTORY
-            .sources
-            .iter()
-            .filter(|(path, _)| {
-                path.starts_with("skills/") && !path.starts_with("skills/cafleet/reference/runtime/")
-            })
-        {
+        for (path, text) in INVENTORY.sources.iter().filter(|(path, _)| {
+            path.starts_with("skills/") && !path.starts_with("skills/cafleet/reference/runtime/")
+        }) {
             let source = INVENTORY.document(path);
             for (offset, line) in text.lines().enumerate() {
                 let Some(start) = line.find(command) else {
@@ -1781,7 +1788,13 @@ mod structural_contracts {
         );
         let termination = mux.section("termination-during-pane-input").unwrap();
         termination
-            .require(&["SIGINT", "SIGTERM", "SIGHUP", "SIGKILL", "unconfirmed_previews"])
+            .require(&[
+                "SIGINT",
+                "SIGTERM",
+                "SIGHUP",
+                "SIGKILL",
+                "unconfirmed_previews",
+            ])
             .unwrap();
         let backends = INVENTORY.document("docs/docs/spec/coding-agent-backends.md");
         backends
@@ -1870,7 +1883,10 @@ mod structural_contracts {
             );
             workflow.require_pattern("poll on every wake", r"(?i)on every wake");
             INVENTORY
-                .require_link(&workflow, "../../cafleet/reference/supervision.md#director-wake")
+                .require_link(
+                    &workflow,
+                    "../../cafleet/reference/supervision.md#director-wake",
+                )
                 .unwrap();
         }
         INVENTORY

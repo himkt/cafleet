@@ -105,14 +105,13 @@ impl Fixture {
     fn wait_for_id_of(&self, body: &str) -> i64 {
         let started = Instant::now();
         loop {
-            let found: Option<i64> = rusqlite::OptionalExtension::optional(
-                self.cli.sqlite().query_row(
+            let found: Option<i64> =
+                rusqlite::OptionalExtension::optional(self.cli.sqlite().query_row(
                     "SELECT message_id FROM messages WHERE text=?1",
                     [body],
                     |row| row.get(0),
-                ),
-            )
-            .unwrap();
+                ))
+                .unwrap();
             if let Some(id) = found {
                 return id;
             }
@@ -201,11 +200,12 @@ fn a_delivery_is_escape_then_one_notification_line_then_enter_without_capture() 
     );
     assert_no_capture(&fixture.cli);
     assert_eq!(stderr(&output), "");
-    let polled = payload(
-        &fixture
-            .cli
-            .run(&["message", "poll", &fixture.worker.to_string(), "--json"]),
-    );
+    let polled =
+        payload(
+            &fixture
+                .cli
+                .run(&["message", "poll", &fixture.worker.to_string(), "--json"]),
+        );
     assert_eq!(
         polled[0]["message_id"], id,
         "a delivered message stays in the inbox until ACKed"
@@ -724,7 +724,11 @@ fn a_sigterm_during_member_create_takes_effect_after_the_registry_commit() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(pane.as_deref(), Some("%7"), "the spawned pane is registered");
+    assert_eq!(
+        pane.as_deref(),
+        Some("%7"),
+        "the spawned pane is registered"
+    );
 }
 
 #[test]

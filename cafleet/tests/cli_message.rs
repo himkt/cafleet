@@ -30,7 +30,10 @@ fn a_member_to_director_send_reports_its_notification_into_the_director_pane() {
     assert_eq!(payload["notification_sent"], true);
     assert_eq!(stderr(&output), "");
     let calls = cli.shim_calls();
-    assert_eq!(calls.first().map(String::as_str), Some("send-keys -t %0 Escape"));
+    assert_eq!(
+        calls.first().map(String::as_str),
+        Some("send-keys -t %0 Escape")
+    );
     assert!(
         calls
             .iter()

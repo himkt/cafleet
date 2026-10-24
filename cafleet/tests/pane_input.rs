@@ -424,7 +424,10 @@ fn a_held_lock_makes_prompt_and_exec_wait_then_report_busy_without_capture_or_in
         let output = fixture.run(action);
         let waited = started.elapsed();
         assert_busy(&output, fixture.member, action);
-        assert!(waited >= Duration::from_millis(1400), "{action}: {waited:?}");
+        assert!(
+            waited >= Duration::from_millis(1400),
+            "{action}: {waited:?}"
+        );
         assert!(waited < Duration::from_secs(4), "{action}: {waited:?}");
     }
     assert_no_capture(&fixture.cli.shim_calls());
@@ -706,21 +709,57 @@ fn a_real_prompt_owner_prevents_preview_input_from_joining_its_payload() {
     let mut fixture = InputFixture::new();
     let owner = fixture.gate("prompt", "enter");
     let before = fixture.cli.shim_calls().len();
-    let payload = json(&fixture.send("queued behind native input"));
-    assert_eq!(payload["notification_sent"], false);
+    let started = Instant::now();
+    let sender = fixture.cli.spawn(&[
+        "message",
+        "send",
+        "--from-member-id",
+        &fixture.director.to_string(),
+        "--to-member-id",
+        &fixture.member.to_string(),
+        "queued behind native input",
+        "--json",
+    ]);
+    let writer = fixture.cli.sqlite();
+    while writer
+        .query_row("SELECT count(*) FROM messages", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap()
+        == 0
+    {
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "the send never committed"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    std::thread::sleep(Duration::from_millis(300));
     assert_no_input(&fixture.cli.shim_calls()[before..]);
     let output = owner.release();
     assert_eq!(code(&output), 0, "{}", stderr(&output));
-    let pending: i64 = fixture
-        .cli
-        .sqlite()
-        .query_row(
-            "SELECT count(*) FROM messages WHERE to_member_id=?1 AND notified_at IS NULL",
-            [fixture.member],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(pending, 1);
+    let payload = json(&bounded_output(sender));
+    assert_eq!(
+        payload["notification_sent"], true,
+        "the waiting send delivers after the prompt releases the lock"
+    );
+    let writes: Vec<_> = fixture.cli.shim_calls()[before..]
+        .iter()
+        .filter(|line| line.starts_with("send-keys"))
+        .cloned()
+        .collect();
+    assert_eq!(
+        writes
+            .iter()
+            .map(|line| line.split_whitespace().nth(3).unwrap())
+            .collect::<Vec<_>>(),
+        ["Escape", "-l", "Enter"],
+        "only the preview's own submission follows the prompt's gated Enter: {writes:?}"
+    );
+    assert!(
+        writes[1].contains("[cafleet msg "),
+        "the preview line stays separate from the prompt payload: {writes:?}"
+    );
 }
 
 #[test]
@@ -821,7 +860,10 @@ fn prompt_and_exec_report_first_write_and_enter_failures_as_uncertain_once() {
             );
             let calls = fixture.cli.shim_calls();
             assert_eq!(
-                calls.iter().filter(|line| line.ends_with(" Escape")).count(),
+                calls
+                    .iter()
+                    .filter(|line| line.ends_with(" Escape"))
+                    .count(),
                 1,
                 "{calls:?}"
             );
@@ -1174,7 +1216,10 @@ fn prompt_and_exec_dispatch_regardless_of_the_recorded_coding_agent() {
         let calls = fixture.cli.shim_calls();
         assert_no_capture(&calls);
         assert_eq!(
-            calls.iter().filter(|line| line.ends_with(" Escape")).count(),
+            calls
+                .iter()
+                .filter(|line| line.ends_with(" Escape"))
+                .count(),
             2,
             "{agent}: {calls:?}"
         );
@@ -1210,11 +1255,16 @@ fn preview_prewrite_database_revalidation_obeys_the_remaining_attempt_budget() {
     let child = fixture.cli.spawn(&refs);
     let writer = fixture.cli.sqlite();
     while writer
-        .query_row("SELECT count(*) FROM messages", [], |row| row.get::<_, i64>(0))
+        .query_row("SELECT count(*) FROM messages", [], |row| {
+            row.get::<_, i64>(0)
+        })
         .unwrap()
         == 0
     {
-        assert!(start.elapsed() < Duration::from_secs(5), "the send never committed");
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "the send never committed"
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
     std::thread::sleep(Duration::from_millis(200));

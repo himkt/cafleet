@@ -474,6 +474,7 @@ fn member_output_uses_registration_fields_and_the_director_back_reference() {
             "registered_at",
             "kind",
             "placement",
+            "unconfirmed_previews",
         ]
     );
     assert_eq!(member["name"], "Director");

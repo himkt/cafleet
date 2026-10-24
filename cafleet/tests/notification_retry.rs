@@ -74,7 +74,11 @@ fn retries_rotate_members_once_per_second_in_memory() {
         .into_iter()
         .filter(|event| event.stage == "escape")
         .collect();
-    assert_eq!(escapes.len(), 3, "the fourth attempt starts no earlier than the next interval");
+    assert_eq!(
+        escapes.len(),
+        3,
+        "the fourth attempt starts no earlier than the next interval"
+    );
     assert_ne!(escapes[0].pane, escapes[1].pane);
     assert_eq!(escapes[0].pane, escapes[2].pane);
     assert!(
@@ -167,7 +171,7 @@ fn immediate_incoming_messages_take_priority_over_pending_outgoing_notifications
 
 #[test]
 fn retries_include_the_director_and_exclude_the_subject_self_acked_notified_and_pending_placements()
- {
+{
     let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let subject = fixture.worker("observer");
@@ -232,7 +236,9 @@ fn retry_candidates_stay_inside_the_subjects_fleet() {
     let foreign_pane = format!("%{}", foreign_id + 4);
     let foreign_message = fixture.message(other_director, foreign_id, "foreign work");
     let mut waiting = fixture.spawn(fixture.director, 4);
-    waiting.until("local delivery", || fixture.count("enter_done", &local) >= 1);
+    waiting.until("local delivery", || {
+        fixture.count("enter_done", &local) >= 1
+    });
     fixture.reply(&local, "local reply");
     json(&waiting.output());
     assert_eq!(fixture.stamp(foreign_message), None);

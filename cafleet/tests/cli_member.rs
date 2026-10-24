@@ -782,10 +782,19 @@ fn list_and_show_json_report_unconfirmed_previews_and_text_output_is_unchanged()
     let rows: serde_json::Value = serde_json::from_str(stdout(&listed).trim()).unwrap();
     for row in rows.as_array().unwrap() {
         assert_eq!(
-            row.as_object().unwrap().keys().last().map(String::as_str),
+            row.as_object()
+                .unwrap()
+                .keys()
+                .next_back()
+                .map(String::as_str),
             Some("unconfirmed_previews")
         );
-        let keys: Vec<_> = row.as_object().unwrap().keys().map(String::as_str).collect();
+        let keys: Vec<_> = row
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
         assert_eq!(keys[keys.len() - 2], "idle");
     }
     let by_id = |id: i64| {
@@ -809,7 +818,12 @@ fn list_and_show_json_report_unconfirmed_previews_and_text_output_is_unchanged()
     assert_eq!(code(&shown), 0, "{}", stderr(&shown));
     let record: serde_json::Value = serde_json::from_str(stdout(&shown).trim()).unwrap();
     assert_eq!(
-        record.as_object().unwrap().keys().last().map(String::as_str),
+        record
+            .as_object()
+            .unwrap()
+            .keys()
+            .next_back()
+            .map(String::as_str),
         Some("unconfirmed_previews")
     );
     assert_eq!(record["unconfirmed_previews"], serde_json::json!([claimed]));
