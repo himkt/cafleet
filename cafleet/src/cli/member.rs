@@ -222,6 +222,17 @@ fn resolve_coding_agent(
     }
 }
 
+pub(crate) fn prepare_input(command: &mut MemberCommand) -> Result<(), CafleetError> {
+    if let MemberCommand::Exec { body, .. } = command {
+        body.command = Some(resolve_command_body(
+            body.command.as_deref(),
+            body.file.as_deref(),
+        )?);
+        body.file = None;
+    }
+    Ok(())
+}
+
 pub fn run(
     conn: &mut Connection,
     settings: &Settings,
@@ -264,7 +275,7 @@ pub fn run(
             member_id,
             body,
             json,
-        } => exec(conn, settings, member_id, &body, json),
+        } => exec(conn, settings, member_id, &body, json, deadline),
         MemberCommand::Ping { member_id, json } => ping(conn, settings, member_id, json, deadline),
         MemberCommand::Capture {
             member_id,
@@ -586,10 +597,6 @@ fn dispatch_input(
     })
 }
 
-fn valid_input(text: &str) -> bool {
-    !text.trim().is_empty() && !text.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
-}
-
 fn prompt(
     conn: &mut Connection,
     settings: &Settings,
@@ -598,7 +605,7 @@ fn prompt(
     json: bool,
     deadline: crate::input::Deadline,
 ) -> Result<(), CafleetError> {
-    if !valid_input(text) {
+    if !crate::input::valid_input(text) {
         return Err(CafleetError::Usage(
             "text must be one non-empty line without control characters.".into(),
         ));
@@ -622,9 +629,12 @@ fn exec(
     member_id: i64,
     body: &ExecBodyArgs,
     json: bool,
+    deadline: crate::input::Deadline,
 ) -> Result<(), CafleetError> {
-    let command = resolve_command_body(body.command.as_deref(), body.file.as_deref())?;
-    let deadline = crate::input::Deadline::new();
+    let command = body
+        .command
+        .as_deref()
+        .expect("exec input was resolved before its deadline");
     let member = crate::input::with_database_budget(conn, deadline, |conn| {
         load_member(conn, member_id, false)
     })?;

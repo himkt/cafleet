@@ -1,5 +1,5 @@
 //! claude backend (SPEC §6.7): pass-through model validation, the five-level
-//! effort enum, and the only backend that honors `display_name` The colocated
+//! effort enum, and the only backend that honors `display_name`. The colocated
 //! tests pin the contract; see [`super::test_support`] for the API.
 
 use super::{CodingAgent, SpawnProbe, missing_binary};

@@ -1,7 +1,7 @@
 use crate::broker;
 use crate::config::Settings;
 use crate::error::CafleetError;
-use crate::input::{Deadline, PaneLock, with_database_budget};
+use crate::input::{Deadline, PaneLock, complete_database_budget, with_database_budget};
 use crate::multiplexer::{AnyMultiplexer, Multiplexer, MultiplexerError};
 use crate::output::truncate_text;
 use crate::pane_state::{PaneState, classify};
@@ -115,8 +115,20 @@ fn attempt_preview_scoped(
     if current.placement != member.placement {
         return Ok(AttemptOutcome::Held);
     }
-    if message.from_member_id == member_id {
-        return Ok(AttemptOutcome::Held);
+    let uncertain = |cause| {
+        failed(
+            message.message_id,
+            Delivery::Uncertain,
+            format!(
+                "preview {} delivery to member {member_id} is uncertain: {cause}. Inspect the pane before retrying.",
+                message.message_id
+            ),
+        )
+    };
+    if broker::messaging::preview_started(conn, message.message_id)? {
+        return Ok(uncertain(
+            "an earlier input attempt has no confirmed notification stamp".to_owned(),
+        ));
     }
     let mux = match resolve().and_then(|mux| {
         mux.ensure_available()?;
@@ -185,16 +197,10 @@ fn attempt_preview_scoped(
     }
     let text =
         truncate_text(Some(&message.text), settings.max_text_len).expect("present message text");
-    let uncertain = |cause| {
-        failed(
-            message.message_id,
-            Delivery::Uncertain,
-            format!(
-                "preview {} delivery to member {member_id} is uncertain: {cause}. Inspect the pane before retrying.",
-                message.message_id
-            ),
-        )
-    };
+    deadline.remaining()?;
+    if !broker::messaging::claim_preview(conn, message.message_id)? {
+        return Ok(AttemptOutcome::Held);
+    }
     if let Err(error) = mux.send_inline_preview(
         pane,
         message.message_id,
@@ -205,14 +211,23 @@ fn attempt_preview_scoped(
         return Ok(if error.submission_started() {
             uncertain(error.to_string())
         } else {
-            failed(message.message_id, Delivery::NotSent, error.to_string())
+            match complete_database_budget(conn, deadline, |conn| {
+                broker::messaging::release_preview(conn, message.message_id)
+            }) {
+                Ok(()) => failed(message.message_id, Delivery::NotSent, error.to_string()),
+                Err(cleanup) => uncertain(format!(
+                    "{error}; releasing the input claim failed: {cleanup}"
+                )),
+            }
         });
     }
-    match broker::stamp_notified(
-        conn,
-        message.message_id,
-        &format_utc(crate::time::now_utc()),
-    ) {
+    match complete_database_budget(conn, deadline, |conn| {
+        broker::messaging::stamp_notified_validated(
+            conn,
+            message.message_id,
+            &format_utc(crate::time::now_utc()),
+        )
+    }) {
         Ok(true) => Ok(AttemptOutcome::Sent {
             message_id: message.message_id,
         }),
@@ -236,6 +251,7 @@ mod tests {
 
     struct FinishingRunner {
         deadline: Deadline,
+        submitted: std::sync::Arc<std::sync::atomic::AtomicBool>,
     }
 
     #[test]
@@ -271,6 +287,8 @@ mod tests {
             assert_eq!(argv[1], "send-keys");
             if argv.last().unwrap() == "Enter" {
                 std::thread::sleep(self.deadline.remaining().unwrap() + Duration::from_millis(5));
+                self.submitted
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
             }
             Ok(String::new())
         }
@@ -292,11 +310,24 @@ mod tests {
         use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
         use std::sync::{
             Arc,
-            atomic::{AtomicUsize, Ordering},
+            atomic::{AtomicBool, AtomicUsize, Ordering},
         };
         let scopes = Arc::new(AtomicUsize::new(0));
         let observed = scopes.clone();
+        let submitted = Arc::new(AtomicBool::new(false));
+        let stamped = submitted.clone();
         conn.authorizer(Some(move |context: AuthContext<'_>| {
+            if stamped.load(Ordering::SeqCst)
+                && matches!(
+                    context.action,
+                    AuthAction::Read {
+                        table_name: "sqlite_master" | "sqlite_schema" | "refinery_schema_history",
+                        ..
+                    }
+                )
+            {
+                return Authorization::Deny;
+            }
             if matches!(
                 context.action,
                 AuthAction::Pragma {
@@ -311,7 +342,10 @@ mod tests {
         .unwrap();
         let deadline = Deadline::until(Instant::now() + Duration::from_millis(2200));
         let mux = AnyMultiplexer::Tmux(TmuxMultiplexer::new(
-            Rc::new(FinishingRunner { deadline }),
+            Rc::new(FinishingRunner {
+                deadline,
+                submitted,
+            }),
             HashMap::from([("TMUX".into(), "test".into())]),
         ));
         assert_eq!(
@@ -326,8 +360,8 @@ mod tests {
         assert!(deadline.remaining().is_err());
         assert_eq!(
             scopes.load(Ordering::SeqCst),
-            1,
-            "one database budget owns the complete attempt"
+            2,
+            "the input attempt and mandatory finalization own separate database budgets"
         );
         assert!(
             broker::oldest_pending_preview(&conn, worker)

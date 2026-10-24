@@ -1,34 +1,46 @@
 # CAFleet as a Coding-Agent Multiplexer
 
-**Status**: Approved
-**Progress**: 0/28 tasks complete
-**Last Updated**: 2026-10-22
+**Status**: Complete
+**Progress**: 28/28 tasks complete
+**Last Updated**: 2026-10-24
+
+Operator scope decision (2026-10-24 JST): The operator waives further installed-host verification, profile/theme collection, native/model proof and manual smoke gates. Finish implementation, automated contracts and independent code review. Preserve existing observations with their dated limitations. Root owns fixture cleanup. The executing team continues with its installed runtime; publication requires user approval.
+
+Director acceptance audit (2026-10-23T16:10Z): All 28 implementation tasks and 13 success criteria are satisfied under the operator scope decision. Root inspected the source and automated/static anchors in .execution/root-final-criteria-preflight.md and .execution/tester-final-contract-map.md, independently reconciled 19 whole-suite summaries (595 passed, 0 failed, 0 ignored), all 132 current input hashes and lint/format output on 6a8adfee/production 041bea8c. Source-matched build/typecheck/embedding/native packaging and qualified net reductions remain valid. Fresh independent review is the next gate; implementation acceptance does not grant review or publication approval.
+
+Post-review Director acceptance (2026-10-23T17:22Z): The three first-review findings are resolved by documentation commit 7f892c84, regression commit 1ed5136e and production commit 20357e01. Root reviews the complete four-file production diff and verifies the actual current 598 passed / 0 failed / 0 ignored whole run, all 132 current source/test fingerprints, unchanged inline test modules, fresh lint/typecheck/build logs and exact executable payloads in both native packages. Current frozen executable SHA 5793be83c6d5def1847bf549890827cb404339f5c4907d82e628914f9c618e7c matches the working release. The refreshed 13 SC / 11 V map and qualified reductions (6,505 source and 5,333 documentation physical lines) supersede earlier snapshot totals. All 28 implementation tasks are timestamped; independent re-review and user approval remain pending.
 
 ## Overview
+
+Fourth review follow-up (2026-10-24 JST): Mandatory post-input database finalization receives bounded completion grace; V2 persists preview input claims before possible keystrokes and preserves unresolved attempts across invocations. The complete automated suite passes 631 tests with zero failures or ignored cases. Lint/format, typecheck, offline/locked release build and documentation build pass. The operator authorizes committing this completed design with the feature branch; further installed-host verification remains waived. These follow-up changes remain subject to PR review.
+
+Initial publication (2026-10-24 JST): The operator approves PR creation. The initially reviewed branch is pushed through 20357e01 and PR 483 is open at https://github.com/himkt/cafleet/pull/483 against main. Independent review approves after two passes. The operator explicitly authorizes committing this design document on 2026-10-24; hidden execution evidence remains local. No merge is performed.
+
+Independent review approval (2026-10-23T17:23Z): Fresh Reviewer 37 approves 20357e01 after verifying all three first-pass corrections and regression coverage, with independent delete-selection 25, docs_sync/storage 47, lint, documentation build and revision whitespace checks passing. No substantive finding or review marker remains. Installed-host checks remain operator-waived. User approval and finalization remain pending.
 
 CAFleet proactively supplies independent coding-agent sessions wherever the host would otherwise delegate to subagents or an agent team. The host owns continuation and the Director supervises delegated work through a small CLI for panes, durable messages, bounded receiving and visible native command dispatch. Reduce the product to CLI and skills by removing the monitor member, detached scheduler, tracked execution helper, WebUI and HTTP server.
 
 ## Success Criteria
 
-- [ ] Discovery descriptions select CAFleet proactively for delegation; ordinary workflows describe host-owned continuation without activation commands or validation gates.
-- [ ] Fleet creation registers the current Director atomically and spawns no agent or background process; ordinary member creation works immediately afterward.
-- [ ] A Director receives replies through broker reads, and a finite receive operation retries pending ordinary-member notifications while it waits.
-- [ ] Messaging is point-to-point; the Director performs fan-out as individual sends, with no broadcast summaries or grouping-only fields.
-- [ ] A scripted delegation with host continuation disabled receives the member reply through repeated finite `message wait` calls owned by the Director's active tool session; the Director retains that session until the reply or explicit user handoff.
-- [ ] Every CAFleet pane writer holds one process-shared input lock through readiness revalidation and the complete submission sequence.
-- [ ] Public `member exec` visibly submits the actual native shell command and returns dispatch metadata; native host output owns execution status.
-- [ ] Busy, approval, draft, unknown and pending-placement exec targets receive no keystrokes, and uncertain dispatch never causes automatic command resubmission.
-- [ ] The fresh default database has an explicit format identity and no execution/supervision state; selecting an incompatible existing file preserves its bytes and rejects writes.
-- [ ] OpenCode members retain model selection, assignments, editing, permitted commands, broker communication and routed native execution.
-- [ ] Current code, docs, skills, presets, rules, tasks, dependencies and tests contain a consistent reduced product surface with all removed-concept references deleted.
-- [ ] Rust builds and release packaging work without the frontend; documentation-site tooling remains available.
-- [ ] Every row of the §11 verification table has a passing automated check or recorded smoke result, and the implementation report records net reductions in production code and living documentation.
+- [x] Discovery descriptions select CAFleet proactively for delegation; ordinary workflows describe host-owned continuation without activation commands or validation gates.
+- [x] Fleet creation registers the current Director atomically and spawns no agent or background process; ordinary member creation works immediately afterward.
+- [x] A Director receives replies through broker reads, and a finite receive operation retries pending ordinary-member notifications while it waits.
+- [x] Messaging is point-to-point; the Director performs fan-out as individual sends, with no broadcast summaries or grouping-only fields.
+- [x] Automated process contracts verify repeated finite receiving, deferred-decision ACK behavior and later replies; skills preserve active receive-tool ownership. The operator waives the installed-host scripted delegation smoke.
+- [x] Every CAFleet pane writer holds one process-shared input lock through readiness revalidation and the complete submission sequence.
+- [x] Public `member exec` visibly submits the actual native shell command and returns dispatch metadata; native host output owns execution status.
+- [x] Busy, approval, draft, unknown and pending-placement exec targets receive no keystrokes, and uncertain dispatch never causes automatic command resubmission.
+- [x] The fresh default database has an explicit format identity and no execution/supervision state; selecting an incompatible existing file preserves its bytes and rejects writes.
+- [x] OpenCode members retain model selection, assignments, editing, permitted commands, broker communication and routed native execution.
+- [x] Current code, docs, skills, presets, rules, tasks, dependencies and tests contain a consistent reduced product surface with all removed-concept references deleted.
+- [x] Rust builds and release packaging work without the frontend; documentation-site tooling remains available.
+- [x] Every automated contract in the §11 verification table passes, the operator's installed-host smoke waiver and existing evidence limits are recorded, and the implementation report records net reductions in production code and living documentation.
 
 ---
 
 ## Background
 
-The investigation covered the Rust architecture and tests, frontend/server, skills, documentation, build tasks and release workflows. The Director's unmodified baseline run passed 544 tests in 340.74 seconds. Source references below use the investigated CAFleet 0.27.1 checkout; the hidden scan reports are optional local supporting evidence. In this investigation/design phase, the design and its hidden artifacts stay uncommitted per the session's instruction.
+The investigation covered the Rust architecture and tests, frontend/server, skills, documentation, build tasks and release workflows. The Director's unmodified baseline run passed 544 tests in 340.74 seconds. Source references below use the investigated CAFleet 0.27.1 checkout; the hidden scan reports are optional local supporting evidence. The investigation/design phase kept working artifacts local; the operator subsequently authorized publication of this design document with the feature branch.
 
 | Existing dependency | Evidence | Required change |
 |---|---|---|
@@ -87,7 +99,7 @@ cafleet fleet capture FLEET_ID [--lines N] [--ansi] [--json]
 
 `fleet create` resolves a valid tmux/herdr context, validates the selected backend token, and writes fleet, current Director member and Director placement in one transaction. It backfills `director_member_id` before commit. It performs no pane split, member readiness wait or process launch. Text output is `<fleet-id> director=<member-id>`. JSON retains the existing ordered `fleet_id`, `name`, `created_at`, `director` structure; `director` retains its current identity/description/registration/placement fields.
 
-`fleet capture` is the one-shot diagnostic rehomed from the current batch capture. It uses the current active roster, emits the Director first and other placement-owning members by ascending ID, preserves `--lines`/`--ansi` and timestamp/fingerprint behavior, and annotates per-pane failures without aborting the batch. It writes no broker state and runs no subsequent check. JSON retains the existing scan-entry shape with `kind` restricted to `director` or `member`.
+`fleet capture` is the one-shot diagnostic rehomed from the current batch capture. It validates fleet existence and soft-deletion before resolving the multiplexer; an absent or deleted fleet exits 1 with `Error: fleet ID not found`. It uses the current active roster, emits the Director first and other placement-owning members by ascending ID, preserves `--lines`/`--ansi` and timestamp/fingerprint behavior, and annotates per-pane failures without aborting the batch. A pending Director placement receives the same per-pane annotation as an ordinary member. It writes no broker state and runs no subsequent check. JSON retains the existing scan-entry shape with `kind` restricted to `director` or `member`.
 
 `member create` retains the current prompt/file contract, backend inheritance/override, model/effort validation, identity substitution, pending placement, pane split, placement patch and compensation ladder. Its role is its supplied assignment; no registry role flag is needed. Spawn argv contains no monitor argument or special monitor permission branch. A registration/placeholder/split/patch failure preserves the primary error and any cleanup failure; cleanup targets only a pane actually owned by that operation.
 
@@ -95,7 +107,7 @@ cafleet fleet capture FLEET_ID [--lines N] [--ansi] [--json]
 
 ### 4. Durable messages and synchronous notification
 
-The broker stores point-to-point messages with fleet isolation, full text, explicit ACK and subject-ID behavior. The Director performs fan-out with an individual send to each selected recipient; every resulting message has its own identity and acknowledgement. A committed message is the source of truth; a pane notification is a convenience that may repeat. Poll/show/wait JSON remains untruncated; text and pane previews obey `CAFLEET_MAX_TEXT_LEN`.
+The broker stores point-to-point messages with fleet isolation, full text, explicit ACK and subject-ID behavior. The Director performs fan-out with an individual send to each selected recipient; every resulting message has its own identity and acknowledgement. A committed message is the source of truth; a pane notification is a convenience protected by a durable input claim. Poll/show/wait JSON remains untruncated; text and pane previews obey `CAFLEET_MAX_TEXT_LEN`.
 
 The complete ordered message record is:
 
@@ -133,7 +145,7 @@ Fold CRLF/LF/CR in preview text to `⏎`, display tabs as `␉`, and escape othe
 
 Send JSON uses `{message, notification_sent}` with the reduced message record above. The boolean refers to the newly committed message, so delivering an older pending preview leaves it false. A held or unavailable notification exits successfully with `notification_sent=false`. On the first attempted preview classified `unknown` or `draft`, emit `Message NEW_ID was persisted. member ID is STATE; preview PREVIEW_ID was not sent.` on stderr, naming both the newly stored message and the attempted preview when they differ. No daemon startup can turn a committed send into a failure. A storage failure before commit exits 1 with its database cause; another notification/stamp problem after commit is a stderr diagnostic naming the persisted message ID, while the successful stdout record remains available and is never resubmitted as a new message.
 
-Pane notifications are best effort, with pending state enabling retries. A process can exit after native submission but before its stamp, so a preview may repeat. Members use the message ID, current poll result and ACK state to decide whether work remains actionable. The broker does not promise exactly-once task execution. Full delivery to the Director depends on its receive procedure, independent of preview success.
+Pane notifications are best effort. V2 adds nullable `messages.preview_started_at`, persisted under the pane lock immediately before possible keystrokes. A confirmed no-input failure clears the claim; an ambiguous submission, process exit or failed stamp leaves it durable. Later invocations report uncertainty and suspend automatic input for that preview. After inspecting the pane, explicitly prompt or ping an idle member to poll its durable inbox. The member uses message IDs, poll results and normal ACK to establish actionable work. Full delivery to the Director depends on its receive procedure, independent of preview success.
 
 ### 5. Finite `message wait`
 
@@ -145,7 +157,7 @@ cafleet message wait MEMBER_ID [--timeout SECONDS] [--json]
 
 Between incoming-message checks, retry pending notifications for active ordinary members in the subject's fleet. Exclude the Director, self-notification and acknowledged/already-notified rows. Keep a round-robin member cursor in memory, attempt at most one member per interval, select its oldest pending preview, and recheck the inbox before starting another attempt. This gives held assignments a retry owner even while the Director is waiting. Multiple waiters remain safe through the shared pane lock and under-lock database revalidation.
 
-The receive loop starts no new I/O after its deadline. A notification attempt has a total five-second budget covering capture, typing, settle and stamp; cap each subprocess/database busy wait to the remaining attempt budget. Stop between stages when the budget expires, preserving pending state and reporting uncertainty if bytes may already have been typed. Consequently the command returns by its deadline plus at most one five-second in-flight attempt/cleanup allowance; injected-clock and subprocess fixtures verify this bound. Normal receiving never blocks indefinitely on a pane or database lock.
+The receive loop starts a receive check or notification attempt only before its deadline. A notification attempt already in flight retains its five-second input budget covering revalidation, capture, typing, settle and Enter. Mandatory database finalization uses the later of the original deadline and one second after finalization begins. Preserve the durable input claim and report uncertainty when bytes may already have been typed but completion cannot be confirmed. The command returns by its deadline plus at most one six-second in-flight attempt/finalization allowance. Automated fixtures verify bounded waits.
 
 JSON is one ordered object:
 
@@ -160,7 +172,7 @@ JSON is one ordered object:
 
 `outcome` is `messages` with a nonempty array of the same full records returned by poll, or `timeout` with an empty array. Messages retain poll's descending status-timestamp/message-ID order. Each notification error is `{member_id, message_id, delivery, error}`, where delivery is `not_sent` or `uncertain`; keep only the latest error per member in this invocation. The first attempted preview classified `unknown` or `draft` records `delivery: "not_sent"` and `error: "member ID is STATE; preview MESSAGE_ID was not sent."`, making an unsupported composer or retained draft visible without a hold timer. Working, approval, pending placement and input-lock contention remain ordinary holds without errors.
 
-Revalidate diagnostics at each receive check and before returning. Remove a member's diagnostic when its referenced message is ACKed, that member leaves the active fleet, or that preview is successfully notified by any invocation. A later error for a different pending message replaces the previous diagnostic. This is finite in-memory reporting, with no persistent hold history or forced typing.
+Reconcile diagnostics against each successful receive snapshot and the typed observations of an owned notification attempt, including before returning. Remove a member's diagnostic when these observations show its referenced message is ACKed, that member has left the active fleet, or that preview was successfully notified by any invocation. A later error for a different pending message replaces the previous diagnostic. After the receive deadline, return the most recent successful snapshot reconciled with the completed attempt's observations; subsequent external changes become visible to the next receive invocation. This is finite in-memory reporting, with no persistent hold history or forced typing.
 
 Text prints `Messages available for member ID.` plus the normal indexed messages, or `Timed out waiting for member ID.`; notification errors are stderr diagnostics. Both normal outcomes exit 0. A vanished/inactive subject, deleted fleet or unreadable/corrupt broker state exits 1 with its actual cause. Ctrl+C terminates this finite task under normal process behavior; it owns no daemon, persistent lease or task lifecycle to recover.
 
@@ -272,11 +284,13 @@ Use `sqlite:///$HOME/.local/share/cafleet/cafleet_v8.db` as the default URL. Pre
 
 The fresh baseline sets `PRAGMA application_id = 1128351288` (`0x43414638`, ASCII `CAF8`). Refinery's baseline remains version 1 within this distinct format family. Compatibility checks precede every broker write and both setup halves, including asset-install record writes. A current-format identity alone is insufficient: require the ledger version and expected current table/column shapes as well.
 
+The fresh baseline creates exactly the application tables specified below. Compatibility diagnosis validates each required table's column shape and required indexes/foreign keys; unrelated auxiliary tables, indexes and triggers are compatible when those required definitions remain intact. This preserves the CLI compensation fault fixtures without adding a production injection API.
+
 | Selected file | Behavior |
 |---|---|
 | Empty SQLite file with application_id=0 and no non-internal tables | Setup applies the fresh baseline transactionally, then installs assets |
 | Current identity and valid current schema | Normal commands and idempotent setup proceed |
-| Current identity with behind/ahead schema | Apply existing version classification within this family; setup upgrades known versions and refuses downgrade |
+| Current identity with behind/ahead schema | Apply existing version classification within this family; setup upgrades known versions and rejects an ahead version before database writes, asset installation or asset-install recording |
 | Any other populated/identified format or malformed current schema | Exit 1 before content writes or asset installation; preserve file contents |
 
 The incompatible-format error body is `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.` It describes the current requirement without advertising a removed feature. Database read/open failures preserve their actual cause. The schema classifier is shared by invocation guard, setup and doctor; doctor reports the format problem while completing its other read-only diagnostics.
@@ -469,43 +483,44 @@ The essential removal closure is self-contained below. These are the exact targe
 | `.claude/rules/commands.md`, `bash-tool.md`, `coding-agent-overlay.md`, `documentation-maintenance.md`; `CLAUDE.md` | Rewrite obsolete server/admin/monitor/helper instructions and maintain backend subsection/note ownership |
 | `.claude/skills/skill-author`, `clean-docs`, `residue`, `cafleet-model-list-refresh`, `update-readme` | Remove affected monitor/WebUI/broadcast examples and retain current helper responsibilities |
 
-- [ ] Update documentation-site concepts/specifications/navigation for the reduced CLI, receive/notification behavior, direct execution and fresh storage format; remove obsolete pages and runtime mirror symlinks. <!-- completed: -->
-- [ ] Update README and SPEC to the final responsibilities, affected outputs/errors, schema and build contracts, preserving their required detail and structure. <!-- completed: -->
-- [ ] Rewrite CAFleet and design-document roles/workflows/references to proactive multiplexing and host-owned finite receiving; preserve existing clarification/review/user gates and positive OpenCode capabilities. <!-- completed: -->
-- [ ] Update affected presets, project rules and helper skills; remove monitor placeholders, native-subagent dispatch examples, obsolete command/task references and duplicated registry descriptions. <!-- completed: -->
+- [x] Update documentation-site concepts/specifications/navigation for the reduced CLI, receive/notification behavior, direct execution and fresh storage format; remove obsolete pages and runtime mirror symlinks. <!-- completed: 2026-10-23T06:20 -->
+- [x] Update README and SPEC to the final responsibilities, affected outputs/errors, schema and build contracts, preserving their required detail and structure. <!-- completed: 2026-10-23T06:22 -->
+- [x] Rewrite CAFleet and design-document roles/workflows/references to proactive multiplexing and host-owned finite receiving; preserve existing clarification/review/user gates and positive OpenCode capabilities. <!-- completed: 2026-10-23T06:29 -->
+- [x] Update affected presets, project rules and helper skills; remove monitor placeholders, native-subagent dispatch examples, obsolete command/task references and duplicated registry descriptions. <!-- completed: 2026-10-23T06:34 -->
 
 ### Step 2: Establish the fresh database format
 
-- [ ] Select `cafleet_v8.db`, implement shared format/shape diagnosis with application_id `1128351288`, and reject incompatible explicit paths before normal writes. <!-- completed: -->
-- [ ] Replace the fresh baseline and decoded records with the schema in this document; remove execution/supervision/member-card state and simplify related queries/presenters. <!-- completed: -->
-- [ ] Gate both setup halves and doctor/CLI behavior on current-format diagnosis; verify predecessor/custom-file preservation and transactional initialization. <!-- completed: -->
-- [ ] Update schema/chain/asset fixtures and fail-fast enum/required-column checks for the new format. <!-- completed: -->
+- [x] Select `cafleet_v8.db`, implement shared format/shape diagnosis with application_id `1128351288`, and reject incompatible explicit paths before normal writes. <!-- completed: 2026-10-23T07:09 -->
+- [x] Replace the fresh baseline and decoded records with the schema in this document; remove execution/supervision/member-card state and simplify related queries/presenters. <!-- completed: 2026-10-23T07:09 -->
+- [x] Gate both setup halves and doctor/CLI behavior on current-format diagnosis; verify predecessor/custom-file preservation and transactional initialization. <!-- completed: 2026-10-23T07:09 -->
+- [x] Update schema/chain/asset fixtures and fail-fast enum/required-column checks for the new format. <!-- completed: 2026-10-23T07:09 -->
 
 ### Step 3: Simplify registry and lifecycle operations
 
-- [ ] Replace fleet bootstrap with atomic current-Director registration and its reduced text/JSON output. <!-- completed: -->
-- [ ] Remove member-role guards and monitor spawn parameters while retaining backend inheritance, identity substitution and owned-pane/registration compensation. <!-- completed: -->
-- [ ] Rehome batch capture under `fleet capture`, narrow member kinds/output and preserve member/fleet deletion semantics with input ownership. <!-- completed: -->
+- [x] Replace fleet bootstrap with atomic current-Director registration and its reduced text/JSON output. <!-- completed: 2026-10-23T07:21 -->
+- [x] Remove member-role guards and monitor spawn parameters while retaining backend inheritance, identity substitution and owned-pane/registration compensation. <!-- completed: 2026-10-23T07:21 -->
+- [x] Rehome batch capture under `fleet capture`, narrow member kinds/output and preserve member/fleet deletion semantics with input ownership. <!-- completed: 2026-10-23T07:49 -->
 
 ### Step 4: Serialize native pane input
 
-- [ ] Implement the stable-key OS file-lock guard, bounded acquisition/errors and shared use by every pane-writing/lifecycle mutation path. <!-- completed: -->
-- [ ] Implement styled backend-specific readiness checks and Claude `--prompt-suggestions false`, distinguishing host decorations from identical user text, working/approval and unknown captures. <!-- completed: -->
-- [ ] Add checked literal submission with stage-aware uncertainty and bounded transport deadlines; remove forced interruption behavior and timestamp claims. <!-- completed: -->
-- [ ] Verify multi-process serialization, slow input, partial failures, duplicate placement keys and lock release on process exit. <!-- completed: -->
+- [x] Implement the stable-key OS file-lock guard, bounded acquisition/errors and shared use by every pane-writing/lifecycle mutation path. <!-- completed: 2026-10-23T07:49 -->
+
+- [x] Implement styled backend-specific readiness checks and Claude `--prompt-suggestions false`, distinguishing host decorations from identical user text, working/approval and unknown captures. <!-- completed: 2026-10-23T15:09; automated 66 cases pass; further installed-host acceptance waived by operator -->
+- [x] Add checked literal submission with stage-aware uncertainty and bounded transport deadlines; remove forced interruption behavior and timestamp claims. <!-- completed: 2026-10-23T08:16 -->
+- [x] Verify multi-process serialization, slow input, partial failures, duplicate placement keys and lock release on process exit. <!-- completed: 2026-10-23T08:16 -->
 
 ### Step 5: Implement finite receiving and notification retries
 
-- [ ] Remove broadcast/summary/grouping code and simplify synchronous point-to-point notification, with Director exclusion and truthful committed-message output. <!-- completed: -->
-- [ ] Implement `message wait` timeout validation, full result shape, inbox checks, 300-second background default/foreground guidance, monotonic deadline and capped per-operation I/O. <!-- completed: -->
-- [ ] Implement in-memory round-robin ordinary-member preview retries, under-lock revalidation/stamping and bounded diagnostics without persistent runtime state. <!-- completed: -->
-- [ ] Verify immediate replies, timeout/arrival races, busy-to-idle retry, ACK-on-read with deferred decisions and later replies, multiple waiters and the no-continuation ordinary delegation flow. <!-- completed: -->
+- [x] Remove broadcast/summary/grouping code and simplify synchronous point-to-point notification, with Director exclusion and truthful committed-message output. <!-- completed: 2026-10-23T09:31 -->
+- [x] Implement `message wait` timeout validation, full result shape, inbox checks, 300-second background default/foreground guidance, monotonic deadline and capped per-operation I/O. <!-- completed: 2026-10-23T09:31 -->
+- [x] Implement in-memory round-robin ordinary-member preview retries, under-lock revalidation/stamping and bounded diagnostics without persistent runtime state. <!-- completed: 2026-10-23T09:31 -->
+- [x] Verify immediate replies, timeout/arrival races, busy-to-idle retry, ACK-on-read with deferred decisions and later replies, and multiple waiters through automated contracts; the operator waives the installed-host no-continuation delegation smoke. <!-- completed: 2026-10-23T15:18; receive 24 / retry 28 pass on unchanged production, guarded message_wait 16 pass -->
 
 ### Step 6: Replace tracked execution with native dispatch
 
-- [ ] Implement the one-line COMMAND/file/stdin contract, native backend shell-input framing and dispatch-only text/JSON/error output. <!-- completed: -->
-- [ ] Delete ExecRun, `--wait`, queue/process/exit/resume code, notices, fixtures and execution-based delivery holds. <!-- completed: -->
-- [ ] Verify literal command visibility, every readiness rejection and partial-send uncertainty; smoke-test native completion inspection and explicit continuation. <!-- completed: -->
+- [x] Implement the one-line COMMAND/file/stdin contract, native backend shell-input framing and dispatch-only text/JSON/error output. <!-- completed: 2026-10-23T10:11 -->
+- [x] Delete ExecRun, `--wait`, queue/process/exit/resume code, notices, fixtures and execution-based delivery holds. <!-- completed: 2026-10-23T10:11 -->
+- [x] Verify literal command visibility, every readiness rejection and partial-send uncertainty through automated contracts; retain existing native output evidence and the operator's waiver of further completion/continuation smoke. <!-- completed: 2026-10-23T15:09 -->
 
 ### Step 7: Complete runtime, UI and build reduction
 
@@ -522,12 +537,18 @@ The essential removal closure is self-contained below. These are the exact targe
 | `.github/workflows/ci.yml`, `.github/workflows/release.yml` | Remove admin install/lint/test steps (CI lines 25-26,44-45) and install/build steps (release lines 30-31) |
 | `cafleet/build.rs`, `embedded.rs`, `Cargo.toml`, `Cargo.lock` | Keep skills/presets embedding, remove SPA dist/MIME and unused dependency consumers, regenerate lockfile |
 
-- [ ] Delete monitor/scheduler/HTTP/SPA code and frontend package; remove unused broker/multiplexer APIs, exports, configuration and generated-artifact references. <!-- completed: -->
-- [ ] Reduce embedding to skills/presets and remove admin requirements from task roots, Rust tasks, CI/release, ignore rules and permission entries. <!-- completed: -->
-- [ ] Remove dependencies with no surviving consumers, regenerate Cargo.lock and retain correct general process I/O/capture/permission support. <!-- completed: -->
+- [x] Delete monitor/scheduler/HTTP/SPA code and frontend package; remove unused broker/multiplexer APIs, exports, configuration and generated-artifact references. <!-- completed: 2026-10-23T11:16 -->
+- [x] Reduce embedding to skills/presets and remove admin requirements from task roots, Rust tasks, CI/release, ignore rules and permission entries. <!-- completed: 2026-10-23T11:16 -->
+- [x] Remove dependencies with no surviving consumers, regenerate Cargo.lock and retain correct general process I/O/capture/permission support. <!-- completed: 2026-10-23T11:16 -->
 
 ### Step 8: Verify the complete reduced product
 
-- [ ] Run meaningful retained/new Rust tests through `mise //cafleet:test`, plus the repository lint/typecheck tasks, and fix failures within the specified contracts. <!-- completed: -->
-- [ ] Run documentation/link/embedding checks, verify removed-surface closure and backend/multiplexer smoke evidence, and record net production/documentation reductions. <!-- completed: -->
-- [ ] Review final skills, presets, normal delegation and design-document create/interview/execute flows for consistency with the shipped CLI and host behavior. <!-- completed: -->
+- [x] Run meaningful retained/new Rust tests through `mise //cafleet:test`, plus the repository lint/typecheck tasks, and fix failures within the specified contracts. <!-- completed: 2026-10-23T16:53 -->
+- [x] Run documentation/link/embedding checks, verify removed-surface closure and record net production/documentation reductions; retain existing backend/multiplexer observations with the operator's waiver of further installed-host smoke. <!-- completed: 2026-10-23T17:19 -->
+- [x] Review final skills, presets, normal delegation and design-document create/interview/execute flows for consistency with the shipped CLI and host behavior. <!-- completed: 2026-10-23T11:32 -->
+
+## Changelog
+
+- 2026-10-24: Post-review notification safety adds a V2 durable input claim and bounded one-second mandatory-finalization grace. Unified input validation and command preparation preserve the five-second transport boundary. The operator authorizes publishing the completed design document. The final automated suite passes 631 tests, with lint/format, typecheck, offline/locked release build and documentation build passing.
+
+- 2026-10-24: Completed implementation and all 28 tasks / 13 criteria under the explicit installed-host waiver; 598 Rust tests and lint/typecheck/native build/docs checks pass. Resolved three independent review findings and obtained approval after two review passes. With operator remote approval, pushed 20357e01 and created PR 483. The operator subsequently authorized committing the design document; execution evidence remains local.

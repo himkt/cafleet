@@ -282,7 +282,7 @@ mod tests {
         let head = crate::db::migrate_to_head(&mut conn).unwrap();
         conn.execute_batch("ALTER TABLE messages ADD COLUMN future_value TEXT;")
             .unwrap();
-        conn.execute("UPDATE refinery_schema_history SET version=?1", [head + 1])
+        conn.execute("UPDATE refinery_schema_history SET version=?1 WHERE version=(SELECT MAX(version) FROM refinery_schema_history)", [head + 1])
             .unwrap();
         assert!(matches!(
             classify_schema(&conn, head),
@@ -302,7 +302,7 @@ mod tests {
         assert!(
             matches!(classify_schema(&conn, head + 1), SchemaState::Behind { recorded, .. } if recorded == head)
         );
-        conn.execute("UPDATE refinery_schema_history SET version=?1", [head + 1])
+        conn.execute("UPDATE refinery_schema_history SET version=?1 WHERE version=(SELECT MAX(version) FROM refinery_schema_history)", [head + 1])
             .unwrap();
         assert!(matches!(
             classify_schema(&conn, head),

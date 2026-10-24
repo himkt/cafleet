@@ -4,7 +4,7 @@ A message is a durable point-to-point delivery. The recipient owns its inbox and
 
 ## Persisted shape
 
-The [messages table](data-model.md#messages) stores typed routing/status columns, exact body text and internal `notified_at` state. Required values decode with typed errors.
+The [messages table](data-model.md#messages) stores typed routing/status columns, exact body text and internal `notified_at` and `preview_started_at` state. Required values decode with typed errors.
 
 The ordered public record is:
 

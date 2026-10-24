@@ -414,7 +414,7 @@ fn capture_failures_are_not_sent_diagnostics_with_the_actual_cause() {
 }
 
 #[test]
-fn first_write_and_enter_failures_are_uncertain_and_keep_the_preview_pending() {
+fn first_write_and_enter_failures_suspend_retries_across_wait_invocations() {
     let _test_resource = common::process_test_resource_guard();
     for stage in ["literal", "enter"] {
         let fixture = Fixture::new();
@@ -432,6 +432,12 @@ fn first_write_and_enter_failures_are_uncertain_and_keep_the_preview_pending() {
                 .contains(&format!("distinct {stage} failure"))
         );
         assert_eq!(fixture.stamp(message), None);
+        let captures = fixture.count("capture", &worker);
+        let later = json(&fixture.spawn(fixture.director, 1).output());
+        let errors = later["notification_errors"].as_array().unwrap();
+        assert_eq!(errors.len(), 1);
+        assert_diagnostic(&errors[0], &worker, message, "uncertain");
+        assert_eq!(fixture.count("capture", &worker), captures);
         assert_eq!(
             fixture.count("literal", &worker),
             fixture.count("capture", &worker)

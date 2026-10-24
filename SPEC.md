@@ -82,7 +82,7 @@ The fresh baseline creates exactly the application tables declared in the schema
 
 Connections use SQLite foreign-key enforcement and a normal five-second busy timeout. A bounded operation caps that wait to its remaining budget. Resolve a relative selected SQLite file path against the invoking working directory and canonicalize the database file before lock-key directory construction.
 
-Classify database identity, ledger version and required table/column shapes for the recorded supported version before every write and before either setup half installs assets. Empty zero-identity files initialize with the baseline atomically. Current-family known older versions migrate; an ahead ledger version rejects both setup write paths before database mutation, asset installation or asset-install recording. Independent half-error reporting applies only after the compatibility gate. Other populated/identified or malformed files fail without content writes:
+Validate database identity, ledger version and required table/column shapes for the recorded supported version before command writes and before either setup half installs assets. An invocation's validated connection serves its internal send, ACK, notification claim and stamp operations; standalone public broker write functions retain their own format guard. Empty zero-identity files initialize with the baseline atomically. Current-family known older versions migrate; an ahead ledger version rejects both setup write paths before database mutation, asset installation or asset-install recording. Independent half-error reporting applies only after the compatibility gate. Other populated/identified or malformed files fail without content writes:
 
 `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.`
 
@@ -644,9 +644,9 @@ On the first attempted unknown/draft capture, stderr is `Message NEW_ID was pers
 
 Timeout is an integer in `1..=1800`, default `300`. Validate an active subject and live fleet. Existing unread deliveries return immediately; otherwise check at one-second monotonic intervals. The invocation owns finite receiving and never ACKs messages.
 
-Between inbox checks, retry at most one ordinary-member preview per interval with an in-memory round-robin cursor. Select concrete placements and exclude the Director, self-notifications, ACKed and already-notified rows. Preserve uncertain-delivery diagnostics and suspend that member's retries within this wait while the exact preview remains eligible. Recheck the inbox before starting another attempt. Shared input locks and under-lock revalidation keep multiple waiters safe.
+Between inbox checks, retry at most one ordinary-member preview per interval with an in-memory round-robin cursor. Select concrete placements and exclude the Director, self-notifications, ACKed and already-notified rows. Persist an input claim before the first possible keystroke. Preserve uncertain-delivery diagnostics across invocations and suspend automatic retries while that exact preview remains pending with an unresolved claim. Recheck the inbox before starting another attempt. Shared input locks and under-lock revalidation keep multiple waiters safe.
 
-Start each receive check or notification attempt before the monotonic receive deadline. An attempt already in flight retains its original five-second total budget for revalidation, capture, typing, settle and stamp. Cap subprocess/database busy waits to its remaining budget; return by the receive deadline plus at most one in-flight five-second attempt/cleanup allowance. Start input only with time reserved for settle and Enter. After complete submission, allow uncontended notification-stamp finalization even if the deadline has elapsed, with no extra database lock-wait budget. A snapshot blocked until receive expiry returns `timeout` with retained notification diagnostics; earlier transient contention can retry before expiry. Corruption and other fatal storage errors retain their causes.
+Start each receive check or notification attempt before the monotonic receive deadline. An attempt already in flight retains its original five-second budget for revalidation, capture, typing, settle and Enter. Cap subprocess/database busy waits to its remaining budget and start input only with time reserved for settle and Enter. Mandatory database finalization uses the later of the original deadline and one second after finalization begins, keeping pane transport within its original budget. A receive returns by its deadline plus at most one six-second in-flight attempt/finalization allowance. A snapshot blocked until receive expiry returns `timeout` with retained notification diagnostics; earlier transient contention can retry before expiry. Corruption and other fatal storage errors retain their causes.
 
 The ordered JSON result is:
 
@@ -776,7 +776,7 @@ is introduced.
 
 Lock the concrete placement before kill/deregistration. A member without a concrete pane needs no lock. Retry contention every 50 milliseconds against one five-second deadline; expiry exits 1 with `member ID's pane input remained busy for 5 seconds; member was not deleted.` and leaves state unchanged. Preserve pane/registry errors and layout cleanup ownership.
 
-Revalidate pending or absent placement and deregister atomically. For a concrete pane, retain input ownership while closing it outside a SQLite write transaction, then revalidate and finalize the registry. After successful close, an expired budget permits uncontended finalization and permits no further lock wait; actual database failures report that the pane was closed and preserve the database cause. Optional layout work follows mandatory finalization within the original deadline. A failed or expired restoration emits a stderr diagnostic while preserving successful deregistration.
+Revalidate pending or absent placement and deregister atomically. For a concrete pane, retain input ownership while closing it outside a SQLite write transaction, then revalidate and finalize the registry. After successful close, mandatory registry finalization uses the later of the original deadline and one second after finalization begins, allowing short reader/writer contention to clear; actual database failures report that the pane was closed and preserve the database cause. Optional layout work follows mandatory finalization within the original deadline. A failed or expired restoration emits a stderr diagnostic while preserving successful deregistration.
 
 ##### `member show` {#member-show}
 
@@ -1141,7 +1141,7 @@ Every notification, prompt, ping and native command uses one process-shared OS f
 | Key | SHA-256 of UTF-8 `backend + NUL + mux_session + NUL + mux_pane_id` |
 | File | `<key>.lock`, read/write create without truncation, owner-only creation permissions |
 | Acquisition | Nonblocking exclusive `std::fs::File::try_lock`; preserve unexpected errors with path/member context |
-| Identity | Keep lockfiles stable while processes may use the database |
+| Identity | Keep lockfiles stable while processes may use the database; unlinking a held file would let another process lock a different inode for the same pane |
 | Contention | Hold notifications, skip ping, reject prompt/exec |
 
 Duplicate placements for one pane share the same lock key. Process exit releases ownership. Read-only capture needs no input lock.
@@ -1176,7 +1176,7 @@ The lock excludes CAFleet writers; the user's keyboard and host UI can still cha
 
 The Director receives through broker poll/wait reads; sends to the Director persist without injected text. A self-send is already settled. For an ordinary member, a synchronous send attempts at most one oldest pending unacknowledged preview ordered by `(created_at, message_id)`.
 
-Read preview eligibility in short consistent snapshots before and after acquiring the shared input lock, then revalidate activity, fleet, concrete placement, message status and `notified_at` before writing. One connection-scoped database budget owns the attempt; commit every read snapshot before multiplexer I/O. An idle empty composer accepts one literal line:
+Read preview eligibility in short consistent snapshots before and after acquiring the shared input lock, then revalidate activity, fleet, concrete placement, message status and `notified_at` before writing. The invocation validates its connection before notification operations. One connection-scoped database budget owns capture/input eligibility; commit every read snapshot before multiplexer I/O. An idle empty composer accepts one literal line:
 
 ```text
 [cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] TEXT
@@ -1184,7 +1184,7 @@ Read preview eligibility in short consistent snapshots before and after acquirin
 
 Stored text remains exact. Truncate the preview body by `CAFLEET_MAX_TEXT_LEN`, fold CRLF/LF/CR to `⏎`, render tabs as `␉`, and escape other C0/DEL controls as visible hexadecimal escapes. The fixed prefix distinguishes message text from native composer controls.
 
-Stamp `notified_at` only after complete submission and only while the message remains pending. Successful submission permits uncontended stamp finalization after expiry; the original deadline still bounds every database lock wait. ACK removes preview eligibility. If a process exits after submission but before stamping, a preview may repeat; members use its ID and current inbox/ACK evidence to establish actionable work.
+Persist `preview_started_at` before the first possible keystroke while holding the input lock. A confirmed no-input failure clears that claim; an ambiguous write, process exit or failed stamp leaves it durable. Stamp `notified_at` only after complete submission and only while the message remains pending. Mandatory stamp finalization uses the later of the original deadline and one second after finalization begins. An unresolved claim produces an uncertain diagnostic in later invocations and suspends automatic input. ACK removes preview eligibility. After inspecting the pane, explicitly prompt or ping an idle member to poll its durable inbox; the member ACKs consumed messages normally.
 
 ##### Held delivery {#held-delivery}
 
@@ -1371,7 +1371,7 @@ Preserve binary-not-found, nonzero stderr and timeout context in the backend err
 
 The receive task is the synchronous caller-owned process. Its cursor and latest-per-member diagnostics live only in memory. Check the subject/inbox and reconcile diagnostics against each successful snapshot before another attempt. Retry one eligible ordinary member per one-second interval. Start a receive check or attempt only before the monotonic receive deadline; after expiry return the last successful snapshot reconciled with its owned attempt's typed result. A later invocation observes subsequent external changes.
 
-Each notification or explicit input operation has one five-second budget covering capture, literal input, settle, Enter and database lock waits. Reserve settle and Enter time before literal input. Successful submission permits uncontended notification-stamp completion after expiry with no additional lock-wait budget. A receive returns by its own deadline plus one in-flight attempt/cleanup allowance, retaining diagnostics on snapshot contention at expiry. Distinguish confirmed non-launch or missing-pane failures from ambiguous started writes.
+Each notification or explicit input operation has one five-second budget covering capture, literal input, settle, Enter and database lock waits. Reserve settle and Enter time before literal input. Mandatory database finalization uses the later of the original deadline and one second after finalization begins. A receive returns by its own deadline plus one in-flight attempt and at most one second of finalization grace, retaining diagnostics on snapshot contention at expiry. Persist a preview input claim before possible keystrokes and retain unresolved claims across invocations. Distinguish confirmed non-launch or missing-pane failures from ambiguous started writes.
 
 The shared OS guard uses `File::try_lock`. Store stable, owner-created lockfiles under `<canonical-database-file>.pane-locks/`, keyed by SHA-256 of backend, NUL, session, NUL, pane ID. Acquire before reload/capture; retain ownership through final Enter/stamp. Close on every path. Keep lockfiles in place. Placement deletion locks the same keys with sorted acquisition, revalidation and one five-second deadline.
 

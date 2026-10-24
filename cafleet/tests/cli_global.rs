@@ -99,19 +99,21 @@ fn the_schema_guard_reports_a_foreign_database() {
 fn the_schema_guard_reports_a_newer_database() {
     let cli = Cli::new();
     cli.migrate();
+    let head = cafleet::db::head_version();
     cli.sqlite()
         .execute(
             "INSERT INTO refinery_schema_history (version, name, applied_on, checksum) \
-             VALUES (2, 'future', '2026-01-01T00:00:00Z', '0')",
-            [],
+             VALUES (?1, 'future', '2026-01-01T00:00:00Z', '0')",
+            [head + 1],
         )
         .unwrap();
     let output = cli.run(&["fleet", "list"]);
     assert_eq!(code(&output), 1);
     assert!(
-        stderr(&output).contains(
-            "Error: database schema 2 is newer than this cafleet (head 1); upgrade cafleet"
-        ),
+        stderr(&output).contains(&format!(
+            "Error: database schema {} is newer than this cafleet (head {head}); upgrade cafleet",
+            head + 1
+        )),
         "got: {}",
         stderr(&output)
     );

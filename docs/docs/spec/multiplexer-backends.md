@@ -143,7 +143,7 @@ Every notification, prompt, ping and native command uses one process-shared OS f
 | Key | SHA-256 of UTF-8 `backend + NUL + mux_session + NUL + mux_pane_id` |
 | File | `<key>.lock`, read/write create without truncation, owner-only creation permissions |
 | Acquisition | Nonblocking exclusive `std::fs::File::try_lock`; preserve unexpected errors with path/member context |
-| Identity | Keep lockfiles stable while processes may use the database |
+| Identity | Keep lockfiles stable while processes may use the database; unlinking a held file would let another process lock a different inode for the same pane |
 | Contention | Hold notifications, skip ping, reject prompt/exec |
 
 Duplicate placements for one pane share the same lock key. Process exit releases ownership. Read-only capture needs no input lock.
@@ -178,7 +178,7 @@ The lock excludes CAFleet writers; the user's keyboard and host UI can still cha
 
 The Director receives through broker poll/wait reads; sends to the Director persist without injected text. A self-send is already settled. For an ordinary member, a synchronous send attempts at most one oldest pending unacknowledged preview ordered by `(created_at, message_id)`.
 
-Read preview eligibility in short consistent snapshots before and after acquiring the shared input lock, then revalidate activity, fleet, concrete placement, message status and `notified_at` before writing. One connection-scoped database budget owns the attempt; commit every read snapshot before multiplexer I/O. An idle empty composer accepts one literal line:
+Read preview eligibility in short consistent snapshots before and after acquiring the shared input lock, then revalidate activity, fleet, concrete placement, message status and `notified_at` before writing. The invocation validates its connection before notification operations. One connection-scoped database budget owns capture/input eligibility; commit every read snapshot before multiplexer I/O. An idle empty composer accepts one literal line:
 
 ```text
 [cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] TEXT
@@ -186,11 +186,11 @@ Read preview eligibility in short consistent snapshots before and after acquirin
 
 Stored text remains exact. Truncate the preview body by `CAFLEET_MAX_TEXT_LEN`, fold CRLF/LF/CR to `⏎`, render tabs as `␉`, and escape other C0/DEL controls as visible hexadecimal escapes. The fixed prefix distinguishes message text from native composer controls.
 
-Stamp `notified_at` only after complete submission and only while the message remains pending. Successful submission permits uncontended stamp finalization after expiry; the original deadline still bounds every database lock wait. ACK removes preview eligibility. If a process exits after submission but before stamping, a preview may repeat; members use its ID and current inbox/ACK evidence to establish actionable work.
+Persist `preview_started_at` before the first possible keystroke while holding the input lock. A confirmed no-input failure clears that claim; an ambiguous write, process exit or failed stamp leaves it durable. Stamp `notified_at` only after complete submission and only while the message remains pending. Mandatory stamp finalization uses the later of the original deadline and one second after finalization begins. An unresolved claim produces an uncertain diagnostic in later invocations and suspends automatic input. ACK removes preview eligibility. After inspecting the pane, explicitly prompt or ping an idle member to poll its durable inbox; the member ACKs consumed messages normally.
 
 ### Held delivery {#held-delivery}
 
-Working, approval, pending placement and lock contention are ordinary holds. A finite [message wait](cli-options.md#message-wait) or a later send retries eligible ordinary-member previews. Rotation selects concrete ordinary-member placements and attempts at most one member per interval. After an uncertain delivery, the same wait preserves that diagnostic and excludes the member from automatic retries while that exact preview remains eligible. Successful snapshots can establish ACK, departure or notification by another invocation.
+Working, approval, pending placement and lock contention are ordinary holds. A finite [message wait](cli-options.md#message-wait) or a later send retries eligible ordinary-member previews. Rotation selects concrete ordinary-member placements and attempts at most one member per interval. After an uncertain delivery, every subsequent wait preserves the unresolved durable claim and excludes the member from automatic input while that exact preview remains eligible. Successful snapshots can establish ACK, departure or notification by another invocation.
 
 A first attempted draft or unknown composer yields an immediate diagnostic naming the member and preview ID. Capture and relay retained user drafts before a user decision or authorized replacement. Transport and stamp failures after persistence remain diagnostics alongside a successful send result. No notification outcome erases a committed delivery.
 

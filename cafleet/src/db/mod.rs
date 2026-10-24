@@ -357,7 +357,7 @@ mod tests {
             .unwrap();
         require_current(&conn).unwrap();
         conn.execute(
-            "UPDATE refinery_schema_history SET version=?1",
+            "UPDATE refinery_schema_history SET version=?1 WHERE version=(SELECT MAX(version) FROM refinery_schema_history)",
             [head_version() + 1],
         )
         .unwrap();
@@ -366,7 +366,7 @@ mod tests {
             "ledger contents are read on every validation"
         );
         conn.execute(
-            "UPDATE refinery_schema_history SET version=?1",
+            "UPDATE refinery_schema_history SET version=?1 WHERE version=(SELECT MAX(version) FROM refinery_schema_history)",
             [head_version()],
         )
         .unwrap();
@@ -494,11 +494,41 @@ mod tests {
     }
 
     #[test]
-    fn migrate_reaches_head_version_1_and_is_idempotent() {
+    fn a_v1_database_upgrades_in_place_without_rewriting_messages() {
+        let mut conn = connect("sqlite:///:memory:").unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(1))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO fleets(fleet_id, created_at) VALUES(1, 'created');
+             INSERT INTO members(member_id, fleet_id, name, description, status, registered_at)
+             VALUES(1, 1, 'director', 'test', 'active', 'created');
+             INSERT INTO messages(message_id, from_member_id, to_member_id, created_at, status_state, status_timestamp, text)
+             VALUES(7, 1, 1, 'created', 'input_required', 'created', 'preserved');"
+        ).unwrap();
+        assert!(matches!(
+            crate::diagnosis::classify_schema(&conn, head_version()),
+            crate::diagnosis::SchemaState::Behind { recorded: 1, .. }
+        ));
+        migrate_to_head(&mut conn).unwrap();
+        let row: (String, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT text, notified_at, preview_started_at FROM messages WHERE message_id=7",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(row, ("preserved".into(), None, None));
+        require_current(&conn).unwrap();
+    }
+
+    #[test]
+    fn migrate_reaches_head_and_is_idempotent() {
         let dir = TempDir::new().unwrap();
         let mut conn = connect(&temp_db_url(&dir)).unwrap();
-        assert_eq!(migrate_to_head(&mut conn).unwrap(), 1);
-        assert_eq!(migrate_to_head(&mut conn).unwrap(), 1);
+        assert_eq!(migrate_to_head(&mut conn).unwrap(), head_version());
+        assert_eq!(migrate_to_head(&mut conn).unwrap(), head_version());
     }
 
     #[test]
@@ -570,6 +600,7 @@ mod tests {
                     ("status_timestamp", "TEXT", 1, 0),
                     ("text", "TEXT", 1, 0),
                     ("notified_at", "TEXT", 0, 0),
+                    ("preview_started_at", "TEXT", 0, 0),
                 ],
             ),
         ] {
@@ -866,14 +897,17 @@ mod tests {
             .unwrap()
             .map(Result::unwrap)
             .collect();
-        assert_eq!(versions, vec![1]);
+        assert_eq!(
+            versions,
+            (1..=i64::from(head_version())).collect::<Vec<_>>()
+        );
     }
 
     // The chain guard reads the refinery-embedded listing, not the filesystem:
     // `migration_chain()` returns the `(version, name)` pairs of the embedded
     // runner's migrations, sorted ascending.
     #[test]
-    fn migration_chain_is_contiguous_from_1_with_exactly_one_baseline_and_head_1() {
+    fn migration_chain_is_contiguous_from_1_with_exactly_one_baseline() {
         let chain = migration_chain();
         let versions: Vec<u32> = chain.iter().map(|(version, _)| *version).collect();
         let contiguous: Vec<u32> = (1..=versions.len() as u32).collect();
@@ -894,12 +928,6 @@ mod tests {
             chain.iter().all(|(_, name)| !name.is_empty()),
             "every migration carries a slug"
         );
-        assert_eq!(
-            chain
-                .last()
-                .map(|(version, name)| (*version, name.as_str())),
-            Some((1, "baseline")),
-            "expected head is V1__baseline"
-        );
+        assert_eq!(chain.last().unwrap().0, head_version());
     }
 }

@@ -27,9 +27,9 @@ Columns are `member_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT`, `fleet_id IN
 
 ### messages
 
-Required columns are `message_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT`, `from_member_id` and `to_member_id` integer references to members with delete restricted, and text `created_at`, `status_state`, `status_timestamp`, `text`. `notified_at` is nullable text. Indexes cover `(to_member_id, status_timestamp)` and `(from_member_id, status_timestamp)`.
+Required columns are `message_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT`, `from_member_id` and `to_member_id` integer references to members with delete restricted, and text `created_at`, `status_state`, `status_timestamp`, `text`. `notified_at` and `preview_started_at` are nullable text. Indexes cover `(to_member_id, status_timestamp)` and `(from_member_id, status_timestamp)`.
 
-`status_state` decodes as `input_required` or `completed`. Pending previews require an active ordinary recipient with a concrete pane, an unacknowledged row and null `notified_at`; choose the oldest by creation time/message ID. Stamp only after successful complete input while holding the pane lock and revalidating eligibility. The public [message record](message-envelope.md#persisted-shape) omits the internal notification stamp.
+`status_state` decodes as `input_required` or `completed`. Pending previews require an active ordinary recipient with a concrete pane, an unacknowledged row and null `notified_at`; choose the oldest by creation time/message ID. Persist `preview_started_at` immediately before possible input under the pane lock. Clear it only after a confirmed no-input failure; retain unresolved claims across process restarts so automatic delivery reports uncertainty instead of resubmitting. Stamp `notified_at` only after successful complete input while holding the pane lock and revalidating eligibility. The public [message record](message-envelope.md#persisted-shape) omits both internal notification fields.
 
 ### asset_installs
 

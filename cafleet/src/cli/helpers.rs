@@ -98,7 +98,7 @@ pub fn resolve_command_body(
             body.pop();
         }
     }
-    if body.trim().is_empty() || body.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}') {
+    if !crate::input::valid_input(&body) {
         return Err(CafleetError::Usage(
             "command must be one non-empty line without control characters.".into(),
         ));

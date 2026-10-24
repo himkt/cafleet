@@ -116,7 +116,12 @@ pub fn run(
             let deadline = crate::input::Deadline::new();
 
             let message = crate::input::with_database_budget(conn, deadline, |conn| {
-                broker::send_message(conn, from_member_id, &to_member_id.to_string(), &text)
+                broker::messaging::send_message_validated(
+                    conn,
+                    from_member_id,
+                    &to_member_id.to_string(),
+                    &text,
+                )
             })?;
             let message_id = message.message_id;
             let notification_sent =
@@ -207,7 +212,9 @@ pub fn run(
             Ok(())
         }
         MessageCommand::Ack { message_id, json } => {
-            let result = presentation::message_envelope(&broker::ack_message(conn, message_id)?);
+            let result = presentation::message_envelope(&broker::messaging::ack_message_validated(
+                conn, message_id,
+            )?);
             emit_result(settings, result, json, |result| {
                 format!("Message acknowledged.\n{}", format_message(result))
             });

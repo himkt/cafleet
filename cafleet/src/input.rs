@@ -13,6 +13,10 @@ use crate::error::CafleetError;
 #[derive(Debug, Clone, Copy)]
 pub struct Deadline(Instant);
 
+pub(crate) fn valid_input(text: &str) -> bool {
+    !text.trim().is_empty() && !text.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
+}
+
 impl Deadline {
     pub fn new() -> Self {
         Self::until(Instant::now() + Duration::from_secs(5))
@@ -54,6 +58,7 @@ struct DatabaseWait {
     identity: usize,
     deadline: Deadline,
     handler: usize,
+    completion: bool,
 }
 
 thread_local! {
@@ -102,7 +107,11 @@ fn remaining_database_wait(handler: usize) -> Option<Duration> {
             waits.iter().any(|wait| wait.handler == handler),
             "a busy handler has an owning connection scope"
         );
-        waits
+        let start = waits
+            .iter()
+            .rposition(|wait| wait.handler == handler && wait.completion)
+            .unwrap_or(0);
+        waits[start..]
             .iter()
             .filter(|wait| wait.handler == handler)
             .try_fold(Duration::MAX, |remaining, wait| {
@@ -129,7 +138,11 @@ struct DatabaseBudget<'a> {
 }
 
 impl<'a> DatabaseBudget<'a> {
-    fn new(conn: &'a mut Connection, deadline: Deadline) -> Result<Self, CafleetError> {
+    fn new(
+        conn: &'a mut Connection,
+        deadline: Deadline,
+        completion: bool,
+    ) -> Result<Self, CafleetError> {
         let previous: u32 = conn
             .query_row("PRAGMA busy_timeout", [], |row| row.get(0))
             .map_err(crate::broker::members::db_err)?;
@@ -157,6 +170,7 @@ impl<'a> DatabaseBudget<'a> {
                 identity,
                 deadline,
                 handler,
+                completion,
             })
         });
         Ok(Self {
@@ -222,17 +236,27 @@ pub fn with_database_budget<T>(
     operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
 ) -> Result<T, CafleetError> {
     deadline.remaining()?;
-    complete_database_budget(conn, deadline, operation)
+    scoped_database_budget(conn, deadline, false, operation)
 }
 
-// Successful pane side effects still need uncontended finalization after expiry;
-// the original deadline continues to bound every SQLite lock wait.
+// Pane side effects are irreversible; mandatory storage finalization gets a
+// bounded grace period independent of the input deadline.
 pub(crate) fn complete_database_budget<T>(
     conn: &mut Connection,
     deadline: Deadline,
     operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
 ) -> Result<T, CafleetError> {
-    let mut budget = DatabaseBudget::new(conn, deadline)?;
+    let completion = Deadline::until(deadline.0.max(Instant::now() + Duration::from_secs(1)));
+    scoped_database_budget(conn, completion, true, operation)
+}
+
+fn scoped_database_budget<T>(
+    conn: &mut Connection,
+    deadline: Deadline,
+    completion: bool,
+    operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
+) -> Result<T, CafleetError> {
+    let mut budget = DatabaseBudget::new(conn, deadline, completion)?;
     let result = operation(budget.conn);
     let restored = budget.restore();
     match (result, restored) {
@@ -251,7 +275,7 @@ mod database_scope_tests {
     use super::*;
 
     #[test]
-    fn expired_completion_commits_uncontended_work_without_starting_a_new_budget() {
+    fn expired_completion_commits_uncontended_work() {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("CREATE TABLE probe(value INTEGER);")
             .unwrap();
@@ -270,7 +294,46 @@ mod database_scope_tests {
     }
 
     #[test]
-    fn expired_completion_reports_real_contention_without_waiting() {
+    fn completion_waits_for_a_reader_to_release_commit_after_input_expiry() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("reader.db");
+        let mut conn = Connection::open(&path).unwrap();
+        conn.execute_batch("CREATE TABLE probe(value INTEGER); INSERT INTO probe VALUES(1)")
+            .unwrap();
+        let reader = Connection::open(&path).unwrap();
+        reader.execute_batch("BEGIN; SELECT * FROM probe").unwrap();
+        let (release, released) = std::sync::mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            released.recv().unwrap();
+            std::thread::sleep(Duration::from_millis(100));
+            reader.execute_batch("COMMIT").unwrap();
+        });
+        let deadline = Deadline::until(Instant::now() + Duration::from_millis(20));
+        with_database_budget(&mut conn, deadline, |conn| {
+            std::thread::sleep(Duration::from_millis(30));
+            complete_database_budget(conn, deadline, |conn| {
+                let tx = conn
+                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                    .map_err(crate::broker::members::db_err)?;
+                tx.execute("UPDATE probe SET value=42", [])
+                    .map_err(crate::broker::members::db_err)?;
+                release.send(()).unwrap();
+                tx.commit().map_err(crate::broker::members::db_err)
+            })?;
+            assert!(with_database_budget(conn, deadline, |_| Ok(())).is_err());
+            Ok(())
+        })
+        .unwrap();
+        thread.join().unwrap();
+        assert_eq!(
+            conn.query_row("SELECT value FROM probe", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            42
+        );
+    }
+
+    #[test]
+    fn expired_completion_reports_contention_after_bounded_grace() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("completion.db");
         let writer = Connection::open(&path).unwrap();
@@ -286,7 +349,8 @@ mod database_scope_tests {
         })
         .unwrap_err();
         assert!(error.message().contains("database is locked"));
-        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(started.elapsed() >= Duration::from_millis(900));
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 
     #[test]

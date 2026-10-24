@@ -115,6 +115,10 @@ fn dispatch(
                 });
                 helpers::stale_assets_guard(&assets?, VERSION)?;
             }
+            let mut command = command;
+            if let Command::Member(command) = &mut command {
+                member::prepare_input(command)?;
+            }
             let deadline = crate::input::Deadline::new();
             let mut slot = Some(conn);
             match command {

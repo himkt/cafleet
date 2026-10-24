@@ -58,6 +58,15 @@ pub fn send_message(
     text: &str,
 ) -> Result<MessageRecord, CafleetError> {
     crate::db::require_current(conn)?;
+    send_message_validated(conn, from_member_id, to, text)
+}
+
+pub(crate) fn send_message_validated(
+    conn: &mut Connection,
+    from_member_id: i64,
+    to: &str,
+    text: &str,
+) -> Result<MessageRecord, CafleetError> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(db_err)?;
@@ -144,6 +153,14 @@ pub fn stamp_notified(
     when: &str,
 ) -> Result<bool, CafleetError> {
     crate::db::require_current(conn)?;
+    stamp_notified_validated(conn, message_id, when)
+}
+
+pub(crate) fn stamp_notified_validated(
+    conn: &Connection,
+    message_id: i64,
+    when: &str,
+) -> Result<bool, CafleetError> {
     let changed = conn
         .execute(
             &format!(
@@ -153,6 +170,33 @@ pub fn stamp_notified(
         )
         .map_err(db_err)?;
     Ok(changed == 1)
+}
+
+pub(crate) fn preview_started(conn: &Connection, message_id: i64) -> Result<bool, CafleetError> {
+    conn.query_row(
+        "SELECT preview_started_at IS NOT NULL FROM messages WHERE message_id=?1",
+        [message_id],
+        |row| row.get(0),
+    )
+    .map_err(db_err)
+}
+
+pub(crate) fn claim_preview(conn: &Connection, message_id: i64) -> Result<bool, CafleetError> {
+    conn.execute(
+        &format!("UPDATE messages SET preview_started_at=?1 WHERE message_id=?2 AND {PENDING_PREVIEW} AND preview_started_at IS NULL"),
+        params![format_utc(now_utc()), message_id],
+    )
+    .map(|changed| changed == 1)
+    .map_err(db_err)
+}
+
+pub(crate) fn release_preview(conn: &Connection, message_id: i64) -> Result<(), CafleetError> {
+    conn.execute(
+        "UPDATE messages SET preview_started_at=NULL WHERE message_id=?1",
+        [message_id],
+    )
+    .map(|_| ())
+    .map_err(db_err)
 }
 
 pub fn poll_messages(
@@ -179,6 +223,13 @@ pub fn poll_messages(
 
 pub fn ack_message(conn: &mut Connection, message_id: i64) -> Result<MessageRecord, CafleetError> {
     crate::db::require_current(conn)?;
+    ack_message_validated(conn, message_id)
+}
+
+pub(crate) fn ack_message_validated(
+    conn: &mut Connection,
+    message_id: i64,
+) -> Result<MessageRecord, CafleetError> {
     let now = format_utc(now_utc());
     let updated = conn
         .query_row(

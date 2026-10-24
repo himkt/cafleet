@@ -214,7 +214,8 @@ fn a_failed_preview_preserves_the_committed_message_and_pending_stamp() {
 }
 
 #[test]
-fn a_notification_stamp_failure_keeps_pending_state_and_reports_uncertainty() {
+fn a_notification_stamp_failure_survives_a_new_wait_without_resubmission() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     fixture.cli.sqlite().execute_batch("CREATE TRIGGER reject_notification_stamp BEFORE UPDATE OF notified_at ON messages
         WHEN NEW.notified_at IS NOT NULL BEGIN SELECT RAISE(ABORT, 'injected notification stamp failure'); END;").unwrap();
@@ -230,6 +231,32 @@ fn a_notification_stamp_failure_keeps_pending_state_and_reports_uncertainty() {
         error.contains("injected notification stamp failure"),
         "{error}"
     );
+    assert!(
+        fixture
+            .cli
+            .sqlite()
+            .query_row(
+                "SELECT preview_started_at IS NOT NULL FROM messages WHERE message_id=?1",
+                [id],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap()
+    );
+    for _ in 0..2 {
+        let waiting = fixture.cli.run(&[
+            "message",
+            "wait",
+            &fixture.director.to_string(),
+            "--timeout",
+            "1",
+            "--json",
+        ]);
+        let result = payload(&waiting);
+        let errors = result["notification_errors"].as_array().unwrap();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0]["message_id"], id);
+        assert_eq!(errors[0]["delivery"], "uncertain");
+    }
     assert_eq!(
         fixture
             .cli
@@ -237,7 +264,8 @@ fn a_notification_stamp_failure_keeps_pending_state_and_reports_uncertainty() {
             .iter()
             .filter(|line| line.ends_with(" Enter"))
             .count(),
-        1
+        1,
+        "fresh waits preserve the durable claim and never inject another preview"
     );
 }
 

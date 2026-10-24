@@ -100,7 +100,10 @@ fn setup_initializes_an_empty_sqlite_file_and_is_idempotent() {
             |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
         )
         .unwrap(),
-        (1, 1)
+        (
+            i64::from(cafleet::db::head_version()),
+            i64::from(cafleet::db::head_version())
+        )
     );
     drop(conn);
     let tables = cli.asset_rows();
@@ -203,7 +206,7 @@ fn identity_is_checked_before_an_otherwise_valid_ledger() {
         let conn = cli.sqlite();
         conn.pragma_update(None, "application_id", identity)
             .unwrap();
-        conn.execute("UPDATE refinery_schema_history SET version=99", [])
+        conn.execute("UPDATE refinery_schema_history SET version=99 WHERE version=(SELECT MAX(version) FROM refinery_schema_history)", [])
             .unwrap();
         drop(conn);
         assert_format_rejected(&cli, &cli.db_path(), &["setup"]);
@@ -340,7 +343,7 @@ fn ahead_current_schema_preserves_both_setup_write_paths() {
     let cli = Cli::new();
     current_fixture(&cli);
     cli.sqlite()
-        .execute("UPDATE refinery_schema_history SET version=version+1", [])
+        .execute("UPDATE refinery_schema_history SET version=version+1 WHERE version=(SELECT MAX(version) FROM refinery_schema_history)", [])
         .unwrap();
     let database = std::fs::read(cli.db_path()).unwrap();
     let assets = asset_snapshot(&cli);

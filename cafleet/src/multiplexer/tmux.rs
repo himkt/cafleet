@@ -194,7 +194,7 @@ impl TmuxMultiplexer {
     }
 
     pub fn send_prompt(&self, target_pane_id: &str, text: &str) -> Result<(), MultiplexerError> {
-        if text.trim().is_empty() || text.chars().any(|ch| ch <= '\u{1f}' || ch == '\u{7f}') {
+        if !crate::input::valid_input(text) {
             return Err(MultiplexerError::new(
                 "send_prompt: text must be one non-empty line without control characters",
             ));
