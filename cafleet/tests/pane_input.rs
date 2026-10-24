@@ -1208,8 +1208,16 @@ fn preview_prewrite_database_revalidation_obeys_the_remaining_attempt_budget() {
     let args = fixture.action("preview");
     let refs: Vec<_> = args.iter().map(String::as_str).collect();
     let child = fixture.cli.spawn(&refs);
-    std::thread::sleep(Duration::from_millis(400));
     let writer = fixture.cli.sqlite();
+    while writer
+        .query_row("SELECT count(*) FROM messages", [], |row| row.get::<_, i64>(0))
+        .unwrap()
+        == 0
+    {
+        assert!(start.elapsed() < Duration::from_secs(5), "the send never committed");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    std::thread::sleep(Duration::from_millis(200));
     let journal: String = writer
         .query_row("PRAGMA journal_mode", [], |row| row.get(0))
         .unwrap();

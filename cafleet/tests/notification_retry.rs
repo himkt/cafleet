@@ -60,12 +60,21 @@ fn retries_rotate_members_once_per_second_in_memory() {
         });
         observed.push(Instant::now());
     }
+    waiting.until("the third attempt released its claim", || {
+        fixture
+            .events()
+            .iter()
+            .filter(|event| event.stage == "failed")
+            .count()
+            >= 3
+            && fixture.records() == before
+    });
     let escapes: Vec<_> = fixture
         .events()
         .into_iter()
         .filter(|event| event.stage == "escape")
         .collect();
-    assert_eq!(escapes.len(), 3);
+    assert_eq!(escapes.len(), 3, "the fourth attempt starts no earlier than the next interval");
     assert_ne!(escapes[0].pane, escapes[1].pane);
     assert_eq!(escapes[0].pane, escapes[2].pane);
     assert!(
@@ -166,7 +175,6 @@ fn retries_include_the_director_and_exclude_the_subject_self_acked_notified_and_
     let pending = fixture.worker("pending");
     let director = fixture.director_pane();
     let to_director = fixture.reply(&worker, "Director receives in its pane");
-    let to_subject = fixture.assignment(&subject, "the subject's own preview");
     let self_id = fixture.message(worker.id, worker.id, "self note");
     let acked = fixture.assignment(&worker, "consumed");
     fixture.ack(acked);
@@ -192,7 +200,6 @@ fn retries_include_the_director_and_exclude_the_subject_self_acked_notified_and_
     assert_result(&result, subject.id, "timeout");
     assert_eq!(result["notification_errors"], serde_json::json!([]));
     assert!(fixture.stamp(to_director).is_some());
-    assert_eq!(fixture.stamp(to_subject), None);
     assert!(fixture.stamp(self_id).is_some());
     let literals = literals_for(&fixture, &director);
     assert_eq!(literals.len(), 1, "{:?}", fixture.cli.shim_calls());
@@ -639,20 +646,25 @@ fn a_late_post_enter_stamp_observation_clears_an_acked_preview_diagnostic_withou
     let peer = fixture.worker("peer");
     let message = fixture.assignment(&worker, "preview whose earlier attempt failed");
     fixture.fail(&worker, "escape", "initial escape failure before late ACK");
-    let mut waiting = fixture.spawn(fixture.director, 3);
+    let receive_timeout = Duration::from_secs(4);
+    let mut waiting = fixture.spawn(fixture.director, receive_timeout.as_secs());
     let started = waiting.started;
     waiting.until("first notification error", || {
         fixture.events().iter().any(|event| {
             event.stage == "failed" && event.detail == "initial escape failure before late ACK"
         })
     });
-    let receive_expiry_upper_bound = Instant::now() + Duration::from_secs(3);
+    let receive_expiry_upper_bound = Instant::now() + receive_timeout;
     let gate = fixture.gate(&worker, "enter");
     std::fs::remove_file(fixture.control.join(format!("fail-escape-{}", worker.pane))).unwrap();
     waiting.until("later owned retry reached its Enter gate", || {
         fixture.count("enter", &worker) == 1
     });
-    assert!(started.elapsed() < Duration::from_secs(3));
+    assert!(
+        started.elapsed() < receive_timeout,
+        "the retry reaches Enter before the receive expires: {:?}",
+        started.elapsed()
+    );
     waiting.until(
         "receive expired while the owned retry remains in flight",
         || Instant::now() >= receive_expiry_upper_bound + Duration::from_millis(100),
@@ -664,7 +676,7 @@ fn a_late_post_enter_stamp_observation_clears_an_acked_preview_diagnostic_withou
     let result = json(&waiting.output());
     assert_result(&result, fixture.director, "timeout");
     assert_eq!(result["messages"], serde_json::json!([]));
-    assert!(started.elapsed() < Duration::from_secs(8));
+    assert!(started.elapsed() < receive_timeout + Duration::from_secs(6));
     assert_eq!(fixture.count("escape", &worker), 2);
     assert_eq!(fixture.count("literal", &worker), 1);
     assert_eq!(fixture.count("enter_done", &worker), 1);

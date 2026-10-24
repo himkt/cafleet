@@ -33,7 +33,7 @@ pub const CAPTURE_FAILS: &str = "CAPTURE-FAILS";
 // call count is read back from its own log with shell builtins only.
 //
 // `CAFLEET_TEST_TMUX_BLOCK` (`literal` or `split-window`) makes the matching
-// call create `$CAFLEET_TEST_TMUX_RELEASE.blocked` and spin on builtins until
+// call create `$CAFLEET_TEST_TMUX_RELEASE.blocked` and poll every 10 ms until
 // `$CAFLEET_TEST_TMUX_RELEASE` exists.
 const TMUX_SHIM: &str = r#"#!/bin/sh
 printf '%s\n' "$*" >> "$CAFLEET_TEST_TMUX_LOG"
@@ -41,7 +41,7 @@ if [ -n "$CAFLEET_TEST_TMUX_BLOCK" ]; then
     case "$CAFLEET_TEST_TMUX_BLOCK:$1: $* " in
         literal:send-keys:*" -l "*|split-window:split-window:*)
             : > "$CAFLEET_TEST_TMUX_RELEASE.blocked"
-            while [ ! -e "$CAFLEET_TEST_TMUX_RELEASE" ]; do :; done
+            while [ ! -e "$CAFLEET_TEST_TMUX_RELEASE" ]; do /bin/sleep 0.01; done
             ;;
     esac
 fi

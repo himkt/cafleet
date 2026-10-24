@@ -12,10 +12,13 @@ struct Fixture {
     director: i64,
     worker: i64,
     pane: String,
+    // Every case races the five-second pane-input budget, so cases run one at a time.
+    _test_resource: std::sync::MutexGuard<'static, ()>,
 }
 
 impl Fixture {
     fn new() -> Self {
+        let test_resource = common::process_test_resource_guard();
         let cli = Cli::new();
         let (fleet, director) = cli.seeded_fleet();
         let worker = cli.seed_member(fleet, "worker");
@@ -26,6 +29,7 @@ impl Fixture {
             director,
             worker,
             pane,
+            _test_resource: test_resource,
         }
     }
 
@@ -96,6 +100,28 @@ impl Fixture {
                 |row| row.get(0),
             )
             .unwrap()
+    }
+
+    fn wait_for_id_of(&self, body: &str) -> i64 {
+        let started = Instant::now();
+        loop {
+            let found: Option<i64> = rusqlite::OptionalExtension::optional(
+                self.cli.sqlite().query_row(
+                    "SELECT message_id FROM messages WHERE text=?1",
+                    [body],
+                    |row| row.get(0),
+                ),
+            )
+            .unwrap();
+            if let Some(id) = found {
+                return id;
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(5),
+                "the send never committed {body:?}"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     fn pending(&self, body: &str) -> i64 {
@@ -239,14 +265,13 @@ fn budget_exhaustion_leaves_later_messages_pending_without_a_diagnostic() {
 
 #[test]
 fn a_message_acked_between_claim_and_stamp_counts_as_sent_and_the_next_line_has_no_escape() {
-    let _test_resource = common::process_test_resource_guard();
     let mut fixture = Fixture::new();
     fixture.cli.block_tmux("literal");
     let child = fixture.spawn_send("acked while typing");
     fixture.cli.wait_for_tmux_block();
     let first = fixture.id_of("acked while typing");
-    let ack = fixture.cli.run(&["message", "ack", &first.to_string()]);
-    assert_eq!(code(&ack), 0, "{}", stderr(&ack));
+    let mut conn = cafleet::db::connect(&fixture.cli.db_url()).unwrap();
+    cafleet::broker::ack_message(&mut conn, first).unwrap();
     let second = fixture.pending("arrived while typing");
     fixture.cli.release_tmux();
     let output = wait_output(child);
@@ -272,11 +297,11 @@ fn a_message_acked_between_claim_and_stamp_counts_as_sent_and_the_next_line_has_
 
 #[test]
 fn a_member_deregistered_during_the_lock_wait_ends_without_input() {
-    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let lock = fixture.cli.lock_pane(&fixture.pane);
     let child = fixture.spawn_send("target leaves");
-    std::thread::sleep(Duration::from_millis(400));
+    fixture.wait_for_id_of("target leaves");
+    std::thread::sleep(Duration::from_millis(200));
     fixture
         .cli
         .sqlite()
@@ -295,7 +320,6 @@ fn a_member_deregistered_during_the_lock_wait_ends_without_input() {
 
 #[test]
 fn a_lock_released_within_the_wait_still_delivers() {
-    let _test_resource = common::process_test_resource_guard();
     for delay in [Duration::from_millis(400), Duration::from_millis(1250)] {
         let fixture = Fixture::new();
         let lock = fixture.cli.lock_pane(&fixture.pane);
@@ -313,7 +337,6 @@ fn a_lock_released_within_the_wait_still_delivers() {
 
 #[test]
 fn a_lock_still_busy_at_the_reserved_deadline_reports_the_lock_busy_diagnostic() {
-    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let _lock = fixture.cli.lock_pane(&fixture.pane);
     let started = Instant::now();
@@ -332,7 +355,6 @@ fn a_lock_still_busy_at_the_reserved_deadline_reports_the_lock_busy_diagnostic()
 
 #[test]
 fn the_lock_busy_diagnostic_names_the_oldest_pending_preview() {
-    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let older = fixture.pending("older");
     let _lock = fixture.cli.lock_pane(&fixture.pane);
@@ -347,12 +369,10 @@ fn the_lock_busy_diagnostic_names_the_oldest_pending_preview() {
 
 #[test]
 fn a_concurrent_drainer_settling_every_message_during_the_lock_wait_reports_nothing() {
-    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let lock = fixture.cli.lock_pane(&fixture.pane);
     let child = fixture.spawn_send("delivered by another sender");
-    std::thread::sleep(Duration::from_millis(400));
-    let id = fixture.id_of("delivered by another sender");
+    let id = fixture.wait_for_id_of("delivered by another sender");
     fixture
         .cli
         .sqlite()
@@ -425,7 +445,6 @@ fn a_failed_escape_preserves_the_committed_message_and_releases_its_claim() {
 
 #[test]
 fn a_notification_stamp_failure_survives_a_new_wait_without_resubmission() {
-    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     fixture.cli.sqlite().execute_batch("CREATE TRIGGER reject_notification_stamp BEFORE UPDATE OF notified_at ON messages
         WHEN NEW.notified_at IS NOT NULL BEGIN SELECT RAISE(ABORT, 'injected notification stamp failure'); END;").unwrap();
@@ -614,7 +633,6 @@ fn terminated_by_sigterm(status: std::process::ExitStatus) -> bool {
 
 #[test]
 fn a_sigterm_during_the_literal_write_takes_effect_after_the_notification_stamp() {
-    let _test_resource = common::process_test_resource_guard();
     let mut fixture = Fixture::new();
     fixture.cli.block_tmux("literal");
     let mut child = fixture.spawn_send("deliver before terminating");
@@ -646,7 +664,6 @@ fn a_sigterm_during_the_literal_write_takes_effect_after_the_notification_stamp(
 
 #[test]
 fn a_sigterm_outside_any_span_terminates_at_once() {
-    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let mut child = fixture.cli.spawn(&[
         "message",
@@ -674,7 +691,6 @@ fn a_sigterm_outside_any_span_terminates_at_once() {
 
 #[test]
 fn a_sigterm_during_member_create_takes_effect_after_the_registry_commit() {
-    let _test_resource = common::process_test_resource_guard();
     let mut fixture = Fixture::new();
     fixture.cli.block_tmux("split-window");
     let mut child = fixture.cli.spawn(&[
