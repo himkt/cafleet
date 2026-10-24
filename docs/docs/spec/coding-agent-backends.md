@@ -65,7 +65,7 @@ Per-backend capabilities:
 
 ## Claude {#claude}
 
-A separate evaluator checks the session condition against the transcript (Claude Code 2.1.296, checked 2026-10-22). Native background work defers evaluation and returns a host result; external panes supply evidence when the Director reads broker/pane state. An unmet condition can immediately start another turn without native background work; consecutive tool-free stops reach the configured block cap, eight by default. Retain a finite receive task handle while external work remains.
+A separate evaluator checks the session condition against the transcript (Claude Code 2.1.296, checked 2026-10-22). Native background work defers evaluation and returns a host result; external panes supply evidence when the Director reads broker/pane state. An unmet condition can immediately start another turn without native background work; consecutive tool-free stops reach the configured block cap, eight by default. While a goal is active, each continued Director turn with outstanding delegated work ends with the bounded foreground wait `cafleet message wait <director-member-id> --timeout 30 --json`.
 
 Native composer controls act at the beginning of submitted input. A local probe merged control text into a concurrent preview, so serialize complete input and inspect capture evidence. Native shell probes displayed command/stdout/stderr followed by a model turn; the trigger and any second permission check were not established. The Director authorizes each routed command under its host rules.
 
@@ -89,7 +89,7 @@ rules on its spawn command line, so the member does not depend on any
 
 | Member | Rules |
 |---|---|
-| Broker capability | `Bash(cafleet message *)`, including finite receiving |
+| Broker capability | `Bash(cafleet message *)`, including `message wait` |
 | Work capability | Host-configured read/edit/command rules |
 
 `--allowedTools` takes several values, so it sits before `--name`, which ends
@@ -161,7 +161,7 @@ Director to make the edit.
 
 ## Codex {#codex}
 
-The objective belongs to the thread, with model-callable lifecycle tools and optional token-budget accounting (Codex CLI 0.162.1, checked 2026-10-22). A two-turn tool-bearing probe observed continuation and model-reported completion. Preserve the user's objective, activation authority and budget; retain live tool/session handles and collect explicit broker/pane evidence.
+The objective belongs to the thread, with model-callable lifecycle tools and optional token-budget accounting (Codex CLI 0.162.1, checked 2026-10-22). A two-turn tool-bearing probe observed continuation and model-reported completion. Preserve the user's objective, activation authority and budget; retain live tool/session handles and collect explicit broker/pane evidence. While a thread objective is active, each continued Director turn with outstanding delegated work ends with the bounded foreground wait `cafleet message wait <director-member-id> --timeout 30 --json`.
 
 A native shell probe displayed the actual command, exit code, duration and output. Installed protocol metadata describes unsandboxed dispatch while public CLI guidance describes current approval/sandbox settings; the TUI's effective boundary and protocol path were not established. Treat native input as a Director-authorized action rather than assume a second member-tool permission check.
 

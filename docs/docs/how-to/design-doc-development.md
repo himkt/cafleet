@@ -32,7 +32,7 @@ implementing the approved work.
 
 ## Watch the team work
 
-Read durable coordination with message poll/show and inspect the team’s visible panes with member/fleet capture. The Director owns finite receiving, evidence checks and continuation until delegated work resolves.
+Read durable coordination with message poll/show and inspect the team’s visible panes with member/fleet capture. The Director wakes on delivered replies and owns evidence checks and continuation until delegated work resolves.
 
 ## Invocation syntax
 

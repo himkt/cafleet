@@ -29,7 +29,7 @@ Columns are `member_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT`, `fleet_id IN
 
 Required columns are `message_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT`, `from_member_id` and `to_member_id` integer references to members with delete restricted, and text `created_at`, `status_state`, `status_timestamp`, `text`. `notified_at` and `preview_started_at` are nullable text. Indexes cover `(to_member_id, status_timestamp)` and `(from_member_id, status_timestamp)`.
 
-`status_state` decodes as `input_required` or `completed`. Pending previews require an active ordinary recipient with a concrete pane, an unacknowledged non-self row and null `notified_at`. Select automatic input from rows with null `preview_started_at`, ordered by creation time/message ID; retain claimed rows as diagnostics while later messages remain eligible. Persist `preview_started_at` immediately before possible input under the pane lock. Retry its release after a confirmed no-input failure within the absolute completion budget, retaining `not_sent` and the storage cause on failure. Preserve unresolved claims across process restarts so their exact messages remain suspended. Stamp `notified_at` only after successful complete input while holding the pane lock and revalidating eligibility. The public [message record](message-envelope.md#persisted-shape) omits both internal notification fields.
+`status_state` decodes as `input_required` or `completed`. Pending previews require an active recipient with a concrete pane, the Director included, an unacknowledged non-self row and null `notified_at`. Select automatic input from rows with null `preview_started_at`, ordered by creation time/message ID; retain claimed rows as diagnostics while later messages remain eligible. Persist `preview_started_at` immediately before possible input under the pane lock. Retry its release after a confirmed no-input failure within the absolute completion budget, retaining `not_sent` and the storage cause on failure. Preserve unresolved claims across process restarts so their exact messages remain suspended. Stamp `notified_at` only after successful complete input while holding the pane lock and revalidating eligibility. Delivery leaves `status_state` unchanged: a delivered message stays `input_required` until the recipient ACKs it. Every message drained in one lock hold follows the same claim and stamp rules. The public [message record](message-envelope.md#persisted-shape) omits both internal notification fields.
 
 ### asset_installs
 
@@ -45,11 +45,11 @@ Required text columns are `coding_agent`, `path`, `cafleet_version` and `install
 | ACK | Transition an existing `input_required` row to `completed` and stamp consumption |
 | Fan-out | The Director sends individually, retaining each committed ID and reporting each recipient failure |
 
-Consumed questions and deferred approvals are ACKed before another wait; the Director retains unfinished actions in host-owned state.
+Consumed questions and deferred approvals are ACKed before the Director ends its turn; the Director retains unfinished actions in host-owned state.
 
 ## Query and activity contracts
 
-Roster/list queries filter active members in live fleets. Activity is the maximum sent, received and ACK timestamp; `idle` is elapsed seconds from the latest known activity or null when none exists. Detailed views retain registration/description/placement data. Fleet soft deletion deregisters members and retains messages; member deletion protects the root Director. Placement mutations acquire the same input locks as writers.
+Roster/list queries filter active members in live fleets. Activity is the maximum sent, received and ACK timestamp; `idle` is elapsed seconds from the latest known activity or null when none exists. `unconfirmed_previews` selects, per member and ordered by creation time/message ID, the incoming `input_required` messages with non-null `preview_started_at` and null `notified_at`. Detailed views retain registration/description/placement data. Fleet soft deletion deregisters members and retains messages; member deletion protects the root Director. Placement mutations acquire the same input locks as writers.
 
 ## Format and connection invariants
 
