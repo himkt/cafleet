@@ -28,8 +28,20 @@ pub const CAPTURE_FAILS: &str = "CAPTURE-FAILS";
 // call takes the Nth letter (`F` fails, anything else succeeds) and calls past
 // the end repeat the last letter. The shim has no PATH beyond itself, so the
 // call count is read back from its own log with shell builtins only.
+//
+// `CAFLEET_TEST_TMUX_BLOCK` (`literal` or `split-window`) makes the matching
+// call create `$CAFLEET_TEST_TMUX_RELEASE.blocked` and spin on builtins until
+// `$CAFLEET_TEST_TMUX_RELEASE` exists.
 const TMUX_SHIM: &str = r#"#!/bin/sh
 printf '%s\n' "$*" >> "$CAFLEET_TEST_TMUX_LOG"
+if [ -n "$CAFLEET_TEST_TMUX_BLOCK" ]; then
+    case "$CAFLEET_TEST_TMUX_BLOCK:$1: $* " in
+        literal:send-keys:*" -l "*|split-window:split-window:*)
+            : > "$CAFLEET_TEST_TMUX_RELEASE.blocked"
+            while [ ! -e "$CAFLEET_TEST_TMUX_RELEASE" ]; do :; done
+            ;;
+    esac
+fi
 if [ -n "$CAFLEET_TEST_TMUX_FAIL" ] && [ "$1" = "$CAFLEET_TEST_TMUX_FAIL" ]; then
     echo "forced failure" >&2
     exit 1
@@ -119,6 +131,31 @@ impl Cli {
     /// of [`CAPTURE_FAILS`] makes the capture fail instead.
     pub fn set_pane_capture(&self, pane: &str, content: &str) {
         std::fs::write(self.capture_dir.join(pane), content).unwrap();
+    }
+
+    /// Make every later `kind` call (`literal` for `send-keys -l`, or
+    /// `split-window`) block until [`Cli::release_tmux`].
+    pub fn block_tmux(&mut self, kind: &str) {
+        let release = self.home.path().join("tmux-release");
+        self.set_env("CAFLEET_TEST_TMUX_BLOCK", kind);
+        self.set_env("CAFLEET_TEST_TMUX_RELEASE", release.to_str().unwrap());
+    }
+
+    /// Wait until a blocked fake `tmux` call has started.
+    pub fn wait_for_tmux_block(&self) {
+        let marker = self.home.path().join("tmux-release.blocked");
+        let started = std::time::Instant::now();
+        while !marker.exists() {
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(5),
+                "the fake tmux call never blocked"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    pub fn release_tmux(&self) {
+        std::fs::write(self.home.path().join("tmux-release"), "").unwrap();
     }
 
     /// Set an extra environment variable (e.g. a backend config-location

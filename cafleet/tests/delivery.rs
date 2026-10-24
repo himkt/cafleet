@@ -343,6 +343,146 @@ fn pending_placement_persists_without_capture_or_notification_stamp() {
     assert!(fixture.cli.shim_calls().is_empty());
 }
 
+fn terminate(child: &std::process::Child) {
+    nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(i32::try_from(child.id()).unwrap()),
+        nix::sys::signal::Signal::SIGTERM,
+    )
+    .unwrap();
+}
+
+fn wait_within(
+    child: &mut std::process::Child,
+    limit: std::time::Duration,
+) -> std::process::ExitStatus {
+    let started = std::time::Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            return status;
+        }
+        assert!(
+            started.elapsed() < limit,
+            "the process outlived {limit:?}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+fn terminated_by_sigterm(status: std::process::ExitStatus) -> bool {
+    use std::os::unix::process::ExitStatusExt;
+    status.signal() == Some(nix::sys::signal::Signal::SIGTERM as i32)
+}
+
+#[test]
+fn a_sigterm_during_the_literal_write_takes_effect_after_the_notification_stamp() {
+    let _test_resource = common::process_test_resource_guard();
+    let mut fixture = Fixture::new();
+    fixture.cli.block_tmux("literal");
+    let mut child = fixture.cli.spawn(&[
+        "message",
+        "send",
+        "--from-member-id",
+        &fixture.director.to_string(),
+        "--to-member-id",
+        &fixture.worker.to_string(),
+        "deliver before terminating",
+        "--json",
+    ]);
+    fixture.cli.wait_for_tmux_block();
+    terminate(&child);
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    assert!(
+        child.try_wait().unwrap().is_none(),
+        "the SIGTERM is deferred while pane input is in flight"
+    );
+    fixture.cli.release_tmux();
+    let status = wait_within(&mut child, std::time::Duration::from_secs(10));
+    assert!(terminated_by_sigterm(status), "{status:?}");
+    let (id, notified): (i64, Option<String>) = fixture
+        .cli
+        .sqlite()
+        .query_row(
+            "SELECT message_id, notified_at FROM messages WHERE text='deliver before terminating'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert!(notified.is_some(), "message {id} is stamped before the exit");
+    assert!(
+        fixture
+            .cli
+            .shim_calls()
+            .iter()
+            .any(|line| line == &format!("send-keys -t {} Enter", fixture.pane)),
+        "{:?}",
+        fixture.cli.shim_calls()
+    );
+}
+
+#[test]
+fn a_sigterm_outside_any_span_terminates_at_once() {
+    let _test_resource = common::process_test_resource_guard();
+    let fixture = Fixture::new();
+    let mut child = fixture.cli.spawn(&[
+        "message",
+        "wait",
+        &fixture.director.to_string(),
+        "--timeout",
+        "30",
+        "--json",
+    ]);
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    assert!(child.try_wait().unwrap().is_none(), "the wait is still sleeping");
+    let signalled = std::time::Instant::now();
+    terminate(&child);
+    let status = wait_within(&mut child, std::time::Duration::from_secs(5));
+    assert!(terminated_by_sigterm(status), "{status:?}");
+    assert!(
+        signalled.elapsed() < std::time::Duration::from_secs(1),
+        "{:?}",
+        signalled.elapsed()
+    );
+}
+
+#[test]
+fn a_sigterm_during_member_create_takes_effect_after_the_registry_commit() {
+    let _test_resource = common::process_test_resource_guard();
+    let mut fixture = Fixture::new();
+    fixture.cli.block_tmux("split-window");
+    let mut child = fixture.cli.spawn(&[
+        "member",
+        "create",
+        "--fleet-id",
+        &fixture.fleet.to_string(),
+        "--name",
+        "spawned",
+        "--description",
+        "test member",
+        "wait for the Director",
+    ]);
+    fixture.cli.wait_for_tmux_block();
+    terminate(&child);
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    assert!(
+        child.try_wait().unwrap().is_none(),
+        "the SIGTERM is deferred between the pane spawn and the registry commit"
+    );
+    fixture.cli.release_tmux();
+    let status = wait_within(&mut child, std::time::Duration::from_secs(10));
+    assert!(terminated_by_sigterm(status), "{status:?}");
+    let pane: Option<String> = fixture
+        .cli
+        .sqlite()
+        .query_row(
+            "SELECT p.mux_pane_id FROM members m JOIN member_placements p ON p.member_id=m.member_id
+             WHERE m.fleet_id=?1 AND m.name='spawned' AND m.status='active'",
+            [fixture.fleet],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(pane.as_deref(), Some("%7"), "the spawned pane is registered");
+}
+
 #[test]
 fn preview_sanitization_keeps_stored_text_exact_and_native_commands_separate() {
     let fixture = Fixture::new();

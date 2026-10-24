@@ -510,4 +510,116 @@ mod tests {
             .unwrap();
         assert_eq!(current, "changed");
     }
+
+    mod notification_line_tests {
+        use super::super::{INLINE_BODY_LIMIT, notification_line};
+        use crate::broker::records::{MessageRecord, MessageStatus};
+
+        const TS: &str = "2026-10-24T09:00:00.000000+00:00";
+        const CLAUSES: &str = "[cafleet] Resume your work if something was still running. [cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.";
+
+        fn record(text: &str) -> MessageRecord {
+            MessageRecord {
+                message_id: 57,
+                from_member_id: 15,
+                to_member_id: 16,
+                created_at: TS.into(),
+                status: MessageStatus::InputRequired,
+                status_timestamp: TS.into(),
+                text: text.into(),
+            }
+        }
+
+        fn line_body(text: &str) -> String {
+            let line = notification_line(&record(text));
+            let prefix = format!("[cafleet msg 57 from 15 {TS}] ");
+            let suffix = format!(" {CLAUSES}");
+            assert!(line.starts_with(&prefix), "{line}");
+            assert!(line.ends_with(&suffix), "{line}");
+            line[prefix.len()..line.len() - suffix.len()].to_owned()
+        }
+
+        fn pointer(stored_chars: usize) -> String {
+            format!(
+                "Body is {stored_chars} characters; run cafleet message show 57 --json to read it."
+            )
+        }
+
+        #[test]
+        fn the_inline_limit_is_4000() {
+            assert_eq!(INLINE_BODY_LIMIT, 4000);
+        }
+
+        #[test]
+        fn the_line_matches_the_specified_example() {
+            assert_eq!(
+                notification_line(&record("ready (doc)\nsee the reviewer notes")),
+                format!("[cafleet msg 57 from 15 {TS}] ready (doc)⏎see the reviewer notes {CLAUSES}")
+            );
+        }
+
+        #[test]
+        fn a_single_line_body_is_inline_unchanged() {
+            assert_eq!(line_body("assignment"), "assignment");
+        }
+
+        #[test]
+        fn multiline_tab_and_control_characters_are_folded_visibly() {
+            assert_eq!(
+                line_body("a\r\nb\nc\rd\tx\x1b\x7f"),
+                "a⏎b⏎c⏎d␉x\\x1b\\x7f"
+            );
+            let line = notification_line(&record("! printf danger\r\nnext\u{0}"));
+            assert!(crate::input::valid_input(&line), "{line:?}");
+        }
+
+        #[test]
+        fn a_folded_body_of_exactly_4000_characters_is_inline() {
+            let body = "x".repeat(4000);
+            assert_eq!(line_body(&body), body);
+        }
+
+        #[test]
+        fn a_folded_body_of_4001_characters_becomes_the_show_pointer() {
+            assert_eq!(line_body(&"x".repeat(4001)), pointer(4001));
+        }
+
+        #[test]
+        fn the_limit_counts_unicode_scalar_values_not_bytes() {
+            let body = "é".repeat(4000);
+            assert_eq!(line_body(&body), body);
+            assert_eq!(line_body(&"é".repeat(4001)), pointer(4001));
+        }
+
+        #[test]
+        fn the_limit_applies_to_the_folded_body_and_the_pointer_counts_stored_text() {
+            let crlf = "\r\n".repeat(4000);
+            assert_eq!(
+                line_body(&crlf),
+                "⏎".repeat(4000),
+                "8000 stored characters fold to 4000"
+            );
+            let controls = "\u{1}".repeat(1001);
+            assert_eq!(
+                line_body(&controls),
+                pointer(1001),
+                "1001 stored characters fold to 4004"
+            );
+        }
+
+        #[test]
+        fn inline_and_pointer_lines_both_carry_both_clauses() {
+            for text in ["short", &"y".repeat(5000)] {
+                let line = notification_line(&record(text));
+                assert!(line.ends_with(&format!(" {CLAUSES}")), "{line}");
+                assert_eq!(line.matches("[cafleet] ").count(), 2, "{line}");
+            }
+        }
+
+        #[test]
+        fn the_line_ignores_the_cli_text_length_limit() {
+            let body = "z".repeat(3999);
+            assert_eq!(line_body(&body), body);
+        }
+    }
 }
