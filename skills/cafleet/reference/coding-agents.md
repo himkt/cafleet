@@ -12,7 +12,7 @@ Resolve the five runtime placeholders from Runtime bindings for the relevant ope
 
 For example, a Codex Director selecting an OpenCode reviewer uses the OpenCode catalog and reviewer defaults with the Codex decision surface and local execution tools. A Claude Director inspecting Codex applies the target backend’s capture cues. User overrides and selection decisions follow [Director model-selection policy](../roles/director.md#model-selection).
 
-Model catalogs, their provenance/context notes, canonical Role defaults, and shared freshness metadata are maintained exclusively by the `cafleet-model-list-refresh` skill from the official sources in each backend section, refreshed at least every 30 days (last refreshed: 2026-10-20). Runtime bindings, bound runtime notes, pane cues, and worked resolutions belong to runtime documentation maintenance. The freshness date applies to model data; structural reorganization preserves that date.
+Model catalogs, their provenance/context notes, canonical Role defaults, and shared freshness metadata are maintained exclusively by the `cafleet-model-list-refresh` skill from the official sources in each backend section, refreshed at least every 30 days (last refreshed: 2026-10-24). Runtime bindings, bound runtime notes, pane cues, and worked resolutions belong to runtime documentation maintenance. The freshness date applies to model data; structural reorganization preserves that date.
 
 Prices are standard provider USD rates per MTok and are planning estimates, not an invoice guarantee. Each backend's catalog is ordered most → least capable as reviewed judgment. Context windows are listed for the `claude` backend, whose model strings are the ones a context-window suffix can apply to. Selection policy, including cost efficiency mode and reviewer/member rules, lives in [Director model selection](../roles/director.md#model-selection).
 
@@ -167,23 +167,120 @@ Follow [Director evidence handling](supervision.md#idle-semantics). An empty com
 
 ### Model catalog
 
-A curated subset of the [OpenCode Console](https://opencode.ai/v2/docs/console/models/)
-catalog; the `opencode/` prefix is part of the `--model` value. Any other
-`<provider-id>/<model-id>` value remains a manual spawn with explicit
-`--coding-agent opencode --model` flags on `member create`. A price of
-0.00 is an explicitly free model, currently offered by OpenCode Console for
-a limited time.
+The table lists every model in the [OpenCode Console](https://opencode.ai/v2/docs/console/models/)
+catalog except models past their published deprecation date; the `opencode/`
+prefix is part of the `--model` value. Any other `<provider-id>/<model-id>`
+value remains a manual spawn with explicit `--coding-agent opencode --model`
+flags on `member create`. A price of `0.00` marks an explicitly free rate;
+models with both rates free are offered by OpenCode Console for a limited time.
+A Claude or GPT row here gives its OpenCode spawn token; a bare model-name
+reference selects the native backend under [Director model selection](../roles/director.md#model-selection).
 
 | Model | Class | Input $/MTok | Output $/MTok |
 |---|---|---|---|
+| opencode/claude-fable-5-1 | Mythos-class frontier; highest capability on every dimension | 10.00 | 50.00 |
+| opencode/gpt-6-astra | Latest frontier tier across code, apps, and research; strongest reviewer | 10.00 | 50.00 |
+| opencode/claude-fable-5 | Prior Mythos-class generation at the same price tier | 10.00 | 50.00 |
+| opencode/claude-opus-5-5 | Everyday frontier; strong coding, planning, and review | 4.00 | 20.00 |
+| opencode/gpt-6.1-sol | Complex coding and agentic workflows tier for everyday work | 2.00 | 10.00 |
+| opencode/gemini-4-argon | Frontier general tier for complex coding and multimodal work | 2.00 | 10.00 |
+| opencode/claude-opus-5 | Prior frontier generation at a higher price | 5.00 | 25.00 |
+| opencode/gpt-6-sol | Prior Sol generation for complex coding and agentic work | 2.00 | 10.00 |
+| opencode/muse-wonder-1.0 | Strong general tier for complex coding and reasoning | 4.00 | 20.00 |
+| opencode/gpt-5.6-sol | Prior high-capability Sol tier for demanding coding work | 4.00 | 20.00 |
+| opencode/claude-opus-4-8 | Earlier Opus tier for demanding coding and review | 5.00 | 25.00 |
+| opencode/kimi-k3 | Strong agentic tier for complex coding workflows | 3.00 | 15.00 |
+| opencode/grok-4.7 | Strong general tier for coding and reasoning | 2.00 | 6.00 |
+| opencode/gpt-5.5-pro | Earlier high-compute tier for demanding reasoning | 30.00 | 180.00 |
+| opencode/claude-opus-4-7 | Earlier Opus tier for complex engineering work | 5.00 | 25.00 |
+| opencode/claude-sonnet-5-5 | Efficient mid tier for routine work | 2.00 | 10.00 |
+| opencode/gpt-5.6-terra | Prior balanced tier for coding and reasoning | 2.00 | 12.00 |
+| opencode/claude-opus-4-6 | Earlier Opus tier for complex coding tasks | 5.00 | 25.00 |
+| opencode/gpt-5.5 | Earlier general tier for coding and agentic work | 5.00 | 30.00 |
+| opencode/gpt-5.4-pro | Earlier high-compute tier for deep reasoning | 30.00 | 180.00 |
+| opencode/gemini-3.8-flash | Fast general tier for coding and multimodal tasks | 1.50 | 7.50 |
+| opencode/grok-4.6 | Earlier strong general tier for coding and reasoning | 2.00 | 6.00 |
+| opencode/gpt-5.4 | Earlier general tier for coding and tool use | 2.50 | 15.00 |
+| opencode/claude-sonnet-5 | Prior mid-tier generation at the same price | 2.00 | 10.00 |
+| opencode/glm-5.3 | Strong general coding tier with agentic workflows | 1.40 | 4.40 |
+| opencode/qwen3.8-max | Strong general tier for coding and reasoning | 2.00 | 6.00 |
+| opencode/deepseek-v4-pro | Strong reasoning tier for coding and tool use | 1.74 | 3.48 |
+| opencode/claude-opus-4-5 | Earlier Opus tier for broad coding tasks | 5.00 | 25.00 |
+| opencode/gemini-3.7-flash | Earlier fast tier for coding and multimodal tasks | 1.50 | 7.50 |
+| opencode/grok-4.5 | Earlier general tier for coding and reasoning | 2.00 | 6.00 |
+| opencode/gemini-3.1-pro | Earlier general reasoning and multimodal tier | 2.00 | 12.00 |
 | opencode/glm-5.2 | Strong general coding tier | 1.40 | 4.40 |
 | opencode/kimi-k2.7-code | Strong agentic tier tuned for code | 0.95 | 4.00 |
+| opencode/claude-sonnet-4-6 | Earlier balanced tier for coding and tool use | 3.00 | 15.00 |
+| opencode/gpt-5.3-codex | Earlier coding tier for agentic engineering | 1.75 | 14.00 |
+| opencode/kimi-k2.6 | Earlier agentic tier for coding workflows | 0.95 | 4.00 |
+| opencode/muse-spark-1.3 | Balanced general tier for routine coding | 1.25 | 4.25 |
+| opencode/gemini-3.6-flash | Earlier fast general and multimodal tier | 1.50 | 7.50 |
+| opencode/gpt-5.2 | Earlier general tier for coding and reasoning | 1.75 | 14.00 |
+| opencode/glm-5.1 | Earlier general coding tier | 1.40 | 4.40 |
+| opencode/claude-sonnet-4-5 | Earlier balanced tier for routine engineering | 3.00 | 15.00 |
+| opencode/gemini-3.5-flash | Earlier efficient general and multimodal tier | 1.50 | 9.00 |
+| opencode/minimax-m3 | Efficient agentic tier for routine coding workflows | 0.30 | 1.20 |
+| opencode/mistral-large-4 | Balanced general tier for routine coding and reasoning | 0.68 | 2.09 |
 | opencode/muse-spark-1.2 | Mid-price general coding tier | 1.25 | 4.25 |
+| opencode/gpt-5.3-codex-spark | Earlier fast coding tier for bounded tasks | 1.75 | 14.00 |
+| opencode/minimax-m2.7 | Earlier efficient agentic coding tier | 0.30 | 1.20 |
+| opencode/deepseek-v4.1-flash | Efficient reasoning and coding tier | 0.30 | 1.20 |
 | opencode/deepseek-v4.1-flash-free | DeepSeek V4.1 Flash free tier; zero-retention provider | 0.00 | 0.00 |
+| opencode/gpt-6-luna | Fast efficient tier for focused, high-volume tasks | 0.10 | 0.50 |
+| opencode/claude-haiku-5-5 | Fast lowest-cost tier; routine checks and bounded tasks | 0.10 | 0.50 |
+| opencode/gpt-5.6-luna | Prior efficient Luna tier for focused coding tasks | 0.20 | 1.20 |
+| opencode/qwen3.6-plus | Efficient general tier for routine coding and reasoning | 0.50 | 3.00 |
+| opencode/gpt-5.4-mini | Earlier small tier for focused coding and tool use | 0.75 | 4.50 |
+| opencode/qwen3.8-flash | Fast low-cost tier for routine coding tasks | 0.15 | 0.47 |
 | opencode/glm-5.3-flash-free | GLM-5.3-Flash free efficient tier; zero-retention provider | 0.00 | 0.00 |
 | opencode/qwen3.5-plus | Efficient mid tier for routine work | 0.20 | 1.20 |
 | opencode/glm-5.3-flash | Fast low-cost GLM tier for routine work | 0.15 | 0.50 |
+| opencode/gpt-5.1 | Earlier general tier for bounded coding tasks | 1.07 | 8.50 |
+| opencode/gpt-5 | Earlier general tier for routine coding tasks | 1.07 | 8.50 |
+| opencode/gemini-3-flash | Earlier efficient general and multimodal tier | 0.50 | 3.00 |
+| opencode/claude-haiku-4-5 | Earlier fast tier for routine checks and small tasks | 1.00 | 5.00 |
+| opencode/gemini-3.5-flash-lite | Lightweight tier for bounded multimodal and routine tasks | 0.30 | 2.50 |
+| opencode/mimo-v2.6-flash-free | Free efficient tier for routine coding tasks | 0.00 | 0.00 |
+| opencode/nemotron-3-ultra-free | Free reasoning tier for bounded coding and analysis | 0.00 | 0.00 |
+| opencode/nemotron-3.5-super-vl-free | Free vision-language tier for multimodal tasks | 0.00 | 0.00 |
+| opencode/nemotron-3.5-lightning-free | Free fast tier for focused routine tasks | 0.00 | 0.00 |
+| opencode/gpt-5.4-nano | Earlier lightweight tier for simple bounded tasks | 0.20 | 1.25 |
+| opencode/gpt-5-nano | Lightweight tier for extraction and routine checks | 0.05 | 0.40 |
+| opencode/jev-1.13 | Specialized tier for typed decisions and scoring | 0.042 | 0.00 |
+| opencode/jev-1.13-free | Free specialized tier for typed decisions and scoring | 0.00 | 0.00 |
+| opencode/grok-build-0.1 | Early coding preview; capability unverified | 1.00 | 2.00 |
+| opencode/beam-free | Free experimental tier; capability unverified | 0.00 | 0.00 |
+| opencode/flint-40b-free | Free 40B experimental tier; capability unverified | 0.00 | 0.00 |
+| opencode/longcat-2.5-preview-free | Free preview tier; capability unverified | 0.00 | 0.00 |
 | opencode/big-pickle | Stealth preview model; capability unverified | 0.00 | 0.00 |
+
+The table uses base (shortest-prompt) rates. Long-context rates below are input/output USD per MTok.
+
+| Model | Prompt length | Input $/MTok | Output $/MTok |
+|---|---|---|---|
+| `opencode/gpt-6-astra` | > 272K tokens | 20.00 | 75.00 |
+| `opencode/gpt-6.1-sol` | > 272K tokens | 4.00 | 15.00 |
+| `opencode/gpt-6-sol` | > 272K tokens | 4.00 | 15.00 |
+| `opencode/gpt-5.6-sol` | > 272K tokens | 8.00 | 30.00 |
+| `opencode/grok-4.7` | > 200K tokens | 4.00 | 12.00 |
+| `opencode/gpt-5.6-terra` | > 272K tokens | 4.00 | 18.00 |
+| `opencode/gpt-5.5` | > 272K tokens | 10.00 | 45.00 |
+| `opencode/grok-4.6` | > 200K tokens | 4.00 | 12.00 |
+| `opencode/gpt-5.4` | > 272K tokens | 5.00 | 22.50 |
+| `opencode/grok-4.5` | > 200K tokens | 4.00 | 12.00 |
+| `opencode/gemini-3.1-pro` | > 200K tokens | 4.00 | 18.00 |
+| `opencode/claude-sonnet-4-5` | > 200K tokens | 6.00 | 22.50 |
+| `opencode/gpt-6-luna` | > 272K tokens | 0.20 | 0.75 |
+| `opencode/claude-haiku-5-5` | > 100K tokens | 0.50 | 2.50 |
+| `opencode/gpt-5.6-luna` | > 272K tokens | 0.40 | 1.80 |
+
+Promotional rows use the currently billed rates. List prices below are input/output USD per MTok.
+
+| Model | Discount | List input $/MTok | List output $/MTok | Discount end |
+|---|---|---|---|---|
+| `opencode/gemini-4-argon` | 50% off | 4.00 | 20.00 | 2026-11-30 |
+| `opencode/mistral-large-4` | 50% off | 1.36 | 4.18 | Not published |
 
 Source: [OpenCode Console models and pricing](https://opencode.ai/v2/docs/console/models/).
 
