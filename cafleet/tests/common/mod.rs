@@ -406,6 +406,15 @@ impl Cli {
             .unwrap()
     }
 
+    pub fn spawn_with_stdin(&self, args: &[&str]) -> std::process::Child {
+        self.command(args, true)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap()
+    }
+
     /// How many shim calls so far start with `prefix`.
     pub fn shim_count(&self, prefix: &str) -> usize {
         self.shim_calls()

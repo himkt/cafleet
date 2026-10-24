@@ -5,7 +5,6 @@ use serde_json::Value;
 
 use super::{
     CommandRunner, MultiplexerContext, MultiplexerError, PaneCleanup, PaneOwnership, RunError,
-    SUBMIT_DELAY,
 };
 
 const PANE_NOT_FOUND: &str = "pane_not_found";
@@ -27,6 +26,9 @@ fn error_code(stderr: &str) -> Option<String> {
 fn map_run_error(argv: &[String], timeout_secs: Option<u64>, error: RunError) -> MultiplexerError {
     let joined = argv.join(" ");
     match error {
+        RunError::NotStarted(detail) => {
+            MultiplexerError::new(format!("herdr command was not started: {detail}: {joined}"))
+        }
         RunError::BinaryNotFound(detail) => {
             MultiplexerError::new(format!("herdr binary not found: {detail}"))
         }
@@ -367,20 +369,13 @@ impl HerdrMultiplexer {
             ));
         }
         let bounded = self.bounded(crate::input::Deadline::new());
-        bounded
-            .run(
-                &herdr_argv(&["herdr", "pane", "send-text", target_pane_id, text]),
-                Some(5),
-            )
-            .map_err(MultiplexerError::after_write)?;
-        bounded.runner.sleep(SUBMIT_DELAY);
-        bounded
-            .run(
-                &herdr_argv(&["herdr", "pane", "send-keys", target_pane_id, "enter"]),
-                Some(5),
-            )
-            .map_err(MultiplexerError::after_write)?;
-        Ok(())
+        super::submit_prompt(
+            bounded.runner.as_ref(),
+            &herdr_argv(&["herdr", "pane", "send-text", target_pane_id, text]),
+            &herdr_argv(&["herdr", "pane", "send-keys", target_pane_id, "enter"]),
+            map_run_error,
+            |stderr| error_code(stderr).as_deref() == Some(PANE_NOT_FOUND),
+        )
     }
 
     /// `herdr pane read` prints the raw terminal buffer (no envelope); the

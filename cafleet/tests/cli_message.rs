@@ -16,6 +16,40 @@ fn fleet_with_member(cli: &Cli) -> (i64, i64, i64) {
 }
 
 #[test]
+fn slow_stdin_receives_a_fresh_persistence_budget_after_the_body_is_resolved() {
+    use std::{io::Write, time::Duration};
+    let _test_resource = common::process_test_resource_guard();
+    let cli = Cli::new();
+    let (_, director, member) = fleet_with_member(&cli);
+    let child = cli.spawn_with_stdin(&[
+        "message",
+        "send",
+        "--from-member-id",
+        &director.to_string(),
+        "--to-member-id",
+        &member.to_string(),
+        "--file",
+        "-",
+        "--json",
+    ]);
+    let mut child = child;
+    let mut stdin = child.stdin.take().unwrap();
+    std::thread::sleep(Duration::from_secs(6));
+    stdin.write_all(b"exact delayed body\n").unwrap();
+    drop(stdin);
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["message"]["text"], "exact delayed body\n");
+    assert_eq!(result["notification_sent"], true);
+    let stored: String = cli
+        .sqlite()
+        .query_row("SELECT text FROM messages", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(stored, "exact delayed body\n");
+}
+
+#[test]
 fn send_truncates_the_echo_but_never_the_persisted_text() {
     let cli = Cli::new();
     let (_, director_id, member_id) = fleet_with_member(&cli);

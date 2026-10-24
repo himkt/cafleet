@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
 
-use super::{CommandRunner, MultiplexerContext, MultiplexerError, RunError, SUBMIT_DELAY};
+use super::{CommandRunner, MultiplexerContext, MultiplexerError, RunError};
 
 const PANE_GONE_MARKERS: [&str; 2] = ["can't find pane", "no such pane"];
 
@@ -19,6 +19,9 @@ fn is_pane_gone(stderr: &str) -> bool {
 fn map_run_error(argv: &[String], timeout_secs: Option<u64>, error: RunError) -> MultiplexerError {
     let joined = argv.join(" ");
     match error {
+        RunError::NotStarted(detail) => {
+            MultiplexerError::new(format!("tmux command was not started: {detail}: {joined}"))
+        }
         RunError::BinaryNotFound(detail) => {
             MultiplexerError::new(format!("tmux binary not found: {detail}"))
         }
@@ -197,20 +200,13 @@ impl TmuxMultiplexer {
             ));
         }
         let bounded = self.bounded(crate::input::Deadline::new());
-        bounded
-            .run(
-                &tmux_argv(&["tmux", "send-keys", "-t", target_pane_id, "-l", text]),
-                Some(5),
-            )
-            .map_err(MultiplexerError::after_write)?;
-        bounded.runner.sleep(SUBMIT_DELAY);
-        bounded
-            .run(
-                &tmux_argv(&["tmux", "send-keys", "-t", target_pane_id, "Enter"]),
-                Some(5),
-            )
-            .map_err(MultiplexerError::after_write)?;
-        Ok(())
+        super::submit_prompt(
+            bounded.runner.as_ref(),
+            &tmux_argv(&["tmux", "send-keys", "-t", target_pane_id, "-l", text]),
+            &tmux_argv(&["tmux", "send-keys", "-t", target_pane_id, "Enter"]),
+            map_run_error,
+            is_pane_gone,
+        )
     }
 
     /// Capture the last `lines` drawn lines of the pane buffer via the shared

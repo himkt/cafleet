@@ -168,6 +168,11 @@ esac
     assert!(cli.home.path().join("closed-pane").exists());
     assert!(cli.home.path().join("layout-started").exists());
     assert!(
+        stderr(&output).contains("optional layout restoration failed"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(
         elapsed < std::time::Duration::from_millis(6500),
         "{elapsed:?}"
     );

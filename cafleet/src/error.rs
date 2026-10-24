@@ -5,6 +5,8 @@ pub enum CafleetError {
     Usage(String),
     App(String),
     Value(String),
+    DatabaseBusy(String),
+    DeadlineExceeded,
     InvalidStoredValue { field: String, value: String },
 }
 
@@ -15,7 +17,10 @@ impl CafleetError {
         match self {
             Self::Usage(_) => Self::Usage(message),
             Self::Value(_) => Self::Value(message),
-            Self::App(_) | Self::InvalidStoredValue { .. } => Self::App(message),
+            Self::App(_)
+            | Self::InvalidStoredValue { .. }
+            | Self::DatabaseBusy(_)
+            | Self::DeadlineExceeded => Self::App(message),
         }
     }
 
@@ -24,6 +29,8 @@ impl CafleetError {
             CafleetError::Usage(_) => 2,
             CafleetError::App(_)
             | CafleetError::Value(_)
+            | CafleetError::DatabaseBusy(_)
+            | CafleetError::DeadlineExceeded
             | CafleetError::InvalidStoredValue { .. } => 1,
         }
     }
@@ -32,7 +39,9 @@ impl CafleetError {
         match self {
             CafleetError::Usage(message)
             | CafleetError::App(message)
-            | CafleetError::Value(message) => Cow::Borrowed(message),
+            | CafleetError::Value(message)
+            | CafleetError::DatabaseBusy(message) => Cow::Borrowed(message),
+            CafleetError::DeadlineExceeded => Cow::Borrowed("operation exceeded its deadline"),
             CafleetError::InvalidStoredValue { field, value } => {
                 Cow::Owned(format!("invalid stored value for {field}: {value}"))
             }

@@ -128,7 +128,6 @@ fn dispatch(
                     slot.as_mut().expect("open invocation connection"),
                     settings,
                     cmd,
-                    deadline,
                 ),
                 Command::Setup(_) | Command::Doctor(_) => unreachable!("handled above"),
             }

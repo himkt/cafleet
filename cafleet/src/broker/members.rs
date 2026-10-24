@@ -14,6 +14,12 @@ pub struct NewPlacement {
 }
 
 pub(crate) fn db_err(e: rusqlite::Error) -> CafleetError {
+    if matches!(
+        e.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked)
+    ) {
+        return CafleetError::DatabaseBusy(format!("database error: {e}"));
+    }
     if let rusqlite::Error::FromSqlConversionFailure(_, _, source) = &e
         && let Some(error) = source.downcast_ref::<CafleetError>()
     {

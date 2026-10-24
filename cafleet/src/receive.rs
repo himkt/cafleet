@@ -98,7 +98,19 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
             clock.sleep(next_check.min(expires).duration_since(now));
             continue;
         }
-        let snapshot = io.check(Deadline::until(expires.min(now + Duration::from_secs(5))))?;
+        let snapshot = match io.check(Deadline::until(expires.min(now + Duration::from_secs(5)))) {
+            Ok(snapshot) => snapshot,
+            Err(CafleetError::DatabaseBusy(_) | CafleetError::DeadlineExceeded) => {
+                let now = clock.now();
+                if now >= expires {
+                    break;
+                }
+                next_check =
+                    started + Duration::from_secs(now.duration_since(started).as_secs() + 1);
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
         errors.retain(|member, error| {
             snapshot.pending.iter().any(|preview| {
                 preview.member_id == *member && preview.message_id == error.message_id
@@ -117,6 +129,11 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
                 .pending
                 .iter()
                 .map(|preview| preview.member_id)
+                .filter(|member| {
+                    !errors
+                        .get(member)
+                        .is_some_and(|error| error.delivery == Delivery::Uncertain)
+                })
                 .filter(|member| cursor.is_none_or(|cursor| *member > cursor))
                 .min()
                 .or_else(|| {
@@ -124,13 +141,35 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
                         .pending
                         .iter()
                         .map(|preview| preview.member_id)
+                        .filter(|member| {
+                            !errors
+                                .get(member)
+                                .is_some_and(|error| error.delivery == Delivery::Uncertain)
+                        })
                         .min()
                 })
         };
         if let Some(member) = member {
             cursor = Some(member);
             last_interval = Some(interval);
-            match io.attempt(member, Deadline::until(now + Duration::from_secs(5)))? {
+            let outcome = match io.attempt(member, Deadline::until(now + Duration::from_secs(5))) {
+                Ok(outcome) => outcome,
+                Err(error @ (CafleetError::DatabaseBusy(_) | CafleetError::DeadlineExceeded)) => {
+                    AttemptOutcome::Failed(NotificationError {
+                        member_id: member,
+                        message_id: snapshot
+                            .pending
+                            .iter()
+                            .find(|preview| preview.member_id == member)
+                            .expect("the selected member has a pending preview")
+                            .message_id,
+                        delivery: Delivery::NotSent,
+                        error: error.to_string(),
+                    })
+                }
+                Err(error) => return Err(error),
+            };
+            match outcome {
                 AttemptOutcome::Held => {}
                 AttemptOutcome::NoPending => {
                     errors.remove(&member);
@@ -575,6 +614,129 @@ mod tests {
     }
 
     #[test]
+    fn uncertain_delivery_is_retained_without_retrying_that_member_during_the_same_wait() {
+        let clock = TestClock::new();
+        let error = diagnostic(
+            11,
+            101,
+            Delivery::Uncertain,
+            "Enter result is unknown; inspect the pane",
+        );
+        let mut io = ScriptedIo::new(
+            &clock,
+            |_, _, _| Step::done(snapshot(&[(11, 101), (22, 202)])),
+            |attempt, member, _| match member {
+                11 => {
+                    assert_eq!(attempt, 1, "the uncertain member is attempted once");
+                    Step::done(AttemptOutcome::Failed(error.clone()))
+                }
+                22 => Step::done(AttemptOutcome::Held),
+                _ => panic!("unexpected member"),
+            },
+        );
+        let outcome = clock.run(&mut io, 4500).unwrap();
+        assert_eq!(outcome.notification_errors, vec![error]);
+        assert_eq!(
+            clock
+                .attempts()
+                .iter()
+                .filter(|(_, member)| *member == 11)
+                .count(),
+            1
+        );
+        assert!(clock.attempts().iter().any(|(_, member)| *member == 22));
+    }
+
+    #[test]
+    fn snapshot_contention_at_receive_expiry_returns_timeout_with_prior_diagnostics() {
+        for failure in [
+            CafleetError::DatabaseBusy("database is locked".into()),
+            CafleetError::DeadlineExceeded,
+        ] {
+            let clock = TestClock::new();
+            let error = diagnostic(
+                11,
+                101,
+                Delivery::Uncertain,
+                "stamp failed; inspect the pane",
+            );
+            let mut io = ScriptedIo::new(
+                &clock,
+                |check, _, _| {
+                    if check == 1 {
+                        Step::done(snapshot(&[(11, 101)]))
+                    } else {
+                        Step {
+                            duration: Duration::from_millis(2500),
+                            result: Err(failure.clone()),
+                        }
+                    }
+                },
+                |attempt, _, _| {
+                    assert_eq!(attempt, 1);
+                    Step::done(AttemptOutcome::Failed(error.clone()))
+                },
+            );
+            let outcome = clock.run(&mut io, 2500).unwrap();
+            assert!(outcome.messages.is_empty());
+            assert_eq!(outcome.notification_errors, vec![error.clone()]);
+            assert_eq!(clock.elapsed(), Duration::from_millis(2500));
+            assert_eq!(io.checks, 2);
+        }
+    }
+
+    #[test]
+    fn transient_snapshot_contention_can_recover_before_receive_expiry() {
+        let clock = TestClock::new();
+        let mut io = ScriptedIo::new(
+            &clock,
+            |check, _, _| {
+                if check == 1 {
+                    Step {
+                        duration: Duration::from_secs(5),
+                        result: Err(CafleetError::DatabaseBusy("database is locked".into())),
+                    }
+                } else {
+                    Step::done(incoming(&[]))
+                }
+            },
+            unexpected_attempt,
+        );
+        let outcome = clock.run(&mut io, 6500).unwrap();
+        assert_eq!(outcome.messages, messages());
+        assert_eq!(clock.elapsed(), Duration::from_secs(6));
+    }
+
+    #[test]
+    fn pre_write_database_contention_retains_other_diagnostics_at_receive_expiry() {
+        let clock = TestClock::new();
+        let first = diagnostic(11, 101, Delivery::Uncertain, "Enter result is unknown");
+        let mut io = ScriptedIo::new(
+            &clock,
+            |_, _, _| Step::done(snapshot(&[(11, 101), (22, 202)])),
+            |attempt, _, _| {
+                if attempt == 1 {
+                    Step::done(AttemptOutcome::Failed(first.clone()))
+                } else {
+                    Step {
+                        duration: Duration::from_secs(5),
+                        result: Err(CafleetError::DatabaseBusy("database is locked".into())),
+                    }
+                }
+            },
+        );
+        let outcome = clock.run(&mut io, 2500).unwrap();
+        assert_eq!(
+            outcome.notification_errors,
+            vec![
+                first,
+                diagnostic(22, 202, Delivery::NotSent, "database is locked")
+            ]
+        );
+        clock.assert_last_io_was_attempt();
+    }
+
+    #[test]
     fn existing_messages_return_full_ordered_records_without_retry_or_sleep() {
         let clock = TestClock::new();
         let mut io = ScriptedIo::new(
@@ -949,8 +1111,8 @@ mod tests {
                         let error = diagnostic(
                             member,
                             message,
-                            Delivery::Uncertain,
-                            "Enter transport failed: owned attempt",
+                            Delivery::NotSent,
+                            "capture transport failed before writing: owned attempt",
                         );
                         errors.borrow_mut().push(error.clone());
                         Step::done(AttemptOutcome::Failed(error))
@@ -1224,8 +1386,8 @@ mod tests {
                 1 => Step::done(AttemptOutcome::Failed(diagnostic(
                     11,
                     101,
-                    Delivery::Uncertain,
-                    "Enter failed",
+                    Delivery::NotSent,
+                    "capture failed before input",
                 ))),
                 2 => Step::failed(CafleetError::InvalidStoredValue {
                     field: "messages.status_state".into(),

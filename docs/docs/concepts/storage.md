@@ -26,6 +26,8 @@ The current format requires `PRAGMA application_id = 1128351288` (`CAF8`), a com
 | Current format ahead of the bundled head | Reject both setup write paths before database writes, asset installation or asset-install recording |
 | Other populated/identified format or malformed current schema | Report incompatible format before writes |
 
+Expected migration shapes are cached once per process. Successful shape checks are reused for an identical main/temp schema definition; schema changes trigger inspection within a consistent read snapshot. Application identity and ledger contents are read on every validation, so a changed version or malformed definition still fails at the boundary.
+
 Run [`cafleet setup`](../spec/cli-options.md#cafleet-setup) after installation. The same classifier guards normal commands and feeds doctor's read-only diagnosis. Exact errors are in the [schema guard](../spec/cli-options.md#schema-version-guard).
 
 ## Assets-install recording

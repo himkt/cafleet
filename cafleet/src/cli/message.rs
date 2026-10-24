@@ -104,7 +104,6 @@ pub fn run(
     conn: &mut Connection,
     settings: &Settings,
     command: MessageCommand,
-    deadline: crate::input::Deadline,
 ) -> Result<(), CafleetError> {
     match command {
         MessageCommand::Send {
@@ -114,6 +113,7 @@ pub fn run(
             json,
         } => {
             let text = resolve_body(body.text.as_deref(), body.file.as_deref(), "--file")?;
+            let deadline = crate::input::Deadline::new();
 
             let message = crate::input::with_database_budget(conn, deadline, |conn| {
                 broker::send_message(conn, from_member_id, &to_member_id.to_string(), &text)

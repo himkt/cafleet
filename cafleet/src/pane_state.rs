@@ -475,7 +475,13 @@ pub fn classify(coding_agent: &str, content: &str) -> PaneState {
         return PaneState::Unknown;
     }
     let lines = styled_lines(content);
-    let mut fenced = false;
+    let mut fenced = lines
+        .iter()
+        .filter(|line| line.text.trim_start().starts_with("```"))
+        .take_while(|line| line.text.trim() == "```")
+        .count()
+        % 2
+        == 1;
     let lines: Vec<_> = lines
         .iter()
         .filter(|line| {

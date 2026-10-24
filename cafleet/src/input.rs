@@ -30,9 +30,7 @@ impl Deadline {
         self.0
             .checked_duration_since(now)
             .filter(|left| !left.is_zero())
-            .ok_or_else(|| {
-                CafleetError::App("pane input attempt exceeded its five-second deadline".into())
-            })
+            .ok_or(CafleetError::DeadlineExceeded)
     }
 
     pub fn retry(self) -> bool {
@@ -227,7 +225,7 @@ pub fn with_database_budget<T>(
     complete_database_budget(conn, deadline, operation)
 }
 
-// An irreversible pane close still needs uncontended finalization after expiry;
+// Successful pane side effects still need uncontended finalization after expiry;
 // the original deadline continues to bound every SQLite lock wait.
 pub(crate) fn complete_database_budget<T>(
     conn: &mut Connection,

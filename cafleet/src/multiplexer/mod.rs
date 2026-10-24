@@ -12,6 +12,114 @@ pub use tmux::TmuxMultiplexer;
 
 pub(crate) const SUBMIT_DELAY: f64 = 1.0;
 
+#[cfg(test)]
+mod submission_regressions {
+    use super::test_support::{FakeRunner, env, herdr_error_stderr};
+    use super::*;
+
+    fn muxes(runner: Rc<dyn CommandRunner>) -> [AnyMultiplexer; 2] {
+        [
+            AnyMultiplexer::Tmux(TmuxMultiplexer::new(runner.clone(), env(&[]))),
+            AnyMultiplexer::Herdr(HerdrMultiplexer::new(runner, env(&[]))),
+        ]
+    }
+
+    #[test]
+    fn insufficient_settle_and_enter_budget_starts_no_literal_input() {
+        let runner = FakeRunner::without_binaries();
+        for mux in muxes(runner.clone()) {
+            let deadline = crate::input::Deadline::until(
+                std::time::Instant::now() + Duration::from_millis(500),
+            );
+            let error = mux
+                .bounded(deadline)
+                .send_prompt("pane", "assignment")
+                .unwrap_err();
+            assert!(!error.submission_started());
+            assert!(runner.events().is_empty());
+        }
+    }
+
+    #[test]
+    fn confirmed_missing_panes_report_no_submission() {
+        for (index, stderr) in [
+            "can't find pane: pane".to_owned(),
+            herdr_error_stderr("pane_not_found"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let runner = FakeRunner::without_binaries();
+            runner.respond(Err(RunError::Failed { stderr }));
+            let mux = muxes(runner.clone()).into_iter().nth(index).unwrap();
+            let error = mux.send_prompt("pane", "assignment").unwrap_err();
+            assert!(!error.submission_started(), "{error}");
+            assert_eq!(runner.run_argvs().len(), 1);
+        }
+    }
+
+    #[test]
+    fn launch_failures_are_not_sent_and_started_write_or_enter_failures_are_uncertain() {
+        for backend in 0..2 {
+            for (failure, started) in [
+                (
+                    RunError::NotStarted("deadline expired before launch".into()),
+                    false,
+                ),
+                (RunError::BinaryNotFound("missing executable".into()), false),
+                (RunError::Timeout, true),
+                (
+                    RunError::Failed {
+                        stderr: "connection lost".into(),
+                    },
+                    true,
+                ),
+            ] {
+                let runner = FakeRunner::without_binaries();
+                runner.respond(Err(failure));
+                let error = muxes(runner.clone())
+                    .into_iter()
+                    .nth(backend)
+                    .unwrap()
+                    .send_prompt("pane", "assignment")
+                    .unwrap_err();
+                assert_eq!(error.submission_started(), started, "{error}");
+                assert_eq!(runner.run_argvs().len(), 1);
+            }
+            let runner = FakeRunner::without_binaries();
+            runner.respond(Ok(String::new()));
+            runner.respond(Err(RunError::NotStarted(
+                "Enter deadline expired before launch".into(),
+            )));
+            let error = muxes(runner.clone())
+                .into_iter()
+                .nth(backend)
+                .unwrap()
+                .send_prompt("pane", "assignment")
+                .unwrap_err();
+            assert!(
+                error.submission_started(),
+                "the literal input already arrived: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn expired_optional_layout_returns_a_diagnostic_without_starting_another_process() {
+        let runner = FakeRunner::without_binaries();
+        let mux = muxes(runner.clone())
+            .into_iter()
+            .nth(1)
+            .unwrap()
+            .bounded(crate::input::Deadline::until(std::time::Instant::now()));
+        let error = mux
+            .restore_after_close(PostCloseLayout::HerdrTab("tab".into()))
+            .unwrap_err();
+        assert!(error.to_string().contains("deadline"));
+        assert!(runner.events().is_empty());
+    }
+}
+
 /// Resolved pane identity, returned by `context_discovery` (SPEC §6.5).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MultiplexerContext {
@@ -122,6 +230,7 @@ impl std::error::Error for MultiplexerError {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunError {
     BinaryNotFound(String),
+    NotStarted(String),
     Timeout,
     Failed { stderr: String },
 }
@@ -136,6 +245,46 @@ pub trait CommandRunner {
         )
     }
     fn sleep(&self, seconds: f64);
+    fn remaining_budget(&self) -> Result<Option<Duration>, RunError> {
+        Ok(None)
+    }
+}
+
+fn submit_prompt(
+    runner: &dyn CommandRunner,
+    literal: &[String],
+    enter: &[String],
+    map_error: fn(&[String], Option<u64>, RunError) -> MultiplexerError,
+    pane_gone: fn(&str) -> bool,
+) -> Result<(), MultiplexerError> {
+    let remaining = runner
+        .remaining_budget()
+        .map_err(|error| map_error(literal, None, error))?
+        .expect("submission uses a deadline-bounded runner");
+    let reserved = Duration::from_secs_f64(SUBMIT_DELAY) + Duration::from_secs(1);
+    let literal_budget = remaining
+        .checked_sub(reserved)
+        .filter(|budget| !budget.is_zero())
+        .ok_or_else(|| {
+            MultiplexerError::new(
+                "insufficient pane input budget for literal input, settle and Enter",
+            )
+        })?;
+    runner.run_for(literal, literal_budget).map_err(|error| {
+        let not_sent = match &error {
+            RunError::BinaryNotFound(_) | RunError::NotStarted(_) => true,
+            RunError::Failed { stderr } => pane_gone(stderr),
+            RunError::Timeout => false,
+        };
+        let seconds = literal_budget.as_secs() + u64::from(literal_budget.subsec_nanos() > 0);
+        let error = map_error(literal, Some(seconds), error);
+        if not_sent { error } else { error.after_write() }
+    })?;
+    runner.sleep(SUBMIT_DELAY);
+    runner
+        .run(enter, Some(5))
+        .map_err(|error| map_error(enter, Some(5), error).after_write())?;
+    Ok(())
 }
 
 pub(crate) struct DeadlineRunner {
@@ -158,7 +307,9 @@ impl CommandRunner for DeadlineRunner {
     }
 
     fn run(&self, argv: &[String], timeout_secs: Option<u64>) -> Result<String, RunError> {
-        let remaining = self.deadline.remaining().map_err(|_| RunError::Timeout)?;
+        let remaining = self
+            .remaining_budget()?
+            .expect("deadline runner has a budget");
         self.run_for(
             argv,
             timeout_secs
@@ -168,7 +319,9 @@ impl CommandRunner for DeadlineRunner {
     }
 
     fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError> {
-        let remaining = self.deadline.remaining().map_err(|_| RunError::Timeout)?;
+        let remaining = self
+            .remaining_budget()?
+            .expect("deadline runner has a budget");
         self.runner.run_for(argv, timeout.min(remaining))
     }
 
@@ -180,6 +333,18 @@ impl CommandRunner for DeadlineRunner {
                     .as_secs_f64(),
             );
         }
+    }
+
+    fn remaining_budget(&self) -> Result<Option<Duration>, RunError> {
+        let remaining = self
+            .deadline
+            .remaining()
+            .map_err(|_| RunError::NotStarted("command deadline expired before launch".into()))?;
+        Ok(Some(
+            self.runner
+                .remaining_budget()?
+                .map_or(remaining, |inner| inner.min(remaining)),
+        ))
     }
 }
 
@@ -290,11 +455,14 @@ impl AnyMultiplexer {
         }
     }
 
-    pub(crate) fn restore_after_close(&self, layout: PostCloseLayout) {
+    pub(crate) fn restore_after_close(
+        &self,
+        layout: PostCloseLayout,
+    ) -> Result<(), MultiplexerError> {
         match (self, layout) {
-            (_, PostCloseLayout::None) => {}
+            (_, PostCloseLayout::None) => Ok(()),
             (Self::Herdr(mux), PostCloseLayout::HerdrTab(tab_id)) => {
-                let _ = mux.resize_after_close(&tab_id);
+                mux.resize_after_close(&tab_id)
             }
             (Self::Tmux(_), PostCloseLayout::HerdrTab(_)) => {
                 unreachable!("post-close layout belongs to its multiplexer backend");

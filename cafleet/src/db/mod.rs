@@ -1,5 +1,8 @@
 use rusqlite::{Connection, OptionalExtension};
-use std::{collections::BTreeMap, sync::OnceLock};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::{Mutex, OnceLock},
+};
 
 use crate::error::CafleetError;
 
@@ -221,12 +224,81 @@ fn schema_versions() -> Result<&'static BTreeMap<u32, SchemaShape>, CafleetError
 }
 
 pub(crate) fn migration_ledger_matches(conn: &Connection) -> Result<bool, CafleetError> {
-    schema_versions()?[&head_version()]
-        .0
-        .iter()
-        .find(|table| table.name == "refinery_schema_history")
-        .expect("refinery migrations create their ledger")
-        .matches(conn)
+    cached_schema_match(conn, 0, || {
+        schema_versions()?[&head_version()]
+            .0
+            .iter()
+            .find(|table| table.name == "refinery_schema_history")
+            .expect("refinery migrations create their ledger")
+            .matches(conn)
+    })
+}
+
+type SchemaObjects = Vec<(String, String, String, String, Option<String>)>;
+
+fn cached_schema_match(
+    conn: &Connection,
+    version: u32,
+    inspect: impl FnOnce() -> Result<bool, CafleetError>,
+) -> Result<bool, CafleetError> {
+    let snapshot = if conn.is_autocommit() {
+        Some(
+            conn.unchecked_transaction()
+                .map_err(crate::broker::members::db_err)?,
+        )
+    } else {
+        None
+    };
+    let matched = cached_schema_match_in_snapshot(conn, version, inspect)?;
+    if let Some(snapshot) = snapshot {
+        snapshot.commit().map_err(crate::broker::members::db_err)?;
+    }
+    Ok(matched)
+}
+
+fn cached_schema_match_in_snapshot(
+    conn: &Connection,
+    version: u32,
+    inspect: impl FnOnce() -> Result<bool, CafleetError>,
+) -> Result<bool, CafleetError> {
+    static VALIDATED: Mutex<BTreeSet<(u32, SchemaObjects)>> = Mutex::new(BTreeSet::new());
+    let mut statement = conn
+        .prepare(
+            "SELECT 'main', type, name, tbl_name, sql FROM main.sqlite_schema \
+         UNION ALL SELECT 'temp', type, name, tbl_name, sql FROM temp.sqlite_schema \
+         ORDER BY 1, 2, 3, 4, 5",
+        )
+        .map_err(crate::broker::members::db_err)?;
+    let objects = statement
+        .query_map([], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            ))
+        })
+        .map_err(crate::broker::members::db_err)?
+        .collect::<Result<SchemaObjects, _>>()
+        .map_err(crate::broker::members::db_err)?;
+    let key = (version, objects);
+    if VALIDATED
+        .lock()
+        .expect("schema cache mutex is healthy")
+        .contains(&key)
+    {
+        return Ok(true);
+    }
+    if !inspect()? {
+        return Ok(false);
+    }
+    let mut validated = VALIDATED.lock().expect("schema cache mutex is healthy");
+    if validated.len() >= 32 {
+        validated.clear();
+    }
+    validated.insert(key);
+    Ok(true)
 }
 
 pub(crate) fn schema_matches_version(
@@ -234,7 +306,7 @@ pub(crate) fn schema_matches_version(
     version: u32,
 ) -> Result<bool, CafleetError> {
     match schema_versions()?.get(&version) {
-        Some(schema) => schema.matches(conn),
+        Some(schema) => cached_schema_match(conn, version, || schema.matches(conn)),
         None => Ok(false),
     }
 }
@@ -246,6 +318,66 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+
+    #[test]
+    fn validation_reuses_unchanged_shapes_and_rechecks_ddl_ledger_and_temp_shadows() {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate_to_head(&mut conn).unwrap();
+        conn.execute_batch("CREATE TABLE schema_cache_regression(value INTEGER)")
+            .unwrap();
+        require_current(&conn).unwrap();
+        let reads = Arc::new(AtomicUsize::new(0));
+        let observed = reads.clone();
+        conn.authorizer(Some(move |context: AuthContext<'_>| {
+            if matches!(context.action, AuthAction::Read { table_name, .. } if table_name.starts_with("pragma_")) {
+                observed.fetch_add(1, Ordering::SeqCst);
+            }
+            Authorization::Allow
+        })).unwrap();
+        require_current(&conn).unwrap();
+        require_current(&conn).unwrap();
+        assert_eq!(
+            reads.load(Ordering::SeqCst),
+            0,
+            "unchanged definitions reuse verified shape metadata"
+        );
+        conn.execute_batch("ALTER TABLE messages RENAME COLUMN text TO broken")
+            .unwrap();
+        assert!(require_current(&conn).is_err());
+        assert!(
+            reads.load(Ordering::SeqCst) > 0,
+            "changed definitions are inspected"
+        );
+        conn.execute_batch("ALTER TABLE messages RENAME COLUMN broken TO text")
+            .unwrap();
+        require_current(&conn).unwrap();
+        conn.execute(
+            "UPDATE refinery_schema_history SET version=?1",
+            [head_version() + 1],
+        )
+        .unwrap();
+        assert!(
+            require_current(&conn).is_err(),
+            "ledger contents are read on every validation"
+        );
+        conn.execute(
+            "UPDATE refinery_schema_history SET version=?1",
+            [head_version()],
+        )
+        .unwrap();
+        require_current(&conn).unwrap();
+        conn.execute_batch("CREATE TEMP TABLE messages(wrong TEXT)")
+            .unwrap();
+        assert!(
+            require_current(&conn).is_err(),
+            "temporary shadows alter the visible schema"
+        );
+    }
 
     #[test]
     fn reference_shapes_are_cached_and_match_the_recorded_migration_version() {

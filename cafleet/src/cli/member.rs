@@ -511,7 +511,11 @@ fn delete(
                     error.message()
                 ))
             })?;
-            mux.restore_after_close(layout);
+            if let Err(error) = mux.restore_after_close(layout) {
+                eprintln!(
+                    "Member {member_id} was deregistered; optional layout restoration failed: {error}"
+                );
+            }
             break format!("{pane_id} (killed)");
         }
         drop(guard);

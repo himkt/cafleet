@@ -10,6 +10,7 @@ pub(crate) fn pending_previews(
         .prepare(
             "SELECT m.member_id, g.message_id FROM members m
          JOIN fleets f ON f.fleet_id=m.fleet_id
+         JOIN member_placements p ON p.member_id=m.member_id AND p.mux_pane_id IS NOT NULL
          JOIN messages g ON g.to_member_id=m.member_id
          WHERE m.fleet_id=?1 AND m.status='active' AND m.member_id!=f.director_member_id
            AND m.member_id!=?2 AND g.from_member_id!=m.member_id
@@ -24,4 +25,32 @@ pub(crate) fn pending_previews(
         .map_err(super::members::db_err)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(super::members::db_err)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::broker::{self, test_support as common};
+
+    #[test]
+    fn preview_rotation_selects_only_concrete_ordinary_placements() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        let (fleet, director) = common::create_fleet(&mut conn, "rotation");
+        let pending = common::register(&mut conn, fleet, "pending", None);
+        let placed = common::register(&mut conn, fleet, "placed", Some("%2"));
+        broker::send_message(
+            &mut conn,
+            director,
+            &pending.to_string(),
+            "wait for placement",
+        )
+        .unwrap();
+        let message =
+            broker::send_message(&mut conn, director, &placed.to_string(), "deliver now").unwrap();
+        assert_eq!(
+            pending_previews(&conn, fleet, director).unwrap(),
+            vec![(placed, message.message_id)]
+        );
+    }
 }

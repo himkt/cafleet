@@ -364,6 +364,36 @@ fn completed_code_blocks_do_not_hide_the_live_composer() {
 }
 
 #[test]
+fn a_capture_starting_inside_a_code_block_retains_the_live_composer_after_its_close() {
+    for fixture in COMPOSERS {
+        for (composer, expected) in [
+            (fixture.placeholder, PaneState::Idle),
+            (fixture.draft, PaneState::Draft),
+        ] {
+            for transcript in [
+                "tail of a clipped code block\n```",
+                "tail of a clipped code block\n```\n```rust\nfn example() {}\n```",
+            ] {
+                let capture = format!("{transcript}\n{composer}");
+                assert_eq!(
+                    classify(fixture.agent, &capture),
+                    expected,
+                    "{}",
+                    fixture.agent
+                );
+            }
+            let unclosed_quote = format!("tail of a clipped code block\n```\n```text\n{composer}");
+            assert_eq!(
+                classify(fixture.agent, &unclosed_quote),
+                PaneState::Unknown,
+                "{}",
+                fixture.agent
+            );
+        }
+    }
+}
+
+#[test]
 fn numbered_live_drafts_are_not_approval_choices() {
     for fixture in COMPOSERS
         .iter()

@@ -722,14 +722,27 @@ fn process_exit_releases_input_ownership_without_replacing_the_lockfile() {
 }
 
 #[test]
-fn slow_literal_submission_retains_process_shared_ownership() {
+fn a_literal_timeout_retains_ownership_until_failure_and_releases_it_without_enter() {
     let _test_resource = common::process_test_resource_guard();
     let mut fixture = InputFixture::new();
-    let owner = fixture.gate("prompt", "literal");
-    std::thread::sleep(Duration::from_millis(3200));
-    assert_busy(&fixture.run("prompt"), fixture.member);
-    let output = owner.release();
-    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let mut owner = fixture.gate("prompt", "literal");
+    let contender = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(fixture.lock_path())
+        .unwrap();
+    assert!(matches!(
+        contender.try_lock(),
+        Err(TryLockError::WouldBlock)
+    ));
+    let output = bounded_output(owner.child.take().unwrap());
+    assert_eq!(code(&output), 1, "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("is uncertain:"),
+        "{}",
+        stderr(&output)
+    );
+    contender.try_lock().unwrap();
     let literals: Vec<_> = fixture
         .cli
         .shim_calls()
@@ -737,6 +750,13 @@ fn slow_literal_submission_retains_process_shared_ownership() {
         .filter(|line| line.contains(" -l "))
         .collect();
     assert_eq!(literals.len(), 1, "{literals:?}");
+    assert!(
+        fixture
+            .cli
+            .shim_calls()
+            .iter()
+            .all(|line| !line.ends_with(" Enter"))
+    );
 }
 
 #[test]
@@ -931,7 +951,7 @@ fn capture_timeout_is_bounded_and_starts_no_input_after_the_deadline() {
 }
 
 #[test]
-fn capture_and_literal_share_one_five_second_attempt_budget() {
+fn insufficient_post_capture_budget_starts_no_literal_input() {
     let _test_resource = common::process_test_resource_guard();
     let mut fixture = InputFixture::new();
     fixture.cli.set_env("CAFLEET_TEST_CAPTURE_DELAY", "3");
@@ -945,17 +965,12 @@ fn capture_and_literal_share_one_five_second_attempt_budget() {
         start.elapsed()
     );
     assert!(
-        stderr(&output).contains("is uncertain:"),
+        stderr(&output).contains("prompt was not dispatched")
+            && stderr(&output).contains("insufficient pane input budget"),
         "{}",
         stderr(&output)
     );
-    assert!(
-        fixture
-            .cli
-            .shim_calls()
-            .iter()
-            .all(|line| !line.ends_with(" Enter"))
-    );
+    assert_no_input(&fixture.cli.shim_calls());
 }
 
 #[test]

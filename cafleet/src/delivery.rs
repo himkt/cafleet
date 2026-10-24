@@ -1,7 +1,7 @@
 use crate::broker;
 use crate::config::Settings;
 use crate::error::CafleetError;
-use crate::input::{Deadline, PaneLock, with_database_budget};
+use crate::input::{Deadline, PaneLock, complete_database_budget, with_database_budget};
 use crate::multiplexer::{AnyMultiplexer, Multiplexer, MultiplexerError};
 use crate::output::truncate_text;
 use crate::pane_state::{PaneState, classify};
@@ -177,7 +177,7 @@ pub(crate) fn attempt_preview(
             failed(message.message_id, Delivery::NotSent, error.to_string())
         });
     }
-    match with_database_budget(conn, deadline, |conn| {
+    match complete_database_budget(conn, deadline, |conn| {
         broker::stamp_notified(
             conn,
             message.message_id,
@@ -191,5 +191,72 @@ pub(crate) fn attempt_preview(
             message_id: message.message_id,
         }),
         Err(error) => Ok(uncertain(error.message().into_owned())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::broker::test_support as common;
+    use crate::multiplexer::{CommandRunner, RunError, TmuxMultiplexer};
+    use std::{
+        collections::HashMap,
+        rc::Rc,
+        time::{Duration, Instant},
+    };
+
+    struct FinishingRunner {
+        deadline: Deadline,
+    }
+
+    impl CommandRunner for FinishingRunner {
+        fn binary_exists(&self, _: &str) -> bool {
+            true
+        }
+        fn run(&self, argv: &[String], _: Option<u64>) -> Result<String, RunError> {
+            if argv[1] == "capture-pane" {
+                return Ok("Ready.\n────────────\n❯ \x1b[0m\n────────────\n? for shortcuts".into());
+            }
+            assert_eq!(argv[1], "send-keys");
+            if argv.last().unwrap() == "Enter" {
+                std::thread::sleep(self.deadline.remaining().unwrap() + Duration::from_millis(5));
+            }
+            Ok(String::new())
+        }
+        fn sleep(&self, _: f64) {}
+    }
+
+    #[test]
+    fn a_completed_submission_is_stamped_even_when_its_budget_has_just_expired() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        let (fleet, director) = common::create_fleet(&mut conn, "stamp");
+        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+        let message =
+            broker::send_message(&mut conn, director, &worker.to_string(), "assignment").unwrap();
+        let settings = Settings::from_lookup(|name| {
+            (name == "CAFLEET_DATABASE_URL").then(|| format!("sqlite:///{}", conn.path().unwrap()))
+        })
+        .unwrap();
+        let deadline = Deadline::until(Instant::now() + Duration::from_millis(2200));
+        let mux = AnyMultiplexer::Tmux(TmuxMultiplexer::new(
+            Rc::new(FinishingRunner { deadline }),
+            HashMap::from([("TMUX".into(), "test".into())]),
+        ));
+        assert_eq!(
+            attempt_preview(&mut conn, &settings, worker, Some(fleet), deadline, || Ok(
+                mux
+            ))
+            .unwrap(),
+            AttemptOutcome::Sent {
+                message_id: message.message_id
+            }
+        );
+        assert!(deadline.remaining().is_err());
+        assert!(
+            broker::oldest_pending_preview(&conn, worker)
+                .unwrap()
+                .is_none()
+        );
     }
 }

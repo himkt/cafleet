@@ -128,9 +128,9 @@ remaining, the member column is re-equalized to equal heights (the same
 invariant the create path enforces); after the last member is deleted, the
 Director pane is explicitly restored to full tab width when the layout read
 shows a residual right split; a single remaining member needs no resize. The
-rebalance silently skips on unexpected layout shapes. Any `HerdrError` during
-the rebalance is swallowed: a layout failure never fails `member delete` — the
-pane is closed and the member deregistered regardless.
+rebalance uses the original operation deadline after registry finalization.
+A failed or expired restoration emits a stderr diagnostic; `member delete`
+retains its successful close and deregistration result.
 
 
 ## Pane input lock {#pane-input-lock}
@@ -170,7 +170,7 @@ Approval and work evidence outrank empty-composer cues. A dim/grey host suggesti
 
 Validate a nonblank literal line without CR/LF or C0/DEL control characters. After locking and idle revalidation, type the payload once, wait the backend settle interval and submit Enter. Native shell input starts with `! ` followed by the validated actual command. Composer controls begin the submitted input.
 
-Each submission has one five-second transport budget. Bound capture and every write/settle/stamp by the remaining budget. A pre-write error reports no dispatch; an error from the first text-writing call or later is uncertain, because bytes may already have arrived. A failure after Enter can mean the command ran. Inspect the pane before authorizing any retry.
+Each submission has one five-second transport budget. Before literal input, reserve the one-second settle delay and one second for Enter; bound the literal command by the remaining unreserved time. Insufficient time starts no input. A confirmed launch failure or recognized missing pane reports no dispatch. A started text write with an ambiguous result, or any failure after successful literal input, is uncertain. A failure after Enter can mean the command ran. Inspect the pane before authorizing any retry.
 
 The lock excludes CAFleet writers; the user's keyboard and host UI can still change after a capture. Successful dispatch establishes complete submission only.
 
@@ -186,11 +186,11 @@ Acquire the shared input lock, then revalidate activity, fleet, concrete placeme
 
 Stored text remains exact. Truncate the preview body by `CAFLEET_MAX_TEXT_LEN`, fold CRLF/LF/CR to `⏎`, render tabs as `␉`, and escape other C0/DEL controls as visible hexadecimal escapes. The fixed prefix distinguishes message text from native composer controls.
 
-Stamp `notified_at` only after complete submission and only while the message remains pending. ACK removes preview eligibility. If a process exits after submission but before stamping, a preview may repeat; members use its ID and current inbox/ACK evidence to establish actionable work.
+Stamp `notified_at` only after complete submission and only while the message remains pending. Successful submission permits uncontended stamp finalization after expiry; the original deadline still bounds every database lock wait. ACK removes preview eligibility. If a process exits after submission but before stamping, a preview may repeat; members use its ID and current inbox/ACK evidence to establish actionable work.
 
 ### Held delivery {#held-delivery}
 
-Working, approval, pending placement and lock contention are ordinary holds. A finite [message wait](cli-options.md#message-wait) or a later send retries eligible ordinary-member previews. Its in-memory round-robin cursor attempts at most one member per interval.
+Working, approval, pending placement and lock contention are ordinary holds. A finite [message wait](cli-options.md#message-wait) or a later send retries eligible ordinary-member previews. Rotation selects concrete ordinary-member placements and attempts at most one member per interval. After an uncertain delivery, the same wait preserves that diagnostic and excludes the member from automatic retries while that exact preview remains eligible. Successful snapshots can establish ACK, departure or notification by another invocation.
 
 A first attempted draft or unknown composer yields an immediate diagnostic naming the member and preview ID. Capture and relay retained user drafts before a user decision or authorized replacement. Transport and stamp failures after persistence remain diagnostics alongside a successful send result. No notification outcome erases a committed delivery.
 
