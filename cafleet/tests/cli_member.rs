@@ -562,6 +562,7 @@ fn member_placement_is_pending_until_the_owned_pane_is_patched() {
 #[test]
 fn fleet_capture_follows_the_director_back_reference_before_member_id_order() {
     let cli = Cli::new();
+    cli.allow_rest_capture();
     let (fleet, first) = cli.seeded_fleet();
     let second = cli.seed_member(fleet, "second");
     let director = cli.seed_member(fleet, "new-director");
@@ -603,6 +604,7 @@ fn fleet_capture_follows_the_director_back_reference_before_member_id_order() {
 #[test]
 fn fleet_capture_annotates_a_pending_director_and_keeps_other_panes_available() {
     let cli = Cli::new();
+    cli.allow_rest_capture();
     let (fleet, director) = cli.seeded_fleet();
     let worker = cli.seed_member(fleet, "healthy");
     cli.sqlite()
@@ -650,6 +652,7 @@ fn fleet_capture_annotates_a_pending_director_and_keeps_other_panes_available() 
 #[test]
 fn fleet_capture_reports_a_failed_pane_and_continues_with_healthy_members() {
     let cli = Cli::new();
+    cli.allow_rest_capture();
     let (fleet, _) = cli.seeded_fleet();
     let member = cli.seed_member(fleet, "healthy");
     cli.set_pane_capture("%0", CAPTURE_FAILS);
@@ -718,7 +721,7 @@ fn member_show_takes_the_positional_subject() {
     assert_eq!(
         stdout(&output),
         format!(
-            r#"{{"member_id":{member_id},"name":"worker","description":"test member","status":"active","registered_at":"{registered}","kind":"member","placement":{{"backend":"tmux","mux_session":"main","mux_window_id":"@1","mux_pane_id":"%6","coding_agent":"claude","created_at":"{placed}"}}}}"#
+            r#"{{"member_id":{member_id},"name":"worker","description":"test member","status":"active","registered_at":"{registered}","kind":"member","placement":{{"backend":"tmux","mux_session":"main","mux_window_id":"@1","mux_pane_id":"%6","coding_agent":"claude","created_at":"{placed}"}},"unconfirmed_previews":[]}}"#
         ) + "\n"
     );
 
@@ -728,6 +731,77 @@ fn member_show_takes_the_positional_subject() {
         stderr(&output).contains("Error: Member 99 not found"),
         "got: {}",
         stderr(&output)
+    );
+}
+
+#[test]
+fn list_and_show_json_report_unconfirmed_previews_and_text_output_is_unchanged() {
+    let cli = Cli::new();
+    let (fleet_id, director_id) = cli.seeded_fleet();
+    let member_id = cli.seed_member(fleet_id, "worker");
+    let text_before = stdout(&cli.run(&["member", "list", &fleet_id.to_string()]));
+    let show_text_before = stdout(&cli.run(&["member", "show", &member_id.to_string()]));
+    let claimed = cli.seed_message(director_id, member_id, "claimed without a stamp");
+    let stamped = cli.seed_message(director_id, member_id, "claimed and stamped");
+    cli.seed_message(director_id, member_id, "never claimed");
+    let to_director = cli.seed_message(member_id, director_id, "Director claim");
+    cli.sqlite()
+        .execute_batch(&format!(
+            "UPDATE messages SET preview_started_at=created_at WHERE message_id IN ({claimed}, {stamped}, {to_director});
+             UPDATE messages SET notified_at=created_at WHERE message_id={stamped};"
+        ))
+        .unwrap();
+
+    let listed = cli.run(&["member", "list", &fleet_id.to_string(), "--json"]);
+    assert_eq!(code(&listed), 0, "{}", stderr(&listed));
+    let rows: serde_json::Value = serde_json::from_str(stdout(&listed).trim()).unwrap();
+    for row in rows.as_array().unwrap() {
+        assert_eq!(
+            row.as_object().unwrap().keys().last().map(String::as_str),
+            Some("unconfirmed_previews")
+        );
+        let keys: Vec<_> = row.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(keys[keys.len() - 2], "idle");
+    }
+    let by_id = |id: i64| {
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["member_id"] == id)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(
+        by_id(member_id)["unconfirmed_previews"],
+        serde_json::json!([claimed])
+    );
+    assert_eq!(
+        by_id(director_id)["unconfirmed_previews"],
+        serde_json::json!([to_director])
+    );
+
+    let shown = cli.run(&["member", "show", &member_id.to_string(), "--json"]);
+    assert_eq!(code(&shown), 0, "{}", stderr(&shown));
+    let record: serde_json::Value = serde_json::from_str(stdout(&shown).trim()).unwrap();
+    assert_eq!(
+        record.as_object().unwrap().keys().last().map(String::as_str),
+        Some("unconfirmed_previews")
+    );
+    assert_eq!(record["unconfirmed_previews"], serde_json::json!([claimed]));
+
+    let ack = cli.run(&["message", "ack", &claimed.to_string()]);
+    assert_eq!(code(&ack), 0, "{}", stderr(&ack));
+    let shown = cli.run(&["member", "show", &member_id.to_string(), "--json"]);
+    let record: serde_json::Value = serde_json::from_str(stdout(&shown).trim()).unwrap();
+    assert_eq!(record["unconfirmed_previews"], serde_json::json!([]));
+
+    let text_after = stdout(&cli.run(&["member", "list", &fleet_id.to_string()]));
+    let header = |text: &str| text.lines().take(2).collect::<Vec<_>>().join("\n");
+    assert_eq!(header(&text_after), header(&text_before));
+    assert!(!text_after.contains("unconfirmed"), "{text_after}");
+    assert_eq!(
+        stdout(&cli.run(&["member", "show", &member_id.to_string()])),
+        show_text_before
     );
 }
 
@@ -882,6 +956,7 @@ fn member_ping_skips_a_pending_placement_and_exits_zero() {
 #[test]
 fn member_capture_text_emits_the_content_only() {
     let cli = Cli::new();
+    cli.allow_rest_capture();
     let (fleet_id, _) = cli.seeded_fleet();
     let member_id = cli.seed_member(fleet_id, "worker");
     let pane = format!("%{}", member_id + 4);
@@ -932,6 +1007,7 @@ fn member_capture_text_emits_the_content_only() {
 #[test]
 fn fleet_capture_prints_director_first_then_members_ascending() {
     let cli = Cli::new();
+    cli.allow_rest_capture();
     let (fleet_id, director_id) = cli.seeded_fleet();
     let alpha_id = cli.seed_member(fleet_id, "alpha");
     let beta_id = cli.seed_member(fleet_id, "beta");
@@ -1038,6 +1114,7 @@ fn fleet_capture_prints_director_first_then_members_ascending() {
 #[test]
 fn fleet_capture_annotates_a_pending_placement_and_exits_zero() {
     let cli = Cli::new();
+    cli.allow_rest_capture();
     let (fleet_id, _) = cli.seeded_fleet();
     let member_id = cli.seed_member(fleet_id, "worker");
     cli.sqlite()
@@ -1112,6 +1189,7 @@ fn fleet_capture_annotates_a_pending_placement_and_exits_zero() {
 #[test]
 fn fleet_capture_annotates_failed_captures_and_exits_zero() {
     let mut cli = Cli::new();
+    cli.allow_rest_capture();
     let (fleet_id, _) = cli.seeded_fleet();
     cli.seed_member(fleet_id, "worker");
     cli.fail_subcommand = Some("capture-pane".to_string());
@@ -1157,6 +1235,7 @@ fn fleet_capture_annotates_failed_captures_and_exits_zero() {
 #[test]
 fn fleet_capture_of_a_memberless_fleet_captures_the_director_only() {
     let cli = Cli::new();
+    cli.allow_rest_capture();
     let (fleet_id, _) = cli.seeded_fleet();
 
     let output = cli.run(&["fleet", "capture", &fleet_id.to_string()]);

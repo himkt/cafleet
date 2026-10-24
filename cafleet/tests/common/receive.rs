@@ -1,19 +1,11 @@
 #![allow(dead_code)]
 
-use std::fs::{File, OpenOptions};
-use std::os::unix::fs::OpenOptionsExt;
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Output};
 use std::time::{Duration, Instant};
 
 use crate::common::{Cli, code, stderr, stdout, write_executable};
-use sha2::{Digest, Sha256};
-
-pub const IDLE: &str = "Ready.\n────────────────────────────\n❯ \x1b[0m\n────────────────────────────\n? for shortcuts\n";
-pub const WORKING: &str = "✻ Working (esc to interrupt)\n────────────────────────────\n❯ \x1b[0m\n────────────────────────────";
-pub const APPROVAL: &str = "Do you want to proceed?\n ❯ 1. Yes, proceed\n   2. No";
-pub const DRAFT: &str = "Ready.\n────────────────────────────\n❯ \x1b[0;37munsent user draft\x1b[0m\n────────────────────────────\n? for shortcuts";
-pub const UNKNOWN: &str = "Unrecognized truncated terminal screen";
 
 const SHIM: &str = r#"#!/bin/sh
 printf '%s\n' "$*" >> "$CAFLEET_TEST_TMUX_LOG"
@@ -37,11 +29,16 @@ case "$1" in
         case "$1" in
             -l) stage=literal ;;
             Enter) stage=enter ;;
+            Escape) stage=escape ;;
             *) stage=key ;;
         esac
         ;;
     display-message) printf 'main|@1|%%0\n'; exit 0 ;;
 esac
+if [ "$stage" = capture ]; then
+    printf 'unexpected capture-pane\n' >&2
+    exit 1
+fi
 printf '%s\t%s\t%s\t\n' "$PPID" "$stage" "$pane" >> "$CAFLEET_TEST_RECEIVE_EVENTS"
 control="$CAFLEET_TEST_RECEIVE_CONTROL"
 if [ -f "$control/gate-$stage-$pane" ]; then
@@ -60,15 +57,6 @@ if [ -f "$control/fail-$stage-$pane" ]; then
     printf '%s\tfailed\t%s\t%s\n' "$PPID" "$pane" "$cause" >> "$CAFLEET_TEST_RECEIVE_EVENTS"
     printf '%s\n' "$cause" >&2
     exit 1
-fi
-if [ "$stage" = capture ]; then
-    if [ ! -f "$CAFLEET_TEST_TMUX_CAPTURE_DIR/$pane" ]; then
-        printf 'missing capture fixture %s\n' "$pane" >&2
-        exit 1
-    fi
-    while IFS= read -r line || [ -n "$line" ]; do
-        printf '%s\n' "$line"
-    done < "$CAFLEET_TEST_TMUX_CAPTURE_DIR/$pane"
 fi
 printf '%s\t%s_done\t%s\t\n' "$PPID" "$stage" "$pane" >> "$CAFLEET_TEST_RECEIVE_EVENTS"
 "#;
@@ -109,8 +97,15 @@ impl Fixture {
     pub fn worker(&self, name: &str) -> Worker {
         let id = self.cli.seed_member(self.fleet, name);
         let pane = format!("%{}", id + 4);
-        self.cli.set_pane_capture(&pane, IDLE);
         Worker { id, pane }
+    }
+
+    /// The Director's seeded pane, addressable like a worker's.
+    pub fn director_pane(&self) -> Worker {
+        Worker {
+            id: self.director,
+            pane: "%0".into(),
+        }
     }
 
     pub fn message(&self, sender: i64, recipient: i64, body: &str) -> i64 {
@@ -176,8 +171,10 @@ impl Fixture {
             .count()
     }
 
-    pub fn view(&self, worker: &Worker, content: &str) {
-        self.cli.set_pane_capture(&worker.pane, content);
+    /// Make every Escape into `worker`'s pane fail before any text is typed,
+    /// so each attempt ends `not_sent` and releases its claim.
+    pub fn refuse_escape(&self, worker: &Worker) {
+        self.fail(worker, "escape", "escape refused by test");
     }
 
     pub fn fail(&self, worker: &Worker, stage: &str, cause: &str) {
@@ -206,22 +203,7 @@ impl Fixture {
     }
 
     pub fn lock(&self, worker: &Worker) -> File {
-        let mut directory = self.cli.db_path().canonicalize().unwrap().into_os_string();
-        directory.push(".pane-locks");
-        let digest = Sha256::digest(format!("tmux\0main\0{}", worker.pane).as_bytes());
-        let key: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
-        let directory = PathBuf::from(directory);
-        std::fs::create_dir_all(&directory).unwrap();
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .mode(0o600)
-            .open(directory.join(format!("{key}.lock")))
-            .unwrap();
-        file.try_lock().unwrap();
-        file
+        self.cli.lock_pane(&worker.pane)
     }
 
     pub fn stamp(&self, id: i64) -> Option<String> {
@@ -404,6 +386,30 @@ pub fn assert_keys(value: &serde_json::Value, expected: &[&str]) {
             .map(String::as_str)
             .collect::<Vec<_>>(),
         expected
+    );
+}
+
+/// No text reached any pane: no literal write and no Enter (an Escape attempt
+/// is allowed).
+pub fn assert_no_text_input(fixture: &Fixture) {
+    assert!(
+        fixture.cli.shim_calls().iter().all(|line| {
+            !(line.starts_with("send-keys") && (line.contains(" -l ") || line.ends_with(" Enter")))
+        }),
+        "{:?}",
+        fixture.cli.shim_calls()
+    );
+}
+
+pub fn assert_no_capture(fixture: &Fixture) {
+    assert!(
+        fixture
+            .cli
+            .shim_calls()
+            .iter()
+            .all(|line| !line.starts_with("capture-pane")),
+        "{:?}",
+        fixture.cli.shim_calls()
     );
 }
 

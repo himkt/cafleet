@@ -6,10 +6,13 @@ use std::os::unix::process::ExitStatusExt;
 use std::time::Duration;
 
 use common::{Cli, code, stderr, stdout};
-use receive::{Fixture, WORKING, assert_keys, assert_no_input, assert_result, json};
+use receive::{
+    Fixture, assert_keys, assert_no_capture, assert_no_input, assert_no_text_input, assert_result,
+    json,
+};
 
 #[test]
-fn wait_help_declares_the_background_receive_default() {
+fn wait_help_declares_the_default_timeout() {
     let _test_resource = common::process_test_resource_guard();
     let cli = Cli::new();
     let output = cli.run(&["message", "wait", "--help"]);
@@ -206,11 +209,11 @@ fn arrival_during_a_finite_receive_returns_the_new_unacknowledged_reply() {
     let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
-    fixture.view(&worker, WORKING);
+    fixture.refuse_escape(&worker);
     fixture.assignment(&worker, "ongoing assignment");
     let mut waiting = fixture.spawn(fixture.director, 4);
-    waiting.until("first retry capture", || {
-        fixture.count("capture", &worker) >= 1
+    waiting.until("first retry attempt", || {
+        fixture.count("failed", &worker) >= 1
     });
     let id = fixture.reply(&worker, "new reply");
     let output = waiting.output();
@@ -218,7 +221,8 @@ fn arrival_during_a_finite_receive_returns_the_new_unacknowledged_reply() {
     assert_result(&result, fixture.director, "messages");
     assert_eq!(result["messages"][0]["message_id"], id);
     assert_eq!(result["messages"][0]["status_state"], "input_required");
-    assert_no_input(&fixture);
+    assert_no_text_input(&fixture);
+    assert_no_capture(&fixture);
 }
 
 #[test]
@@ -226,7 +230,7 @@ fn ack_on_read_allows_a_deferred_question_and_a_later_reply() {
     let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
-    fixture.view(&worker, WORKING);
+    fixture.refuse_escape(&worker);
     let question = fixture.reply(&worker, "May I deploy after review?");
     let first = json(&fixture.spawn(fixture.director, 1).output());
     assert_eq!(first["messages"][0]["message_id"], question);
@@ -234,7 +238,7 @@ fn ack_on_read_allows_a_deferred_question_and_a_later_reply() {
     fixture.assignment(&worker, "continue the already authorized work");
     let mut next = fixture.spawn(fixture.director, 4);
     next.until("a new receive rather than the consumed question", || {
-        fixture.count("capture", &worker) >= 1
+        fixture.count("failed", &worker) >= 1
     });
     let reply = fixture.reply(&worker, "review evidence is ready");
     let result = json(&next.output());
@@ -246,7 +250,7 @@ fn ack_on_read_allows_a_deferred_question_and_a_later_reply() {
             .run(&["message", "show", &question.to_string(), "--json"]),
     );
     assert_eq!(shown["message"]["status_state"], "completed");
-    assert_no_input(&fixture);
+    assert_no_text_input(&fixture);
 }
 
 #[test]
@@ -284,11 +288,11 @@ fn a_subject_or_fleet_invalidated_during_receive_exits_with_its_cause() {
     for invalidation in ["subject", "fleet"] {
         let fixture = Fixture::new();
         let worker = fixture.worker("worker");
-        fixture.view(&worker, WORKING);
+        fixture.refuse_escape(&worker);
         fixture.assignment(&worker, "pending assignment");
         let mut waiting = fixture.spawn(fixture.director, 5);
         waiting.until("receive has started", || {
-            fixture.count("capture", &worker) >= 1
+            fixture.count("failed", &worker) >= 1
         });
         if invalidation == "subject" {
             fixture
@@ -349,11 +353,11 @@ fn receive_preserves_a_storage_read_failure_during_the_loop() {
     let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
-    fixture.view(&worker, WORKING);
+    fixture.refuse_escape(&worker);
     fixture.assignment(&worker, "pending assignment");
     let mut waiting = fixture.spawn(fixture.director, 5);
     waiting.until("receive has started", || {
-        fixture.count("capture", &worker) >= 1
+        fixture.count("failed", &worker) >= 1
     });
     fixture
         .cli
@@ -391,12 +395,12 @@ fn ctrl_c_terminates_the_owned_finite_receive_without_registry_state() {
     let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
-    fixture.view(&worker, WORKING);
+    fixture.refuse_escape(&worker);
     fixture.assignment(&worker, "work retained after cancellation");
     let before = fixture.records();
     let mut waiting = fixture.spawn(fixture.director, 10);
-    waiting.until("receive reached a normal held notification", || {
-        fixture.count("capture_done", &worker) >= 1
+    waiting.until("receive reached a released not-sent attempt", || {
+        fixture.count("failed", &worker) >= 1
     });
     waiting.signal(nix::sys::signal::Signal::SIGINT);
     let output = waiting.output();
@@ -408,5 +412,5 @@ fn ctrl_c_terminates_the_owned_finite_receive_without_registry_state() {
     );
     assert_eq!(stdout(&output), "");
     assert_eq!(fixture.records(), before);
-    assert_no_input(&fixture);
+    assert_no_text_input(&fixture);
 }

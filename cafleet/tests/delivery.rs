@@ -1,8 +1,10 @@
 mod common;
 
+use std::time::{Duration, Instant};
+
 use common::{Cli, code, stderr, stdout};
 
-const IDLE: &str = "Ready.\n────────────────────────────\n❯ \x1b[0m\n────────────────────────────\n? for shortcuts";
+const CLAUSES: &str = "[cafleet] Resume your work if something was still running. [cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.";
 
 struct Fixture {
     cli: Cli,
@@ -18,7 +20,6 @@ impl Fixture {
         let (fleet, director) = cli.seeded_fleet();
         let worker = cli.seed_member(fleet, "worker");
         let pane = format!("%{}", worker + 4);
-        cli.set_pane_capture(&pane, IDLE);
         Self {
             cli,
             fleet,
@@ -28,17 +29,29 @@ impl Fixture {
         }
     }
 
+    fn send_args(&self, body: &str) -> Vec<String> {
+        vec![
+            "message".to_owned(),
+            "send".to_owned(),
+            "--from-member-id".to_owned(),
+            self.director.to_string(),
+            "--to-member-id".to_owned(),
+            self.worker.to_string(),
+            body.to_owned(),
+            "--json".to_owned(),
+        ]
+    }
+
     fn send(&self, body: &str) -> std::process::Output {
-        self.cli.run(&[
-            "message",
-            "send",
-            "--from-member-id",
-            &self.director.to_string(),
-            "--to-member-id",
-            &self.worker.to_string(),
-            body,
-            "--json",
-        ])
+        let args = self.send_args(body);
+        self.cli
+            .run(&args.iter().map(String::as_str).collect::<Vec<_>>())
+    }
+
+    fn spawn_send(&self, body: &str) -> std::process::Child {
+        let args = self.send_args(body);
+        self.cli
+            .spawn(&args.iter().map(String::as_str).collect::<Vec<_>>())
     }
 
     fn stamp(&self, id: i64) -> Option<String> {
@@ -52,8 +65,63 @@ impl Fixture {
             .unwrap()
     }
 
+    fn claimed(&self, id: i64) -> bool {
+        self.cli
+            .sqlite()
+            .query_row(
+                "SELECT preview_started_at IS NOT NULL FROM messages WHERE message_id=?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    fn state(&self, id: i64) -> String {
+        self.cli
+            .sqlite()
+            .query_row(
+                "SELECT status_state FROM messages WHERE message_id=?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    fn id_of(&self, body: &str) -> i64 {
+        self.cli
+            .sqlite()
+            .query_row(
+                "SELECT message_id FROM messages WHERE text=?1",
+                [body],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
     fn pending(&self, body: &str) -> i64 {
         self.cli.seed_message(self.director, self.worker, body)
+    }
+
+    fn writes_to(&self, pane: &str) -> Vec<String> {
+        self.cli
+            .shim_calls()
+            .into_iter()
+            .filter(|line| line.starts_with(&format!("send-keys -t {pane} ")))
+            .collect()
+    }
+
+    fn escapes_to(&self, pane: &str) -> usize {
+        self.writes_to(pane)
+            .iter()
+            .filter(|line| line.ends_with(" Escape"))
+            .count()
+    }
+
+    fn lock_busy_stderr(&self, new: i64, preview: i64) -> String {
+        format!(
+            "Message {new} was persisted. member {}'s pane input remained busy; preview {preview} was not sent.",
+            self.worker
+        )
     }
 }
 
@@ -62,8 +130,29 @@ fn payload(output: &std::process::Output) -> serde_json::Value {
     serde_json::from_str(&stdout(output)).unwrap()
 }
 
+fn wait_output(child: std::process::Child) -> std::process::Output {
+    child.wait_with_output().unwrap()
+}
+
+fn release_after(lock: std::fs::File, delay: Duration) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        std::thread::sleep(delay);
+        drop(lock);
+    })
+}
+
+fn assert_no_capture(cli: &Cli) {
+    assert!(
+        cli.shim_calls()
+            .iter()
+            .all(|line| !line.starts_with("capture-pane")),
+        "{:?}",
+        cli.shim_calls()
+    );
+}
+
 #[test]
-fn idle_preview_is_one_literal_line_followed_by_enter() {
+fn a_delivery_is_escape_then_one_notification_line_then_enter_without_capture() {
     let fixture = Fixture::new();
     let output = fixture.send("assignment");
     let result = payload(&output);
@@ -71,91 +160,214 @@ fn idle_preview_is_one_literal_line_followed_by_enter() {
     let message = &result["message"];
     let id = message["message_id"].as_i64().unwrap();
     assert!(fixture.stamp(id).is_some());
+    assert_eq!(fixture.state(id), "input_required");
     let ts = message["created_at"].as_str().unwrap();
-    let writes: Vec<_> = fixture
-        .cli
-        .shim_calls()
-        .into_iter()
-        .filter(|line| line.starts_with("send-keys"))
-        .collect();
     assert_eq!(
-        writes,
+        fixture.writes_to(&fixture.pane),
         [
+            format!("send-keys -t {} Escape", fixture.pane),
             format!(
-                "send-keys -t {} -l -- [cafleet msg {id} from {} {ts}] assignment",
+                "send-keys -t {} -l -- [cafleet msg {id} from {} {ts}] assignment {CLAUSES}",
                 fixture.pane, fixture.director
             ),
             format!("send-keys -t {} Enter", fixture.pane),
         ]
     );
+    assert_no_capture(&fixture.cli);
+    assert_eq!(stderr(&output), "");
+    let polled = payload(
+        &fixture
+            .cli
+            .run(&["message", "poll", &fixture.worker.to_string(), "--json"]),
+    );
+    assert_eq!(
+        polled[0]["message_id"], id,
+        "a delivered message stays in the inbox until ACKed"
+    );
 }
 
 #[test]
-fn non_idle_previews_stay_pending_even_when_the_message_is_old() {
-    for (state, capture) in [
-        ("working", format!("✻ Working (esc to interrupt)\n{IDLE}")),
-        ("awaiting_user", format!(" ❯ 1. Yes, proceed\n{IDLE}")),
-        (
-            "draft",
-            IDLE.replace("❯ \x1b[0m", "❯ \x1b[0;37munsent draft\x1b[0m"),
-        ),
-        ("unknown", "unrecognized screen".into()),
-    ] {
-        let fixture = Fixture::new();
-        fixture.cli.set_pane_capture(&fixture.pane, &capture);
-        let old = fixture.pending("old assignment");
-        fixture
-            .cli
-            .sqlite()
-            .execute(
-                "UPDATE messages SET created_at='1900-01-01T00:00:00+00:00' WHERE message_id=?1",
-                [old],
-            )
-            .unwrap();
-        let output = fixture.send("new assignment");
-        let result = payload(&output);
-        assert_eq!(result["notification_sent"], false);
-        assert_eq!(fixture.stamp(old), None);
-        assert_eq!(
-            fixture.stamp(result["message"]["message_id"].as_i64().unwrap()),
-            None
+fn one_send_drains_pending_messages_oldest_first_with_one_escape() {
+    let fixture = Fixture::new();
+    let older = fixture.pending("older");
+    let result = payload(&fixture.send("newer"));
+    let newer = result["message"]["message_id"].as_i64().unwrap();
+    assert_eq!(
+        result["notification_sent"], true,
+        "the new message is drained after the older one"
+    );
+    let literals = fixture.cli.literal_calls();
+    assert_eq!(literals.len(), 2, "{literals:?}");
+    for (literal, id) in literals.iter().zip([older, newer]) {
+        assert!(
+            literal.contains(&format!("[cafleet msg {id} from ")),
+            "{literals:?}"
         );
-        assert_eq!(fixture.cli.shim_count("send-keys"), 0, "{state}");
-        if matches!(state, "draft" | "unknown") {
-            let new = result["message"]["message_id"].as_i64().unwrap();
-            assert!(stderr(&output).contains(&format!(
-                "Message {new} was persisted. member {} is {state}; preview {old} was not sent.", fixture.worker)),
-                "{}", stderr(&output));
-        }
+        assert!(fixture.stamp(id).is_some());
+    }
+    assert_eq!(fixture.escapes_to(&fixture.pane), 1);
+    let writes = fixture.writes_to(&fixture.pane);
+    assert!(writes[0].ends_with(" Escape"), "{writes:?}");
+}
+
+#[test]
+fn budget_exhaustion_leaves_later_messages_pending_without_a_diagnostic() {
+    let fixture = Fixture::new();
+    let older: Vec<i64> = (0..4)
+        .map(|index| fixture.pending(&format!("older {index}")))
+        .collect();
+    let output = fixture.send("newest");
+    let result = payload(&output);
+    let newest = result["message"]["message_id"].as_i64().unwrap();
+    assert_eq!(result["notification_sent"], false);
+    assert_eq!(stderr(&output), "");
+    let mut ids = older.clone();
+    ids.push(newest);
+    let stamped: Vec<bool> = ids.iter().map(|id| fixture.stamp(*id).is_some()).collect();
+    let delivered = stamped.iter().take_while(|stamped| **stamped).count();
+    assert!(delivered >= 1, "{stamped:?}");
+    assert!(
+        stamped[delivered..].iter().all(|stamped| !stamped),
+        "delivery is an oldest-first prefix: {stamped:?}"
+    );
+    assert!(delivered < ids.len(), "{stamped:?}");
+    for id in &ids[delivered..] {
+        assert!(!fixture.claimed(*id), "no claim is left behind");
+    }
+    assert_eq!(fixture.cli.literal_calls().len(), delivered);
+}
+
+#[test]
+fn a_message_acked_between_claim_and_stamp_counts_as_sent_and_the_next_line_has_no_escape() {
+    let _test_resource = common::process_test_resource_guard();
+    let mut fixture = Fixture::new();
+    fixture.cli.block_tmux("literal");
+    let child = fixture.spawn_send("acked while typing");
+    fixture.cli.wait_for_tmux_block();
+    let first = fixture.id_of("acked while typing");
+    let ack = fixture.cli.run(&["message", "ack", &first.to_string()]);
+    assert_eq!(code(&ack), 0, "{}", stderr(&ack));
+    let second = fixture.pending("arrived while typing");
+    fixture.cli.release_tmux();
+    let output = wait_output(child);
+    let result = payload(&output);
+    assert_eq!(result["notification_sent"], true);
+    assert_eq!(fixture.stamp(first), None);
+    assert_eq!(fixture.state(first), "completed");
+    assert!(fixture.stamp(second).is_some());
+    assert_eq!(fixture.escapes_to(&fixture.pane), 1);
+    let literals = fixture.cli.literal_calls();
+    assert_eq!(literals.len(), 2, "{literals:?}");
+    assert!(literals[1].contains(&format!("[cafleet msg {second} from ")));
+    let writes = fixture.writes_to(&fixture.pane);
+    let second_literal = writes
+        .iter()
+        .position(|line| line.contains(&format!("[cafleet msg {second} from ")))
+        .unwrap();
+    assert!(
+        !writes[second_literal - 1].ends_with(" Escape"),
+        "{writes:?}"
+    );
+}
+
+#[test]
+fn a_member_deregistered_during_the_lock_wait_ends_without_input() {
+    let _test_resource = common::process_test_resource_guard();
+    let fixture = Fixture::new();
+    let lock = fixture.cli.lock_pane(&fixture.pane);
+    let child = fixture.spawn_send("target leaves");
+    std::thread::sleep(Duration::from_millis(400));
+    fixture
+        .cli
+        .sqlite()
+        .execute(
+            "UPDATE members SET status='deregistered',deregistered_at='2026-10-24T00:00:00+00:00' WHERE member_id=?1",
+            [fixture.worker],
+        )
+        .unwrap();
+    drop(lock);
+    let output = wait_output(child);
+    let result = payload(&output);
+    assert_eq!(result["notification_sent"], false);
+    assert_eq!(stderr(&output), "");
+    assert!(fixture.writes_to(&fixture.pane).is_empty());
+}
+
+#[test]
+fn a_lock_released_within_the_wait_still_delivers() {
+    let _test_resource = common::process_test_resource_guard();
+    for delay in [Duration::from_millis(400), Duration::from_millis(1250)] {
+        let fixture = Fixture::new();
+        let lock = fixture.cli.lock_pane(&fixture.pane);
+        let started = Instant::now();
+        let holder = release_after(lock, delay);
+        let output = fixture.send("delivered after the lock frees");
+        holder.join().unwrap();
+        let result = payload(&output);
+        assert_eq!(result["notification_sent"], true, "{delay:?}");
+        assert_eq!(stderr(&output), "", "{delay:?}");
+        assert!(started.elapsed() >= delay);
+        assert_eq!(fixture.cli.literal_calls().len(), 1, "{delay:?}");
     }
 }
 
 #[test]
-fn each_send_attempts_only_the_oldest_pending_preview() {
+fn a_lock_still_busy_at_the_reserved_deadline_reports_the_lock_busy_diagnostic() {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
-    let first = fixture.pending("first");
-    let second = fixture.pending("second");
+    let _lock = fixture.cli.lock_pane(&fixture.pane);
+    let started = Instant::now();
+    let output = fixture.send("stays pending");
+    let waited = started.elapsed();
+    let result = payload(&output);
+    let id = result["message"]["message_id"].as_i64().unwrap();
+    assert_eq!(result["notification_sent"], false);
+    assert_eq!(stderr(&output).trim_end(), fixture.lock_busy_stderr(id, id));
+    assert!(waited >= Duration::from_millis(1400), "{waited:?}");
+    assert!(waited < Duration::from_secs(4), "{waited:?}");
+    assert_eq!(fixture.stamp(id), None);
+    assert!(!fixture.claimed(id));
+    assert!(fixture.writes_to(&fixture.pane).is_empty());
+}
+
+#[test]
+fn the_lock_busy_diagnostic_names_the_oldest_pending_preview() {
+    let _test_resource = common::process_test_resource_guard();
+    let fixture = Fixture::new();
+    let older = fixture.pending("older");
+    let _lock = fixture.cli.lock_pane(&fixture.pane);
+    let output = fixture.send("newer");
+    let result = payload(&output);
+    let id = result["message"]["message_id"].as_i64().unwrap();
+    assert_eq!(
+        stderr(&output).trim_end(),
+        fixture.lock_busy_stderr(id, older)
+    );
+}
+
+#[test]
+fn a_concurrent_drainer_settling_every_message_during_the_lock_wait_reports_nothing() {
+    let _test_resource = common::process_test_resource_guard();
+    let fixture = Fixture::new();
+    let lock = fixture.cli.lock_pane(&fixture.pane);
+    let child = fixture.spawn_send("delivered by another sender");
+    std::thread::sleep(Duration::from_millis(400));
+    let id = fixture.id_of("delivered by another sender");
     fixture
         .cli
         .sqlite()
-        .execute_batch("UPDATE messages SET created_at='2026-01-01T00:00:00+00:00';")
+        .execute(
+            "UPDATE messages SET notified_at=created_at WHERE message_id=?1",
+            [id],
+        )
         .unwrap();
-    let output = fixture.send("third");
+    std::thread::sleep(Duration::from_millis(1500));
+    drop(lock);
+    let output = wait_output(child);
     let result = payload(&output);
-    let third = result["message"]["message_id"].as_i64().unwrap();
     assert_eq!(result["notification_sent"], false);
-    assert!(fixture.stamp(first).is_some());
-    assert_eq!(fixture.stamp(second), None);
-    assert_eq!(fixture.stamp(third), None);
-    assert_eq!(
-        fixture
-            .cli
-            .shim_calls()
-            .iter()
-            .filter(|line| line.contains(" -l "))
-            .count(),
-        1
-    );
+    assert_eq!(stderr(&output), "");
+    assert!(fixture.writes_to(&fixture.pane).is_empty());
 }
 
 #[test]
@@ -175,42 +387,40 @@ fn acked_and_already_notified_rows_are_excluded_from_preview_selection() {
         .unwrap();
     let result = payload(&fixture.send("deliver this"));
     assert_eq!(result["notification_sent"], true);
-    let calls = fixture.cli.shim_calls();
-    let literals: Vec<_> = calls.iter().filter(|line| line.contains(" -l ")).collect();
+    let literals = fixture.cli.literal_calls();
     assert_eq!(literals.len(), 1);
-    assert!(literals[0].ends_with("] deliver this"), "{literals:?}");
+    assert!(
+        literals[0].ends_with(&format!("] deliver this {CLAUSES}")),
+        "{literals:?}"
+    );
 }
 
 #[test]
-fn a_failed_preview_preserves_the_committed_message_and_pending_stamp() {
-    for failed in ["capture-pane", "send-keys"] {
-        let mut fixture = Fixture::new();
-        fixture.cli.fail_subcommand = Some(failed.into());
-        let output = fixture.send("persist exactly once");
-        let result = payload(&output);
-        let id = result["message"]["message_id"].as_i64().unwrap();
-        assert_eq!(result["notification_sent"], false);
-        assert_eq!(fixture.stamp(id), None);
-        assert_eq!(
-            fixture
-                .cli
-                .sqlite()
-                .query_row("SELECT count(*) FROM messages", [], |row| row
-                    .get::<_, i64>(0))
-                .unwrap(),
-            1
-        );
-        assert!(
-            stderr(&output).contains(&id.to_string()),
-            "{}",
-            stderr(&output)
-        );
-        assert!(
-            stderr(&output).contains("forced failure"),
-            "{}",
-            stderr(&output)
-        );
-    }
+fn a_failed_escape_preserves_the_committed_message_and_releases_its_claim() {
+    let mut fixture = Fixture::new();
+    fixture.cli.fail_subcommand = Some("send-keys".into());
+    let output = fixture.send("persist exactly once");
+    let result = payload(&output);
+    let id = result["message"]["message_id"].as_i64().unwrap();
+    assert_eq!(result["notification_sent"], false);
+    assert_eq!(fixture.stamp(id), None);
+    assert!(!fixture.claimed(id));
+    assert_eq!(
+        fixture
+            .cli
+            .sqlite()
+            .query_row("SELECT count(*) FROM messages", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    let error = stderr(&output);
+    assert!(
+        error.starts_with(&format!("Message {id} was persisted. ")),
+        "{error}"
+    );
+    assert!(error.contains("forced failure"), "{error}");
+    assert_eq!(fixture.cli.literal_calls().len(), 0);
 }
 
 #[test]
@@ -231,17 +441,7 @@ fn a_notification_stamp_failure_survives_a_new_wait_without_resubmission() {
         error.contains("injected notification stamp failure"),
         "{error}"
     );
-    assert!(
-        fixture
-            .cli
-            .sqlite()
-            .query_row(
-                "SELECT preview_started_at IS NOT NULL FROM messages WHERE message_id=?1",
-                [id],
-                |row| row.get::<_, bool>(0),
-            )
-            .unwrap()
-    );
+    assert!(fixture.claimed(id));
     for _ in 0..2 {
         let waiting = fixture.cli.run(&[
             "message",
@@ -257,13 +457,16 @@ fn a_notification_stamp_failure_survives_a_new_wait_without_resubmission() {
         assert_eq!(errors[0]["message_id"], id);
         assert_eq!(errors[0]["delivery"], "uncertain");
     }
-    assert_eq!(
+    let enters = || {
         fixture
             .cli
             .shim_calls()
             .iter()
             .filter(|line| line.ends_with(" Enter"))
-            .count(),
+            .count()
+    };
+    assert_eq!(
+        enters(),
         1,
         "fresh waits preserve the durable claim and never inject another preview"
     );
@@ -277,50 +480,62 @@ fn a_notification_stamp_failure_survives_a_new_wait_without_resubmission() {
     assert_eq!(later["notification_sent"], true);
     assert!(fixture.stamp(later_id).is_some());
     assert_eq!(fixture.stamp(id), None);
-    assert_eq!(
-        fixture
-            .cli
-            .shim_calls()
-            .iter()
-            .filter(|line| line.ends_with(" Enter"))
-            .count(),
-        2
-    );
+    assert_eq!(enters(), 2);
 }
 
 #[test]
-fn director_and_self_notifications_require_no_pane_io() {
+fn a_member_to_director_send_is_delivered_into_the_directors_pane() {
     let fixture = Fixture::new();
-    for (sender, recipient) in [
-        (fixture.worker, fixture.director),
-        (fixture.worker, fixture.worker),
-    ] {
-        let output = fixture.cli.run_outside_tmux(&[
+    let output = fixture.cli.run(&[
+        "message",
+        "send",
+        "--from-member-id",
+        &fixture.worker.to_string(),
+        "--to-member-id",
+        &fixture.director.to_string(),
+        "reply for the Director",
+        "--json",
+    ]);
+    let result = payload(&output);
+    let id = result["message"]["message_id"].as_i64().unwrap();
+    assert_eq!(result["notification_sent"], true);
+    assert_eq!(stderr(&output), "");
+    assert!(fixture.stamp(id).is_some());
+    assert_eq!(fixture.state(id), "input_required");
+    let ts = result["message"]["created_at"].as_str().unwrap();
+    assert_eq!(
+        fixture.writes_to("%0"),
+        [
+            "send-keys -t %0 Escape".to_owned(),
+            format!(
+                "send-keys -t %0 -l -- [cafleet msg {id} from {} {ts}] reply for the Director {CLAUSES}",
+                fixture.worker
+            ),
+            "send-keys -t %0 Enter".to_owned(),
+        ]
+    );
+    assert!(fixture.writes_to(&fixture.pane).is_empty());
+}
+
+#[test]
+fn self_sends_produce_no_pane_input() {
+    let fixture = Fixture::new();
+    for member in [fixture.director, fixture.worker] {
+        let output = fixture.cli.run(&[
             "message",
             "send",
             "--from-member-id",
-            &sender.to_string(),
+            &member.to_string(),
             "--to-member-id",
-            &recipient.to_string(),
-            "read through broker",
+            &member.to_string(),
+            "note to self",
             "--json",
         ]);
         let result = payload(&output);
         assert_eq!(result["notification_sent"], false);
+        assert_eq!(stderr(&output), "");
     }
     assert!(fixture.cli.shim_calls().is_empty());
-    assert_eq!(
-        fixture
-            .cli
-            .sqlite()
-            .query_row(
-                "SELECT count(*) FROM members WHERE fleet_id=?1",
-                [fixture.fleet],
-                |row| row.get::<_, i64>(0)
-            )
-            .unwrap(),
-        2
-    );
 }
 
 #[test]
@@ -343,6 +558,36 @@ fn pending_placement_persists_without_capture_or_notification_stamp() {
     assert!(fixture.cli.shim_calls().is_empty());
 }
 
+#[test]
+fn a_long_body_is_replaced_by_the_show_pointer() {
+    let fixture = Fixture::new();
+    let body = "x".repeat(4001);
+    let result = payload(&fixture.send(&body));
+    let id = result["message"]["message_id"].as_i64().unwrap();
+    assert_eq!(result["message"]["text"], body);
+    let literals = fixture.cli.literal_calls();
+    assert_eq!(literals.len(), 1);
+    assert!(
+        literals[0].ends_with(&format!(
+            "] Body is 4001 characters; run cafleet message show {id} --json to read it. {CLAUSES}"
+        )),
+        "{literals:?}"
+    );
+}
+
+#[test]
+fn the_cli_text_limit_does_not_truncate_the_delivered_line() {
+    let mut fixture = Fixture::new();
+    fixture.cli.set_env("CAFLEET_MAX_TEXT_LEN", "5");
+    let body = "a body longer than five characters";
+    payload(&fixture.send(body));
+    let literals = fixture.cli.literal_calls();
+    assert!(
+        literals[0].ends_with(&format!("] {body} {CLAUSES}")),
+        "{literals:?}"
+    );
+}
+
 fn terminate(child: &std::process::Child) {
     nix::sys::signal::kill(
         nix::unistd::Pid::from_raw(i32::try_from(child.id()).unwrap()),
@@ -351,20 +596,14 @@ fn terminate(child: &std::process::Child) {
     .unwrap();
 }
 
-fn wait_within(
-    child: &mut std::process::Child,
-    limit: std::time::Duration,
-) -> std::process::ExitStatus {
-    let started = std::time::Instant::now();
+fn wait_within(child: &mut std::process::Child, limit: Duration) -> std::process::ExitStatus {
+    let started = Instant::now();
     loop {
         if let Some(status) = child.try_wait().unwrap() {
             return status;
         }
-        assert!(
-            started.elapsed() < limit,
-            "the process outlived {limit:?}"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        assert!(started.elapsed() < limit, "the process outlived {limit:?}");
+        std::thread::sleep(Duration::from_millis(10));
     }
 }
 
@@ -378,36 +617,22 @@ fn a_sigterm_during_the_literal_write_takes_effect_after_the_notification_stamp(
     let _test_resource = common::process_test_resource_guard();
     let mut fixture = Fixture::new();
     fixture.cli.block_tmux("literal");
-    let mut child = fixture.cli.spawn(&[
-        "message",
-        "send",
-        "--from-member-id",
-        &fixture.director.to_string(),
-        "--to-member-id",
-        &fixture.worker.to_string(),
-        "deliver before terminating",
-        "--json",
-    ]);
+    let mut child = fixture.spawn_send("deliver before terminating");
     fixture.cli.wait_for_tmux_block();
     terminate(&child);
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    std::thread::sleep(Duration::from_millis(200));
     assert!(
         child.try_wait().unwrap().is_none(),
         "the SIGTERM is deferred while pane input is in flight"
     );
     fixture.cli.release_tmux();
-    let status = wait_within(&mut child, std::time::Duration::from_secs(10));
+    let status = wait_within(&mut child, Duration::from_secs(10));
     assert!(terminated_by_sigterm(status), "{status:?}");
-    let (id, notified): (i64, Option<String>) = fixture
-        .cli
-        .sqlite()
-        .query_row(
-            "SELECT message_id, notified_at FROM messages WHERE text='deliver before terminating'",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .unwrap();
-    assert!(notified.is_some(), "message {id} is stamped before the exit");
+    let id = fixture.id_of("deliver before terminating");
+    assert!(
+        fixture.stamp(id).is_some(),
+        "message {id} is stamped before the exit"
+    );
     assert!(
         fixture
             .cli
@@ -431,14 +656,17 @@ fn a_sigterm_outside_any_span_terminates_at_once() {
         "30",
         "--json",
     ]);
-    std::thread::sleep(std::time::Duration::from_millis(500));
-    assert!(child.try_wait().unwrap().is_none(), "the wait is still sleeping");
-    let signalled = std::time::Instant::now();
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(
+        child.try_wait().unwrap().is_none(),
+        "the wait is still sleeping"
+    );
+    let signalled = Instant::now();
     terminate(&child);
-    let status = wait_within(&mut child, std::time::Duration::from_secs(5));
+    let status = wait_within(&mut child, Duration::from_secs(5));
     assert!(terminated_by_sigterm(status), "{status:?}");
     assert!(
-        signalled.elapsed() < std::time::Duration::from_secs(1),
+        signalled.elapsed() < Duration::from_secs(1),
         "{:?}",
         signalled.elapsed()
     );
@@ -462,13 +690,13 @@ fn a_sigterm_during_member_create_takes_effect_after_the_registry_commit() {
     ]);
     fixture.cli.wait_for_tmux_block();
     terminate(&child);
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    std::thread::sleep(Duration::from_millis(200));
     assert!(
         child.try_wait().unwrap().is_none(),
         "the SIGTERM is deferred between the pane spawn and the registry commit"
     );
     fixture.cli.release_tmux();
-    let status = wait_within(&mut child, std::time::Duration::from_secs(10));
+    let status = wait_within(&mut child, Duration::from_secs(10));
     assert!(terminated_by_sigterm(status), "{status:?}");
     let pane: Option<String> = fixture
         .cli
@@ -500,11 +728,13 @@ fn preview_sanitization_keeps_stored_text_exact_and_native_commands_separate() {
         )
         .unwrap();
     assert_eq!(stored, body);
-    let calls = fixture.cli.shim_calls();
-    let literal = calls.iter().find(|line| line.contains(" -l ")).unwrap();
+    let literals = fixture.cli.literal_calls();
+    let literal = &literals[0];
     assert!(literal.contains(" -l -- [cafleet msg "), "{literal}");
     assert!(
-        literal.ends_with("] ! printf danger⏎next⏎line⏎last␉column\\x1b\\x7f"),
+        literal.ends_with(&format!(
+            "] ! printf danger⏎next⏎line⏎last␉column\\x1b\\x7f {CLAUSES}"
+        )),
         "{literal}"
     );
 }

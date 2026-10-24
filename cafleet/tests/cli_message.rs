@@ -8,11 +8,86 @@ use common::{Cli, code, stderr, stdout, write_file};
 fn fleet_with_member(cli: &Cli) -> (i64, i64, i64) {
     let (fleet_id, director_id) = cli.seeded_fleet();
     let member_id = cli.seed_member(fleet_id, "worker");
-    cli.set_pane_capture(
-        &format!("%{}", member_id + 4),
-        "Ready.\n────────────\n❯ \x1b[0m\n────────────\n? for shortcuts",
-    );
     (fleet_id, director_id, member_id)
+}
+
+#[test]
+fn a_member_to_director_send_reports_its_notification_into_the_director_pane() {
+    let cli = Cli::new();
+    let (_, director_id, member_id) = fleet_with_member(&cli);
+    let output = cli.run(&[
+        "message",
+        "send",
+        "--from-member-id",
+        &member_id.to_string(),
+        "--to-member-id",
+        &director_id.to_string(),
+        "reply",
+        "--json",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+    assert_eq!(payload["notification_sent"], true);
+    assert_eq!(stderr(&output), "");
+    let calls = cli.shim_calls();
+    assert_eq!(calls.first().map(String::as_str), Some("send-keys -t %0 Escape"));
+    assert!(
+        calls
+            .iter()
+            .any(|line| line.starts_with("send-keys -t %0 -l -- [cafleet msg ")),
+        "{calls:?}"
+    );
+}
+
+#[test]
+fn a_director_self_send_produces_no_pane_input_inside_the_multiplexer() {
+    let cli = Cli::new();
+    let (_, director_id, _) = fleet_with_member(&cli);
+    let output = cli.run(&[
+        "message",
+        "send",
+        "--from-member-id",
+        &director_id.to_string(),
+        "--to-member-id",
+        &director_id.to_string(),
+        "note to self",
+        "--json",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+    assert_eq!(payload["notification_sent"], false);
+    assert!(cli.shim_calls().is_empty(), "{:?}", cli.shim_calls());
+}
+
+#[test]
+fn a_lock_busy_send_prints_the_persisted_prefix_and_keeps_the_message_pending() {
+    let _test_resource = common::process_test_resource_guard();
+    let cli = Cli::new();
+    let (_, director_id, member_id) = fleet_with_member(&cli);
+    let _lock = cli.lock_pane(&format!("%{}", member_id + 4));
+    let output = cli.run(&[
+        "message",
+        "send",
+        "--from-member-id",
+        &director_id.to_string(),
+        "--to-member-id",
+        &member_id.to_string(),
+        "behind a busy pane",
+        "--json",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+    let id = payload["message"]["message_id"].as_i64().unwrap();
+    assert_eq!(payload["notification_sent"], false);
+    assert_eq!(
+        stderr(&output).trim_end(),
+        format!(
+            "Message {id} was persisted. member {member_id}'s pane input remained busy; preview {id} was not sent."
+        )
+    );
+    let polled = cli.run(&["message", "poll", &member_id.to_string(), "--json"]);
+    let inbox: serde_json::Value = serde_json::from_str(stdout(&polled).trim()).unwrap();
+    assert_eq!(inbox[0]["message_id"], id);
 }
 
 #[test]

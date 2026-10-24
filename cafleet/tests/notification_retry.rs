@@ -6,9 +6,11 @@ use std::time::{Duration, Instant};
 
 use common::{code, stderr, stdout};
 use receive::{
-    APPROVAL, DRAFT, Fixture, IDLE, UNKNOWN, WORKING, Worker, assert_keys, assert_no_input,
+    Fixture, Worker, assert_keys, assert_no_capture, assert_no_input, assert_no_text_input,
     assert_result, json,
 };
+
+const ESCAPE_REFUSED: &str = "escape refused by test";
 
 fn assert_diagnostic(value: &serde_json::Value, worker: &Worker, message: i64, delivery: &str) {
     assert_keys(value, &["member_id", "message_id", "delivery", "error"]);
@@ -18,6 +20,22 @@ fn assert_diagnostic(value: &serde_json::Value, worker: &Worker, message: i64, d
     assert!(!value["error"].as_str().unwrap().is_empty());
 }
 
+fn lock_busy(worker: &Worker, message: i64) -> String {
+    format!(
+        "member {}'s pane input remained busy; preview {message} was not sent.",
+        worker.id
+    )
+}
+
+fn literals_for(fixture: &Fixture, worker: &Worker) -> Vec<String> {
+    fixture
+        .cli
+        .literal_calls()
+        .into_iter()
+        .filter(|line| line.starts_with(&format!("send-keys -t {} -l ", worker.pane)))
+        .collect()
+}
+
 #[test]
 fn retries_rotate_members_once_per_second_in_memory() {
     let _test_resource = common::process_test_resource_guard();
@@ -25,8 +43,8 @@ fn retries_rotate_members_once_per_second_in_memory() {
     let first = fixture.worker("first");
     let second = fixture.worker("second");
     for worker in [&first, &second] {
-        fixture.view(worker, WORKING);
-        fixture.assignment(worker, "held assignment");
+        fixture.refuse_escape(worker);
+        fixture.assignment(worker, "refused assignment");
     }
     let before = fixture.records();
     let mut waiting = fixture.spawn(fixture.director, 6);
@@ -36,22 +54,22 @@ fn retries_rotate_members_once_per_second_in_memory() {
             fixture
                 .events()
                 .iter()
-                .filter(|event| event.stage == "capture")
+                .filter(|event| event.stage == "escape")
                 .count()
                 >= count
         });
         observed.push(Instant::now());
     }
-    let captures: Vec<_> = fixture
+    let escapes: Vec<_> = fixture
         .events()
         .into_iter()
-        .filter(|event| event.stage == "capture")
+        .filter(|event| event.stage == "escape")
         .collect();
-    assert_eq!(captures.len(), 3);
-    assert_ne!(captures[0].pane, captures[1].pane);
-    assert_eq!(captures[0].pane, captures[2].pane);
+    assert_eq!(escapes.len(), 3);
+    assert_ne!(escapes[0].pane, escapes[1].pane);
+    assert_eq!(escapes[0].pane, escapes[2].pane);
     assert!(
-        captures
+        escapes
             .iter()
             .all(|event| { event.pane == first.pane || event.pane == second.pane })
     );
@@ -60,12 +78,18 @@ fn retries_rotate_members_once_per_second_in_memory() {
             .windows(2)
             .all(|pair| pair[1].duration_since(pair[0]) >= Duration::from_millis(750))
     );
-    assert_eq!(fixture.records(), before);
+    assert_eq!(fixture.records(), before, "not-sent claims are released");
     fixture.reply(&first, "stop receiving with a real reply");
     let result = json(&waiting.output());
     assert_result(&result, fixture.director, "messages");
-    assert_eq!(result["notification_errors"], serde_json::json!([]));
-    assert_no_input(&fixture);
+    let errors = result["notification_errors"].as_array().unwrap();
+    assert_eq!(errors.len(), 2);
+    for error in errors {
+        assert_eq!(error["delivery"], "not_sent");
+        assert!(error["error"].as_str().unwrap().contains(ESCAPE_REFUSED));
+    }
+    assert_no_text_input(&fixture);
+    assert_no_capture(&fixture);
 }
 
 #[test]
@@ -91,10 +115,10 @@ fn an_inbox_reply_is_checked_before_another_retry_attempt() {
                 .unwrap();
             (earlier_id, later_id)
         };
-        let gate = fixture.gate(&first, "capture");
+        let gate = fixture.gate(&first, "escape");
         let mut waiting = fixture.spawn(fixture.director, 5);
-        waiting.until("locked first capture", || {
-            fixture.count("capture", &first) == 1
+        waiting.until("locked first Escape", || {
+            fixture.count("escape", &first) == 1
         });
         fixture.assignment(&second, "other member");
         let reply = fixture.reply(&second, "incoming result");
@@ -102,20 +126,20 @@ fn an_inbox_reply_is_checked_before_another_retry_attempt() {
         let result = json(&waiting.output());
         assert_eq!(result["messages"][0]["message_id"], reply);
         assert!(fixture.stamp(old).is_some());
-        assert_eq!(fixture.stamp(later), None);
-        assert_eq!(fixture.count("capture", &first), 1);
-        assert_eq!(fixture.count("capture", &second), 0);
-        let literals: Vec<_> = fixture
-            .cli
-            .shim_calls()
-            .into_iter()
-            .filter(|line| line.contains(" -l "))
-            .collect();
-        assert_eq!(literals.len(), 1);
+        assert!(fixture.stamp(later).is_some(), "one attempt drains both");
+        assert_eq!(fixture.count("escape", &first), 1);
+        assert_eq!(fixture.count("escape", &second), 0);
+        let literals = literals_for(&fixture, &first);
+        assert_eq!(literals.len(), 2, "{literals:?}");
         assert!(
             literals[0].contains(&format!("[cafleet msg {old} from ")),
             "{literals:?}"
         );
+        assert!(
+            literals[1].contains(&format!("[cafleet msg {later} from ")),
+            "{literals:?}"
+        );
+        assert!(literals_for(&fixture, &second).is_empty());
     }
 }
 
@@ -133,13 +157,16 @@ fn immediate_incoming_messages_take_priority_over_pending_outgoing_notifications
 }
 
 #[test]
-fn retries_exclude_director_self_acked_notified_and_pending_placements() {
+fn retries_include_the_director_and_exclude_the_subject_self_acked_notified_and_pending_placements()
+ {
     let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let subject = fixture.worker("observer");
     let worker = fixture.worker("worker");
     let pending = fixture.worker("pending");
-    fixture.reply(&worker, "Director receives through broker");
+    let director = fixture.director_pane();
+    let to_director = fixture.reply(&worker, "Director receives in its pane");
+    let to_subject = fixture.assignment(&subject, "the subject's own preview");
     let self_id = fixture.message(worker.id, worker.id, "self note");
     let acked = fixture.assignment(&worker, "consumed");
     fixture.ack(acked);
@@ -161,13 +188,30 @@ fn retries_exclude_director_self_acked_notified_and_pending_placements() {
         )
         .unwrap();
     fixture.assignment(&pending, "pending pane");
-    let before = fixture.records();
     let result = json(&fixture.spawn(subject.id, 1).output());
     assert_result(&result, subject.id, "timeout");
     assert_eq!(result["notification_errors"], serde_json::json!([]));
-    assert_eq!(fixture.records(), before);
+    assert!(fixture.stamp(to_director).is_some());
+    assert_eq!(fixture.stamp(to_subject), None);
     assert!(fixture.stamp(self_id).is_some());
-    assert!(fixture.cli.shim_calls().is_empty());
+    let literals = literals_for(&fixture, &director);
+    assert_eq!(literals.len(), 1, "{:?}", fixture.cli.shim_calls());
+    assert!(
+        literals[0].contains(&format!("[cafleet msg {to_director} from {} ", worker.id)),
+        "{literals:?}"
+    );
+    assert_eq!(fixture.count("escape", &director), 1);
+    for untouched in [&subject, &worker, &pending] {
+        assert!(
+            fixture
+                .events()
+                .iter()
+                .all(|event| event.pane != untouched.pane),
+            "{}",
+            untouched.pane
+        );
+    }
+    assert_no_capture(&fixture);
 }
 
 #[test]
@@ -175,15 +219,13 @@ fn retry_candidates_stay_inside_the_subjects_fleet() {
     let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let local = fixture.worker("local");
-    fixture.view(&local, WORKING);
     fixture.assignment(&local, "local work");
     let (other_fleet, other_director) = fixture.cli.seed_fleet("other");
     let foreign_id = fixture.cli.seed_member(other_fleet, "foreign");
     let foreign_pane = format!("%{}", foreign_id + 4);
-    fixture.cli.set_pane_capture(&foreign_pane, IDLE);
     let foreign_message = fixture.message(other_director, foreign_id, "foreign work");
     let mut waiting = fixture.spawn(fixture.director, 4);
-    waiting.until("local retry", || fixture.count("capture", &local) >= 1);
+    waiting.until("local delivery", || fixture.count("enter_done", &local) >= 1);
     fixture.reply(&local, "local reply");
     json(&waiting.output());
     assert_eq!(fixture.stamp(foreign_message), None);
@@ -196,47 +238,51 @@ fn retry_candidates_stay_inside_the_subjects_fleet() {
 }
 
 #[test]
-fn a_busy_pane_is_retried_after_ownership_is_released() {
+fn a_lock_released_within_the_wait_lets_the_same_attempt_deliver() {
     let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     let message = fixture.assignment(&worker, "pending behind input");
     let lock = fixture.lock(&worker);
     let mut waiting = fixture.spawn(fixture.director, 5);
-    std::thread::sleep(Duration::from_millis(1200));
+    std::thread::sleep(Duration::from_millis(900));
     waiting.assert_running();
     assert!(fixture.events().is_empty());
     assert_eq!(fixture.stamp(message), None);
     drop(lock);
-    waiting.until("retry after lock release", || {
+    waiting.until("delivery after lock release", || {
         fixture.count("enter_done", &worker) >= 1
     });
     fixture.reply(&worker, "ready");
     let result = json(&waiting.output());
     assert!(fixture.stamp(message).is_some());
     assert_eq!(result["notification_errors"], serde_json::json!([]));
+    assert_eq!(fixture.count("escape", &worker), 1);
     assert_eq!(fixture.count("literal", &worker), 1);
 }
 
 #[test]
-fn a_working_pane_becomes_deliverable_on_a_fresh_idle_capture() {
+fn a_lock_busy_for_the_whole_window_reports_one_lock_busy_entry() {
     let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
-    fixture.view(&worker, WORKING);
-    let message = fixture.assignment(&worker, "pending work");
-    let mut waiting = fixture.spawn(fixture.director, 5);
-    waiting.until("held working pane", || {
-        fixture.count("capture_done", &worker) >= 1
-    });
-    assert_eq!(fixture.count("literal", &worker), 0);
-    fixture.view(&worker, IDLE);
-    waiting.until("idle retry", || fixture.count("enter_done", &worker) >= 1);
-    fixture.reply(&worker, "accepted");
+    let message = fixture.assignment(&worker, "pending behind a stuck writer");
+    let _lock = fixture.lock(&worker);
+    let waiting = fixture.spawn(fixture.director, 2);
+    let start = waiting.started;
     let result = json(&waiting.output());
-    assert!(fixture.stamp(message).is_some());
-    assert!(fixture.count("capture", &worker) >= 2);
-    assert_eq!(result["notification_errors"], serde_json::json!([]));
+    assert!(
+        start.elapsed() < Duration::from_secs(8),
+        "deadline plus one attempt plus finalization grace: {:?}",
+        start.elapsed()
+    );
+    assert_result(&result, fixture.director, "timeout");
+    let errors = result["notification_errors"].as_array().unwrap();
+    assert_eq!(errors.len(), 1);
+    assert_diagnostic(&errors[0], &worker, message, "not_sent");
+    assert_eq!(errors[0]["error"], lock_busy(&worker, message));
+    assert_eq!(fixture.stamp(message), None);
+    assert_no_input(&fixture);
 }
 
 #[test]
@@ -245,15 +291,15 @@ fn concurrent_waiters_serialize_one_preview_and_revalidate_its_stamp() {
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     let message = fixture.assignment(&worker, "one preview");
-    let gate = fixture.gate(&worker, "capture");
+    let gate = fixture.gate(&worker, "escape");
     let mut first = fixture.spawn(fixture.director, 5);
-    first.until("first waiter owns capture", || {
-        fixture.count("capture", &worker) == 1
+    first.until("first waiter owns the pane", || {
+        fixture.count("escape", &worker) == 1
     });
     let mut second = fixture.spawn(fixture.director, 5);
     std::thread::sleep(Duration::from_millis(200));
     second.assert_running();
-    assert_eq!(fixture.count("capture", &worker), 1);
+    assert_eq!(fixture.count("escape", &worker), 1);
     assert_eq!(fixture.count("literal", &worker), 0);
     gate.release();
     first.until("one submission", || {
@@ -265,24 +311,24 @@ fn concurrent_waiters_serialize_one_preview_and_revalidate_its_stamp() {
         assert_eq!(result["notification_errors"], serde_json::json!([]));
     }
     assert!(fixture.stamp(message).is_some());
+    assert_eq!(fixture.count("escape", &worker), 1);
     assert_eq!(fixture.count("literal", &worker), 1);
     assert_eq!(fixture.count("enter", &worker), 1);
 }
 
 #[test]
-fn ack_during_capture_is_revalidated_before_submission() {
+fn an_ack_during_the_lock_wait_is_revalidated_before_input() {
     let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
-    let message = fixture.assignment(&worker, "consumed during capture");
-    let gate = fixture.gate(&worker, "capture");
+    let message = fixture.assignment(&worker, "consumed during the lock wait");
+    let lock = fixture.lock(&worker);
     let mut waiting = fixture.spawn(fixture.director, 4);
-    waiting.until("capture before ACK", || {
-        fixture.count("capture", &worker) == 1
-    });
+    std::thread::sleep(Duration::from_millis(300));
+    waiting.assert_running();
     fixture.ack(message);
     fixture.reply(&worker, "ACK arrived first");
-    gate.release();
+    drop(lock);
     let result = json(&waiting.output());
     assert_eq!(fixture.stamp(message), None);
     assert_eq!(result["notification_errors"], serde_json::json!([]));
@@ -290,18 +336,17 @@ fn ack_during_capture_is_revalidated_before_submission() {
 }
 
 #[test]
-fn activity_and_placement_are_revalidated_after_capture_before_typing() {
+fn activity_and_placement_are_revalidated_under_the_lock_before_typing() {
     let _test_resource = common::process_test_resource_guard();
     for mutation in ["deregistered", "new-pane"] {
         let fixture = Fixture::new();
         let worker = fixture.worker("worker");
         let peer = fixture.worker("peer");
         let message = fixture.assignment(&worker, "target changes");
-        let gate = fixture.gate(&worker, "capture");
+        let lock = fixture.lock(&worker);
         let mut waiting = fixture.spawn(fixture.director, 4);
-        waiting.until("capture before placement mutation", || {
-            fixture.count("capture", &worker) == 1
-        });
+        std::thread::sleep(Duration::from_millis(300));
+        waiting.assert_running();
         if mutation == "deregistered" {
             fixture
                 .cli
@@ -323,10 +368,9 @@ fn activity_and_placement_are_revalidated_after_capture_before_typing() {
                     [worker.id],
                 )
                 .unwrap();
-            fixture.cli.set_pane_capture("%99", IDLE);
         }
         fixture.reply(&peer, "new inbox result");
-        gate.release();
+        drop(lock);
         let result = json(&waiting.output());
         assert_result(&result, fixture.director, "messages");
         assert_eq!(fixture.stamp(message), None);
@@ -335,70 +379,12 @@ fn activity_and_placement_are_revalidated_after_capture_before_typing() {
 }
 
 #[test]
-fn draft_and_unknown_diagnostics_are_exact_and_deduplicated_per_member() {
-    let _test_resource = common::process_test_resource_guard();
-    for (state, view) in [("draft", DRAFT), ("unknown", UNKNOWN)] {
-        let fixture = Fixture::new();
-        let worker = fixture.worker("worker");
-        fixture.view(&worker, view);
-        let message = fixture.assignment(&worker, "retained work");
-        fixture
-            .cli
-            .sqlite()
-            .execute(
-                "UPDATE messages SET created_at='1900-01-01T00:00:00+00:00' WHERE message_id=?1",
-                [message],
-            )
-            .unwrap();
-        let before = fixture.records();
-        let result = json(&fixture.spawn(fixture.director, 2).output());
-        assert_result(&result, fixture.director, "timeout");
-        let errors = result["notification_errors"].as_array().unwrap();
-        assert_eq!(errors.len(), 1);
-        assert_diagnostic(&errors[0], &worker, message, "not_sent");
-        assert_eq!(
-            errors[0]["error"],
-            format!(
-                "member {} is {state}; preview {message} was not sent.",
-                worker.id
-            )
-        );
-        assert_eq!(fixture.records(), before);
-        assert_no_input(&fixture);
-    }
-}
-
-#[test]
-fn working_approval_and_lock_contention_are_ordinary_holds() {
-    let _test_resource = common::process_test_resource_guard();
-    for state in ["working", "approval", "busy"] {
-        let fixture = Fixture::new();
-        let worker = fixture.worker("worker");
-        fixture.assignment(&worker, "held work");
-        if state == "working" {
-            fixture.view(&worker, WORKING);
-        }
-        if state == "approval" {
-            fixture.view(&worker, APPROVAL);
-        }
-        let _lock = if state == "busy" {
-            Some(fixture.lock(&worker))
-        } else {
-            None
-        };
-        let result = json(&fixture.spawn(fixture.director, 2).output());
-        assert_eq!(result["notification_errors"], serde_json::json!([]));
-        assert_no_input(&fixture);
-    }
-}
-
-#[test]
-fn capture_failures_are_not_sent_diagnostics_with_the_actual_cause() {
+fn escape_failures_are_not_sent_diagnostics_with_the_actual_cause() {
     let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
-    let message = fixture.assignment(&worker, "capture unavailable");
-    fixture.fail(&worker, "capture", "distinct capture bridge failure");
+    let message = fixture.assignment(&worker, "escape unavailable");
+    fixture.fail(&worker, "escape", "distinct escape bridge failure");
     let result = json(&fixture.spawn(fixture.director, 2).output());
     let errors = result["notification_errors"].as_array().unwrap();
     assert_eq!(errors.len(), 1);
@@ -407,10 +393,10 @@ fn capture_failures_are_not_sent_diagnostics_with_the_actual_cause() {
         errors[0]["error"]
             .as_str()
             .unwrap()
-            .contains("distinct capture bridge failure")
+            .contains("distinct escape bridge failure")
     );
     assert_eq!(fixture.stamp(message), None);
-    assert_no_input(&fixture);
+    assert_no_text_input(&fixture);
 }
 
 #[test]
@@ -512,15 +498,15 @@ fn first_write_and_enter_failures_suspend_retries_across_wait_invocations() {
                 .contains(&format!("distinct {stage} failure"))
         );
         assert_eq!(fixture.stamp(message), None);
-        let captures = fixture.count("capture", &worker);
+        let escapes = fixture.count("escape", &worker);
         let later = json(&fixture.spawn(fixture.director, 1).output());
         let errors = later["notification_errors"].as_array().unwrap();
         assert_eq!(errors.len(), 1);
         assert_diagnostic(&errors[0], &worker, message, "uncertain");
-        assert_eq!(fixture.count("capture", &worker), captures);
+        assert_eq!(fixture.count("escape", &worker), escapes);
         assert_eq!(
             fixture.count("literal", &worker),
-            fixture.count("capture", &worker)
+            fixture.count("escape", &worker)
         );
         assert_eq!(
             fixture.count("enter", &worker),
@@ -539,7 +525,7 @@ fn a_later_error_replaces_an_earlier_error_for_the_same_member() {
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     let message = fixture.assignment(&worker, "retry errors");
-    fixture.fail(&worker, "capture", "first bridge failure");
+    fixture.fail(&worker, "escape", "first bridge failure");
     let mut waiting = fixture.spawn(fixture.director, 6);
     waiting.until("first transport error", || {
         fixture
@@ -547,7 +533,7 @@ fn a_later_error_replaces_an_earlier_error_for_the_same_member() {
             .iter()
             .any(|event| event.stage == "failed" && event.detail == "first bridge failure")
     });
-    fixture.fail(&worker, "capture", "second bridge failure");
+    fixture.fail(&worker, "escape", "second bridge failure");
     waiting.until("replacement transport error", || {
         fixture
             .events()
@@ -581,8 +567,8 @@ fn independent_members_keep_one_latest_diagnostic_each() {
     let second = fixture.worker("second");
     let first_id = fixture.assignment(&first, "first work");
     let second_id = fixture.assignment(&second, "second work");
-    fixture.fail(&first, "capture", "first pane cause");
-    fixture.fail(&second, "capture", "second pane cause");
+    fixture.fail(&first, "escape", "first pane cause");
+    fixture.fail(&second, "escape", "second pane cause");
     let mut waiting = fixture.spawn(fixture.director, 6);
     waiting.until("both member errors", || {
         fixture
@@ -616,11 +602,11 @@ fn diagnostics_are_removed_after_ack_or_member_leave_before_return() {
         let fixture = Fixture::new();
         let worker = fixture.worker("worker");
         let peer = fixture.worker("peer");
-        fixture.view(&worker, DRAFT);
+        fixture.refuse_escape(&worker);
         let message = fixture.assignment(&worker, "pending diagnostic");
         let mut waiting = fixture.spawn(fixture.director, 6);
-        waiting.until("an accumulated readiness diagnostic", || {
-            fixture.count("capture", &worker) >= 2
+        waiting.until("an accumulated delivery diagnostic", || {
+            fixture.count("failed", &worker) >= 2
         });
         if cleanup == "ack" {
             fixture.ack(message);
@@ -640,48 +626,33 @@ fn diagnostics_are_removed_after_ack_or_member_leave_before_return() {
         fixture.reply(&peer, "return now");
         let result = json(&waiting.output());
         assert_eq!(result["notification_errors"], serde_json::json!([]));
-        assert_no_input(&fixture);
+        assert_no_text_input(&fixture);
     }
 }
 
-fn assert_late_ack_clears_the_owned_attempt_diagnostic(stage: &str) {
-    assert!(matches!(stage, "capture" | "enter"));
+#[test]
+fn a_late_post_enter_stamp_observation_clears_an_acked_preview_diagnostic_without_a_final_receive_check()
+ {
+    let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     let peer = fixture.worker("peer");
     let message = fixture.assignment(&worker, "preview whose earlier attempt failed");
-    fixture.fail(
-        &worker,
-        "capture",
-        "initial capture failure before late ACK",
-    );
+    fixture.fail(&worker, "escape", "initial escape failure before late ACK");
     let mut waiting = fixture.spawn(fixture.director, 3);
     let started = waiting.started;
     waiting.until("first notification error", || {
         fixture.events().iter().any(|event| {
-            event.stage == "failed" && event.detail == "initial capture failure before late ACK"
+            event.stage == "failed" && event.detail == "initial escape failure before late ACK"
         })
     });
     let receive_expiry_upper_bound = Instant::now() + Duration::from_secs(3);
-    let gate = fixture.gate(&worker, stage);
-    fixture.view(&worker, IDLE);
-    std::fs::remove_file(
-        fixture
-            .control
-            .join(format!("fail-capture-{}", worker.pane)),
-    )
-    .unwrap();
-    waiting.until("later owned retry started capture", || {
-        fixture.count("capture", &worker) == 2
+    let gate = fixture.gate(&worker, "enter");
+    std::fs::remove_file(fixture.control.join(format!("fail-escape-{}", worker.pane))).unwrap();
+    waiting.until("later owned retry reached its Enter gate", || {
+        fixture.count("enter", &worker) == 1
     });
-    let capture_observed_after = started.elapsed();
-    assert!(
-        capture_observed_after < Duration::from_secs(3),
-        "retry capture observed at {capture_observed_after:?}"
-    );
-    waiting.until("later owned retry reached its gate", || {
-        fixture.count(stage, &worker) == if stage == "capture" { 2 } else { 1 }
-    });
+    assert!(started.elapsed() < Duration::from_secs(3));
     waiting.until(
         "receive expired while the owned retry remains in flight",
         || Instant::now() >= receive_expiry_upper_bound + Duration::from_millis(100),
@@ -694,11 +665,9 @@ fn assert_late_ack_clears_the_owned_attempt_diagnostic(stage: &str) {
     assert_result(&result, fixture.director, "timeout");
     assert_eq!(result["messages"], serde_json::json!([]));
     assert!(started.elapsed() < Duration::from_secs(8));
-    assert_eq!(fixture.count("capture", &worker), 2);
-    let submissions = usize::from(stage == "enter");
-    assert_eq!(fixture.count("literal", &worker), submissions);
-    assert_eq!(fixture.count("enter", &worker), submissions);
-    assert_eq!(fixture.count("enter_done", &worker), submissions);
+    assert_eq!(fixture.count("escape", &worker), 2);
+    assert_eq!(fixture.count("literal", &worker), 1);
+    assert_eq!(fixture.count("enter_done", &worker), 1);
     assert_eq!(fixture.stamp(message), None);
     assert_eq!(result["notification_errors"], serde_json::json!([]));
 
@@ -707,20 +676,7 @@ fn assert_late_ack_clears_the_owned_attempt_diagnostic(stage: &str) {
     assert_eq!(next["messages"].as_array().unwrap().len(), 1);
     assert_eq!(next["messages"][0]["message_id"], reply);
     assert_eq!(next["notification_errors"], serde_json::json!([]));
-    assert_eq!(fixture.count("capture", &worker), 2);
-}
-
-#[test]
-fn a_late_prewrite_revalidation_clears_an_acked_preview_diagnostic_without_a_final_receive_check() {
-    let _test_resource = common::process_test_resource_guard();
-    assert_late_ack_clears_the_owned_attempt_diagnostic("capture");
-}
-
-#[test]
-fn a_late_post_enter_stamp_observation_clears_an_acked_preview_diagnostic_without_a_final_receive_check()
- {
-    let _test_resource = common::process_test_resource_guard();
-    assert_late_ack_clears_the_owned_attempt_diagnostic("enter");
+    assert_eq!(fixture.count("escape", &worker), 2);
 }
 
 #[test]
@@ -728,85 +684,36 @@ fn a_different_pending_preview_replaces_the_member_diagnostic_identity() {
     let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
-    fixture.view(&worker, UNKNOWN);
+    fixture.refuse_escape(&worker);
     let old = fixture.assignment(&worker, "old pending");
     let mut waiting = fixture.spawn(fixture.director, 8);
-    waiting.until("first diagnostic", || {
-        fixture.count("capture", &worker) >= 1
-    });
+    waiting.until("first diagnostic", || fixture.count("failed", &worker) >= 1);
     fixture.ack(old);
     let next = fixture.assignment(&worker, "next pending");
-    let baseline = fixture.count("capture", &worker);
+    let baseline = fixture.count("failed", &worker);
     waiting.until("new pending preview diagnostic", || {
-        fixture.count("capture", &worker) >= baseline + 2
+        fixture.count("failed", &worker) >= baseline + 2
     });
     fixture.reply(&worker, "return");
     let result = json(&waiting.output());
     let errors = result["notification_errors"].as_array().unwrap();
     assert_eq!(errors.len(), 1);
     assert_diagnostic(&errors[0], &worker, next, "not_sent");
-    assert_eq!(
-        errors[0]["error"],
-        format!(
-            "member {} is unknown; preview {next} was not sent.",
-            worker.id
-        )
+    assert!(
+        errors[0]["error"]
+            .as_str()
+            .unwrap()
+            .contains(ESCAPE_REFUSED)
     );
 }
 
 #[test]
-fn successful_notification_by_another_invocation_clears_the_waiters_diagnostic() {
+fn text_receives_report_delivery_diagnostics_on_stderr() {
     let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
-    let blocker = fixture.worker("blocker");
-    fixture.view(&worker, DRAFT);
-    fixture.view(&blocker, WORKING);
-    let old = fixture.assignment(&worker, "old pending");
-    let gate = fixture.gate(&blocker, "capture");
-    let mut waiting = fixture.spawn(fixture.director, 8);
-    waiting.until("readiness diagnostic before external success", || {
-        fixture.count("capture", &worker) >= 2
-    });
-    fixture.assignment(&blocker, "working peer");
-    waiting.until("waiter has moved to another pane", || {
-        fixture.count("capture", &blocker) == 1
-    });
-    fixture.view(&worker, IDLE);
-    let other = fixture.spawn_args(
-        &[
-            "message",
-            "send",
-            "--from-member-id",
-            &fixture.director.to_string(),
-            "--to-member-id",
-            &worker.id.to_string(),
-            "new committed message",
-            "--json",
-        ],
-        7,
-    );
-    let other_pid = other.pid();
-    let sent = json(&other.output());
-    assert_eq!(sent["notification_sent"], false);
-    assert!(fixture.stamp(old).is_some());
-    assert!(fixture.events().iter().any(|event| event.pid == other_pid
-        && event.stage == "literal"
-        && event.pane == worker.pane));
-    fixture.ack(sent["message"]["message_id"].as_i64().unwrap());
-    fixture.reply(&blocker, "return after external success");
-    gate.release();
-    let result = json(&waiting.output());
-    assert_eq!(result["notification_errors"], serde_json::json!([]));
-}
-
-#[test]
-fn text_receives_report_readiness_diagnostics_on_stderr() {
-    let _test_resource = common::process_test_resource_guard();
-    let fixture = Fixture::new();
-    let worker = fixture.worker("worker");
-    fixture.view(&worker, UNKNOWN);
-    let message = fixture.assignment(&worker, "unknown pane");
+    fixture.refuse_escape(&worker);
+    fixture.assignment(&worker, "refused pane");
     let output = fixture
         .spawn_args(
             &[
@@ -825,17 +732,14 @@ fn text_receives_report_readiness_diagnostics_on_stderr() {
         format!("Timed out waiting for member {}.\n", fixture.director)
     );
     assert!(
-        stderr(&output).contains(&format!(
-            "member {} is unknown; preview {message} was not sent.",
-            worker.id
-        )),
+        stderr(&output).contains(ESCAPE_REFUSED),
         "{}",
         stderr(&output)
     );
 }
 
 #[test]
-fn send_reports_the_new_message_even_when_it_notifies_an_older_preview() {
+fn send_drains_an_older_preview_before_the_new_message() {
     let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
@@ -860,13 +764,16 @@ fn send_reports_the_new_message_even_when_it_notifies_an_older_preview() {
     let new = result["message"]["message_id"].as_i64().unwrap();
     assert_ne!(new, old);
     assert_eq!(result["message"]["text"], full);
-    assert_eq!(result["notification_sent"], false);
+    assert_eq!(result["notification_sent"], true);
     assert!(fixture.stamp(old).is_some());
-    assert_eq!(fixture.stamp(new), None);
-    let calls = fixture.cli.shim_calls();
-    let literals: Vec<_> = calls.iter().filter(|line| line.contains(" -l ")).collect();
-    assert_eq!(literals.len(), 1);
+    assert!(fixture.stamp(new).is_some());
+    assert_eq!(fixture.count("escape", &worker), 1, "one Escape per drain");
+    let literals = literals_for(&fixture, &worker);
+    assert_eq!(literals.len(), 2);
     assert!(literals[0].contains(&format!("[cafleet msg {old} from ")));
+    assert!(literals[1].contains(&format!("[cafleet msg {new} from ")));
+    assert!(literals[1].contains(&full), "the full body is inline");
+    assert_eq!(stderr(&output), "");
 }
 
 #[test]
@@ -874,7 +781,7 @@ fn committed_send_stdout_survives_notification_failure_with_its_message_id() {
     let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
-    fixture.fail(&worker, "capture", "notification transport is unavailable");
+    fixture.fail(&worker, "escape", "notification transport is unavailable");
     let output = fixture
         .spawn_args(
             &[
@@ -964,12 +871,12 @@ fn precommit_storage_failure_returns_no_committed_message_or_notification() {
 }
 
 #[test]
-fn slow_capture_is_bounded_by_one_inflight_attempt_after_receive_deadline() {
+fn a_hung_escape_is_bounded_by_its_timeout_and_types_nothing() {
     let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
-    let message = fixture.assignment(&worker, "slow capture");
-    fixture.delay(&worker, "capture", "8");
+    let message = fixture.assignment(&worker, "hung escape");
+    fixture.delay(&worker, "escape", "8");
     let waiting = fixture.spawn(fixture.director, 2);
     let start = waiting.started;
     let result = json(&waiting.output());
@@ -979,7 +886,7 @@ fn slow_capture_is_bounded_by_one_inflight_attempt_after_receive_deadline() {
         start.elapsed()
     );
     assert_result(&result, fixture.director, "timeout");
-    assert_eq!(fixture.count("capture", &worker), 1);
+    assert!(fixture.count("escape", &worker) >= 1);
     assert_eq!(fixture.count("literal", &worker), 0);
     let errors = result["notification_errors"].as_array().unwrap();
     assert_eq!(errors.len(), 1);
@@ -988,13 +895,13 @@ fn slow_capture_is_bounded_by_one_inflight_attempt_after_receive_deadline() {
 }
 
 #[test]
-fn capture_and_write_share_the_attempt_budget_and_stop_before_enter() {
+fn escape_settle_and_write_share_the_attempt_budget_and_stop_before_enter() {
     let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     let message = fixture.assignment(&worker, "partial write timeout");
-    fixture.delay(&worker, "capture", "2");
-    fixture.delay(&worker, "literal", "3");
+    fixture.delay(&worker, "escape", "0.4");
+    fixture.delay(&worker, "literal", "6");
     let waiting = fixture.spawn(fixture.director, 2);
     let start = waiting.started;
     let result = json(&waiting.output());
@@ -1003,7 +910,7 @@ fn capture_and_write_share_the_attempt_budget_and_stop_before_enter() {
         "{:?}",
         start.elapsed()
     );
-    assert_eq!(fixture.count("capture", &worker), 1);
+    assert_eq!(fixture.count("escape", &worker), 1);
     assert_eq!(fixture.count("literal", &worker), 1);
     assert_eq!(fixture.count("enter", &worker), 0);
     assert_eq!(fixture.stamp(message), None);

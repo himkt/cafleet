@@ -17,9 +17,12 @@ pub fn process_test_resource_guard() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// The capture every pane shows unless [`Cli::set_pane_capture`] overrides it:
-/// a claude composer at rest, so a delivery fires immediately.
+/// The capture every pane shows after [`Cli::allow_rest_capture`] unless
+/// [`Cli::set_pane_capture`] overrides it.
 pub const REST_CAPTURE: &str = "pane:{pane}\nline1\nline2\n> at rest";
+
+/// The capture-directory entry that opts every pane into [`REST_CAPTURE`].
+const REST_CAPTURE_OPT_IN: &str = ".rest-capture";
 
 /// A capture file holding this line makes `capture-pane` fail for that pane.
 pub const CAPTURE_FAILS: &str = "CAPTURE-FAILS";
@@ -63,8 +66,12 @@ case "$1" in
                     done < "$CAFLEET_TEST_TMUX_CAPTURE_DIR/$1"
                     exit 0
                 fi
-                printf 'pane:%s\nline1\nline2\n> at rest\n' "$1"
-                exit 0
+                if [ -e "$CAFLEET_TEST_TMUX_CAPTURE_DIR/.rest-capture" ]; then
+                    printf 'pane:%s\nline1\nline2\n> at rest\n' "$1"
+                    exit 0
+                fi
+                echo "unexpected capture-pane" >&2
+                exit 1
             fi
             shift
         done
@@ -128,9 +135,47 @@ impl Cli {
     }
 
     /// Make `capture-pane` print `content` for `pane` from now on; a content
-    /// of [`CAPTURE_FAILS`] makes the capture fail instead.
+    /// of [`CAPTURE_FAILS`] makes the capture fail instead. Only `member
+    /// capture` / `fleet capture` tests opt panes in; any other capture fails
+    /// with `unexpected capture-pane`.
     pub fn set_pane_capture(&self, pane: &str, content: &str) {
         std::fs::write(self.capture_dir.join(pane), content).unwrap();
+    }
+
+    /// Hold the pane-input lock of a tmux `main` session pane until the
+    /// returned file is dropped.
+    pub fn lock_pane(&self, pane: &str) -> std::fs::File {
+        use sha2::{Digest, Sha256};
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut directory = self.db_path().canonicalize().unwrap().into_os_string();
+        directory.push(".pane-locks");
+        let digest = Sha256::digest(format!("tmux\0main\0{pane}").as_bytes());
+        let key: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+        let directory = PathBuf::from(directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(0o600)
+            .open(directory.join(format!("{key}.lock")))
+            .unwrap();
+        file.try_lock().unwrap();
+        file
+    }
+
+    /// Opt every pane without its own capture into [`REST_CAPTURE`].
+    pub fn allow_rest_capture(&self) {
+        std::fs::write(self.capture_dir.join(REST_CAPTURE_OPT_IN), "").unwrap();
+    }
+
+    /// The shim calls that type literal text (`send-keys … -l …`).
+    pub fn literal_calls(&self) -> Vec<String> {
+        self.shim_calls()
+            .into_iter()
+            .filter(|line| line.starts_with("send-keys") && line.contains(" -l "))
+            .collect()
     }
 
     /// Make every later `kind` call (`literal` for `send-keys -l`, or
