@@ -38,13 +38,38 @@ fn assert_no_pane_effects(calls: &[String]) {
 }
 
 #[test]
-fn member_ping_excludes_the_director_before_capture_or_input() {
+fn member_ping_is_not_a_subcommand() {
+    let cli = Cli::new();
+    let output = cli.run(&["member", "ping", "1"]);
+    assert_eq!(code(&output), 2);
+    assert_eq!(stdout(&output), "");
+    assert!(
+        stderr(&output).contains("unrecognized subcommand 'ping'"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(cli.shim_calls().is_empty());
+}
+
+#[test]
+fn member_prompt_rejects_the_directors_own_pane_before_pane_io() {
     let cli = Cli::new();
     let (_, director) = cli.seeded_fleet();
-    let output = cli.run(&["member", "ping", &director.to_string(), "--json"]);
-    assert_eq!(code(&output), 1);
-    assert!(stderr(&output).contains("cannot ping the Director's own pane"));
-    assert!(cli.shim_calls().is_empty());
+    for json in [false, true] {
+        let director_id = director.to_string();
+        let mut args = vec!["member", "prompt", director_id.as_str(), "hello"];
+        if json {
+            args.push("--json");
+        }
+        let output = cli.run(&args);
+        assert_eq!(code(&output), 1, "{}", stderr(&output));
+        assert_eq!(stdout(&output), "");
+        assert_eq!(
+            stderr(&output),
+            "Error: cannot prompt the Director's own pane\n"
+        );
+    }
+    assert!(cli.shim_calls().is_empty(), "{:?}", cli.shim_calls());
 }
 
 fn assert_keys(value: &serde_json::Value, expected: &[&str]) {
@@ -862,7 +887,7 @@ fn member_delete_of_the_root_director_is_rejected() {
 }
 
 #[test]
-fn member_ping_skips_a_pending_placement_and_exits_zero() {
+fn member_capture_of_a_pending_placement_fails_without_capture() {
     let cli = Cli::new();
     let (fleet_id, _) = cli.seeded_fleet();
     let member_id = cli.seed_member(fleet_id, "worker");
@@ -890,65 +915,6 @@ fn member_ping_skips_a_pending_placement_and_exits_zero() {
         calls[calls_before..]
             .iter()
             .all(|line| !line.starts_with("capture-pane")),
-        "{calls:?}"
-    );
-
-    let calls_before = calls.len();
-    let output = cli.run(&["member", "ping", &member_id.to_string()]);
-    assert_eq!(code(&output), 0);
-    assert!(stdout(&output).contains(
-        "Member worker has no pane yet (pending placement) — ping skipped; it will poll its inbox on spawn."
-    ), "{}", stdout(&output));
-    let calls = cli.shim_calls();
-    assert!(
-        calls[calls_before..]
-            .iter()
-            .all(|line| !line.starts_with("send-keys")),
-        "{calls:?}"
-    );
-
-    let calls_before = calls.len();
-    let output = cli.run(&["member", "ping", &member_id.to_string(), "--json"]);
-    assert_eq!(code(&output), 0);
-    let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
-    assert_keys(&payload, &["member_id", "pane_id", "skipped", "reason"]);
-    assert_eq!(payload["member_id"], member_id);
-    assert_eq!(payload["pane_id"], serde_json::Value::Null);
-    assert_eq!(payload["skipped"], true);
-    assert_eq!(payload["reason"], "pending_placement");
-    let calls = cli.shim_calls();
-    assert!(
-        calls[calls_before..]
-            .iter()
-            .all(|line| !line.starts_with("send-keys")),
-        "{calls:?}"
-    );
-
-    let pane = format!("%{}", member_id + 6);
-    cafleet::broker::update_placement_pane_id(&mut cli.sqlite(), member_id, &pane)
-        .unwrap()
-        .unwrap();
-    cli.set_pane_capture(
-        &pane,
-        "Ready.\n────────────\n❯ \x1b[0m\n────────────\n? for shortcuts",
-    );
-    let calls_before = calls.len();
-    let output = cli.run(&["member", "ping", &member_id.to_string(), "--json"]);
-    assert_eq!(code(&output), 0);
-    let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
-    assert_keys(&payload, &["member_id", "pane_id", "skipped", "reason"]);
-    assert_eq!(payload["member_id"], member_id);
-    assert_eq!(payload["pane_id"], pane);
-    assert_eq!(payload["skipped"], false);
-    assert_eq!(payload["reason"], serde_json::Value::Null);
-    let calls = cli.shim_calls();
-    assert_eq!(
-        calls[calls_before..]
-            .iter()
-            .filter(|line| line.as_str()
-                == format!("send-keys -t {pane} -l -- cafleet message poll {member_id} --json"))
-            .count(),
-        1,
         "{calls:?}"
     );
 }
