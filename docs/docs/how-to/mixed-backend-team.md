@@ -1,162 +1,114 @@
 # Run a fleet
 
-Create a supervised team from your coding-agent pane inside tmux or herdr.
-A Director can use one backend or mix Claude, Codex and OpenCode members;
-all exchange messages through the same broker.
+Create independent coding-agent sessions in tmux or herdr, assign work and collect durable replies through finite receiving.
 
 ## Prerequisites
 
-Follow Quickstart to [install](../quickstart.md#install),
-[configure](../quickstart.md#configure) and
-[trust the working directory](../quickstart.md#trust-the-working-directory).
-Put each selected backend binary on PATH. Run every CAFleet command in its
-own shell-tool invocation and use the literal IDs returned by the CLI.
+Follow Quickstart to [install](../quickstart.md#install), [configure](../quickstart.md#configure) and [trust the workspace](../quickstart.md#trust-the-working-directory). Put each selected backend on PATH. Use literal returned IDs and one CAFleet command per shell-tool invocation.
 
 ## Prompt
 
 ```text
-Create a CAFleet team for this repo with three members — one on claude,
-one on codex, and one on opencode. Name them alice, bob, and carol.
-Send each member a message asking it to report its backend, confirm
-all three replies, then shut down the team.
+Use CAFleet to delegate independent reviews of this change, collect both reports, resolve their findings, and close the team.
 ```
 
-Your agent loads the CAFleet Director instructions, creates the fleet with
-its monitor, and dispatches each member after its own ready signal. Messages appear as
-[inline previews](../spec/multiplexer-backends.md#push-notifications) in
-the member panes and remain available through the broker.
+Your agent loads the Director instructions, creates members and assigns each after its ready. The host continues the task; the Director owns receiving and evidence checks.
 
 ## Manual lifecycle
 
-This baseline uses a Claude Director, example HOME `/home/cafleet-demo`
-and workspace `/home/cafleet-demo/work/demo`. Substitute your actual
-absolute paths and installed skill root. Run the diagnostic first; resolve
-any reported issue before bootstrap:
+This example uses HOME `/home/cafleet-demo` and workspace `/home/cafleet-demo/work/demo`. Substitute actual absolute paths and the installed skill root. [Config-dir resolution](../spec/cli-options.md#config-dir-resolution) owns backend path overrides.
 
 ```bash
 cafleet doctor --json
 ```
 
-Use [Config-dir resolution](../spec/cli-options.md#config-dir-resolution)
-for overrides. The default skill roots are:
-
-| Backend | CAFleet skill root |
-|---|---|
-| `claude` | `~/.claude/skills/cafleet` |
-| `codex` | `~/.codex/skills/cafleet` |
-| `opencode` | `~/.config/opencode/skills/cafleet` |
-
-The Director loads its own backend instructions and the installed generic
-Director role and supervision protocol before orchestration. When composing
-a spawn, it reads the selected backend's model catalog, defaults and
-capabilities. The monitor member classifies a pane with the observed
-member's backend cues.
-
-### Bootstrap the monitor
-
-Save this complete prompt as
-`/home/cafleet-demo/work/demo/.prompts/monitor.md`, creating the directory
-and choosing a new filename if one already exists. Keep the four identity
-placeholders for CAFleet to fill during creation; double any other literal
-braces added to the prompt.
-
-```text
-You are the monitor member in a CAFleet team.
-ROLE DEFINITION: Open /home/cafleet-demo/.claude/skills/cafleet/roles/monitor.md BEFORE any other action. Follow that role definition.
-Read /home/cafleet-demo/.claude/skills/cafleet/reference/coding-agents.md and resolve your own backend section, then load /home/cafleet-demo/.claude/skills/cafleet/SKILL.md as an assigned member. Read /home/cafleet-demo/.claude/skills/cafleet/reference/base-dir.md before writing files.
-FLEET ID: {fleet_id}
-DIRECTOR MEMBER ID: {director_member_id}
-YOUR MEMBER ID: {member_id}
-BASE: /home/cafleet-demo/work/demo
-CODING AGENT: {coding_agent}
-Complete the role's prerequisite reads, send ready to the Director, then end your turn. The monitor loop is already running; each wake it sends you names the members to health-check.
-```
+Resolve diagnosis issues. Load the Director role, backend reference and supervision procedure from the installed CAFleet skill, then register the calling session:
 
 ```bash
-cafleet fleet create --name demo --coding-agent claude --monitor-model haiku --monitor-effort low --monitor-file /home/cafleet-demo/work/demo/.prompts/monitor.md
+cafleet fleet create --name demo --coding-agent claude
 ```
 
-For example, the command prints `1 director=2 monitor=3` and
-`monitor loop: pid 4821`. It returns only after the fleet's monitor loop is
-running, so the loop needs no step of its own. The `--coding-agent` value
-states the backend already running in the Director's pane; the monitor
-inherits it. Wait for the monitor's `ready` before creating an ordinary
-member: registration alone does not establish that the agent in the pane
-booted.
+Example output: `1 director=2`. Creation registers the current pane without starting another session. The backend flag declares the calling host.
 
 ### Create and dispatch a member
 
-Save this prompt as a new file
-`/home/cafleet-demo/work/demo/.prompts/member.md`:
+Save this prompt as `/home/cafleet-demo/work/demo/.prompts/member.md` with a fresh filename. Keep identity placeholders and double other literal braces:
 
 ```text
 You are an ordinary CAFleet member.
-ROLE DEFINITION: Open /home/cafleet-demo/.claude/skills/cafleet/roles/member.md before any other action. Follow that role definition.
-Read /home/cafleet-demo/.claude/skills/cafleet/reference/coding-agents.md and resolve your own backend section, then load /home/cafleet-demo/.claude/skills/cafleet/SKILL.md. Read /home/cafleet-demo/.claude/skills/cafleet/reference/base-dir.md and follow the supplied BASE contract.
+ROLE DEFINITION: Open /home/cafleet-demo/.claude/skills/cafleet/roles/member.md BEFORE any other action. Follow that role definition.
+Read /home/cafleet-demo/.claude/skills/cafleet/reference/coding-agents.md and resolve your backend, then load /home/cafleet-demo/.claude/skills/cafleet/SKILL.md as an assigned member. Read /home/cafleet-demo/.claude/skills/cafleet/reference/base-dir.md and the supplied host instructions before task work.
 FLEET ID: {fleet_id}
 DIRECTOR MEMBER ID: {director_member_id}
 YOUR MEMBER ID: {member_id}
 BASE: /home/cafleet-demo/work/demo
 CODING AGENT: {coding_agent}
-Use an available text reader for prerequisites; shell-only prerequisite reads may precede ready. As your first operational broker shell command, send: cafleet message send --from-member-id {member_id} --to-member-id {director_member_id} "ready"
-Poll and ACK your assignment, then act on the Director's instructions. Wait at the prompt when no assignment remains.
+As your first operational broker command, send: cafleet message send --from-member-id {member_id} --to-member-id {director_member_id} "ready"
+Poll and ACK your assignment, perform it, poll before reporting completion and on every wake, then handle queued assignments before becoming idle.
 ```
 
 ```bash
-cafleet member create --fleet-id 1 --name alice --description "Demo member" --file /home/cafleet-demo/work/demo/.prompts/member.md
+cafleet member create --fleet-id 1 --name alice --description "Independent review" --file /home/cafleet-demo/work/demo/.prompts/member.md
 ```
 
-Suppose the returned member ID is `4`. Wait for that member's `ready`, then
-dispatch its work at once:
+Suppose the returned ID is `3`. Receive its ready, ACK its actual message ID, then dispatch its assignment:
 
 ```bash
-cafleet message send --from-member-id 2 --to-member-id 4 "Please reply hello."
+cafleet message send --from-member-id 2 --to-member-id 3 "Review the change and report findings."
 ```
 
-The send needs no check of the member's pane. When the member is still busy,
-the broker [holds the preview](../concepts/monitoring.md#delivery-pass) and
-the monitor loop delivers it once the pane is at rest. The member receives
-the preview, polls, acknowledges and replies. Read the Director inbox and ACK
-each consumed delivery using its actual message ID:
+A busy recipient's preview remains pending. The Director's next finite receive retries pending member notifications. The member's startup/report/wake polls also discover durable assignments.
+
+### Receive results
+
+Run this command as a host-native background task:
+
+```bash
+cafleet message wait 2 --timeout 300 --json
+```
+
+Retain the live task/session handle and collect its terminal result. A foreground-only tool without such a handle uses at most 30 seconds. Full payloads are also available through:
 
 ```bash
 cafleet message poll 2 --json
 ```
 
+ACK every consumed delivery immediately, using its returned ID:
+
 ```bash
 cafleet message ack 10
 ```
 
-Here `10` is an example. The monitor's `ready` gates the first member
-creation; each ordinary member's `ready` gates that member's first
-assignment.
+Keep deferred questions/approvals in host-owned task state after ACK. On timeout inspect roster, panes and artifacts, then receive again while useful delegated work remains. When host continuation is unavailable, keep the active receive tool/session until the reply or an explicit handoff to the user.
 
 ### Run a command for a member
 
-A member whose harness does not run a command asks the Director for it with
-a message such as `Need to run: mise //cafleet:test. My harness denied it.`
-Run the command in that member's pane:
+A member can ask `Need to run: mise //cafleet:test. My harness denied it.` Authorize and dispatch the exact command:
 
 ```bash
-cafleet member exec 4 "mise //cafleet:test"
+cafleet member exec 3 "mise //cafleet:test"
 ```
 
-The command runs to completion in the member's pane, the Director receives a
-completion notice in its inbox, and the member continues with the output — no
-ping and no pane capture. See
-[Command routing](../concepts/member-lifecycle.md#command-routing).
+The CLI returns submission metadata. Inspect the native command and result:
+
+```bash
+cafleet member capture 3 --lines 80
+```
+
+Once the command has finished and the composer is idle, explicitly continue a member that has not resumed:
+
+```bash
+cafleet member prompt 3 "Use the native command output and continue your assignment."
+```
+
+Inspect failed or uncertain input before authorizing any retry. [Command routing](../concepts/member-lifecycle.md#command-routing) explains the evidence boundary.
 
 ### Close the fleet
 
-Delete the monitor first, then delete the ordinary member. After each command succeeds, verify that only the root Director
-remains before deleting the fleet:
+Delete each owned ordinary member, verify the remaining roster, then deregister:
 
 ```bash
 cafleet member delete 3
-```
-
-```bash
-cafleet member delete 4
 ```
 
 ```bash
@@ -171,30 +123,8 @@ cafleet fleet delete 1
 cafleet fleet list
 ```
 
-Confirm fleet `1` is absent. If another fixture-owned member remains, finish
-its member deletion before fleet deletion; fleet deletion alone does not
-close panes. Apply cleanup only to the team you are authorized to manage.
+Fleet deletion retains history and closes no panes. Limit cleanup to the team you own.
 
 ## Backend variations
 
-Use the same lifecycle for a Codex or OpenCode Director, declaring its actual
-backend at fleet creation and using its installed monitor paths and selected
-monitor model. The monitor inherits the Director's backend. Resolve model
-choices through [Model choice](../concepts/coding-agents.md#model-choice).
-
-For a mixed team, save separate ordinary-member prompts with the appropriate
-installed role/core/backend paths and a shared workspace BASE. After the
-monitor's `ready`, add members with explicit backend flags:
-
-```bash
-cafleet member create --fleet-id 1 --name bob --description "Codex member" --coding-agent codex --file /home/cafleet-demo/work/demo/.prompts/bob.md
-```
-
-```bash
-cafleet member create --fleet-id 1 --name carol --description "OpenCode member" --coding-agent opencode --file /home/cafleet-demo/work/demo/.prompts/carol.md
-```
-
-Dispatch each member after its own ready, using the actual returned ID. List members to find their panes: only Claude sets the member
-name as its pane title. During shutdown, delete every added member after the
-monitor and before the root-only registry check. Exact flags, outputs and
-failure distinctions are in [CLI options](../spec/cli-options.md).
+Use explicit member backend/model flags to create a mixed team. Resolve role defaults and models through [model choice](../concepts/coding-agents.md#model-choice). OpenCode members perform assignments through their selected provider/model, workspace tools, broker and native shell path. Each member receives its own installed role/core paths, shared BASE and host prerequisites.

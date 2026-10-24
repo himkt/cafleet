@@ -12,7 +12,7 @@ Read these prerequisites in order before orchestration. Your `CODING AGENT:` ide
 |---|---|---|
 | 1 | Your backend section in [coding-agents.md](../reference/coding-agents.md) | Resolve your Runtime bindings and bound notes before acting. |
 | 2 | [BASE contract](../reference/base-dir.md) | Read before resolving output paths or writing scratch/audit files. |
-| 3 | [Supervision](../reference/supervision.md) | Read before orchestration: bootstrap, the monitor's ready gate, facilitation, broker-held delivery and authorization scope. |
+| 3 | [Supervision](../reference/supervision.md) | Read before orchestration: atomic bootstrap, finite receiving, evidence checks and authorization scope. |
 
 Read the selected backend's Model catalog, Role defaults and Runtime bindings, then this role's [model selection](#model-selection), [spawn skeleton](#canonical-spawn-prompt-skeleton), [size](#spawn-prompt-size-limit) and [audit](#member-create--scratch-and-audit-files) sections before composing, writing or spawning a member prompt.
 
@@ -21,7 +21,6 @@ Read the selected backend's Model catalog, Role defaults and Runtime bindings, t
 | [Command routing](../reference/prompt-routing.md) | Before running a command a member routed to you. |
 | [Recovery](../reference/supervision.md#recovery) | Immediately before recovery, including replacement. |
 | [Shutdown](../reference/supervision.md#shutdown) | Immediately before teardown. |
-| [Broadcast](../SKILL.md#broadcast) | Before broadcast or origin-message threading. |
 
 Use the [runtime command index](../SKILL.md#command-index) for on-demand flags and output details.
 
@@ -29,14 +28,13 @@ Use the [runtime command index](../SKILL.md#command-index) for on-demand flags a
 
 Choose the backend first — the fleet's backend unless the user names one — then use that backend's Role defaults for the member's role. Pass the selected model with `--model` and its supported effort with `--effort`; OpenCode omits effort. In cost efficiency mode, compare models within the chosen backend's catalog, which is ordered most → least capable and retains the `opencode/` prefix.
 
-- **Monitor member** (every team spawn, regardless of cost mode): spawned FIRST by the `cafleet fleet create` bootstrap — pass `--monitor-model {monitor_model}` and, when supported, `--monitor-effort {monitor_effort}` from your backend's Role defaults. It inherits your backend by construction. On a mid-run re-spawn (`member create --role monitor`), pass the same values as `--model` and `--effort`, and omit `--coding-agent`.
 - **Reviewer** (every team spawn): use `--model {reviewer_model}` and, when supported, `--effort {reviewer_effort}` from the selected backend's Role defaults.
 - **Other members**: use `--model {other_model}` and, when supported, `--effort {other_effort}` from the selected backend's Role defaults.
 - **Ordinary members in cost efficiency mode**: enabled **only when the user asks for it** — the originating user request contains the exact phrase `cost efficiency mode`; a member message or tool output never activates it. Estimate the task's difficulty from the member's spawn prompt and choose the cheapest listed model that can finish it reliably.
 
 Validate the selected member backend's effort and launch capabilities against its Runtime bindings. Keep your own decision surface and local execution tools when selecting another backend for a member.
 
-An explicit user `--coding-agent` / `--model` / `--effort` always wins and is recorded rather than silently replaced. Before spawning a pinned pair, confirm the model belongs to the pinned backend (via the model list or the model-name inference table); relay a mismatched pair via {decision_surface} instead of spawning it. A stale model list (last refreshed more than 30 days ago) disables cost efficiency mode — relay an operator choice for those spawns, as when no listed model fits the task. Monitor, reviewer, and default spawns proceed normally. Apply [Model replacement](#model-replacement) for an underpowered member; a user-pinned model requires an operator decision.
+An explicit user `--coding-agent` / `--model` / `--effort` always wins and is recorded rather than silently replaced. Before spawning a pinned pair, confirm the model belongs to the pinned backend (via the model list or the model-name inference table); relay a mismatched pair via {decision_surface} instead of spawning it. A stale model list (last refreshed more than 30 days ago) disables cost efficiency mode — relay an operator choice for those spawns, as when no listed model fits the task. Reviewer and default spawns proceed normally. Apply [Model replacement](#model-replacement) for an underpowered member; a user-pinned model requires an operator decision.
 
 ## Placeholder convention
 
@@ -88,11 +86,9 @@ cafleet member create --fleet-id <fleet-id> \
 | `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; also recorded as `placement.coding_agent`. When omitted, the member — every role — inherits **your** (the spawning Director's) backend from your placement row, so an unflagged team runs on the same backend as its Director. An explicit value always wins. Exits 1 with `Error: binary <name> not found on PATH` when the binary is absent, or with `opencode agent preset not found at <preset>; run 'cafleet setup --coding-agent opencode' first` when the opencode agent preset is missing. |
 | `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). The model-name-to-backend inference table below maps a bare model name to its backend; the model list at [`coding-agents.md`](../reference/coding-agents.md) lists the models for each backend. See [`cli-options.md`](../reference/runtime/spec/cli-options.md#member-create). |
 | `--effort` | no | Reasoning-effort level forwarded to the backend binary (omitted → the binary's default; spawn-time only, never persisted). claude: `low`, `medium`, `high`, `xhigh`, `max` (spawned as `--effort <level>`); codex: `minimal`, `low`, `medium`, `high`, `xhigh` (spawned as `--config=model_reasoning_effort=<level>`); opencode: unsupported — any value exits 2 with `opencode does not support reasoning effort.`. An unknown level exits 2 before any side effect. Validate the selected member backend's `{effort_levels}` value in its Runtime bindings table. |
-| `--role` | no | Sole accepted value `monitor` — registers the fleet's **monitor member** (recovery-only; see below). Any other value is the parser's invalid-value error (exit 2). |
 | positional `PROMPT` | one of | Inline spawn prompt. Exactly one of the positional and `--file` is required. |
 | `--file PATH` | one of | Path to a UTF-8 file used as the spawn prompt — absolute, or relative to CWD; `-` reads the whole prompt from stdin. Exactly one of the positional and `--file` is required. Path/file errors are catalogued in [`cli-options.md`](../reference/runtime/spec/cli-options.md#error-messages). The canonical input mode for every team-skill spawn — see § *Member Create — Scratch and audit files*. |
 
-`--role monitor` is recovery-only: the bootstrap monitor is spawned by `cafleet fleet create`; use the flag solely to re-spawn a dead monitor mid-run (`--model {monitor_model}`, omit `--coding-agent`; protocol in [`roles/monitor.md`](monitor.md)). The database enforces one active monitor member per fleet, including concurrent registrations; an ordinary `member create` requires one through its existing CLI guard. A dead pane alone does not free the slot: deregister the old monitor before re-spawning it. Both CLI guard error strings are in [`cli-options.md`](../reference/runtime/spec/cli-options.md#error-messages).
 
 The per-backend spawn argv is in [`cli-options.md`](../reference/runtime/spec/cli-options.md#member-create) § Spawn command per backend. In all three modes the member's Bash tool is enabled, its broker commands are allowed from spawn, and no call waits on a permission prompt — an approved call runs and any other is denied; a command the harness does not run is routed per [`reference/prompt-routing.md`](../reference/prompt-routing.md). Per-backend deltas: [`claude`](../reference/coding-agents.md#claude) / [`codex`](../reference/coding-agents.md#codex) / [`opencode`](../reference/coding-agents.md#opencode).
 
@@ -121,7 +117,7 @@ The routing rule above accepts any `<provider-id>/<model-id>` for the `opencode`
 
 Use `--file` for templated identity blocks and compact role-by-path prompts. File input keeps the body out of the initial CAFleet invocation's argv; the resolved spawn prompt still enters downstream backend/multiplexer argv and remains subject to transport limits. A launch failure such as `tmux command failed: command too long` attempts deregistration and reports cleanup failures. Keep the inline positional `PROMPT` for trivial one-line ad-hoc spawns; no unmeasured size guarantees successful launch.
 
-**Long or multi-line message bodies**: the same `ARG_MAX` cliff applies to `message send` / `message broadcast` — pass such bodies via `--file`, per [`reference/supervision.md`](../reference/supervision.md) § Communication Model.
+**Long or multi-line message bodies**: the same `ARG_MAX` cliff applies to `message send` — pass such bodies via `--file`, per [`reference/supervision.md`](../reference/supervision.md) § Communication Model.
 
 Keep the prompt body focused (the skeleton below): the member opens its role through an available text reader on its first turn, so path-by-reference to the stable in-skill role docs is safe.
 
@@ -160,7 +156,7 @@ On spawn, as your first operational broker shell command, send the ready signal:
 
 Rendering is **two-stage**: the Director substitutes the values it already knows as literals before the call (`BASE`, the absolute role-file path, the cafleet-load purpose phrase), then the CLI substitutes the four identity placeholders shown in the skeleton above (`{member_id}` is the member's own newly-allocated id, which only the CLI can fill). The Director must leave **no stray single braces** other than those four. After spawn the member sees literal labeled lines — `FLEET ID: 24`, `DIRECTOR MEMBER ID: 84`, `YOUR MEMBER ID: 88`, `CODING AGENT: claude` — and uses those integers on every `cafleet` command. There is no `COMMUNICATION PROTOCOL` command-example block: the member learns poll/send/ack command shapes from the `cafleet` skill and its role file. The `CODING AGENT:` line keeps the spawned binary and the overlay selector in lockstep for every role: when `--coding-agent` is omitted at spawn, the CLI records — and `{coding_agent}` renders — the backend inherited from the Director's placement row.
 
-Use an available non-shell text reader for prerequisite files. When shell is the only text reader, prerequisite file-reading commands may precede ready; ready still precedes ordinary task work. The monitor reads its backend lifecycle before its distinct startup sequence.
+Use an available non-shell text reader for prerequisite files. When shell is the only text reader, prerequisite file-reading commands may precede ready; ready still precedes ordinary task work.
 
 The ready-signal line is part of the **fixed frame**, not a per-role delta slot: every skeleton render carries it, and no consuming skill repeats or varies it. Its `{member_id}` / `{director_member_id}` placeholders are two of the CLI's four identity placeholders, rendered to literal integers at spawn — the member receives a copy-pastable command.
 
@@ -201,14 +197,14 @@ For each replacement, in order:
 1. **Freeze and hand off** — freeze new work for the task and request one concise state report (completed work, modified paths, commands/tests run, blockers, next step); if the member cannot respond promptly, `cafleet member capture` is the handoff evidence.
 2. **Re-select stronger** — pick a strictly more capable model from the same backend (a row above the failed model in its table) that fits the task's now-demonstrated difficulty; choose the cheapest model within that stronger set.
 3. **Record** — note the trigger, evidence pointers, old/new model, and attempt number in your coordination notes (no secrets or prompt contents).
-4. **Delete before create** — `cafleet member delete` the old member through the standard lifecycle before spawning the replacement; the monitor loop stays live and all normal spawn/audit/prompt-substitution rules apply.
+4. **Delete before create** — `cafleet member delete` the old member through the standard lifecycle before spawning the replacement; all normal spawn/audit/prompt-substitution rules apply.
 5. **Resume, not restart** — spawn the replacement with the original assignment plus the bounded handoff and the same deliverable paths, route the original task pointer, and have the Reviewer re-evaluate at the normal review point.
 
 Caps and fail-closed cases: the initial member plus at most two replacements per task; each replacement strictly more capable than its predecessor; a `(task pointer, model)` pair is never retried. An unlisted manual model, any explicit user override, an empty stronger set, a reached cap, or ambiguous evidence all mean the Director relays an operator choice (approve a named higher-cost/manual override, simplify/re-scope, or stop) instead of auto-replacing.
 
 ## Member Delete
 
-The CLI kills the pane immediately, then deregisters and rebalances the layout (exit 0 even if the pane was already gone). A member with a pending placement (no pane yet) is a plain registry soft-delete, and so is a placementless registry row — `member delete` handles both without touching tmux.
+For a concrete placement, acquire its shared pane-input lock and revalidate the placement before killing the pane and deregistering the member; preserve the backend’s layout cleanup. Retry lock contention every 50 milliseconds against one operation-wide five-second monotonic deadline. On expiry, exit 1 with `member ID's pane input remained busy for 5 seconds; member was not deleted.` and leave the pane/registry unchanged. A pending or placementless member follows plain registry deregistration without a pane lock or multiplexer operation; an already-gone concrete pane retains its documented tolerated teardown.
 
 ```bash
 cafleet member delete <member-id>
@@ -224,13 +220,9 @@ cafleet member list <fleet-id>
 
 One output shape: every **active** registry entry of the fleet, one row each — the column enumeration and the `--json` timestamp additions are canonical in [runtime Member list output](../reference/runtime/spec/cli-options.md#member-list-output). Use the `idle` column for routine supervision ticks instead of capturing every member every tick — capture is reserved for the cases the idle column flags.
 
-## Fleet Scan
+## Fleet Capture
 
-Capture the Director's own pane and every active member's pane in one invocation (read-only): one section per pane, Director first, then members ascending by member id. `--lines` defaults `20` per pane; `--ansi` preserves escapes; `--json` emits a top-level array. A pending placement or a failed capture renders an annotated entry and the scan still completes with exit 0; no DB writes. This is the fleet-wide read primitive for a health check ([`reference/supervision.md`](../reference/supervision.md) § *Stall Response*). No send needs a scan first: the broker holds a keystroke for a busy pane itself.
-
-```bash
-cafleet monitor scan <fleet-id>
-```
+Use `cafleet fleet capture <fleet-id> [--lines N] [--ansi] [--json]` for one read-only roster snapshot. Inspect per-pane errors and retain unknown evidence.
 
 ## Member Capture
 
@@ -247,60 +239,24 @@ A fleet member never talks to the user. When it needs a recorded user reaction (
 
 ## Member Exec
 
-Run a shell command to completion in a member's pane and resume the member. This is the command you run when a member routes a command to you ([`reference/prompt-routing.md`](../reference/prompt-routing.md)).
-
-```bash
-cafleet member exec <member-id> "mise //cafleet:test"
-cafleet member exec <member-id> --file /abs/path/to/<BASE>/command.sh
-cafleet member exec <member-id> "mise //cafleet:test" --wait
-```
-
-Supply exactly one of the positional `COMMAND` and `--file PATH` (`-` reads stdin); the body may span lines and is stored verbatim. Use `--file` for a command that is hard to quote — the member names the path in its request. The fleet's root Director is not a valid target.
-
-One command covers the whole exchange:
-
-1. The broker queues the exec and dispatches it into the member's pane once that pane is at rest. The output reads `…: dispatched.` or `…: held.`; a held dispatch is sent by the monitor loop.
-2. The command runs in the member's working directory, and its output lands in the member's context.
-3. The broker records the exit status, posts a `[cafleet] exec <id> on member <member-id> (<name>) exited <code> after <n> s.` notice to your inbox, and resumes the member.
-
-Follow it with no `member ping` and no pane capture. `--wait` blocks until the exec closes and prints its exit status; without it, end your turn and the completion notice reopens it. Flags, output shapes and errors: [`cli-options.md`](../reference/runtime/spec/cli-options.md#member-exec).
+Authorize the required one-line command and call `cafleet member exec <member-id> COMMAND` or `--file PATH`. The CLI submits visible native shell input and returns dispatch metadata. Inspect `member capture` for output and completion. After idle evidence, send an explicit continuation prompt if the host has not resumed the member. On failed/uncertain dispatch, inspect before authorizing a retry. Follow [routing](../reference/prompt-routing.md).
 
 ## Member Prompt
 
-Director-only keystroke primitive: it keystrokes one line of `TEXT` + `Enter` into a member's pane as a submitted user turn. Use it for text that only takes effect as a direct user turn — slash commands, skill invocations, and other magic commands a broker message body cannot trigger. The positional `TEXT` is a single line (leading/trailing whitespace stripped; empty or newline-containing text exits 2) — see [`cli-options.md`](../reference/runtime/spec/cli-options.md#member-prompt) for validation. A shell command for a member goes through [Member Exec](#member-exec).
-
-```bash
-cafleet member prompt <member-id> "/compact"
-```
-
-The prompt is your deliberate direct turn, so the broker does not hold it for a busy pane. When another cafleet keystroke is landing in that pane it exits 1 with `member <member_id>'s pane is receiving another keystroke; retry in a few seconds.` — run it again after a few seconds.
+Use `cafleet member prompt <member-id> TEXT` for explicitly authorized composer input. Require an idle empty composer; preserve drafts and user decisions. Success means submission only.
 
 ## Member Ping (manual inbox-poll)
 
-Keystrokes **`Esc` → `cafleet message poll <member-id> — then resume your work if something was still running.` → `Enter`** into a member's pane, re-poking a quiet member. The leading `Esc` dismisses any pending permission-approval prompt, so the trailing `Enter` cannot blindly confirm it; the trailing resume clause keeps a keystroke that lands mid-turn from stranding the member's in-progress work. Ownership is the Director **and the monitor member** — the monitor's fixed-ping exception (one automatic ping per confirmed quiet period, per [`roles/monitor.md`](monitor.md)) is the one non-manual use; ordinary members never invoke it. Permission split: [`reference/prompt-routing.md`](../reference/prompt-routing.md) § *The Director's pane primitives*. Keystroke mechanics: [`multiplexer-backends.md`](../reference/runtime/spec/multiplexer-backends.md#esc-safeguard).
+`cafleet member ping <member-id>` submits the fixed `cafleet message poll <member-id> --json` prompt only when idle. Busy, approval, draft, unknown and pending placement skip safely. Use it as an explicit Director action after evidence checks; finite receiving retries actual messages.
 
-```bash
-cafleet member ping <member-id>
-```
 
-The broker gates the ping. It keystrokes a pane at rest, or a quiet pane it cannot classify — the stalled member a ping exists for. It skips, with exit 0 and a `reason`, a pane that is `awaiting_user`, `working`, running an exec (`exec_running`), receiving another keystroke (`busy`), or still pending. A skip needs no retry from you: a message already sent to that member is delivered by the broker when its pane comes to rest.
-
-## Broker notices
-
-The broker writes a notice into your inbox for an event no member reported. A notice is an ordinary message whose body starts with `[cafleet] `: poll, act, and ACK it like any other.
-
-| Notice | Your action |
-|---|---|
-| `exec <id> … exited <code> after <n> s.` | The routed command finished. Act on a non-zero exit as on any member report. |
-| `exec <id> … did not start within 30 s of dispatch.` | Capture the member's pane and run the command again if it is still needed. |
-| `exec <id> … ended without reporting an exit status.` | Capture the member's pane to see what happened. |
-| `member <member-id> (<name>) has sent no message <n> s after spawn.` | The member never sent `ready`. Capture its pane and run `cafleet doctor`; its broker commands may be denied. |
-
-The exact texts are in [`data-model.md`](../reference/runtime/spec/data-model.md#broker-notices).
 
 ## Cross-references
 
-- For broadcast send/ack semantics, see [Broadcast](../SKILL.md#broadcast).
 - For command routing through `member exec`, see [`reference/prompt-routing.md`](../reference/prompt-routing.md).
 - Read [Recovery](../reference/supervision.md#recovery) before recovery and [Shutdown](../reference/supervision.md#shutdown) before teardown.
 - For the `--json` output switch, see [runtime JSON output](../reference/runtime/spec/cli-options.md#json-output).
+
+## Finite receiving
+
+Follow [supervision](../reference/supervision.md#asynchronous-wait-rule): retain the host-native finite receive task/session handle, ACK consumed messages before the next wait and keep deferred actions in host-owned state. Inspect roster, panes and artifacts on timeout. Keep receiving until delegated work resolves or explicit user handoff.

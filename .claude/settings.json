@@ -2,7 +2,6 @@
   "permissions": {
     "allow": [
       "Bash(pnpm install --frozen-lockfile)",
-      "Bash(mise //admin*)",
       "Bash(mise //cafleet*)",
       "Bash(mise //docs*)",
       "Bash(mise tasks)",

@@ -1,298 +1,513 @@
-//! Held delivery (SPEC §6.5): at most one keystroke into one member's pane,
-//! gated on the state the pane's capture classifies to.
-
-use chrono::{DateTime, Duration, Utc};
-use rusqlite::Connection;
-
 use crate::broker;
-use crate::broker::records::{MemberExec, MessageRecord, PaneTarget};
 use crate::config::Settings;
 use crate::error::CafleetError;
-use crate::output::{strip_ansi, truncate_text};
+use crate::input::{
+    Deadline, PaneLock, complete_database_budget, retry_database_completion, with_database_budget,
+};
+use crate::multiplexer::{AnyMultiplexer, Multiplexer, MultiplexerError};
+use crate::output::truncate_text;
 use crate::pane_state::{PaneState, classify};
-use crate::time::{format_utc, parse_lenient};
+use crate::receive::{AttemptOutcome, Delivery, NotificationError};
+use crate::time::format_utc;
+use rusqlite::Connection;
 
-pub const DELIVERY_CAPTURE_LINES: i64 = 40;
-pub const EXEC_RESUME_GRACE_SECONDS: i64 = 10;
+pub const DELIVERY_CAPTURE_LINES: i64 = 80;
 
-macro_rules! resume_clause {
-    () => {
-        "[cafleet] Resume your work if something was still running."
-    };
-}
-
-const RESUME_CLAUSE: &str = resume_clause!();
-const AWAITING_USER_NOTE: &str = concat!(
-    resume_clause!(),
-    "\n[cafleet] This delivery's Escape dismissed a pending prompt in your pane; \
-     that rejection did not come from the user. Re-issue the tool call if you still need it.",
-);
-
-/// What a delivery needs from the pane-hosting backend. `Err` carries the raw
-/// backend error string.
-pub trait PaneIo {
-    fn capture_pane(&self, pane_id: &str, lines: i64) -> Result<String, String>;
-    fn send_inline_preview(
-        &self,
-        pane_id: &str,
-        message_id: i64,
-        sender_id: i64,
-        ts: &str,
-        text: &str,
-        note: Option<&str>,
-    ) -> Result<(), String>;
-    fn send_prompt(&self, pane_id: &str, text: &str) -> Result<(), String>;
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PaneOutcome {
-    Fired { item: Item, forced: bool },
-    Held(HoldReason),
-    Idle,
-}
-
-impl PaneOutcome {
-    /// Whether this outcome keystroked the preview of `message_id`.
-    pub fn fired_preview(&self, message_id: i64) -> bool {
-        matches!(
-            self,
-            PaneOutcome::Fired { item: Item::Preview { message_id: fired }, .. }
-                if *fired == message_id
-        )
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Item {
-    Preview { message_id: i64 },
-    ExecDispatch { exec_id: i64 },
-    ExecResume { exec_id: i64 },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HoldReason {
-    ExecRunning,
-    ResumeGrace,
-    AwaitingUser,
-    Working,
-    Unclassified,
-    CaptureFailed(String),
-    Busy,
-    KeystrokeFailed(String),
-}
-
-enum Gate {
-    Ordinary,
-    Forced,
-    Hold(HoldReason),
-}
-
-/// The gate table: a pane at rest always receives; any other state holds
-/// until the hold age reaches the timeout, and a timeout of `0` never forces.
-fn gate(state: PaneState, hold_age: Duration, hold_timeout: i64) -> Gate {
-    let reason = match state {
-        PaneState::Finished => return Gate::Ordinary,
-        PaneState::AwaitingUser => HoldReason::AwaitingUser,
-        PaneState::Working => HoldReason::Working,
-        PaneState::Unclassified => HoldReason::Unclassified,
-    };
-    if hold_timeout > 0 && hold_age >= Duration::seconds(hold_timeout) {
-        Gate::Forced
-    } else {
-        Gate::Hold(reason)
-    }
-}
-
-/// The lines a forced preview adds for the state the broker observed.
-fn forced_note(state: PaneState) -> &'static str {
-    match state {
-        PaneState::AwaitingUser => AWAITING_USER_NOTE,
-        PaneState::Working | PaneState::Unclassified => RESUME_CLAUSE,
-        PaneState::Finished => unreachable!("a finished pane receives an ordinary delivery"),
-    }
-}
-
-/// The one item a pane is owed next.
-enum Owed {
-    Resume(MemberExec),
-    Dispatch(MemberExec),
-    Preview(MessageRecord),
-}
-
-impl Owed {
-    /// A finished exec not yet resumed, else the oldest queued exec, else the
-    /// oldest pending preview.
-    fn select(conn: &Connection, member_id: i64) -> Result<Option<Owed>, CafleetError> {
-        if let Some(exec) = broker::oldest_finished_exec(conn, member_id)? {
-            return Ok(Some(Owed::Resume(exec)));
-        }
-        if let Some(exec) = broker::oldest_queued_exec(conn, member_id)? {
-            return Ok(Some(Owed::Dispatch(exec)));
-        }
-        Ok(broker::oldest_pending_preview(conn, member_id)?.map(Owed::Preview))
-    }
-
-    fn item(&self) -> Item {
-        match self {
-            Owed::Resume(exec) => Item::ExecResume {
-                exec_id: exec.exec_id,
-            },
-            Owed::Dispatch(exec) => Item::ExecDispatch {
-                exec_id: exec.exec_id,
-            },
-            Owed::Preview(message) => Item::Preview {
-                message_id: message.message_id,
-            },
-        }
-    }
-
-    /// When the item became owed: an exec's end for a resume, the row's
-    /// creation otherwise.
-    fn owed_since(&self) -> &str {
-        match self {
-            Owed::Resume(exec) => finished_at(exec),
-            Owed::Dispatch(exec) => &exec.created_at,
-            Owed::Preview(message) => &message.created_at,
-        }
-    }
-
-    /// Stamp the item as keystroked; `false` when it is no longer owed,
-    /// because it was ACKed or another process stamped it first.
-    fn stamp(&self, conn: &mut Connection, when: &str) -> Result<bool, CafleetError> {
-        match self {
-            Owed::Resume(exec) => broker::stamp_exec_resumed(conn, exec.exec_id, when),
-            Owed::Dispatch(exec) => broker::stamp_exec_dispatched(conn, exec.exec_id, when),
-            Owed::Preview(message) => broker::stamp_notified(conn, message.message_id, when),
-        }
-    }
-
-    fn clear_stamp(&self, conn: &mut Connection) -> Result<(), CafleetError> {
-        match self {
-            Owed::Resume(exec) => broker::clear_exec_resumed(conn, exec.exec_id),
-            Owed::Dispatch(exec) => broker::clear_exec_dispatched(conn, exec.exec_id),
-            Owed::Preview(message) => broker::clear_notified(conn, message.message_id),
-        }
-    }
-
-    fn send(
-        &self,
-        io: &dyn PaneIo,
-        settings: &Settings,
-        pane_id: &str,
-        note: Option<&str>,
-    ) -> Result<(), String> {
-        match self {
-            Owed::Resume(exec) => io.send_prompt(
-                pane_id,
-                &format!(
-                    "[cafleet] exec {} finished with exit {}. \
-                     Continue your work using its output above.",
-                    exec.exec_id,
-                    exec.exit_code
-                        .expect("an exec that awaits its resume recorded an exit code"),
-                ),
-            ),
-            Owed::Dispatch(exec) => io.send_prompt(
-                pane_id,
-                &format!("! cafleet member exec-run {}", exec.exec_id),
-            ),
-            Owed::Preview(message) => io.send_inline_preview(
-                pane_id,
-                message.message_id,
-                message.from_member_id,
-                &message.created_at,
-                &truncate_text(Some(&message.text), settings.max_text_len)
-                    .expect("a present text truncates to a present text"),
-                note,
-            ),
-        }
-    }
-}
-
-fn finished_at(exec: &MemberExec) -> &str {
-    exec.finished_at
-        .as_deref()
-        .expect("a finished exec carries finished_at")
-}
-
-/// `now − max(item timestamp, finished_at of the pane's latest exec,
-/// forced_at)`: the two pane-level terms restart the clock for everything
-/// queued behind an exec or a forced delivery.
-fn hold_age(
-    conn: &Connection,
-    target: &PaneTarget,
-    owed: &Owed,
-    now: DateTime<Utc>,
-) -> Result<Duration, CafleetError> {
-    let mut baseline = parse_lenient(owed.owed_since())?;
-    let latest_exec_end = broker::latest_exec_finished_at(conn, target.member_id)?;
-    for restart in [&latest_exec_end, &target.forced_at].into_iter().flatten() {
-        baseline = baseline.max(parse_lenient(restart)?);
-    }
-    Ok(now - baseline)
-}
-
-/// Perform at most one keystroke into `member_id`'s pane.
-pub fn deliver_pane(
+pub(crate) fn attempt_preview(
     conn: &mut Connection,
-    io: &dyn PaneIo,
     settings: &Settings,
     member_id: i64,
-    now: DateTime<Utc>,
-) -> Result<PaneOutcome, CafleetError> {
-    let Some(target) = broker::pane_target(conn, member_id)? else {
-        return Ok(PaneOutcome::Idle);
-    };
-    if broker::exec_in_flight(conn, member_id)? {
-        return Ok(PaneOutcome::Held(HoldReason::ExecRunning));
-    }
-    let Some(owed) = Owed::select(conn, member_id)? else {
-        return Ok(PaneOutcome::Idle);
-    };
+    expected_fleet: Option<i64>,
+    deadline: Deadline,
+    resolve: impl FnOnce() -> Result<AnyMultiplexer, MultiplexerError>,
+) -> Result<AttemptOutcome, CafleetError> {
+    with_database_budget(conn, deadline, |conn| {
+        attempt_preview_scoped(conn, settings, member_id, expected_fleet, deadline, resolve)
+    })
+}
 
-    let content = match io.capture_pane(&target.pane_id, DELIVERY_CAPTURE_LINES) {
-        Ok(content) => content,
-        Err(error) => return Ok(PaneOutcome::Held(HoldReason::CaptureFailed(error))),
-    };
-    let state = classify(&target.coding_agent, &strip_ansi(&content));
+fn read_snapshot<T>(
+    conn: &mut Connection,
+    deadline: Deadline,
+    read: impl FnOnce(&Connection) -> Result<T, CafleetError>,
+) -> Result<T, CafleetError> {
+    deadline.remaining()?;
+    let tx = conn.transaction().map_err(broker::members::db_err)?;
+    let result = read(&tx)?;
+    tx.commit().map_err(broker::members::db_err)?;
+    Ok(result)
+}
 
-    if let Owed::Resume(exec) = &owed {
-        if state == PaneState::Working {
-            // The harness answered the command's output with a turn of its
-            // own, so the exec closes without a keystroke.
-            broker::stamp_exec_resumed(conn, exec.exec_id, &format_utc(now))?;
-            return Ok(PaneOutcome::Held(HoldReason::Working));
+type PreviewSnapshot = (
+    broker::records::MemberRecord,
+    broker::records::MessageRecord,
+);
+
+fn preview_snapshot(
+    conn: &mut Connection,
+    member_id: i64,
+    expected_fleet: Option<i64>,
+    deadline: Deadline,
+) -> Result<Option<PreviewSnapshot>, CafleetError> {
+    read_snapshot(conn, deadline, |conn| {
+        let Some(fleet_id) = broker::active_member_fleet(conn, member_id)? else {
+            return Ok(None);
+        };
+        if expected_fleet.is_some_and(|expected| expected != fleet_id) {
+            return Ok(None);
         }
-        if now - parse_lenient(finished_at(exec))? < Duration::seconds(EXEC_RESUME_GRACE_SECONDS) {
-            return Ok(PaneOutcome::Held(HoldReason::ResumeGrace));
+        let fleet = broker::fleets::fetch_fleet(conn, fleet_id)?
+            .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;
+        if fleet.director_member_id == Some(member_id) {
+            return Ok(None);
         }
-    }
+        let Some(member) = broker::get_member(conn, member_id, fleet_id)? else {
+            return Ok(None);
+        };
+        let Some(message) = broker::oldest_pending_preview(conn, member_id)? else {
+            return Ok(None);
+        };
+        Ok(Some((member, message)))
+    })
+}
 
-    let age = hold_age(conn, &target, &owed, now)?;
-    let forced = match gate(state, age, settings.delivery_hold_timeout) {
-        Gate::Ordinary => false,
-        Gate::Forced => true,
-        Gate::Hold(reason) => return Ok(PaneOutcome::Held(reason)),
+enum PreviewClaim {
+    Ready(broker::records::MessageRecord),
+    Skipped(AttemptOutcome),
+}
+
+fn claim_current_preview(
+    conn: &mut Connection,
+    member: &broker::records::MemberRecord,
+    message_id: i64,
+    deadline: Deadline,
+) -> Result<PreviewClaim, CafleetError> {
+    deadline.remaining()?;
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(broker::members::db_err)?;
+    let Some(current) = broker::get_member(&tx, member.member_id, member.fleet_id)? else {
+        return Ok(PreviewClaim::Skipped(AttemptOutcome::NoPending));
     };
+    if current.placement != member.placement {
+        return Ok(PreviewClaim::Skipped(AttemptOutcome::Held));
+    }
+    let Some(message) = broker::messaging::claim_preview(&tx, message_id, member.member_id)? else {
+        return Ok(PreviewClaim::Skipped(AttemptOutcome::Settled {
+            message_id,
+        }));
+    };
+    if let Some(earlier) = broker::oldest_pending_preview(&tx, member.member_id)?
+        && (&earlier.created_at, earlier.message_id) < (&message.created_at, message.message_id)
+    {
+        return Ok(PreviewClaim::Skipped(AttemptOutcome::Held));
+    }
+    deadline.remaining()?;
+    tx.commit().map_err(broker::members::db_err)?;
+    Ok(PreviewClaim::Ready(message))
+}
 
-    let stamp = format_utc(now);
-    // A refused claim means another cafleet process is typing into the pane;
-    // a refused stamp means the item stopped being owed after it was selected.
-    if !broker::claim_pane(conn, member_id, now)? || !owed.stamp(conn, &stamp)? {
-        return Ok(PaneOutcome::Held(HoldReason::Busy));
-    }
-    if forced {
-        broker::stamp_forced(conn, member_id, &stamp)?;
-    }
-    let note = forced.then(|| forced_note(state));
-    match owed.send(io, settings, &target.pane_id, note) {
-        Ok(()) => Ok(PaneOutcome::Fired {
-            item: owed.item(),
-            forced,
-        }),
+fn attempt_preview_scoped(
+    conn: &mut Connection,
+    settings: &Settings,
+    member_id: i64,
+    expected_fleet: Option<i64>,
+    deadline: Deadline,
+    resolve: impl FnOnce() -> Result<AnyMultiplexer, MultiplexerError>,
+) -> Result<AttemptOutcome, CafleetError> {
+    let Some((member, initial)) = preview_snapshot(conn, member_id, expected_fleet, deadline)?
+    else {
+        return Ok(AttemptOutcome::NoPending);
+    };
+    let fleet_id = member.fleet_id;
+    let Some(placement) = member
+        .placement
+        .as_ref()
+        .filter(|p| p.mux_pane_id.is_some())
+    else {
+        return Ok(AttemptOutcome::Held);
+    };
+    let failed = |message_id, delivery, error| {
+        AttemptOutcome::Failed(NotificationError {
+            member_id,
+            message_id,
+            delivery,
+            error,
+        })
+    };
+    let _guard = match PaneLock::try_acquire(&settings.database_url, placement) {
+        Ok(Some(guard)) => guard,
+        Ok(None) => return Ok(AttemptOutcome::Held),
         Err(error) => {
-            owed.clear_stamp(conn)?;
-            Ok(PaneOutcome::Held(HoldReason::KeystrokeFailed(error)))
+            return Ok(failed(
+                initial.message_id,
+                Delivery::NotSent,
+                format!("member {member_id} pane input: {}", error.message()),
+            ));
         }
+    };
+    let Some((current, message)) = preview_snapshot(conn, member_id, Some(fleet_id), deadline)?
+    else {
+        return Ok(AttemptOutcome::NoPending);
+    };
+    if current.placement != member.placement {
+        return Ok(AttemptOutcome::Held);
+    }
+    let mux = match resolve().and_then(|mux| {
+        mux.ensure_available()?;
+        Ok(mux.bounded(deadline))
+    }) {
+        Ok(mux) => mux,
+        Err(error) => {
+            return Ok(failed(
+                message.message_id,
+                Delivery::NotSent,
+                error.to_string(),
+            ));
+        }
+    };
+    let pane = placement
+        .mux_pane_id
+        .as_deref()
+        .expect("concrete preview placement");
+    let content = match mux.capture_pane(pane, DELIVERY_CAPTURE_LINES) {
+        Ok(content) => content,
+        Err(error) => {
+            return Ok(failed(
+                message.message_id,
+                Delivery::NotSent,
+                error.to_string(),
+            ));
+        }
+    };
+    let state = classify(&placement.coding_agent, &content);
+    if let Some(reason) = state.hold_reason() {
+        return Ok(if matches!(state, PaneState::Draft | PaneState::Unknown) {
+            failed(
+                message.message_id,
+                Delivery::NotSent,
+                format!(
+                    "member {member_id} is {reason}; preview {} was not sent.",
+                    message.message_id
+                ),
+            )
+        } else {
+            AttemptOutcome::Held
+        });
+    }
+    let message = match claim_current_preview(conn, &member, message.message_id, deadline)? {
+        PreviewClaim::Ready(message) => message,
+        PreviewClaim::Skipped(outcome) => return Ok(outcome),
+    };
+    let text =
+        truncate_text(Some(&message.text), settings.max_text_len).expect("present message text");
+    let uncertain = |cause| {
+        failed(
+            message.message_id,
+            Delivery::Uncertain,
+            format!(
+                "preview {} delivery to member {member_id} is uncertain: {cause}. Inspect the pane before retrying.",
+                message.message_id
+            ),
+        )
+    };
+    if let Err(error) = mux.send_inline_preview(
+        pane,
+        message.message_id,
+        message.from_member_id,
+        &message.created_at,
+        &text,
+    ) {
+        return Ok(if error.submission_started() {
+            uncertain(error.to_string())
+        } else {
+            match retry_database_completion(conn, deadline, |conn| {
+                broker::messaging::release_preview(conn, message.message_id)
+            }) {
+                Ok(()) => failed(message.message_id, Delivery::NotSent, error.to_string()),
+                Err(cleanup) => failed(
+                    message.message_id,
+                    Delivery::NotSent,
+                    format!(
+                        "{error}; releasing the input claim failed: {cleanup}. This preview remains suspended; later messages remain eligible."
+                    ),
+                ),
+            }
+        });
+    }
+    match complete_database_budget(conn, deadline, |conn| {
+        broker::messaging::stamp_notified_validated(
+            conn,
+            message.message_id,
+            &format_utc(crate::time::now_utc()),
+        )
+    }) {
+        Ok(true) => Ok(AttemptOutcome::Sent {
+            message_id: message.message_id,
+        }),
+        Ok(false) => Ok(AttemptOutcome::Settled {
+            message_id: message.message_id,
+        }),
+        Err(error) => Ok(uncertain(error.message().into_owned())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::broker::test_support as common;
+    use crate::multiplexer::{CommandRunner, RunError, TmuxMultiplexer};
+    use std::{
+        collections::HashMap,
+        rc::Rc,
+        time::{Duration, Instant},
+    };
+
+    struct FinishingRunner {
+        deadline: Deadline,
+        submitted: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    #[test]
+    fn obsolete_claims_are_settled_without_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        let (fleet, director) = common::create_fleet(&mut conn, "settled");
+        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+        let member = broker::get_member(&conn, worker, fleet).unwrap().unwrap();
+        for state in ["acked", "notified", "claimed"] {
+            let message =
+                broker::send_message(&mut conn, director, &worker.to_string(), state).unwrap();
+            match state {
+                "acked" => {
+                    broker::ack_message(&mut conn, message.message_id).unwrap();
+                }
+                "notified" => {
+                    conn.execute(
+                        "UPDATE messages SET notified_at=created_at WHERE message_id=?1",
+                        [message.message_id],
+                    )
+                    .unwrap();
+                }
+                "claimed" => {
+                    assert!(
+                        broker::messaging::claim_preview(&conn, message.message_id, worker)
+                            .unwrap()
+                            .is_some()
+                    );
+                }
+                _ => unreachable!(),
+            }
+            assert!(matches!(
+                claim_current_preview(&mut conn, &member, message.message_id, Deadline::new()).unwrap(),
+                PreviewClaim::Skipped(AttemptOutcome::Settled { message_id }) if message_id == message.message_id
+            ));
+        }
+    }
+
+    #[test]
+    fn an_earlier_candidate_rolls_back_the_tentative_claim() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        let (fleet, director) = common::create_fleet(&mut conn, "ordering");
+        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+        let member = broker::get_member(&conn, worker, fleet).unwrap().unwrap();
+        let selected =
+            broker::send_message(&mut conn, director, &worker.to_string(), "selected").unwrap();
+        let earlier =
+            broker::send_message(&mut conn, director, &worker.to_string(), "earlier").unwrap();
+        conn.execute(
+            "UPDATE messages SET created_at='1900' WHERE message_id=?1",
+            [earlier.message_id],
+        )
+        .unwrap();
+        assert!(matches!(
+            claim_current_preview(&mut conn, &member, selected.message_id, Deadline::new())
+                .unwrap(),
+            PreviewClaim::Skipped(AttemptOutcome::Held)
+        ));
+        assert!(
+            !conn
+                .query_row(
+                    "SELECT preview_started_at IS NOT NULL FROM messages WHERE message_id=?1",
+                    [selected.message_id],
+                    |row| row.get::<_, bool>(0)
+                )
+                .unwrap()
+        );
+        assert_eq!(
+            broker::oldest_pending_preview(&conn, worker)
+                .unwrap()
+                .unwrap()
+                .message_id,
+            earlier.message_id
+        );
+    }
+
+    #[test]
+    fn a_director_without_a_placement_has_no_preview_attempt() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        let (fleet, director) = common::create_fleet(&mut conn, "director");
+        conn.execute(
+            "DELETE FROM member_placements WHERE member_id=?1",
+            [director],
+        )
+        .unwrap();
+        let settings = Settings::from_lookup(|_| None).unwrap();
+        let outcome = attempt_preview(
+            &mut conn,
+            &settings,
+            director,
+            Some(fleet),
+            Deadline::new(),
+            || panic!("Director needs no multiplexer"),
+        );
+        assert_eq!(outcome.unwrap(), AttemptOutcome::NoPending);
+    }
+
+    impl CommandRunner for FinishingRunner {
+        fn binary_exists(&self, _: &str) -> bool {
+            true
+        }
+        fn run(&self, argv: &[String], _: Option<u64>) -> Result<String, RunError> {
+            if argv[1] == "capture-pane" {
+                return Ok("Ready.\n────────────\n❯ \x1b[0m\n────────────\n? for shortcuts".into());
+            }
+            assert_eq!(argv[1], "send-keys");
+            if argv.last().unwrap() == "Enter" {
+                std::thread::sleep(self.deadline.remaining().unwrap() + Duration::from_millis(5));
+                self.submitted
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            Ok(String::new())
+        }
+        fn sleep(&self, _: f64) {}
+    }
+
+    #[test]
+    fn a_completed_submission_is_stamped_even_when_its_budget_has_just_expired() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        let (fleet, director) = common::create_fleet(&mut conn, "stamp");
+        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+        let message =
+            broker::send_message(&mut conn, director, &worker.to_string(), "assignment").unwrap();
+        let settings = Settings::from_lookup(|name| {
+            (name == "CAFLEET_DATABASE_URL").then(|| format!("sqlite:///{}", conn.path().unwrap()))
+        })
+        .unwrap();
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+        };
+        let scopes = Arc::new(AtomicUsize::new(0));
+        let observed = scopes.clone();
+        let submitted = Arc::new(AtomicBool::new(false));
+        let stamped = submitted.clone();
+        conn.authorizer(Some(move |context: AuthContext<'_>| {
+            if stamped.load(Ordering::SeqCst)
+                && matches!(
+                    context.action,
+                    AuthAction::Read {
+                        table_name: "sqlite_master" | "sqlite_schema" | "refinery_schema_history",
+                        ..
+                    }
+                )
+            {
+                return Authorization::Deny;
+            }
+            if matches!(
+                context.action,
+                AuthAction::Pragma {
+                    pragma_name: "busy_timeout",
+                    ..
+                }
+            ) {
+                observed.fetch_add(1, Ordering::SeqCst);
+            }
+            Authorization::Allow
+        }))
+        .unwrap();
+        let deadline = Deadline::until(Instant::now() + Duration::from_millis(2200));
+        let mux = AnyMultiplexer::Tmux(TmuxMultiplexer::new(
+            Rc::new(FinishingRunner {
+                deadline,
+                submitted,
+            }),
+            HashMap::from([("TMUX".into(), "test".into())]),
+        ));
+        assert_eq!(
+            attempt_preview(&mut conn, &settings, worker, Some(fleet), deadline, || Ok(
+                mux
+            ))
+            .unwrap(),
+            AttemptOutcome::Sent {
+                message_id: message.message_id
+            }
+        );
+        assert!(deadline.remaining().is_err());
+        assert_eq!(
+            scopes.load(Ordering::SeqCst),
+            2,
+            "the input attempt and mandatory finalization own separate database budgets"
+        );
+        assert!(
+            broker::oldest_pending_preview(&conn, worker)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn preview_reads_share_one_snapshot_when_another_connection_changes_placement_and_text() {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        conn.execute_batch("PRAGMA journal_mode=WAL").unwrap();
+        let (fleet, director) = common::create_fleet(&mut conn, "snapshot");
+        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+        let message =
+            broker::send_message(&mut conn, director, &worker.to_string(), "original").unwrap();
+        let path = conn.path().unwrap().to_owned();
+        let mut changed = false;
+        conn.authorizer(Some(move |context: AuthContext<'_>| {
+            if !changed
+                && matches!(
+                    context.action,
+                    AuthAction::Read {
+                        table_name: "messages",
+                        ..
+                    }
+                )
+            {
+                changed = true;
+                let other = Connection::open(&path).unwrap();
+                other
+                    .execute(
+                        "UPDATE member_placements SET mux_pane_id='%9' WHERE member_id=?1",
+                        [worker],
+                    )
+                    .unwrap();
+                other
+                    .execute(
+                        "UPDATE messages SET text='changed' WHERE message_id=?1",
+                        [message.message_id],
+                    )
+                    .unwrap();
+            }
+            Authorization::Allow
+        }))
+        .unwrap();
+        let (member, message) = preview_snapshot(&mut conn, worker, Some(fleet), Deadline::new())
+            .unwrap()
+            .unwrap();
+        assert_eq!(member.placement.unwrap().mux_pane_id.as_deref(), Some("%2"));
+        assert_eq!(message.text, "original");
+        let current: String = conn
+            .query_row("SELECT text FROM messages", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(current, "changed");
     }
 }

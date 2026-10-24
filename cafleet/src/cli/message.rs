@@ -8,13 +8,13 @@ use rusqlite::Connection;
 use clap::{Args, Subcommand};
 use serde_json::Value;
 
-use super::helpers::{resolve_body, resolve_mux};
+use super::helpers::resolve_body;
 use crate::broker;
 use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::output::{format_indexed_list, format_message, truncate_message_text};
 use crate::presentation;
-use crate::runtime::{deliver_preview, ensure_loop_for_owed_work};
+use crate::receive::{AttemptOutcome, BrokerReceiver, Delivery, SystemClock};
 
 #[derive(Args)]
 #[group(required = true, multiple = false)]
@@ -43,22 +43,23 @@ pub enum MessageCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Broadcast a message to all fleet members.
-    Broadcast {
-        /// Sender's member ID.
-        #[arg(long = "from-member-id")]
-        from_member_id: i64,
-        #[command(flatten)]
-        body: BodyArgs,
-        /// Output in JSON format.
-        #[arg(long)]
-        json: bool,
-    },
     /// Fetch un-acked incoming messages.
     Poll {
         /// Recipient whose inbox is fetched.
         #[arg(value_name = "MEMBER_ID")]
         member_id: i64,
+        /// Output in JSON format.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Receive incoming messages and retry pending ordinary-member previews.
+    Wait {
+        /// Recipient whose inbox is received.
+        #[arg(value_name = "MEMBER_ID")]
+        member_id: i64,
+        /// Maximum seconds; use the default for a host-native background task.
+        #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u64).range(1..=1800))]
+        timeout: u64,
         /// Output in JSON format.
         #[arg(long)]
         json: bool,
@@ -99,12 +100,6 @@ fn emit_result(
     }
 }
 
-/// The fleet of a sender the broker has just validated as active.
-fn sender_fleet(conn: &Connection, from_member_id: i64) -> Result<i64, CafleetError> {
-    Ok(broker::active_member_fleet(conn, from_member_id)?
-        .expect("the broker persisted a message from this active sender"))
-}
-
 pub fn run(
     conn: &mut Connection,
     settings: &Settings,
@@ -118,67 +113,42 @@ pub fn run(
             json,
         } => {
             let text = resolve_body(body.text.as_deref(), body.file.as_deref(), "--file")?;
+            let deadline = crate::input::Deadline::new();
 
-            let message =
-                broker::send_message(conn, from_member_id, &to_member_id.to_string(), &text)?;
+            let message = crate::input::with_database_budget(conn, deadline, |conn| {
+                broker::messaging::send_message_validated(
+                    conn,
+                    from_member_id,
+                    &to_member_id.to_string(),
+                    &text,
+                )
+            })?;
             let message_id = message.message_id;
-            let mux = resolve_mux(settings).ok();
             let notification_sent =
-                deliver_preview(conn, settings, mux.as_ref(), to_member_id, message_id)?;
-            ensure_loop_for_owed_work(conn, settings, sender_fleet(conn, from_member_id)?)
-                .map_err(|error| {
-                    CafleetError::App(format!(
-                        "Message {message_id} was persisted, but {}. \
-                         Do not resend this message; run 'cafleet doctor'.",
-                        error.message()
-                    ))
-                })?;
+                match crate::runtime::attempt_preview(conn, settings, to_member_id, None, deadline)
+                {
+                    Ok(AttemptOutcome::Sent {
+                        message_id: notified,
+                    }) => notified == message_id,
+                    Ok(
+                        AttemptOutcome::Held
+                        | AttemptOutcome::NoPending
+                        | AttemptOutcome::Settled { .. },
+                    ) => false,
+                    Ok(AttemptOutcome::Failed(error)) => {
+                        eprintln!("Message {message_id} was persisted. {}", error.error);
+                        false
+                    }
+                    Err(error) => {
+                        eprintln!("Message {message_id} was persisted. {}", error.message());
+                        false
+                    }
+                };
             emit_result(
                 settings,
                 presentation::send_outcome(&message, notification_sent),
                 json,
                 |result| format!("Message sent.\n{}", format_message(result)),
-            );
-            Ok(())
-        }
-        MessageCommand::Broadcast {
-            from_member_id,
-            body,
-            json,
-        } => {
-            let text = resolve_body(body.text.as_deref(), body.file.as_deref(), "--file")?;
-
-            let rows = broker::broadcast_message(conn, from_member_id, &text)?;
-            let summary_id = rows.summary.message_id;
-            let recipients = rows.deliveries.len();
-            let mux = resolve_mux(settings).ok();
-            let mut delivered = 0;
-            for (member_id, message_id) in rows.deliveries {
-                if deliver_preview(conn, settings, mux.as_ref(), member_id, message_id)? {
-                    delivered += 1;
-                }
-            }
-            ensure_loop_for_owed_work(conn, settings, sender_fleet(conn, from_member_id)?)
-                .map_err(|error| {
-                    CafleetError::App(format!(
-                        "Broadcast {summary_id} was persisted, but {}. \
-                         Do not resend it; run 'cafleet doctor'.",
-                        error.message()
-                    ))
-                })?;
-            emit_result(
-                settings,
-                Value::Array(vec![presentation::broadcast_outcome(
-                    &rows.summary,
-                    recipients,
-                    delivered,
-                )]),
-                json,
-                |_| {
-                    format!(
-                        "broadcast id={summary_id} recipients={recipients} delivered={delivered}"
-                    )
-                },
             );
             Ok(())
         }
@@ -193,8 +163,58 @@ pub fn run(
             });
             Ok(())
         }
+        MessageCommand::Wait {
+            member_id,
+            timeout,
+            json,
+        } => {
+            let mut receiver = BrokerReceiver::new(conn, settings, member_id);
+            let outcome = crate::receive::wait(
+                &SystemClock,
+                &mut receiver,
+                std::time::Duration::from_secs(timeout),
+            )?;
+            let messages: Vec<_> = outcome.messages.iter().map(presentation::message).collect();
+            let errors: Vec<_> = outcome.notification_errors.iter().map(|error| serde_json::json!({
+                "member_id": error.member_id,
+                "message_id": error.message_id,
+                "delivery": match error.delivery { Delivery::NotSent => "not_sent", Delivery::Uncertain => "uncertain" },
+                "error": error.error,
+            })).collect();
+            if !json {
+                for error in &outcome.notification_errors {
+                    eprintln!("{}", error.error);
+                }
+            }
+            emit_result(
+                settings,
+                serde_json::json!({
+                    "member_id": member_id,
+                    "outcome": if messages.is_empty() { "timeout" } else { "messages" },
+                    "messages": messages,
+                    "notification_errors": errors,
+                }),
+                json,
+                |result| {
+                    let items = result["messages"]
+                        .as_array()
+                        .expect("wait returns a message list");
+                    if items.is_empty() {
+                        format!("Timed out waiting for member {member_id}.")
+                    } else {
+                        format!(
+                            "Messages available for member {member_id}.\n{}",
+                            format_indexed_list(items, format_message, "No messages found.")
+                        )
+                    }
+                },
+            );
+            Ok(())
+        }
         MessageCommand::Ack { message_id, json } => {
-            let result = presentation::message_envelope(&broker::ack_message(conn, message_id)?);
+            let result = presentation::message_envelope(&broker::messaging::ack_message_validated(
+                conn, message_id,
+            )?);
             emit_result(settings, result, json, |result| {
                 format!("Message acknowledged.\n{}", format_message(result))
             });

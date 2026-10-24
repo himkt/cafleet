@@ -36,11 +36,13 @@ pub fn run(
         if slot.is_none() {
             slot = Some((hooks.connect)(&settings.database_url)?);
         }
-        assets_half(
-            slot.as_mut().expect("assets connection opened"),
-            &args.coding_agent,
-            hooks.asset_env,
-        )
+        let conn = slot.as_mut().expect("assets connection opened");
+        setup_write_guard(&crate::diagnosis::classify_selected_schema(
+            conn,
+            crate::db::head_version(),
+            &settings.database_url,
+        ))?;
+        assets_half(conn, &args.coding_agent, hooks.asset_env)
     })();
     if let Err(error) = assets_result {
         println!("assets half failed: {}", error.message());
@@ -87,14 +89,16 @@ fn db_half_in_slot(
     *slot = Some((hooks.connect)(&settings.database_url)?);
     let conn = slot.as_mut().expect("database connection opened");
     let head = crate::db::head_version();
-    let schema = crate::diagnosis::classify_schema(conn, head);
+    let schema = crate::diagnosis::classify_selected_schema(conn, head, &settings.database_url);
     let recorded = match schema {
         SchemaState::Unreachable { cause } => return Err(cause),
-        SchemaState::Unversioned => return Err(CafleetError::App(
-            "DB has existing tables but no refinery_schema_history. Refusing to migrate an unversioned database.".into()
-        )),
+        SchemaState::Incompatible { path } => {
+            return Err(crate::diagnosis::incompatible_format(&path));
+        }
         SchemaState::Missing => None,
-        SchemaState::Behind { recorded, .. } | SchemaState::Ahead { recorded, .. } => Some(recorded),
+        SchemaState::Behind { recorded, .. } | SchemaState::Ahead { recorded, .. } => {
+            Some(recorded)
+        }
         SchemaState::Head { version } => Some(version),
     };
     if let Some(version) = recorded {
@@ -120,6 +124,20 @@ fn db_half_in_slot(
         Some(version) => println!("Upgraded from {version} to {head}."),
     }
     Ok(())
+}
+
+fn setup_write_guard(schema: &SchemaState) -> Result<(), CafleetError> {
+    match schema {
+        SchemaState::Ahead { recorded, .. } => Err(CafleetError::App(format!(
+            "DB schema is at version {recorded} which is unknown to this version of cafleet. Refusing to downgrade automatically."
+        ))),
+        SchemaState::Incompatible { path } => Err(crate::diagnosis::incompatible_format(path)),
+        SchemaState::Unreachable { cause } => Err(cause.clone()),
+        SchemaState::Missing => Err(CafleetError::App(
+            "the database schema is missing or outdated; run 'cafleet setup' first".into(),
+        )),
+        SchemaState::Head { .. } | SchemaState::Behind { .. } => Ok(()),
+    }
 }
 
 /// The assets half (SPEC §6.3): the explicit selector installs exactly the

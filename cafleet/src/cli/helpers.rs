@@ -11,23 +11,7 @@ use crate::runtime::system::read_stdin;
 
 /// Preserve the CLI guard's wording while sharing schema classification.
 pub(crate) fn schema_guard(schema: &crate::diagnosis::SchemaState) -> Result<(), CafleetError> {
-    use crate::diagnosis::SchemaState;
-    match schema {
-        SchemaState::Head { .. } => Ok(()),
-        SchemaState::Behind { recorded, head } => Err(CafleetError::App(format!(
-            "database schema is outdated (schema {recorded}, head {head}); run 'cafleet setup'"
-        ))),
-        SchemaState::Ahead { recorded, head } => Err(CafleetError::App(format!(
-            "database schema {recorded} is newer than this cafleet (head {head}); upgrade cafleet"
-        ))),
-        SchemaState::Unversioned => Err(CafleetError::App(
-            "database has tables but no schema history — not a cafleet database?".into(),
-        )),
-        SchemaState::Missing => Err(CafleetError::App(
-            "no cafleet database; run 'cafleet setup'".into(),
-        )),
-        SchemaState::Unreachable { cause } => Err(cause.clone()),
-    }
+    schema.require_current()
 }
 
 pub(crate) fn stale_assets_guard(
@@ -85,7 +69,7 @@ fn is_blank(text: &str) -> bool {
 /// input*): `-` = stdin, raw-bytes UTF-8 decode with no newline translation,
 /// uniform empty-body rejection. Exactly one source is present — clap's
 /// required argument group enforces it at parse time. Error strings name the
-/// file flag the caller exposes (`--file`, `--monitor-file`) via `flag`.
+/// file flag the caller exposes via `flag`.
 pub fn resolve_body(
     inline: Option<&str>,
     file: Option<&str>,
@@ -102,16 +86,22 @@ pub fn resolve_body(
     })
 }
 
-/// The `member exec` command body: the same positional / `--file` reader,
-/// with one empty-body rejection for either source. The body is returned
-/// verbatim.
 pub fn resolve_command_body(
     inline: Option<&str>,
     file: Option<&str>,
 ) -> Result<String, CafleetError> {
-    let body = read_body(inline, file, "--file")?;
-    if is_blank(&body) {
-        return Err(CafleetError::Usage("command may not be empty.".to_string()));
+    let mut body = read_body(inline, file, "--file")?;
+    if file.is_some() {
+        if body.ends_with("\r\n") {
+            body.truncate(body.len() - 2);
+        } else if body.ends_with('\n') {
+            body.pop();
+        }
+    }
+    if !crate::input::valid_input(&body) {
+        return Err(CafleetError::Usage(
+            "command must be one non-empty line without control characters.".into(),
+        ));
     }
     Ok(body)
 }

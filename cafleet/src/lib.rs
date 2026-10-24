@@ -11,13 +11,13 @@ pub(crate) mod diagnosis;
 pub mod embedded;
 pub mod error;
 pub(crate) mod member_permissions;
-pub mod monitor;
 pub mod multiplexer;
-pub(crate) mod notices;
 pub mod output;
 pub mod pane_state;
 pub mod presentation;
+pub(crate) mod receive;
 pub mod runtime;
 pub mod spawn_prompt;
 pub mod time;
-pub mod webui;
+
+pub mod input;

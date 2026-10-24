@@ -8,7 +8,7 @@ every hit and may classify a hit no pattern named.
 ## Scope: whole tracked tree minus the exempt set
 
 Sweep **tracked files only** — a multi-pass `git grep` over the tracked tree
-naturally excludes untracked generated output such as `cafleet/webui-dist`. The
+naturally excludes untracked generated output. The
 exempt set is canonical in the umbrella [`SKILL.md`](../../SKILL.md) § *Scope and
 exempt set*; exclude it from every pass:
 
@@ -16,11 +16,7 @@ exempt set*; exclude it from every pass:
 - `researches/` — gitignored analysis (not tracked; already excluded).
 - Lock files (`uv.lock`, `pnpm-lock.yaml`, `package-lock.json`, …).
 
-Everything else tracked is in scope, per the umbrella's scope statement: any
-tracked file outside the exempt set is swept — `docs/`, `README.md`, `SPEC.md`,
-`skills/`, `.claude/`, `cafleet/src/`, `cafleet/tests/`, `admin/src/`, and root
-files like `CLAUDE.md`, `pyproject.toml`, `mise.toml`, `package.json` are
-illustrative, not an exhaustive allow-list.
+Sweep every tracked file outside the umbrella’s exempt set. The tracked tree selects membership; include any newly tracked surface automatically.
 
 The `:(exclude)` pathspec below is the **mechanical embodiment** of the
 umbrella's canonical exempt-set list — one authority, no second list to drift:

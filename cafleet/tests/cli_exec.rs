@@ -1,347 +1,418 @@
-//! `cafleet member exec` and `cafleet member exec-run`, driven through the
-//! binary against the tmux shim.
-
 mod common;
 
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 use std::process::Output;
 
-use cafleet::time::format_utc;
-use chrono::{Duration, Utc};
-use common::{Cli, LoopChild, code, stderr, stdout, write_file};
+use common::{Cli, code, stderr, stdout, write_executable, write_file};
 
-const FLEET: i64 = 1;
-const DIRECTOR: i64 = 1;
-const WORKER: i64 = 3;
-const WORKER_PANE: &str = "%7";
-
-const WORKING_CAPTURE: &str = "✻ Cogitating… (12s · esc to interrupt)\n\n> \n";
-
-/// Fleet 1 with the Director on `%0` and one worker on `%7`. Dropping the
-/// fixture terminates the loop a `member exec` started detached.
-struct ExecFleet {
-    cli: Cli,
+#[derive(Clone, Copy, Debug)]
+enum CommandSource {
+    File,
+    Stdin,
 }
 
-impl ExecFleet {
-    fn new() -> Self {
-        let mut cli = Cli::new();
-        // `exec-run` resolves `sh` through PATH; the shim directory stays first.
-        cli.set_env("PATH", &format!("{}:/bin:/usr/bin", cli.shim_dir.display()));
-        assert_eq!(cli.seeded_fleet(), (FLEET, DIRECTOR));
-        assert_eq!(cli.seed_member(FLEET, "worker"), WORKER);
-        ExecFleet { cli }
-    }
-
-    fn exec(&self, args: &[&str]) -> Output {
-        let worker = WORKER.to_string();
-        let mut argv = vec!["member", "exec", worker.as_str()];
-        argv.extend_from_slice(args);
-        self.cli.run(&argv)
-    }
-
-    fn exec_rows(&self) -> i64 {
-        self.cli
-            .sqlite()
-            .query_row("SELECT COUNT(*) FROM member_execs", [], |row| row.get(0))
-            .unwrap()
-    }
-
-    fn stored_command(&self, exec_id: i64) -> String {
-        self.cli
-            .sqlite()
-            .query_row(
-                "SELECT command FROM member_execs WHERE exec_id=?1",
-                [exec_id],
-                |row| row.get(0),
-            )
-            .unwrap()
-    }
-
-    fn dispatched(&self, exec_id: i64) -> bool {
-        self.cli
-            .sqlite()
-            .query_row(
-                "SELECT dispatched_at IS NOT NULL FROM member_execs WHERE exec_id=?1",
-                [exec_id],
-                |row| row.get(0),
-            )
-            .unwrap()
-    }
-
-    fn dispatch_keystrokes(&self, exec_id: i64) -> usize {
-        self.cli
-            .shim_calls()
-            .iter()
-            .filter(|line| {
-                **line
-                    == format!("send-keys -t {WORKER_PANE} -l ! cafleet member exec-run {exec_id}")
-            })
-            .count()
-    }
-
-    /// Insert a dispatched exec for the worker, as `member exec` leaves it once
-    /// its keystroke landed.
-    fn seed_dispatched_exec(&self, command: &str) -> i64 {
-        let conn = self.cli.sqlite();
-        let now = format_utc(Utc::now());
-        conn.execute(
-            "INSERT INTO member_execs (member_id, command, created_at, dispatched_at) \
-             VALUES (?1, ?2, ?3, ?3)",
-            rusqlite::params![WORKER, command, now],
-        )
-        .unwrap();
-        conn.last_insert_rowid()
+fn from_source(cli: &Cli, worker: i64, source: CommandSource, body: &[u8]) -> Output {
+    let id = worker.to_string();
+    match source {
+        CommandSource::File => {
+            let file = write_file(&cli.home.path().join("native command.txt"), body);
+            cli.run(&["member", "exec", &id, "--file", &file, "--json"])
+        }
+        CommandSource::Stdin => {
+            cli.run_with_stdin_bytes(&["member", "exec", &id, "--file", "-", "--json"], body)
+        }
     }
 }
 
-impl Drop for ExecFleet {
-    fn drop(&mut self) {
-        if let Some(pid) = self.cli.monitor_pid(FLEET) {
-            let pid = nix::unistd::Pid::from_raw(i32::try_from(pid).expect("PID fits i32"));
-            let _ = nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGTERM);
+fn files_under(root: &Path) -> BTreeSet<PathBuf> {
+    let mut files = BTreeSet::new();
+    for entry in std::fs::read_dir(root).unwrap() {
+        let entry = entry.unwrap();
+        if entry.file_type().unwrap().is_dir() {
+            files.extend(files_under(&entry.path()));
+        } else {
+            files.insert(entry.path());
+        }
+    }
+    files
+}
+
+fn fixture() -> (Cli, i64, i64) {
+    let cli = Cli::new();
+    let (fleet, director) = cli.seeded_fleet();
+    let worker = cli.seed_member(fleet, "worker");
+    cli.set_pane_capture(
+        &format!("%{}", worker + 4),
+        "Ready.\n────────────\n❯ \x1b[0m\n────────────\n? for shortcuts",
+    );
+    (cli, director, worker)
+}
+
+#[test]
+fn native_exec_requires_exactly_one_source_and_one_nonempty_line() {
+    let (cli, _, worker) = fixture();
+    let file = write_file(&cli.home.path().join("command.txt"), b"printf file");
+    for arguments in [
+        vec![],
+        vec!["printf inline", "--file", file.as_str()],
+        vec![""],
+        vec!["  "],
+        vec!["a\nb"],
+        vec!["a\rb"],
+        vec!["a\tb"],
+        vec!["a\u{1b}b"],
+        vec!["a\u{7f}b"],
+    ] {
+        let id = worker.to_string();
+        let mut args = vec!["member", "exec", id.as_str()];
+        args.extend(arguments);
+        let output = cli.run(&args);
+        assert_eq!(code(&output), 2, "{}", stderr(&output));
+    }
+    assert!(cli.shim_calls().is_empty());
+}
+
+#[test]
+fn native_exec_dispatches_the_exact_command_and_reduced_metadata_once() {
+    let (cli, _, worker) = fixture();
+    let command = "  printf '%s' 'literal $HOME; !'  ";
+    let output = cli.run(&["member", "exec", &worker.to_string(), command, "--json"]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let payload: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(
+        payload
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        [
+            "member_id",
+            "pane_id",
+            "coding_agent",
+            "command",
+            "dispatched"
+        ]
+    );
+    let pane = format!("%{}", worker + 4);
+    assert_eq!(
+        payload,
+        serde_json::json!({"member_id":worker,"pane_id":pane,
+        "coding_agent":"claude","command":command,"dispatched":true})
+    );
+    let writes: Vec<_> = cli
+        .shim_calls()
+        .into_iter()
+        .filter(|line| line.starts_with("send-keys"))
+        .collect();
+    assert_eq!(
+        writes,
+        [
+            format!("send-keys -t {pane} -l -- ! {command}"),
+            format!("send-keys -t {pane} Enter")
+        ]
+    );
+}
+
+#[test]
+fn native_exec_file_and_stdin_remove_at_most_one_terminal_line_ending() {
+    let command = "  printf '%s' 'café 界 $HOME; !'  ";
+    for source in [CommandSource::File, CommandSource::Stdin] {
+        for ending in ["", "\n", "\r\n"] {
+            let (cli, _, worker) = fixture();
+            let body = format!("{command}{ending}");
+            let output = from_source(&cli, worker, source, body.as_bytes());
+            assert_eq!(code(&output), 0, "{source:?}: {}", stderr(&output));
+            let payload: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+            assert_eq!(payload["command"], command);
+            let pane = format!("%{}", worker + 4);
+            let writes: Vec<_> = cli
+                .shim_calls()
+                .into_iter()
+                .filter(|line| line.starts_with("send-keys"))
+                .collect();
+            assert_eq!(
+                writes,
+                [
+                    format!("send-keys -t {pane} -l -- ! {command}"),
+                    format!("send-keys -t {pane} Enter"),
+                ]
+            );
         }
     }
 }
 
 #[test]
-fn member_exec_takes_exactly_one_non_empty_command_source() {
-    let fleet = ExecFleet::new();
-    let script = write_file(&fleet.cli.home.path().join("script.sh"), b"echo from file");
-    let empty = write_file(&fleet.cli.home.path().join("empty.sh"), b"");
-
-    let no_source: &[&str] = &[];
-    let both_sources: &[&str] = &["echo inline", "--file", script.as_str()];
-    for args in [no_source, both_sources] {
-        let output = fleet.exec(args);
-        assert_eq!(code(&output), 2, "{args:?}: {}", stderr(&output));
+fn native_exec_file_and_stdin_reject_blank_multiline_and_control_bytes_before_io() {
+    let mut bodies = [
+        "",
+        " \u{2003}",
+        "\n",
+        "\r\n",
+        "printf example\r",
+        "printf example\n\n",
+        "printf example\r\n\r\n",
+        "printf example\r\n\n",
+        "first\nsecond",
+    ]
+    .map(|body| body.as_bytes().to_vec())
+    .to_vec();
+    bodies.extend((0..=31).chain([127]).map(|byte| vec![b'x', byte, b'y']));
+    for source in [CommandSource::File, CommandSource::Stdin] {
+        let (cli, _, worker) = fixture();
+        for body in &bodies {
+            let output = from_source(&cli, worker, source, body);
+            assert_eq!(code(&output), 2, "{source:?} {body:?}: {}", stderr(&output));
+            assert_eq!(stdout(&output), "");
+            assert_eq!(
+                stderr(&output),
+                "Error: command must be one non-empty line without control characters.\n"
+            );
+        }
+        assert!(cli.shim_calls().is_empty());
     }
-    let empty_inline: &[&str] = &[""];
-    let empty_file: &[&str] = &["--file", empty.as_str()];
-    for args in [empty_inline, empty_file] {
-        let output = fleet.exec(args);
-        assert_eq!(code(&output), 2, "{args:?}: {}", stderr(&output));
-        assert!(
-            stderr(&output).contains("command may not be empty."),
-            "{args:?}: {}",
-            stderr(&output)
+}
+
+#[test]
+fn native_exec_rejects_invalid_utf8_from_file_and_stdin_with_source_context() {
+    for source in [CommandSource::File, CommandSource::Stdin] {
+        let (cli, _, worker) = fixture();
+        let label = match source {
+            CommandSource::File => cli
+                .home
+                .path()
+                .join("native command.txt")
+                .display()
+                .to_string(),
+            CommandSource::Stdin => "-".to_string(),
+        };
+        for bytes in [vec![0xff], vec![0xc3, 0x28], vec![0xf0, 0x9f]] {
+            let output = from_source(&cli, worker, source, &bytes);
+            assert_eq!(code(&output), 1, "{source:?}: {}", stderr(&output));
+            assert_eq!(stdout(&output), "");
+            assert_eq!(
+                stderr(&output),
+                format!("Error: --file {label}: file is not valid UTF-8.\n")
+            );
+        }
+        assert!(cli.shim_calls().is_empty());
+    }
+}
+
+#[test]
+fn native_exec_reports_missing_or_directory_command_files_before_pane_io() {
+    let (cli, _, worker) = fixture();
+    for path in [
+        cli.home.path().join("missing command.txt"),
+        cli.home.path().to_path_buf(),
+    ] {
+        let path = path.to_str().unwrap();
+        let output = cli.run(&[
+            "member",
+            "exec",
+            &worker.to_string(),
+            "--file",
+            path,
+            "--json",
+        ]);
+        assert_eq!(code(&output), 1);
+        assert_eq!(stdout(&output), "");
+        assert_eq!(
+            stderr(&output),
+            format!("Error: --file {path}: file does not exist or is not a regular file.\n")
         );
     }
-
-    assert_eq!(fleet.exec_rows(), 0);
-    assert!(
-        fleet
-            .cli
-            .shim_calls()
-            .iter()
-            .all(|line| !line.starts_with("send-keys")),
-        "{:?}",
-        fleet.cli.shim_calls()
-    );
+    assert!(cli.shim_calls().is_empty());
 }
 
 #[test]
-fn member_exec_stores_a_multi_line_body_verbatim_from_a_file_or_stdin() {
-    let fleet = ExecFleet::new();
-    let body = "cd \"$HOME\"\nprintf '%s\\n' \"it's a | b\" && exit 3";
-    let script = write_file(&fleet.cli.home.path().join("script.sh"), body.as_bytes());
-
-    let output = fleet.exec(&["--file", &script]);
-    assert_eq!(code(&output), 0, "{}", stderr(&output));
-    assert_eq!(fleet.stored_command(1), body);
-    assert_eq!(
-        fleet.dispatch_keystrokes(1),
-        1,
-        "the keystroke carries the exec id, never the command: {:?}",
-        fleet.cli.shim_calls()
-    );
-
-    let worker = WORKER.to_string();
-    let output = fleet
-        .cli
-        .run_with_stdin(&["member", "exec", &worker, "--file", "-"], body);
-    assert_eq!(code(&output), 0, "{}", stderr(&output));
-    assert_eq!(fleet.stored_command(2), body);
+fn native_exec_reports_unknown_deregistered_and_absent_placement_targets() {
+    for state in ["unknown", "deregistered", "no-placement"] {
+        let (cli, _, worker) = fixture();
+        let (subject, cause) = match state {
+            "unknown" => (999, "Member 999 not found".to_string()),
+            "deregistered" => {
+                assert!(cafleet::broker::deregister_member(&mut cli.sqlite(), worker).unwrap());
+                (worker, format!("Member {worker} not found"))
+            }
+            "no-placement" => {
+                assert_eq!(
+                    cli.sqlite()
+                        .execute("DELETE FROM member_placements WHERE member_id=?1", [worker])
+                        .unwrap(),
+                    1
+                );
+                (
+                    worker,
+                    format!(
+                        "member {worker} has no placement row; it was not spawned via `cafleet member create`."
+                    ),
+                )
+            }
+            _ => unreachable!(),
+        };
+        let output = cli.run(&[
+            "member",
+            "exec",
+            &subject.to_string(),
+            "printf example",
+            "--json",
+        ]);
+        assert_eq!(code(&output), 1);
+        assert_eq!(stdout(&output), "");
+        assert_eq!(stderr(&output), format!("Error: {cause}\n"));
+        assert!(cli.shim_calls().is_empty());
+    }
 }
 
 #[test]
-fn member_exec_rejects_the_director_and_a_member_without_a_pane() {
-    let fleet = ExecFleet::new();
-
-    let output = fleet
-        .cli
-        .run(&["member", "exec", &DIRECTOR.to_string(), "echo hi"]);
+fn native_exec_rejects_director_and_pending_placement_without_typing() {
+    let (cli, director, worker) = fixture();
+    let output = cli.run(&["member", "exec", &director.to_string(), "printf example"]);
     assert_eq!(code(&output), 1);
-    assert_eq!(stdout(&output), "");
     assert!(
-        stderr(&output).contains("Error: cannot exec in the Director's own pane"),
+        stderr(&output).contains("cannot exec in the Director's own pane"),
         "{}",
         stderr(&output)
     );
-
-    fleet
-        .cli
-        .sqlite()
+    cli.sqlite()
         .execute(
             "UPDATE member_placements SET mux_pane_id=NULL WHERE member_id=?1",
-            [WORKER],
+            [worker],
         )
         .unwrap();
-    let output = fleet.exec(&["echo hi"]);
+    let output = cli.run(&["member", "exec", &worker.to_string(), "printf example"]);
     assert_eq!(code(&output), 1);
     assert!(
         stderr(&output).contains(&format!(
-            "Error: member {WORKER} has no pane yet (pending placement)"
+            "member {worker} has no pane yet (pending placement) — nothing to exec."
         )),
         "{}",
         stderr(&output)
     );
-
-    assert_eq!(fleet.exec_rows(), 0);
+    assert_eq!(cli.shim_count("send-keys"), 0);
 }
 
 #[test]
-fn member_exec_dispatches_into_a_pane_at_rest() {
-    let fleet = ExecFleet::new();
-
-    let output = fleet.exec(&["mise //cafleet:test"]);
-    assert_eq!(code(&output), 0, "{}", stderr(&output));
-    assert_eq!(
-        stdout(&output),
-        format!("Queued exec 1 for member worker ({WORKER_PANE}): dispatched.\n")
-    );
-    assert!(fleet.dispatched(1));
-    assert_eq!(fleet.dispatch_keystrokes(1), 1);
+fn native_exec_frames_each_backend_command_through_both_transports() {
+    for (agent, capture) in [
+        (
+            "claude",
+            include_str!("fixtures/pane-readiness/claude-placeholder.ansi"),
+        ),
+        (
+            "codex",
+            include_str!("fixtures/pane-readiness/codex-placeholder.ansi"),
+        ),
+        (
+            "opencode",
+            include_str!("fixtures/pane-readiness/opencode-placeholder.ansi"),
+        ),
+    ] {
+        for transport in ["tmux", "herdr"] {
+            let (mut cli, _, worker) = fixture();
+            let pane = if transport == "tmux" {
+                format!("%{}", worker + 4)
+            } else {
+                "w1:p2".to_string()
+            };
+            cli.sqlite().execute(
+                "UPDATE member_placements SET backend=?1,mux_pane_id=?2,coding_agent=?3 WHERE member_id=?4",
+                rusqlite::params![transport, pane, agent, worker],
+            ).unwrap();
+            cli.set_pane_capture(&pane, capture);
+            if transport == "herdr" {
+                cli.set_env("CAFLEET_MULTIPLEXER", "herdr");
+                cli.set_env("HERDR_ENV", "native-exec-test");
+                write_executable(
+                    &cli.shim_dir.join("herdr"),
+                    r#"#!/bin/sh
+printf '%s\n' "$*" >> "$CAFLEET_TEST_TMUX_LOG"
+if [ "$1" = pane ] && [ "$2" = read ]; then
+    if [ ! -f "$CAFLEET_TEST_TMUX_CAPTURE_DIR/$3" ]; then exit 1; fi
+    while IFS= read -r line || [ -n "$line" ]; do
+        printf '%s\n' "$line"
+    done < "$CAFLEET_TEST_TMUX_CAPTURE_DIR/$3"
+fi
+"#,
+                );
+            }
+            let command = "  printf '%s' 'café $HOME; !'  ";
+            let output = cli.run(&["member", "exec", &worker.to_string(), command, "--json"]);
+            assert_eq!(code(&output), 0, "{agent}/{transport}: {}", stderr(&output));
+            let payload: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+            assert_eq!(payload["coding_agent"], agent);
+            assert_eq!(payload["command"], command);
+            assert_eq!(payload["dispatched"], true);
+            let calls = cli.shim_calls();
+            let writes: Vec<_> = calls
+                .into_iter()
+                .filter(|line| line.starts_with("send-keys") || line.starts_with("pane send-"))
+                .collect();
+            let expected = if transport == "tmux" {
+                vec![
+                    format!("send-keys -t {pane} -l -- ! {command}"),
+                    format!("send-keys -t {pane} Enter"),
+                ]
+            } else {
+                vec![
+                    format!("pane send-text {pane} -- ! {command}"),
+                    format!("pane send-keys {pane} enter"),
+                ]
+            };
+            assert_eq!(writes, expected, "{agent}/{transport}");
+        }
+    }
 }
 
 #[test]
-fn member_exec_holds_the_dispatch_while_the_pane_is_not_at_rest() {
-    let fleet = ExecFleet::new();
-    fleet.cli.set_pane_capture(WORKER_PANE, WORKING_CAPTURE);
-
-    let output = fleet.exec(&["mise //cafleet:test"]);
-    assert_eq!(code(&output), 0, "{}", stderr(&output));
-    assert_eq!(
-        stdout(&output),
-        format!("Queued exec 1 for member worker ({WORKER_PANE}): held.\n")
+fn native_exec_text_reports_submission_with_unchanged_broker_and_only_input_artifacts() {
+    let (cli, _, worker) = fixture();
+    let mut locks = cli.db_path().into_os_string();
+    locks.push(".pane-locks");
+    let locks = PathBuf::from(locks);
+    let stable_files = |files: BTreeSet<PathBuf>| {
+        files
+            .into_iter()
+            .filter(|path| path != &cli.shim_log && !path.starts_with(&locks))
+            .collect::<BTreeSet<_>>()
+    };
+    let before_files = stable_files(files_under(cli.home.path()));
+    let before_database = std::fs::read(cli.db_path()).unwrap();
+    let command = format!(
+        "printf native-output > '{}'",
+        cli.home.path().join("native-result.txt").display()
     );
-    assert!(!fleet.dispatched(1));
-    assert_eq!(fleet.dispatch_keystrokes(1), 0);
-
-    let output = fleet.exec(&["mise //cafleet:lint", "--json"]);
+    let output = cli.run_in(
+        cli.home.path(),
+        &["member", "exec", &worker.to_string(), &command],
+    );
     assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(stderr(&output), "");
+    let pane = format!("%{}", worker + 4);
     assert_eq!(
         stdout(&output),
         format!(
-            "{{\"exec_id\":2,\"member_id\":{WORKER},\"pane_id\":\"{WORKER_PANE}\",\
-             \"dispatched\":false}}\n"
+            "Dispatched native command to member {worker} ({pane}). Inspect the pane for its result.\n"
         )
     );
+    assert_eq!(std::fs::read(cli.db_path()).unwrap(), before_database);
+    assert_eq!(stable_files(files_under(cli.home.path())), before_files);
+    assert_eq!(cli.shim_count("send-keys"), 2);
 }
 
 #[test]
-fn exec_run_runs_the_command_once_and_records_its_exit_code() {
-    let fleet = ExecFleet::new();
-    let ran = fleet.cli.home.path().join("ran.log");
-    let exec_id = fleet.seed_dispatched_exec(&format!(
-        "printf 'ran\\n' >> '{}'; printf 'command output\\n'; exit 7",
-        ran.display()
-    ));
-    let exec_arg = exec_id.to_string();
-
-    let output = fleet.cli.run(&["member", "exec-run", &exec_arg]);
-    assert_eq!(code(&output), 7, "{}", stderr(&output));
-    assert_eq!(
-        stdout(&output),
-        format!("command output\n[cafleet] exec {exec_id} exited 7\n")
-    );
-    let (started, has_pid, finished, exit_code): (bool, bool, bool, Option<i64>) = fleet
-        .cli
-        .sqlite()
-        .query_row(
-            "SELECT started_at IS NOT NULL, pid IS NOT NULL, finished_at IS NOT NULL, exit_code \
-             FROM member_execs WHERE exec_id=?1",
-            [exec_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-        )
-        .unwrap();
-    assert_eq!(
-        (started, has_pid, finished, exit_code),
-        (true, true, true, Some(7))
-    );
-
-    let again = fleet.cli.run(&["member", "exec-run", &exec_arg]);
-    assert_eq!(code(&again), 1);
+fn native_exec_uses_the_standard_parser_for_undeclared_options() {
+    let cli = Cli::new();
+    let output = cli.run(&["member", "exec", "1", "printf example", "--wait"]);
+    assert_eq!(code(&output), 2);
+    assert_eq!(stdout(&output), "");
     assert!(
-        stderr(&again).contains(&format!("Error: exec {exec_id} is not runnable")),
+        stderr(&output).contains("unexpected argument '--wait' found"),
         "{}",
-        stderr(&again)
+        stderr(&output)
     );
-    assert_eq!(std::fs::read_to_string(&ran).unwrap(), "ran\n");
-}
-
-/// Close exec 1 as the pane and the loop would, `ran_seconds` after its start.
-fn close_exec(fleet: &ExecFleet, ran_seconds: i64, exit_code: Option<i64>) {
-    let finished_at = Utc::now();
-    let started_at = format_utc(finished_at - Duration::seconds(ran_seconds));
-    let finished_at = format_utc(finished_at);
-    fleet
-        .cli
-        .sqlite()
-        .execute(
-            "UPDATE member_execs SET created_at=?1, dispatched_at=?1, started_at=?1, pid=?2, \
-             finished_at=?3, exit_code=?4, resumed_at=?3 WHERE exec_id=1",
-            rusqlite::params![
-                started_at,
-                i64::from(std::process::id()),
-                finished_at,
-                exit_code
-            ],
-        )
-        .unwrap();
-}
-
-fn exec_and_wait<'a>(fleet: &'a ExecFleet) -> LoopChild<'a> {
-    let mut waiting = LoopChild::spawn(
-        &fleet.cli,
-        &["member", "exec", "3", "mise //cafleet:test", "--wait"],
-    );
-    waiting.wait_until("the exec to be dispatched", || {
-        fleet.exec_rows() == 1 && fleet.dispatched(1)
-    });
-    waiting
-}
-
-#[test]
-fn member_exec_wait_prints_the_exit_status_once_the_exec_closes() {
-    let fleet = ExecFleet::new();
-    let mut waiting = exec_and_wait(&fleet);
-
-    close_exec(&fleet, 4, Some(3));
-    let output = waiting.wait_for_exit("the wait to observe the closed exec");
-    assert_eq!(code(&output), 0, "{}", stderr(&output));
-    assert_eq!(
-        stdout(&output),
-        format!(
-            "Queued exec 1 for member worker ({WORKER_PANE}): dispatched.\n\
-             exec 1 exited 3 after 4 s.\n"
-        )
-    );
-}
-
-#[test]
-fn member_exec_wait_exits_one_with_the_lost_exec_text() {
-    let fleet = ExecFleet::new();
-    let mut waiting = exec_and_wait(&fleet);
-
-    close_exec(&fleet, 4, None);
-    let output = waiting.wait_for_exit("the wait to observe the lost exec");
-    assert_eq!(code(&output), 1, "{}", stdout(&output));
-    assert_eq!(
-        stdout(&output),
-        format!(
-            "Queued exec 1 for member worker ({WORKER_PANE}): dispatched.\n\
-             [cafleet] exec 1 on member {WORKER} (worker) ended without reporting an exit \
-             status. Inspect the pane with cafleet member capture {WORKER}.\n"
-        )
-    );
+    assert!(!cli.db_path().exists());
+    assert!(cli.shim_calls().is_empty());
 }

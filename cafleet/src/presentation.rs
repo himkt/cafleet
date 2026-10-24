@@ -1,4 +1,4 @@
-//! Explicit CLI/HTTP wire construction, separate from storage records.
+//! CLI output construction from storage records.
 use crate::broker::records::*;
 use serde_json::{Value, json};
 
@@ -15,9 +15,9 @@ pub(crate) fn doctor_database_detail(schema: &SchemaState) -> String {
         SchemaState::Ahead { recorded, head } => {
             format!("schema {recorded} is newer than this CLI (head {head}) — upgrade cafleet")
         }
-        SchemaState::Unversioned => {
-            "database has tables but no schema history — not a cafleet database?".into()
-        }
+        SchemaState::Incompatible { path } => crate::diagnosis::incompatible_format(path)
+            .message()
+            .into_owned(),
         SchemaState::Missing => "no database — run: cafleet setup".into(),
         SchemaState::Unreachable { cause } => cause.message().into_owned(),
     }
@@ -115,14 +115,8 @@ pub fn registered_member(row: &RegisteredMember) -> Value {
 pub fn member(row: &MemberRecord) -> Value {
     json!({"member_id":row.member_id,"name":row.name,"description":row.description,
         "status":row.status.as_str(),"registered_at":row.registered_at,
-        "kind":row.kind.as_str(),"skills":row.skills,
+        "kind":row.kind.as_str(),
         "placement":row.placement.as_ref().map(placement)})
-}
-
-pub fn roster_member(row: &MemberRecord) -> Value {
-    json!({"member_id":row.member_id,"name":row.name,"description":row.description,
-        "status":row.status.as_str(),"registered_at":row.registered_at,
-        "kind":row.kind.as_str(),"placement":row.placement.as_ref().map(placement)})
 }
 
 pub fn member_activity(row: &MemberActivity) -> Value {
@@ -132,10 +126,9 @@ pub fn member_activity(row: &MemberActivity) -> Value {
 }
 
 pub fn message(row: &MessageRecord) -> Value {
-    json!({"message_id":row.message_id,"owner_member_id":row.owner_member_id,
-        "from_member_id":row.from_member_id,"to_member_id":row.to_member_id,
-        "type":row.kind.as_str(),"created_at":row.created_at,"status_state":row.status.as_str(),
-        "status_timestamp":row.status_timestamp,"origin_message_id":row.origin_message_id,"text":row.text})
+    json!({"message_id":row.message_id,"from_member_id":row.from_member_id,
+        "to_member_id":row.to_member_id,"created_at":row.created_at,"status_state":row.status.as_str(),
+        "status_timestamp":row.status_timestamp,"text":row.text})
 }
 
 pub fn message_envelope(row: &MessageRecord) -> Value {
@@ -146,32 +139,6 @@ pub fn send_outcome(row: &MessageRecord, notification_sent: bool) -> Value {
     json!({"message":message(row),"notification_sent":notification_sent})
 }
 
-pub fn broadcast_outcome(summary: &MessageRecord, recipients: usize, delivered: usize) -> Value {
-    json!({"message":message(summary),"recipients":recipients,"delivered":delivered})
-}
-
-pub fn monitor_runtime(row: &MonitorRuntime) -> Value {
-    json!({"fleet_id":row.fleet_id,"pid":row.pid,"started_at":row.started_at,
-        "last_tick_at":row.last_tick_at,"tick_seconds":row.tick_seconds,
-        "wake_interval_seconds":row.wake_interval_seconds,"last_wake_at":row.last_wake_at,
-        "wake_requested_at":row.wake_requested_at})
-}
-
-pub fn monitor_runtime_view(row: &MonitorRuntimeView) -> Value {
-    json!({"running":row.running,"pid":row.pid,"tick_seconds":row.tick_seconds,
-        "wake_interval_seconds":row.wake_interval_seconds,"last_tick_at":row.last_tick_at,
-        "last_tick_age_seconds":row.last_tick_age_seconds,"started_at":row.started_at,
-        "last_wake_at":row.last_wake_at,"last_wake_age_seconds":row.last_wake_age_seconds})
-}
-
-pub fn wake_target(row: &WakeTarget) -> Value {
-    json!({"member_id":row.member_id,"name":row.name,"coding_agent":row.coding_agent,"pending_count":row.pending_count})
-}
-
-pub fn monitor_member(row: &MonitorMember) -> Value {
-    json!({"member_id":row.member_id,"name":row.name,"pending_count":row.pending_count,
-        "oldest_pending_ts":row.oldest_pending_ts,"oldest_pending_age_seconds":row.oldest_pending_age_seconds})
-}
 pub(crate) fn member_capture(capture: &crate::capture::MemberCapture) -> Value {
     let snapshot = &capture.snapshot;
     json!({"member_id":capture.member_id,"pane_id":capture.pane_id,"lines":capture.lines,

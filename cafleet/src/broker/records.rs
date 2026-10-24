@@ -1,6 +1,4 @@
-//! Internal records decoded once from storage; wire construction is separate.
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ValueRef};
-use serde_json::Value;
 
 use crate::error::CafleetError;
 
@@ -34,8 +32,7 @@ macro_rules! stored_enum {
 }
 
 stored_enum!(MemberStatus, "members.status", {Active => "active", Deregistered => "deregistered"});
-stored_enum!(MemberKind, "member.kind", {Director => "director", Monitor => "monitor", Member => "member"});
-stored_enum!(MessageKind, "messages.type", {Unicast => "unicast", BroadcastSummary => "broadcast_summary"});
+stored_enum!(MemberKind, "member.kind", {Director => "director", Member => "member"});
 stored_enum!(MessageStatus, "messages.status_state", {InputRequired => "input_required", Completed => "completed"});
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,7 +67,6 @@ pub struct MemberRecord {
     pub registered_at: String,
     pub status: MemberStatus,
     pub kind: MemberKind,
-    pub skills: Vec<Value>,
     pub placement: Option<Placement>,
 }
 
@@ -93,103 +89,12 @@ pub struct RegisteredMember {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageRecord {
     pub message_id: i64,
-    pub owner_member_id: i64,
     pub from_member_id: i64,
-    pub to_member_id: Option<i64>,
-    pub kind: MessageKind,
+    pub to_member_id: i64,
     pub created_at: String,
     pub status: MessageStatus,
     pub status_timestamp: String,
-    pub origin_message_id: Option<i64>,
     pub text: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MonitorRuntime {
-    pub fleet_id: i64,
-    pub pid: Option<i64>,
-    pub started_at: Option<String>,
-    pub last_tick_at: Option<String>,
-    pub tick_seconds: i64,
-    pub wake_interval_seconds: Option<i64>,
-    pub last_wake_at: Option<String>,
-    pub wake_requested_at: Option<String>,
-}
-
-/// The rows one broadcast persisted: the sender's summary plus one
-/// `(member_id, message_id)` pair per delivery, in recipient order.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BroadcastRows {
-    pub summary: MessageRecord,
-    pub deliveries: Vec<(i64, i64)>,
-}
-
-/// What a keystroke into one member's pane needs to know about it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PaneTarget {
-    pub member_id: i64,
-    pub name: String,
-    pub pane_id: String,
-    pub coding_agent: String,
-    pub forced_at: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MemberExec {
-    pub exec_id: i64,
-    pub member_id: i64,
-    pub command: String,
-    pub created_at: String,
-    pub dispatched_at: Option<String>,
-    pub started_at: Option<String>,
-    pub pid: Option<i64>,
-    pub finished_at: Option<String>,
-    pub exit_code: Option<i64>,
-    pub resumed_at: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExecMember {
-    pub member_id: i64,
-    pub fleet_id: i64,
-    pub name: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SilentMember {
-    pub member_id: i64,
-    pub name: String,
-    pub spawned_at: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WakeTarget {
-    pub member_id: i64,
-    pub name: String,
-    pub coding_agent: String,
-    pub pending_count: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MonitorMember {
-    pub member_id: i64,
-    pub name: String,
-    pub pending_count: i64,
-    pub oldest_pending_ts: Option<String>,
-    pub oldest_pending_age_seconds: Option<i64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MonitorRuntimeView {
-    pub running: bool,
-    pub pid: Option<i64>,
-    pub tick_seconds: Option<i64>,
-    pub wake_interval_seconds: Option<i64>,
-    pub last_tick_at: Option<String>,
-    pub last_tick_age_seconds: Option<i64>,
-    pub started_at: Option<String>,
-    pub last_wake_at: Option<String>,
-    pub last_wake_age_seconds: Option<i64>,
 }
 
 #[cfg(test)]
@@ -208,9 +113,8 @@ mod tests {
     }
 
     #[test]
-    fn corrupt_member_status_returns_the_domain_variant_from_storage() {
-        let (_dir, mut conn, fleet, director) = fixture();
-        broker::send_message(&mut conn, director, &director.to_string(), "retain history").unwrap();
+    fn corrupt_director_status_returns_the_domain_variant_from_a_live_typed_read() {
+        let (_dir, conn, fleet, director) = fixture();
         conn.execute_batch("PRAGMA ignore_check_constraints=ON")
             .unwrap();
         conn.execute(
@@ -218,8 +122,30 @@ mod tests {
             [director],
         )
         .unwrap();
-        assert!(matches!(broker::list_roster(&conn, fleet, true),
+        assert!(matches!(broker::get_member(&conn, director, fleet),
             Err(CafleetError::InvalidStoredValue { field, value })
             if field == "members.status" && value == "corrupt-status"));
+    }
+
+    #[test]
+    fn corrupt_recipient_status_stops_a_send_with_the_domain_cause_before_inserting() {
+        let (_dir, mut conn, fleet, director) = fixture();
+        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+        conn.execute_batch("PRAGMA ignore_check_constraints=ON")
+            .unwrap();
+        conn.execute(
+            "UPDATE members SET status='corrupt-recipient' WHERE member_id=?1",
+            [worker],
+        )
+        .unwrap();
+        assert!(
+            matches!(broker::send_message(&mut conn, director, &worker.to_string(), "pending assignment"),
+            Err(CafleetError::InvalidStoredValue { field, value })
+            if field == "members.status" && value == "corrupt-recipient")
+        );
+        let messages: i64 = conn
+            .query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(messages, 0);
     }
 }

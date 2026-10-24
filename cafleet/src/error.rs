@@ -4,16 +4,16 @@ use std::{borrow::Cow, fmt};
 pub enum CafleetError {
     Usage(String),
     App(String),
-    /// A broker value error (bad input / missing row), translated by callers:
-    /// the CLI wraps to exit 1, the WebUI maps to an HTTP status.
     Value(String),
+    DatabaseBusy(String),
+    DeadlineExceeded,
+    WithDiagnostics {
+        cause: Box<CafleetError>,
+        diagnostics: Vec<String>,
+    },
     InvalidStoredValue {
         field: String,
         value: String,
-    },
-    ActiveMonitorExists {
-        fleet_id: i64,
-        member_id: i64,
     },
 }
 
@@ -24,36 +24,40 @@ impl CafleetError {
         match self {
             Self::Usage(_) => Self::Usage(message),
             Self::Value(_) => Self::Value(message),
-            Self::App(_) | Self::ActiveMonitorExists { .. } | Self::InvalidStoredValue { .. } => {
-                Self::App(message)
-            }
+            Self::WithDiagnostics { cause, .. } if cause.exit_code() == 2 => Self::Usage(message),
+            Self::App(_)
+            | Self::InvalidStoredValue { .. }
+            | Self::DatabaseBusy(_)
+            | Self::DeadlineExceeded
+            | Self::WithDiagnostics { .. } => Self::App(message),
         }
     }
 
     pub fn exit_code(&self) -> i32 {
         match self {
+            CafleetError::WithDiagnostics { cause, .. } => cause.exit_code(),
             CafleetError::Usage(_) => 2,
             CafleetError::App(_)
             | CafleetError::Value(_)
-            | CafleetError::ActiveMonitorExists { .. }
+            | CafleetError::DatabaseBusy(_)
+            | CafleetError::DeadlineExceeded
             | CafleetError::InvalidStoredValue { .. } => 1,
         }
     }
 
     pub fn message(&self) -> Cow<'_, str> {
         match self {
+            CafleetError::WithDiagnostics { cause, diagnostics } => {
+                Cow::Owned(format!("{cause}\n{}", diagnostics.join("\n")))
+            }
             CafleetError::Usage(message)
             | CafleetError::App(message)
-            | CafleetError::Value(message) => Cow::Borrowed(message),
+            | CafleetError::Value(message)
+            | CafleetError::DatabaseBusy(message) => Cow::Borrowed(message),
+            CafleetError::DeadlineExceeded => Cow::Borrowed("operation exceeded its deadline"),
             CafleetError::InvalidStoredValue { field, value } => {
                 Cow::Owned(format!("invalid stored value for {field}: {value}"))
             }
-            CafleetError::ActiveMonitorExists {
-                fleet_id,
-                member_id,
-            } => Cow::Owned(format!(
-                "fleet {fleet_id} already has an active monitor member (member {member_id})"
-            )),
         }
     }
 }
@@ -64,7 +68,14 @@ impl fmt::Display for CafleetError {
     }
 }
 
-impl std::error::Error for CafleetError {}
+impl std::error::Error for CafleetError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::WithDiagnostics { cause, .. } => Some(cause.as_ref()),
+            _ => None,
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -87,17 +98,5 @@ mod tests {
     fn message_returns_the_carried_string() {
         assert_eq!(CafleetError::Usage("u".to_string()).message(), "u");
         assert_eq!(CafleetError::App("a".to_string()).message(), "a");
-    }
-
-    #[test]
-    fn active_monitor_conflict_preserves_message_display_and_exit_code() {
-        let error = CafleetError::ActiveMonitorExists {
-            fleet_id: 17,
-            member_id: 42,
-        };
-        let expected = "fleet 17 already has an active monitor member (member 42)";
-        assert_eq!(error.message(), expected);
-        assert_eq!(error.to_string(), expected);
-        assert_eq!(error.exit_code(), 1);
     }
 }

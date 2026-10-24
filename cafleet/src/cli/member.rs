@@ -1,13 +1,8 @@
-//! The `member` group (SPEC §6.3 *member group*): the shared resolution
-//! helpers, the `member create` spawn orchestration + rollback ladder,
-//! delete, show/list, prompt, ping, and capture.
-
 use clap::{Args, Subcommand};
 use rusqlite::Connection;
 use serde_json::{Value, json};
 
 use super::creation::{PaneGuard, RegistrationGuard};
-use std::os::unix::process::ExitStatusExt;
 
 use super::helpers::{emit, resolve_body, resolve_command_body, resolve_mux};
 use crate::broker::records::MemberRecord;
@@ -15,14 +10,11 @@ use crate::broker::{self, NewPlacement};
 use crate::capture::{CaptureSnapshot, MemberCapture, write_member_capture};
 use crate::coding_agent::coding_agent;
 use crate::config::Settings;
-use crate::delivery::{DELIVERY_CAPTURE_LINES, Item, PaneOutcome, deliver_pane};
+use crate::delivery::DELIVERY_CAPTURE_LINES;
 use crate::error::CafleetError;
-use crate::notices;
-use crate::runtime::{deliver_preview, ensure_monitor_loop};
-use crate::time::format_utc;
 
 use crate::multiplexer::Multiplexer;
-use crate::output::{format_member, format_member_detail, format_member_list, strip_ansi};
+use crate::output::{format_member, format_member_detail, format_member_list};
 use crate::pane_state::{PaneState, classify};
 use crate::presentation;
 use crate::runtime::system::SystemProbe;
@@ -73,9 +65,6 @@ pub enum MemberCommand {
         /// Reasoning-effort level (claude, codex only).
         #[arg(long)]
         effort: Option<String>,
-        /// Register the fleet's monitor member (sole accepted value: monitor).
-        #[arg(long, value_parser = ["monitor"])]
-        role: Option<String>,
         #[command(flatten)]
         body: PromptArgs,
         /// Output in JSON format.
@@ -121,25 +110,16 @@ pub enum MemberCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Run a command to completion in a member's pane and resume the member.
+    /// Submit a native shell command to a member's idle pane.
     Exec {
         /// The target member.
         #[arg(value_name = "MEMBER_ID")]
         member_id: i64,
         #[command(flatten)]
         body: ExecBodyArgs,
-        /// Block until the exec closes, then print its exit status.
-        #[arg(long)]
-        wait: bool,
         /// Output in JSON format.
         #[arg(long)]
         json: bool,
-    },
-    /// Run one dispatched exec; cafleet types this into the member's pane.
-    ExecRun {
-        /// The exec to run.
-        #[arg(value_name = "EXEC_ID")]
-        exec_id: i64,
     },
     /// Inject an inbox-poll keystroke into a member's pane.
     Ping {
@@ -242,10 +222,22 @@ fn resolve_coding_agent(
     }
 }
 
+pub(crate) fn prepare_input(command: &mut MemberCommand) -> Result<(), CafleetError> {
+    if let MemberCommand::Exec { body, .. } = command {
+        body.command = Some(resolve_command_body(
+            body.command.as_deref(),
+            body.file.as_deref(),
+        )?);
+        body.file = None;
+    }
+    Ok(())
+}
+
 pub fn run(
     conn: &mut Connection,
     settings: &Settings,
     command: MemberCommand,
+    deadline: crate::input::Deadline,
 ) -> Result<(), CafleetError> {
     match command {
         MemberCommand::Create {
@@ -255,7 +247,6 @@ pub fn run(
             coding_agent,
             model,
             effort,
-            role,
             body,
             json,
         } => create(
@@ -267,26 +258,25 @@ pub fn run(
             coding_agent.as_deref(),
             model.as_deref(),
             effort.as_deref(),
-            role.is_some(),
             &body,
             json,
         ),
-        MemberCommand::Delete { member_id, json } => delete(conn, settings, member_id, json),
+        MemberCommand::Delete { member_id, json } => {
+            delete(conn, settings, member_id, json, deadline)
+        }
         MemberCommand::Show { member_id, json } => show(conn, member_id, json),
         MemberCommand::List { fleet_id, json } => list(conn, fleet_id, json),
         MemberCommand::Prompt {
             member_id,
             text,
             json,
-        } => prompt(conn, settings, member_id, &text, json),
+        } => prompt(conn, settings, member_id, &text, json, deadline),
         MemberCommand::Exec {
             member_id,
             body,
-            wait,
             json,
-        } => exec(conn, settings, member_id, &body, wait, json),
-        MemberCommand::ExecRun { exec_id } => exec_run(conn, settings, exec_id),
-        MemberCommand::Ping { member_id, json } => ping(conn, settings, member_id, json),
+        } => exec(conn, settings, member_id, &body, json, deadline),
+        MemberCommand::Ping { member_id, json } => ping(conn, settings, member_id, json, deadline),
         MemberCommand::Capture {
             member_id,
             lines,
@@ -306,11 +296,9 @@ fn create(
     explicit_agent: Option<&str>,
     model: Option<&str>,
     effort: Option<&str>,
-    monitor: bool,
     body: &PromptArgs,
     json: bool,
 ) -> Result<(), CafleetError> {
-    // 1. Auto-resolve the Director from the fleet row, first thing.
     let fleet = broker::fleets::fetch_fleet(conn, fleet_id)?
         .ok_or_else(|| CafleetError::Usage(format!("Fleet '{fleet_id}' not found.")))?;
     if fleet.deleted_at.is_some() {
@@ -326,30 +314,11 @@ fn create(
     let backend = coding_agent(&agent_name)
         .unwrap_or_else(|| panic!("'{agent_name}' is a registry-validated backend"));
 
-    // 2. Model and effort validation, before any registration or pane effect.
     backend.validate_model(model)?;
     backend.validate_effort(effort)?;
 
-    // 3. Monitor-role guards, one-per-fleet first, before any registration
-    //    or pane effect (the broker also enforces monitor uniqueness).
-    let active_monitor = broker::active_monitor_member_id(conn, fleet_id)?;
-    if monitor {
-        if let Some(existing) = active_monitor {
-            return Err(CafleetError::App(format!(
-                "fleet {fleet_id} already has an active monitor member (member {existing})"
-            )));
-        }
-    } else if active_monitor.is_none() {
-        return Err(CafleetError::App(format!(
-            "fleet {fleet_id} has no active monitor member; spawn one with --role monitor first"
-        )));
-    }
-
-    // 4. Resolve the body before any side effect; substitution is deferred
-    //    until the new member id exists.
     let prompt_body = resolve_body(body.prompt.as_deref(), body.file.as_deref(), "--file")?;
 
-    // 5. Preconditions.
     let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
@@ -364,8 +333,6 @@ fn create(
         .into_iter()
         .collect();
 
-    // 6. Register the member with a pending placement, threading the
-    //    monitor role into its card marker.
     let placement = NewPlacement {
         backend: mux.name().to_string(),
         mux_session: context.session.clone(),
@@ -373,19 +340,9 @@ fn create(
         mux_pane_id: None,
         coding_agent: agent_name.clone(),
     };
-    let registered = broker::register_member(
-        conn,
-        fleet_id,
-        name,
-        description,
-        &[],
-        Some(&placement),
-        monitor,
-    )
-    .map_err(|error| match error {
-        CafleetError::App(_)
-        | CafleetError::Usage(_)
-        | CafleetError::ActiveMonitorExists { .. } => error,
+    let registered = broker::register_member(conn, fleet_id, name, description, Some(&placement))
+        .map_err(|error| match error {
+        CafleetError::App(_) | CafleetError::Usage(_) => error,
         other => CafleetError::App(format!("register failed: {}", other.message())),
     })?;
     let member_id = registered.member_id;
@@ -400,7 +357,7 @@ fn create(
         Ok(prompt) => prompt,
         Err(original) => return Err(registration.rollback(original)),
     };
-    let argv = backend.build_spawn_argv(&prompt, name, model, effort, monitor);
+    let argv = backend.build_spawn_argv(&prompt, name, model, effort);
     let pane_id = match mux.split_window(&context, &env, &argv) {
         Ok(pane_id) => pane_id,
         Err(error) => {
@@ -411,7 +368,6 @@ fn create(
     };
     let mut pane = PaneGuard::with_kill(pane_id.clone(), Box::new(|id| mux.kill_pane(id, true)));
 
-    // 10. A failed placement patch compensates the pane before registration.
     let patched = broker::update_placement_pane_id(registration.connection(), member_id, &pane_id);
     let placement_view = match patched {
         Ok(Some(placement)) => placement,
@@ -429,7 +385,6 @@ fn create(
     pane.finish();
     registration.finish();
 
-    // 11. Emit with the placement view attached.
     let result = json!({
         "member_id": member_id,
         "name": name,
@@ -440,48 +395,132 @@ fn create(
     Ok(())
 }
 
+enum DeleteAction {
+    Deregistered(&'static str),
+    Close(String),
+}
+
 fn delete(
     conn: &mut Connection,
     settings: &Settings,
     member_id: i64,
     json: bool,
+    deadline: crate::input::Deadline,
 ) -> Result<(), CafleetError> {
-    // Root-Director guard, before any pane mutation.
-    let fleet_id = broker::active_member_fleet(conn, member_id)?
-        .ok_or_else(|| CafleetError::App(format!("Member {member_id} not found")))?;
-    let fleet = broker::fleets::fetch_fleet(conn, fleet_id)?
-        .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;
+    let fleet = crate::input::with_database_budget(conn, deadline, |conn| {
+        let fleet_id = broker::active_member_fleet(conn, member_id)?
+            .ok_or_else(|| CafleetError::App(format!("Member {member_id} not found")))?;
+        let fleet = broker::fleets::fetch_fleet(conn, fleet_id)?
+            .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;
+        Ok(fleet)
+    })?;
     if fleet.director_member_id == Some(member_id) {
         return Err(CafleetError::App(
             "cannot deregister the root Director; use 'cafleet fleet delete' instead".to_string(),
         ));
     }
 
-    let member = load_member(conn, member_id, true)?;
-    let pane = member
-        .placement
-        .as_ref()
-        .and_then(|p| p.mux_pane_id.clone());
-    let pane_status = if member.placement.is_none() {
-        "(no placement)".to_string()
-    } else if let Some(pane_id) = &pane {
-        let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
-        mux.ensure_available()
-            .map_err(|e| CafleetError::App(e.to_string()))?;
-        mux.kill_pane(pane_id, true).map_err(|error| {
+    let locked = crate::input::lock_deletion(
+        conn,
+        settings,
+        deadline,
+        |conn| {
+            let member = load_member(conn, member_id, true)?;
+            let targets = member
+                .placement
+                .as_ref()
+                .filter(|placement| placement.mux_pane_id.is_some())
+                .map(|placement| vec![(member_id, placement.clone())])
+                .unwrap_or_default();
+            Ok((member, targets))
+        },
+        |conn, snapshot| {
+            let tx = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .map_err(crate::broker::members::db_err)?;
+            let current = load_member(&tx, member_id, true)?;
+            if current.placement != snapshot.placement {
+                return Ok(None);
+            }
+            if current.kind == crate::broker::records::MemberKind::Director {
+                return Err(CafleetError::App(
+                    "cannot deregister the root Director; use 'cafleet fleet delete' instead"
+                        .into(),
+                ));
+            }
+            let pane = current
+                .placement
+                .as_ref()
+                .and_then(|placement| placement.mux_pane_id.as_deref());
+            let action = if let Some(pane_id) = pane {
+                DeleteAction::Close(pane_id.to_owned())
+            } else {
+                let changed = crate::broker::members::deregister_member_rows(&tx, member_id)?;
+                assert!(changed, "the revalidated member remains active");
+                DeleteAction::Deregistered(if current.placement.is_none() {
+                    "(no placement)"
+                } else {
+                    "(pending — no pane)"
+                })
+            };
+            tx.commit().map_err(crate::broker::members::db_err)?;
+            Ok(Some(action))
+        },
+        |_| {
             CafleetError::App(format!(
-                "kill_pane failed for pane {pane_id}: {error}. The {} server may be \
-                 unreachable. Verify with 'cafleet doctor', then re-run the command.",
-                mux.name()
+                "member {member_id}'s pane input remained busy for 5 seconds; member was not deleted."
             ))
-        })?;
-        format!("{pane_id} (killed)")
-    } else {
-        "(pending — no pane)".to_string()
+        },
+    )?;
+    let member = &locked.snapshot;
+    let pane_status = match &locked.value {
+        DeleteAction::Deregistered(status) => status.to_string(),
+        DeleteAction::Close(pane_id) => {
+            let mux = resolve_mux(settings)
+                .map_err(|error| CafleetError::App(error.to_string()))?
+                .bounded(deadline);
+            mux.ensure_available()
+                .map_err(|error| CafleetError::App(error.to_string()))?;
+            let layout = mux.close_pane(pane_id, true).map_err(|error| {
+                CafleetError::App(format!(
+                    "kill_pane failed for pane {pane_id}: {error}. The {} server may be \
+                     unreachable. Verify with 'cafleet doctor', then re-run the command.",
+                    mux.name()
+                ))
+            })?;
+            crate::input::complete_database_budget(conn, deadline, |conn| {
+                let tx = conn
+                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                    .map_err(crate::broker::members::db_err)?;
+                let current = load_member(&tx, member_id, true)?;
+                if current.placement != member.placement {
+                    return Err(CafleetError::App(
+                        "member placement changed after pane close".into(),
+                    ));
+                }
+                let changed = crate::broker::members::deregister_member_rows(&tx, member_id)?;
+                assert!(
+                    changed,
+                    "the input-locked member remains active until deregistration"
+                );
+                tx.commit().map_err(crate::broker::members::db_err)
+            })
+            .map_err(|error| {
+                CafleetError::App(format!(
+                    "pane {pane_id} was closed, but deregister failed: {}",
+                    error.message()
+                ))
+            })?;
+            if let Err(error) = mux.restore_after_close(layout) {
+                eprintln!(
+                    "Member {member_id} was deregistered; optional layout restoration failed: {error}"
+                );
+            }
+            format!("{pane_id} (killed)")
+        }
     };
-    broker::deregister_member(conn, member_id)
-        .map_err(|e| CafleetError::App(format!("deregister failed: {}", e.message())))?;
 
+    drop(locked);
     let result = json!({"member_id": member_id, "pane_status": pane_status});
     emit(json, &result, || {
         format!("Member deleted.\n  member_id: {member_id}\n  pane_id:   {pane_status}")
@@ -507,45 +546,80 @@ fn list(conn: &mut Connection, fleet_id: i64, json: bool) -> Result<(), CafleetE
     Ok(())
 }
 
+fn input_state(state: PaneState) -> Option<&'static str> {
+    state.hold_reason()
+}
+
+fn dispatch_input(
+    conn: &mut Connection,
+    settings: &Settings,
+    member: &MemberRecord,
+    text: &str,
+    label: &str,
+    deadline: crate::input::Deadline,
+) -> Result<(), CafleetError> {
+    let id = member.member_id;
+    let Some(locked) = crate::input::with_database_budget(conn, deadline, |conn| {
+        crate::input::lock_member(conn, settings, member)
+    })?
+    else {
+        return Err(CafleetError::App(format!(
+            "member {id}'s pane is receiving another input; retry after it is idle."
+        )));
+    };
+    let placement = locked.member.placement.as_ref().expect("locked placement");
+    let pane = placement
+        .mux_pane_id
+        .as_deref()
+        .expect("locked concrete pane");
+    let prewrite = |cause| {
+        CafleetError::App(format!(
+            "{label} was not dispatched to member {id}: {cause}"
+        ))
+    };
+    let mux = resolve_mux(settings)
+        .map_err(|e| prewrite(e.to_string()))?
+        .bounded(deadline);
+    mux.ensure_available()
+        .map_err(|e| prewrite(e.to_string()))?;
+    let content = mux
+        .capture_pane(pane, DELIVERY_CAPTURE_LINES)
+        .map_err(|e| prewrite(e.to_string()))?;
+    if let Some(state) = input_state(classify(&placement.coding_agent, &content)) {
+        return Err(CafleetError::App(format!(
+            "member {id} is {state}; {label} was not dispatched."
+        )));
+    }
+    mux.send_prompt(pane, text).map_err(|error| {
+        if error.submission_started() { CafleetError::App(format!(
+            "{label} delivery to member {id} is uncertain: {error}. Inspect the pane before retrying."
+        )) } else { prewrite(error.to_string()) }
+    })
+}
+
 fn prompt(
     conn: &mut Connection,
     settings: &Settings,
     member_id: i64,
     text: &str,
     json: bool,
+    deadline: crate::input::Deadline,
 ) -> Result<(), CafleetError> {
-    if text.contains('\n') || text.contains('\r') {
+    if !crate::input::valid_input(text) {
         return Err(CafleetError::Usage(
-            "text may not contain newlines.".to_string(),
+            "text must be one non-empty line without control characters.".into(),
         ));
     }
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return Err(CafleetError::Usage("text may not be empty.".to_string()));
-    }
-    let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
-    mux.ensure_available()
-        .map_err(|e| CafleetError::App(e.to_string()))?;
-
-    let member = load_member(conn, member_id, false)?;
-    let pane_id = require_pane(&member, member_id, "prompt")?;
-    if !broker::claim_pane(conn, member_id, now_utc())? {
-        return Err(CafleetError::App(format!(
-            "member {member_id}'s pane is receiving another keystroke; retry in a few seconds."
-        )));
-    }
-    mux.send_prompt(&pane_id, trimmed)
-        .map_err(|e| CafleetError::App(format!("send failed: {e}")))?;
-
-    let name = member.name.as_str();
-    let result = json!({
-        "member_id": member_id,
-        "pane_id": pane_id,
-        "text": trimmed,
-    });
-    emit(json, &result, || {
-        format!("Sent prompt {trimmed:?} to member {name} ({pane_id}).")
-    });
+    let member = crate::input::with_database_budget(conn, deadline, |conn| {
+        load_member(conn, member_id, false)
+    })?;
+    let pane = require_pane(&member, member_id, "prompt")?;
+    dispatch_input(conn, settings, &member, text, "prompt", deadline)?;
+    emit(
+        json,
+        &json!({"member_id":member_id,"pane_id":pane,"text":text}),
+        || format!("Sent prompt {text:?} to member {} ({pane}).", member.name),
+    );
     Ok(())
 }
 
@@ -554,129 +628,46 @@ fn exec(
     settings: &Settings,
     member_id: i64,
     body: &ExecBodyArgs,
-    wait: bool,
     json: bool,
+    deadline: crate::input::Deadline,
 ) -> Result<(), CafleetError> {
-    let command = resolve_command_body(body.command.as_deref(), body.file.as_deref())?;
-    let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
-    mux.ensure_available()
-        .map_err(|e| CafleetError::App(e.to_string()))?;
-
-    let member = load_member(conn, member_id, false)?;
-    let fleet = broker::fleets::fetch_fleet(conn, member.fleet_id)?
-        .ok_or_else(|| CafleetError::App(format!("fleet '{}' not found.", member.fleet_id)))?;
-    if fleet.director_member_id == Some(member_id) {
+    let command = body
+        .command
+        .as_deref()
+        .expect("exec input was resolved before its deadline");
+    let member = crate::input::with_database_budget(conn, deadline, |conn| {
+        load_member(conn, member_id, false)
+    })?;
+    if member.kind == crate::broker::records::MemberKind::Director {
         return Err(CafleetError::App(
-            "cannot exec in the Director's own pane".to_string(),
+            "cannot exec in the Director's own pane".into(),
         ));
     }
-    let pane_id = require_pane(&member, member_id, "exec")?;
-
-    let exec_id = broker::queue_exec(conn, member_id, &command)?.exec_id;
-    let outcome = deliver_pane(conn, &mux, settings, member_id, now_utc())?;
-    let dispatched = matches!(
-        outcome,
-        PaneOutcome::Fired { item: Item::ExecDispatch { exec_id: fired }, .. } if fired == exec_id
-    );
-    ensure_monitor_loop(conn, settings, member.fleet_id).map_err(|error| {
-        CafleetError::App(format!(
-            "Exec {exec_id} was queued, but {}",
-            error.message()
-        ))
-    })?;
-
-    let name = member.name.as_str();
-    let result = json!({
-        "exec_id": exec_id,
-        "member_id": member_id,
-        "pane_id": pane_id,
-        "dispatched": dispatched,
-    });
-    emit(json, &result, || {
-        let state = if dispatched { "dispatched" } else { "held" };
-        format!("Queued exec {exec_id} for member {name} ({pane_id}): {state}.")
-    });
-    if wait {
-        wait_for_exec(conn, exec_id)?;
-    }
-    Ok(())
-}
-
-/// Block until the exec closes, then print its exit status; an exec closed
-/// as lost prints its notice text and exits 1.
-fn wait_for_exec(conn: &Connection, exec_id: i64) -> Result<(), CafleetError> {
-    loop {
-        let exec = broker::get_exec(conn, exec_id)?.expect("the exec row was just queued");
-        if exec.resumed_at.is_some() {
-            let Some(exit_code) = exec.exit_code else {
-                let member = broker::exec_member(conn, exec.member_id)?;
-                println!("{}", notices::exec_lost(&exec, &member));
-                std::process::exit(1);
-            };
-            println!(
-                "exec {exec_id} exited {exit_code} after {} s.",
-                notices::exec_run_seconds(&exec)?
-            );
-            return Ok(());
-        }
-        std::thread::sleep(std::time::Duration::from_secs(1));
-    }
-}
-
-/// The pane-side half of `member exec`: claim the dispatched row, run its
-/// command with the pane's stdio, record the exit status, tell the Director,
-/// and exit with the command's code.
-fn exec_run(conn: &mut Connection, settings: &Settings, exec_id: i64) -> Result<(), CafleetError> {
-    let pid = i64::from(std::process::id());
-    if !broker::start_exec(conn, exec_id, pid, &format_utc(now_utc()))? {
-        return Err(CafleetError::App(format!("exec {exec_id} is not runnable")));
-    }
-    let command = broker::get_exec(conn, exec_id)?
-        .expect("the start claim just matched this row")
-        .command;
-    let status = std::process::Command::new("sh")
-        .arg("-c")
-        .arg(&command)
-        .status()
-        .map_err(|error| CafleetError::App(format!("cannot run sh: {error}")))?;
-    let exit_code = match status.code() {
-        Some(code) => code,
-        None => {
-            128 + status
-                .signal()
-                .expect("a process without an exit code was ended by a signal")
-        }
-    };
-
-    broker::finish_exec(conn, exec_id, i64::from(exit_code), &format_utc(now_utc()))?;
-    let exec = broker::get_exec(conn, exec_id)?.expect("the exec row was just finished");
-    let member = broker::exec_member(conn, exec.member_id)?;
-    let notice = broker::post_notice(
-        conn,
-        member.fleet_id,
-        &notices::exec_finished(&exec, &member, i64::from(exit_code))?,
-    )?;
-    let mux = resolve_mux(settings).ok();
-    deliver_preview(
+    let pane = require_pane(&member, member_id, "exec")?;
+    dispatch_input(
         conn,
         settings,
-        mux.as_ref(),
-        notice.owner_member_id,
-        notice.message_id,
+        &member,
+        &format!("! {command}"),
+        "native command",
+        deadline,
     )?;
-
-    println!("[cafleet] exec {exec_id} exited {exit_code}");
-    std::process::exit(exit_code);
-}
-
-/// Why a gated ping sends no keystroke into a pane in `state`; `None` when
-/// the state lets the ping through.
-fn ping_hold_reason(state: PaneState) -> Option<&'static str> {
-    match state {
-        PaneState::AwaitingUser => Some("awaiting_user"),
-        PaneState::Working => Some("working"),
-        PaneState::Finished | PaneState::Unclassified => None,
-    }
+    let agent = &member
+        .placement
+        .as_ref()
+        .expect("placed member")
+        .coding_agent;
+    emit(
+        json,
+        &json!({"member_id":member_id,"pane_id":pane,"coding_agent":agent,
+        "command":command,"dispatched":true}),
+        || {
+            format!(
+                "Dispatched native command to member {member_id} ({pane}). Inspect the pane for its result."
+            )
+        },
+    );
+    Ok(())
 }
 
 fn ping(
@@ -684,74 +675,66 @@ fn ping(
     settings: &Settings,
     member_id: i64,
     json: bool,
+    deadline: crate::input::Deadline,
 ) -> Result<(), CafleetError> {
-    let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
-    mux.ensure_available()
-        .map_err(|e| CafleetError::App(e.to_string()))?;
-
-    let member = load_member(conn, member_id, false)?;
-    let name = member.name.as_str();
-    let placement = member
-        .placement
-        .as_ref()
-        .expect("load_member requires a placement row");
-
-    let Some(pane_id) = placement.mux_pane_id.as_deref() else {
-        // The pending-placement skip path: no keystroke, exit 0.
-        let result = json!({
-            "member_id": member_id,
-            "pane_id": Value::Null,
-            "skipped": true,
-            "reason": "pending_placement",
-        });
-        emit(json, &result, || {
-            format!(
-                "Member {name} has no pane yet (pending placement) — ping skipped; \
-                 it will poll its inbox on spawn."
-            )
-        });
-        return Ok(());
-    };
-
-    let hold_reason = if broker::exec_in_flight(conn, member_id)? {
-        Some("exec_running")
+    let member = crate::input::with_database_budget(conn, deadline, |conn| {
+        load_member(conn, member_id, false)
+    })?;
+    if member.kind == crate::broker::records::MemberKind::Director {
+        return Err(CafleetError::App(
+            "cannot ping the Director's own pane".into(),
+        ));
+    }
+    let placement = member.placement.as_ref().expect("placed member");
+    let pane = placement.mux_pane_id.as_deref();
+    let reason;
+    if let Some(pane) = pane {
+        let locked = crate::input::with_database_budget(conn, deadline, |conn| {
+            crate::input::lock_member(conn, settings, &member)
+        })?;
+        reason = match locked {
+            None => Some("busy"),
+            Some(_locked) => {
+                let mux = resolve_mux(settings)
+                    .map_err(|e| CafleetError::App(e.to_string()))?
+                    .bounded(deadline);
+                mux.ensure_available()
+                    .map_err(|e| CafleetError::App(e.to_string()))?;
+                let content = mux
+                    .capture_pane(pane, DELIVERY_CAPTURE_LINES)
+                    .map_err(|e| CafleetError::App(e.to_string()))?;
+                let reason = input_state(classify(&placement.coding_agent, &content));
+                if reason.is_none() {
+                    mux.send_prompt(pane, &format!("cafleet message poll {member_id} --json"))
+                        .map_err(|error| if error.submission_started() { CafleetError::App(format!(
+                            "poll-trigger delivery to member {member_id} is uncertain: {error}. Inspect the pane before retrying."
+                        )) } else { CafleetError::App(error.to_string()) })?;
+                }
+                reason
+            }
+        };
     } else {
-        let content = mux
-            .capture_pane(pane_id, DELIVERY_CAPTURE_LINES)
-            .map_err(|e| CafleetError::App(format!("capture failed: {e}")))?;
-        match ping_hold_reason(classify(&placement.coding_agent, &strip_ansi(&content))) {
-            Some(reason) => Some(reason),
-            None => (!broker::claim_pane(conn, member_id, now_utc())?).then_some("busy"),
-        }
-    };
-    if let Some(reason) = hold_reason {
-        let result = json!({
-            "member_id": member_id,
-            "pane_id": pane_id,
-            "skipped": true,
-            "reason": reason,
-        });
-        emit(json, &result, || {
-            format!("Member {name} ({pane_id}) is {reason} — ping skipped.")
-        });
-        return Ok(());
+        reason = Some("pending_placement");
     }
-
-    if !mux.send_poll_trigger(pane_id, member_id) {
-        return Err(CafleetError::App(format!(
-            "send failed: tmux send-keys did not deliver the poll-trigger keystroke \
-             to pane {pane_id}."
-        )));
-    }
-    let result = json!({
-        "member_id": member_id,
-        "pane_id": pane_id,
-        "skipped": false,
-        "reason": Value::Null,
-    });
-    emit(json, &result, || {
-        format!("Pinged member {name} ({pane_id}) — poll keystroke dispatched.")
-    });
+    emit(
+        json,
+        &json!({"member_id":member_id,"pane_id":pane,
+        "skipped":reason.is_some(),"reason":reason}),
+        || match (pane, reason) {
+            (None, _) => format!(
+                "Member {} has no pane yet (pending placement) — ping skipped; it will poll its inbox on spawn.",
+                member.name
+            ),
+            (Some(pane), Some(reason)) => format!(
+                "Member {} ({pane}) is {reason} — ping skipped.",
+                member.name
+            ),
+            (Some(pane), None) => format!(
+                "Pinged member {} ({pane}) — poll keystroke dispatched.",
+                member.name
+            ),
+        },
+    );
     Ok(())
 }
 
@@ -783,9 +766,225 @@ fn capture(
 
 #[cfg(test)]
 mod tests {
+    use super::MemberCommand;
     use clap::Parser;
 
-    use super::MemberCommand;
+    struct DeleteKillRelease(std::path::PathBuf);
+
+    impl Drop for DeleteKillRelease {
+        fn drop(&mut self) {
+            std::fs::write(&self.0, b"release").unwrap();
+        }
+    }
+
+    fn pending_delete_in_private_process(home: &std::path::Path) {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization, TransactionOperation};
+        use std::sync::mpsc;
+        use std::time::{Duration, Instant};
+
+        let database_url = format!("sqlite:///{}", home.join("broker_test.db").display());
+        let mut deletion = crate::db::connect(&database_url).unwrap();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let mut gated = false;
+        let expire_after_close =
+            std::env::var_os("CAFLEET_TEST_DELETE_EXPIRE_AFTER_CLOSE").is_some();
+        let expires = Instant::now() + Duration::from_secs(5);
+        deletion
+            .authorizer(Some(move |context: AuthContext<'_>| {
+                if !gated
+                    && matches!(
+                        context.action,
+                        AuthAction::Transaction {
+                            operation: TransactionOperation::Begin
+                        }
+                    )
+                {
+                    gated = true;
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+                }
+                if expire_after_close
+                    && matches!(
+                        context.action,
+                        AuthAction::Update {
+                            table_name: "members",
+                            ..
+                        }
+                    )
+                {
+                    std::thread::sleep(
+                        expires.saturating_duration_since(Instant::now())
+                            + Duration::from_millis(10),
+                    );
+                }
+                Authorization::Allow
+            }))
+            .unwrap();
+        let settings = crate::config::Settings {
+            database_url: database_url.clone(),
+            max_text_len: 200,
+            multiplexer: Some("tmux".into()),
+        };
+        let _kill_release = DeleteKillRelease(home.join("release-kill"));
+        let deleting = std::thread::spawn(move || {
+            super::delete(
+                &mut deletion,
+                &settings,
+                2,
+                true,
+                crate::input::Deadline::until(expires),
+            )
+        });
+        entered_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("deletion reaches its first registry transaction");
+        let mut creation = crate::db::connect(&database_url).unwrap();
+        let patched = crate::broker::update_placement_pane_id(&mut creation, 2, "%9")
+            .unwrap()
+            .expect("creation patches the pending placement before deletion mutates it");
+        assert_eq!(patched.mux_pane_id.as_deref(), Some("%9"));
+        release_tx.send(()).unwrap();
+
+        let entered = home.join("kill-entered");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !entered.exists() && !deleting.is_finished() {
+            assert!(
+                Instant::now() < deadline,
+                "deletion reaches concrete pane close"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            entered.exists(),
+            "deletion must close the pane published after its pending snapshot"
+        );
+        assert!(
+            crate::input::PaneLock::try_acquire(&database_url, &patched)
+                .unwrap()
+                .is_none(),
+            "the concrete pane close retains exclusive input ownership"
+        );
+        creation.busy_timeout(Duration::ZERO).unwrap();
+        creation
+            .execute_batch("BEGIN IMMEDIATE; ROLLBACK;")
+            .expect("a blocked multiplexer close leaves the SQLite writer available");
+        std::fs::write(home.join("release-kill"), b"release").unwrap();
+        deleting.join().unwrap().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(home.join("mux-calls")).unwrap(),
+            "kill-pane -t %9\n"
+        );
+        let (status, deregistered_at): (String, Option<String>) = creation
+            .query_row(
+                "SELECT status,deregistered_at FROM members WHERE member_id=2",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "deregistered");
+        assert!(deregistered_at.is_some());
+        let placements: i64 = creation
+            .query_row(
+                "SELECT count(*) FROM member_placements WHERE member_id=2",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(placements, 0);
+        let director_status: String = creation
+            .query_row("SELECT status FROM members WHERE member_id=1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(director_status, "active");
+    }
+
+    #[test]
+    fn member_delete_revalidates_a_pending_placement_before_registry_mutation() {
+        run_private_delete_regression(false);
+    }
+
+    #[test]
+    fn successful_pane_close_is_finalized_when_the_operation_budget_expires() {
+        run_private_delete_regression(true);
+    }
+
+    fn run_private_delete_regression(expire_after_close: bool) {
+        use std::os::unix::fs::PermissionsExt;
+        use std::process::{Command, Stdio};
+        use std::time::{Duration, Instant};
+
+        if let Some(home) = std::env::var_os("CAFLEET_TEST_PENDING_DELETE_UNIT_HOME") {
+            pending_delete_in_private_process(std::path::Path::new(&home));
+            return;
+        }
+        let home = tempfile::TempDir::new().unwrap();
+        let mut conn = crate::broker::test_support::migrated_conn(&home);
+        let (fleet, _) = crate::broker::test_support::create_fleet(&mut conn, "pending-delete");
+        let member = crate::broker::test_support::register(&mut conn, fleet, "worker", None);
+        assert_eq!(member, 2);
+        drop(conn);
+        let bin = home.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let tmux = bin.join("tmux");
+        std::fs::write(
+            &tmux,
+            r#"#!/bin/sh
+[ "$*" = 'kill-pane -t %9' ] || exit 91
+printf '%s\n' "$*" >> "$HOME/mux-calls"
+printf 'entered\n' > "$HOME/kill-entered"
+loops=0
+while [ ! -e "$HOME/release-kill" ] && [ "$loops" -lt 600 ]; do
+    /bin/sleep 0.01
+    loops=$((loops + 1))
+done
+[ -e "$HOME/release-kill" ] || exit 92
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&tmux, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command.args([
+                "--exact",
+                "cli::member::tests::member_delete_revalidates_a_pending_placement_before_registry_mutation",
+                "--nocapture",
+            ])
+            .env_clear()
+            .env("HOME", home.path())
+            .env("PATH", &bin)
+            .env("TMUX", "/tmp/cafleet-test,1,0")
+            .env("TMUX_PANE", "%0")
+            .env("CAFLEET_TEST_PENDING_DELETE_UNIT_HOME", home.path())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        if expire_after_close {
+            command.env("CAFLEET_TEST_DELETE_EXPIRE_AFTER_CLOSE", "1");
+        }
+        let mut child = command.spawn().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(9);
+        loop {
+            if child.try_wait().unwrap().is_some() {
+                let output = child.wait_with_output().unwrap();
+                assert!(
+                    output.status.success(),
+                    "private deletion regression: stdout={}, stderr={}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                break;
+            }
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                let output = child.wait_with_output().unwrap();
+                panic!(
+                    "private deletion regression exceeded cleanup bound: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
 
     #[derive(Parser)]
     struct Harness {
@@ -797,35 +996,33 @@ mod tests {
         Harness::try_parse_from(args).map(|harness| harness.command)
     }
 
-    fn create_role(command: MemberCommand) -> Option<String> {
-        let MemberCommand::Create { role, .. } = command else {
-            panic!("parsed a non-create command");
-        };
-        role
-    }
-
     #[test]
-    fn create_accepts_the_sole_role_value_monitor() {
-        let command = parse(&[
+    fn create_parses_the_supplied_assignment_and_inline_prompt() {
+        let parsed = parse(&[
             "cafleet",
             "create",
             "--fleet-id",
             "1",
             "--name",
-            "monitor",
+            "reviewer",
             "--description",
-            "d",
-            "--role",
-            "monitor",
+            "assignment",
             "PROMPT",
         ])
         .unwrap();
-        assert_eq!(create_role(command).as_deref(), Some("monitor"));
+        let MemberCommand::Create {
+            name, description, ..
+        } = parsed
+        else {
+            panic!("expected member creation");
+        };
+        assert_eq!(name, "reviewer");
+        assert_eq!(description, "assignment");
     }
 
     #[test]
-    fn create_parses_without_a_role() {
-        let command = parse(&[
+    fn create_parses_file_input_and_backend_model_selection() {
+        parse(&[
             "cafleet",
             "create",
             "--fleet-id",
@@ -833,30 +1030,17 @@ mod tests {
             "--name",
             "worker",
             "--description",
-            "d",
-            "PROMPT",
+            "assignment",
+            "--coding-agent",
+            "codex",
+            "--model",
+            "gpt-6.1-sol",
+            "--effort",
+            "high",
+            "--file",
+            "prompt.md",
+            "--json",
         ])
         .unwrap();
-        assert_eq!(create_role(command), None);
-    }
-
-    #[test]
-    fn create_rejects_any_other_role_value() {
-        let Err(err) = parse(&[
-            "cafleet",
-            "create",
-            "--fleet-id",
-            "1",
-            "--name",
-            "worker",
-            "--description",
-            "d",
-            "--role",
-            "builder",
-            "PROMPT",
-        ]) else {
-            panic!("monitor is the sole accepted --role value");
-        };
-        assert_eq!(err.kind(), clap::error::ErrorKind::InvalidValue);
     }
 }

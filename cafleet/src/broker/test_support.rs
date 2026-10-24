@@ -1,15 +1,3 @@
-//! Shared fixtures for typed broker contract tests (SPEC §6.2).
-//!
-//! Storage APIs return broker::records types: register_member returns
-//! RegisteredMember; get_member/list_roster return MemberRecord;
-//! list_members adds MemberActivity; update_placement_pane_id returns
-//! Placement. Message reads, send_message and ACK use MessageRecord, and
-//! broadcast_message returns BroadcastRows. The broker persists only; pane
-//! delivery belongs to crate::delivery. Monitor queries distinguish optional
-//! raw MonitorRuntime from MonitorRuntimeView, MonitorMember, and WakeTarget.
-//!
-//! Tests call explicit crate::presentation functions when asserting wire JSON.
-//! This fixture's send helper presents the persisted row under a `message` key.
 #![allow(dead_code)]
 
 use rusqlite::Connection;
@@ -35,73 +23,41 @@ pub fn placement(pane: Option<&str>) -> NewPlacement {
     }
 }
 
-pub const MONITOR_NAME: &str = "monitor";
-pub const MONITOR_DESCRIPTION: &str = "Monitor member for this fleet";
-pub const MONITOR_PANE: &str = "%1";
-
-/// Atomic bootstrap on the canned tmux context: Director on `%0`, monitor
-/// member on [`MONITOR_PANE`] via an always-succeeding spawn callback.
 pub fn create_fleet(conn: &mut Connection, name: &str) -> (i64, i64) {
-    let fleet = broker::create_fleet(
-        conn,
-        Some(name),
-        "main",
-        "@1",
-        "%0",
-        "claude",
-        "tmux",
-        MONITOR_NAME,
-        MONITOR_DESCRIPTION,
-        |_, _, _| Ok(MONITOR_PANE.to_string()),
-    )
-    .unwrap();
+    let fleet =
+        broker::create_fleet(conn, Some(name), "main", "@1", "%0", "claude", "tmux").unwrap();
     (
         fleet["fleet_id"].as_i64().unwrap(),
         fleet["director"]["member_id"].as_i64().unwrap(),
     )
 }
 
-/// The monitor member the atomic bootstrap registered for `fleet_id`.
-pub fn bootstrap_monitor(conn: &Connection, fleet_id: i64) -> i64 {
-    broker::active_monitor_member_id(conn, fleet_id)
-        .unwrap()
-        .expect("the atomic bootstrap registers the monitor member")
-}
-
 pub fn register(conn: &mut Connection, fleet_id: i64, name: &str, pane: Option<&str>) -> i64 {
-    broker::register_member(
-        conn,
-        fleet_id,
-        name,
-        "test member",
-        &[],
-        Some(&placement(pane)),
-        false,
-    )
-    .unwrap()
-    .member_id
+    broker::register_member(conn, fleet_id, name, "test member", Some(&placement(pane)))
+        .unwrap()
+        .member_id
 }
 
-pub fn register_monitor(
+pub fn guarded_delete_fleet(
     conn: &mut Connection,
     fleet_id: i64,
-    name: &str,
-    pane: Option<&str>,
-) -> i64 {
-    broker::register_member(
-        conn,
-        fleet_id,
-        name,
-        "monitor member",
-        &[],
-        Some(&placement(pane)),
-        true,
-    )
-    .unwrap()
-    .member_id
+) -> Result<Value, crate::error::CafleetError> {
+    let path = conn
+        .path()
+        .expect("fleet deletion uses a file-backed fixture");
+    assert!(
+        !path.is_empty(),
+        "fleet deletion has a concrete database path"
+    );
+    let database_url = format!("sqlite:///{path}");
+    let settings = crate::config::Settings::from_lookup(|name| {
+        (name == "CAFLEET_DATABASE_URL").then(|| database_url.clone())
+    })
+    .unwrap();
+    crate::input::delete_fleet(conn, &settings, fleet_id, crate::input::Deadline::new())
 }
 
-/// Persist a unicast message and return `{"message": <presented row>}`.
+/// Persist a point-to-point message and return `{"message": <presented row>}`.
 pub fn send(conn: &mut Connection, from: i64, to: i64, text: &str) -> Value {
     let message = broker::send_message(conn, from, &to.to_string(), text).unwrap();
     json!({"message": crate::presentation::message(&message)})

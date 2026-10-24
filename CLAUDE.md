@@ -1,26 +1,15 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides repository guidance to coding agents.
 
 ## Skills
 
-The system-reminder lists every available skill with its trigger description. Read that list at the start of every session and invoke matching skills via the Skill tool BEFORE taking any other action.
+Load relevant skills through the executing backend's supported loader. Assigned CAFleet members continue their existing team workflow with the installed role/core/backend references from their spawn prompt.
 
 ## Project: CAFleet
 
-A message broker and member registry for coding agents.
-
-- **Single package**:
-  - `cafleet/` — `cafleet` (clap + rusqlite + refinery + axum, single static binary)
-- **Unified CLI command**: `cafleet` (with a single `setup` command for onboarding and schema management, and all member/messaging commands)
-
-## Tech Stack
-
-- Rust (toolchain pinned with mise; single Cargo package at `cafleet/`)
-- Server: axum + tokio (the `server` subcommand)
-- CLI: clap (direct SQLite via broker module)
+CAFleet multiplexes coding-agent sessions and coordinates them through durable point-to-point messages. The Rust package under `cafleet/` builds the unified CLI with clap, rusqlite and embedded refinery migrations. Skills and presets are embedded assets; the documentation site retains its own Node/pnpm toolchain.
 
 ## Commands
 
-See `.claude/rules/commands.md` for the full command reference.
-
+Use repository-root mise full-path tasks. See `.claude/rules/commands.md` and the task registry for available operations.

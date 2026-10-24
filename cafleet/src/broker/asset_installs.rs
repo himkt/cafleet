@@ -46,6 +46,7 @@ pub fn record_asset_install(
     path: &str,
     cafleet_version: &str,
 ) -> Result<(), CafleetError> {
+    crate::db::require_current(conn)?;
     let now = format_utc(now_utc());
     conn.execute(
         "INSERT INTO asset_installs (coding_agent, path, cafleet_version, installed_at) \

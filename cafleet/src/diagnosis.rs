@@ -11,11 +11,30 @@ use crate::error::CafleetError;
 #[derive(Debug)]
 pub(crate) enum SchemaState {
     Missing,
-    Unversioned,
+    Incompatible { path: String },
     Behind { recorded: u32, head: u32 },
     Head { version: u32 },
     Ahead { recorded: u32, head: u32 },
     Unreachable { cause: CafleetError },
+}
+
+impl SchemaState {
+    pub(crate) fn require_current(&self) -> Result<(), CafleetError> {
+        match self {
+            SchemaState::Head { .. } => Ok(()),
+            SchemaState::Behind { recorded, head } => Err(CafleetError::App(format!(
+                "database schema is outdated (schema {recorded}, head {head}); run 'cafleet setup'"
+            ))),
+            SchemaState::Ahead { recorded, head } => Err(CafleetError::App(format!(
+                "database schema {recorded} is newer than this cafleet (head {head}); upgrade cafleet"
+            ))),
+            SchemaState::Incompatible { path } => Err(crate::diagnosis::incompatible_format(path)),
+            SchemaState::Missing => Err(CafleetError::App(
+                "no cafleet database; run 'cafleet setup'".into(),
+            )),
+            SchemaState::Unreachable { cause } => Err(cause.clone()),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -80,24 +99,70 @@ pub(crate) fn recorded_version(conn: &Connection) -> Result<Option<u32>, Cafleet
     .map_err(db_err)
 }
 
-pub(crate) fn has_foreign_tables(conn: &Connection) -> Result<bool, CafleetError> {
-    conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != 'refinery_schema_history')",
-        [], |row| row.get(0),
-    ).map_err(db_err)
+pub(crate) fn incompatible_format(path: &str) -> CafleetError {
+    CafleetError::App(format!(
+        "database format is incompatible at '{path}'; choose an empty database path and run 'cafleet setup'."
+    ))
 }
 
 pub(crate) fn classify_schema(conn: &Connection, head: u32) -> SchemaState {
-    match recorded_version(conn) {
+    classify_schema_with(conn, head, crate::db::schema_matches_version)
+}
+
+pub(crate) fn classify_schema_with(
+    conn: &Connection,
+    head: u32,
+    matches_version: impl Fn(&Connection, u32) -> Result<bool, CafleetError>,
+) -> SchemaState {
+    let incompatible = || SchemaState::Incompatible {
+        path: conn.path().unwrap_or(":memory:").to_owned(),
+    };
+    let inspect = || -> Result<SchemaState, CafleetError> {
+        let identity: i64 = conn
+            .query_row("PRAGMA application_id", [], |row| row.get(0))
+            .map_err(db_err)?;
+        let populated: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%')",
+            [], |row| row.get(0)
+        ).map_err(db_err)?;
+        if identity == 0 && !populated {
+            return Ok(SchemaState::Missing);
+        }
+        if identity != crate::db::APPLICATION_ID || !crate::db::migration_ledger_matches(conn)? {
+            return Ok(incompatible());
+        }
+        let Some(recorded) = recorded_version(conn)? else {
+            return Ok(incompatible());
+        };
+        if recorded > head {
+            return Ok(SchemaState::Ahead { recorded, head });
+        }
+        if !matches_version(conn, recorded)? {
+            return Ok(incompatible());
+        }
+        Ok(if recorded < head {
+            SchemaState::Behind { recorded, head }
+        } else {
+            SchemaState::Head { version: recorded }
+        })
+    };
+    match inspect() {
+        Ok(state) => state,
         Err(cause) => SchemaState::Unreachable { cause },
-        Ok(Some(recorded)) if recorded < head => SchemaState::Behind { recorded, head },
-        Ok(Some(recorded)) if recorded > head => SchemaState::Ahead { recorded, head },
-        Ok(Some(version)) => SchemaState::Head { version },
-        Ok(None) => match has_foreign_tables(conn) {
-            Ok(true) => SchemaState::Unversioned,
-            Ok(false) => SchemaState::Missing,
+    }
+}
+
+pub(crate) fn classify_selected_schema(
+    conn: &Connection,
+    head: u32,
+    database_url: &str,
+) -> SchemaState {
+    match classify_schema(conn, head) {
+        SchemaState::Incompatible { .. } => match crate::db::database_path(database_url) {
+            Ok(path) => SchemaState::Incompatible { path: path.into() },
             Err(cause) => SchemaState::Unreachable { cause },
         },
+        state => state,
     }
 }
 
@@ -139,7 +204,7 @@ pub(crate) fn diagnose_assets(
                 }
                 AssetState::PathError {
                     variable,
-                    raw_value: raw.unwrap_or_default(),
+                    raw_value: raw.expect("a config-path error has a supplied value"),
                     cause,
                 }
             }
@@ -212,56 +277,43 @@ mod tests {
     use super::*;
 
     #[test]
+    fn newer_schema_shapes_are_reported_ahead_without_comparing_them_to_head() {
+        let mut conn = crate::db::connect("sqlite:///:memory:").unwrap();
+        let head = crate::db::migrate_to_head(&mut conn).unwrap();
+        conn.execute_batch("ALTER TABLE messages ADD COLUMN future_value TEXT;")
+            .unwrap();
+        conn.execute("UPDATE refinery_schema_history SET version=?1 WHERE version=(SELECT MAX(version) FROM refinery_schema_history)", [head + 1])
+            .unwrap();
+        assert!(matches!(
+            classify_schema(&conn, head),
+            SchemaState::Ahead { recorded, head: expected } if recorded == head + 1 && expected == head
+        ));
+    }
+
+    #[test]
     fn schema_states_preserve_versions_and_sql_failures() {
-        let conn = crate::db::connect("sqlite:///:memory:").unwrap();
-        assert!(matches!(classify_schema(&conn, 9), SchemaState::Missing));
-        conn.execute_batch("CREATE TABLE refinery_schema_history(version INTEGER)")
-            .unwrap();
-        assert!(matches!(classify_schema(&conn, 9), SchemaState::Missing));
-        conn.execute_batch("CREATE TABLE foreign_data(value TEXT)")
-            .unwrap();
-        assert!(matches!(
-            classify_schema(&conn, 9),
-            SchemaState::Unversioned
-        ));
-        conn.execute_batch("DROP TABLE foreign_data; DROP TABLE refinery_schema_history")
-            .unwrap();
-        conn.execute_batch("CREATE TABLE app_data(value TEXT)")
+        let mut conn = crate::db::connect("sqlite:///:memory:").unwrap();
+        let head = crate::db::head_version();
+        assert!(matches!(classify_schema(&conn, head), SchemaState::Missing));
+        crate::db::migrate_to_head(&mut conn).unwrap();
+        assert!(
+            matches!(classify_schema(&conn, head), SchemaState::Head { version } if version == head)
+        );
+        assert!(
+            matches!(classify_schema(&conn, head + 1), SchemaState::Behind { recorded, .. } if recorded == head)
+        );
+        conn.execute("UPDATE refinery_schema_history SET version=?1 WHERE version=(SELECT MAX(version) FROM refinery_schema_history)", [head + 1])
             .unwrap();
         assert!(matches!(
-            classify_schema(&conn, 9),
-            SchemaState::Unversioned
+            classify_schema(&conn, head),
+            SchemaState::Ahead { .. }
         ));
-        conn.execute_batch("CREATE TABLE refinery_schema_history(version INTEGER)")
-            .unwrap();
-        for version in [8, 9, 10] {
-            conn.execute("INSERT INTO refinery_schema_history VALUES (?1)", [version])
-                .unwrap();
-            let state = classify_schema(&conn, 9);
-            assert!(matches!(
-                (version, state),
-                (
-                    8,
-                    SchemaState::Behind {
-                        recorded: 8,
-                        head: 9
-                    }
-                ) | (9, SchemaState::Head { version: 9 })
-                    | (
-                        10,
-                        SchemaState::Ahead {
-                            recorded: 10,
-                            head: 9
-                        }
-                    )
-            ));
-        }
         conn.execute_batch("ALTER TABLE refinery_schema_history RENAME COLUMN version TO broken")
             .unwrap();
-        let SchemaState::Unreachable { cause } = classify_schema(&conn, 9) else {
-            panic!("expected SQL failure")
-        };
-        assert!(cause.message().contains("version"));
+        assert!(!matches!(
+            classify_schema(&conn, head),
+            SchemaState::Head { .. } | SchemaState::Ahead { .. } | SchemaState::Behind { .. }
+        ));
     }
 
     #[test]

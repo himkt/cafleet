@@ -16,7 +16,7 @@ When implementing a design document, ALWAYS update documentation FIRST before wr
 |---|---|---|
 | `docs/` | Any change to features, architecture, usage, or configuration (a new architectural axis gets its own Concepts page) | The primary documentation home goes stale |
 | `README.md` | The thin surface itself changes — the pitch drifts from `docs/docs/index.md`, the install commands change, or a docs-site section is added or removed (sync via the `/update-readme` skill) | The entry point misleads new users |
-| `SPEC.md` | Any change to its contract surfaces — CLI options, `CAFLEET_*` configuration, the SQLite schema, the HTTP API, error strings, JSON key order, text layouts (maintained via the `/update-readme` skill) | The single authoritative reimplementation specification no longer matches the shipped contract |
+| `SPEC.md` | Any change to its contract surfaces — CLI options, `CAFLEET_*` configuration, the SQLite schema, error strings, JSON key order, text layouts (maintained via the `/update-readme` skill) | The single authoritative reimplementation specification no longer matches the shipped contract |
 | `skills/*/SKILL.md` | Any change to CLI commands, flags, environment variables, required arguments, output formats, or the expected invocation workflow | Claude Code loads stale skills as ground truth and produces broken tool calls |
 | `.claude/rules/` | The project convention the rule captures changes | Agents follow outdated conventions |
 
@@ -30,8 +30,8 @@ user-visible artifacts, never in terms of where the implementation lives.
 
 ### Describe behavior, not code locations
 
-- Name components by concept ("the broker", "the HTTP server", "the
-  supervision protocol"), anchored to the Core terms table in the concepts
+- Name components by concept ("the broker", "the finite receiver", "the
+  receive procedure"), anchored to the Core terms table in the concepts
   overview — not by source file or module path.
 - When a page needs to say where a protocol or catalog is defined, attribute
   it to the shipping artifact the reader has ("part of the cafleet skill",
@@ -111,8 +111,7 @@ a restatement of the owned attributes.
 Two rules keep the non-owning mentions honest:
 
 - **Echo rule.** A non-owning page may describe an owned enumeration in
-  qualitative magnitude terms ("the Director wake interval is two orders of
-  magnitude longer than the scan tick"); it states no exact values.
+  qualitative magnitude terms ("a receive operation bounds its native task lifetime"); it states no exact values.
 - **Term tie-break.** When copies have drifted on what to call something, the
   term in the Core terms table of the concepts overview governs. The owning
   table and every linking mention adopt it.

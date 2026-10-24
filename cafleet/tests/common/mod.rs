@@ -1,15 +1,21 @@
 #![allow(dead_code)]
 
-use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Output, Stdio};
-use std::time::{Duration, Instant};
+use std::process::{Command, Output, Stdio};
 
 use tempfile::TempDir;
 
-use cafleet::broker::{self, NewPlacement};
+use cafleet::broker;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub fn process_test_resource_guard() -> std::sync::MutexGuard<'static, ()> {
+    static RESOURCE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    // Each test owns its fixture state, so a prior failure only releases this slot.
+    RESOURCE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 /// The capture every pane shows unless [`Cli::set_pane_capture`] overrides it:
 /// a claude composer at rest, so a delivery fires immediately.
@@ -115,30 +121,6 @@ impl Cli {
         std::fs::write(self.capture_dir.join(pane), content).unwrap();
     }
 
-    /// The fleet's `monitor_runtime` owner pid; `None` when no loop holds it.
-    pub fn monitor_pid(&self, fleet_id: i64) -> Option<i64> {
-        self.sqlite()
-            .query_row(
-                "SELECT pid FROM monitor_runtime WHERE fleet_id=?1",
-                [fleet_id],
-                |row| row.get::<_, Option<i64>>(0),
-            )
-            .ok()
-            .flatten()
-    }
-
-    /// The text `fleet create` prints once the fleet's loop is live.
-    pub fn fleet_create_text(&self, fleet_id: i64, director_id: i64, monitor_id: i64) -> String {
-        let pid = self
-            .monitor_pid(fleet_id)
-            .expect("fleet create returns only after the loop is live");
-        format!("{fleet_id} director={director_id} monitor={monitor_id}\nmonitor loop: pid {pid}\n")
-    }
-
-    pub fn monitor_log_path(&self, fleet_id: i64) -> PathBuf {
-        self.home.path().join(format!("monitor-{fleet_id}.log"))
-    }
-
     /// Set an extra environment variable (e.g. a backend config-location
     /// variable) for every subsequent run.
     pub fn set_env(&mut self, key: &str, value: &str) {
@@ -191,6 +173,10 @@ impl Cli {
     }
 
     pub fn run_with_stdin(&self, args: &[&str], stdin: &str) -> Output {
+        self.run_with_stdin_bytes(args, stdin.as_bytes())
+    }
+
+    pub fn run_with_stdin_bytes(&self, args: &[&str], stdin: &[u8]) -> Output {
         use std::io::Write;
         let mut child = self
             .command(args, true)
@@ -199,12 +185,7 @@ impl Cli {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(stdin.as_bytes())
-            .unwrap();
+        child.stdin.take().unwrap().write_all(stdin).unwrap();
         child.wait_with_output().unwrap()
     }
 
@@ -289,9 +270,7 @@ impl Cli {
             .collect()
     }
 
-    /// Hand-write a database file from a release with a different default
-    /// file name: the refinery ledger at versions 1–10, ahead of head.
-    pub fn seed_pre_reset_database(&self) {
+    pub fn seed_incompatible_database(&self) {
         self.sqlite()
             .execute_batch(
                 "CREATE TABLE refinery_schema_history (
@@ -301,16 +280,7 @@ impl Cli {
                      checksum VARCHAR(255)
                  );
                  INSERT INTO refinery_schema_history (version, name, applied_on, checksum) VALUES
-                     (1, 'baseline', '2026-01-01T00:00:00Z', '0'),
-                     (2, 'drop_director_monitor_enrollment', '2026-01-01T00:00:00Z', '0'),
-                     (3, 'strip_monitoring_member_kind', '2026-01-01T00:00:00Z', '0'),
-                     (4, 'fleet_level_wake_schedule', '2026-01-01T00:00:00Z', '0'),
-                     (5, 'monitor_wake_interval', '2026-01-01T00:00:00Z', '0'),
-                     (6, 'path_aware_asset_installs', '2026-01-01T00:00:00Z', '0'),
-                     (7, 'monitor_wake_request', '2026-01-01T00:00:00Z', '0'),
-                     (8, 'unique_active_monitor', '2026-01-01T00:00:00Z', '0'),
-                     (9, 'held_delivery_and_member_execs', '2026-01-01T00:00:00Z', '0'),
-                     (10, 'composer_safe_delivery', '2026-01-01T00:00:00Z', '0');
+                     (1, 'baseline', '2026-01-01T00:00:00Z', '0');
                  CREATE TABLE asset_installs (
                      coding_agent TEXT NOT NULL,
                      path TEXT NOT NULL,
@@ -329,23 +299,6 @@ impl Cli {
         self.seed_asset_row("claude", VERSION);
     }
 
-    /// The monitor member id the atomic `fleet create` bootstrap allocates in
-    /// a fresh database (fleet 1, Director 1, monitor 2).
-    pub const BOOTSTRAP_MONITOR_ID: i64 = 2;
-
-    /// Write (once) and return the monitor spawn-prompt file `fleet create
-    /// --monitor-file` consumes.
-    pub fn monitor_prompt_path(&self) -> String {
-        let path = self.home.path().join("monitor-prompt.md");
-        if !path.exists() {
-            std::fs::write(&path, "follow your monitor role protocol").unwrap();
-        }
-        path.to_str().unwrap().to_string()
-    }
-
-    /// `ready()` + a fleet via the atomic `fleet create` bootstrap: fleet 1,
-    /// Director member 1, and monitor member [`Self::BOOTSTRAP_MONITOR_ID`]
-    /// spawned from `--monitor-file`.
     pub fn with_cli_fleet(&self) -> (i64, i64) {
         self.ready();
         let output = self.run(&[
@@ -355,8 +308,6 @@ impl Cli {
             "testfleet",
             "--coding-agent",
             "claude",
-            "--monitor-file",
-            &self.monitor_prompt_path(),
             "--json",
         ]);
         assert!(
@@ -373,20 +324,6 @@ impl Cli {
         )
     }
 
-    pub fn with_cli_bare_fleet(&self) -> (i64, i64) {
-        let ids = self.with_cli_fleet();
-        let monitor = broker::active_monitor_member_id(&self.sqlite(), ids.0)
-            .unwrap()
-            .expect("bootstrap monitor");
-        let output = self.run(&["member", "delete", &monitor.to_string()]);
-        assert!(
-            output.status.success(),
-            "monitor delete: {}",
-            text(&output.stderr)
-        );
-        ids
-    }
-
     pub fn seeded_fleet(&self) -> (i64, i64) {
         self.ready();
         self.seed_fleet("testfleet")
@@ -394,98 +331,44 @@ impl Cli {
 
     pub fn seed_fleet(&self, name: &str) -> (i64, i64) {
         let mut conn = cafleet::db::connect(&self.db_url()).unwrap();
-        let fleet = broker::create_fleet(
-            &mut conn,
-            Some(name),
-            "main",
-            "@1",
-            "%0",
-            "claude",
-            "tmux",
-            "monitor",
-            "Monitor member for this fleet",
-            |_, _, monitor| Ok(format!("%{monitor}")),
+        let tx = conn.transaction().unwrap();
+        let timestamp = "2026-10-23T00:00:00.000000+00:00";
+        tx.execute(
+            "INSERT INTO fleets(name, created_at) VALUES(?1, ?2)",
+            rusqlite::params![name, timestamp],
         )
         .unwrap();
-        (
-            fleet["fleet_id"].as_i64().expect("seeded fleet id"),
-            fleet["director"]["member_id"]
-                .as_i64()
-                .expect("seeded Director id"),
+        let fleet = tx.last_insert_rowid();
+        tx.execute("INSERT INTO members(fleet_id, name, description, status, registered_at) VALUES(?1, 'Director', 'Root Director for this fleet', 'active', ?2)", rusqlite::params![fleet, timestamp]).unwrap();
+        let director = tx.last_insert_rowid();
+        tx.execute("INSERT INTO member_placements(member_id, mux_session, mux_window_id, mux_pane_id, backend, coding_agent, created_at) VALUES(?1, 'main', '@1', '%0', 'tmux', 'claude', ?2)", rusqlite::params![director, timestamp]).unwrap();
+        tx.execute(
+            "UPDATE fleets SET director_member_id=?1 WHERE fleet_id=?2",
+            rusqlite::params![director, fleet],
         )
-    }
-
-    pub fn seeded_bare_fleet(&self) -> (i64, i64) {
-        let ids = self.seeded_fleet();
-        let mut conn = cafleet::db::connect(&self.db_url()).unwrap();
-        let monitor = broker::active_monitor_member_id(&conn, ids.0)
-            .unwrap()
-            .expect("seeded monitor");
-        broker::deregister_member(&mut conn, monitor).unwrap();
-        ids
+        .unwrap();
+        tx.commit().unwrap();
+        (fleet, director)
     }
 
     pub fn seed_member(&self, fleet_id: i64, name: &str) -> i64 {
         let mut conn = cafleet::db::connect(&self.db_url()).unwrap();
-        let member = broker::register_member(
-            &mut conn,
-            fleet_id,
-            name,
-            "test member",
-            &[],
-            Some(&NewPlacement {
-                backend: "tmux".into(),
-                mux_session: "main".into(),
-                mux_window_id: "@1".into(),
-                mux_pane_id: None,
-                coding_agent: "claude".into(),
-            }),
-            false,
-        )
-        .unwrap();
-        let pane_id = format!("%{}", member.member_id + 4);
-        let placement = broker::update_placement_pane_id(&mut conn, member.member_id, &pane_id)
-            .unwrap()
-            .expect("seeded member placement");
-        assert_eq!(placement.mux_pane_id.as_deref(), Some(pane_id.as_str()));
-        member.member_id
+        let tx = conn.transaction().unwrap();
+        let timestamp = "2026-10-23T00:00:00.000000+00:00";
+        tx.execute("INSERT INTO members(fleet_id, name, description, status, registered_at) VALUES(?1, ?2, 'test member', 'active', ?3)", rusqlite::params![fleet_id, name, timestamp]).unwrap();
+        let member = tx.last_insert_rowid();
+        let pane = format!("%{}", member + 4);
+        tx.execute("INSERT INTO member_placements(member_id, mux_session, mux_window_id, mux_pane_id, backend, coding_agent, created_at) VALUES(?1, 'main', '@1', ?2, 'tmux', 'claude', ?3)", rusqlite::params![member, pane, timestamp]).unwrap();
+        tx.commit().unwrap();
+        member
     }
 
     pub fn seed_message(&self, sender: i64, recipient: i64, body: &str) -> i64 {
         let mut conn = cafleet::db::connect(&self.db_url()).unwrap();
         let message =
             broker::send_message(&mut conn, sender, &recipient.to_string(), body).unwrap();
-        assert_eq!(message.owner_member_id, recipient);
         assert_eq!(message.text, body);
         message.message_id
-    }
-
-    /// Spawn the fleet's monitor member through `member create --role monitor`.
-    pub fn create_monitor(&self, fleet_id: i64) -> i64 {
-        let output = self.run(&[
-            "member",
-            "create",
-            "--fleet-id",
-            &fleet_id.to_string(),
-            "--role",
-            "monitor",
-            "--name",
-            "monitor",
-            "--description",
-            "fleet monitor member",
-            "follow your monitor role protocol",
-        ]);
-        assert!(
-            output.status.success(),
-            "monitor member create must succeed: {}",
-            text(&output.stderr)
-        );
-        text(&output.stdout)
-            .split_whitespace()
-            .next()
-            .expect("compact member-create output starts with the id")
-            .parse()
-            .expect("the first token is the member id")
     }
 
     /// Spawn a member through `member create`; returns its id parsed from the
@@ -523,6 +406,15 @@ impl Cli {
             .unwrap()
     }
 
+    pub fn spawn_with_stdin(&self, args: &[&str]) -> std::process::Child {
+        self.command(args, true)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap()
+    }
+
     /// How many shim calls so far start with `prefix`.
     pub fn shim_count(&self, prefix: &str) -> usize {
         self.shim_calls()
@@ -540,114 +432,7 @@ impl Cli {
     }
 }
 
-const LOOP_DEADLINE: Duration = Duration::from_secs(20);
-const LOOP_POLL_INTERVAL: Duration = Duration::from_millis(20);
-
-/// A foreground `cafleet monitor` child that is always reaped, with its
-/// output and the shim log attached to every failure.
-pub struct LoopChild<'a> {
-    child: Option<Child>,
-    cli: &'a Cli,
-}
-
-impl<'a> LoopChild<'a> {
-    pub fn spawn(cli: &'a Cli, args: &[&str]) -> Self {
-        Self {
-            child: Some(cli.spawn(args)),
-            cli,
-        }
-    }
-
-    /// Spawn the loop for `fleet_id` and wait until it owns the runtime row.
-    pub fn start(cli: &'a Cli, fleet_id: i64, flags: &[&str]) -> Self {
-        let fleet = fleet_id.to_string();
-        let mut args = vec!["monitor", fleet.as_str()];
-        args.extend_from_slice(flags);
-        let mut child = Self::spawn(cli, &args);
-        let pid = child.pid();
-        child.wait_until("the loop to own the runtime row", || {
-            cli.monitor_pid(fleet_id) == Some(pid)
-        });
-        child
-    }
-
-    pub fn pid(&self) -> i64 {
-        i64::from(self.child.as_ref().expect("uncollected child").id())
-    }
-
-    fn reap(&mut self) -> io::Result<Output> {
-        let child = self.child.as_mut().expect("collect each child once");
-        if child.try_wait()?.is_none() {
-            child.kill()?;
-        }
-        self.child.take().unwrap().wait_with_output()
-    }
-
-    fn fail(&mut self, reason: &str) -> ! {
-        let output = self.reap().expect("terminate and reap the failed loop");
-        panic!(
-            "monitor loop: {reason}; status={}; stdout={}; stderr={}; shim={:?}",
-            output.status,
-            stdout(&output),
-            stderr(&output),
-            self.cli.shim_calls()
-        );
-    }
-
-    /// Wait for `observed` while the loop stays alive.
-    pub fn wait_until(&mut self, description: &str, mut observed: impl FnMut() -> bool) {
-        let deadline = Instant::now() + LOOP_DEADLINE;
-        loop {
-            if self.child.as_mut().unwrap().try_wait().unwrap().is_some() {
-                self.fail(&format!("exited before {description}"));
-            }
-            if observed() {
-                return;
-            }
-            if Instant::now() >= deadline {
-                self.fail(&format!("deadline waiting for {description}"));
-            }
-            std::thread::sleep(LOOP_POLL_INTERVAL);
-        }
-    }
-
-    /// Wait until the loop has listed the panes `ticks` more times.
-    pub fn wait_ticks(&mut self, ticks: usize) {
-        let cli = self.cli;
-        let target = cli.shim_count("list-panes") + ticks;
-        self.wait_until("further ticks", || cli.shim_count("list-panes") >= target);
-    }
-
-    pub fn stop(&mut self) -> Output {
-        let pid = nix::unistd::Pid::from_raw(i32::try_from(self.pid()).expect("PID fits i32"));
-        nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGTERM)
-            .expect("request graceful loop shutdown");
-        self.wait_for_exit("graceful loop shutdown")
-    }
-
-    pub fn wait_for_exit(&mut self, description: &str) -> Output {
-        let deadline = Instant::now() + LOOP_DEADLINE;
-        loop {
-            if self.child.as_mut().unwrap().try_wait().unwrap().is_some() {
-                return self.reap().expect("collect the completed loop");
-            }
-            if Instant::now() >= deadline {
-                self.fail(&format!("deadline waiting for {description}"));
-            }
-            std::thread::sleep(LOOP_POLL_INTERVAL);
-        }
-    }
-}
-
-impl Drop for LoopChild<'_> {
-    fn drop(&mut self) {
-        if self.child.is_some() {
-            let _ = self.reap();
-        }
-    }
-}
-
-fn write_executable(path: &Path, contents: &str) {
+pub fn write_executable(path: &Path, contents: &str) {
     std::fs::write(path, contents).unwrap();
     #[cfg(unix)]
     {

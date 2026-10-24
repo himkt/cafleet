@@ -1,50 +1,26 @@
-//! The `fleet` group (SPEC §6.3 *fleet group*) — the atomic fleet + Director
-//! + monitor bootstrap, list, show, and soft-delete.
-
-use rusqlite::Connection;
-
 use clap::Subcommand;
-use serde_json::{Value, json};
+use rusqlite::Connection;
+use serde_json::Value;
 
-use super::creation::PaneGuard;
-use super::helpers::{emit, resolve_body, resolve_mux};
+use super::helpers::{emit, resolve_mux};
 use crate::broker;
-use crate::coding_agent::coding_agent;
+use crate::capture::{CaptureSnapshot, ScanEntry, write_scan};
 use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::multiplexer::Multiplexer;
-
 use crate::output::format_fleet_create;
-use crate::runtime::ensure_monitor_loop;
-use crate::runtime::system::SystemProbe;
-
-const MONITOR_NAME: &str = "monitor";
-const MONITOR_DESCRIPTION: &str = "Monitor member for this fleet";
-
-struct MonitorSelection<'a> {
-    model: Option<&'a str>,
-    effort: Option<&'a str>,
-}
+use crate::time::now_utc;
 
 #[derive(Subcommand)]
 pub enum FleetCommand {
-    /// Create a fleet with its root Director and monitor member.
+    /// Register the calling Director in a new fleet.
     Create {
-        /// Human-readable name for the fleet.
+        /// Fleet name.
         #[arg(long)]
         name: String,
-        /// The backend the Director is actually running on.
+        /// Director's coding agent.
         #[arg(long = "coding-agent", value_parser = ["claude", "codex", "opencode"])]
         coding_agent: String,
-        /// UTF-8 file whose contents are the monitor's spawn prompt (`-` = stdin).
-        #[arg(long = "monitor-file", value_name = "PATH")]
-        monitor_file: String,
-        /// Model passed to the monitor's backend binary.
-        #[arg(long = "monitor-model", value_name = "MODEL")]
-        monitor_model: Option<String>,
-        /// Reasoning effort passed to the monitor's backend binary.
-        #[arg(long = "monitor-effort", value_name = "LEVEL")]
-        monitor_effort: Option<String>,
         /// Output in JSON format.
         #[arg(long)]
         json: bool,
@@ -55,20 +31,35 @@ pub enum FleetCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Show one fleet (soft-deleted included).
+    /// Show one fleet.
     Show {
-        /// The fleet to show.
+        /// Fleet to show.
         #[arg(value_name = "FLEET_ID")]
         fleet_id: i64,
         /// Output in JSON format.
         #[arg(long)]
         json: bool,
     },
-    /// Soft-delete a fleet and deregister its members.
+    /// Deregister a fleet and its members.
     Delete {
-        /// The fleet to delete.
+        /// Fleet to deregister.
         #[arg(value_name = "FLEET_ID")]
         fleet_id: i64,
+        /// Output in JSON format.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Capture the active fleet's panes once.
+    Capture {
+        /// Fleet whose active panes are captured.
+        #[arg(value_name = "FLEET_ID")]
+        fleet_id: i64,
+        /// Lines per pane.
+        #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(i64).range(1..))]
+        lines: i64,
+        /// Preserve ANSI styling in captured content.
+        #[arg(long)]
+        ansi: bool,
         /// Output in JSON format.
         #[arg(long)]
         json: bool,
@@ -79,167 +70,51 @@ pub fn run(
     slot: &mut Option<Connection>,
     settings: &Settings,
     command: FleetCommand,
+    deadline: crate::input::Deadline,
 ) -> Result<(), CafleetError> {
+    let conn = slot.as_mut().expect("open invocation connection");
     match command {
         FleetCommand::Create {
             name,
             coding_agent,
-            monitor_file,
-            monitor_model,
-            monitor_effort,
             json,
-        } => create(
-            slot,
-            settings,
-            &name,
-            &coding_agent,
-            &monitor_file,
-            MonitorSelection {
-                model: monitor_model.as_deref(),
-                effort: monitor_effort.as_deref(),
-            },
-            json,
-        ),
-        FleetCommand::List { json } => {
-            list(slot.as_mut().expect("open invocation connection"), json)
-        }
-        FleetCommand::Show { fleet_id, json } => show(
-            slot.as_mut().expect("open invocation connection"),
+        } => create(conn, settings, &name, &coding_agent, json),
+        FleetCommand::List { json } => list(conn, json),
+        FleetCommand::Show { fleet_id, json } => show(conn, fleet_id, json),
+        FleetCommand::Delete { fleet_id, json } => delete(conn, settings, fleet_id, json, deadline),
+        FleetCommand::Capture {
             fleet_id,
+            lines,
+            ansi,
             json,
-        ),
-        FleetCommand::Delete { fleet_id, json } => delete(
-            slot.as_mut().expect("open invocation connection"),
-            fleet_id,
-            json,
-        ),
+        } => capture(conn, settings, fleet_id, lines, ansi, json),
     }
 }
 
-/// The atomic bootstrap ladder (SPEC §6.3 *fleet group* → create): multiplexer
-/// preconditions → monitor prompt resolution → backend checks → the broker's
-/// single transaction, whose spawn callback substitutes the identity
-/// placeholders and splits the monitor pane. A post-spawn failure kills the
-/// recorded pane after DB rollback. Cleanup failures remain in the diagnostic.
 fn create(
-    slot: &mut Option<Connection>,
+    conn: &mut Connection,
     settings: &Settings,
     name: &str,
-    agent_name: &str,
-    monitor_file: &str,
-    monitor: MonitorSelection<'_>,
+    agent: &str,
     json: bool,
 ) -> Result<(), CafleetError> {
-    let inside_session = || {
-        CafleetError::App(
-            "cafleet fleet create must be run inside a tmux or herdr session".to_string(),
-        )
+    let inside_session = |_| {
+        CafleetError::App("cafleet fleet create must be run inside a tmux or herdr session".into())
     };
-    let mux = resolve_mux(settings).map_err(|_| inside_session())?;
-    mux.ensure_available().map_err(|_| inside_session())?;
-    let context = mux.context_discovery().map_err(|_| inside_session())?;
-
-    let prompt_body = resolve_body(None, Some(monitor_file), "--monitor-file")?;
-
-    let backend = coding_agent(agent_name)
-        .unwrap_or_else(|| panic!("'{agent_name}' is a registry-validated backend"));
-    backend.validate_model(monitor.model)?;
-    backend.validate_effort(monitor.effort)?;
-    backend.ensure_available(&SystemProbe)?;
-
-    let env: Vec<_> = std::env::var("CAFLEET_DATABASE_URL")
-        .ok()
-        .map(|value| ("CAFLEET_DATABASE_URL".to_string(), value))
-        .into_iter()
-        .collect();
-    let conn = slot
-        .as_mut()
-        .ok_or_else(|| CafleetError::App("database connection is closed".into()))?;
-    let mut spawned_pane: Option<PaneGuard<'_>> = None;
-    let bootstrap = broker::fleets::create_fleet(
+    let mux = resolve_mux(settings).map_err(inside_session)?;
+    mux.ensure_available().map_err(inside_session)?;
+    let context = mux.context_discovery().map_err(inside_session)?;
+    let fleet = broker::create_fleet(
         conn,
         Some(name),
         &context.session,
         &context.window_id,
         &context.pane_id,
-        agent_name,
+        agent,
         mux.name(),
-        MONITOR_NAME,
-        MONITOR_DESCRIPTION,
-        |fleet_id, director_id, monitor_id| {
-            let prompt = crate::spawn_prompt::substitute_spawn_placeholders(
-                &prompt_body,
-                fleet_id,
-                monitor_id,
-                director_id,
-                agent_name,
-            )?;
-            let argv = backend.build_spawn_argv(
-                &prompt,
-                MONITOR_NAME,
-                monitor.model,
-                monitor.effort,
-                true,
-            );
-            let pane_id = mux
-                .split_window(&context, &env, &argv)
-                .map_err(|error| CafleetError::App(format!("tmux split-window failed: {error}")))?;
-            spawned_pane = Some(PaneGuard::with_kill(
-                pane_id.clone(),
-                Box::new(|id| mux.kill_pane(id, true)),
-            ));
-            Ok(pane_id)
-        },
-    );
-    let mut fleet = match bootstrap {
-        Ok(fleet) => fleet,
-        Err(error) => {
-            // The broker has ended its transaction scope. Close our DB handle
-            // before external cleanup, including when explicit rollback failed.
-            drop(slot.take());
-            return Err(match &mut spawned_pane {
-                Some(pane) => pane.rollback(error),
-                None => error,
-            });
-        }
-    };
-    let fleet_id = fleet["fleet_id"]
-        .as_i64()
-        .expect("the bootstrap reports the fleet id");
-    let loop_pid = match start_monitor_loop(conn, settings, fleet_id) {
-        Ok(pid) => pid,
-        Err(error) => {
-            let error = match broker::delete_fleet(conn, fleet_id) {
-                Ok(_) => error,
-                Err(cleanup) => {
-                    error.with_cleanup(format!("cleanup failed for fleet {fleet_id}: {cleanup}"))
-                }
-            };
-            drop(slot.take());
-            return Err(match &mut spawned_pane {
-                Some(pane) => pane.rollback(error),
-                None => error,
-            });
-        }
-    };
-    if let Some(pane) = &mut spawned_pane {
-        pane.finish();
-    }
-    fleet["monitor_loop"] = json!({"pid": loop_pid});
+    )?;
     emit(json, &fleet, || format_fleet_create(&fleet));
     Ok(())
-}
-
-/// Start the fleet's loop and return the process id that owns its runtime row.
-fn start_monitor_loop(
-    conn: &Connection,
-    settings: &Settings,
-    fleet_id: i64,
-) -> Result<i64, CafleetError> {
-    ensure_monitor_loop(conn, settings, fleet_id)?;
-    Ok(broker::read_monitor_runtime(conn, fleet_id)?
-        .and_then(|runtime| runtime.pid)
-        .expect("a live loop owns the runtime row"))
 }
 
 fn list(conn: &mut Connection, json: bool) -> Result<(), CafleetError> {
@@ -293,8 +168,14 @@ fn show(conn: &mut Connection, fleet_id: i64, json: bool) -> Result<(), CafleetE
     Ok(())
 }
 
-fn delete(conn: &mut Connection, fleet_id: i64, json: bool) -> Result<(), CafleetError> {
-    let result = broker::delete_fleet(conn, fleet_id)?;
+fn delete(
+    conn: &mut Connection,
+    settings: &Settings,
+    fleet_id: i64,
+    json: bool,
+    deadline: crate::input::Deadline,
+) -> Result<(), CafleetError> {
+    let result = crate::input::delete_fleet(conn, settings, fleet_id, deadline)?;
     emit(json, &result, || {
         format!(
             "Deleted fleet {fleet_id}. Deregistered {} members.",
@@ -304,11 +185,66 @@ fn delete(conn: &mut Connection, fleet_id: i64, json: bool) -> Result<(), Caflee
     Ok(())
 }
 
+fn capture(
+    conn: &mut Connection,
+    settings: &Settings,
+    fleet_id: i64,
+    lines: i64,
+    ansi: bool,
+    json_output: bool,
+) -> Result<(), CafleetError> {
+    let fleet = broker::fleets::fetch_fleet(conn, fleet_id)?
+        .filter(|fleet| fleet.deleted_at.is_none())
+        .ok_or_else(|| CafleetError::App(format!("fleet {fleet_id} not found")))?;
+    let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
+    mux.ensure_available()
+        .map_err(|e| CafleetError::App(e.to_string()))?;
+
+    let director_member_id = fleet.director_member_id;
+    let members = broker::members::capture_roster(conn, fleet_id)?;
+    let mut roster: Vec<_> = members
+        .iter()
+        .filter(|member| Some(member.member_id) == director_member_id)
+        .collect();
+    roster.extend(members.iter().filter(|member| {
+        Some(member.member_id) != director_member_id && member.placement.is_some()
+    }));
+
+    let mut entries = Vec::new();
+    for member in roster {
+        let placement =
+            member
+                .placement
+                .as_ref()
+                .ok_or_else(|| CafleetError::InvalidStoredValue {
+                    field: "member placement".into(),
+                    value: member.member_id.to_string(),
+                })?;
+        let pane_id = placement.mux_pane_id.clone();
+        let outcome = match pane_id.as_deref() {
+            None => Err("pane not available (pending placement)".to_string()),
+            Some(pane) => mux
+                .capture_pane(pane, lines)
+                .map_err(|error| format!("capture failed: {error}"))
+                .map(|raw| CaptureSnapshot::from_raw(&raw, ansi, now_utc())),
+        };
+        entries.push(ScanEntry {
+            member_id: member.member_id,
+            name: member.name.clone(),
+            kind: member.kind,
+            coding_agent: placement.coding_agent.clone(),
+            pane_id,
+            lines,
+            outcome,
+        });
+    }
+    write_scan(&mut std::io::stdout(), &entries, json_output)
+}
+
 #[cfg(test)]
 mod tests {
-    use clap::Parser;
-
     use super::FleetCommand;
+    use clap::Parser;
 
     #[derive(Parser)]
     struct Harness {
@@ -320,77 +256,42 @@ mod tests {
         Harness::try_parse_from(args).map(|harness| harness.command)
     }
 
-    fn create_monitor_flags(command: FleetCommand) -> (String, Option<String>, Option<String>) {
-        let FleetCommand::Create {
-            monitor_file,
-            monitor_model,
-            monitor_effort,
-            ..
-        } = command
-        else {
-            panic!("parsed a non-create command");
-        };
-        (monitor_file, monitor_model, monitor_effort)
+    #[test]
+    fn fleet_help_explains_registration_and_capture_flags() {
+        let create = parse(&["cafleet", "create", "--help"])
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(create.contains("Fleet name"), "{create}");
+        assert!(create.contains("Director's coding agent"), "{create}");
+        let capture = parse(&["cafleet", "capture", "--help"])
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(capture.contains("Lines per pane"), "{capture}");
+        assert!(capture.contains("Preserve ANSI"), "{capture}");
     }
 
     #[test]
-    fn create_requires_the_monitor_file() {
-        let Err(err) = parse(&[
+    fn create_parses_registration_inputs_for_the_current_director() {
+        let parsed = parse(&[
             "cafleet",
             "create",
             "--name",
             "alpha",
             "--coding-agent",
             "claude",
-        ]) else {
-            panic!("--monitor-file is required");
-        };
-        assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
-        assert!(
-            err.to_string().contains("--monitor-file"),
-            "the error names the missing flag, got: {err}"
-        );
-    }
-
-    #[test]
-    fn create_parses_without_a_monitor_model() {
-        let command = parse(&[
-            "cafleet",
-            "create",
-            "--name",
-            "alpha",
-            "--coding-agent",
-            "claude",
-            "--monitor-file",
-            "prompt.md",
+            "--json",
         ])
         .unwrap();
-        let (monitor_file, monitor_model, monitor_effort) = create_monitor_flags(command);
-        assert_eq!(monitor_file, "prompt.md");
-        assert_eq!(monitor_model, None);
-        assert_eq!(monitor_effort, None);
+        assert!(matches!(parsed, FleetCommand::Create { .. }));
     }
 
     #[test]
-    fn create_accepts_stdin_as_the_monitor_file_and_a_monitor_model() {
-        let command = parse(&[
-            "cafleet",
-            "create",
-            "--name",
-            "alpha",
-            "--coding-agent",
-            "claude",
-            "--monitor-file",
-            "-",
-            "--monitor-model",
-            "haiku",
-            "--monitor-effort",
-            "low",
+    fn capture_accepts_the_fleet_subject_depth_and_ansi_presentation() {
+        parse(&[
+            "cafleet", "capture", "1", "--lines", "200", "--ansi", "--json",
         ])
         .unwrap();
-        let (monitor_file, monitor_model, monitor_effort) = create_monitor_flags(command);
-        assert_eq!(monitor_file, "-", "the stdin sentinel is an ordinary value");
-        assert_eq!(monitor_model.as_deref(), Some("haiku"));
-        assert_eq!(monitor_effort.as_deref(), Some("low"));
     }
 }

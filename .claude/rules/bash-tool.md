@@ -1,21 +1,12 @@
 # Bash Tool — Member Behavior
 
-This rule fires every time you reach for the Bash tool as a CAFleet team member. Read it before invoking Bash, before emitting any text that looks like a command result, and before responding to any "run X" request.
-
-## The MUST rule
-
-> **If you are a CAFleet member spawned by `cafleet member create`, your harness runs in `--permission-mode dontAsk`. Your Bash tool is ENABLED and your broker commands are allowed from spawn. Read-only commands and every call matching the operator's `permissions.allow` also run without a prompt; every other shell command or file edit is denied without a prompt, and an edit under a protected directory such as `.git` or `.claude` is denied whatever the allow list holds. Run every command your harness allows directly via the Bash tool, with no prefix and no operator prompt. Route a correct, necessary command it denies to the Director with `cafleet message send`, and report a denied file edit to the Director.**
-
-## How to detect that you are a CAFleet member
-
-Any of the following signals means you are a member subject to this rule:
-
-- Your spawn prompt names a Director / `director_member_id` / refers to you as a "member" / "teammate" of a CAFleet team.
-- The status line at the bottom of your pane shows `⏵⏵ don't ask on`.
-- Your spawn prompt instructs you to wait for the Director's instructions via `cafleet ... message poll`.
+A CAFleet member runs commands directly through its available shell tool under the executing backend's host rules. Inspect real output, reconsider incorrect paths/flags or a permitted alternative, and route a necessary denied command to the Director. Report denied file edits for a host-rule change or Director edit.
 
 ## The owning protocols
 
-- Member-side conduct — run what your harness allows and route the rest, the never-fabricate rules, and where your ids come from: `skills/cafleet/roles/member.md`.
-- Command routing — the member-side reconsider-then-route protocol and the Director-side `cafleet member exec` dispatch, completion notice, and targeting boundary: `skills/cafleet/reference/prompt-routing.md`.
-- Keystrokes you may see land in your pane: a `cafleet member ping` (`Esc` → `cafleet message poll <your-member-id> — then resume your work if something was still running.` → `Enter`) re-poking a quiet pane, and a `! cafleet member exec-run <exec-id>` line running a command the Director dispatched for you with `cafleet member exec`.
+- Member authority and observed-result reporting: `skills/cafleet/roles/member.md`.
+- Required denied-command routing: `skills/cafleet/reference/prompt-routing.md`.
+- `cafleet member ping` submits the fixed literal `cafleet message poll <your-member-id> --json` only into an idle composer.
+- `cafleet member exec` visibly submits native `! COMMAND`. Use the host's actual output; the Director inspects completion and sends explicit continuation when needed.
+
+Run one command per shell invocation, preserve literal IDs and use a file writer for output. The selected backend's runtime bindings define its permission posture. A broad tool permission remains subject to the assigned role and Director-owned lifecycle/Git boundaries.

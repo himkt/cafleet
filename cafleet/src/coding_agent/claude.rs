@@ -1,6 +1,5 @@
 //! claude backend (SPEC §6.7): pass-through model validation, the five-level
-//! effort enum, and the only backend that honors `display_name` and
-//! `monitor`. The colocated
+//! effort enum, and the only backend that honors `display_name`. The colocated
 //! tests pin the contract; see [`super::test_support`] for the API.
 
 use super::{CodingAgent, SpawnProbe, missing_binary};
@@ -11,10 +10,6 @@ const EFFORT_LEVELS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 /// Session allow rules for the broker commands every claude member runs, so
 /// a member does not depend on the user's `settings.json`.
 const MEMBER_ALLOW_RULES: [&str; 1] = ["Bash(cafleet message *)"];
-const MONITOR_ALLOW_RULES: [&str; 2] = [
-    "Bash(cafleet monitor scan *)",
-    "Bash(cafleet member ping *)",
-];
 
 pub struct Claude;
 
@@ -56,18 +51,16 @@ impl CodingAgent for Claude {
         display_name: &str,
         model: Option<&str>,
         effort: Option<&str>,
-        monitor: bool,
     ) -> Vec<String> {
         let mut argv = vec![
             "claude".to_string(),
             "--permission-mode".to_string(),
             "dontAsk".to_string(),
+            "--prompt-suggestions".to_string(),
+            "false".to_string(),
             "--allowedTools".to_string(),
         ];
         argv.extend(MEMBER_ALLOW_RULES.map(str::to_string));
-        if monitor {
-            argv.extend(MONITOR_ALLOW_RULES.map(str::to_string));
-        }
         // `--allowedTools` takes several values; `--name` ends its value list
         // and keeps the prompt positional.
         argv.push("--name".to_string());
@@ -132,11 +125,13 @@ mod tests {
     #[test]
     fn spawn_argv_carries_the_message_allow_rule_the_display_name_and_optional_tokens() {
         assert_eq!(
-            claude().build_spawn_argv("do it", "worker", Some("opus"), Some("high"), false),
+            claude().build_spawn_argv("do it", "worker", Some("opus"), Some("high")),
             argv(&[
                 "claude",
                 "--permission-mode",
                 "dontAsk",
+                "--prompt-suggestions",
+                "false",
                 "--allowedTools",
                 "Bash(cafleet message *)",
                 "--name",
@@ -153,11 +148,13 @@ mod tests {
     #[test]
     fn spawn_argv_omits_all_tokens_for_none_model_and_effort() {
         assert_eq!(
-            claude().build_spawn_argv("do it", "worker", None, None, false),
+            claude().build_spawn_argv("do it", "worker", None, None),
             argv(&[
                 "claude",
                 "--permission-mode",
                 "dontAsk",
+                "--prompt-suggestions",
+                "false",
                 "--allowedTools",
                 "Bash(cafleet message *)",
                 "--name",
@@ -165,30 +162,6 @@ mod tests {
                 "do it",
             ]),
             "no --model/--effort tokens at all — never an empty value"
-        );
-    }
-
-    #[test]
-    fn spawn_argv_for_the_monitor_adds_the_scan_and_ping_allow_rules() {
-        assert_eq!(
-            claude().build_spawn_argv("do it", "monitor", Some("haiku"), Some("low"), true),
-            argv(&[
-                "claude",
-                "--permission-mode",
-                "dontAsk",
-                "--allowedTools",
-                "Bash(cafleet message *)",
-                "Bash(cafleet monitor scan *)",
-                "Bash(cafleet member ping *)",
-                "--name",
-                "monitor",
-                "--model",
-                "haiku",
-                "--effort",
-                "low",
-                "do it",
-            ]),
-            "--name ends the --allowedTools value list, so the prompt stays positional"
         );
     }
 

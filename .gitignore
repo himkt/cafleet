@@ -17,10 +17,6 @@
 .claude/scheduled_tasks.lock
 
 # ==== Build outputs ====
-# WebUI SPA bundled output (built by `mise //admin:build`), embedded into the
-# cafleet binary at cargo-build time.
-cafleet/webui-dist/
-
 # Cargo build directory.
 /cafleet/target/
 
@@ -28,9 +24,7 @@ cafleet/webui-dist/
 /docs/doc_build/
 
 # ==== Toolchain caches ====
-admin/node_modules/
 /docs/node_modules/
-.vite/
 
 # ==== Generated content ====
 # Research-shaped task folders — one per topic, produced by clean-docs runs and

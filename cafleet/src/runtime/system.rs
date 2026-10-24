@@ -48,6 +48,10 @@ impl CommandRunner for SystemRunner {
         run_process(argv, timeout_secs.map(Duration::from_secs))
     }
 
+    fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError> {
+        run_process(argv, Some(timeout))
+    }
+
     fn sleep(&self, seconds: f64) {
         std::thread::sleep(Duration::from_secs_f64(seconds));
     }
@@ -56,6 +60,11 @@ impl CommandRunner for SystemRunner {
 fn run_process(argv: &[String], timeout: Option<Duration>) -> Result<String, RunError> {
     let started = Instant::now();
     let (program, args) = argv.split_first().expect("argv carries the program");
+    if timeout.is_some_and(|timeout| timeout.is_zero()) {
+        return Err(RunError::NotStarted(
+            "command deadline expired before launch".into(),
+        ));
+    }
     let spawned = Command::new(program)
         .args(args)
         .stdin(Stdio::null())
@@ -68,9 +77,7 @@ fn run_process(argv: &[String], timeout: Option<Duration>) -> Result<String, Run
             return Err(RunError::BinaryNotFound(e.to_string()));
         }
         Err(e) => {
-            return Err(RunError::Failed {
-                stderr: e.to_string(),
-            });
+            return Err(RunError::NotStarted(e.to_string()));
         }
     };
     if let Some(timeout) = timeout {

@@ -73,6 +73,13 @@ fn assert_keys(value: &serde_json::Value, expected: &[&str]) {
     );
 }
 
+fn incompatible_format_error(cli: &Cli) -> String {
+    format!(
+        "database format is incompatible at '{}'; choose an empty database path and run 'cafleet setup'.",
+        cli.db_path().display()
+    )
+}
+
 fn assert_doctor_shape(payload: &serde_json::Value) {
     assert_keys(
         payload,
@@ -245,13 +252,9 @@ fn setup_refuses_an_unversioned_database_with_existing_tables() {
     assert_eq!(code(&output), 1);
     let combined = format!("{}{}", stdout(&output), stderr(&output));
     assert!(
-        combined.contains(
-            "DB has existing tables but no refinery_schema_history. \
-             Refusing to migrate an unversioned database."
-        ),
+        combined.contains(&incompatible_format_error(&cli)),
         "got: {combined}"
     );
-    assert!(combined.contains("db half failed:"), "got: {combined}");
     let conn = cli.sqlite();
     assert_eq!(
         conn.query_row("SELECT x FROM junk", [], |row| row.get::<_, i64>(0))
@@ -262,20 +265,20 @@ fn setup_refuses_an_unversioned_database_with_existing_tables() {
 }
 
 #[test]
-fn setup_refuses_a_pre_reset_database_and_leaves_its_ledger_unchanged() {
+fn setup_preserves_an_incompatible_database_and_its_install_ledger() {
     let cli = Cli::new();
-    cli.seed_pre_reset_database();
+    cli.seed_incompatible_database();
+    let before = std::fs::read(cli.db_path()).unwrap();
 
     let output = cli.run(&["setup"]);
     assert_eq!(code(&output), 1);
     let combined = format!("{}{}", stdout(&output), stderr(&output));
     assert!(
-        combined.contains(
-            "db half failed: DB schema is at version 10 which is unknown to this version \
-             of cafleet. Refusing to downgrade automatically."
-        ),
+        combined.contains(&incompatible_format_error(&cli)),
         "got: {combined}"
     );
+    assert_eq!(std::fs::read(cli.db_path()).unwrap(), before);
+    assert!(cli.asset_rows().is_empty());
     assert_eq!(
         cli.sqlite()
             .query_row(
@@ -284,7 +287,7 @@ fn setup_refuses_a_pre_reset_database_and_leaves_its_ledger_unchanged() {
                 |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
             )
             .unwrap(),
-        (10, 10)
+        (1, 1)
     );
 }
 
@@ -501,21 +504,15 @@ fn doctor_reports_a_missing_database() {
 }
 
 #[test]
-fn doctor_completes_the_report_against_a_pre_reset_database() {
+fn doctor_completes_the_report_against_an_incompatible_database() {
     let cli = Cli::new();
-    cli.seed_pre_reset_database();
+    cli.seed_incompatible_database();
     let output = cli.run(&["doctor"]);
     assert_eq!(code(&output), 1, "the database issue exits 1");
     let out = stdout(&output);
     assert!(out.contains("✓ multiplexer"), "got: {out}");
     assert!(out.contains("✗ database"), "got: {out}");
-    assert!(
-        out.contains(&format!(
-            "schema 10 is newer than this CLI (head {}) — upgrade cafleet",
-            head_version()
-        )),
-        "got: {out}"
-    );
+    assert!(out.contains(&incompatible_format_error(&cli)), "got: {out}");
     assert_eq!(
         out.matches("– cafleet setup --coding-agent").count(),
         3,
@@ -536,7 +533,10 @@ fn doctor_completes_the_report_against_a_pre_reset_database() {
     assert_doctor_shape(&payload);
 
     assert_eq!(payload["database"]["ok"], false);
-    assert_eq!(payload["database"]["schema_version"], 10);
+    assert_eq!(
+        payload["database"]["error"],
+        incompatible_format_error(&cli)
+    );
     assert_eq!(payload["database"]["head_version"], head_version());
 
     let agents = payload["coding_agents"]["agents"].as_array().unwrap();
@@ -552,7 +552,7 @@ fn doctor_completes_the_report_against_a_pre_reset_database() {
             .unwrap()
             .len(),
         0,
-        "no recorded rows are read on a behind-head schema"
+        "incompatible formats expose no asset records"
     );
     assert_eq!(payload["issues"], 1, "only the database issue counts");
 }
@@ -567,10 +567,7 @@ fn doctor_reports_an_unversioned_database() {
     let output = cli.run(&["doctor"]);
     assert_eq!(code(&output), 1);
     let out = stdout(&output);
-    assert!(
-        out.contains("database has tables but no schema history — not a cafleet database?"),
-        "got: {out}"
-    );
+    assert!(out.contains(&incompatible_format_error(&cli)), "got: {out}");
     assert_eq!(
         out.matches("– cafleet setup --coding-agent").count(),
         3,
@@ -721,22 +718,14 @@ fn step6_doctor_open_and_path_failures_still_render_all_sections_in_text_and_jso
 }
 
 #[test]
-fn step6_doctor_ahead_of_head_does_not_query_malformed_asset_records() {
+fn doctor_reports_malformed_current_assets_without_querying_records() {
     let cli = Cli::new();
     cli.migrate();
     let conn = cli.sqlite();
-    conn.execute(
-        "UPDATE refinery_schema_history SET version=?1 WHERE version=?2",
-        rusqlite::params![cafleet::db::head_version() + 1, cafleet::db::head_version()],
-    )
-    .unwrap();
     conn.execute_batch("DROP TABLE asset_installs; CREATE TABLE asset_installs(wrong_column TEXT)")
         .unwrap();
     drop(conn);
-    let head = head_version();
-    let recorded = head + 1;
-    let remedy =
-        format!("schema {recorded} is newer than this CLI (head {head}) — upgrade cafleet");
+    let remedy = incompatible_format_error(&cli);
     let output = cli.run(&["doctor"]);
     assert_eq!(code(&output), 1);
     let out = stdout(&output);
@@ -748,11 +737,9 @@ fn step6_doctor_ahead_of_head_does_not_query_malformed_asset_records() {
     assert_eq!(code(&output), 1);
     let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
     assert_doctor_shape(&payload);
-    assert_eq!(
-        payload["database"],
-        serde_json::json!({"ok": false,
-            "schema_version": recorded, "head_version": head, "error": remedy})
-    );
+    assert_eq!(payload["database"]["ok"], false);
+    assert_eq!(payload["database"]["error"], remedy);
+    assert_eq!(payload["database"]["head_version"], head_version());
     assert!(
         payload["coding_agents"]["superseded"]
             .as_array()
@@ -905,7 +892,7 @@ fn doctor_reports_mixed_assets_in_text_and_json() {
 }
 
 #[test]
-fn doctor_treats_empty_and_absent_asset_tables_as_informational() {
+fn doctor_distinguishes_an_empty_asset_registry_from_a_missing_required_table() {
     let cli = Cli::new();
     cli.migrate();
     let output = cli.run(&["doctor"]);
@@ -924,18 +911,18 @@ fn doctor_treats_empty_and_absent_asset_tables_as_informational() {
     let output = cli.run(&["doctor"]);
     assert_eq!(
         code(&output),
-        0,
-        "the missing table carries no issue: {}",
+        1,
+        "a missing required table is a format issue: {}",
         stdout(&output)
     );
     let out = stdout(&output);
-    assert!(out.contains("✓ database"), "got: {out}");
+    assert!(out.contains(&incompatible_format_error(&cli)), "got: {out}");
     assert_eq!(
         out.matches("– cafleet setup --coding-agent").count(),
         3,
         "every agent renders not-installed with no recorded data: {out}"
     );
-    assert!(out.contains("no issues found"), "got: {out}");
+    assert!(out.contains("1 issue found"), "got: {out}");
 }
 
 const SEND_PROBE: &str = "cafleet message send --from-member-id 1 --to-member-id 2 x";
@@ -960,6 +947,38 @@ fn write_user_settings(cli: &Cli, contents: &str) -> PathBuf {
     path
 }
 
+#[test]
+fn doctor_reports_wait_specific_deny_and_ask_rules() {
+    for list in ["deny", "ask"] {
+        let cli = Cli::new();
+        cli.migrate();
+        seed_all_current(&cli);
+        let settings = write_user_settings(
+            &cli,
+            &format!(r#"{{"permissions": {{"{list}": ["Bash(cafleet message wait *)"]}}}}"#),
+        );
+        let project = tempfile::TempDir::new().unwrap();
+        let (text, payload) = doctor_from(&cli, project.path(), 1);
+        assert!(
+            text.contains("cafleet message wait 1 --timeout 300 --json"),
+            "{text}"
+        );
+        assert_eq!(
+            payload["member_permissions"],
+            serde_json::json!({
+                "ok": false,
+                "findings": [{
+                    "coding_agent": "claude",
+                    "file": settings.to_str().unwrap(),
+                    "list": list,
+                    "rule": "Bash(cafleet message wait *)",
+                    "command": "cafleet message wait 1 --timeout 300 --json"
+                }]
+            })
+        );
+        assert_eq!(payload["issues"], 1);
+    }
+}
 #[test]
 fn doctor_reports_no_member_permission_finding_when_no_setting_blocks_a_broker_command() {
     let cli = Cli::new();

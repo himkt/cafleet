@@ -22,8 +22,6 @@ jobs:
             cafleet/target
           key: ${{ runner.os }}-cargo-lint-${{ hashFiles('cafleet/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-lint-
-      - run: mise //admin:install
-      - run: mise //admin:lint
       - run: mise //cafleet:lint
 
   test:
@@ -41,6 +39,4 @@ jobs:
             cafleet/target
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('cafleet/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-test-
-      - run: mise //admin:install
-      - run: mise //admin:test
       - run: mise //cafleet:test

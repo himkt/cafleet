@@ -1,191 +1,96 @@
-//! End-to-end binary tests (design § Success Criteria): atomic fleet create
-//! (fleet + Director + monitor member + the detached monitor loop in one
-//! invocation) → member create (tmux shim) → message send/poll/ack → one loop
-//! tick waking the monitor member's pane, all against a fresh temp DB.
-
 mod common;
 
-use std::time::{Duration, Instant};
-
-use common::{Cli, LoopChild, code, stderr, stdout};
-
-const DEADLINE: Duration = Duration::from_secs(30);
-const POLL_INTERVAL: Duration = Duration::from_millis(20);
-
-/// The loop `fleet create` started detached; stopped when the test ends.
-struct DetachedLoop(i64);
-
-impl DetachedLoop {
-    fn terminate(&self) {
-        let pid = nix::unistd::Pid::from_raw(i32::try_from(self.0).expect("PID fits i32"));
-        let _ = nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGTERM);
-    }
-}
-
-impl Drop for DetachedLoop {
-    fn drop(&mut self) {
-        self.terminate();
-    }
-}
-
-fn wait_for(cli: &Cli, description: &str, mut observed: impl FnMut() -> bool) {
-    let deadline = Instant::now() + DEADLINE;
-    while !observed() {
-        assert!(
-            Instant::now() < deadline,
-            "deadline waiting for {description}; log={:?}; shim={:?}",
-            std::fs::read_to_string(cli.monitor_log_path(1)),
-            cli.shim_calls()
-        );
-        std::thread::sleep(POLL_INTERVAL);
-    }
-}
+use common::{Cli, code, stderr, stdout};
 
 #[test]
-fn end_to_end_lifecycle_with_one_monitor_tick() {
+fn registration_spawn_and_point_to_point_message_lifecycle() {
     let mut cli = Cli::new();
-    cli.set_env("CAFLEET_TEST_TMUX_PANES", "%0 %7 %8 %9");
-    cli.set_env("CAFLEET_MONITOR_WAKE_INTERVAL", "1");
-    cli.set_env("CAFLEET_TEST_NEXT_PANE", "%7");
     cli.install();
-
-    let output = cli.run(&[
+    let fleet = cli.run(&[
         "fleet",
         "create",
         "--name",
         "e2e",
         "--coding-agent",
         "claude",
-        "--monitor-file",
-        &cli.monitor_prompt_path(),
+        "--json",
     ]);
-    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
-    assert_eq!(stdout(&output), cli.fleet_create_text(1, 1, 2));
-    let pid = cli.monitor_pid(1).expect("fleet create started the loop");
-    let monitor_loop = DetachedLoop(pid);
-
-    let monitor_id = Cli::BOOTSTRAP_MONITOR_ID;
+    assert_eq!(code(&fleet), 0, "{}", stderr(&fleet));
+    let created: serde_json::Value = serde_json::from_str(&stdout(&fleet)).unwrap();
+    let fleet_id = created["fleet_id"].as_i64().unwrap();
+    let director = created["director"]["member_id"].as_i64().unwrap();
+    assert_eq!(cli.shim_count("split-window"), 0);
     cli.set_env("CAFLEET_TEST_NEXT_PANE", "%8");
-    let worker_id = cli.create_member(1, "worker");
-    cli.set_env("CAFLEET_TEST_NEXT_PANE", "%9");
-    let helper_id = cli.create_member(1, "helper");
-    let conn = cli.sqlite();
-    for (member, pane) in [
-        (1, "%0"),
-        (monitor_id, "%7"),
-        (worker_id, "%8"),
-        (helper_id, "%9"),
-    ] {
-        assert_eq!(
-            conn.query_row(
-                "SELECT mux_pane_id FROM member_placements WHERE member_id=?1",
-                [member],
-                |row| row.get::<_, String>(0)
-            )
-            .unwrap(),
-            pane
-        );
-    }
-
-    let output = cli.run(&[
+    let worker = cli.create_member(fleet_id, "worker");
+    cli.set_pane_capture(
+        "%8",
+        "Ready.\n────────────\n❯ \x1b[0m\n────────────\n? for shortcuts",
+    );
+    let sent = cli.run(&[
         "message",
         "send",
         "--from-member-id",
-        "1",
+        &director.to_string(),
         "--to-member-id",
-        &worker_id.to_string(),
+        &worker.to_string(),
         "e2e task",
+        "--json",
     ]);
-    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
-    let message_id: i64 = cli
+    assert_eq!(code(&sent), 0, "{}", stderr(&sent));
+    let payload: serde_json::Value = serde_json::from_str(&stdout(&sent)).unwrap();
+    let id = payload["message"]["message_id"].as_i64().unwrap();
+    assert_eq!(payload["notification_sent"], true);
+    let polled = cli.run(&["message", "poll", &worker.to_string(), "--json"]);
+    assert_eq!(code(&polled), 0, "{}", stderr(&polled));
+    let inbox: serde_json::Value = serde_json::from_str(&stdout(&polled)).unwrap();
+    assert_eq!(inbox.as_array().unwrap().len(), 1);
+    assert_eq!(inbox[0], payload["message"]);
+    let acked = cli.run(&["message", "ack", &id.to_string(), "--json"]);
+    assert_eq!(code(&acked), 0, "{}", stderr(&acked));
+    let ack: serde_json::Value = serde_json::from_str(&stdout(&acked)).unwrap();
+    assert_eq!(ack["message"]["status_state"], "completed");
+    let mut expected = payload["message"].clone();
+    expected["status_state"] = "completed".into();
+    expected["status_timestamp"] = ack["message"]["status_timestamp"].clone();
+    assert_eq!(ack["message"], expected);
+    let notification_stamp: String = cli
         .sqlite()
         .query_row(
-            "SELECT message_id FROM messages WHERE type='unicast'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-
-    let output = cli.run(&["message", "poll", &worker_id.to_string()]);
-    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
-    assert!(
-        stdout(&output).contains("e2e task"),
-        "got: {}",
-        stdout(&output)
-    );
-
-    let output = cli.run(&["message", "ack", &message_id.to_string()]);
-    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
-    assert!(stdout(&output).starts_with("Message acknowledged.\n"));
-
-    let output = cli.run(&["message", "poll", &worker_id.to_string()]);
-    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
-    assert!(stdout(&output).contains("No messages found."));
-
-    let mut second = LoopChild::spawn(&cli, &["monitor", "1", "--tick", "1"]);
-    let output = second.wait_for_exit("second monitor refusal");
-    assert_eq!(
-        code(&output),
-        1,
-        "the atomic claim refuses a second loop; stderr: {}",
-        stderr(&output)
-    );
-    assert!(
-        stderr(&output).contains("Error: monitor already running for fleet 1"),
-        "got: {}",
-        stderr(&output)
-    );
-
-    let payload = format!(
-        "[cafleet] tick: fleet 1 — health-check your 2 members: \
-         {worker_id} (worker; coding_agent=claude; unacked=0), \
-         {helper_id} (helper; coding_agent=claude; unacked=0). \
-         Director: 1 (Director; coding_agent=claude; unacked=0). \
-         Follow your monitor role protocol. \
-         Resume your work if something was still running."
-    );
-    let wake_keystroke = format!("send-keys -t %7 -l {payload}");
-    wait_for(&cli, "the committed monitor-directed wake", || {
-        let committed = conn
-            .query_row(
-                "SELECT last_wake_at FROM monitor_runtime WHERE fleet_id=1",
-                [],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .unwrap()
-            .is_some_and(|timestamp| !timestamp.is_empty());
-        committed && cli.shim_calls().iter().any(|line| line == &wake_keystroke)
-    });
-
-    monitor_loop.terminate();
-    wait_for(&cli, "the loop to clear its runtime row", || {
-        cli.monitor_pid(1).is_none()
-    });
-    let log = std::fs::read_to_string(cli.monitor_log_path(1)).unwrap();
-    let calls = cli.shim_calls();
-    assert!(
-        log.contains(&format!(
-            "monitor loop started (fleet 1, tick 5s, pid {pid})"
-        )),
-        "log: {log}; shim: {calls:?}"
-    );
-    assert!(
-        log.contains(&format!("tick -> wake monitor {monitor_id} (2 members)")),
-        "log: {log}; shim: {calls:?}"
-    );
-    assert!(
-        calls
-            .iter()
-            .filter(|line| line.contains("[cafleet] tick:"))
-            .all(|line| line.starts_with("send-keys -t %7 -l [cafleet] tick: fleet 1 ")),
-        "every wake targets the monitor, including no Director-directed wake: {calls:?}"
-    );
-    let last_wake: String = conn
-        .query_row(
-            "SELECT last_wake_at FROM monitor_runtime WHERE fleet_id=1",
-            [],
+            "SELECT notified_at FROM messages WHERE message_id=?1",
+            [id],
             |row| row.get(0),
         )
         .unwrap();
-    chrono::DateTime::parse_from_rfc3339(&last_wake).expect("successful wake timestamp");
+    let empty = cli.run(&["message", "poll", &worker.to_string(), "--json"]);
+    assert_eq!(code(&empty), 0);
+    assert_eq!(stdout(&empty).trim(), "[]");
+    let capture = cli.run(&["fleet", "capture", &fleet_id.to_string(), "--json"]);
+    assert_eq!(code(&capture), 0, "{}", stderr(&capture));
+    let panes: serde_json::Value = serde_json::from_str(&stdout(&capture)).unwrap();
+    assert_eq!(panes[0]["member_id"], director);
+    assert_eq!(panes[1]["member_id"], worker);
+    let deleted = cli.run(&["fleet", "delete", &fleet_id.to_string(), "--json"]);
+    assert_eq!(code(&deleted), 0, "{}", stderr(&deleted));
+    let (retained, retained_stamp) = cli.sqlite().query_row(
+        "SELECT message_id, from_member_id, to_member_id, created_at, status_state, status_timestamp, text, notified_at FROM messages WHERE message_id=?1",
+        [id],
+        |row| Ok((cafleet::broker::records::MessageRecord {
+            message_id: row.get(0)?,
+            from_member_id: row.get(1)?,
+            to_member_id: row.get(2)?,
+            created_at: row.get(3)?,
+            status: row.get(4)?,
+            status_timestamp: row.get(5)?,
+            text: row.get(6)?,
+        }, row.get::<_, String>(7)?)),
+    ).unwrap();
+    assert_eq!(cafleet::presentation::message(&retained), ack["message"]);
+    assert_eq!(retained_stamp, notification_stamp);
+    assert_eq!(
+        cli.sqlite()
+            .query_row("SELECT count(*) FROM messages", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
 }

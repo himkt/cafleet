@@ -58,7 +58,7 @@ is never used to price a model.
    still prices it; legacy models remain manual pass-through `--model`
    values.
 4. **Ask the maintainer for role defaults.** Show the current and available
-   catalog tokens for reviewer, monitor, and other members on each backend.
+   catalog tokens for reviewer and other members on each backend.
    Ask which model each role should use and, for Claude and Codex, which
    supported effort level should accompany it. Record the maintainer's
    choices in the proposed diff. OpenCode omits effort because its backend

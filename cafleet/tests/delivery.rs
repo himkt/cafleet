@@ -1,797 +1,370 @@
-use std::cell::RefCell;
-use std::collections::HashMap;
+mod common;
 
-use cafleet::broker::{self, NewPlacement};
-use cafleet::config::Settings;
-use cafleet::delivery::{HoldReason, Item, PaneIo, PaneOutcome, deliver_pane};
-use cafleet::time::format_utc;
-use chrono::{DateTime, Duration, TimeZone, Utc};
-use rusqlite::Connection;
-use tempfile::TempDir;
+use common::{Cli, code, stderr, stdout};
 
-const MEMBER_PANE: &str = "%2";
-const HOLD_TIMEOUT: i64 = 300;
-const DELIVERY_CAPTURE_LINES: i64 = 40;
-const KEYSTROKE_SPACING_SECONDS: i64 = 3;
-const EXEC_RESUME_GRACE_SECONDS: i64 = 10;
-
-const FINISHED: &str = "⏺ Done.\n\n> ";
-const AWAITING_USER: &str = " Do you want to proceed?\n ❯ 1. Yes\n   2. No";
-const WORKING: &str = "✻ Cogitating… (12s · esc to interrupt)\n\n> ";
-const UNCLASSIFIED: &str = "⏺ Bash(cargo build)\n  ⎿  Compiling cafleet";
-
-const RESUME_CLAUSE: &str = "[cafleet] Resume your work if something was still running.";
-const AWAITING_USER_NOTE: &str = "[cafleet] Resume your work if something was still running.\n\
-     [cafleet] This delivery's Escape dismissed a pending prompt in your pane; \
-     that rejection did not come from the user. Re-issue the tool call if you still need it.";
-
-#[derive(Debug, PartialEq)]
-struct Preview {
-    pane_id: String,
-    message_id: i64,
-    sender_id: i64,
-    ts: String,
-    text: String,
-    note: Option<String>,
-}
-
-struct FakeIo {
-    captures: RefCell<HashMap<String, Result<String, String>>>,
-    preview_result: RefCell<Result<(), String>>,
-    capture_calls: RefCell<Vec<(String, i64)>>,
-    previews: RefCell<Vec<Preview>>,
-    prompts: RefCell<Vec<(String, String)>>,
-}
-
-impl FakeIo {
-    fn showing(content: &str) -> Self {
-        let io = FakeIo {
-            captures: RefCell::new(HashMap::new()),
-            preview_result: RefCell::new(Ok(())),
-            capture_calls: RefCell::new(Vec::new()),
-            previews: RefCell::new(Vec::new()),
-            prompts: RefCell::new(Vec::new()),
-        };
-        io.show(content);
-        io
-    }
-
-    fn show(&self, content: &str) {
-        self.captures
-            .borrow_mut()
-            .insert(MEMBER_PANE.to_string(), Ok(content.to_string()));
-    }
-
-    fn preview_ids(&self) -> Vec<i64> {
-        self.previews
-            .borrow()
-            .iter()
-            .map(|preview| preview.message_id)
-            .collect()
-    }
-}
-
-impl PaneIo for FakeIo {
-    fn capture_pane(&self, pane_id: &str, lines: i64) -> Result<String, String> {
-        self.capture_calls
-            .borrow_mut()
-            .push((pane_id.to_string(), lines));
-        self.captures.borrow()[pane_id].clone()
-    }
-
-    fn send_inline_preview(
-        &self,
-        pane_id: &str,
-        message_id: i64,
-        sender_id: i64,
-        ts: &str,
-        text: &str,
-        note: Option<&str>,
-    ) -> Result<(), String> {
-        self.previews.borrow_mut().push(Preview {
-            pane_id: pane_id.to_string(),
-            message_id,
-            sender_id,
-            ts: ts.to_string(),
-            text: text.to_string(),
-            note: note.map(str::to_string),
-        });
-        self.preview_result.borrow().clone()
-    }
-
-    fn send_prompt(&self, pane_id: &str, text: &str) -> Result<(), String> {
-        self.prompts
-            .borrow_mut()
-            .push((pane_id.to_string(), text.to_string()));
-        Ok(())
-    }
-}
+const IDLE: &str = "Ready.\n────────────────────────────\n❯ \x1b[0m\n────────────────────────────\n? for shortcuts";
 
 struct Fixture {
-    _dir: TempDir,
-    conn: Connection,
-    director_id: i64,
-    member_id: i64,
+    cli: Cli,
+    fleet: i64,
+    director: i64,
+    worker: i64,
+    pane: String,
 }
 
-fn fixture() -> Fixture {
-    let dir = TempDir::new().unwrap();
-    let url = format!("sqlite:///{}", dir.path().join("delivery.db").display());
-    let mut conn = cafleet::db::connect(&url).unwrap();
-    cafleet::db::migrate_to_head(&mut conn).unwrap();
-    let fleet = broker::create_fleet(
-        &mut conn,
-        Some("alpha"),
-        "main",
-        "@1",
-        "%0",
-        "claude",
-        "tmux",
-        "monitor",
-        "Monitor member for this fleet",
-        |_, _, _| Ok("%1".to_string()),
-    )
-    .unwrap();
-    let fleet_id = fleet["fleet_id"].as_i64().unwrap();
-    let director_id = fleet["director"]["member_id"].as_i64().unwrap();
-    let member_id = broker::register_member(
-        &mut conn,
-        fleet_id,
-        "worker",
-        "test member",
-        &[],
-        Some(&NewPlacement {
-            backend: "tmux".to_string(),
-            mux_session: "main".to_string(),
-            mux_window_id: "@1".to_string(),
-            mux_pane_id: Some(MEMBER_PANE.to_string()),
-            coding_agent: "claude".to_string(),
-        }),
-        false,
-    )
-    .unwrap()
-    .member_id;
-    Fixture {
-        _dir: dir,
-        conn,
-        director_id,
-        member_id,
-    }
-}
-
-fn settings(hold_timeout: i64) -> Settings {
-    Settings::from_lookup(|name| match name {
-        "CAFLEET_DATABASE_URL" => Some("sqlite:///unused.db".to_string()),
-        "CAFLEET_DELIVERY_HOLD_TIMEOUT" => Some(hold_timeout.to_string()),
-        _ => None,
-    })
-    .unwrap()
-}
-
-fn base_time() -> DateTime<Utc> {
-    Utc.with_ymd_and_hms(2026, 10, 10, 9, 0, 0).unwrap()
-}
-
-fn send_at(fixture: &mut Fixture, text: &str, at: DateTime<Utc>) -> i64 {
-    let message = broker::send_message(
-        &mut fixture.conn,
-        fixture.director_id,
-        &fixture.member_id.to_string(),
-        text,
-    )
-    .unwrap();
-    fixture
-        .conn
-        .execute(
-            "UPDATE messages SET created_at=?1, status_timestamp=?1 WHERE message_id=?2",
-            rusqlite::params![format_utc(at), message.message_id],
-        )
-        .unwrap();
-    message.message_id
-}
-
-fn notified_at(conn: &Connection, message_id: i64) -> Option<String> {
-    conn.query_row(
-        "SELECT notified_at FROM messages WHERE message_id=?1",
-        [message_id],
-        |row| row.get(0),
-    )
-    .unwrap()
-}
-
-fn forced_at(conn: &Connection, member_id: i64) -> Option<String> {
-    conn.query_row(
-        "SELECT forced_at FROM member_placements WHERE member_id=?1",
-        [member_id],
-        |row| row.get(0),
-    )
-    .unwrap()
-}
-
-#[derive(Default)]
-struct ExecTimes {
-    dispatched_at: Option<DateTime<Utc>>,
-    started_at: Option<DateTime<Utc>>,
-    finished_at: Option<DateTime<Utc>>,
-    exit_code: Option<i64>,
-    resumed_at: Option<DateTime<Utc>>,
-}
-
-impl ExecTimes {
-    /// An exec whose command ended at `finished_at` with `exit_code` and that
-    /// still awaits its resume.
-    fn finished(finished_at: DateTime<Utc>, exit_code: i64) -> Self {
-        ExecTimes {
-            dispatched_at: Some(finished_at - Duration::seconds(20)),
-            started_at: Some(finished_at - Duration::seconds(19)),
-            finished_at: Some(finished_at),
-            exit_code: Some(exit_code),
-            resumed_at: None,
+impl Fixture {
+    fn new() -> Self {
+        let cli = Cli::new();
+        let (fleet, director) = cli.seeded_fleet();
+        let worker = cli.seed_member(fleet, "worker");
+        let pane = format!("%{}", worker + 4);
+        cli.set_pane_capture(&pane, IDLE);
+        Self {
+            cli,
+            fleet,
+            director,
+            worker,
+            pane,
         }
     }
+
+    fn send(&self, body: &str) -> std::process::Output {
+        self.cli.run(&[
+            "message",
+            "send",
+            "--from-member-id",
+            &self.director.to_string(),
+            "--to-member-id",
+            &self.worker.to_string(),
+            body,
+            "--json",
+        ])
+    }
+
+    fn stamp(&self, id: i64) -> Option<String> {
+        self.cli
+            .sqlite()
+            .query_row(
+                "SELECT notified_at FROM messages WHERE message_id=?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    fn pending(&self, body: &str) -> i64 {
+        self.cli.seed_message(self.director, self.worker, body)
+    }
 }
 
-fn insert_exec(fixture: &Fixture, created_at: DateTime<Utc>, times: ExecTimes) -> i64 {
-    let pid = times.started_at.map(|_| i64::from(std::process::id()));
-    fixture
-        .conn
-        .execute(
-            "INSERT INTO member_execs (member_id, command, created_at, dispatched_at, \
-             started_at, pid, finished_at, exit_code, resumed_at) \
-             VALUES (?1, 'mise //cafleet:test', ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            rusqlite::params![
-                fixture.member_id,
-                format_utc(created_at),
-                times.dispatched_at.map(format_utc),
-                times.started_at.map(format_utc),
-                pid,
-                times.finished_at.map(format_utc),
-                times.exit_code,
-                times.resumed_at.map(format_utc),
-            ],
-        )
-        .unwrap();
-    fixture.conn.last_insert_rowid()
+fn payload(output: &std::process::Output) -> serde_json::Value {
+    assert_eq!(code(output), 0, "{}", stderr(output));
+    serde_json::from_str(&stdout(output)).unwrap()
 }
 
-fn resumed_at(conn: &Connection, exec_id: i64) -> Option<String> {
-    conn.query_row(
-        "SELECT resumed_at FROM member_execs WHERE exec_id=?1",
-        [exec_id],
-        |row| row.get(0),
-    )
-    .unwrap()
+#[test]
+fn idle_preview_is_one_literal_line_followed_by_enter() {
+    let fixture = Fixture::new();
+    let output = fixture.send("assignment");
+    let result = payload(&output);
+    assert_eq!(result["notification_sent"], true);
+    let message = &result["message"];
+    let id = message["message_id"].as_i64().unwrap();
+    assert!(fixture.stamp(id).is_some());
+    let ts = message["created_at"].as_str().unwrap();
+    let writes: Vec<_> = fixture
+        .cli
+        .shim_calls()
+        .into_iter()
+        .filter(|line| line.starts_with("send-keys"))
+        .collect();
+    assert_eq!(
+        writes,
+        [
+            format!(
+                "send-keys -t {} -l -- [cafleet msg {id} from {} {ts}] assignment",
+                fixture.pane, fixture.director
+            ),
+            format!("send-keys -t {} Enter", fixture.pane),
+        ]
+    );
 }
 
-fn resume_line(exec_id: i64, exit_code: i64) -> (String, String) {
-    (
-        MEMBER_PANE.to_string(),
-        format!(
-            "[cafleet] exec {exec_id} finished with exit {exit_code}. \
-             Continue your work using its output above."
+#[test]
+fn non_idle_previews_stay_pending_even_when_the_message_is_old() {
+    for (state, capture) in [
+        ("working", format!("✻ Working (esc to interrupt)\n{IDLE}")),
+        ("awaiting_user", format!(" ❯ 1. Yes, proceed\n{IDLE}")),
+        (
+            "draft",
+            IDLE.replace("❯ \x1b[0m", "❯ \x1b[0;37munsent draft\x1b[0m"),
         ),
-    )
-}
-
-fn describe(outcome: &PaneOutcome) -> String {
-    match outcome {
-        PaneOutcome::Fired { item, forced } => {
-            let item = match item {
-                Item::Preview { message_id } => format!("preview {message_id}"),
-                Item::ExecDispatch { exec_id } => format!("exec dispatch {exec_id}"),
-                Item::ExecResume { exec_id } => format!("exec resume {exec_id}"),
-            };
-            format!("fired {item} forced={forced}")
+        ("unknown", "unrecognized screen".into()),
+    ] {
+        let fixture = Fixture::new();
+        fixture.cli.set_pane_capture(&fixture.pane, &capture);
+        let old = fixture.pending("old assignment");
+        fixture
+            .cli
+            .sqlite()
+            .execute(
+                "UPDATE messages SET created_at='1900-01-01T00:00:00+00:00' WHERE message_id=?1",
+                [old],
+            )
+            .unwrap();
+        let output = fixture.send("new assignment");
+        let result = payload(&output);
+        assert_eq!(result["notification_sent"], false);
+        assert_eq!(fixture.stamp(old), None);
+        assert_eq!(
+            fixture.stamp(result["message"]["message_id"].as_i64().unwrap()),
+            None
+        );
+        assert_eq!(fixture.cli.shim_count("send-keys"), 0, "{state}");
+        if matches!(state, "draft" | "unknown") {
+            let new = result["message"]["message_id"].as_i64().unwrap();
+            assert!(stderr(&output).contains(&format!(
+                "Message {new} was persisted. member {} is {state}; preview {old} was not sent.", fixture.worker)),
+                "{}", stderr(&output));
         }
-        PaneOutcome::Held(reason) => match reason {
-            HoldReason::ExecRunning => "held exec_running".to_string(),
-            HoldReason::ResumeGrace => "held resume_grace".to_string(),
-            HoldReason::AwaitingUser => "held awaiting_user".to_string(),
-            HoldReason::Working => "held working".to_string(),
-            HoldReason::Unclassified => "held unclassified".to_string(),
-            HoldReason::CaptureFailed(error) => format!("held capture_failed: {error}"),
-            HoldReason::Busy => "held busy".to_string(),
-            HoldReason::KeystrokeFailed(error) => format!("held keystroke_failed: {error}"),
-        },
-        PaneOutcome::Idle => "idle".to_string(),
     }
 }
 
-fn deliver(fixture: &mut Fixture, io: &FakeIo, hold_timeout: i64, now: DateTime<Utc>) -> String {
-    let outcome = deliver_pane(
-        &mut fixture.conn,
-        io,
-        &settings(hold_timeout),
-        fixture.member_id,
-        now,
-    )
-    .unwrap();
-    describe(&outcome)
-}
-
-fn fired(message_id: i64, forced: bool) -> String {
-    format!("fired preview {message_id} forced={forced}")
-}
-
 #[test]
-fn ordinary_delivery_fires_the_base_payload_into_a_finished_pane() {
-    let mut fixture = fixture();
-    let sent = base_time();
-    let message_id = send_at(&mut fixture, "task one", sent);
-    let io = FakeIo::showing(FINISHED);
-
-    let outcome = deliver(&mut fixture, &io, HOLD_TIMEOUT, sent + Duration::seconds(1));
-    assert_eq!(outcome, fired(message_id, false));
+fn each_send_attempts_only_the_oldest_pending_preview() {
+    let fixture = Fixture::new();
+    let first = fixture.pending("first");
+    let second = fixture.pending("second");
+    fixture
+        .cli
+        .sqlite()
+        .execute_batch("UPDATE messages SET created_at='2026-01-01T00:00:00+00:00';")
+        .unwrap();
+    let output = fixture.send("third");
+    let result = payload(&output);
+    let third = result["message"]["message_id"].as_i64().unwrap();
+    assert_eq!(result["notification_sent"], false);
+    assert!(fixture.stamp(first).is_some());
+    assert_eq!(fixture.stamp(second), None);
+    assert_eq!(fixture.stamp(third), None);
     assert_eq!(
-        *io.capture_calls.borrow(),
-        [(MEMBER_PANE.to_string(), DELIVERY_CAPTURE_LINES)]
-    );
-    assert_eq!(
-        *io.previews.borrow(),
-        [Preview {
-            pane_id: MEMBER_PANE.to_string(),
-            message_id,
-            sender_id: fixture.director_id,
-            ts: format_utc(sent),
-            text: "task one".to_string(),
-            note: None,
-        }]
-    );
-    assert!(notified_at(&fixture.conn, message_id).is_some());
-    assert_eq!(forced_at(&fixture.conn, fixture.member_id), None);
-}
-
-#[test]
-fn a_pane_that_is_not_at_rest_holds_the_preview_below_the_timeout() {
-    for (content, held) in [
-        (AWAITING_USER, "held awaiting_user"),
-        (WORKING, "held working"),
-        (UNCLASSIFIED, "held unclassified"),
-    ] {
-        let mut fixture = fixture();
-        let sent = base_time();
-        let message_id = send_at(&mut fixture, "task one", sent);
-        let io = FakeIo::showing(content);
-
-        let outcome = deliver(
-            &mut fixture,
-            &io,
-            HOLD_TIMEOUT,
-            sent + Duration::seconds(HOLD_TIMEOUT - 1),
-        );
-        assert_eq!(outcome, held);
-        assert!(io.previews.borrow().is_empty(), "{held} sends no keystroke");
-        assert_eq!(notified_at(&fixture.conn, message_id), None);
-    }
-}
-
-#[test]
-fn a_hold_at_the_timeout_is_forced_with_the_payload_for_the_observed_state() {
-    for (content, note) in [
-        (AWAITING_USER, AWAITING_USER_NOTE),
-        (WORKING, RESUME_CLAUSE),
-        (UNCLASSIFIED, RESUME_CLAUSE),
-    ] {
-        let mut fixture = fixture();
-        let sent = base_time();
-        let message_id = send_at(&mut fixture, "task one", sent);
-        let io = FakeIo::showing(content);
-
-        let outcome = deliver(
-            &mut fixture,
-            &io,
-            HOLD_TIMEOUT,
-            sent + Duration::seconds(HOLD_TIMEOUT),
-        );
-        assert_eq!(outcome, fired(message_id, true), "{content}");
-        let previews = io.previews.borrow();
-        assert_eq!(previews.len(), 1);
-        assert_eq!(previews[0].text, "task one");
-        assert_eq!(previews[0].note.as_deref(), Some(note), "{content}");
-        assert!(notified_at(&fixture.conn, message_id).is_some());
-        assert!(forced_at(&fixture.conn, fixture.member_id).is_some());
-    }
-}
-
-#[test]
-fn a_finished_pane_past_the_timeout_still_gets_an_ordinary_delivery() {
-    let mut fixture = fixture();
-    let sent = base_time();
-    let message_id = send_at(&mut fixture, "task one", sent);
-    let io = FakeIo::showing(FINISHED);
-
-    let outcome = deliver(
-        &mut fixture,
-        &io,
-        HOLD_TIMEOUT,
-        sent + Duration::seconds(HOLD_TIMEOUT * 2),
-    );
-    assert_eq!(outcome, fired(message_id, false));
-    assert_eq!(io.previews.borrow()[0].note, None);
-    assert_eq!(forced_at(&fixture.conn, fixture.member_id), None);
-}
-
-#[test]
-fn a_zero_timeout_never_forces() {
-    for (content, held) in [
-        (AWAITING_USER, "held awaiting_user"),
-        (WORKING, "held working"),
-        (UNCLASSIFIED, "held unclassified"),
-    ] {
-        let mut fixture = fixture();
-        let sent = base_time();
-        send_at(&mut fixture, "task one", sent);
-        let io = FakeIo::showing(content);
-
-        let outcome = deliver(&mut fixture, &io, 0, sent + Duration::days(30));
-        assert_eq!(outcome, held);
-        assert!(io.previews.borrow().is_empty());
-    }
-}
-
-#[test]
-fn overdue_previews_on_an_awaiting_pane_force_one_keystroke_per_timeout() {
-    let mut fixture = fixture();
-    let sent = base_time();
-    let ids = [
-        send_at(&mut fixture, "one", sent),
-        send_at(&mut fixture, "two", sent + Duration::seconds(1)),
-        send_at(&mut fixture, "three", sent + Duration::seconds(2)),
-    ];
-    let io = FakeIo::showing(AWAITING_USER);
-    let at = |seconds: i64| sent + Duration::seconds(seconds);
-
-    assert_eq!(
-        deliver(&mut fixture, &io, HOLD_TIMEOUT, at(HOLD_TIMEOUT)),
-        fired(ids[0], true)
-    );
-    for (first_forced, next) in [(HOLD_TIMEOUT, ids[1]), (HOLD_TIMEOUT * 2, ids[2])] {
-        assert_eq!(
-            deliver(
-                &mut fixture,
-                &io,
-                HOLD_TIMEOUT,
-                at(first_forced + KEYSTROKE_SPACING_SECONDS)
-            ),
-            "held awaiting_user",
-            "the hold clock restarts at the pane's last forced delivery"
-        );
-        assert_eq!(
-            deliver(
-                &mut fixture,
-                &io,
-                HOLD_TIMEOUT,
-                at(first_forced + HOLD_TIMEOUT - 1)
-            ),
-            "held awaiting_user"
-        );
-        assert_eq!(
-            deliver(
-                &mut fixture,
-                &io,
-                HOLD_TIMEOUT,
-                at(first_forced + HOLD_TIMEOUT)
-            ),
-            fired(next, true)
-        );
-    }
-    assert_eq!(io.preview_ids(), ids);
-    assert!(
-        io.previews
-            .borrow()
+        fixture
+            .cli
+            .shim_calls()
             .iter()
-            .all(|preview| preview.note.as_deref() == Some(AWAITING_USER_NOTE))
+            .filter(|line| line.contains(" -l "))
+            .count(),
+        1
     );
 }
 
 #[test]
-fn the_oldest_pending_preview_fires_first() {
-    let mut fixture = fixture();
-    let sent = base_time();
-    let older = send_at(&mut fixture, "older", sent);
-    let newer = send_at(&mut fixture, "newer", sent + Duration::seconds(5));
-    let io = FakeIo::showing(FINISHED);
-
-    let first = sent + Duration::seconds(10);
-    assert_eq!(
-        deliver(&mut fixture, &io, HOLD_TIMEOUT, first),
-        fired(older, false)
-    );
-    assert_eq!(notified_at(&fixture.conn, newer), None);
-    assert_eq!(
-        deliver(
-            &mut fixture,
-            &io,
-            HOLD_TIMEOUT,
-            first + Duration::seconds(KEYSTROKE_SPACING_SECONDS)
-        ),
-        fired(newer, false)
-    );
-    assert_eq!(io.preview_ids(), [older, newer]);
+fn acked_and_already_notified_rows_are_excluded_from_preview_selection() {
+    let fixture = Fixture::new();
+    let acked = fixture.pending("acked");
+    let notified = fixture.pending("already notified");
+    let ack = fixture.cli.run(&["message", "ack", &acked.to_string()]);
+    assert_eq!(code(&ack), 0, "{}", stderr(&ack));
+    fixture
+        .cli
+        .sqlite()
+        .execute(
+            "UPDATE messages SET notified_at=created_at WHERE message_id=?1",
+            [notified],
+        )
+        .unwrap();
+    let result = payload(&fixture.send("deliver this"));
+    assert_eq!(result["notification_sent"], true);
+    let calls = fixture.cli.shim_calls();
+    let literals: Vec<_> = calls.iter().filter(|line| line.contains(" -l ")).collect();
+    assert_eq!(literals.len(), 1);
+    assert!(literals[0].ends_with("] deliver this"), "{literals:?}");
 }
 
 #[test]
-fn a_failed_keystroke_clears_the_stamp_and_leaves_the_preview_owed() {
-    let mut fixture = fixture();
-    let sent = base_time();
-    let message_id = send_at(&mut fixture, "task one", sent);
-    let io = FakeIo::showing(FINISHED);
-    *io.preview_result.borrow_mut() = Err("send-keys failed: boom".to_string());
-
-    let first = sent + Duration::seconds(1);
-    assert_eq!(
-        deliver(&mut fixture, &io, HOLD_TIMEOUT, first),
-        "held keystroke_failed: send-keys failed: boom"
-    );
-    assert_eq!(notified_at(&fixture.conn, message_id), None);
-
-    *io.preview_result.borrow_mut() = Ok(());
-    assert_eq!(
-        deliver(
-            &mut fixture,
-            &io,
-            HOLD_TIMEOUT,
-            first + Duration::seconds(KEYSTROKE_SPACING_SECONDS)
-        ),
-        fired(message_id, false)
-    );
-    assert!(notified_at(&fixture.conn, message_id).is_some());
-}
-
-#[test]
-fn an_acked_message_is_never_keystroked() {
-    let mut fixture = fixture();
-    let sent = base_time();
-    let message_id = send_at(&mut fixture, "task one", sent);
-    broker::ack_message(&mut fixture.conn, message_id).unwrap();
-    let io = FakeIo::showing(FINISHED);
-
-    for seconds in [1, HOLD_TIMEOUT, HOLD_TIMEOUT * 10] {
+fn a_failed_preview_preserves_the_committed_message_and_pending_stamp() {
+    for failed in ["capture-pane", "send-keys"] {
+        let mut fixture = Fixture::new();
+        fixture.cli.fail_subcommand = Some(failed.into());
+        let output = fixture.send("persist exactly once");
+        let result = payload(&output);
+        let id = result["message"]["message_id"].as_i64().unwrap();
+        assert_eq!(result["notification_sent"], false);
+        assert_eq!(fixture.stamp(id), None);
         assert_eq!(
-            deliver(
-                &mut fixture,
-                &io,
-                HOLD_TIMEOUT,
-                sent + Duration::seconds(seconds)
-            ),
-            "idle"
-        );
-    }
-    assert!(io.capture_calls.borrow().is_empty());
-    assert!(io.previews.borrow().is_empty());
-    assert_eq!(notified_at(&fixture.conn, message_id), None);
-}
-
-#[test]
-fn a_second_delivery_inside_the_spacing_window_sends_no_second_keystroke() {
-    let mut fixture = fixture();
-    let sent = base_time();
-    let first_id = send_at(&mut fixture, "one", sent);
-    let second_id = send_at(&mut fixture, "two", sent + Duration::seconds(1));
-    let io = FakeIo::showing(FINISHED);
-
-    let first = sent + Duration::seconds(10);
-    assert_eq!(
-        deliver(&mut fixture, &io, HOLD_TIMEOUT, first),
-        fired(first_id, false)
-    );
-    assert_eq!(
-        deliver(
-            &mut fixture,
-            &io,
-            HOLD_TIMEOUT,
-            first + Duration::seconds(KEYSTROKE_SPACING_SECONDS - 1)
-        ),
-        "held busy"
-    );
-    assert_eq!(io.preview_ids(), [first_id]);
-    assert_eq!(notified_at(&fixture.conn, second_id), None);
-
-    assert_eq!(
-        deliver(
-            &mut fixture,
-            &io,
-            HOLD_TIMEOUT,
-            first + Duration::seconds(KEYSTROKE_SPACING_SECONDS)
-        ),
-        fired(second_id, false)
-    );
-    assert_eq!(io.preview_ids(), [first_id, second_id]);
-}
-
-#[test]
-fn an_exec_in_flight_holds_every_item_without_forcing() {
-    let sent = base_time();
-    let dispatched_at = Some(sent + Duration::seconds(1));
-    for started_at in [None, Some(sent + Duration::seconds(2))] {
-        for content in [FINISHED, AWAITING_USER, WORKING] {
-            let mut fixture = fixture();
-            let message_id = send_at(&mut fixture, "task one", sent);
-            insert_exec(
-                &fixture,
-                sent,
-                ExecTimes {
-                    dispatched_at,
-                    started_at,
-                    ..ExecTimes::default()
-                },
-            );
-            let io = FakeIo::showing(content);
-
-            for seconds in [HOLD_TIMEOUT - 1, HOLD_TIMEOUT, HOLD_TIMEOUT * 10] {
-                assert_eq!(
-                    deliver(
-                        &mut fixture,
-                        &io,
-                        HOLD_TIMEOUT,
-                        sent + Duration::seconds(seconds)
-                    ),
-                    "held exec_running",
-                    "{content}"
-                );
-            }
-            assert!(io.previews.borrow().is_empty());
-            assert!(io.prompts.borrow().is_empty());
-            assert_eq!(notified_at(&fixture.conn, message_id), None);
-        }
-    }
-}
-
-#[test]
-fn the_hold_age_restarts_at_the_finished_at_of_the_panes_latest_exec() {
-    let mut fixture = fixture();
-    let sent = base_time();
-    let message_id = send_at(&mut fixture, "queued behind the command", sent);
-    let exec_end = sent + Duration::seconds(HOLD_TIMEOUT * 4);
-    insert_exec(
-        &fixture,
-        sent,
-        ExecTimes {
-            resumed_at: Some(exec_end),
-            ..ExecTimes::finished(exec_end, 0)
-        },
-    );
-    let io = FakeIo::showing(WORKING);
-
-    assert_eq!(
-        deliver(
-            &mut fixture,
-            &io,
-            HOLD_TIMEOUT,
-            exec_end + Duration::seconds(HOLD_TIMEOUT - 1)
-        ),
-        "held working",
-        "a long command does not force the keystroke that waited for it"
-    );
-    assert_eq!(
-        deliver(
-            &mut fixture,
-            &io,
-            HOLD_TIMEOUT,
-            exec_end + Duration::seconds(HOLD_TIMEOUT)
-        ),
-        fired(message_id, true)
-    );
-    assert_eq!(io.previews.borrow()[0].note.as_deref(), Some(RESUME_CLAUSE));
-}
-
-#[test]
-fn a_finished_exec_on_a_working_pane_closes_without_a_keystroke() {
-    for seconds in [1, EXEC_RESUME_GRACE_SECONDS, HOLD_TIMEOUT] {
-        let mut fixture = fixture();
-        let finished_at = base_time();
-        let exec_id = insert_exec(
-            &fixture,
-            finished_at - Duration::seconds(30),
-            ExecTimes::finished(finished_at, 0),
-        );
-        let io = FakeIo::showing(WORKING);
-
-        assert_eq!(
-            deliver(
-                &mut fixture,
-                &io,
-                HOLD_TIMEOUT,
-                finished_at + Duration::seconds(seconds),
-            ),
-            "held working"
+            fixture
+                .cli
+                .sqlite()
+                .query_row("SELECT count(*) FROM messages", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
         );
         assert!(
-            resumed_at(&fixture.conn, exec_id).is_some(),
-            "the harness answered the command's output itself ({seconds} s)"
+            stderr(&output).contains(&id.to_string()),
+            "{}",
+            stderr(&output)
         );
-        assert!(io.prompts.borrow().is_empty());
-        assert!(io.previews.borrow().is_empty());
+        assert!(
+            stderr(&output).contains("forced failure"),
+            "{}",
+            stderr(&output)
+        );
     }
 }
 
 #[test]
-fn a_finished_exec_holds_for_the_resume_grace_while_the_pane_is_not_working() {
-    for content in [FINISHED, AWAITING_USER, UNCLASSIFIED] {
-        let mut fixture = fixture();
-        let finished_at = base_time();
-        let exec_id = insert_exec(
-            &fixture,
-            finished_at - Duration::seconds(30),
-            ExecTimes::finished(finished_at, 0),
-        );
-        let io = FakeIo::showing(content);
-
-        assert_eq!(
-            deliver(
-                &mut fixture,
-                &io,
-                HOLD_TIMEOUT,
-                finished_at + Duration::seconds(EXEC_RESUME_GRACE_SECONDS - 1)
-            ),
-            "held resume_grace",
-            "{content}"
-        );
-        assert_eq!(resumed_at(&fixture.conn, exec_id), None);
-        assert!(io.prompts.borrow().is_empty());
-    }
-}
-
-#[test]
-fn a_finished_exec_past_the_grace_gets_the_resume_line_in_a_pane_at_rest() {
-    let mut fixture = fixture();
-    let finished_at = base_time();
-    let exec_id = insert_exec(
-        &fixture,
-        finished_at - Duration::seconds(30),
-        ExecTimes::finished(finished_at, 7),
+fn a_notification_stamp_failure_survives_a_new_wait_without_resubmission() {
+    let _test_resource = common::process_test_resource_guard();
+    let fixture = Fixture::new();
+    fixture.cli.sqlite().execute_batch("CREATE TRIGGER reject_notification_stamp BEFORE UPDATE OF notified_at ON messages
+        WHEN NEW.notified_at IS NOT NULL BEGIN SELECT RAISE(ABORT, 'injected notification stamp failure'); END;").unwrap();
+    let output = fixture.send("submitted before stamp failure");
+    let result = payload(&output);
+    let id = result["message"]["message_id"].as_i64().unwrap();
+    assert_eq!(result["notification_sent"], false);
+    assert_eq!(fixture.stamp(id), None);
+    let error = stderr(&output);
+    assert!(error.contains(&id.to_string()), "{error}");
+    assert!(error.contains("uncertain"), "{error}");
+    assert!(
+        error.contains("injected notification stamp failure"),
+        "{error}"
     );
-    let io = FakeIo::showing(FINISHED);
-
+    assert!(
+        fixture
+            .cli
+            .sqlite()
+            .query_row(
+                "SELECT preview_started_at IS NOT NULL FROM messages WHERE message_id=?1",
+                [id],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap()
+    );
+    for _ in 0..2 {
+        let waiting = fixture.cli.run(&[
+            "message",
+            "wait",
+            &fixture.director.to_string(),
+            "--timeout",
+            "1",
+            "--json",
+        ]);
+        let result = payload(&waiting);
+        let errors = result["notification_errors"].as_array().unwrap();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0]["message_id"], id);
+        assert_eq!(errors[0]["delivery"], "uncertain");
+    }
     assert_eq!(
-        deliver(
-            &mut fixture,
-            &io,
-            HOLD_TIMEOUT,
-            finished_at + Duration::seconds(EXEC_RESUME_GRACE_SECONDS)
-        ),
-        format!("fired exec resume {exec_id} forced=false")
+        fixture
+            .cli
+            .shim_calls()
+            .iter()
+            .filter(|line| line.ends_with(" Enter"))
+            .count(),
+        1,
+        "fresh waits preserve the durable claim and never inject another preview"
     );
-    assert_eq!(*io.prompts.borrow(), [resume_line(exec_id, 7)]);
-    assert!(resumed_at(&fixture.conn, exec_id).is_some());
-    assert_eq!(forced_at(&fixture.conn, fixture.member_id), None);
+    fixture
+        .cli
+        .sqlite()
+        .execute_batch("DROP TRIGGER reject_notification_stamp")
+        .unwrap();
+    let later = payload(&fixture.send("later message still gets its own notification"));
+    let later_id = later["message"]["message_id"].as_i64().unwrap();
+    assert_eq!(later["notification_sent"], true);
+    assert!(fixture.stamp(later_id).is_some());
+    assert_eq!(fixture.stamp(id), None);
+    assert_eq!(
+        fixture
+            .cli
+            .shim_calls()
+            .iter()
+            .filter(|line| line.ends_with(" Enter"))
+            .count(),
+        2
+    );
 }
 
 #[test]
-fn a_resume_line_past_the_grace_holds_and_forces_through_the_gate_table() {
-    let mut fixture = fixture();
-    let finished_at = base_time();
-    let exec_id = insert_exec(
-        &fixture,
-        finished_at - Duration::seconds(30),
-        ExecTimes::finished(finished_at, 0),
-    );
-    let io = FakeIo::showing(AWAITING_USER);
-
-    for seconds in [EXEC_RESUME_GRACE_SECONDS, HOLD_TIMEOUT - 1] {
-        assert_eq!(
-            deliver(
-                &mut fixture,
-                &io,
-                HOLD_TIMEOUT,
-                finished_at + Duration::seconds(seconds)
-            ),
-            "held awaiting_user"
-        );
+fn director_and_self_notifications_require_no_pane_io() {
+    let fixture = Fixture::new();
+    for (sender, recipient) in [
+        (fixture.worker, fixture.director),
+        (fixture.worker, fixture.worker),
+    ] {
+        let output = fixture.cli.run_outside_tmux(&[
+            "message",
+            "send",
+            "--from-member-id",
+            &sender.to_string(),
+            "--to-member-id",
+            &recipient.to_string(),
+            "read through broker",
+            "--json",
+        ]);
+        let result = payload(&output);
+        assert_eq!(result["notification_sent"], false);
     }
-    assert_eq!(resumed_at(&fixture.conn, exec_id), None);
-    assert!(io.prompts.borrow().is_empty());
-
+    assert!(fixture.cli.shim_calls().is_empty());
     assert_eq!(
-        deliver(
-            &mut fixture,
-            &io,
-            HOLD_TIMEOUT,
-            finished_at + Duration::seconds(HOLD_TIMEOUT)
-        ),
-        format!("fired exec resume {exec_id} forced=true")
+        fixture
+            .cli
+            .sqlite()
+            .query_row(
+                "SELECT count(*) FROM members WHERE fleet_id=?1",
+                [fixture.fleet],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+        2
     );
-    assert_eq!(*io.prompts.borrow(), [resume_line(exec_id, 0)]);
-    assert!(resumed_at(&fixture.conn, exec_id).is_some());
-    assert!(forced_at(&fixture.conn, fixture.member_id).is_some());
+}
+
+#[test]
+fn pending_placement_persists_without_capture_or_notification_stamp() {
+    let fixture = Fixture::new();
+    fixture
+        .cli
+        .sqlite()
+        .execute(
+            "UPDATE member_placements SET mux_pane_id=NULL WHERE member_id=?1",
+            [fixture.worker],
+        )
+        .unwrap();
+    let result = payload(&fixture.send("wait for placement"));
+    assert_eq!(result["notification_sent"], false);
+    assert_eq!(
+        fixture.stamp(result["message"]["message_id"].as_i64().unwrap()),
+        None
+    );
+    assert!(fixture.cli.shim_calls().is_empty());
+}
+
+#[test]
+fn preview_sanitization_keeps_stored_text_exact_and_native_commands_separate() {
+    let fixture = Fixture::new();
+    let body = "! printf danger\r\nnext\nline\rlast\tcolumn\u{1b}\u{7f}";
+    let result = payload(&fixture.send(body));
+    assert_eq!(result["message"]["text"], body);
+    let id = result["message"]["message_id"].as_i64().unwrap();
+    let stored: String = fixture
+        .cli
+        .sqlite()
+        .query_row(
+            "SELECT text FROM messages WHERE message_id=?1",
+            [id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(stored, body);
+    let calls = fixture.cli.shim_calls();
+    let literal = calls.iter().find(|line| line.contains(" -l ")).unwrap();
+    assert!(literal.contains(" -l -- [cafleet msg "), "{literal}");
+    assert!(
+        literal.ends_with("] ! printf danger⏎next⏎line⏎last␉column\\x1b\\x7f"),
+        "{literal}"
+    );
 }

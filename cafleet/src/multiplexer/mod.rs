@@ -1,24 +1,140 @@
-//! Multiplexer — the pane-hosting backends (SPEC §6.5): the shared context /
-//! error types, the injectable `CommandRunner` seam, the `resolve_multiplexer`
-//! precedence, the shared wake-payload builder + unified sanitization map, and
-//! the tmux / herdr backends. The colocated tests pin the contract; the
-//! expected API is catalogued in [`test_support`].
-
 pub mod herdr;
 #[cfg(test)]
 pub mod test_support;
 pub mod tmux;
 
 use std::fmt;
-
-use crate::coding_agent::coding_agent;
-use crate::delivery::PaneIo;
+use std::rc::Rc;
+use std::time::Duration;
 
 pub use herdr::HerdrMultiplexer;
 pub use tmux::TmuxMultiplexer;
 
-pub(crate) const ESC_SETTLE_DELAY: f64 = 0.1;
 pub(crate) const SUBMIT_DELAY: f64 = 1.0;
+
+#[cfg(test)]
+mod submission_regressions {
+    use super::test_support::{FakeRunner, env, herdr_error_stderr};
+    use super::*;
+
+    fn muxes(runner: Rc<dyn CommandRunner>) -> [AnyMultiplexer; 2] {
+        [
+            AnyMultiplexer::Tmux(TmuxMultiplexer::new(runner.clone(), env(&[]))),
+            AnyMultiplexer::Herdr(HerdrMultiplexer::new(runner, env(&[]))),
+        ]
+    }
+
+    #[test]
+    fn insufficient_settle_and_enter_budget_starts_no_literal_input() {
+        let runner = FakeRunner::without_binaries();
+        for mux in muxes(runner.clone()) {
+            let deadline = crate::input::Deadline::until(
+                std::time::Instant::now() + Duration::from_millis(500),
+            );
+            let error = mux
+                .bounded(deadline)
+                .send_prompt("pane", "assignment")
+                .unwrap_err();
+            assert!(!error.submission_started());
+            assert!(runner.events().is_empty());
+        }
+    }
+
+    #[test]
+    fn confirmed_missing_panes_report_no_submission() {
+        for (index, stderr) in [
+            "can't find pane: pane".to_owned(),
+            herdr_error_stderr("pane_not_found"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let runner = FakeRunner::without_binaries();
+            runner.respond(Err(RunError::Failed { stderr }));
+            let mux = muxes(runner.clone()).into_iter().nth(index).unwrap();
+            let error = mux.send_prompt("pane", "assignment").unwrap_err();
+            assert!(!error.submission_started(), "{error}");
+            assert_eq!(runner.run_argvs().len(), 1);
+        }
+    }
+
+    #[test]
+    fn option_like_prompt_text_follows_the_literal_option_terminator() {
+        for mux_index in 0..2 {
+            let runner = FakeRunner::without_binaries();
+            let mux = muxes(runner.clone()).into_iter().nth(mux_index).unwrap();
+            mux.send_prompt("pane", "-R --help --target=other").unwrap();
+            let calls = runner.run_argvs();
+            let literal = &calls[0];
+            assert_eq!(
+                &literal[literal.len() - 2..],
+                ["--", "-R --help --target=other"]
+            );
+            assert_eq!(calls.len(), 2);
+        }
+    }
+
+    #[test]
+    fn launch_failures_are_not_sent_and_started_write_or_enter_failures_are_uncertain() {
+        for backend in 0..2 {
+            for (failure, started) in [
+                (
+                    RunError::NotStarted("deadline expired before launch".into()),
+                    false,
+                ),
+                (RunError::BinaryNotFound("missing executable".into()), false),
+                (RunError::Timeout, true),
+                (
+                    RunError::Failed {
+                        stderr: "connection lost".into(),
+                    },
+                    true,
+                ),
+            ] {
+                let runner = FakeRunner::without_binaries();
+                runner.respond(Err(failure));
+                let error = muxes(runner.clone())
+                    .into_iter()
+                    .nth(backend)
+                    .unwrap()
+                    .send_prompt("pane", "assignment")
+                    .unwrap_err();
+                assert_eq!(error.submission_started(), started, "{error}");
+                assert_eq!(runner.run_argvs().len(), 1);
+            }
+            let runner = FakeRunner::without_binaries();
+            runner.respond(Ok(String::new()));
+            runner.respond(Err(RunError::NotStarted(
+                "Enter deadline expired before launch".into(),
+            )));
+            let error = muxes(runner.clone())
+                .into_iter()
+                .nth(backend)
+                .unwrap()
+                .send_prompt("pane", "assignment")
+                .unwrap_err();
+            assert!(
+                error.submission_started(),
+                "the literal input already arrived: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn expired_optional_layout_returns_a_diagnostic_without_starting_another_process() {
+        let runner = FakeRunner::without_binaries();
+        let mux = muxes(runner.clone())
+            .into_iter()
+            .nth(1)
+            .unwrap()
+            .bounded(crate::input::Deadline::until(std::time::Instant::now()));
+        let error = mux
+            .restore_after_close(PostCloseLayout::HerdrTab("tab".into()))
+            .unwrap_err();
+        assert!(error.to_string().contains("deadline"));
+        assert!(runner.events().is_empty());
+    }
+}
 
 /// Resolved pane identity, returned by `context_discovery` (SPEC §6.5).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,6 +159,7 @@ pub enum PaneCleanup {
 pub struct MultiplexerError {
     message: String,
     pane_cleanup: Option<PaneCleanup>,
+    submission_started: bool,
 }
 
 impl MultiplexerError {
@@ -50,11 +167,21 @@ impl MultiplexerError {
         Self {
             message: message.into(),
             pane_cleanup: None,
+            submission_started: false,
         }
     }
 
     pub fn pane_cleanup(&self) -> Option<&PaneCleanup> {
         self.pane_cleanup.as_ref()
+    }
+
+    pub fn submission_started(&self) -> bool {
+        self.submission_started
+    }
+
+    pub(crate) fn after_write(mut self) -> Self {
+        self.submission_started = true;
+        self
     }
 
     pub(crate) fn with_pane_cleanup(mut self, cleanup: PaneCleanup) -> Self {
@@ -119,17 +246,122 @@ impl std::error::Error for MultiplexerError {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunError {
     BinaryNotFound(String),
+    NotStarted(String),
     Timeout,
     Failed { stderr: String },
 }
 
-/// The injectable subprocess seam (SPEC §9): `sleep` goes through the runner
-/// so the Esc-settle and submit delays are observable events, not wall-clock
-/// waits.
 pub trait CommandRunner {
     fn binary_exists(&self, name: &str) -> bool;
     fn run(&self, argv: &[String], timeout_secs: Option<u64>) -> Result<String, RunError>;
+    fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError> {
+        self.run(
+            argv,
+            Some(timeout.as_secs() + u64::from(timeout.subsec_nanos() > 0)),
+        )
+    }
     fn sleep(&self, seconds: f64);
+    fn remaining_budget(&self) -> Result<Option<Duration>, RunError> {
+        Ok(None)
+    }
+}
+
+fn submit_prompt(
+    runner: &dyn CommandRunner,
+    literal: &[String],
+    enter: &[String],
+    map_error: fn(&[String], Option<u64>, RunError) -> MultiplexerError,
+    pane_gone: fn(&str) -> bool,
+) -> Result<(), MultiplexerError> {
+    let remaining = runner
+        .remaining_budget()
+        .map_err(|error| map_error(literal, None, error))?
+        .expect("submission uses a deadline-bounded runner");
+    let reserved = Duration::from_secs_f64(SUBMIT_DELAY) + Duration::from_secs(1);
+    let literal_budget = remaining
+        .checked_sub(reserved)
+        .filter(|budget| !budget.is_zero())
+        .ok_or_else(|| {
+            MultiplexerError::new(
+                "insufficient pane input budget for literal input, settle and Enter",
+            )
+        })?;
+    runner.run_for(literal, literal_budget).map_err(|error| {
+        let not_sent = match &error {
+            RunError::BinaryNotFound(_) | RunError::NotStarted(_) => true,
+            RunError::Failed { stderr } => pane_gone(stderr),
+            RunError::Timeout => false,
+        };
+        let seconds = literal_budget.as_secs() + u64::from(literal_budget.subsec_nanos() > 0);
+        let error = map_error(literal, Some(seconds), error);
+        if not_sent { error } else { error.after_write() }
+    })?;
+    runner.sleep(SUBMIT_DELAY);
+    runner
+        .run(enter, Some(5))
+        .map_err(|error| map_error(enter, Some(5), error).after_write())?;
+    Ok(())
+}
+
+pub(crate) struct DeadlineRunner {
+    runner: Rc<dyn CommandRunner>,
+    deadline: crate::input::Deadline,
+}
+
+impl DeadlineRunner {
+    pub(crate) fn wrap(
+        runner: Rc<dyn CommandRunner>,
+        deadline: crate::input::Deadline,
+    ) -> Rc<dyn CommandRunner> {
+        Rc::new(Self { runner, deadline })
+    }
+}
+
+impl CommandRunner for DeadlineRunner {
+    fn binary_exists(&self, name: &str) -> bool {
+        self.runner.binary_exists(name)
+    }
+
+    fn run(&self, argv: &[String], timeout_secs: Option<u64>) -> Result<String, RunError> {
+        let remaining = self
+            .remaining_budget()?
+            .expect("deadline runner has a budget");
+        self.run_for(
+            argv,
+            timeout_secs
+                .map(Duration::from_secs)
+                .map_or(remaining, |timeout| timeout.min(remaining)),
+        )
+    }
+
+    fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError> {
+        let remaining = self
+            .remaining_budget()?
+            .expect("deadline runner has a budget");
+        self.runner.run_for(argv, timeout.min(remaining))
+    }
+
+    fn sleep(&self, seconds: f64) {
+        if let Ok(remaining) = self.deadline.remaining() {
+            self.runner.sleep(
+                Duration::from_secs_f64(seconds)
+                    .min(remaining)
+                    .as_secs_f64(),
+            );
+        }
+    }
+
+    fn remaining_budget(&self) -> Result<Option<Duration>, RunError> {
+        let remaining = self
+            .deadline
+            .remaining()
+            .map_err(|_| RunError::NotStarted("command deadline expired before launch".into()))?;
+        Ok(Some(
+            self.runner
+                .remaining_budget()?
+                .map_or(remaining, |inner| inner.min(remaining)),
+        ))
+    }
 }
 
 /// The A8 over-fetch margin: both backends fetch `lines + 1000` so a blank
@@ -155,100 +387,37 @@ pub(crate) fn capture_window(raw: &str, lines: i64) -> String {
     parts[start..].join("\n")
 }
 
-/// Keep a user-controlled field inside the one-line wake envelope: line
-/// breaks and tabs → `⏎`, backtick → `ˋ`, `$(` → `$﹙`, pipe → `│`.
-pub fn sanitize_wake_field(value: &str) -> String {
-    value
-        .replace("\r\n", "⏎")
-        .replace(['\n', '\r', '\t'], "⏎")
-        .replace('`', "ˋ")
-        .replace("$(", "$﹙")
-        .replace('|', "│")
-}
-
-/// Transport-facing wake descriptor. The monitor maps broker records into
-/// these borrowed fields; backends have no dependency on broker records.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WakeEntry<'a> {
-    pub member_id: i64,
-    pub name: &'a str,
-    pub coding_agent: &'a str,
-    pub pending_count: i64,
-}
-
-/// Render one wake descriptor; an unregistered coding agent aborts the wake.
-fn wake_entry(member: &WakeEntry<'_>) -> Result<String, MultiplexerError> {
-    let agent = member.coding_agent;
-    if coding_agent(agent).is_none() {
-        return Err(MultiplexerError::new(format!(
-            "member {} has invalid coding_agent '{agent}'",
-            member.member_id
-        )));
-    }
-    Ok(format!(
-        "{} ({}; coding_agent={agent}; unacked={})",
-        member.member_id,
-        sanitize_wake_field(member.name),
-        member.pending_count
-    ))
-}
-
-/// Build the byte-identical tmux/herdr pure-trigger wake payload (SPEC §6.5):
-/// the roster entries, the trailing `Director:` segment, and the two fixed
-/// protocol sentences. A roster member or Director with an unregistered
-/// coding agent aborts the wake.
-pub fn build_wake_payload_from_entries(
-    fleet_id: i64,
-    members: &[WakeEntry<'_>],
-    director: &WakeEntry<'_>,
-) -> Result<String, MultiplexerError> {
-    let entries = members
-        .iter()
-        .map(wake_entry)
-        .collect::<Result<Vec<_>, _>>()?;
-    let director_entry = wake_entry(director)?;
-    let clause = if entries.is_empty() {
-        "no members to health-check.".to_string()
-    } else {
-        let noun = if entries.len() == 1 {
-            "member"
-        } else {
-            "members"
-        };
-        format!(
-            "health-check your {} {noun}: {}.",
-            entries.len(),
-            entries.join(", ")
-        )
-    };
-    Ok(format!(
-        "[cafleet] tick: fleet {fleet_id} — {clause} Director: {director_entry}. \
-         Follow your monitor role protocol. \
-         Resume your work if something was still running."
-    ))
-}
-
-/// The inline-preview payload shared by both backends: the header line, the
-/// text with its line breaks folded to `⏎`, and the optional broker note line.
 pub(crate) fn inline_preview_payload(
     message_id: i64,
     sender_id: i64,
     ts: &str,
     text: &str,
-    note: Option<&str>,
 ) -> String {
-    let sanitized = text.replace("\r\n", "⏎").replace(['\n', '\r'], "⏎");
-    let mut payload = format!("[cafleet msg {message_id} from {sender_id} {ts}]\n{sanitized}");
-    if let Some(note) = note {
-        payload.push('\n');
-        payload.push_str(note);
+    fn visible(text: &str) -> String {
+        let mut result = String::new();
+        let mut chars = text.chars().peekable();
+        while let Some(ch) = chars.next() {
+            match ch {
+                '\r' => {
+                    if chars.peek() == Some(&'\n') {
+                        chars.next();
+                    }
+                    result.push('⏎');
+                }
+                '\n' => result.push('⏎'),
+                '\t' => result.push('␉'),
+                '\u{00}'..='\u{1f}' | '\u{7f}' => result.push_str(&format!("\\x{:02x}", ch as u32)),
+                _ => result.push(ch),
+            }
+        }
+        result
     }
-    payload
+    format!(
+        "[cafleet msg {message_id} from {sender_id} {ts}] {}",
+        visible(text)
+    )
 }
 
-/// The pane-hosting backend surface (SPEC §6.5). `agent_status` is the
-/// `Option`-returning native-state capability: herdr reads its native state,
-/// tmux always answers `None`.
 pub trait Multiplexer {
     fn name(&self) -> &'static str;
     fn ensure_available(&self) -> Result<(), MultiplexerError>;
@@ -259,16 +428,6 @@ pub trait Multiplexer {
         env: &[(String, String)],
         command: &[String],
     ) -> Result<String, MultiplexerError>;
-    fn send_exit(&self, target_pane_id: &str, ignore_missing: bool)
-    -> Result<(), MultiplexerError>;
-    fn send_poll_trigger(&self, target_pane_id: &str, member_id: i64) -> bool;
-    fn send_wake_entries(
-        &self,
-        target_pane_id: &str,
-        fleet_id: i64,
-        members: &[WakeEntry<'_>],
-        director: &WakeEntry<'_>,
-    ) -> Result<bool, MultiplexerError>;
     fn send_inline_preview(
         &self,
         target_pane_id: &str,
@@ -276,20 +435,63 @@ pub trait Multiplexer {
         sender_id: i64,
         ts: &str,
         text: &str,
-        note: Option<&str>,
     ) -> Result<(), MultiplexerError>;
     fn send_prompt(&self, target_pane_id: &str, text: &str) -> Result<(), MultiplexerError>;
     fn capture_pane(&self, target_pane_id: &str, lines: i64) -> Result<String, MultiplexerError>;
     fn list_pane_ids(&self) -> Result<std::collections::BTreeSet<String>, MultiplexerError>;
     fn kill_pane(&self, target_pane_id: &str, ignore_missing: bool)
     -> Result<(), MultiplexerError>;
-    fn agent_status(&self, target_pane_id: &str) -> Result<Option<String>, MultiplexerError>;
 }
 
 /// The closed backend dispatch the resolver returns.
 pub enum AnyMultiplexer {
     Tmux(TmuxMultiplexer),
     Herdr(HerdrMultiplexer),
+}
+
+pub(crate) enum PostCloseLayout {
+    None,
+    HerdrTab(String),
+}
+
+impl AnyMultiplexer {
+    pub(crate) fn close_pane(
+        &self,
+        target_pane_id: &str,
+        ignore_missing: bool,
+    ) -> Result<PostCloseLayout, MultiplexerError> {
+        match self {
+            Self::Tmux(mux) => {
+                mux.kill_pane(target_pane_id, ignore_missing)?;
+                Ok(PostCloseLayout::None)
+            }
+            Self::Herdr(mux) => Ok(mux
+                .close_pane(target_pane_id, ignore_missing)?
+                .map_or(PostCloseLayout::None, PostCloseLayout::HerdrTab)),
+        }
+    }
+
+    pub(crate) fn restore_after_close(
+        &self,
+        layout: PostCloseLayout,
+    ) -> Result<(), MultiplexerError> {
+        match (self, layout) {
+            (_, PostCloseLayout::None) => Ok(()),
+            (Self::Herdr(mux), PostCloseLayout::HerdrTab(tab_id)) => {
+                mux.resize_after_close(&tab_id)
+            }
+            (Self::Tmux(_), PostCloseLayout::HerdrTab(_)) => {
+                unreachable!("post-close layout belongs to its multiplexer backend");
+            }
+        }
+    }
+
+    pub fn bounded(&self, deadline: crate::input::Deadline) -> Self {
+        match self {
+            Self::Tmux(mux) => Self::Tmux(mux.bounded(deadline)),
+            Self::Herdr(mux) => Self::Herdr(mux.bounded(deadline)),
+        }
+    }
 }
 
 macro_rules! dispatch {
@@ -323,28 +525,6 @@ impl Multiplexer for AnyMultiplexer {
         dispatch!(self, mux => mux.split_window(reference, env, command))
     }
 
-    fn send_exit(
-        &self,
-        target_pane_id: &str,
-        ignore_missing: bool,
-    ) -> Result<(), MultiplexerError> {
-        dispatch!(self, mux => mux.send_exit(target_pane_id, ignore_missing))
-    }
-
-    fn send_poll_trigger(&self, target_pane_id: &str, member_id: i64) -> bool {
-        dispatch!(self, mux => mux.send_poll_trigger(target_pane_id, member_id))
-    }
-
-    fn send_wake_entries(
-        &self,
-        target_pane_id: &str,
-        fleet_id: i64,
-        members: &[WakeEntry<'_>],
-        director: &WakeEntry<'_>,
-    ) -> Result<bool, MultiplexerError> {
-        dispatch!(self, mux => mux.send_wake_entries(target_pane_id, fleet_id, members, director))
-    }
-
     fn send_inline_preview(
         &self,
         target_pane_id: &str,
@@ -352,9 +532,8 @@ impl Multiplexer for AnyMultiplexer {
         sender_id: i64,
         ts: &str,
         text: &str,
-        note: Option<&str>,
     ) -> Result<(), MultiplexerError> {
-        dispatch!(self, mux => mux.send_inline_preview(target_pane_id, message_id, sender_id, ts, text, note))
+        dispatch!(self, mux => mux.send_inline_preview(target_pane_id, message_id, sender_id, ts, text))
     }
 
     fn send_prompt(&self, target_pane_id: &str, text: &str) -> Result<(), MultiplexerError> {
@@ -375,10 +554,6 @@ impl Multiplexer for AnyMultiplexer {
         ignore_missing: bool,
     ) -> Result<(), MultiplexerError> {
         dispatch!(self, mux => mux.kill_pane(target_pane_id, ignore_missing))
-    }
-
-    fn agent_status(&self, target_pane_id: &str) -> Result<Option<String>, MultiplexerError> {
-        dispatch!(self, mux => mux.agent_status(target_pane_id))
     }
 }
 
@@ -407,28 +582,6 @@ macro_rules! implement_backend {
                 $backend::split_window(self, reference, env, command)
             }
 
-            fn send_exit(
-                &self,
-                target_pane_id: &str,
-                ignore_missing: bool,
-            ) -> Result<(), MultiplexerError> {
-                $backend::send_exit(self, target_pane_id, ignore_missing)
-            }
-
-            fn send_poll_trigger(&self, target_pane_id: &str, member_id: i64) -> bool {
-                $backend::send_poll_trigger(self, target_pane_id, member_id)
-            }
-
-            fn send_wake_entries(
-                &self,
-                target_pane_id: &str,
-                fleet_id: i64,
-                members: &[WakeEntry<'_>],
-                director: &WakeEntry<'_>,
-            ) -> Result<bool, MultiplexerError> {
-                $backend::send_wake_entries(self, target_pane_id, fleet_id, members, director)
-            }
-
             fn send_inline_preview(
                 &self,
                 target_pane_id: &str,
@@ -436,17 +589,8 @@ macro_rules! implement_backend {
                 sender_id: i64,
                 ts: &str,
                 text: &str,
-                note: Option<&str>,
             ) -> Result<(), MultiplexerError> {
-                $backend::send_inline_preview(
-                    self,
-                    target_pane_id,
-                    message_id,
-                    sender_id,
-                    ts,
-                    text,
-                    note,
-                )
+                $backend::send_inline_preview(self, target_pane_id, message_id, sender_id, ts, text)
             }
 
             fn send_prompt(
@@ -478,41 +622,11 @@ macro_rules! implement_backend {
             ) -> Result<(), MultiplexerError> {
                 $backend::kill_pane(self, target_pane_id, ignore_missing)
             }
-
-            fn agent_status(
-                &self,
-                target_pane_id: &str,
-            ) -> Result<Option<String>, MultiplexerError> {
-                $backend::agent_status(self, target_pane_id)
-            }
         }
     };
 }
 implement_backend!(TmuxMultiplexer);
 implement_backend!(HerdrMultiplexer);
-
-impl<M: Multiplexer> PaneIo for M {
-    fn capture_pane(&self, pane_id: &str, lines: i64) -> Result<String, String> {
-        Multiplexer::capture_pane(self, pane_id, lines).map_err(|error| error.to_string())
-    }
-
-    fn send_inline_preview(
-        &self,
-        pane_id: &str,
-        message_id: i64,
-        sender_id: i64,
-        ts: &str,
-        text: &str,
-        note: Option<&str>,
-    ) -> Result<(), String> {
-        Multiplexer::send_inline_preview(self, pane_id, message_id, sender_id, ts, text, note)
-            .map_err(|error| error.to_string())
-    }
-
-    fn send_prompt(&self, pane_id: &str, text: &str) -> Result<(), String> {
-        Multiplexer::send_prompt(self, pane_id, text).map_err(|error| error.to_string())
-    }
-}
 
 /// Resolve the backend per the SPEC precedence and construct it over the
 /// given runner and environment snapshot.
@@ -562,170 +676,7 @@ pub fn resolve_multiplexer_name(
 
 #[cfg(test)]
 mod tests {
-    use crate::multiplexer::WakeEntry;
-
-    use crate::multiplexer::{
-        build_wake_payload_from_entries, resolve_multiplexer_name, sanitize_wake_field,
-    };
-
-    fn member<'a>(
-        member_id: i64,
-        name: &'a str,
-        coding_agent: &'a str,
-        unacked: i64,
-    ) -> WakeEntry<'a> {
-        WakeEntry {
-            member_id,
-            name,
-            coding_agent,
-            pending_count: unacked,
-        }
-    }
-
-    mod sanitize_wake_field_tests {
-        use super::*;
-
-        #[test]
-        fn crlf_collapses_to_a_single_return_symbol() {
-            assert_eq!(sanitize_wake_field("a\r\nb"), "a⏎b");
-        }
-
-        #[test]
-        fn each_line_break_and_tab_becomes_the_return_symbol() {
-            assert_eq!(sanitize_wake_field("a\nb\rc\td"), "a⏎b⏎c⏎d");
-            assert_eq!(sanitize_wake_field("x\r\n\r"), "x⏎⏎");
-        }
-
-        #[test]
-        fn backtick_becomes_the_modifier_grave() {
-            assert_eq!(sanitize_wake_field("run `ls` now"), "run ˋlsˋ now");
-        }
-
-        #[test]
-        fn command_substitution_open_is_defused() {
-            assert_eq!(sanitize_wake_field("$(rm -rf)"), "$﹙rm -rf)");
-            assert_eq!(sanitize_wake_field("cost $5 (ok)"), "cost $5 (ok)");
-        }
-
-        #[test]
-        fn pipe_becomes_the_box_drawing_bar() {
-            assert_eq!(sanitize_wake_field("a|b"), "a│b");
-        }
-
-        #[test]
-        fn plain_names_pass_through() {
-            assert_eq!(sanitize_wake_field("worker-1"), "worker-1");
-        }
-    }
-
-    mod build_wake_payload_from_entries_tests {
-        use super::*;
-
-        #[test]
-        fn two_members_join_entries_and_the_director_segment_trails() {
-            let payload = build_wake_payload_from_entries(
-                3,
-                &[
-                    member(6, "drafter", "claude", 2),
-                    member(7, "reviewer", "codex", 0),
-                ],
-                &member(4, "Director", "claude", 1),
-            )
-            .unwrap();
-            assert_eq!(
-                payload,
-                "[cafleet] tick: fleet 3 — health-check your 2 members: \
-                 6 (drafter; coding_agent=claude; unacked=2), \
-                 7 (reviewer; coding_agent=codex; unacked=0). \
-                 Director: 4 (Director; coding_agent=claude; unacked=1). \
-                 Follow your monitor role protocol. \
-                 Resume your work if something was still running."
-            );
-        }
-
-        #[test]
-        fn a_single_member_uses_the_singular_noun() {
-            let payload = build_wake_payload_from_entries(
-                7,
-                &[member(4, "worker", "opencode", 1)],
-                &member(2, "Director", "claude", 0),
-            )
-            .unwrap();
-            assert_eq!(
-                payload,
-                "[cafleet] tick: fleet 7 — health-check your 1 member: \
-                 4 (worker; coding_agent=opencode; unacked=1). \
-                 Director: 2 (Director; coding_agent=claude; unacked=0). \
-                 Follow your monitor role protocol. \
-                 Resume your work if something was still running."
-            );
-        }
-
-        #[test]
-        fn an_empty_roster_drops_the_entries_and_keeps_the_director_segment() {
-            let payload =
-                build_wake_payload_from_entries(7, &[], &member(2, "Director", "claude", 3))
-                    .unwrap();
-            assert_eq!(
-                payload,
-                "[cafleet] tick: fleet 7 — no members to health-check. \
-                 Director: 2 (Director; coding_agent=claude; unacked=3). \
-                 Follow your monitor role protocol. \
-                 Resume your work if something was still running."
-            );
-        }
-
-        #[test]
-        fn member_and_director_names_are_sanitized_in_the_payload() {
-            let payload = build_wake_payload_from_entries(
-                3,
-                &[member(5, "e`vil$(x)|z\nq", "claude", 0)],
-                &member(2, "Dir|ector", "claude", 0),
-            )
-            .unwrap();
-            assert!(
-                payload.contains("5 (eˋvil$﹙x)│z⏎q; coding_agent=claude; unacked=0)"),
-                "got: {payload}"
-            );
-            assert!(
-                payload.contains("Director: 2 (Dir│ector; coding_agent=claude; unacked=0)"),
-                "got: {payload}"
-            );
-            assert!(!payload.contains('`'));
-            assert!(!payload.contains("$("));
-            assert!(!payload.contains('\n'));
-        }
-
-        #[test]
-        fn an_unregistered_roster_coding_agent_aborts_the_wake() {
-            let err = build_wake_payload_from_entries(
-                3,
-                &[member(4, "worker", "python", 0)],
-                &member(2, "Director", "claude", 0),
-            )
-            .expect_err("an unknown member agent must abort");
-            assert!(
-                err.to_string()
-                    .contains("member 4 has invalid coding_agent 'python'"),
-                "got: {err}"
-            );
-        }
-
-        #[test]
-        fn an_unregistered_director_coding_agent_aborts_the_wake() {
-            let err = build_wake_payload_from_entries(
-                3,
-                &[member(4, "worker", "claude", 0)],
-                &member(2, "Director", "python", 0),
-            )
-            .expect_err("an unknown Director agent must abort");
-            assert!(
-                err.to_string()
-                    .contains("member 2 has invalid coding_agent 'python'"),
-                "got: {err}"
-            );
-        }
-    }
+    use crate::multiplexer::resolve_multiplexer_name;
 
     mod resolver_tests {
         use super::*;
@@ -825,7 +776,7 @@ mod tests {
                 env(&[("TMUX", "/tmp/tmux"), ("TMUX_PANE", "%1")]),
             ));
             assert_eq!(
-                mux.send_inline_preview("%5", 5, 2, TS, "hi", None)
+                mux.send_inline_preview("%5", 5, 2, TS, "hi")
                     .unwrap_err()
                     .to_string(),
                 "tmux binary not found on PATH"
@@ -836,7 +787,7 @@ mod tests {
                 env(&[("HERDR_ENV", "1")]),
             ));
             assert_eq!(
-                mux.send_inline_preview("w1:p2", 5, 2, TS, "hi", None)
+                mux.send_inline_preview("w1:p2", 5, 2, TS, "hi")
                     .unwrap_err()
                     .to_string(),
                 "herdr binary not found on PATH"
@@ -846,7 +797,7 @@ mod tests {
                 FakeRunner::with_binary("tmux"),
                 env(&[("TMUX", "/tmp/tmux"), ("TMUX_PANE", "%1")]),
             ));
-            assert!(mux.send_inline_preview("%5", 5, 2, TS, "hi", None).is_ok());
+            assert!(mux.send_inline_preview("%5", 5, 2, TS, "hi").is_ok());
         }
     }
 }

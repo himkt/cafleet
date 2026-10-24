@@ -61,6 +61,14 @@ pub fn truncate_message_text(result: &mut Value, max_text_len: usize) {
                 truncate_item(item, max_text_len);
             }
         }
+        Value::Object(object) if object.contains_key("messages") => {
+            truncate_message_text(
+                object
+                    .get_mut("messages")
+                    .expect("the result contains messages"),
+                max_text_len,
+            );
+        }
         other => truncate_item(other, max_text_len),
     }
 }
@@ -86,8 +94,6 @@ fn truncate_item(item: &mut Value, limit: usize) {
     }
 }
 
-/// Project a typed-column message to the compact rendered shape
-/// `{id, from, ts, text[, kind][, origin]}`.
 pub fn render_message(message: &Value) -> Value {
     let field = |name: &str| -> Value {
         message
@@ -100,26 +106,7 @@ pub fn render_message(message: &Value) -> Value {
     out.insert("from".to_string(), field("from_member_id"));
     out.insert("ts".to_string(), field("status_timestamp"));
     out.insert("text".to_string(), field("text"));
-    let kind = field("type");
-    if kind != "unicast" {
-        out.insert("kind".to_string(), kind);
-    }
-    let origin = &message["origin_message_id"];
-    if is_truthy(origin) {
-        out.insert("origin".to_string(), origin.clone());
-    }
     Value::Object(out)
-}
-
-pub(crate) fn is_truthy(value: &Value) -> bool {
-    match value {
-        Value::Null => false,
-        Value::Bool(b) => *b,
-        Value::Number(n) => n.as_f64() != Some(0.0),
-        Value::String(s) => !s.is_empty(),
-        Value::Array(a) => !a.is_empty(),
-        Value::Object(o) => !o.is_empty(),
-    }
 }
 
 #[cfg(test)]
@@ -129,17 +116,14 @@ mod tests {
 
     const TS: &str = "2026-07-30T09:00:00.000000+00:00";
 
-    fn unicast(id: i64, from: i64, text: &str) -> Value {
+    fn message_fixture(id: i64, from: i64, text: &str) -> Value {
         json!({
             "message_id": id,
-            "owner_member_id": 3,
             "from_member_id": from,
             "to_member_id": 3,
-            "type": "unicast",
             "created_at": TS,
             "status_state": "input_required",
             "status_timestamp": TS,
-            "origin_message_id": null,
             "text": text,
         })
     }
@@ -245,16 +229,31 @@ mod tests {
         use super::*;
 
         #[test]
+        fn truncates_wait_messages_without_changing_diagnostics() {
+            let mut result = json!({
+                "member_id": 2,
+                "outcome": "messages",
+                "messages": [message_fixture(1, 2, &"界".repeat(10))],
+                "notification_errors": [{"error": "keep this full diagnostic"}],
+            });
+            truncate_message_text(&mut result, 3);
+            assert_eq!(result["messages"][0]["text"], "界界界…");
+            assert_eq!(
+                result["notification_errors"][0]["error"],
+                "keep this full diagnostic"
+            );
+        }
+
+        #[test]
         fn truncates_a_bare_message_dict_in_place() {
-            let mut message = unicast(1, 2, &"a".repeat(10));
+            let mut message = message_fixture(1, 2, &"a".repeat(10));
             truncate_message_text(&mut message, 5);
             assert_eq!(message["text"], "aaaaa…");
         }
 
         #[test]
         fn truncates_inside_a_message_envelope() {
-            let mut result =
-                json!({"message": unicast(1, 2, &"b".repeat(10)), "notification_sent": true});
+            let mut result = json!({"message": message_fixture(1, 2, &"b".repeat(10)), "notification_sent": true});
             truncate_message_text(&mut result, 5);
             assert_eq!(result["message"]["text"], "bbbbb…");
             assert_eq!(result["notification_sent"], true);
@@ -263,8 +262,8 @@ mod tests {
         #[test]
         fn truncates_every_item_of_a_list() {
             let mut result = json!([
-                {"message": unicast(1, 2, &"c".repeat(10))},
-                unicast(2, 3, &"d".repeat(10)),
+                {"message": message_fixture(1, 2, &"c".repeat(10))},
+                message_fixture(2, 3, &"d".repeat(10)),
             ]);
             truncate_message_text(&mut result, 5);
             assert_eq!(result[0]["message"]["text"], "ccccc…");
@@ -285,49 +284,11 @@ mod tests {
 
         #[test]
         fn compact_projection_has_the_pinned_key_order() {
-            let rendered = render_message(&unicast(5, 2, "hi"));
+            let rendered = render_message(&message_fixture(5, 2, "hi"));
             assert_eq!(
                 format_json(&rendered),
                 format!(r#"{{"id":5,"from":2,"ts":"{TS}","text":"hi"}}"#)
             );
-        }
-
-        #[test]
-        fn non_unicast_type_surfaces_kind_and_truthy_origin() {
-            let mut summary = unicast(6, 2, "Broadcast sent to 2 recipients");
-            summary["type"] = json!("broadcast_summary");
-            summary["status_state"] = json!("completed");
-            summary["to_member_id"] = Value::Null;
-            summary["origin_message_id"] = json!(6);
-            let rendered = render_message(&summary);
-            assert_eq!(
-                format_json(&rendered),
-                format!(
-                    r#"{{"id":6,"from":2,"ts":"{TS}","text":"Broadcast sent to 2 recipients","kind":"broadcast_summary","origin":6}}"#
-                )
-            );
-        }
-
-        #[test]
-        fn unicast_delivery_with_origin_keeps_origin_but_suppresses_kind() {
-            let mut delivery = unicast(7, 2, "fanout");
-            delivery["origin_message_id"] = json!(6);
-            let rendered = render_message(&delivery);
-            assert_eq!(
-                format_json(&rendered),
-                format!(r#"{{"id":7,"from":2,"ts":"{TS}","text":"fanout","origin":6}}"#)
-            );
-        }
-
-        #[test]
-        fn falsy_origin_is_suppressed() {
-            let mut message = unicast(8, 2, "x");
-            message["origin_message_id"] = json!(0);
-            let rendered = render_message(&message);
-            assert!(rendered.get("origin").is_none());
-            let message = unicast(9, 2, "x");
-            let rendered = render_message(&message);
-            assert!(rendered.get("origin").is_none());
         }
     }
 }

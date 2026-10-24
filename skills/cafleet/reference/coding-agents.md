@@ -8,13 +8,13 @@ Each backend section is self-contained. Select the backend by the subject of the
 | Select/configure a spawned member | The backend selected under [Director model-selection policy](../roles/director.md#model-selection) | Its Model catalog and Role defaults; validate target effort and launch capabilities against its Runtime bindings. |
 | Interpret a captured member pane | The observed member's recorded backend | Its Pane-state capture cues, while retaining the observer's own execution tools and decision surface. |
 
-Resolve the five runtime placeholders from Runtime bindings for the relevant operation and the model and effort placeholders from the selected spawn backend's Role defaults. Apply notes at their named instructions and emit concrete command values using the core skill's [Resolve your overlay](../SKILL.md#resolve-your-overlay) procedure and its documented neutral defaults for explicitly allowed missing/unknown-backend cases. Report a missing required backend section, malformed table, or broken supported-backend reference as a documentation defect.
+Resolve the five runtime placeholders from Runtime bindings for the relevant operation and model/effort placeholders from the selected backend’s Role defaults. Apply notes at their named instructions and emit concrete command values using the core skill's [Resolve your overlay](../SKILL.md#resolve-your-overlay) procedure and its documented neutral defaults for explicitly allowed missing/unknown-backend cases. Report a missing required backend section, malformed table, or broken supported-backend reference as a documentation defect.
 
-For example, a Codex Director selecting an OpenCode reviewer uses the OpenCode catalog and reviewer defaults with the Codex decision surface and local execution tools. A Claude monitor observing a Codex member uses Codex capture cues with its own Claude tools. Monitor bootstrap and recovery select the Director's backend by construction: pass its monitor model and supported effort at bootstrap and recovery, retaining backend inheritance. User overrides and selection decisions follow [Director model-selection policy](../roles/director.md#model-selection).
+For example, a Codex Director selecting an OpenCode reviewer uses the OpenCode catalog and reviewer defaults with the Codex decision surface and local execution tools. A Claude Director inspecting Codex applies the target backend’s capture cues. User overrides and selection decisions follow [Director model-selection policy](../roles/director.md#model-selection).
 
 Model catalogs, their provenance/context notes, canonical Role defaults, and shared freshness metadata are maintained exclusively by the `cafleet-model-list-refresh` skill from the official sources in each backend section, refreshed at least every 30 days (last refreshed: 2026-10-20). Runtime bindings, bound runtime notes, pane cues, and worked resolutions belong to runtime documentation maintenance. The freshness date applies to model data; structural reorganization preserves that date.
 
-Prices are standard provider USD rates per MTok and are planning estimates, not an invoice guarantee. Each backend's catalog is ordered most → least capable as reviewed judgment. Context windows are listed for the `claude` backend, whose model strings are the ones a context-window suffix can apply to. Selection policy, including cost efficiency mode and monitor/reviewer rules, lives in [Director model selection](../roles/director.md#model-selection).
+Prices are standard provider USD rates per MTok and are planning estimates, not an invoice guarantee. Each backend's catalog is ordered most → least capable as reviewed judgment. Context windows are listed for the `claude` backend, whose model strings are the ones a context-window suffix can apply to. Selection policy, including cost efficiency mode and reviewer/member rules, lives in [Director model selection](../roles/director.md#model-selection).
 
 ## claude
 
@@ -25,7 +25,7 @@ Prices are standard provider USD rates per MTok and are planning estimates, not 
 | `{decision_surface}` | the AskUserQuestion tool |
 | `{permission_flags}` | `--permission-mode dontAsk` |
 | `{pane_title}` | `claude --name <member-name>` sets `#{pane_title}` to the member name |
-| `{skill_loader}` | the Skill tool (dispatch sub-agents via the Agent tool) |
+| `{skill_loader}` | the Skill tool |
 | `{effort_levels}` | `low`, `medium`, `high`, `xhigh`, `max` (spawn flag `--effort <level>`) |
 
 ### Role defaults
@@ -34,8 +34,6 @@ Prices are standard provider USD rates per MTok and are planning estimates, not 
 |---|---|
 | `{reviewer_model}` | `claude-opus-5-5` |
 | `{reviewer_effort}` | `high` |
-| `{monitor_model}` | `claude-haiku-5-5` |
-| `{monitor_effort}` | `low` |
 | `{other_model}` | `claude-opus-5-5` |
 | `{other_effort}` | `high` |
 
@@ -51,7 +49,7 @@ Either the model name or its alias is a valid `--model` token.
 | claude-opus-5 | — | Prior frontier generation at a higher price | 1M | 5.00 | 25.00 |
 | claude-sonnet-5-5 | sonnet | Efficient mid tier for routine work | 1M | 2.00 | 10.00 |
 | claude-sonnet-5 | — | Prior mid-tier generation at the same price | 1M | 2.00 | 10.00 |
-| claude-haiku-5-5 | haiku | Fast lowest-cost tier; 1M context; monitoring and quick bounded tasks | 1M | 0.10 | 0.50 |
+| claude-haiku-5-5 | haiku | Fast lowest-cost tier; 1M context; routine checks and quick bounded tasks | 1M | 0.10 | 0.50 |
 
 Every row above runs at its 1M window on every plan on the Anthropic API,
 so its `--model` value needs no `[1m]` suffix. `claude-haiku-5-5` prices
@@ -62,23 +60,29 @@ Sources: [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pr
 ### Note → applies at
 
 | Note | Applies at |
-|------|-----------|
-| `AskUserQuestion` takes ≤ 4 options/question; the built-in "Other" is the free-text path (don't add an explicit "Other"). Question shapes → form: choice among ≤ 4 labeled options; approve-or-revise (two options); continue-or-abort (two options); open-ended draft-comparison (2–4 full candidate bodies). | `{decision_surface}` — `cafleet/SKILL.md` § Soliciting user reactions; `cafleet-design-doc/create/create.md` Step 2 question batch |
-| *Pane-state capture cues* (below) — the concrete claude-pane discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`. | the monitor member's on-wake classification (its role file's § *On each wake*) and the Director's reading of a pane capture — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response; the pane-state taxonomy in [Monitoring](runtime/concepts/monitoring.md) (each reader applies the cues of the **target member's** backend overlay). |
-| A member's broker commands are allowed on its spawn command line. Beyond them, `dontAsk` runs the harness's built-in read-only commands, file reads inside the working directory, and every tool call matching the operator's `permissions.allow`; every other call — shell command or file edit — is denied without a prompt. A task command outside that allow list is routed on every use, and each routed dispatch costs the operator one `member exec` confirmation. Routing carries shell commands only: report a denied file edit to the Director — as a missing `Edit` allow entry, or, for a path under the harness's protected directories (such as `.git` and `.claude`), as an edit the Director must make. | `{permission_flags}` — `cafleet/roles/member.md` § Command execution; `cafleet/reference/prompt-routing.md` opening paragraphs / § Member-side: reconsider, then route; `cafleet/roles/director.md` introduction / § Member Create; `cafleet/reference/supervision.md` § Routing member command requests |
+|---|---|
+| `AskUserQuestion` supports up to four options; its built-in Other path accepts free text. Members relay a concrete question to the Director. | `{decision_surface}`; [user relay](supervision.md#user-delegation-protocol) |
+| A separate evaluator checks the session condition against the transcript; native background work defers evaluation and returns a host result. External CAFleet panes supply evidence when the Director reads broker/pane state. | [Director receiving](supervision.md#asynchronous-wait-rule) |
+| Without native background work an unmet condition can immediately start another turn; consecutive tool-free stops reach the configured block cap, eight by default. Retain the finite receive task handle while delegated work remains. | [Turn boundaries](supervision.md#asynchronous-wait-rule) |
+| Composer controls act at the beginning of submitted input; a local probe merged control text into a concurrent preview. Serialize complete input and inspect its capture. | [Native dispatch](prompt-routing.md#director-side-dispatch) |
+| Native shell probes displayed command/stdout/stderr followed by a model turn; its trigger and a second permission check were not established. The Director authorizes routed native input under its host rules. | [Command authorization](prompt-routing.md#director-side-dispatch) |
+| `dontAsk` permits spawn-allowed broker tools, built-in read-only work and matching host allow rules; denied work routes to the Director. Protected file edits need the Director or a host-rule change. | `{permission_flags}`; [routing](prompt-routing.md#member-side-reconsider-then-route) |
+
+Evidence: Claude Code 2.1.296, checked 2026-10-22; [host continuation](https://code.claude.com/docs/en/goal) and [block cap](https://code.claude.com/docs/en/hooks-guide#stop-hook-hits-the-block-cap). Local probes establish only exercised behavior.
 
 ### Pane-state capture cues
 
-A cross-section reader — the monitor member on each wake, the Director reading a capture — classifies each target from its **content only** (never native `agent_status`) using that target's backend overlay:
+Use fresh styled capture as transport evidence. Approval/work outranks idle cues; preserve drafts and treat ambiguity as unknown.
 
 | State | claude capture cue |
 |---|---|
-| `awaiting_user` | A bordered prompt box awaiting a keypress: an `AskUserQuestion` selection list (numbered options with a `❯`-marked choice and an "Other" free-text entry) or a tool/permission approval prompt (`Do you want to proceed?` with `❯ 1. Yes` / `2. No`). A choice is pending; the composer is not at rest. |
-| `finished` | The bare composer at rest: an empty `>` input line with its placeholder hint and the idle status line beneath (model + context, the `⏵⏵` mode indicator), with **no** question/approval box above it and **no** running spinner or `esc to interrupt` indicator. |
-| `working` | Affirmative active-work evidence: a running spinner, `esc to interrupt`, streaming response, tool execution, or generation indicator. A truncated or ambiguous capture that might hide one of these cues is also `working`. |
-| `stall_candidate` | Quiet, non-finished transcript content with no question/approval box, no empty at-rest composer, and no spinner, tool, streaming, generation, or other active-work cue. |
+| `idle` | Empty `>` composer with recognized dim/grey host suggestion or placeholder decoration and no active/approval evidence |
+| `working` | Spinner, streaming, shell/tool activity or `esc to interrupt` |
+| `awaiting_user` | Question/confirmation/approval box awaiting a selection |
+| `draft` | User-input styled unsent text in the composer, including text identical to a host suggestion |
+| `unknown` | Missing, truncated, unrecognized or ambiguous composer/style evidence |
 
-Tie-breaks and the two-quiet-families rule: `cafleet/roles/monitor.md` § *On each wake*.
+Follow [Director evidence handling](supervision.md#idle-semantics). Empty readiness establishes no task completion.
 
 ## codex
 
@@ -98,8 +102,6 @@ Tie-breaks and the two-quiet-families rule: `cafleet/roles/monitor.md` § *On ea
 |---|---|
 | `{reviewer_model}` | `gpt-6-astra` |
 | `{reviewer_effort}` | `high` |
-| `{monitor_model}` | `gpt-6-luna` |
-| `{monitor_effort}` | `low` |
 | `{other_model}` | `gpt-6.1-sol` |
 | `{other_effort}` | `xhigh` |
 
@@ -119,23 +121,28 @@ Sources: [OpenAI pricing](https://developers.openai.com/api/docs/pricing) and [C
 ### Note → applies at
 
 | Note | Applies at |
-|------|-----------|
-| No in-pane prompt — a fleet member sends its question to the Director, which answers as a plain operator message. Ask a concrete, answerable question, not free-form prose. | `{decision_surface}` — `cafleet/SKILL.md` § Soliciting user reactions |
-| *Pane-state capture cues* (below) — the concrete codex-pane discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`. | the monitor member's on-wake classification (its role file's § *On each wake*) and the Director's reading of a pane capture — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response; the pane-state taxonomy in [Monitoring](runtime/concepts/monitoring.md) (each reader applies the cues of the **target member's** backend overlay). |
-| Denial is the rare case: the harness rejects a few destructive operations (e.g. `git push`, `rm -rf`). | `{permission_flags}` — `cafleet/roles/member.md` § Command execution; `cafleet/reference/prompt-routing.md` opening paragraphs / § Member-side: reconsider, then route; `cafleet/roles/director.md` introduction / § Member Create; `cafleet/reference/supervision.md` § Routing member command requests |
+|---|---|
+| A member sends a concrete question to the Director; the Director relays the operator's answer as a message. | `{decision_surface}`; [user relay](supervision.md#user-delegation-protocol) |
+| The objective belongs to the thread with model-callable lifecycle tools and optional token-budget accounting; a two-turn tool-bearing probe verified continuation and model-reported completion. Preserve the user's objective, activation authority and budget, retain live tool/session handles and collect broker/pane evidence. | [Director receiving](supervision.md#asynchronous-wait-rule) |
+| Native shell input displayed command, exit code, duration and output. Installed protocol metadata describes unsandboxed dispatch while public CLI guidance describes current approval/sandbox settings; the effective TUI boundary and protocol path were not established. | [Native authorization](prompt-routing.md#director-side-dispatch) |
+| The Director authorizes routed native input under its host rules; harmless command visibility establishes no second member-tool permission check. Inspect output before explicit continuation. | [Dispatch and continuation](prompt-routing.md#director-side-dispatch) |
+| Run host-permitted workspace commands directly and route required denied operations. The configured sandbox and approval posture remain authoritative. | `{permission_flags}`; [member routing](prompt-routing.md#member-side-reconsider-then-route) |
+
+Evidence: Codex CLI 0.162.1, checked 2026-10-22; [host continuation](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex) and [command reference](https://learn.chatgpt.com/docs/developer-commands).
 
 ### Pane-state capture cues
 
-A cross-section reader — the monitor member on each wake, the Director reading a capture — classifies each target from its **content only** (never native `agent_status`) using that target's backend overlay:
+Use fresh styled capture as transport evidence. Approval/work outranks idle cues; preserve drafts and treat ambiguity as unknown.
 
 | State | codex capture cue |
 |---|---|
-| `awaiting_user` | A codex confirmation/approval prompt awaiting a keypress — a `[y/n]`-style command-approval or an out-of-sandbox escalation request. Under `--ask-for-approval never --sandbox workspace-write` codex auto-approves in-workspace work, so a visible approval prompt means codex hit something the policy could not clear and is genuinely waiting. |
-| `finished` | The empty codex composer at rest — the input prompt with no streaming output above it and no active-turn / "working" indicator. |
-| `working` | Affirmative active-work evidence: the active-turn or `working` indicator, streaming model output, a running tool, or generation in progress. A truncated or ambiguous capture that may still be active is also `working`. |
-| `stall_candidate` | Quiet, non-finished content with no confirmation prompt, no empty at-rest composer, and no active-turn, tool, streaming, generation, or other work cue. |
+| `idle` | Empty native composer or verified decoration-styled placeholder without active/approval evidence |
+| `working` | Active turn/working indicator, streaming, tool or native shell execution |
+| `awaiting_user` | Confirmation or approval prompt awaiting input |
+| `draft` | Unsent user-styled composer text, including text identical to a placeholder |
+| `unknown` | Missing, truncated, unrecognized or ambiguous composer/style evidence |
 
-Tie-breaks and the two-quiet-families rule: `cafleet/roles/monitor.md` § *On each wake*.
+Follow [Director evidence handling](supervision.md#idle-semantics). Empty readiness establishes no task completion.
 
 ## opencode
 
@@ -155,8 +162,6 @@ Tie-breaks and the two-quiet-families rule: `cafleet/roles/monitor.md` § *On ea
 |---|---|
 | `{reviewer_model}` | `opencode/deepseek-v4.1-flash-free` |
 | `{reviewer_effort}` | `—` |
-| `{monitor_model}` | `opencode/big-pickle` |
-| `{monitor_effort}` | `—` |
 | `{other_model}` | `opencode/glm-5.3-flash-free` |
 | `{other_effort}` | `—` |
 
@@ -185,23 +190,27 @@ Source: [OpenCode Console models and pricing](https://opencode.ai/v2/docs/consol
 ### Note → applies at
 
 | Note | Applies at |
-|------|-----------|
-| No in-pane prompt — a fleet member sends its question to the Director, which answers as a plain operator message. The `--agent cafleet` safety floor shows no popup; if a popup ever appears it is a regression to escalate, not a decision point. | `{decision_surface}` — `cafleet/SKILL.md` § Soliciting user reactions |
-| *Pane-state capture cues* (below) — the concrete opencode-pane discriminators for `awaiting_user`, `finished`, affirmative `working`, and quiet `stall_candidate`. | the monitor member's on-wake classification (its role file's § *On each wake*) and the Director's reading of a pane capture — `cafleet/reference/supervision.md` § Idle Semantics / § Stall Response; the pane-state taxonomy in [Monitoring](runtime/concepts/monitoring.md) (each reader applies the cues of the **target member's** backend overlay). |
-| The `--agent cafleet` preset is a deny-by-default bash allowlist: denial is the common case for any un-allowlisted command, and routing workflow commands through the Director is the routine path. Before routing, check whether an allowlisted command covers the need. | `{permission_flags}` — `cafleet/roles/member.md` § Command execution; `cafleet/reference/prompt-routing.md` opening paragraphs / § Member-side: reconsider, then route; `cafleet/roles/director.md` introduction / § Member Create; `cafleet/reference/supervision.md` § Routing member command requests |
+|---|---|
+| A member routes concrete questions to the Director and receives the operator's answer as a message. | `{decision_surface}`; [user relay](supervision.md#user-delegation-protocol) |
+| Members perform assignments using the selected provider/model, workspace reads/edits, permitted tools and broker communication. The Director coordinates next steps and retains finite receiving. | [Director receiving](supervision.md#asynchronous-wait-rule) |
+| The TUI documents leading `!` native shell input and conversation-visible output. A local native-input permission probe was outside this investigation; preserve member-tool permissions and Director authorization. | [Native dispatch](prompt-routing.md#director-side-dispatch) |
+| The `cafleet` preset allows its declared workspace/broker tools and denies unmatched shell commands; route a required denied command. A permission popup is an issue to capture and relay. | `{permission_flags}`; [member routing](prompt-routing.md#member-side-reconsider-then-route) |
+
+Provenance: [OpenCode shell input](https://docs.opencode.ai/docs/tui/#shell-commands).
 
 ### Pane-state capture cues
 
-A cross-section reader — the monitor member on each wake, the Director reading a capture — classifies each target from its **content only** (never native `agent_status`) using that target's backend overlay:
+Use fresh styled capture as transport evidence. Approval/work outranks idle cues; preserve drafts and treat ambiguity as unknown.
 
 | State | opencode capture cue |
 |---|---|
-| `awaiting_user` | An opencode permission/selection popup awaiting a choice. The `--agent cafleet` floor suppresses permission popups, so a visible popup is both the `awaiting_user` signal **and** a regression to escalate (see the decision-surface note above). |
-| `finished` | The empty opencode prompt at rest — no streaming response above it and no active generation indicator. |
-| `working` | Affirmative active-work evidence: streaming response text, an active generation indicator, a running tool, or any other visible in-progress state. A truncated or ambiguous capture that might still be active is also `working`. |
-| `stall_candidate` | Quiet, non-finished content with no popup, no empty at-rest prompt, and no streaming, tool, generation, or other active-work cue. |
+| `idle` | Affirmative empty composer or verified decoration-styled placeholder without active/approval evidence |
+| `working` | Streaming, generation, tool/shell activity or interrupt cue |
+| `awaiting_user` | Question/permission/selection popup awaiting a choice |
+| `draft` | Unsent user-input styled text in the recognized composer |
+| `unknown` | Missing, truncated, unrecognized or ambiguous composer/style evidence |
 
-Tie-breaks and the two-quiet-families rule: `cafleet/roles/monitor.md` § *On each wake*.
+Follow [Director evidence handling](supervision.md#idle-semantics). Empty readiness establishes no task completion.
 
 ## Template
 
@@ -213,7 +222,7 @@ Supply all five tokens: `{decision_surface}` (recorded user-reaction surface; me
 
 ### Role defaults
 
-Set `{reviewer_model}`, `{monitor_model}`, and `{other_model}` to catalog tokens or aliases. Set their matching effort placeholders to a supported level or `—` when the backend does not support effort.
+Set `{reviewer_model}` and `{other_model}` to catalog tokens or aliases. Set their matching effort placeholders to a supported level or `—` when the backend does not support effort.
 
 ### Model catalog
 
@@ -221,8 +230,8 @@ List exact spawn tokens, valid aliases, reviewed most-to-least capability orderi
 
 ### Note → applies at
 
-Use a `Note | Applies at` table, one caveat per row. Every Applies-at cell names the token and affected `<skill>/<file>` section. Bind the pane-cue table to monitor on-wake classification and the Director's reading of a pane capture. Bind a `{permission_flags}` row stating the posture's denial semantics — what a member runs unprompted, what the harness denies, and when the member routes — to the member command-execution, prompt-routing, Director, and supervision instructions that point at it.
+Use a `Note | Applies at` table, one caveat per row. Every Applies-at cell names the token and affected `<skill>/<file>` section. Bind the pane-cue table to Director capture inspection and the Director's reading of a pane capture. Bind a `{permission_flags}` row stating the posture's denial semantics — what a member runs unprompted, what the harness denies, and when the member routes — to the member command-execution, prompt-routing, Director, and supervision instructions that point at it.
 
 ### Pane-state capture cues
 
-Provide concrete content-only cues for `awaiting_user`, `finished`, `working` and `stall_candidate`; native `agent_status` is outside this classification. Finished requires an empty at-rest composer without a pending prompt or active work; working includes streaming, generation, tools and ambiguous/truncated captures that may still be active. Stall-candidate means quiet non-finished content without a prompt or active-work cue. Link [the monitor's on-wake protocol](../roles/monitor.md#on-each-wake) for both tie-breaks (`awaiting_user` over `finished`, `working` over `stall_candidate`) and quiet confirmation.
+Provide backend-specific styled cues for `idle`, `working`, `awaiting_user`, `draft` and `unknown`. Bind receiving and native-input facts to their consuming supervision/routing instructions. Preserve input when evidence is ambiguous.

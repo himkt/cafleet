@@ -137,8 +137,7 @@ writable_roots = ["/home/<you>/.local/share/cafleet"]
 (tmux and herdr) communicate over a local socket, which the Codex sandbox
 classifies as network access — without it cafleet commands fail with
 `Operation not permitted`. `writable_roots` grants write access to cafleet's
-default SQLite DB directory. Use the absolute path matching
-`CAFLEET_DATABASE_URL` or the default XDG location.
+default SQLite DB directory. For `writable_roots`, use the absolute directory obtained by resolving the selected database file against the invoking working directory, or use the default XDG location.
 
 The Codex rules for `cafleet` commands allow every subcommand while keeping
 `cafleet member prompt` and `cafleet member exec` prompting; the reference

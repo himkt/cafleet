@@ -8,7 +8,45 @@ use common::{Cli, code, stderr, stdout, write_file};
 fn fleet_with_member(cli: &Cli) -> (i64, i64, i64) {
     let (fleet_id, director_id) = cli.seeded_fleet();
     let member_id = cli.seed_member(fleet_id, "worker");
+    cli.set_pane_capture(
+        &format!("%{}", member_id + 4),
+        "Ready.\n────────────\n❯ \x1b[0m\n────────────\n? for shortcuts",
+    );
     (fleet_id, director_id, member_id)
+}
+
+#[test]
+fn slow_stdin_receives_a_fresh_persistence_budget_after_the_body_is_resolved() {
+    use std::{io::Write, time::Duration};
+    let _test_resource = common::process_test_resource_guard();
+    let cli = Cli::new();
+    let (_, director, member) = fleet_with_member(&cli);
+    let child = cli.spawn_with_stdin(&[
+        "message",
+        "send",
+        "--from-member-id",
+        &director.to_string(),
+        "--to-member-id",
+        &member.to_string(),
+        "--file",
+        "-",
+        "--json",
+    ]);
+    let mut child = child;
+    let mut stdin = child.stdin.take().unwrap();
+    std::thread::sleep(Duration::from_secs(6));
+    stdin.write_all(b"exact delayed body\n").unwrap();
+    drop(stdin);
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["message"]["text"], "exact delayed body\n");
+    assert_eq!(result["notification_sent"], true);
+    let stored: String = cli
+        .sqlite()
+        .query_row("SELECT text FROM messages", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(stored, "exact delayed body\n");
 }
 
 #[test]
@@ -40,11 +78,7 @@ fn send_truncates_the_echo_but_never_the_persisted_text() {
 
     let stored: String = cli
         .sqlite()
-        .query_row(
-            "SELECT text FROM messages WHERE type='unicast'",
-            [],
-            |row| row.get(0),
-        )
+        .query_row("SELECT text FROM messages", [], |row| row.get(0))
         .unwrap();
     assert_eq!(stored, long_text, "persistence is never truncated");
 }
@@ -96,28 +130,6 @@ fn self_send_and_no_pane_skips_stay_successful_without_a_multiplexer() {
 }
 
 #[test]
-fn broadcast_keeps_exit_zero_and_counts_when_previews_fail() {
-    let mut cli = Cli::new();
-    let (_, director_id, _member_id) = fleet_with_member(&cli);
-    cli.fail_subcommand = Some("send-keys".to_string());
-
-    let output = cli.run(&[
-        "message",
-        "broadcast",
-        "--from-member-id",
-        &director_id.to_string(),
-        "failing fanout",
-    ]);
-    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
-    assert_eq!(stderr(&output), "", "no per-recipient error list appears");
-    let out = stdout(&output);
-    assert!(
-        out.contains("recipients=2 delivered=0"),
-        "failed previews only lower the delivered count, got: {out}"
-    );
-}
-
-#[test]
 fn poll_and_ack_walk_the_delivery_lifecycle_with_subject_ids_only() {
     let cli = Cli::new();
     let (_, director_id, member_id) = fleet_with_member(&cli);
@@ -149,11 +161,7 @@ fn poll_and_ack_walk_the_delivery_lifecycle_with_subject_ids_only() {
 
     let message_id: i64 = cli
         .sqlite()
-        .query_row(
-            "SELECT message_id FROM messages WHERE type='unicast'",
-            [],
-            |r| r.get(0),
-        )
+        .query_row("SELECT message_id FROM messages", [], |r| r.get(0))
         .unwrap();
     let output = cli.run(&["message", "ack", &message_id.to_string()]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
@@ -291,8 +299,6 @@ fn send_rejects_a_cross_fleet_pair() {
         "beta",
         "--coding-agent",
         "claude",
-        "--monitor-file",
-        &cli.monitor_prompt_path(),
     ]);
     assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
     let stranger_id: i64 = stdout(&output)
@@ -322,7 +328,7 @@ fn send_rejects_a_cross_fleet_pair() {
 }
 
 #[test]
-fn send_and_broadcast_reject_an_unknown_sender() {
+fn send_rejects_an_unknown_sender() {
     let cli = Cli::new();
     let (_, _, member_id) = fleet_with_member(&cli);
 
@@ -336,14 +342,6 @@ fn send_and_broadcast_reject_an_unknown_sender() {
         "hi",
     ]);
     assert_eq!(code(&output), 1, "the sender check precedes the recipient");
-    assert!(
-        stderr(&output).contains("Error: Sender member not found or not active: 999"),
-        "got: {}",
-        stderr(&output)
-    );
-
-    let output = cli.run(&["message", "broadcast", "--from-member-id", "999", "hi"]);
-    assert_eq!(code(&output), 1);
     assert!(
         stderr(&output).contains("Error: Sender member not found or not active: 999"),
         "got: {}",
@@ -442,7 +440,7 @@ fn json_is_untruncated_on_every_message_subcommand() {
     let ts = shown["message"]["created_at"].as_str().unwrap();
     let body = serde_json::to_string(&long_text).unwrap();
     let expected = format!(
-        r#"{{"message":{{"message_id":{message_id},"owner_member_id":{member_id},"from_member_id":{director_id},"to_member_id":{member_id},"type":"unicast","created_at":"{ts}","status_state":"input_required","status_timestamp":"{ts}","origin_message_id":null,"text":{body}}}}}"#
+        r#"{{"message":{{"message_id":{message_id},"from_member_id":{director_id},"to_member_id":{member_id},"created_at":"{ts}","status_state":"input_required","status_timestamp":"{ts}","text":{body}}}}}"#
     );
     assert_eq!(
         raw.trim(),
@@ -464,67 +462,8 @@ fn json_is_untruncated_on_every_message_subcommand() {
 }
 
 #[test]
-fn broadcast_prints_the_recipients_and_delivered_counts() {
-    let cli = Cli::new();
-    let (_, director_id, _member_id) = fleet_with_member(&cli);
-    let output = cli.run(&[
-        "message",
-        "broadcast",
-        "--from-member-id",
-        &director_id.to_string(),
-        "all hands",
-    ]);
-    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
-    let out = stdout(&output);
-    assert!(
-        out.contains("recipients=2 delivered=2"),
-        "the monitor and worker peers, previews landed via the shim, got: {out}"
-    );
-    assert!(out.contains("broadcast id="), "got: {out}");
-}
-
-#[test]
-fn broadcast_json_summary_carries_the_null_recipient() {
-    let cli = Cli::new();
-    let (_, director_id, _member_id) = fleet_with_member(&cli);
-    let output = cli.run(&[
-        "message",
-        "broadcast",
-        "--from-member-id",
-        &director_id.to_string(),
-        "all hands",
-        "--json",
-    ]);
-    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
-    let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
-    let envelope = &payload[0];
-    assert_eq!(envelope["recipients"], 2);
-    assert_eq!(envelope["delivered"], 2);
-    let summary = &envelope["message"];
-    assert_eq!(summary["type"], "broadcast_summary");
-    assert_eq!(
-        summary["to_member_id"],
-        serde_json::Value::Null,
-        "the summary row has no single recipient — never a 0 sentinel"
-    );
-    assert_eq!(
-        summary["origin_message_id"], summary["message_id"],
-        "self-referential origin"
-    );
-    assert_eq!(summary["text"], "Broadcast sent to 2 recipients");
-    let summary_id = summary["message_id"].as_i64().unwrap();
-    let shown = cli.run(&["message", "show", &summary_id.to_string(), "--json"]);
-    assert_eq!(code(&shown), 0, "{}", stderr(&shown));
-    let fetched: serde_json::Value = serde_json::from_str(stdout(&shown).trim()).unwrap();
-    assert_eq!(
-        fetched["message"], *summary,
-        "show retains the complete summary, including null recipient"
-    );
-}
-
-#[test]
 fn integrity_invalid_stored_message_enum_exits_one_without_success_output_or_panic() {
-    for field in ["type", "status_state"] {
+    for field in ["status_state"] {
         let cli = Cli::new();
         let (_, director, worker) = fleet_with_member(&cli);
         let id = cli.seed_message(director, worker, "integrity");

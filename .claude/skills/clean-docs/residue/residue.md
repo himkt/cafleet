@@ -85,7 +85,7 @@ in this benign / KEEP / exempt class before declaring the sweep clean.
 - `used to` meaning *utilized to* (not *formerly*).
 - `preserved for` / `retained for` describing *current* behavior (not "preserved
   for history / forensic visibility" as a removed-value justification).
-- `\bstale\b` / `STALE` naming a **live** feature — monitor-liveness staleness,
+- `\bstale\b` / `STALE` naming a **live** feature — asset-version staleness,
   skill-install staleness. The word names current behavior, not a removed guard.
 - Issue-provenance citations (`(issue #174 bullet 3)`). Issue provenance is in
   scope only for *design-number* citations, not issue numbers — keep issue refs.
