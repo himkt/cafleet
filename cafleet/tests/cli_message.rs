@@ -63,6 +63,44 @@ fn a_director_self_send_produces_no_pane_input_inside_the_multiplexer() {
 }
 
 #[test]
+fn a_self_send_never_drains_another_pending_message_into_the_senders_own_pane() {
+    let cli = Cli::new();
+    let (_, director_id, member_id) = fleet_with_member(&cli);
+    for (sender, other) in [(director_id, member_id), (member_id, director_id)] {
+        let pending = cli.seed_message(other, sender, "left pending by an earlier send");
+        let output = cli.run(&[
+            "message",
+            "send",
+            "--from-member-id",
+            &sender.to_string(),
+            "--to-member-id",
+            &sender.to_string(),
+            "note to self",
+            "--json",
+        ]);
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+        assert_eq!(stderr(&output), "");
+        let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
+        assert_eq!(payload["notification_sent"], false);
+        assert!(
+            cli.shim_calls().is_empty(),
+            "a self-send produces no pane input: {:?}",
+            cli.shim_calls()
+        );
+        let (notified, claimed): (Option<String>, bool) = cli
+            .sqlite()
+            .query_row(
+                "SELECT notified_at, preview_started_at IS NOT NULL FROM messages WHERE message_id=?1",
+                [pending],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(notified, None, "the other pending message stays pending");
+        assert!(!claimed);
+    }
+}
+
+#[test]
 fn a_lock_busy_send_prints_the_persisted_prefix_and_keeps_the_message_pending() {
     let _test_resource = common::process_test_resource_guard();
     let cli = Cli::new();
