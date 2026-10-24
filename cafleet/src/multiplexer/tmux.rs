@@ -202,7 +202,7 @@ impl TmuxMultiplexer {
         let bounded = self.bounded(crate::input::Deadline::new());
         super::submit_prompt(
             bounded.runner.as_ref(),
-            &tmux_argv(&["tmux", "send-keys", "-t", target_pane_id, "-l", text]),
+            &tmux_argv(&["tmux", "send-keys", "-t", target_pane_id, "-l", "--", text]),
             &tmux_argv(&["tmux", "send-keys", "-t", target_pane_id, "Enter"]),
             map_run_error,
             is_pane_gone,
@@ -427,7 +427,7 @@ mod tests {
         assert_eq!(
             runner.run_argvs(),
             vec![
-                argv(&["tmux", "send-keys", "-t", "%5", "-l", text]),
+                argv(&["tmux", "send-keys", "-t", "%5", "-l", "--", text]),
                 argv(&["tmux", "send-keys", "-t", "%5", "Enter"])
             ]
         );
@@ -453,7 +453,7 @@ mod tests {
         assert_eq!(
             runner.run_argvs(),
             vec![
-                argv(&["tmux", "send-keys", "-t", "%5", "-l", text]),
+                argv(&["tmux", "send-keys", "-t", "%5", "-l", "--", text]),
                 argv(&["tmux", "send-keys", "-t", "%5", "Enter"])
             ]
         );
@@ -477,7 +477,7 @@ mod tests {
         let text = "[cafleet msg 5 from 2 timestamp] hello";
         assert_eq!(
             runner.run_argvs(),
-            vec![argv(&["tmux", "send-keys", "-t", "%5", "-l", text])]
+            vec![argv(&["tmux", "send-keys", "-t", "%5", "-l", "--", text])]
         );
         assert_eq!(runner.events().len(), 1);
     }
@@ -501,7 +501,7 @@ mod tests {
         assert_eq!(
             runner.run_argvs(),
             vec![
-                argv(&["tmux", "send-keys", "-t", "%5", "-l", text]),
+                argv(&["tmux", "send-keys", "-t", "%5", "-l", "--", text]),
                 argv(&["tmux", "send-keys", "-t", "%5", "Enter"])
             ]
         );

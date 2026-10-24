@@ -59,6 +59,22 @@ mod submission_regressions {
     }
 
     #[test]
+    fn option_like_prompt_text_follows_the_literal_option_terminator() {
+        for mux_index in 0..2 {
+            let runner = FakeRunner::without_binaries();
+            let mux = muxes(runner.clone()).into_iter().nth(mux_index).unwrap();
+            mux.send_prompt("pane", "-R --help --target=other").unwrap();
+            let calls = runner.run_argvs();
+            let literal = &calls[0];
+            assert_eq!(
+                &literal[literal.len() - 2..],
+                ["--", "-R --help --target=other"]
+            );
+            assert_eq!(calls.len(), 2);
+        }
+    }
+
+    #[test]
     fn launch_failures_are_not_sent_and_started_write_or_enter_failures_are_uncertain() {
         for backend in 0..2 {
             for (failure, started) in [

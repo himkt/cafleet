@@ -1,7 +1,7 @@
 use crate::broker;
 use crate::config::Settings;
 use crate::error::CafleetError;
-use crate::input::{Deadline, PaneLock, complete_database_budget, with_database_budget};
+use crate::input::{Deadline, PaneLock, with_database_budget};
 use crate::multiplexer::{AnyMultiplexer, Multiplexer, MultiplexerError};
 use crate::output::truncate_text;
 use crate::pane_state::{PaneState, classify};
@@ -19,36 +19,75 @@ pub(crate) fn attempt_preview(
     deadline: Deadline,
     resolve: impl FnOnce() -> Result<AnyMultiplexer, MultiplexerError>,
 ) -> Result<AttemptOutcome, CafleetError> {
-    let Some(fleet_id) = with_database_budget(conn, deadline, |conn| {
-        broker::active_member_fleet(conn, member_id)
-    })?
+    with_database_budget(conn, deadline, |conn| {
+        attempt_preview_scoped(conn, settings, member_id, expected_fleet, deadline, resolve)
+    })
+}
+
+fn read_snapshot<T>(
+    conn: &mut Connection,
+    deadline: Deadline,
+    read: impl FnOnce(&Connection) -> Result<T, CafleetError>,
+) -> Result<T, CafleetError> {
+    deadline.remaining()?;
+    let tx = conn.transaction().map_err(broker::members::db_err)?;
+    let result = read(&tx)?;
+    tx.commit().map_err(broker::members::db_err)?;
+    Ok(result)
+}
+
+type PreviewSnapshot = (
+    broker::records::MemberRecord,
+    broker::records::MessageRecord,
+);
+
+fn preview_snapshot(
+    conn: &mut Connection,
+    member_id: i64,
+    expected_fleet: Option<i64>,
+    deadline: Deadline,
+) -> Result<Option<PreviewSnapshot>, CafleetError> {
+    read_snapshot(conn, deadline, |conn| {
+        let Some(fleet_id) = broker::active_member_fleet(conn, member_id)? else {
+            return Ok(None);
+        };
+        if expected_fleet.is_some_and(|expected| expected != fleet_id) {
+            return Ok(None);
+        }
+        let fleet = broker::fleets::fetch_fleet(conn, fleet_id)?
+            .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;
+        if fleet.director_member_id == Some(member_id) {
+            return Ok(None);
+        }
+        let Some(member) = broker::get_member(conn, member_id, fleet_id)? else {
+            return Ok(None);
+        };
+        let Some(message) = broker::oldest_pending_preview(conn, member_id)? else {
+            return Ok(None);
+        };
+        Ok(Some((member, message)))
+    })
+}
+
+fn attempt_preview_scoped(
+    conn: &mut Connection,
+    settings: &Settings,
+    member_id: i64,
+    expected_fleet: Option<i64>,
+    deadline: Deadline,
+    resolve: impl FnOnce() -> Result<AnyMultiplexer, MultiplexerError>,
+) -> Result<AttemptOutcome, CafleetError> {
+    let Some((member, initial)) = preview_snapshot(conn, member_id, expected_fleet, deadline)?
     else {
         return Ok(AttemptOutcome::NoPending);
     };
-    if expected_fleet.is_some_and(|expected| expected != fleet_id) {
-        return Ok(AttemptOutcome::NoPending);
-    }
-    let member = with_database_budget(conn, deadline, |conn| {
-        broker::get_member(conn, member_id, fleet_id)
-    })?;
-    let Some(member) = member else {
-        return Ok(AttemptOutcome::NoPending);
-    };
+    let fleet_id = member.fleet_id;
     let Some(placement) = member
         .placement
         .as_ref()
         .filter(|p| p.mux_pane_id.is_some())
     else {
         return Ok(AttemptOutcome::Held);
-    };
-    if member.kind == broker::records::MemberKind::Director {
-        return Ok(AttemptOutcome::NoPending);
-    }
-    let Some(initial) = with_database_budget(conn, deadline, |conn| {
-        broker::oldest_pending_preview(conn, member_id)
-    })?
-    else {
-        return Ok(AttemptOutcome::NoPending);
     };
     let failed = |message_id, delivery, error| {
         AttemptOutcome::Failed(NotificationError {
@@ -69,21 +108,13 @@ pub(crate) fn attempt_preview(
             ));
         }
     };
-    let current = with_database_budget(conn, deadline, |conn| {
-        broker::get_member(conn, member_id, fleet_id)
-    })?;
-    let Some(current) = current else {
+    let Some((current, message)) = preview_snapshot(conn, member_id, Some(fleet_id), deadline)?
+    else {
         return Ok(AttemptOutcome::NoPending);
     };
     if current.placement != member.placement {
         return Ok(AttemptOutcome::Held);
     }
-    let Some(message) = with_database_budget(conn, deadline, |conn| {
-        broker::oldest_pending_preview(conn, member_id)
-    })?
-    else {
-        return Ok(AttemptOutcome::NoPending);
-    };
     if message.from_member_id == member_id {
         return Ok(AttemptOutcome::Held);
     }
@@ -129,7 +160,7 @@ pub(crate) fn attempt_preview(
             AttemptOutcome::Held
         });
     }
-    let hold = with_database_budget(conn, deadline, |conn| {
+    let hold = read_snapshot(conn, deadline, |conn| {
         let Some(current) = broker::get_member(conn, member_id, fleet_id)? else {
             return Ok(Some(AttemptOutcome::NoPending));
         };
@@ -177,13 +208,11 @@ pub(crate) fn attempt_preview(
             failed(message.message_id, Delivery::NotSent, error.to_string())
         });
     }
-    match complete_database_budget(conn, deadline, |conn| {
-        broker::stamp_notified(
-            conn,
-            message.message_id,
-            &format_utc(crate::time::now_utc()),
-        )
-    }) {
+    match broker::stamp_notified(
+        conn,
+        message.message_id,
+        &format_utc(crate::time::now_utc()),
+    ) {
         Ok(true) => Ok(AttemptOutcome::Sent {
             message_id: message.message_id,
         }),
@@ -207,6 +236,28 @@ mod tests {
 
     struct FinishingRunner {
         deadline: Deadline,
+    }
+
+    #[test]
+    fn a_director_without_a_placement_has_no_preview_attempt() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        let (fleet, director) = common::create_fleet(&mut conn, "director");
+        conn.execute(
+            "DELETE FROM member_placements WHERE member_id=?1",
+            [director],
+        )
+        .unwrap();
+        let settings = Settings::from_lookup(|_| None).unwrap();
+        let outcome = attempt_preview(
+            &mut conn,
+            &settings,
+            director,
+            Some(fleet),
+            Deadline::new(),
+            || panic!("Director needs no multiplexer"),
+        );
+        assert_eq!(outcome.unwrap(), AttemptOutcome::NoPending);
     }
 
     impl CommandRunner for FinishingRunner {
@@ -238,6 +289,26 @@ mod tests {
             (name == "CAFLEET_DATABASE_URL").then(|| format!("sqlite:///{}", conn.path().unwrap()))
         })
         .unwrap();
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let scopes = Arc::new(AtomicUsize::new(0));
+        let observed = scopes.clone();
+        conn.authorizer(Some(move |context: AuthContext<'_>| {
+            if matches!(
+                context.action,
+                AuthAction::Pragma {
+                    pragma_name: "busy_timeout",
+                    ..
+                }
+            ) {
+                observed.fetch_add(1, Ordering::SeqCst);
+            }
+            Authorization::Allow
+        }))
+        .unwrap();
         let deadline = Deadline::until(Instant::now() + Duration::from_millis(2200));
         let mux = AnyMultiplexer::Tmux(TmuxMultiplexer::new(
             Rc::new(FinishingRunner { deadline }),
@@ -253,10 +324,66 @@ mod tests {
             }
         );
         assert!(deadline.remaining().is_err());
+        assert_eq!(
+            scopes.load(Ordering::SeqCst),
+            1,
+            "one database budget owns the complete attempt"
+        );
         assert!(
             broker::oldest_pending_preview(&conn, worker)
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn preview_reads_share_one_snapshot_when_another_connection_changes_placement_and_text() {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        conn.execute_batch("PRAGMA journal_mode=WAL").unwrap();
+        let (fleet, director) = common::create_fleet(&mut conn, "snapshot");
+        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+        let message =
+            broker::send_message(&mut conn, director, &worker.to_string(), "original").unwrap();
+        let path = conn.path().unwrap().to_owned();
+        let mut changed = false;
+        conn.authorizer(Some(move |context: AuthContext<'_>| {
+            if !changed
+                && matches!(
+                    context.action,
+                    AuthAction::Read {
+                        table_name: "messages",
+                        ..
+                    }
+                )
+            {
+                changed = true;
+                let other = Connection::open(&path).unwrap();
+                other
+                    .execute(
+                        "UPDATE member_placements SET mux_pane_id='%9' WHERE member_id=?1",
+                        [worker],
+                    )
+                    .unwrap();
+                other
+                    .execute(
+                        "UPDATE messages SET text='changed' WHERE message_id=?1",
+                        [message.message_id],
+                    )
+                    .unwrap();
+            }
+            Authorization::Allow
+        }))
+        .unwrap();
+        let (member, message) = preview_snapshot(&mut conn, worker, Some(fleet), Deadline::new())
+            .unwrap()
+            .unwrap();
+        assert_eq!(member.placement.unwrap().mux_pane_id.as_deref(), Some("%2"));
+        assert_eq!(message.text, "original");
+        let current: String = conn
+            .query_row("SELECT text FROM messages", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(current, "changed");
     }
 }

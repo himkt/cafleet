@@ -264,7 +264,7 @@ pub fn run(
             member_id,
             body,
             json,
-        } => exec(conn, settings, member_id, &body, json, deadline),
+        } => exec(conn, settings, member_id, &body, json),
         MemberCommand::Ping { member_id, json } => ping(conn, settings, member_id, json, deadline),
         MemberCommand::Capture {
             member_id,
@@ -409,42 +409,26 @@ fn delete(
         ));
     }
 
-    let pane_status = loop {
-        let member = crate::input::with_database_budget(conn, deadline, |conn| {
-            load_member(conn, member_id, true)
-        })?;
-        let concrete = member
-            .placement
-            .as_ref()
-            .filter(|placement| placement.mux_pane_id.is_some());
-        let guard = if let Some(placement) = concrete {
-            match crate::input::PaneLock::try_acquire(&settings.database_url, placement).map_err(
-                |error| {
-                    CafleetError::App(format!(
-                        "member {member_id} pane input: {}",
-                        error.message()
-                    ))
-                },
-            )? {
-                Some(guard) => Some(guard),
-                None => {
-                    if deadline.retry() {
-                        continue;
-                    }
-                    return Err(CafleetError::App(format!(
-                        "member {member_id}'s pane input remained busy for 5 seconds; member was not deleted."
-                    )));
-                }
-            }
-        } else {
-            None
-        };
-        let deleted = crate::input::with_database_budget(conn, deadline, |conn| {
+    let locked = crate::input::lock_deletion(
+        conn,
+        settings,
+        deadline,
+        |conn| {
+            let member = load_member(conn, member_id, true)?;
+            let targets = member
+                .placement
+                .as_ref()
+                .filter(|placement| placement.mux_pane_id.is_some())
+                .map(|placement| vec![(member_id, placement.clone())])
+                .unwrap_or_default();
+            Ok((member, targets))
+        },
+        |conn, snapshot| {
             let tx = conn
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                 .map_err(crate::broker::members::db_err)?;
             let current = load_member(&tx, member_id, true)?;
-            if current.placement != member.placement {
+            if current.placement != snapshot.placement {
                 return Ok(None);
             }
             if current.kind == crate::broker::records::MemberKind::Director {
@@ -470,18 +454,23 @@ fn delete(
             };
             tx.commit().map_err(crate::broker::members::db_err)?;
             Ok(Some(action))
-        })?;
-        if let Some(action) = deleted {
-            let pane_id = match action {
-                DeleteAction::Deregistered(status) => break status.to_owned(),
-                DeleteAction::Close(pane_id) => pane_id,
-            };
+        },
+        |_| {
+            CafleetError::App(format!(
+                "member {member_id}'s pane input remained busy for 5 seconds; member was not deleted."
+            ))
+        },
+    )?;
+    let member = &locked.snapshot;
+    let pane_status = match &locked.value {
+        DeleteAction::Deregistered(status) => status.to_string(),
+        DeleteAction::Close(pane_id) => {
             let mux = resolve_mux(settings)
                 .map_err(|error| CafleetError::App(error.to_string()))?
                 .bounded(deadline);
             mux.ensure_available()
                 .map_err(|error| CafleetError::App(error.to_string()))?;
-            let layout = mux.close_pane(&pane_id, true).map_err(|error| {
+            let layout = mux.close_pane(pane_id, true).map_err(|error| {
                 CafleetError::App(format!(
                     "kill_pane failed for pane {pane_id}: {error}. The {} server may be \
                      unreachable. Verify with 'cafleet doctor', then re-run the command.",
@@ -516,12 +505,11 @@ fn delete(
                     "Member {member_id} was deregistered; optional layout restoration failed: {error}"
                 );
             }
-            break format!("{pane_id} (killed)");
+            format!("{pane_id} (killed)")
         }
-        drop(guard);
-        deadline.remaining()?;
     };
 
+    drop(locked);
     let result = json!({"member_id": member_id, "pane_status": pane_status});
     emit(json, &result, || {
         format!("Member deleted.\n  member_id: {member_id}\n  pane_id:   {pane_status}")
@@ -634,9 +622,9 @@ fn exec(
     member_id: i64,
     body: &ExecBodyArgs,
     json: bool,
-    deadline: crate::input::Deadline,
 ) -> Result<(), CafleetError> {
     let command = resolve_command_body(body.command.as_deref(), body.file.as_deref())?;
+    let deadline = crate::input::Deadline::new();
     let member = crate::input::with_database_budget(conn, deadline, |conn| {
         load_member(conn, member_id, false)
     })?;

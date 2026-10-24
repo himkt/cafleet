@@ -77,6 +77,30 @@ pub(crate) trait ReceiveIo {
     ) -> Result<AttemptOutcome, CafleetError>;
 }
 
+fn preserve_uncertainty(
+    cause: CafleetError,
+    errors: &BTreeMap<i64, NotificationError>,
+) -> CafleetError {
+    let diagnostics: Vec<_> = errors
+        .values()
+        .filter(|error| error.delivery == Delivery::Uncertain)
+        .map(|error| {
+            format!(
+                "preview {} delivery to member {} is uncertain: {}",
+                error.message_id, error.member_id, error.error
+            )
+        })
+        .collect();
+    if diagnostics.is_empty() {
+        cause
+    } else {
+        CafleetError::WithDiagnostics {
+            cause: Box::new(cause),
+            diagnostics,
+        }
+    }
+}
+
 pub(crate) fn wait<C: Clock, I: ReceiveIo>(
     clock: &C,
     io: &mut I,
@@ -109,7 +133,7 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
                     started + Duration::from_secs(now.duration_since(started).as_secs() + 1);
                 continue;
             }
-            Err(error) => return Err(error),
+            Err(error) => return Err(preserve_uncertainty(error, &errors)),
         };
         errors.retain(|member, error| {
             snapshot.pending.iter().any(|preview| {
@@ -125,7 +149,7 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
         let member = if last_interval == Some(interval) {
             None
         } else {
-            snapshot
+            let eligible = snapshot
                 .pending
                 .iter()
                 .map(|preview| preview.member_id)
@@ -133,21 +157,12 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
                     !errors
                         .get(member)
                         .is_some_and(|error| error.delivery == Delivery::Uncertain)
-                })
+                });
+            eligible
+                .clone()
                 .filter(|member| cursor.is_none_or(|cursor| *member > cursor))
                 .min()
-                .or_else(|| {
-                    snapshot
-                        .pending
-                        .iter()
-                        .map(|preview| preview.member_id)
-                        .filter(|member| {
-                            !errors
-                                .get(member)
-                                .is_some_and(|error| error.delivery == Delivery::Uncertain)
-                        })
-                        .min()
-                })
+                .or_else(|| eligible.min())
         };
         if let Some(member) = member {
             cursor = Some(member);
@@ -167,7 +182,7 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
                         error: error.to_string(),
                     })
                 }
-                Err(error) => return Err(error),
+                Err(error) => return Err(preserve_uncertainty(error, &errors)),
             };
             match outcome {
                 AttemptOutcome::Held => {}
@@ -645,6 +660,40 @@ mod tests {
             1
         );
         assert!(clock.attempts().iter().any(|(_, member)| *member == 22));
+    }
+
+    #[test]
+    fn a_fatal_snapshot_keeps_uncertainty_and_the_original_typed_error() {
+        let clock = TestClock::new();
+        let mut io = ScriptedIo::new(
+            &clock,
+            |check, _, _| {
+                if check == 1 {
+                    Step::done(snapshot(&[(11, 101)]))
+                } else {
+                    Step::failed(CafleetError::InvalidStoredValue {
+                        field: "members.status".into(),
+                        value: "broken".into(),
+                    })
+                }
+            },
+            |attempt, _, _| {
+                assert_eq!(attempt, 1);
+                Step::done(AttemptOutcome::Failed(diagnostic(
+                    11,
+                    101,
+                    Delivery::Uncertain,
+                    "Enter result is unknown",
+                )))
+            },
+        );
+        let error = clock.run(&mut io, 5000).unwrap_err();
+        assert_eq!(error.exit_code(), 1);
+        let message = error.message();
+        assert!(message.contains("members.status") && message.contains("broken"));
+        assert!(message.contains("preview 101 delivery to member 11 is uncertain"));
+        assert!(matches!(error, CafleetError::WithDiagnostics { cause, .. }
+            if matches!(*cause, CafleetError::InvalidStoredValue { .. })));
     }
 
     #[test]

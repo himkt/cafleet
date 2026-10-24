@@ -15,40 +15,52 @@ use crate::time::now_utc;
 pub enum FleetCommand {
     /// Register the calling Director in a new fleet.
     Create {
+        /// Fleet name.
         #[arg(long)]
         name: String,
+        /// Director's coding agent.
         #[arg(long = "coding-agent", value_parser = ["claude", "codex", "opencode"])]
         coding_agent: String,
+        /// Output in JSON format.
         #[arg(long)]
         json: bool,
     },
     /// List non-deleted fleets.
     List {
+        /// Output in JSON format.
         #[arg(long)]
         json: bool,
     },
     /// Show one fleet.
     Show {
+        /// Fleet to show.
         #[arg(value_name = "FLEET_ID")]
         fleet_id: i64,
+        /// Output in JSON format.
         #[arg(long)]
         json: bool,
     },
     /// Deregister a fleet and its members.
     Delete {
+        /// Fleet to deregister.
         #[arg(value_name = "FLEET_ID")]
         fleet_id: i64,
+        /// Output in JSON format.
         #[arg(long)]
         json: bool,
     },
     /// Capture the active fleet's panes once.
     Capture {
+        /// Fleet whose active panes are captured.
         #[arg(value_name = "FLEET_ID")]
         fleet_id: i64,
+        /// Lines per pane.
         #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(i64).range(1..))]
         lines: i64,
+        /// Preserve ANSI styling in captured content.
         #[arg(long)]
         ansi: bool,
+        /// Output in JSON format.
         #[arg(long)]
         json: bool,
     },
@@ -194,12 +206,9 @@ fn capture(
         .iter()
         .filter(|member| Some(member.member_id) == director_member_id)
         .collect();
-    let mut rest: Vec<_> = members
-        .iter()
-        .filter(|member| Some(member.member_id) != director_member_id && member.placement.is_some())
-        .collect();
-    rest.sort_by_key(|member| Some(member.member_id));
-    roster.extend(rest);
+    roster.extend(members.iter().filter(|member| {
+        Some(member.member_id) != director_member_id && member.placement.is_some()
+    }));
 
     let mut entries = Vec::new();
     for member in roster {
@@ -245,6 +254,22 @@ mod tests {
 
     fn parse(args: &[&str]) -> Result<FleetCommand, clap::Error> {
         Harness::try_parse_from(args).map(|harness| harness.command)
+    }
+
+    #[test]
+    fn fleet_help_explains_registration_and_capture_flags() {
+        let create = parse(&["cafleet", "create", "--help"])
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(create.contains("Fleet name"), "{create}");
+        assert!(create.contains("Director's coding agent"), "{create}");
+        let capture = parse(&["cafleet", "capture", "--help"])
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(capture.contains("Lines per pane"), "{capture}");
+        assert!(capture.contains("Preserve ANSI"), "{capture}");
     }
 
     #[test]

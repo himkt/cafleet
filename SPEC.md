@@ -658,7 +658,7 @@ The ordered JSON result is:
 
 Unknown/draft diagnostics are `member ID is STATE; preview MESSAGE_ID was not sent.` Working, approval, pending placement and lock contention are ordinary holds. Reconcile diagnostics with each successful receive snapshot and the typed observations of its owned notification attempt. Remove entries when these observations show ACK, member departure or successful notification by any invocation; a later error replaces the previous one. After receive expiry, return the last successful snapshot reconciled with the completed attempt's observations. Subsequent external changes become visible to the next invocation; final reconciliation starts no additional I/O or tail budget.
 
-Text is `Messages available for member ID.` plus normal messages, or `Timed out waiting for member ID.`; diagnostics go to stderr. Both outcomes exit 0. Deleted subject/fleet or corrupt/unreadable state exits 1 with its cause. Ctrl+C terminates the finite process normally.
+Text is `Messages available for member ID.` plus normal messages, or `Timed out waiting for member ID.`; diagnostics go to stderr. Both outcomes exit 0. Deleted subject/fleet or corrupt/unreadable state exits 1 with its cause and retains earlier uncertain-delivery diagnostics on stderr, including when JSON output was requested. Ctrl+C terminates the finite process normally.
 
 The Director ACKs every consumed delivery before the next wait, including questions or deferred approvals; unfinished actions remain in host-owned task state. Use the default for a host-native background task, retain its live task/session handle and collect the terminal result. A foreground-only mechanism uses an explicit timeout of at most 30 seconds. On timeout inspect roster, panes and artifacts, then receive again while delegated work remains. Keep active receive ownership until the reply or explicit user handoff.
 
@@ -1152,7 +1152,7 @@ Errors are `member ID's pane input remained busy for 5 seconds; member was not d
 
 #### Pane-state classification {#pane-state-classification}
 
-Use the recorded coding-agent backend and a fresh styled capture after locking. tmux captures with `-e`; herdr reads with `--format ansi`. Parse SGR spans in the recognized composer before stripping ANSI for presentation.
+Use the recorded coding-agent backend and a fresh styled capture after locking. tmux captures with `-e`; herdr reads with `--format ansi`. Parse SGR spans in the recognized composer before stripping ANSI for presentation. Recognize the terminal composer/footer frame independently of transcript filtering. Parse fenced output forward using its marker and closing width; exclude code from approval/work evidence. Historical quoted frames and an explicit unfinished quoted frame remain unknown.
 
 | Readiness | Evidence | Action |
 |---|---|---|
@@ -1166,9 +1166,9 @@ Approval and work evidence outrank empty-composer cues. A dim/grey host suggesti
 
 #### Prompt dispatch (`send_prompt`) {#prompt-dispatch}
 
-Validate a nonblank literal line without CR/LF or C0/DEL control characters. After locking and idle revalidation, type the payload once, wait the backend settle interval and submit Enter. Native shell input starts with `! ` followed by the validated actual command. Composer controls begin the submitted input.
+Validate a nonblank literal line without CR/LF or C0/DEL control characters. After locking and idle revalidation, type the payload once, wait the backend settle interval and submit Enter. Native shell input starts with `! ` followed by the validated actual command. Composer controls begin the submitted input. Place the argument terminator `--` before the literal payload in both multiplexer adapters so leading hyphens remain text.
 
-Each submission has one five-second transport budget. Before literal input, reserve the one-second settle delay and one second for Enter; bound the literal command by the remaining unreserved time. Insufficient time starts no input. A confirmed launch failure or recognized missing pane reports no dispatch. A started text write with an ambiguous result, or any failure after successful literal input, is uncertain. A failure after Enter can mean the command ran. Inspect the pane before authorizing any retry.
+Deletion and explicit pane-input operations start their five-second budgets after invocation schema and asset guards. Resolve native command bodies before starting their input budget. Each submission has one five-second transport budget. Before literal input, reserve the one-second settle delay and one second for Enter; bound the literal command by the remaining unreserved time. Insufficient time starts no input. A confirmed launch failure or recognized missing pane reports no dispatch. A started text write with an ambiguous result, or any failure after successful literal input, is uncertain. A failure after Enter can mean the command ran. Inspect the pane before authorizing any retry.
 
 The lock excludes CAFleet writers; the user's keyboard and host UI can still change after a capture. Successful dispatch establishes complete submission only.
 
@@ -1176,7 +1176,7 @@ The lock excludes CAFleet writers; the user's keyboard and host UI can still cha
 
 The Director receives through broker poll/wait reads; sends to the Director persist without injected text. A self-send is already settled. For an ordinary member, a synchronous send attempts at most one oldest pending unacknowledged preview ordered by `(created_at, message_id)`.
 
-Acquire the shared input lock, then revalidate activity, fleet, concrete placement, message status and `notified_at`. An idle empty composer accepts one literal line:
+Read preview eligibility in short consistent snapshots before and after acquiring the shared input lock, then revalidate activity, fleet, concrete placement, message status and `notified_at` before writing. One connection-scoped database budget owns the attempt; commit every read snapshot before multiplexer I/O. An idle empty composer accepts one literal line:
 
 ```text
 [cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] TEXT

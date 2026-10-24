@@ -115,6 +115,7 @@ fn dispatch(
                 });
                 helpers::stale_assets_guard(&assets?, VERSION)?;
             }
+            let deadline = crate::input::Deadline::new();
             let mut slot = Some(conn);
             match command {
                 Command::Fleet(cmd) => fleet::run(&mut slot, settings, cmd, deadline),

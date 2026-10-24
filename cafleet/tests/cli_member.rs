@@ -872,7 +872,7 @@ fn member_ping_skips_a_pending_placement_and_exits_zero() {
         calls[calls_before..]
             .iter()
             .filter(|line| line.as_str()
-                == format!("send-keys -t {pane} -l cafleet message poll {member_id} --json"))
+                == format!("send-keys -t {pane} -l -- cafleet message poll {member_id} --json"))
             .count(),
         1,
         "{calls:?}"

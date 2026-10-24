@@ -7,7 +7,14 @@ pub enum CafleetError {
     Value(String),
     DatabaseBusy(String),
     DeadlineExceeded,
-    InvalidStoredValue { field: String, value: String },
+    WithDiagnostics {
+        cause: Box<CafleetError>,
+        diagnostics: Vec<String>,
+    },
+    InvalidStoredValue {
+        field: String,
+        value: String,
+    },
 }
 
 impl CafleetError {
@@ -17,15 +24,18 @@ impl CafleetError {
         match self {
             Self::Usage(_) => Self::Usage(message),
             Self::Value(_) => Self::Value(message),
+            Self::WithDiagnostics { cause, .. } if cause.exit_code() == 2 => Self::Usage(message),
             Self::App(_)
             | Self::InvalidStoredValue { .. }
             | Self::DatabaseBusy(_)
-            | Self::DeadlineExceeded => Self::App(message),
+            | Self::DeadlineExceeded
+            | Self::WithDiagnostics { .. } => Self::App(message),
         }
     }
 
     pub fn exit_code(&self) -> i32 {
         match self {
+            CafleetError::WithDiagnostics { cause, .. } => cause.exit_code(),
             CafleetError::Usage(_) => 2,
             CafleetError::App(_)
             | CafleetError::Value(_)
@@ -37,6 +47,9 @@ impl CafleetError {
 
     pub fn message(&self) -> Cow<'_, str> {
         match self {
+            CafleetError::WithDiagnostics { cause, diagnostics } => {
+                Cow::Owned(format!("{cause}\n{}", diagnostics.join("\n")))
+            }
             CafleetError::Usage(message)
             | CafleetError::App(message)
             | CafleetError::Value(message)
@@ -55,7 +68,14 @@ impl fmt::Display for CafleetError {
     }
 }
 
-impl std::error::Error for CafleetError {}
+impl std::error::Error for CafleetError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::WithDiagnostics { cause, .. } => Some(cause.as_ref()),
+            _ => None,
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

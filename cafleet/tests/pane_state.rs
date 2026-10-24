@@ -354,6 +354,18 @@ fn transcript_quotes_do_not_become_a_live_composer() {
 }
 
 #[test]
+fn unfinished_output_fences_do_not_expose_code_as_approval_or_work() {
+    for fixture in COMPOSERS {
+        for opening in ["```", "```text", "~~~", "~~~~text"] {
+            for evidence in ["[y/n]", fixture.approval, fixture.working] {
+                let capture = format!("Output example:\n{opening}\n{evidence}");
+                assert_state(fixture.agent, &capture, "Unknown");
+            }
+        }
+    }
+}
+
+#[test]
 fn completed_code_blocks_do_not_hide_the_live_composer() {
     for fixture in COMPOSERS {
         for (composer, expected) in [(fixture.placeholder, "Idle"), (fixture.draft, "Draft")] {

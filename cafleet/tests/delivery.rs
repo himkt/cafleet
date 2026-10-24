@@ -82,7 +82,7 @@ fn idle_preview_is_one_literal_line_followed_by_enter() {
         writes,
         [
             format!(
-                "send-keys -t {} -l [cafleet msg {id} from {} {ts}] assignment",
+                "send-keys -t {} -l -- [cafleet msg {id} from {} {ts}] assignment",
                 fixture.pane, fixture.director
             ),
             format!("send-keys -t {} Enter", fixture.pane),
@@ -315,7 +315,7 @@ fn preview_sanitization_keeps_stored_text_exact_and_native_commands_separate() {
     assert_eq!(stored, body);
     let calls = fixture.cli.shim_calls();
     let literal = calls.iter().find(|line| line.contains(" -l ")).unwrap();
-    assert!(literal.contains(" -l [cafleet msg "), "{literal}");
+    assert!(literal.contains(" -l -- [cafleet msg "), "{literal}");
     assert!(
         literal.ends_with("] ! printf danger⏎next⏎line⏎last␉column\\x1b\\x7f"),
         "{literal}"

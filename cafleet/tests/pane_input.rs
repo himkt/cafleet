@@ -330,7 +330,7 @@ fn prompt_sends_exact_literal_text_then_enter_and_preserves_json_order() {
     assert_eq!(
         writes,
         [
-            format!("send-keys -t {} -l   /help  ", fixture.pane),
+            format!("send-keys -t {} -l --   /help  ", fixture.pane),
             format!("send-keys -t {} Enter", fixture.pane),
         ]
     );
@@ -458,7 +458,7 @@ fn ping_submits_only_the_json_poll_command_with_literal_settle_enter() {
         writes,
         [
             format!(
-                "send-keys -t {} -l cafleet message poll {} --json",
+                "send-keys -t {} -l -- cafleet message poll {} --json",
                 fixture.pane, fixture.member
             ),
             format!("send-keys -t {} Enter", fixture.pane),
@@ -974,6 +974,35 @@ fn insufficient_post_capture_budget_starts_no_literal_input() {
 }
 
 #[test]
+fn startup_schema_wait_does_not_consume_the_member_submission_budget() {
+    let _test_resource = common::process_test_resource_guard();
+    let fixture = InputFixture::new();
+    let blocker = fixture.cli.sqlite();
+    blocker.execute_batch("BEGIN EXCLUSIVE").unwrap();
+    let child = fixture.cli.spawn(&[
+        "member",
+        "prompt",
+        &fixture.member.to_string(),
+        "--json",
+        "--",
+        "-R literal prompt",
+    ]);
+    std::thread::sleep(Duration::from_millis(3500));
+    blocker.execute_batch("ROLLBACK").unwrap();
+    let output = bounded_output(child);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["text"], "-R literal prompt");
+    assert!(
+        fixture
+            .cli
+            .shim_calls()
+            .iter()
+            .any(|line| line.ends_with(" -l -- -R literal prompt"))
+    );
+}
+
+#[test]
 fn member_delete_contention_uses_one_bounded_deadline_without_kill_or_mutation() {
     let _test_resource = common::process_test_resource_guard();
     let fixture = InputFixture::new();
@@ -1443,7 +1472,7 @@ fi
     assert_eq!(
         writes,
         [
-            "pane send-text w1:p2 hello worker",
+            "pane send-text w1:p2 -- hello worker",
             "pane send-keys w1:p2 enter",
         ]
     );

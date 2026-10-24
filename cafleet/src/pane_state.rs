@@ -470,31 +470,60 @@ fn opencode_state(lines: &[&Line]) -> PaneState {
     composer_state(composer, '┃', profile)
 }
 
+fn fence_marker(line: &Line) -> Option<(char, usize, bool)> {
+    let text = line.text.trim_start();
+    let marker = text.chars().next()?;
+    if !matches!(marker, '`' | '~') {
+        return None;
+    }
+    let width = text.chars().take_while(|ch| *ch == marker).count();
+    (width >= 3).then(|| (marker, width, !text[width..].trim().is_empty()))
+}
+
+fn transcript_lines(lines: &[Line]) -> Vec<&Line> {
+    let mut visible = Vec::new();
+    let mut fence = None;
+    for line in lines {
+        if let Some((marker, width, has_info)) = fence_marker(line) {
+            match fence {
+                None => fence = Some((marker, width)),
+                Some((opening, size)) if marker == opening && width >= size && !has_info => {
+                    fence = None
+                }
+                _ => {}
+            }
+        } else if fence.is_none() && !line.text.trim().is_empty() {
+            visible.push(line);
+        }
+    }
+    visible
+}
+
 pub fn classify(coding_agent: &str, content: &str) -> PaneState {
     if !matches!(coding_agent, "claude" | "codex" | "opencode") {
         return PaneState::Unknown;
     }
     let lines = styled_lines(content);
-    let mut fenced = lines
+    let boundary = lines
         .iter()
-        .filter(|line| line.text.trim_start().starts_with("```"))
-        .take_while(|line| line.text.trim() == "```")
-        .count()
-        % 2
-        == 1;
-    let lines: Vec<_> = lines
+        .rposition(|line| fence_marker(line).is_some())
+        .map_or(0, |index| index + 1);
+    let frame: Vec<_> = lines[boundary..]
         .iter()
-        .filter(|line| {
-            if line.text.trim_start().starts_with("```") {
-                fenced = !fenced;
-                false
-            } else {
-                !fenced && !line.text.trim().is_empty()
-            }
-        })
+        .filter(|line| !line.text.trim().is_empty())
         .collect();
-    let recent = &lines[lines.len().saturating_sub(20)..];
-    let composer = agent_composer_state(coding_agent, &lines);
+    let composer = if lines
+        .iter()
+        .rev()
+        .find_map(fence_marker)
+        .is_some_and(|(_, _, has_info)| has_info)
+    {
+        PaneState::Unknown
+    } else {
+        agent_composer_state(coding_agent, &frame)
+    };
+    let visible = transcript_lines(&lines);
+    let recent = &visible[visible.len().saturating_sub(20)..];
     let draft_row = if composer == PaneState::Draft {
         let marker = match coding_agent {
             "claude" => Some('❯'),
@@ -502,7 +531,7 @@ pub fn classify(coding_agent: &str, content: &str) -> PaneState {
             _ => None,
         };
         marker.and_then(|marker| {
-            lines
+            frame
                 .iter()
                 .rfind(|line| line.text.trim_start().starts_with(marker))
         })

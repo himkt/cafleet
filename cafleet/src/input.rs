@@ -393,6 +393,68 @@ pub struct LockedMember {
     _guard: PaneLock,
 }
 
+pub(crate) struct LockedDeletion<S, T> {
+    pub snapshot: S,
+    pub value: T,
+    _guards: Vec<PaneLock>,
+}
+
+pub(crate) fn lock_deletion<S, T>(
+    conn: &mut Connection,
+    settings: &Settings,
+    deadline: Deadline,
+    mut load: impl FnMut(&mut Connection) -> Result<(S, Vec<(i64, Placement)>), CafleetError>,
+    mut revalidate: impl FnMut(&mut Connection, &S) -> Result<Option<T>, CafleetError>,
+    busy: impl Fn(i64) -> CafleetError,
+) -> Result<LockedDeletion<S, T>, CafleetError> {
+    loop {
+        let (snapshot, targets) = with_database_budget(conn, deadline, &mut load)?;
+        let mut targets = targets
+            .into_iter()
+            .map(|(member_id, placement)| {
+                let path = lock_path(&settings.database_url, &placement).map_err(|error| {
+                    CafleetError::App(format!(
+                        "member {member_id} pane input: {}",
+                        error.message()
+                    ))
+                })?;
+                Ok((path, member_id, placement))
+            })
+            .collect::<Result<Vec<_>, CafleetError>>()?;
+        targets.sort_by(|left, right| (&left.0, left.1).cmp(&(&right.0, right.1)));
+        targets.dedup_by(|left, right| left.0 == right.0);
+        let mut guards = Vec::new();
+        for (_, member_id, placement) in targets {
+            let guard = loop {
+                deadline.remaining()?;
+                match PaneLock::try_acquire(&settings.database_url, &placement).map_err(
+                    |error| {
+                        CafleetError::App(format!(
+                            "member {member_id} pane input: {}",
+                            error.message()
+                        ))
+                    },
+                )? {
+                    Some(guard) => break guard,
+                    None if deadline.retry() => {}
+                    None => return Err(busy(member_id)),
+                }
+            };
+            guards.push(guard);
+        }
+        let value = with_database_budget(conn, deadline, |conn| revalidate(conn, &snapshot))?;
+        if let Some(value) = value {
+            return Ok(LockedDeletion {
+                snapshot,
+                value,
+                _guards: guards,
+            });
+        }
+        drop(guards);
+        deadline.remaining()?;
+    }
+}
+
 pub fn lock_member(
     conn: &Connection,
     settings: &Settings,
@@ -480,55 +542,35 @@ pub fn delete_fleet(
             .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;
         Ok(())
     })?;
-    loop {
-        let snapshot = with_database_budget(conn, deadline, |conn| {
-            deletion_placements(conn, settings, fleet_id)
-        })?;
-        let mut guards = Vec::new();
-        let mut previous = None;
-        for target in &snapshot {
-            if previous == Some(&target.path) {
-                continue;
-            }
-            let guard = loop {
-                match PaneLock::try_acquire(&settings.database_url, &target.placement).map_err(
-                    |error| {
-                        CafleetError::App(format!(
-                            "member {} pane input: {}",
-                            target.member_id,
-                            error.message()
-                        ))
-                    },
-                )? {
-                    Some(guard) => break guard,
-                    None if deadline.retry() => {}
-                    None => {
-                        return Err(CafleetError::App(format!(
-                            "fleet {fleet_id} pane input remained busy for 5 seconds at member {}; fleet was not deleted.",
-                            target.member_id
-                        )));
-                    }
-                }
-            };
-            guards.push(guard);
-            previous = Some(&target.path);
-        }
-        let result = with_database_budget(conn, deadline, |conn| {
+    let locked = lock_deletion(
+        conn,
+        settings,
+        deadline,
+        |conn| {
+            let snapshot = deletion_placements(conn, settings, fleet_id)?;
+            let targets = snapshot
+                .iter()
+                .map(|target| (target.member_id, target.placement.clone()))
+                .collect();
+            Ok((snapshot, targets))
+        },
+        |conn, snapshot| {
             let tx = conn
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                 .map_err(crate::broker::members::db_err)?;
-            if deletion_placements(&tx, settings, fleet_id)? != snapshot {
+            if deletion_placements(&tx, settings, fleet_id)? != *snapshot {
                 return Ok(None);
             }
             let result = crate::broker::fleets::delete_fleet_rows(&tx, fleet_id)?;
             deadline.remaining()?;
             tx.commit().map_err(crate::broker::members::db_err)?;
             Ok(Some(result))
-        })?;
-        if let Some(result) = result {
-            return Ok(result);
-        }
-        drop(guards);
-        deadline.remaining()?;
-    }
+        },
+        |member| {
+            CafleetError::App(format!(
+                "fleet {fleet_id} pane input remained busy for 5 seconds at member {member}; fleet was not deleted."
+            ))
+        },
+    )?;
+    Ok(locked.value)
 }

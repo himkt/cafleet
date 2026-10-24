@@ -109,7 +109,7 @@ fn native_exec_dispatches_the_exact_command_and_reduced_metadata_once() {
     assert_eq!(
         writes,
         [
-            format!("send-keys -t {pane} -l ! {command}"),
+            format!("send-keys -t {pane} -l -- ! {command}"),
             format!("send-keys -t {pane} Enter")
         ]
     );
@@ -135,7 +135,7 @@ fn native_exec_file_and_stdin_remove_at_most_one_terminal_line_ending() {
             assert_eq!(
                 writes,
                 [
-                    format!("send-keys -t {pane} -l ! {command}"),
+                    format!("send-keys -t {pane} -l -- ! {command}"),
                     format!("send-keys -t {pane} Enter"),
                 ]
             );
@@ -352,12 +352,12 @@ fi
                 .collect();
             let expected = if transport == "tmux" {
                 vec![
-                    format!("send-keys -t {pane} -l ! {command}"),
+                    format!("send-keys -t {pane} -l -- ! {command}"),
                     format!("send-keys -t {pane} Enter"),
                 ]
             } else {
                 vec![
-                    format!("pane send-text {pane} ! {command}"),
+                    format!("pane send-text {pane} -- ! {command}"),
                     format!("pane send-keys {pane} enter"),
                 ]
             };

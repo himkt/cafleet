@@ -371,7 +371,7 @@ impl HerdrMultiplexer {
         let bounded = self.bounded(crate::input::Deadline::new());
         super::submit_prompt(
             bounded.runner.as_ref(),
-            &herdr_argv(&["herdr", "pane", "send-text", target_pane_id, text]),
+            &herdr_argv(&["herdr", "pane", "send-text", target_pane_id, "--", text]),
             &herdr_argv(&["herdr", "pane", "send-keys", target_pane_id, "enter"]),
             map_run_error,
             |stderr| error_code(stderr).as_deref() == Some(PANE_NOT_FOUND),
@@ -802,7 +802,7 @@ mod tests {
         assert_eq!(
             runner.run_argvs(),
             vec![
-                argv(&["herdr", "pane", "send-text", "w1:p2", text]),
+                argv(&["herdr", "pane", "send-text", "w1:p2", "--", text]),
                 argv(&["herdr", "pane", "send-keys", "w1:p2", "enter"])
             ]
         );
@@ -828,7 +828,7 @@ mod tests {
         assert_eq!(
             runner.run_argvs(),
             vec![
-                argv(&["herdr", "pane", "send-text", "w1:p2", text]),
+                argv(&["herdr", "pane", "send-text", "w1:p2", "--", text]),
                 argv(&["herdr", "pane", "send-keys", "w1:p2", "enter"])
             ]
         );
@@ -852,7 +852,7 @@ mod tests {
         let text = "[cafleet msg 5 from 2 timestamp] hello";
         assert_eq!(
             runner.run_argvs(),
-            vec![argv(&["herdr", "pane", "send-text", "w1:p2", text])]
+            vec![argv(&["herdr", "pane", "send-text", "w1:p2", "--", text])]
         );
         assert_eq!(runner.events().len(), 1);
     }
@@ -876,7 +876,7 @@ mod tests {
         assert_eq!(
             runner.run_argvs(),
             vec![
-                argv(&["herdr", "pane", "send-text", "w1:p2", text]),
+                argv(&["herdr", "pane", "send-text", "w1:p2", "--", text]),
                 argv(&["herdr", "pane", "send-keys", "w1:p2", "enter"])
             ]
         );
