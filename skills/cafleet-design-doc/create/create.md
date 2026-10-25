@@ -29,7 +29,7 @@ Read [Recovery](../../cafleet/reference/supervision.md#recovery) immediately bef
 
 Own the document's quality and fidelity to user intent. Bootstrap and supervise the fleet, enforce fresh-Drafter clarification before document content, relay questions and answers faithfully, and route Drafter/Reviewer revisions until Reviewer approval. Present that reviewed revision for explicit user approval, process feedback through Step 5, and send the Step 6 finalization handoff before teardown. The Drafter writes the document; the Reviewer independently evaluates it.
 
-Store literal fleet and member IDs from CLI JSON and use them on every broker command. Retrieve full payloads with `message poll --json`, ACK each consumed message, and dispatch at once under the shared dispatch-on-ready and turn-boundary rules; the broker holds a keystroke for a busy pane. Coordination owns marker placement and file-detail recovery; the process below owns each phase transition.
+Store literal fleet and member IDs from CLI JSON and use them on every broker command. Retrieve full payloads with `message poll --json`, ACK each consumed message, and dispatch authorized work as soon as its inputs exist. Follow the shared [ordinary-member delivery](../../cafleet/reference/runtime/spec/multiplexer-backends.md#push-notifications) and [Director reception](../../cafleet/reference/supervision.md#director-wake) contracts. Coordination owns marker placement and file-detail recovery; the process below owns each phase transition.
 
 ### Diagnostics and progress
 
