@@ -1,6 +1,6 @@
-//! opencode backend (SPEC §6.7): the `<provider-id>/<model-id>` model rule, no
-//! reasoning-effort support, the preset-existence spawn precondition, and the
-//! `--prompt` flag-pair prompt. The colocated tests pin the contract; see
+//! opencode v2 mini backend (SPEC §6.7): the `<provider-id>/<model-id>` model rule,
+//! no reasoning-effort support, the preset-existence spawn precondition, and
+//! standalone interactive spawning with a `--prompt` flag pair. See
 //! [`super::test_support`] for the API.
 
 use super::{CodingAgent, SpawnProbe, missing_binary};
@@ -72,6 +72,8 @@ impl CodingAgent for Opencode {
     ) -> Vec<String> {
         let mut argv = vec![
             "opencode".to_string(),
+            "mini".to_string(),
+            "--standalone".to_string(),
             "--agent".to_string(),
             "cafleet".to_string(),
         ];
@@ -145,6 +147,8 @@ mod tests {
             opencode().build_spawn_argv("do it", "ignored", Some("openai/gpt-4"), None),
             argv(&[
                 "opencode",
+                "mini",
+                "--standalone",
                 "--agent",
                 "cafleet",
                 "--model",
@@ -156,7 +160,32 @@ mod tests {
         );
         assert_eq!(
             opencode().build_spawn_argv("do it", "ignored", None, None),
-            argv(&["opencode", "--agent", "cafleet", "--prompt", "do it"])
+            argv(&[
+                "opencode",
+                "mini",
+                "--standalone",
+                "--agent",
+                "cafleet",
+                "--prompt",
+                "do it",
+            ])
+        );
+    }
+
+    #[test]
+    fn spawn_argv_preserves_the_prompt_as_one_literal_argument() {
+        let prompt = "--model 'quoted value'\n{member_id} \"next line\"";
+        assert_eq!(
+            opencode().build_spawn_argv(prompt, "display name with spaces", None, None),
+            argv(&[
+                "opencode",
+                "mini",
+                "--standalone",
+                "--agent",
+                "cafleet",
+                "--prompt",
+                prompt,
+            ])
         );
     }
 

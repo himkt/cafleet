@@ -2,16 +2,15 @@ use crate::broker;
 use crate::broker::records::MemberKind;
 use crate::config::Settings;
 use crate::error::CafleetError;
-use crate::input::{
-    Deadline, PaneLock, complete_database_budget, retry_database_completion, with_database_budget,
-};
+use crate::input::{Deadline, PaneLock, complete_database_budget, with_database_budget};
 use crate::multiplexer::{
     AnyMultiplexer, INPUT_RESERVATION, INSUFFICIENT_INPUT_BUDGET, Lead, MIN_LITERAL_BUDGET,
     Multiplexer, MultiplexerError,
 };
-use crate::receive::{AttemptEnd, AttemptOutcome, Delivery, NotificationError};
+use crate::receive::{AttemptEnd, AttemptOutcome, NotificationError};
 use crate::time::format_utc;
 use rusqlite::Connection;
+use std::collections::BTreeSet;
 
 pub(crate) const INLINE_BODY_LIMIT: usize = 4000;
 const RESUME_CLAUSE: &str = "[cafleet] Resume your work if something was still running.";
@@ -54,16 +53,52 @@ pub(crate) fn notification_line(message: &broker::records::MessageRecord) -> Str
     )
 }
 
+pub(crate) fn notification_error(
+    member_id: i64,
+    message_id: i64,
+    cause: impl std::fmt::Display,
+) -> NotificationError {
+    NotificationError {
+        member_id,
+        message_id,
+        error: format!(
+            "message {message_id} was not notified to member {member_id}: {cause}; the next send to member {member_id} or the next message wait retries it."
+        ),
+    }
+}
+
+fn storage_failure(
+    member_id: i64,
+    message_id: i64,
+    error: CafleetError,
+) -> Result<AttemptEnd, CafleetError> {
+    match error {
+        CafleetError::DatabaseBusy(_) | CafleetError::DeadlineExceeded => Ok(AttemptEnd::Failed(
+            notification_error(member_id, message_id, error),
+        )),
+        error => Err(error),
+    }
+}
+
 pub(crate) fn deliver_pending(
     conn: &mut Connection,
     settings: &Settings,
     member_id: i64,
     expected_fleet: Option<i64>,
     deadline: Deadline,
+    attempted: &BTreeSet<i64>,
     resolve: impl FnOnce() -> Result<AnyMultiplexer, MultiplexerError>,
 ) -> Result<AttemptOutcome, CafleetError> {
     with_database_budget(conn, deadline, |conn| {
-        deliver_pending_scoped(conn, settings, member_id, expected_fleet, deadline, resolve)
+        deliver_pending_scoped(
+            conn,
+            settings,
+            member_id,
+            expected_fleet,
+            deadline,
+            attempted,
+            resolve,
+        )
     })
 }
 
@@ -84,75 +119,37 @@ type PreviewSnapshot = (
     broker::records::MessageRecord,
 );
 
+fn eligible_member(
+    conn: &Connection,
+    member_id: i64,
+    expected_fleet: Option<i64>,
+) -> Result<Option<broker::records::MemberRecord>, CafleetError> {
+    let Some(fleet_id) = broker::active_member_fleet(conn, member_id)? else {
+        return Ok(None);
+    };
+    if expected_fleet.is_some_and(|expected| expected != fleet_id) {
+        return Ok(None);
+    }
+    Ok(broker::get_member(conn, member_id, fleet_id)?
+        .filter(|member| member.kind == MemberKind::Member))
+}
+
 fn preview_snapshot(
     conn: &mut Connection,
     member_id: i64,
     expected_fleet: Option<i64>,
     deadline: Deadline,
+    attempted: &BTreeSet<i64>,
 ) -> Result<Option<PreviewSnapshot>, CafleetError> {
     read_snapshot(conn, deadline, |conn| {
-        let Some(fleet_id) = broker::active_member_fleet(conn, member_id)? else {
+        let Some(member) = eligible_member(conn, member_id, expected_fleet)? else {
             return Ok(None);
         };
-        if expected_fleet.is_some_and(|expected| expected != fleet_id) {
-            return Ok(None);
-        }
-        let Some(member) = broker::get_member(conn, member_id, fleet_id)? else {
-            return Ok(None);
-        };
-        if member.kind != MemberKind::Member {
-            return Ok(None);
-        }
-        let Some(message) = broker::oldest_pending_preview(conn, member_id)? else {
+        let Some(message) = broker::oldest_pending_preview(conn, member_id, attempted)? else {
             return Ok(None);
         };
         Ok(Some((member, message)))
     })
-}
-
-enum ClaimSkip {
-    Ineligible,
-    /// The placement changed, or an earlier candidate appeared.
-    Held,
-    /// The message was ACKed or stamped meanwhile.
-    Settled,
-}
-
-enum PreviewClaim {
-    Ready(broker::records::MessageRecord),
-    Skipped(ClaimSkip),
-}
-
-fn claim_current_preview(
-    conn: &mut Connection,
-    member: &broker::records::MemberRecord,
-    message_id: i64,
-    deadline: Deadline,
-) -> Result<PreviewClaim, CafleetError> {
-    deadline.remaining()?;
-    let tx = conn
-        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-        .map_err(broker::members::db_err)?;
-    let Some(current) = broker::get_member(&tx, member.member_id, member.fleet_id)? else {
-        return Ok(PreviewClaim::Skipped(ClaimSkip::Ineligible));
-    };
-    if current.kind != MemberKind::Member {
-        return Ok(PreviewClaim::Skipped(ClaimSkip::Ineligible));
-    }
-    if current.placement != member.placement {
-        return Ok(PreviewClaim::Skipped(ClaimSkip::Held));
-    }
-    let Some(message) = broker::messaging::claim_preview(&tx, message_id, member.member_id)? else {
-        return Ok(PreviewClaim::Skipped(ClaimSkip::Settled));
-    };
-    if let Some(earlier) = broker::oldest_pending_preview(&tx, member.member_id)?
-        && (&earlier.created_at, earlier.message_id) < (&message.created_at, message.message_id)
-    {
-        return Ok(PreviewClaim::Skipped(ClaimSkip::Held));
-    }
-    deadline.remaining()?;
-    tx.commit().map_err(broker::members::db_err)?;
-    Ok(PreviewClaim::Ready(message))
 }
 
 fn deliver_pending_scoped(
@@ -161,18 +158,15 @@ fn deliver_pending_scoped(
     member_id: i64,
     expected_fleet: Option<i64>,
     deadline: Deadline,
+    attempted: &BTreeSet<i64>,
     resolve: impl FnOnce() -> Result<AnyMultiplexer, MultiplexerError>,
 ) -> Result<AttemptOutcome, CafleetError> {
     let ended = |end| Ok(AttemptOutcome::ended(end));
-    let failed = |message_id, delivery, error| {
-        AttemptEnd::Failed(NotificationError {
-            member_id,
-            message_id,
-            delivery,
-            error,
-        })
+    let failed = |message_id, cause: String| {
+        AttemptEnd::Failed(notification_error(member_id, message_id, cause))
     };
-    let Some((member, initial)) = preview_snapshot(conn, member_id, expected_fleet, deadline)?
+    let Some((member, initial)) =
+        preview_snapshot(conn, member_id, expected_fleet, deadline, attempted)?
     else {
         return ended(AttemptEnd::NoPending);
     };
@@ -192,34 +186,31 @@ fn deliver_pending_scoped(
     let _guard = match lock {
         Ok(Some(guard)) => guard,
         Ok(None) => {
-            let still_pending = read_snapshot(conn, deadline, |conn| {
-                broker::oldest_pending_preview(conn, member_id)
-            })?;
+            let still_pending = match read_snapshot(conn, deadline, |conn| {
+                broker::oldest_pending_preview(conn, member_id, attempted)
+            }) {
+                Ok(pending) => pending,
+                Err(error) => return ended(storage_failure(member_id, initial.message_id, error)?),
+            };
             return ended(match still_pending {
                 None => AttemptEnd::NoPending,
-                Some(message) => failed(
-                    message.message_id,
-                    Delivery::NotSent,
-                    format!(
-                        "member {member_id}'s pane input remained busy; preview {} was not sent.",
-                        message.message_id
-                    ),
-                ),
+                Some(message) => failed(message.message_id, "pane input remained busy".into()),
             });
         }
         Err(error) => {
             return ended(failed(
                 initial.message_id,
-                Delivery::NotSent,
-                format!("member {member_id} pane input: {}", error.message()),
+                format!("pane input: {}", error.message()),
             ));
         }
     };
     let _span = crate::signals::DeferTermination::begin()?;
-    let Some((current, first)) = preview_snapshot(conn, member_id, Some(fleet_id), deadline)?
-    else {
-        return ended(AttemptEnd::NoPending);
-    };
+    let (current, first) =
+        match preview_snapshot(conn, member_id, Some(fleet_id), deadline, attempted) {
+            Ok(Some(snapshot)) => snapshot,
+            Ok(None) => return ended(AttemptEnd::NoPending),
+            Err(error) => return ended(storage_failure(member_id, initial.message_id, error)?),
+        };
     if current.placement != member.placement {
         return ended(AttemptEnd::Held);
     }
@@ -228,13 +219,7 @@ fn deliver_pending_scoped(
         Ok(mux.bounded(deadline))
     }) {
         Ok(mux) => mux,
-        Err(error) => {
-            return ended(failed(
-                first.message_id,
-                Delivery::NotSent,
-                error.to_string(),
-            ));
-        }
+        Err(error) => return ended(failed(first.message_id, error.to_string())),
     };
     let pane = placement
         .mux_pane_id
@@ -242,79 +227,57 @@ fn deliver_pending_scoped(
         .expect("concrete preview placement");
     let mut sent = Vec::new();
     let mut lead = Lead::Escape;
+    let mut candidate_id = first.message_id;
     let end = loop {
-        let Ok(remaining) = deadline.remaining() else {
+        if deadline.remaining().is_err() {
             break if sent.is_empty() {
-                failed(
-                    first.message_id,
-                    Delivery::NotSent,
-                    INSUFFICIENT_INPUT_BUDGET.into(),
-                )
-            } else {
-                AttemptEnd::BudgetExhausted
-            };
-        };
-        let Some(candidate) = read_snapshot(conn, deadline, |conn| {
-            broker::oldest_pending_preview(conn, member_id)
-        })?
-        else {
-            break AttemptEnd::Drained;
-        };
-        if remaining < lead.reserved() + MIN_LITERAL_BUDGET {
-            break if sent.is_empty() {
-                failed(
-                    candidate.message_id,
-                    Delivery::NotSent,
-                    INSUFFICIENT_INPUT_BUDGET.into(),
-                )
+                failed(candidate_id, INSUFFICIENT_INPUT_BUDGET.into())
             } else {
                 AttemptEnd::BudgetExhausted
             };
         }
-        let message = match claim_current_preview(conn, &member, candidate.message_id, deadline)? {
-            PreviewClaim::Ready(message) => message,
-            PreviewClaim::Skipped(ClaimSkip::Ineligible) => break AttemptEnd::NoPending,
-            PreviewClaim::Skipped(ClaimSkip::Held) => break AttemptEnd::Held,
-            PreviewClaim::Skipped(ClaimSkip::Settled) => continue,
-        };
-        let uncertain = |cause| {
-            failed(
-                message.message_id,
-                Delivery::Uncertain,
-                format!(
-                    "preview {} delivery to member {member_id} is uncertain: {cause}. Inspect the pane before retrying.",
-                    message.message_id
-                ),
-            )
-        };
-        if let Err(error) = mux.send_prompt(pane, &notification_line(&message), lead) {
-            break if error.submission_started() {
-                uncertain(error.to_string())
-            } else {
-                match retry_database_completion(conn, deadline, |conn| {
-                    broker::messaging::release_preview(conn, message.message_id)
-                }) {
-                    Ok(()) => failed(message.message_id, Delivery::NotSent, error.to_string()),
-                    Err(cleanup) => failed(
-                        message.message_id,
-                        Delivery::NotSent,
-                        format!(
-                            "{error}; releasing the input claim failed: {cleanup}. This preview remains suspended; later messages remain eligible."
-                        ),
-                    ),
-                }
+        let snapshot = read_snapshot(conn, deadline, |conn| {
+            let Some(current) = eligible_member(conn, member_id, Some(fleet_id))? else {
+                return Ok(None);
             };
+            let candidate = broker::oldest_pending_preview(conn, member_id, attempted)?;
+            Ok(Some((current, candidate)))
+        });
+        let (current, candidate) = match snapshot {
+            Ok(Some(snapshot)) => snapshot,
+            Ok(None) => break AttemptEnd::NoPending,
+            Err(error) => break storage_failure(member_id, candidate_id, error)?,
+        };
+        if current.placement != member.placement {
+            break AttemptEnd::Held;
+        }
+        let Some(message) = candidate else {
+            break AttemptEnd::Drained;
+        };
+        candidate_id = message.message_id;
+        if !deadline
+            .remaining()
+            .is_ok_and(|remaining| remaining >= lead.reserved() + MIN_LITERAL_BUDGET)
+        {
+            break if sent.is_empty() {
+                failed(candidate_id, INSUFFICIENT_INPUT_BUDGET.into())
+            } else {
+                AttemptEnd::BudgetExhausted
+            };
+        }
+        if let Err(error) = mux.send_prompt(pane, &notification_line(&message), lead) {
+            break failed(candidate_id, error.to_string());
         }
         lead = Lead::Direct;
         match complete_database_budget(conn, deadline, |conn| {
             broker::messaging::stamp_notified_validated(
                 conn,
-                message.message_id,
+                candidate_id,
                 &format_utc(crate::time::now_utc()),
             )
         }) {
-            Ok(_) => sent.push(message.message_id),
-            Err(error) => break uncertain(error.message().into_owned()),
+            Ok(_) => sent.push(candidate_id),
+            Err(error) => break storage_failure(member_id, candidate_id, error)?,
         }
     };
     Ok(AttemptOutcome { sent, end })
@@ -327,7 +290,7 @@ mod tests {
     use crate::multiplexer::{CommandRunner, RunError, TmuxMultiplexer};
     use crate::receive::AttemptEnd;
     use std::{
-        collections::HashMap,
+        collections::{BTreeSet, HashMap},
         rc::Rc,
         time::{Duration, Instant},
     };
@@ -335,107 +298,6 @@ mod tests {
     struct FinishingRunner {
         deadline: Deadline,
         submitted: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    }
-
-    #[test]
-    fn obsolete_claims_are_settled_without_input() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut conn = common::migrated_conn(&dir);
-        let (fleet, director) = common::create_fleet(&mut conn, "settled");
-        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
-        let member = broker::get_member(&conn, worker, fleet).unwrap().unwrap();
-        for state in ["acked", "notified", "claimed"] {
-            let message =
-                broker::send_message(&mut conn, director, &worker.to_string(), state).unwrap();
-            match state {
-                "acked" => {
-                    broker::ack_message(&mut conn, message.message_id).unwrap();
-                }
-                "notified" => {
-                    conn.execute(
-                        "UPDATE messages SET notified_at=created_at WHERE message_id=?1",
-                        [message.message_id],
-                    )
-                    .unwrap();
-                }
-                "claimed" => {
-                    assert!(
-                        broker::messaging::claim_preview(&conn, message.message_id, worker)
-                            .unwrap()
-                            .is_some()
-                    );
-                }
-                _ => unreachable!(),
-            }
-            assert!(matches!(
-                claim_current_preview(&mut conn, &member, message.message_id, Deadline::new())
-                    .unwrap(),
-                PreviewClaim::Skipped(ClaimSkip::Settled)
-            ));
-        }
-    }
-
-    #[test]
-    fn an_earlier_candidate_rolls_back_the_tentative_claim() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut conn = common::migrated_conn(&dir);
-        let (fleet, director) = common::create_fleet(&mut conn, "ordering");
-        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
-        let member = broker::get_member(&conn, worker, fleet).unwrap().unwrap();
-        let selected =
-            broker::send_message(&mut conn, director, &worker.to_string(), "selected").unwrap();
-        let earlier =
-            broker::send_message(&mut conn, director, &worker.to_string(), "earlier").unwrap();
-        conn.execute(
-            "UPDATE messages SET created_at='1900' WHERE message_id=?1",
-            [earlier.message_id],
-        )
-        .unwrap();
-        assert!(matches!(
-            claim_current_preview(&mut conn, &member, selected.message_id, Deadline::new())
-                .unwrap(),
-            PreviewClaim::Skipped(ClaimSkip::Held)
-        ));
-        assert!(
-            !conn
-                .query_row(
-                    "SELECT preview_started_at IS NOT NULL FROM messages WHERE message_id=?1",
-                    [selected.message_id],
-                    |row| row.get::<_, bool>(0)
-                )
-                .unwrap()
-        );
-        assert_eq!(
-            broker::oldest_pending_preview(&conn, worker)
-                .unwrap()
-                .unwrap()
-                .message_id,
-            earlier.message_id
-        );
-    }
-
-    #[test]
-    fn an_inactive_member_leaves_its_preview_unclaimed() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut conn = common::migrated_conn(&dir);
-        let (fleet, director) = common::create_fleet(&mut conn, "gone");
-        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
-        let member = broker::get_member(&conn, worker, fleet).unwrap().unwrap();
-        let message =
-            broker::send_message(&mut conn, director, &worker.to_string(), "gone").unwrap();
-        broker::deregister_member(&mut conn, worker).unwrap();
-        assert!(matches!(
-            claim_current_preview(&mut conn, &member, message.message_id, Deadline::new()).unwrap(),
-            PreviewClaim::Skipped(_)
-        ));
-        assert!(
-            conn.query_row(
-                "SELECT preview_started_at IS NULL FROM messages WHERE message_id=?1",
-                [message.message_id],
-                |row| row.get::<_, bool>(0),
-            )
-            .unwrap()
-        );
     }
 
     fn settings_for(conn: &Connection) -> Settings {
@@ -452,9 +314,15 @@ mod tests {
         let reply =
             broker::send_message(&mut conn, worker, &director.to_string(), "reply").unwrap();
         assert!(
-            preview_snapshot(&mut conn, director, Some(fleet), Deadline::new())
-                .unwrap()
-                .is_none()
+            preview_snapshot(
+                &mut conn,
+                director,
+                Some(fleet),
+                Deadline::new(),
+                &BTreeSet::new()
+            )
+            .unwrap()
+            .is_none()
         );
         assert_eq!(broker::poll_messages(&conn, director).unwrap(), vec![reply]);
     }
@@ -484,111 +352,23 @@ mod tests {
                 director,
                 Some(fleet),
                 Deadline::new(),
+                &BTreeSet::new(),
                 || panic!("Director delivery must finish before multiplexer resolution"),
             )
             .unwrap();
             assert!(outcome.sent.is_empty());
             assert!(matches!(outcome.end, AttemptEnd::NoPending));
             assert!(!lock.exists(), "{backend}: {}", lock.display());
-            let (notified, claimed): (Option<String>, Option<String>) = conn
+            let notified: Option<String> = conn
                 .query_row(
-                    "SELECT notified_at, preview_started_at FROM messages WHERE message_id=?1",
+                    "SELECT notified_at FROM messages WHERE message_id=?1",
                     [reply.message_id],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
+                    |row| row.get(0),
                 )
                 .unwrap();
-            assert_eq!((notified, claimed), (None, None));
+            assert_eq!(notified, None);
             assert_eq!(broker::poll_messages(&conn, director).unwrap(), vec![reply]);
         }
-    }
-
-    #[test]
-    fn a_member_promoted_to_root_director_is_ineligible_for_a_stale_claim() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut conn = common::migrated_conn(&dir);
-        let (fleet, director) = common::create_fleet(&mut conn, "promotion");
-        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
-        let member = broker::get_member(&conn, worker, fleet).unwrap().unwrap();
-        let message =
-            broker::send_message(&mut conn, director, &worker.to_string(), "assignment").unwrap();
-        conn.execute(
-            "UPDATE fleets SET director_member_id=?1 WHERE fleet_id=?2",
-            rusqlite::params![worker, fleet],
-        )
-        .unwrap();
-        assert!(matches!(
-            claim_current_preview(&mut conn, &member, message.message_id, Deadline::new()).unwrap(),
-            PreviewClaim::Skipped(_)
-        ));
-        assert!(
-            conn.query_row(
-                "SELECT preview_started_at IS NULL AND notified_at IS NULL FROM messages WHERE message_id=?1",
-                [message.message_id],
-                |row| row.get::<_, bool>(0),
-            )
-            .unwrap()
-        );
-        assert_eq!(broker::poll_messages(&conn, worker).unwrap(), vec![message]);
-    }
-
-    #[test]
-    fn a_current_director_is_ineligible_for_a_direct_claim() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut conn = common::migrated_conn(&dir);
-        let (fleet, director) = common::create_fleet(&mut conn, "director-claim");
-        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
-        let member = broker::get_member(&conn, director, fleet).unwrap().unwrap();
-        let reply =
-            broker::send_message(&mut conn, worker, &director.to_string(), "reply").unwrap();
-        assert!(matches!(
-            claim_current_preview(&mut conn, &member, reply.message_id, Deadline::new()).unwrap(),
-            PreviewClaim::Skipped(_)
-        ));
-        assert!(
-            conn.query_row(
-                "SELECT preview_started_at IS NULL AND notified_at IS NULL FROM messages WHERE message_id=?1",
-                [reply.message_id],
-                |row| row.get::<_, bool>(0),
-            )
-            .unwrap()
-        );
-    }
-
-    #[test]
-    fn a_director_with_existing_preview_metadata_receives_no_automatic_input() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut conn = common::migrated_conn(&dir);
-        let (fleet, director) = common::create_fleet(&mut conn, "director-metadata");
-        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
-        let reply =
-            broker::send_message(&mut conn, worker, &director.to_string(), "reply").unwrap();
-        conn.execute(
-            "UPDATE messages SET preview_started_at=created_at WHERE message_id=?1",
-            [reply.message_id],
-        )
-        .unwrap();
-        let settings = settings_for(&conn);
-        let outcome = deliver_pending(
-            &mut conn,
-            &settings,
-            director,
-            Some(fleet),
-            Deadline::new(),
-            || panic!("Director preview metadata belongs to broker reads"),
-        )
-        .unwrap();
-        assert!(outcome.sent.is_empty());
-        assert!(matches!(outcome.end, AttemptEnd::NoPending));
-        let (notified, claimed): (Option<String>, String) = conn
-            .query_row(
-                "SELECT notified_at, preview_started_at FROM messages WHERE message_id=?1",
-                [reply.message_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(notified, None);
-        assert_eq!(claimed, reply.created_at);
-        assert_eq!(broker::poll_messages(&conn, director).unwrap(), vec![reply]);
     }
 
     impl CommandRunner for FinishingRunner {
@@ -661,9 +441,15 @@ mod tests {
             }),
             HashMap::from([("TMUX".into(), "test".into())]),
         ));
-        let outcome = deliver_pending(&mut conn, &settings, worker, Some(fleet), deadline, || {
-            Ok(mux)
-        })
+        let outcome = deliver_pending(
+            &mut conn,
+            &settings,
+            worker,
+            Some(fleet),
+            deadline,
+            &BTreeSet::new(),
+            || Ok(mux),
+        )
         .unwrap();
         assert_eq!(outcome.sent, vec![message.message_id]);
         assert!(deadline.remaining().is_err());
@@ -673,7 +459,7 @@ mod tests {
             "the input attempt and mandatory finalization own separate database budgets"
         );
         assert!(
-            broker::oldest_pending_preview(&conn, worker)
+            broker::oldest_pending_preview(&conn, worker, &BTreeSet::new())
                 .unwrap()
                 .is_none()
         );
@@ -719,15 +505,482 @@ mod tests {
             Authorization::Allow
         }))
         .unwrap();
-        let (member, message) = preview_snapshot(&mut conn, worker, Some(fleet), Deadline::new())
-            .unwrap()
-            .unwrap();
+        let (member, message) = preview_snapshot(
+            &mut conn,
+            worker,
+            Some(fleet),
+            Deadline::new(),
+            &BTreeSet::new(),
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(member.placement.unwrap().mux_pane_id.as_deref(), Some("%2"));
         assert_eq!(message.text, "original");
         let current: String = conn
             .query_row("SELECT text FROM messages", [], |row| row.get(0))
             .unwrap();
         assert_eq!(current, "changed");
+    }
+
+    fn fake_mux(runner: Rc<dyn CommandRunner>) -> AnyMultiplexer {
+        AnyMultiplexer::Tmux(TmuxMultiplexer::new(
+            runner,
+            HashMap::from([("TMUX".into(), "test".into())]),
+        ))
+    }
+
+    fn expected_failure(member_id: i64, message_id: i64, cause: &str) -> AttemptEnd {
+        AttemptEnd::Failed(crate::receive::NotificationError {
+            member_id,
+            message_id,
+            error: format!(
+                "message {message_id} was not notified to member {member_id}: {cause}; the next send to member {member_id} or the next message wait retries it."
+            ),
+        })
+    }
+
+    #[test]
+    fn delivery_skips_attempted_message_ids_and_stamps_only_the_later_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        let (fleet, director) = common::create_fleet(&mut conn, "exclusions");
+        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+        let first =
+            broker::send_message(&mut conn, director, &worker.to_string(), "failed earlier")
+                .unwrap();
+        let next =
+            broker::send_message(&mut conn, director, &worker.to_string(), "next message").unwrap();
+        let settings = settings_for(&conn);
+        let runner = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
+        let result = deliver_pending(
+            &mut conn,
+            &settings,
+            worker,
+            Some(fleet),
+            Deadline::new(),
+            &BTreeSet::from([first.message_id]),
+            || Ok(fake_mux(runner.clone())),
+        )
+        .unwrap();
+        assert_eq!(result.sent, vec![next.message_id]);
+        assert_eq!(result.end, AttemptEnd::Drained);
+        let literals: Vec<_> = runner
+            .run_argvs()
+            .into_iter()
+            .filter(|argv| argv.iter().any(|arg| arg == "-l"))
+            .collect();
+        assert_eq!(literals.len(), 1);
+        assert!(
+            literals[0]
+                .last()
+                .unwrap()
+                .contains(&format!("[cafleet msg {} from ", next.message_id))
+        );
+        assert_eq!(
+            broker::oldest_pending_preview(&conn, worker, &BTreeSet::new())
+                .unwrap()
+                .unwrap()
+                .message_id,
+            first.message_id
+        );
+    }
+
+    #[test]
+    fn resolution_and_availability_failures_use_the_exact_not_notified_diagnostic() {
+        for resolution in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut conn = common::migrated_conn(&dir);
+            let (fleet, director) = common::create_fleet(&mut conn, "multiplexer failure");
+            let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+            let message =
+                broker::send_message(&mut conn, director, &worker.to_string(), "assignment")
+                    .unwrap();
+            let settings = settings_for(&conn);
+            let result = deliver_pending(
+                &mut conn,
+                &settings,
+                worker,
+                Some(fleet),
+                Deadline::new(),
+                &BTreeSet::new(),
+                || {
+                    if resolution {
+                        Err(MultiplexerError::new("resolution unavailable"))
+                    } else {
+                        Ok(fake_mux(
+                            crate::multiplexer::test_support::FakeRunner::without_binaries(),
+                        ))
+                    }
+                },
+            )
+            .unwrap();
+            assert!(result.sent.is_empty());
+            assert_eq!(
+                result.end,
+                expected_failure(
+                    worker,
+                    message.message_id,
+                    if resolution {
+                        "resolution unavailable"
+                    } else {
+                        "tmux binary not found on PATH"
+                    }
+                )
+            );
+            assert_eq!(
+                broker::oldest_pending_preview(&conn, worker, &BTreeSet::new())
+                    .unwrap()
+                    .unwrap()
+                    .message_id,
+                message.message_id
+            );
+        }
+    }
+
+    #[test]
+    fn busy_lock_and_lock_acquisition_errors_use_the_exact_not_notified_diagnostic() {
+        for busy in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut conn = common::migrated_conn(&dir);
+            let (fleet, director) = common::create_fleet(&mut conn, "lock failure");
+            let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+            let message =
+                broker::send_message(&mut conn, director, &worker.to_string(), "assignment")
+                    .unwrap();
+            let settings = settings_for(&conn);
+            let placement = broker::get_member(&conn, worker, fleet)
+                .unwrap()
+                .unwrap()
+                .placement
+                .unwrap();
+            let guard;
+            let cause = if busy {
+                guard = PaneLock::try_acquire(&settings.database_url, &placement).unwrap();
+                assert!(guard.is_some());
+                "pane input remained busy".to_string()
+            } else {
+                let path = crate::input::lock_path(&settings.database_url, &placement).unwrap();
+                std::fs::write(path.parent().unwrap(), "occupied").unwrap();
+                let error = PaneLock::try_acquire(&settings.database_url, &placement)
+                    .err()
+                    .expect("a regular file cannot serve as the lock directory");
+                guard = None;
+                format!("pane input: {error}")
+            };
+            let result = deliver_pending(
+                &mut conn,
+                &settings,
+                worker,
+                Some(fleet),
+                Deadline::until(Instant::now() + Duration::from_millis(500)),
+                &BTreeSet::new(),
+                || panic!("a failed lock finishes before multiplexer resolution"),
+            )
+            .unwrap();
+            assert_eq!(
+                result.end,
+                expected_failure(worker, message.message_id, &cause)
+            );
+            assert!(result.sent.is_empty());
+            drop(guard);
+        }
+    }
+
+    #[test]
+    fn an_insufficient_first_line_budget_reports_the_exact_not_notified_diagnostic() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        let (fleet, director) = common::create_fleet(&mut conn, "budget");
+        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+        let message =
+            broker::send_message(&mut conn, director, &worker.to_string(), "assignment").unwrap();
+        let settings = settings_for(&conn);
+        let runner = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
+        let result = deliver_pending(
+            &mut conn,
+            &settings,
+            worker,
+            Some(fleet),
+            Deadline::until(Instant::now() + Duration::from_millis(500)),
+            &BTreeSet::new(),
+            || Ok(fake_mux(runner.clone())),
+        )
+        .unwrap();
+        assert_eq!(
+            result.end,
+            expected_failure(
+                worker,
+                message.message_id,
+                "insufficient pane input budget for literal input, settle and Enter"
+            )
+        );
+        assert!(runner.events().is_empty());
+    }
+
+    #[test]
+    fn every_transport_stage_uses_the_same_not_notified_template_and_preserves_the_cause() {
+        for successes in 0..=2 {
+            let dir = tempfile::tempdir().unwrap();
+            let mut conn = common::migrated_conn(&dir);
+            let (fleet, director) = common::create_fleet(&mut conn, "transport");
+            let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+            let message =
+                broker::send_message(&mut conn, director, &worker.to_string(), "assignment")
+                    .unwrap();
+            let settings = settings_for(&conn);
+            let runner = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
+            let expected = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
+            for fixture in [&runner, &expected] {
+                for _ in 0..successes {
+                    fixture.respond(Ok(String::new()));
+                }
+                fixture.respond(Err(RunError::Failed {
+                    stderr: "distinct transport failure".into(),
+                }));
+            }
+            let cause = fake_mux(expected)
+                .send_prompt("%2", &notification_line(&message), Lead::Escape)
+                .unwrap_err()
+                .to_string();
+            let result = deliver_pending(
+                &mut conn,
+                &settings,
+                worker,
+                Some(fleet),
+                Deadline::new(),
+                &BTreeSet::new(),
+                || Ok(fake_mux(runner.clone())),
+            )
+            .unwrap();
+            assert_eq!(
+                result.end,
+                expected_failure(worker, message.message_id, &cause)
+            );
+            assert!(result.sent.is_empty());
+            assert_eq!(runner.run_argvs().len(), successes + 1);
+            assert_eq!(
+                broker::oldest_pending_preview(&conn, worker, &BTreeSet::new())
+                    .unwrap()
+                    .unwrap()
+                    .message_id,
+                message.message_id
+            );
+        }
+    }
+
+    #[test]
+    fn a_failure_after_one_submission_keeps_the_sent_prefix_and_names_the_current_candidate() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        let (fleet, director) = common::create_fleet(&mut conn, "partial drain");
+        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+        let first =
+            broker::send_message(&mut conn, director, &worker.to_string(), "first").unwrap();
+        let next = broker::send_message(&mut conn, director, &worker.to_string(), "next").unwrap();
+        let settings = settings_for(&conn);
+        let runner = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
+        for _ in 0..3 {
+            runner.respond(Ok(String::new()));
+        }
+        runner.respond(Err(RunError::Failed {
+            stderr: "next literal failed".into(),
+        }));
+        let expected = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
+        expected.respond(Err(RunError::Failed {
+            stderr: "next literal failed".into(),
+        }));
+        let cause = fake_mux(expected)
+            .send_prompt("%2", &notification_line(&next), Lead::Direct)
+            .unwrap_err()
+            .to_string();
+        let result = deliver_pending(
+            &mut conn,
+            &settings,
+            worker,
+            Some(fleet),
+            Deadline::new(),
+            &BTreeSet::new(),
+            || Ok(fake_mux(runner.clone())),
+        )
+        .unwrap();
+        assert_eq!(result.sent, vec![first.message_id]);
+        assert_eq!(
+            result.end,
+            expected_failure(worker, next.message_id, &cause)
+        );
+        assert_eq!(runner.run_argvs().len(), 4);
+    }
+
+    #[test]
+    fn a_fatal_stamp_error_retains_its_storage_cause() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        let (fleet, director) = common::create_fleet(&mut conn, "fatal stamp");
+        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+        let message =
+            broker::send_message(&mut conn, director, &worker.to_string(), "assignment").unwrap();
+        conn.execute_batch(
+            "CREATE TRIGGER reject_stamp BEFORE UPDATE OF notified_at ON messages
+            BEGIN SELECT RAISE(ABORT, 'injected stamp corruption'); END;",
+        )
+        .unwrap();
+        let settings = settings_for(&conn);
+        let runner = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
+        let error = deliver_pending(
+            &mut conn,
+            &settings,
+            worker,
+            Some(fleet),
+            Deadline::new(),
+            &BTreeSet::new(),
+            || Ok(fake_mux(runner)),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, CafleetError::App(ref cause) if cause.contains("injected stamp corruption"))
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT notified_at FROM messages WHERE message_id=?1",
+                [message.message_id],
+                |row| row.get::<_, Option<String>>(0)
+            )
+            .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn a_fatal_under_lock_snapshot_error_retains_its_storage_cause() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        let (fleet, director) = common::create_fleet(&mut conn, "fatal snapshot");
+        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+        broker::send_message(&mut conn, director, &worker.to_string(), "assignment").unwrap();
+        let settings = settings_for(&conn);
+        let path = conn.path().unwrap().to_string();
+        let runner = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
+        let error = deliver_pending(
+            &mut conn,
+            &settings,
+            worker,
+            Some(fleet),
+            Deadline::new(),
+            &BTreeSet::new(),
+            || {
+                Connection::open(path)
+                    .unwrap()
+                    .execute(
+                        "UPDATE members SET description=zeroblob(1) WHERE member_id=?1",
+                        [worker],
+                    )
+                    .unwrap();
+                Ok(fake_mux(runner.clone()))
+            },
+        )
+        .unwrap_err();
+        assert!(
+            error.message().contains("Invalid column type Blob"),
+            "{error}"
+        );
+        assert!(runner.events().is_empty());
+    }
+
+    #[test]
+    fn recipient_changes_after_resolution_are_revalidated_before_any_input() {
+        for change in ["departure", "promotion", "placement"] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut conn = common::migrated_conn(&dir);
+            let (fleet, director) = common::create_fleet(&mut conn, "revalidation");
+            let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+            let message =
+                broker::send_message(&mut conn, director, &worker.to_string(), "assignment")
+                    .unwrap();
+            let settings = settings_for(&conn);
+            let path = conn.path().unwrap().to_string();
+            let runner = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
+            let result = deliver_pending(
+                &mut conn, &settings, worker, Some(fleet), Deadline::new(), &BTreeSet::new(),
+                || {
+                    let other = Connection::open(path).unwrap();
+                    match change {
+                        "departure" => { other.execute("UPDATE members SET status='deregistered' WHERE member_id=?1", [worker]).unwrap(); }
+                        "promotion" => { other.execute("UPDATE fleets SET director_member_id=?1 WHERE fleet_id=?2", rusqlite::params![worker, fleet]).unwrap(); }
+                        "placement" => { other.execute("UPDATE member_placements SET mux_pane_id='%9' WHERE member_id=?1", [worker]).unwrap(); }
+                        _ => unreachable!(),
+                    }
+                    Ok(fake_mux(runner.clone()))
+                },
+            ).unwrap();
+            assert!(result.sent.is_empty());
+            assert_eq!(
+                result.end,
+                if change == "placement" {
+                    AttemptEnd::Held
+                } else {
+                    AttemptEnd::NoPending
+                }
+            );
+            assert!(runner.events().is_empty());
+            assert_eq!(
+                conn.query_row(
+                    "SELECT notified_at FROM messages WHERE message_id=?1",
+                    [message.message_id],
+                    |row| row.get::<_, Option<String>>(0)
+                )
+                .unwrap(),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn under_lock_snapshot_contention_returns_a_retryable_diagnostic_for_the_current_candidate() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        let (fleet, director) = common::create_fleet(&mut conn, "snapshot contention");
+        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+        let message =
+            broker::send_message(&mut conn, director, &worker.to_string(), "assignment").unwrap();
+        let settings = settings_for(&conn);
+        let blocker = Connection::open(conn.path().unwrap()).unwrap();
+        let runner = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
+        let result = deliver_pending(
+            &mut conn,
+            &settings,
+            worker,
+            Some(fleet),
+            Deadline::until(Instant::now() + Duration::from_millis(500)),
+            &BTreeSet::new(),
+            || {
+                blocker.execute_batch("BEGIN EXCLUSIVE").unwrap();
+                Ok(fake_mux(runner.clone()))
+            },
+        )
+        .unwrap();
+        assert!(result.sent.is_empty());
+        let AttemptEnd::Failed(error) = result.end else {
+            panic!("snapshot contention leaves a per-message retry diagnostic");
+        };
+        assert_eq!(
+            (error.member_id, error.message_id),
+            (worker, message.message_id)
+        );
+        let database = expected_failure(
+            worker,
+            message.message_id,
+            "database error: database is locked",
+        );
+        let deadline = expected_failure(
+            worker,
+            message.message_id,
+            "operation exceeded its deadline",
+        );
+        assert!(
+            AttemptEnd::Failed(error.clone()) == database || AttemptEnd::Failed(error) == deadline
+        );
+        assert!(runner.events().is_empty());
+        blocker.execute_batch("ROLLBACK").unwrap();
     }
 
     mod notification_line_tests {

@@ -20,7 +20,7 @@ The [native dispatch contract](../spec/cli-options.md#member-exec) owns validati
 
 ## Inspection and recovery
 
-Use `member list`, `member capture` and `fleet capture` to check roster and pane evidence. A timeout alone establishes neither failure nor completion. Preserve retained user drafts and relay them to the user. Replace an unusable member only under the existing authorization, carrying its assignment, messages and artifacts into the replacement prompt.
+Use `member list`, `member capture` and `fleet capture` to check roster and pane evidence. Capture about 20 lines with `member capture` (its default) and read the content directly; use `--lines` for more when it is insufficient. An empty composer does not mean the task is complete — judge completion from messages and artifacts. A timeout alone establishes neither failure nor completion. Replace an unusable member only under the existing authorization, carrying its assignment, messages and artifacts into the replacement prompt.
 
 ## Teardown
 

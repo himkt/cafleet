@@ -2,7 +2,7 @@
 
 Create high-quality design documents using a three-role team orchestrated via the CAFleet message broker: Director (orchestrator), Drafter (writes the document), and Reviewer (critically reviews drafts). Every inter-member message is persisted in SQLite and auditable. The team iterates through an internal quality loop before presenting a polished draft to the user.
 
-Resolve runtime tools from the executing agent's backend. For spawns, read the selected member backend's Model catalog and Role defaults under the CAFleet Director's model-selection policy; validate its effort and launch capabilities there. Interpret captured panes using the observed member's backend cues.
+Resolve runtime tools from the executing agent's backend. For spawns, read the selected member backend's Model catalog and Role defaults under the CAFleet Director's model-selection policy; validate its effort and launch capabilities there.
 
 ## Required reading
 
@@ -17,7 +17,7 @@ Read these prerequisites in order before orchestration. Your `CODING AGENT:` ide
 | 5 | [Coordination](../reference/coordination.md) | Before messages, payload retrieval or markers. |
 | 6 | [Guidelines](../reference/guidelines.md) | Before document-format or phase-completion actions. |
 
-Read [Recovery](../../cafleet/reference/supervision.md#recovery) immediately before recovery and [Shutdown](../../cafleet/reference/supervision.md#shutdown) immediately before teardown. The executing backend owns local tools; selected member backend owns spawn model/capabilities; observed backend owns pane cues.
+Read [Recovery](../../cafleet/reference/supervision.md#recovery) immediately before recovery and [Shutdown](../../cafleet/reference/supervision.md#shutdown) immediately before teardown. The executing backend owns local tools; selected member backend owns spawn model/capabilities.
 
 | Role | Identity | Does | Does NOT | Role definition |
 |:--|:--|:--|:--|:--|
@@ -113,7 +113,7 @@ Retain `fleet_id` and `director.member_id` for subsequent commands. Ordinary mem
 
 #### 1b. Arm native Director reception
 
-After Director registration, arm native reception before depending on member ready replies. Follow [Director wake](../../cafleet/reference/supervision.md#director-wake) and the executing [backend recipe](../../cafleet/reference/coding-agents.md) to retain one receiver through dispatch and replies. On every received batch/wake run `cafleet message poll <director-member-id> --json`, reconcile replay, record deferred actions, ACK consumption and dispatch ready work. Inspect roster, ordinary-member `unconfirmed_previews`, panes and artifacts until delegated work resolves or explicit user handoff; consume Director pending IDs through broker reads. Preserve user decision gates and host continuation controls.
+After Director registration, arm native reception before depending on member ready replies. Follow [Director wake](../../cafleet/reference/supervision.md#director-wake) and the executing [backend recipe](../../cafleet/reference/coding-agents.md) to retain one receiver through dispatch and replies. On every received batch/wake run `cafleet message poll <director-member-id> --json`, reconcile replay, record deferred actions, ACK consumption and dispatch ready work. Inspect roster, panes and artifacts until delegated work resolves or explicit user handoff; consume Director pending IDs through broker reads. Preserve user decision gates and host continuation controls.
 
 #### 1c. Locate role definitions (path-by-reference)
 

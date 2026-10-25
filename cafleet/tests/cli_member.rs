@@ -746,7 +746,7 @@ fn member_show_takes_the_positional_subject() {
     assert_eq!(
         stdout(&output),
         format!(
-            r#"{{"member_id":{member_id},"name":"worker","description":"test member","status":"active","registered_at":"{registered}","kind":"member","placement":{{"backend":"tmux","mux_session":"main","mux_window_id":"@1","mux_pane_id":"%6","coding_agent":"claude","created_at":"{placed}"}},"unconfirmed_previews":[]}}"#
+            r#"{{"member_id":{member_id},"name":"worker","description":"test member","status":"active","registered_at":"{registered}","kind":"member","placement":{{"backend":"tmux","mux_session":"main","mux_window_id":"@1","mux_pane_id":"%6","coding_agent":"claude","created_at":"{placed}"}}}}"#
         ) + "\n"
     );
 
@@ -760,88 +760,174 @@ fn member_show_takes_the_positional_subject() {
 }
 
 #[test]
-fn list_and_show_json_report_unconfirmed_previews_and_text_output_is_unchanged() {
+fn member_list_json_exposes_the_ordered_activity_contract_for_every_placement_state() {
     let cli = Cli::new();
     let (fleet_id, director_id) = cli.seeded_fleet();
     let member_id = cli.seed_member(fleet_id, "worker");
-    let text_before = stdout(&cli.run(&["member", "list", &fleet_id.to_string()]));
-    let show_text_before = stdout(&cli.run(&["member", "show", &member_id.to_string()]));
-    let claimed = cli.seed_message(director_id, member_id, "claimed without a stamp");
-    let stamped = cli.seed_message(director_id, member_id, "claimed and stamped");
-    cli.seed_message(director_id, member_id, "never claimed");
-    let to_director = cli.seed_message(member_id, director_id, "Director claim");
+    let pending = cli.seed_member(fleet_id, "pending");
+    let paneless = cli.seed_member(fleet_id, "paneless");
     cli.sqlite()
-        .execute_batch(&format!(
-            "UPDATE messages SET preview_started_at=created_at WHERE message_id IN ({claimed}, {stamped}, {to_director});
-             UPDATE messages SET notified_at=created_at WHERE message_id={stamped};"
-        ))
+        .execute(
+            "UPDATE member_placements SET mux_pane_id=NULL WHERE member_id=?1",
+            [pending],
+        )
+        .unwrap();
+    cli.sqlite()
+        .execute(
+            "DELETE FROM member_placements WHERE member_id=?1",
+            [paneless],
+        )
+        .unwrap();
+    let unread = cli.seed_message(director_id, member_id, "pending notification");
+    let stamped = cli.seed_message(director_id, member_id, "notified message");
+    cli.seed_message(member_id, director_id, "Director inbox");
+    cli.sqlite()
+        .execute(
+            "UPDATE messages SET notified_at=created_at WHERE message_id=?1",
+            [stamped],
+        )
         .unwrap();
 
     let listed = cli.run(&["member", "list", &fleet_id.to_string(), "--json"]);
     assert_eq!(code(&listed), 0, "{}", stderr(&listed));
-    let rows: serde_json::Value = serde_json::from_str(stdout(&listed).trim()).unwrap();
-    for row in rows.as_array().unwrap() {
-        assert_eq!(
-            row.as_object()
-                .unwrap()
-                .keys()
-                .next_back()
-                .map(String::as_str),
-            Some("unconfirmed_previews")
+    let rows: serde_json::Value = serde_json::from_str(&stdout(&listed)).unwrap();
+    let rows = rows.as_array().unwrap();
+    assert_eq!(
+        rows.iter()
+            .map(|row| row["member_id"].as_i64().unwrap())
+            .collect::<Vec<_>>(),
+        [director_id, member_id, pending, paneless]
+    );
+    for row in rows {
+        assert_keys(
+            row,
+            &[
+                "member_id",
+                "name",
+                "kind",
+                "placement",
+                "last_sent",
+                "last_recv",
+                "last_ack",
+                "idle",
+            ],
         );
-        let keys: Vec<_> = row
-            .as_object()
-            .unwrap()
-            .keys()
-            .map(String::as_str)
-            .collect();
-        assert_eq!(keys[keys.len() - 2], "idle");
     }
-    let by_id = |id: i64| {
-        rows.as_array()
-            .unwrap()
-            .iter()
-            .find(|row| row["member_id"] == id)
-            .unwrap()
-            .clone()
-    };
+    let by_id = |id| rows.iter().find(|row| row["member_id"] == id).unwrap();
+    assert_eq!(by_id(director_id)["kind"], "director");
+    assert_eq!(by_id(member_id)["kind"], "member");
     assert_eq!(
-        by_id(member_id)["unconfirmed_previews"],
-        serde_json::json!([claimed])
+        by_id(pending)["placement"]["mux_pane_id"],
+        serde_json::Value::Null
     );
+    assert_eq!(by_id(paneless)["placement"], serde_json::Value::Null);
+    let text = cli.run(&["member", "list", &fleet_id.to_string()]);
+    assert_eq!(code(&text), 0, "{}", stderr(&text));
+    let text = stdout(&text);
     assert_eq!(
-        by_id(director_id)["unconfirmed_previews"],
-        serde_json::json!([to_director])
-    );
-
-    let shown = cli.run(&["member", "show", &member_id.to_string(), "--json"]);
-    assert_eq!(code(&shown), 0, "{}", stderr(&shown));
-    let record: serde_json::Value = serde_json::from_str(stdout(&shown).trim()).unwrap();
-    assert_eq!(
-        record
-            .as_object()
+        text.lines()
+            .nth(1)
             .unwrap()
-            .keys()
-            .next_back()
-            .map(String::as_str),
-        Some("unconfirmed_previews")
+            .split_whitespace()
+            .collect::<Vec<_>>(),
+        ["member_id", "name", "kind", "backend", "pane_id", "idle"]
     );
-    assert_eq!(record["unconfirmed_previews"], serde_json::json!([claimed]));
-
-    let ack = cli.run(&["message", "ack", &claimed.to_string()]);
+    let ack = cli.run(&["message", "ack", &unread.to_string()]);
     assert_eq!(code(&ack), 0, "{}", stderr(&ack));
-    let shown = cli.run(&["member", "show", &member_id.to_string(), "--json"]);
-    let record: serde_json::Value = serde_json::from_str(stdout(&shown).trim()).unwrap();
-    assert_eq!(record["unconfirmed_previews"], serde_json::json!([]));
+    let after = cli.run(&["member", "list", &fleet_id.to_string(), "--json"]);
+    assert_eq!(code(&after), 0, "{}", stderr(&after));
+    let after: serde_json::Value = serde_json::from_str(&stdout(&after)).unwrap();
+    for row in after.as_array().unwrap() {
+        assert_keys(
+            row,
+            &[
+                "member_id",
+                "name",
+                "kind",
+                "placement",
+                "last_sent",
+                "last_recv",
+                "last_ack",
+                "idle",
+            ],
+        );
+    }
+}
 
-    let text_after = stdout(&cli.run(&["member", "list", &fleet_id.to_string()]));
-    let header = |text: &str| text.lines().take(2).collect::<Vec<_>>().join("\n");
-    assert_eq!(header(&text_after), header(&text_before));
-    assert!(!text_after.contains("unconfirmed"), "{text_after}");
-    assert_eq!(
-        stdout(&cli.run(&["member", "show", &member_id.to_string()])),
-        show_text_before
-    );
+#[test]
+fn member_show_json_exposes_the_ordered_registration_contract_for_every_placement_state() {
+    let cli = Cli::new();
+    let (fleet_id, director_id) = cli.seeded_fleet();
+    let worker = cli.seed_member(fleet_id, "worker");
+    let pending = cli.seed_member(fleet_id, "pending");
+    let paneless = cli.seed_member(fleet_id, "paneless");
+    cli.sqlite()
+        .execute(
+            "UPDATE member_placements SET mux_pane_id=NULL WHERE member_id=?1",
+            [pending],
+        )
+        .unwrap();
+    cli.sqlite()
+        .execute(
+            "DELETE FROM member_placements WHERE member_id=?1",
+            [paneless],
+        )
+        .unwrap();
+    cli.seed_message(director_id, worker, "pending notification");
+    for (id, name, kind, description) in [
+        (
+            director_id,
+            "Director",
+            "director",
+            "Root Director for this fleet",
+        ),
+        (worker, "worker", "member", "test member"),
+        (pending, "pending", "member", "test member"),
+        (paneless, "paneless", "member", "test member"),
+    ] {
+        let output = cli.run(&["member", "show", &id.to_string(), "--json"]);
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+        let record: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+        assert_keys(
+            &record,
+            &[
+                "member_id",
+                "name",
+                "description",
+                "status",
+                "registered_at",
+                "kind",
+                "placement",
+            ],
+        );
+        assert_eq!(record["member_id"], id);
+        assert_eq!(record["name"], name);
+        assert_eq!(record["kind"], kind);
+        assert_eq!(record["description"], description);
+        assert_eq!(record["status"], "active");
+        assert!(record["registered_at"].is_string());
+        if id == paneless {
+            assert_eq!(record["placement"], serde_json::Value::Null);
+        } else {
+            assert_keys(
+                &record["placement"],
+                &[
+                    "backend",
+                    "mux_session",
+                    "mux_window_id",
+                    "mux_pane_id",
+                    "coding_agent",
+                    "created_at",
+                ],
+            );
+            if id == pending {
+                assert_eq!(record["placement"]["mux_pane_id"], serde_json::Value::Null);
+            }
+        }
+        let text = cli.run(&["member", "show", &id.to_string()]);
+        assert_eq!(code(&text), 0, "{}", stderr(&text));
+        assert_eq!(stdout(&text), format!("{id} {name} active\n"));
+    }
 }
 
 #[test]

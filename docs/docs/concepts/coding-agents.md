@@ -23,7 +23,7 @@ The flag means slightly different things per command:
   and is recorded as placement metadata. When the flag is omitted, the member inherits the spawning Director's placement backend (an explicit
   value still wins).
 
-Each backend is spawned with flags that enable its Bash tool with no runtime
+Each backend is spawned with flags that enable shell commands with no runtime
 permission prompts, and with its broker commands already allowed: a claude
 member needs no user-level allow rule to send, poll, or ACK. The per-backend
 spawn argv, shell-command posture, and sandbox trade-offs are specified in
@@ -38,8 +38,10 @@ placeholders to literals, so the member reads its ids as plain text lines
 command. Each placeholder and its label line is in
 [CLI options § Spawn-prompt substitution](../spec/cli-options.md#spawn-prompt-substitution). The only environment variable forwarded into the pane is
 `CAFLEET_DATABASE_URL`.
-All three honor a leading-`!` shell shortcut on the coding agent's input line,
-so `cafleet member exec` submits a visible native command Escape-first, without idle revalidation; a member routes a
+Each backend honors a leading-`!` shell shortcut on the coding agent's input line,
+including opencode `mini`; backend-specific permission limits are in
+[Coding-agent backends](../spec/coding-agent-backends.md).
+`cafleet member exec` submits a visible native command Escape-first; a member routes a
 command its harness does not run through the Director — see
 [Command routing](member-lifecycle.md#command-routing). For the full
 broker CLI reference, see [CLI options](../spec/cli-options.md).
@@ -51,10 +53,11 @@ invocation, and run a sequence of CAFleet operations as separate shell-tool
 calls. This rule is backend-neutral and applies identically to `claude`,
 `codex`, and `opencode` panes.
 
-The reason is host permission matching: a compound invocation — a one-shot
-CAFleet command placed beside another command with a newline, `;`, `&&`, a
-pipe, or shell `&` — does not match single-command allow rules, so the host
-prompts for it or runs it under a restricted permission set.
+Keep each actual process explicit for the host's permission rules. Submit
+commands separated by a newline, `;`, `&&`, a pipe or shell `&` as individual
+invocations. Opencode's permission matching for compound shell lines is
+unverified; its [permission limits](../spec/coding-agent-backends.md#safety-floor-caveats)
+apply alongside command isolation.
 
 Leading `NAME=value` environment assignments immediately preceding the
 `cafleet` executable are allowed: they set the CAFleet process's environment
@@ -127,7 +130,7 @@ accepted levels, forwarding forms, and rejection strings are in
 |---|---|---|---|
 | Reasoning effort | supported | supported | not supported |
 | Pane title | supported, via `--name` | not supported | not supported |
-| Sandbox isolation | not supported — the operator's allow list is the safety floor | supported — OS-level, kernel-enforced | not supported — a deny-by-default bash allowlist |
+| Sandbox isolation | not supported — the operator's allow list is the safety floor | supported — OS-level, kernel-enforced | not supported — a deny-by-default shell allowlist |
 
 `--effort` with the `opencode` backend exits 2 with
 `opencode does not support reasoning effort.` before any side effect. Because

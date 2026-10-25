@@ -262,26 +262,6 @@ fn completion_deadline(deadline: Deadline) -> Deadline {
     Deadline::until(deadline.0.max(Instant::now() + Duration::from_secs(1)))
 }
 
-pub(crate) fn retry_database_completion<T>(
-    conn: &mut Connection,
-    deadline: Deadline,
-    mut operation: impl FnMut(&mut Connection) -> Result<T, CafleetError>,
-) -> Result<T, CafleetError> {
-    let completion = completion_deadline(deadline);
-    scoped_database_budget(conn, completion, true, |conn| {
-        loop {
-            match operation(conn) {
-                Err(error @ CafleetError::DatabaseBusy(_)) => {
-                    if !completion.retry() {
-                        return Err(error);
-                    }
-                }
-                result => return result,
-            }
-        }
-    })
-}
-
 fn scoped_database_budget<T>(
     conn: &mut Connection,
     deadline: Deadline,
@@ -305,35 +285,6 @@ fn scoped_database_budget<T>(
 #[cfg(test)]
 mod database_scope_tests {
     use super::*;
-
-    #[test]
-    fn completion_retries_transient_busy_results_with_one_absolute_budget() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        let expired = Deadline::until(Instant::now() - Duration::from_millis(1));
-        let mut attempts = 0;
-        retry_database_completion(&mut conn, expired, |_| {
-            attempts += 1;
-            if attempts < 3 {
-                Err(CafleetError::DatabaseBusy(
-                    "transient locked statement".into(),
-                ))
-            } else {
-                Ok(())
-            }
-        })
-        .unwrap();
-        assert_eq!(attempts, 3);
-        let started = Instant::now();
-        let error = retry_database_completion(&mut conn, expired, |_| {
-            Err::<(), _>(CafleetError::DatabaseBusy(
-                "persistent locked statement".into(),
-            ))
-        })
-        .unwrap_err();
-        assert_eq!(error.message(), "persistent locked statement");
-        assert!(started.elapsed() >= Duration::from_millis(900));
-        assert!(started.elapsed() < Duration::from_secs(2));
-    }
 
     #[test]
     fn expired_completion_commits_uncontended_work() {

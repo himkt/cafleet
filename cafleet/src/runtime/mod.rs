@@ -25,8 +25,15 @@ pub(crate) fn deliver_pending(
     member_id: i64,
     expected_fleet: Option<i64>,
     deadline: crate::input::Deadline,
+    attempted: &std::collections::BTreeSet<i64>,
 ) -> Result<crate::receive::AttemptOutcome, CafleetError> {
-    crate::delivery::deliver_pending(conn, settings, member_id, expected_fleet, deadline, || {
-        resolve_mux(settings)
-    })
+    crate::delivery::deliver_pending(
+        conn,
+        settings,
+        member_id,
+        expected_fleet,
+        deadline,
+        attempted,
+        || resolve_mux(settings),
+    )
 }

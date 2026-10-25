@@ -36,12 +36,12 @@ Use the [command index](#command-index) on demand for exact runtime flags, outpu
 
 You have read `reference/coding-agents.md` (Required-reading row #1). Resolve values by the subject of the action:
 
-1. **Select the subject.** For your current instructions, use your `CODING AGENT:` identity (your own identity when standalone) and its Runtime bindings. For a member spawn, select the backend under [Director model-selection policy](roles/director.md#model-selection), then read that backend's Model catalog and Role defaults and validate target effort and launch capabilities against its Runtime bindings. For captured panes, use the observed member's recorded backend and its Pane-state capture cues. Keep the observer's own tools and decision surface.
+1. **Select the subject.** For your current instructions, use your `CODING AGENT:` identity (your own identity when standalone) and its Runtime bindings. For a member spawn, select the backend under [Director model-selection policy](roles/director.md#model-selection), then read that backend's Model catalog and Role defaults and validate target effort and launch capabilities against its Runtime bindings. Keep the executing agent's own tools and decision surface.
 2. **Materialize values.** Resolve the five runtime placeholders from Runtime bindings for the relevant operation, and the role's model and effort from the selected spawn backend's Role defaults.
 3. **Apply notes.** At each instruction named in the selected backend's *Note → applies at* table, follow that note's caveat. An ordinary member resolves its own runtime section; it acquires no model-selection duty.
 4. **Self-check at emission.** Emit concrete values in commands and messages. Resolve any remaining literal `{token}` before emitting it.
 
-For example, a Codex Director spawning an OpenCode reviewer reads OpenCode Role defaults and effort capability while retaining Codex decision and execution tools. A Claude Director inspecting Codex applies the target backend’s capture cues.
+For example, a Codex Director spawning an OpenCode reviewer reads OpenCode Role defaults and effort capability while retaining Codex decision and execution tools.
 
 ### Documented defaults
 
@@ -102,11 +102,11 @@ When you need a recorded user reaction — **approve**, **choose among options**
 
 ## One-shot command isolation
 
-Every one-shot `cafleet` process is the **only command in its shell-tool invocation**. Run a sequence of CAFleet operations as separate shell-tool calls. Do not place a one-shot CAFleet command beside another command using a newline, `;`, `&&`, a pipe, shell `&`, or any other setup/follow-up command — a compound invocation does not match the host's single-command allow rules.
+Every one-shot `cafleet` process is the **only command in its shell-tool invocation**. Run a sequence of CAFleet operations as separate shell-tool calls. Keep each actual process explicit for the host's permission rules; submit setup/follow-up commands separated by a newline, `;`, `&&`, a pipe or shell `&` as individual invocations.
 
 Leading `NAME=value` assignments that set the environment of the CAFleet process are allowed; they do not start another process. They must immediately precede the CAFleet executable — do not substitute an `env` helper process or append another command. Shell redirection does not authorize another process either; a command that needs a long body uses the positional argument or `--file <path>`, not a pipe.
 
-**Permission-error diagnostic.** A CAFleet command that fails with an operating-system permission error — `Operation not permitted` / `Permission denied`, commonly surfacing as a multiplexer socket or pane-command failure — signals that the invocation likely ran outside your coding agent's command auto-approval scope: a compound invocation does not match single-command allow rules, so the shell tool executes it under the agent's restricted sandbox or permission set. The response is to re-run the CAFleet command as its own isolated invocation. A message whose persisted id was already reported is committed (§ *Send (Unicast)*): send its body once only.
+**Permission-error diagnostic.** For an operating-system permission error — `Operation not permitted` / `Permission denied`, including a multiplexer socket or pane-command failure — check invocation isolation and the host's permission boundary. If the failed invocation combined commands, re-run the CAFleet command as its own isolated invocation; route a still-required denied command through the Director. A message whose persisted id was already reported is committed (§ *Send (Unicast)*): send its body once only.
 
 Command isolation complements the Director-side wake procedure in [`reference/supervision.md`](reference/supervision.md#director-wake).
 

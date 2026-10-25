@@ -364,7 +364,7 @@ impl HerdrMultiplexer {
             bounded.runner.as_ref(),
             &PaneInput {
                 escape: herdr_argv(&["herdr", "pane", "send-keys", target_pane_id, "escape"]),
-                literal: herdr_argv(&["herdr", "pane", "send-text", target_pane_id, "--", text]),
+                literal: herdr_argv(&["herdr", "pane", "send-text", target_pane_id, text]),
                 enter: herdr_argv(&["herdr", "pane", "send-keys", target_pane_id, "enter"]),
             },
             lead,
@@ -797,7 +797,7 @@ mod tests {
         assert_eq!(
             runner.run_argvs(),
             vec![
-                argv(&["herdr", "pane", "send-text", "w1:p2", "--", text]),
+                argv(&["herdr", "pane", "send-text", "w1:p2", text]),
                 argv(&["herdr", "pane", "send-keys", "w1:p2", "enter"])
             ]
         );
@@ -821,7 +821,7 @@ mod tests {
             runner.run_argvs(),
             vec![
                 argv(&["herdr", "pane", "send-keys", "w1:p2", "escape"]),
-                argv(&["herdr", "pane", "send-text", "w1:p2", "--", text]),
+                argv(&["herdr", "pane", "send-text", "w1:p2", text]),
                 argv(&["herdr", "pane", "send-keys", "w1:p2", "enter"])
             ]
         );
@@ -859,54 +859,62 @@ mod tests {
 
     #[test]
     fn first_write_failure_propagates_cause_without_enter_or_retry() {
-        let runner = FakeRunner::with_binary("herdr");
-        runner.respond(Err(RunError::Failed {
-            stderr: "injected first write failure".into(),
-        }));
-        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        let error = mux.send_prompt("w1:p2", "hello", Lead::Direct).unwrap_err();
-        assert!(
-            error.to_string().contains("injected first write failure"),
-            "{error}"
-        );
-        assert_eq!(
-            runner.run_argvs(),
-            vec![argv(&[
-                "herdr",
-                "pane",
-                "send-text",
-                "w1:p2",
-                "--",
-                "hello"
-            ])]
-        );
-        assert_eq!(runner.events().len(), 1);
+        for lead in [Lead::Direct, Lead::Escape] {
+            let runner = FakeRunner::with_binary("herdr");
+            let mut expected = Vec::new();
+            if lead == Lead::Escape {
+                runner.respond(Ok(String::new()));
+                expected.push(argv(&["herdr", "pane", "send-keys", "w1:p2", "escape"]));
+            }
+            runner.respond(Err(RunError::Failed {
+                stderr: "injected first write failure".into(),
+            }));
+            let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+            let error = mux.send_prompt("w1:p2", "! pwd", lead).unwrap_err();
+            assert!(
+                error.to_string().contains("injected first write failure"),
+                "{error}"
+            );
+            assert!(error.submission_started(), "{error}");
+            expected.push(argv(&["herdr", "pane", "send-text", "w1:p2", "! pwd"]));
+            assert_eq!(runner.run_argvs(), expected);
+            assert_eq!(
+                runner.events().len(),
+                if lead == Lead::Escape { 3 } else { 1 }
+            );
+        }
     }
 
     #[test]
     fn lost_enter_propagates_cause_after_one_literal_write() {
-        let runner = FakeRunner::with_binary("herdr");
-        runner.respond(Ok(String::new()));
-        runner.respond(Ok(String::new()));
-        runner.respond(Err(RunError::Failed {
-            stderr: "injected enter failure".into(),
-        }));
-        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        let error = mux.send_prompt("w1:p2", "hello", Lead::Escape).unwrap_err();
-        assert!(
-            error.to_string().contains("injected enter failure"),
-            "{error}"
-        );
-        assert!(error.submission_started(), "{error}");
-        assert_eq!(
-            runner.run_argvs(),
-            vec![
-                argv(&["herdr", "pane", "send-keys", "w1:p2", "escape"]),
-                argv(&["herdr", "pane", "send-text", "w1:p2", "--", "hello"]),
-                argv(&["herdr", "pane", "send-keys", "w1:p2", "enter"])
-            ]
-        );
-        assert_eq!(runner.events().len(), 5);
+        for lead in [Lead::Direct, Lead::Escape] {
+            let runner = FakeRunner::with_binary("herdr");
+            let mut expected = Vec::new();
+            if lead == Lead::Escape {
+                runner.respond(Ok(String::new()));
+                expected.push(argv(&["herdr", "pane", "send-keys", "w1:p2", "escape"]));
+            }
+            runner.respond(Ok(String::new()));
+            runner.respond(Err(RunError::Failed {
+                stderr: "injected enter failure".into(),
+            }));
+            let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+            let error = mux.send_prompt("w1:p2", "! pwd", lead).unwrap_err();
+            assert!(
+                error.to_string().contains("injected enter failure"),
+                "{error}"
+            );
+            assert!(error.submission_started(), "{error}");
+            expected.extend([
+                argv(&["herdr", "pane", "send-text", "w1:p2", "! pwd"]),
+                argv(&["herdr", "pane", "send-keys", "w1:p2", "enter"]),
+            ]);
+            assert_eq!(runner.run_argvs(), expected);
+            assert_eq!(
+                runner.events().len(),
+                if lead == Lead::Escape { 5 } else { 3 }
+            );
+        }
     }
 
     #[test]

@@ -342,7 +342,7 @@ An unknown or inactive `MEMBER_ID` exits 1 (`Error: Member <member-id> not found
 cafleet member list <fleet-id>
 ```
 
-One output shape: every **active** registry entry of the fleet, one row each — the column enumeration and the `--json` timestamp additions are canonical in [runtime Member list output](../reference/runtime/spec/cli-options.md#member-list-output). On every wake, use the `idle` column and the `--json` `unconfirmed_previews` field instead of capturing every member — capture is reserved for the cases they flag.
+One output shape: every **active** registry entry of the fleet, one row each — the column enumeration and the `--json` timestamp additions are canonical in [runtime Member list output](../reference/runtime/spec/cli-options.md#member-list-output). On every wake, use the `idle` column and overdue assignments instead of capturing every member — capture is reserved for the cases they flag.
 
 ## Fleet Capture
 
@@ -367,7 +367,7 @@ Authorize the required one-line command and call `cafleet member exec <member-id
 
 ## Member Prompt
 
-Use `cafleet member prompt <member-id> TEXT` for explicitly authorized composer input. The prompt leads with Escape, so it can interrupt a working turn or dismiss an open prompt in the member pane, and it rejects the Director's own pane. Check a capture for a retained draft before prompting, and relay a user draft before replacing it. Success means submission only.
+Use `cafleet member prompt <member-id> TEXT` for explicitly authorized composer input. The prompt leads with Escape, so it can interrupt a working turn or dismiss an open prompt in the member pane, and it rejects the Director's own pane. Success means submission only.
 
 ## Cross-references
 
@@ -377,4 +377,4 @@ Use `cafleet member prompt <member-id> TEXT` for explicitly authorized composer 
 
 ## Director wake
 
-Follow [supervision](../reference/supervision.md#director-wake): arm native reception before member replies, retain one owned handle and apply the executing backend's receive lifecycle. Reconcile full broker records, record deferred actions and ACK consumption. On every batch/wake inspect roster, ordinary-member `unconfirmed_previews`, panes and artifacts, and consume the Director's own pending IDs through broker reads.
+Follow [supervision](../reference/supervision.md#director-wake): arm native reception before member replies, retain one owned handle and apply the executing backend's receive lifecycle. Reconcile full broker records, record deferred actions and ACK consumption. On every batch/wake inspect roster, panes and artifacts, and consume the Director's own pending IDs through broker reads.

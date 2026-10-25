@@ -5,10 +5,10 @@ pub(crate) fn pending_previews(
     conn: &Connection,
     fleet_id: i64,
     subject_id: i64,
-) -> Result<Vec<(i64, i64, bool)>, CafleetError> {
+) -> Result<Vec<(i64, i64)>, CafleetError> {
     let mut statement = conn
         .prepare(&format!(
-            "SELECT m.member_id, g.message_id, g.preview_started_at IS NOT NULL FROM members m
+            "SELECT m.member_id, g.message_id FROM members m
          JOIN fleets f ON f.fleet_id=m.fleet_id
          JOIN member_placements p ON p.member_id=m.member_id AND p.mux_pane_id IS NOT NULL
          JOIN messages g ON g.to_member_id=m.member_id
@@ -20,7 +20,7 @@ pub(crate) fn pending_previews(
         .map_err(super::members::db_err)?;
     statement
         .query_map(params![fleet_id, subject_id], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            Ok((row.get(0)?, row.get(1)?))
         })
         .map_err(super::members::db_err)?
         .collect::<Result<Vec<_>, _>>()
@@ -50,7 +50,7 @@ mod tests {
             broker::send_message(&mut conn, director, &placed.to_string(), "deliver now").unwrap();
         assert_eq!(
             pending_previews(&conn, fleet, director).unwrap(),
-            vec![(placed, message.message_id, false)]
+            vec![(placed, message.message_id)]
         );
     }
 
@@ -67,7 +67,7 @@ mod tests {
             broker::send_message(&mut conn, director, &worker.to_string(), "assignment").unwrap();
         assert_eq!(
             pending_previews(&conn, fleet, observer).unwrap(),
-            vec![(worker, assignment.message_id, false)]
+            vec![(worker, assignment.message_id)]
         );
         assert_eq!(broker::poll_messages(&conn, director).unwrap(), vec![reply]);
     }
@@ -83,7 +83,7 @@ mod tests {
             broker::send_message(&mut conn, director, &worker.to_string(), "assignment").unwrap();
         assert_eq!(
             pending_previews(&conn, fleet, director).unwrap(),
-            vec![(worker, to_worker.message_id, false)]
+            vec![(worker, to_worker.message_id)]
         );
         assert!(pending_previews(&conn, fleet, worker).unwrap().is_empty());
     }
@@ -111,7 +111,7 @@ mod tests {
             broker::send_message(&mut conn, observer, &director.to_string(), "root reply").unwrap();
         assert_eq!(
             pending_previews(&conn, fleet, observer).unwrap(),
-            vec![(former_director, ordinary.message_id, false)]
+            vec![(former_director, ordinary.message_id)]
         );
         assert_eq!(broker::poll_messages(&conn, director).unwrap(), vec![reply]);
     }

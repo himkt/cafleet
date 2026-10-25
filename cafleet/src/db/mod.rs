@@ -512,14 +512,14 @@ mod tests {
             crate::diagnosis::SchemaState::Behind { recorded: 1, .. }
         ));
         migrate_to_head(&mut conn).unwrap();
-        let row: (String, Option<String>, Option<String>) = conn
+        let row: (String, Option<String>) = conn
             .query_row(
-                "SELECT text, notified_at, preview_started_at FROM messages WHERE message_id=7",
+                "SELECT text, notified_at FROM messages WHERE message_id=7",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(row, ("preserved".into(), None, None));
+        assert_eq!(row, ("preserved".into(), None));
         require_current(&conn).unwrap();
     }
 
@@ -600,7 +600,6 @@ mod tests {
                     ("status_timestamp", "TEXT", 1, 0),
                     ("text", "TEXT", 1, 0),
                     ("notified_at", "TEXT", 0, 0),
-                    ("preview_started_at", "TEXT", 0, 0),
                 ],
             ),
         ] {
@@ -930,7 +929,11 @@ mod tests {
         );
         assert_eq!(
             chain,
-            vec![(1, "baseline".into()), (2, "preview_attempts".into())]
+            vec![
+                (1, "baseline".into()),
+                (2, "preview_attempts".into()),
+                (3, "drop_preview_claims".into()),
+            ]
         );
     }
 }

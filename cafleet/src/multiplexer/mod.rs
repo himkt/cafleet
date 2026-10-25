@@ -290,20 +290,35 @@ mod submission_regressions {
     }
 
     #[test]
-    fn option_like_prompt_text_follows_the_literal_option_terminator() {
+    fn each_transport_preserves_literal_payload_as_one_argument() {
         for mux_index in 0..2 {
             for (lead, literal_index) in [(Lead::Direct, 0), (Lead::Escape, 1)] {
-                let runner = FakeRunner::without_binaries();
-                let mux = muxes(runner.clone()).into_iter().nth(mux_index).unwrap();
-                mux.send_prompt("pane", "-R --help --target=other", lead)
-                    .unwrap();
-                let calls = runner.run_argvs();
-                let literal = &calls[literal_index];
-                assert_eq!(
-                    &literal[literal.len() - 2..],
-                    ["--", "-R --help --target=other"]
-                );
-                assert_eq!(calls.len(), literal_index + 2);
+                for text in [
+                    "-R --help --target=other",
+                    "--",
+                    "  café $HOME; $(printf injected) `pwd` 'single' \"double\" | & *  ",
+                    "! pwd",
+                ] {
+                    let runner = FakeRunner::without_binaries();
+                    let mux = muxes(runner.clone()).into_iter().nth(mux_index).unwrap();
+                    mux.send_prompt("pane", text, lead).unwrap();
+                    let calls = runner.run_argvs();
+                    let expected = if mux_index == 0 {
+                        super::test_support::argv(&[
+                            "tmux",
+                            "send-keys",
+                            "-t",
+                            "pane",
+                            "-l",
+                            "--",
+                            text,
+                        ])
+                    } else {
+                        super::test_support::argv(&["herdr", "pane", "send-text", "pane", text])
+                    };
+                    assert_eq!(calls[literal_index], expected);
+                    assert_eq!(calls.len(), literal_index + 2);
+                }
             }
         }
     }
@@ -1026,7 +1041,7 @@ mod tests {
             assert_eq!(
                 runner.run_argvs(),
                 vec![
-                    argv(&["herdr", "pane", "send-text", "w1:p2", "--", "hi"]),
+                    argv(&["herdr", "pane", "send-text", "w1:p2", "hi"]),
                     argv(&["herdr", "pane", "send-keys", "w1:p2", "enter"]),
                 ]
             );
