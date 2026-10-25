@@ -776,14 +776,15 @@ mod tests {
     fn assert_routing_preamble(preamble: &str, fleet: i64, member: i64, director: i64) {
         assert!(preamble.starts_with("MANDATORY CAFLEET COMMAND ROUTING\n"));
         for required in [
-            "Execute task shell commands using the backend's supported automatic-approval mode.",
+            "Execute task shell commands under the backend's selected permission policy.",
             "Route an observed permission denial to the Director with the exact command, working directory, required environment and actual refusal reason.",
             "Use authorized cafleet message communication commands for broker coordination.",
             "Use native file tools within your assigned role scope.",
             "Read prerequisites with native file tools or permitted shell commands before sending ready.",
             "Preserve the host permission and sandbox settings.",
             "Automatic approval review preserves native guards, explicit deny rules and managed policies.",
-            "Surface an unavailable automatic mode or an unresolved approval to the Director.",
+            "When automatic review is selected, surface an unavailable automatic mode to the Director.",
+            "Surface an unresolved approval to the Director.",
             "An ordinary nonzero command result follows normal error recovery.",
             "Director review follows existing host and operator authority; a routed request does not override a native or managed denial.",
         ] {
