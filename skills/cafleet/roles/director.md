@@ -338,4 +338,4 @@ Use `cafleet member prompt <member-id> TEXT` for explicitly authorized composer 
 
 ## Director wake
 
-Follow [supervision](../reference/supervision.md#director-wake): end your turn after dispatch, wake on delivered lines, then poll, ACK consumed messages before ending the turn and keep deferred actions in host-owned state. On every wake inspect roster, `unconfirmed_previews`, panes and artifacts.
+Follow [supervision](../reference/supervision.md#director-wake): arm native reception before member replies, retain one owned handle and apply the executing backend's receive lifecycle. Reconcile full broker records, record deferred actions and ACK consumption. On every batch/wake inspect roster, ordinary-member `unconfirmed_previews`, panes and artifacts, and consume the Director's own pending IDs through broker reads.

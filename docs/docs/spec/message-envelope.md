@@ -24,7 +24,7 @@ The ordered public record is:
 
 ## Rendered shape
 
-[Output shapes](cli-options.md#output-shapes) owns each command's wrapper. Poll returns an array of full records; show/ACK wrap one record as `message`; send adds `notification_sent`. Wait returns full poll records inside its finite receive result.
+[Output shapes](cli-options.md#output-shapes) owns each command's wrapper. Poll returns an array of full records; show/ACK wrap one record as `message`; send adds `notification_sent`. Wait returns full poll records inside its finite receive result. [Listen](cli-options.md#message-listen) emits that same full record inside a tagged `message` envelope, with separate `ready`/`closed` lifecycle records and explicit ACK consumption.
 
 ### Text-mode projection
 

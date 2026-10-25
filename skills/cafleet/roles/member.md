@@ -54,7 +54,7 @@ For a command that is hard to quote, write it to a file under your `BASE` and na
 
 Take literal integer IDs from `FLEET ID:`, `YOUR MEMBER ID:` and `DIRECTOR MEMBER ID:` in the CLI-rendered spawn prompt. Pass them explicitly on every command; environment variables supply no member identity. Missing IDs surface through the CLI's own validation rather than an invented value.
 
-Poll your own inbox and use permitted Send/Poll/ACK/show operations. The Director owns member creation, deletion, listing, capture and prompt dispatch; `member prompt` and `member exec` belong to the Director alone. A committed send retains its ID and successful output even if preview delivery reports a diagnostic. Keep the existing message and consume it once.
+Poll your own inbox and use permitted Send/Poll/Wait/Listen/ACK/show operations. The Director owns member creation, deletion, listing, capture and prompt dispatch; `member prompt` and `member exec` belong to the Director alone. A committed send retains its ID and successful output even if preview delivery reports a diagnostic. Keep the existing message and consume it once.
 
 ## Shutdown
 

@@ -102,7 +102,7 @@ Per surface, the scope of what may change:
 ```
 User → /clean-docs (one workflow)
  └─ Director (resolves BASE, registers the current session, partitions slices,
-              merges partials, wakes on delivered replies, holds apply behind review,
+              merges partials, retains native reception, holds apply behind review,
               verifies and closes owned members)
      ├─ scanner-1  (owns a disjoint file slice: scan → propose → apply after gate)
      ├─ scanner-N  (…)
@@ -111,7 +111,7 @@ User → /clean-docs (one workflow)
 
 | Role | Responsibility |
 |---|---|
-| **Director** | Resolve task-scoped `${BASE}`; register the current Director atomically and wake on delivered replies; partition the in-scope tree into **disjoint file-ownership** slices (one file → one scanner, whole surfaces per scanner); merge partial artifacts into the run's canonical artifact; route it to the reviewer and **hold the apply until the reviewer's approval**; relay approval to scanners; apply a denied write through the full-file staging protocol; run verification; escalate observations to the user; close owned members before deregistering the fleet. |
+| **Director** | Resolve task-scoped `${BASE}`; register the current Director atomically and arm native reception; partition the in-scope tree into **disjoint file-ownership** slices (one file → one scanner, whole surfaces per scanner); merge partial artifacts into the run's canonical artifact; route it to the reviewer and **hold the apply until the reviewer's approval**; relay approval to scanners; apply a denied write through the full-file staging protocol; run verification; escalate observations to the user; close owned members before deregistering the fleet. |
 | **scanner** (×N) | For its slice: run the workflow's scan mechanics, propose actions per the workflow's rubric, record observations separately, write its partial artifact under `${BASE}`. After approval is relayed: apply its own slice's approved rows exactly as written, re-verify its diff, route harness-denied writes to the Director. |
 | **reviewer** | Validate the merged artifact **before** any edit, per the workflow's guarantees and guardrails. After apply: run the workflow verification (parameter table below). |
 
@@ -269,4 +269,4 @@ use `--file`.
 
 ## Director wake
 
-After dispatch the Director ends its turn; each member reply is delivered into its pane as a line and wakes it. On every wake, poll `cafleet message poll <director-member-id> --json`, ACK consumed deliveries before ending the turn, keep deferred actions in host-owned state and inspect roster/panes/artifacts until delegated work resolves or explicit user handoff. Follow [Director wake](../../../skills/cafleet/reference/supervision.md#director-wake).
+Arm native reception before depending on member replies and retain one receiver through delegated work and authorized review. On every batch/wake, poll `cafleet message poll <director-member-id> --json`, reconcile replay, record deferred actions, ACK consumption and inspect roster/panes/artifacts. Follow [Director wake](../../../skills/cafleet/reference/supervision.md#director-wake) and the executing [backend recipe](../../../skills/cafleet/reference/coding-agents.md), preserving user gates and supplied host continuation controls.

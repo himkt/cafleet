@@ -1,6 +1,6 @@
 # Run a fleet
 
-Create independent coding-agent sessions in tmux or herdr, assign work and receive durable replies delivered into the Director's pane.
+Create independent coding-agent sessions in tmux or herdr, assign work and receive durable replies through the Director's native inbox tools.
 
 ## Prerequisites
 
@@ -12,7 +12,7 @@ Follow Quickstart to [install](../quickstart.md#install), [configure](../quickst
 Use CAFleet to delegate independent reviews of this change, collect both reports, resolve their findings, and close the team.
 ```
 
-Your agent loads the Director instructions, creates members and assigns each after its ready. The host continues the task; the Director wakes on delivered replies and owns evidence checks.
+Your agent loads the Director instructions, arms native reception, creates members and assigns each after its ready. The Director consumes broker events and checks evidence while preserving the host's supplied continuation and user gates.
 
 ## Manual lifecycle
 
@@ -28,7 +28,7 @@ Resolve diagnosis issues. Load the Director role, backend reference and supervis
 cafleet fleet create --name demo --coding-agent claude
 ```
 
-Example output: `1 director=2`. Creation registers the current pane without starting another session. The backend flag declares the calling host. Run it from the Director's coding-agent session, because replies are delivered into this pane.
+Example output: `1 director=2`. Creation registers the current pane without starting another session. The backend flag declares the calling coding-agent host. Before creating members, arm one native receiver using the installed CAFleet skill's backend and supervision instructions. The [backend reference](../spec/coding-agent-backends.md) explains host capabilities and evidence limits. Require the receiver's ready record and retain its native handle; initial replay recovers replies racing with startup.
 
 ### Create and dispatch a member
 
@@ -61,7 +61,7 @@ The send types the assignment into the member's pane as one line, led by Escape.
 
 ### Receive results
 
-End your turn after dispatch. Each reply arrives as a `[cafleet msg ID from SENDER TIMESTAMP]` line in the Director's pane and wakes it. On every wake, read full payloads:
+Read complete JSONL records from the same owned native receiver between events. Codex explicitly reads its retained session while delegated work remains; Claude Monitor may start a turn for each record. Backend recipes own the concrete tool calls. Native reception sends no automatic input into the Director's pane. On every batch/wake, reconcile full pending payloads:
 
 ```bash
 cafleet message poll 2 --json
@@ -73,9 +73,11 @@ ACK every consumed delivery before ending the turn, using its returned ID:
 cafleet message ack 10
 ```
 
-Keep deferred questions/approvals in host-owned task state after ACK. On every wake inspect roster, panes and artifacts, including each member's `unconfirmed_previews` in `cafleet member list 1 --json`.
+Keep deferred questions/approvals in host-owned task state after ACK. Reconcile known/replayed IDs before acting; completed records need no second action or ACK. Broker events leave pending user decisions pending. On every batch/wake inspect roster, panes and artifacts, including ordinary members' `unconfirmed_previews` in `cafleet member list 1 --json`; consume the Director's own pending IDs through broker reads.
 
-A script or manual check can instead block until deliveries arrive:
+A clean expired listener lease can renew after its native task exits while authorized work remains. Unexpected EOF or failure requires inspecting the exit, reconciling the inbox and a fresh successful broker health check before replacement. Retain incomplete JSONL across chunks and preserve unACKed messages after damaged output. Establish old-process termination before replacing a receiver. Fully idle Codex waits for the next user/native activation; a background process alone supplies no unsolicited per-line wake.
+
+Where a verified native adapter is unavailable, state the limitation and use explicit manual poll or finite reception within host permissions. Finite wait also provides ordinary-member retry recovery:
 
 ```bash
 cafleet message wait 2 --timeout 300 --json
@@ -105,7 +107,7 @@ Inspect failed or uncertain input before authorizing any retry. [Command routing
 
 ### Close the fleet
 
-Delete each owned ordinary member, verify the remaining roster, then deregister:
+Consume the final inbox and complete approval gates. Delete each owned ordinary member, verify the remaining roster, then deregister:
 
 ```bash
 cafleet member delete 3
@@ -122,6 +124,8 @@ cafleet fleet delete 1
 ```bash
 cafleet fleet list
 ```
+
+Collect the listener's fleet-deleted closure and native task exit before retiring its handle. To stop reception while the fleet stays live, use verified native cancellation with observed termination or stop renewal and drain its finite lease. Preserve pending messages for later reads.
 
 Fleet deletion retains history and closes no panes. Limit cleanup to the team you own.
 

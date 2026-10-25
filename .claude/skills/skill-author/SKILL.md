@@ -18,7 +18,7 @@ Use CAFleet when independent investigation, implementation or review calls for s
 | Spawning | [Spawn Protocol](../../../skills/cafleet/reference/supervision.md#spawn-protocol) and [Director policy](../../../skills/cafleet/roles/director.md) | Diagnose environment, register the Director and select members/models |
 | Rendering prompts | [Canonical skeleton](../../../skills/cafleet/roles/director.md#canonical-spawn-prompt-skeleton) and [audit convention](../../../skills/cafleet/roles/director.md#member-create--scratch-and-audit-files) | Supply absolute role/core/backend paths, identity, BASE, host prerequisites and lossless role constraints |
 | Coordination | [Coordination](../../../skills/cafleet-design-doc/reference/coordination.md) | Use artifact pointers and paired issue markers |
-| Receiving | [Director wake](../../../skills/cafleet/reference/supervision.md#director-wake) | End the turn after dispatch and wake on delivered replies until the work resolves or explicit handoff |
+| Receiving | [Director wake](../../../skills/cafleet/reference/supervision.md#director-wake) and [backend recipes](../../../skills/cafleet/reference/coding-agents.md) | Arm native reception before ready replies and retain one owned receiver until resolution or explicit handoff |
 | Recovery / finish | [Recovery](../../../skills/cafleet/reference/supervision.md#recovery) / [Shutdown](../../../skills/cafleet/reference/supervision.md#shutdown) | Preserve context and tear down owned members before the fleet |
 
 Members open their authoritative role first, load their own backend and required skills through its supported loader, then use supplied host-rule equivalents for absent optional files. Ready is the first operational broker command; prerequisite shell reads may precede it only when shell is the available reader.
@@ -29,7 +29,7 @@ Normalize research/design inputs to their task folder before resolving BASE. Age
 
 Render a compact role-by-path prompt to a unique `.prompts/<member>-<UTC-compact>.md` and preserve that pre-spawn audit input. Leave only `{fleet_id}`, `{member_id}`, `{director_member_id}` and `{coding_agent}` for CLI identity substitution; double other literal braces. A missing BASE follows its guarded inline transport branch.
 
-Send individually to selected recipients. Members poll after ready, before reporting and on each wake. Every recipient, the Director included, receives each message as a delivered line in its pane. The Director records deferred actions and ACKs every consumed delivery before ending its turn; the next send to a recipient retries its pending previews. Native shell dispatch returns submission metadata; inspect output and explicitly continue after completion evidence if the host has not resumed the member.
+Send individually to selected recipients. Members poll after ready, before reporting and on each wake. Ordinary members receive pane previews; the Director retains native inbox reception through the shared supervision lifecycle. Record deferred actions and ACK consumption, preserving user gates and supplied host goal controls. The next send to an ordinary recipient retries pending previews. Native shell dispatch returns submission metadata; inspect output and explicitly continue after completion evidence if the host has not resumed the member.
 
 ## Worked example: summarize-pr
 
@@ -45,7 +45,7 @@ Run `cafleet doctor`, then register the calling Director:
 cafleet fleet create --name summarize-pr-1234 --coding-agent claude --json
 ```
 
-Suppose this returns fleet 7 and Director 8. The next member can be created immediately.
+Suppose this returns fleet 7 and Director 8. Arm native reception through the shared backend recipe and require its ready record before depending on member replies.
 
 ### Render and spawn
 
@@ -59,10 +59,10 @@ Receive that member's ready and ACK it. Dispatch its scope when inputs exist.
 
 ### Review and revisions
 
-End the turn after dispatch. The Summarizer's report arrives as a delivered line in the Director's pane; on that wake run `cafleet message poll 8 --json` and inspect roster/panes/artifacts.
+Receive the Summarizer's report through the owned native handle. On every batch/wake run `cafleet message poll 8 --json`, reconcile replay and inspect roster/panes/artifacts.
 
-Read and ACK the completed report, inspect the summary and present it. Record revisions as actionable markers at the artifact pointer and send `ready (doc)`. The member revises, removes the marker and sends `addressed (doc)`; wake on each delivered reply through the review loop.
+Read and ACK the completed report, inspect the summary and present it. Record revisions as actionable markers at the artifact pointer and send `ready (doc)`. The member revises, removes the marker and sends `addressed (doc)`; keep the owned receiver through the review loop.
 
 ### Teardown
 
-After the authorized outcome, delete each ordinary member, verify the root-only roster, delete fleet 7 and confirm it is absent from the active list. Member deletion owns pane teardown; fleet deletion owns registry deregistration and retains history. Preserve artifacts and immutable prompt inputs.
+After the authorized outcome, consume the final inbox, delete each ordinary member, verify the root-only roster, delete fleet 7 and confirm it is absent from the active list. Collect the receiver's fleet-deleted closure and native task exit. Member deletion owns pane teardown; fleet deletion owns registry deregistration and retains history. Preserve artifacts and immutable prompt inputs.

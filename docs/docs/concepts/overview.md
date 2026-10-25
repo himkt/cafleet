@@ -12,8 +12,9 @@ CAFleet multiplexes independent coding-agent sessions in tmux or herdr. Use its 
 | placement | The association between a member and its multiplexer session, window, pane and backend | [Data model](../spec/data-model.md) |
 | broker | The synchronous SQLite data-access layer used by the CLI | [Storage](storage.md) |
 | message | One point-to-point delivery, consumed through `input_required → completed` | [Message envelope](../spec/message-envelope.md) |
-| inline preview | A literal one-line notification submitted Escape-first into the recipient's pane, carrying the full body or a show pointer | [Notifications](../spec/multiplexer-backends.md#push-notifications) |
-| receive | A finite inbox wait for scripts and manual use that also retries pending previews | [Message wait](../spec/cli-options.md#message-wait) |
+| inline preview | A literal one-line notification submitted Escape-first into an ordinary recipient's pane, carrying the full body or a show pointer | [Notifications](../spec/multiplexer-backends.md#push-notifications) |
+| receive | A finite inbox wait for scripts and manual use that also retries ordinary-member previews | [Message wait](../spec/cli-options.md#message-wait) |
+| inbox stream | A persistent read-only JSONL observer of pending messages with explicit ACK consumption | [Message listen](../spec/cli-options.md#message-listen) |
 | coding-agent backend | The selected agent binary recorded in a placement | [Coding agents](coding-agents.md) |
 
 ## Fleet isolation
@@ -28,7 +29,7 @@ Fleet creation atomically registers the calling Director and its current pane. Y
 |---|---|
 | Host | Continue its task and own native shell/background results |
 | Director | Assign work, receive replies, inspect evidence, resolve blockers and close the team |
-| CLI | Register sessions, persist messages, deliver them into recipient panes and submit authorized pane input |
+| CLI | Register sessions, persist messages, stream inbox records, preview ordinary-member messages and submit authorized pane input |
 | Multiplexer | Split, read, type into and close panes while preserving layout ownership |
 | Member | Perform its assignment, report through the broker and route required unavailable commands |
 
@@ -36,7 +37,7 @@ The [CLI reference](../spec/cli-options.md#subcommand-summary) owns the command 
 
 ## Receiving delegated work
 
-The Director ends its turn after dispatching work and wakes when a reply is delivered into its pane as a line. On every wake it polls its inbox, ACKs each consumed delivery, records deferred actions in host-owned task state and checks the roster, panes and artifacts. Read the [fleet guide](../how-to/mixed-backend-team.md#manual-lifecycle) for the complete procedure.
+The Director owns one native inbox receiver, reconciles full broker records, ACKs consumption and keeps deferred actions in host-owned task state. Ordinary members receive pane previews. Native reception preserves supplied goal controls and user decision gates; the [fleet guide](../how-to/mixed-backend-team.md#manual-lifecycle) explains handle ownership, recovery and manual reception.
 
 ## Design document workflow
 

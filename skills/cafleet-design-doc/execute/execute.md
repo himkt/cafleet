@@ -37,7 +37,7 @@ Store literal fleet/member IDs from CLI JSON. Poll complete messages with `--jso
 
 ### Diagnostics and progress
 
-Each wake on a delivered reply resumes evidence-based facilitation. Use `cafleet member capture <member-id> --lines 200` for stalled-member diagnostics. Disclose deletion and re-spawn to the user; never silently replace a member. Apply [generic replacement](../../cafleet/roles/director.md#model-replacement) with this disclosure constraint. Route test-defect arbitration through Step 4 and commit test corrections separately.
+Each native receive batch/wake resumes evidence-based facilitation. Use `cafleet member capture <member-id> --lines 200` for stalled-member diagnostics. Disclose deletion and re-spawn to the user; never silently replace a member. Apply [generic replacement](../../cafleet/roles/director.md#model-replacement) with this disclosure constraint. Route test-defect arbitration through Step 4 and commit test corrections separately.
 
 ### Free-form user replies
 
@@ -188,9 +188,9 @@ cafleet fleet create --name "design-doc-execute-<slug>" --coding-agent <backend>
 Retain `fleet_id` and `director.member_id` for subsequent commands. Ordinary member creation can begin immediately.
 
 
-#### 3b. Wake on delivered replies
+#### 3b. Arm native Director reception
 
-After creating/dispatching a member, end your turn; a delivered `[cafleet msg ID …]` line wakes you. On every wake run `cafleet message poll <director-member-id> --json`, ACK every consumed delivery before ending the turn and act on it; keep deferred actions in host-owned state. Inspect roster, `unconfirmed_previews`, panes and artifacts on every wake until the delegated reply or explicit user handoff. Follow [Director wake](../../cafleet/reference/supervision.md#director-wake).
+After Director registration, arm native reception before depending on member ready replies. Follow [Director wake](../../cafleet/reference/supervision.md#director-wake) and the executing [backend recipe](../../cafleet/reference/coding-agents.md) to retain one receiver through dispatch and replies. On every received batch/wake run `cafleet message poll <director-member-id> --json`, reconcile replay, record deferred actions, ACK consumption and dispatch ready work. Inspect roster, ordinary-member `unconfirmed_previews`, panes and artifacts until delegated work resolves or explicit user handoff; consume Director pending IDs through broker reads. Preserve user decision gates and host continuation controls.
 
 #### 3c. Analyze implementation tasks to decide team composition
 

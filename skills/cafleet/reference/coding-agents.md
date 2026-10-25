@@ -62,13 +62,29 @@ Sources: [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pr
 | Note | Applies at |
 |---|---|
 | `AskUserQuestion` supports up to four options; its built-in Other path accepts free text. Members relay a concrete question to the Director. | `{decision_surface}`; [user relay](supervision.md#user-delegation-protocol) |
-| A separate evaluator checks the session condition against the transcript; native background work defers evaluation and returns a host result. External CAFleet panes supply evidence when the Director reads broker/pane state. | [Director wake](supervision.md#director-wake) |
-| Without native background work an unmet condition can immediately start another turn; consecutive tool-free stops reach the configured block cap, eight by default. While a goal is active, end each continued turn with the bounded foreground wait in Director wake. | [Turn boundaries](supervision.md#director-wake) |
+| A separate evaluator checks the session condition against the transcript; native background work defers evaluation and returns a host result. Per-record reception follows the native recipe below. | [Director wake](supervision.md#director-wake) |
+| Receive Director records through one owned Monitor task using the native recipe below. Preserve the supplied `/goal` state and pending user decisions across events and renewal. | [Director wake](supervision.md#director-wake); [native reception](#claude-native-director-reception) |
 | Composer controls act at the beginning of submitted input; a local probe merged control text into a concurrent preview. Serialize complete input and inspect its capture. | [Native dispatch](prompt-routing.md#director-side-dispatch) |
 | Native shell probes displayed command/stdout/stderr followed by a model turn; its trigger and a second permission check were not established. The Director authorizes routed native input under its host rules. | [Command authorization](prompt-routing.md#director-side-dispatch) |
 | `dontAsk` permits spawn-allowed broker tools, built-in read-only work and matching host allow rules; denied work routes to the Director. Protected file edits need the Director or a host-rule change. | `{permission_flags}`; [routing](prompt-routing.md#member-side-reconsider-then-route) |
 
 Evidence: Claude Code 2.1.296, checked 2026-10-22; [host continuation](https://code.claude.com/docs/en/goal) and [block cap](https://code.claude.com/docs/en/hooks-guide#stop-hook-hits-the-block-cap). Local probes establish only exercised behavior.
+
+#### Claude native Director reception
+
+Discover Monitor through the installed host's tool-discovery mechanism and verify its authorization separately from Bash broker rules. After Director registration, start one Monitor with the actual literal Director ID. The tested invocation shape is:
+
+```json
+{"command":"cafleet message listen 1 --timeout 210","description":"CAFleet Director inbox","timeout_ms":240000}
+```
+
+Retain the task ID, pinned member/fleet IDs, receive status and unfinished actions in host-owned state. Require the `ready` record. Each stdout event supplies a protocol record and may start a new model turn before the process exits; consume complete records, reconcile the durable inbox and known/replayed IDs, record deferred work, ACK consumption and act within authorization. Keep Monitor active while returning to other work or ending the turn. An event during an open user question supplies no answer or authority to proceed past that decision.
+
+The finite CLI lease normally ends before the tested Monitor lifetime. On `closed` or native stream-ended/completion notification, establish the old task and source process exited. Renew once while authorized work remains, then reconcile replay. Deduplicate closure and completion notices by the owned task ID, ignoring stale completion notices after ownership moves. A host timeout before CLI closure follows [receiver recovery](supervision.md#receiver-recovery); establish source-child termination before replacement and retain one owned source process.
+
+Use verified native cancellation with observed child cleanup, or stop renewal and drain the finite lease. Preserve the supplied `/goal` activation, pause, completion and budget controls; receiving, ACKing and renewal use no goal lifecycle calls. Ordinary `Bash(run_in_background=true)` provides a different capability: observed completion notification did not establish per-line reception while the process lived. Where Monitor is unavailable or denied, disclose the limitation and use manual `poll`/finite `wait`.
+
+Evidence: Claude Code 2.1.301 stream probes established separate event turns from one process. Actual Monitor expiry, cancellation, child cleanup and independently observed goal/decision preservation require acceptance evidence; the invocation shape alone establishes none of them.
 
 ### Pane-state capture cues
 
@@ -123,12 +139,26 @@ Sources: [OpenAI pricing](https://developers.openai.com/api/docs/pricing) and [C
 | Note | Applies at |
 |---|---|
 | A member sends a concrete question to the Director; the Director relays the operator's answer as a message. | `{decision_surface}`; [user relay](supervision.md#user-delegation-protocol) |
-| The objective belongs to the thread with model-callable lifecycle tools and optional token-budget accounting; a two-turn tool-bearing probe verified continuation and model-reported completion. Preserve the user's objective, activation authority and budget, retain live tool/session handles and collect broker/pane evidence; while the objective is active, each continued turn ends with the bounded foreground wait in Director wake. | [Director wake](supervision.md#director-wake) |
+| The objective belongs to the thread with model-callable lifecycle tools and optional token-budget accounting. Retain native session handles and explicitly read the owned receiver while delegated work remains, preserving goal activation, pause, completion and budget authority. | [Director wake](supervision.md#director-wake); [native reception](#codex-native-director-reception) |
 | Native shell input displayed command, exit code, duration and output. Installed protocol metadata describes unsandboxed dispatch while public CLI guidance describes current approval/sandbox settings; the effective TUI boundary and protocol path were not established. | [Native authorization](prompt-routing.md#director-side-dispatch) |
 | The Director authorizes routed native input under its host rules; harmless command visibility establishes no second member-tool permission check. Inspect output before explicit continuation. | [Dispatch and continuation](prompt-routing.md#director-side-dispatch) |
 | Run host-permitted workspace commands directly and route required denied operations. The configured sandbox and approval posture remain authoritative. | `{permission_flags}`; [member routing](prompt-routing.md#member-side-reconsider-then-route) |
 
 Evidence: Codex CLI 0.162.1, checked 2026-10-22; [host continuation](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex) and [command reference](https://learn.chatgpt.com/docs/developer-commands).
+
+#### Codex native Director reception
+
+After Director registration, start `cafleet message listen <director-id> --timeout 300` once through native `exec_command`, using the actual literal ID and a short initial yield such as 1,000 ms. Retain its live `session_id` and initial stdout; require `ready` before relying on reception.
+
+While delegated work remains, call `write_stdin` on that same session with empty `chars` and a bounded yield such as 10,000 ms. A tool read/yield timeout leaves the receiver running and differs from its 300-second CLI lease. Accumulate incomplete JSONL across chunks, consume every complete record, reconcile known/replayed IDs and `poll --json`, record deferred actions, ACK consumption and dispatch ready work. Continue independent authorized work and user-facing updates between bounded reads, then read the same session again.
+
+Keep the tool-bearing receive loop active independently of whether a host goal was supplied. A background process alone supplies no unsolicited per-line wake after the model turn ends. When the host requires ending the turn or blocks tools for a required user decision, wait for the next user/native activation and reconcile the durable inbox then; fully idle Codex wake is outside this adapter.
+
+On `closed`/exit, establish termination and follow [receiver recovery](supervision.md#receiver-recovery). Renew a clean expired lease only while authorized delegated work remains; unexpected failures require a fresh successful health/inbox check first. Retain the session ID, pinned member/fleet IDs, receive status, incomplete JSONL and unfinished actions across context compaction. When normal retirement lacks a verified native cancel primitive, stop renewal and drain the finite lease to observed exit. Verified native cancellation may retire it sooner; confirm termination and discard partial final data.
+
+Reception, ACK and renewal preserve the supplied goal's activation, pause, completion and budget authority. They never call a goal lifecycle tool, start a goal, resume a paused goal or change its budget. Required user decisions gate dependent work while independent authorized work may continue. Automatic Director reception uses stdout and broker reads only, with no pane controls or queue bridge.
+
+Evidence: Codex CLI 0.162.1 stream probes established one retained session/process across receive–act–receive. Independently observed goal-state and open-decision preservation require acceptance evidence; absence of goal lifecycle calls alone proves no state preservation.
 
 ### Pane-state capture cues
 
@@ -289,7 +319,7 @@ Source: [OpenCode Console models and pricing](https://opencode.ai/v2/docs/consol
 | Note | Applies at |
 |---|---|
 | A member routes concrete questions to the Director and receives the operator's answer as a message. | `{decision_surface}`; [user relay](supervision.md#user-delegation-protocol) |
-| Members perform assignments using the selected provider/model, workspace reads/edits, permitted tools and broker communication. The Director coordinates next steps and wakes on delivered lines. | [Director wake](supervision.md#director-wake) |
+| Members perform assignments using the selected provider/model, workspace reads/edits, permitted tools and broker communication. A Director without a verified native stream adapter uses explicit manual `poll`/finite `wait` and states that reception limit. | [Director wake](supervision.md#director-wake) |
 | The TUI documents leading `!` native shell input and conversation-visible output. A local native-input permission probe was outside this investigation; preserve member-tool permissions and Director authorization. | [Native dispatch](prompt-routing.md#director-side-dispatch) |
 | The `cafleet` preset allows its declared workspace/broker tools and denies unmatched shell commands; route a required denied command. A permission popup is an issue to capture and relay. | `{permission_flags}`; [member routing](prompt-routing.md#member-side-reconsider-then-route) |
 

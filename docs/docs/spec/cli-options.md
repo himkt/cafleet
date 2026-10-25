@@ -17,8 +17,9 @@ The unified `cafleet` CLI uses literal subject IDs, synchronous SQLite access an
 | `member show` / `member list` | Read detail / active roster | `MEMBER_ID` / `FLEET_ID` | yes |
 | `member prompt` / `member exec` | Submit authorized native input | `MEMBER_ID` | yes |
 | `member capture` | Read a pane tail | `MEMBER_ID` | yes |
-| `message send` | Persist a point-to-point message and deliver it into the recipient's pane | Sender/recipient flags | yes |
+| `message send` | Persist a point-to-point message and preview it for an ordinary recipient | Sender/recipient flags | yes |
 | `message poll` / `message wait` | Read incoming deliveries / block until deliveries arrive | `MEMBER_ID` | yes |
+| `message listen` | Stream pending inbox records through stdout | `MEMBER_ID` | JSONL only |
 | `message ack` / `message show` | Consume / read one message | `MESSAGE_ID` | yes |
 
 ## Environment variables
@@ -48,6 +49,7 @@ The default expands HOME once. An explicit URL has the form `sqlite:///<path>`; 
 | `message ack` | `Message acknowledged.` then envelope | `{message}` |
 | `message show` | Envelope | `{message}` |
 | `message wait` | Availability/timeout line and any messages | `{member_id, outcome, messages, notification_errors}` |
+| `message listen` | — | Tagged `ready`, `message`, `closed` JSONL records; no `--json` flag |
 | `member create` | `ID NAME backend=AGENT pane=PANE` | Member with placement |
 | `member delete` | `Member deleted.` with member/pane lines | `{member_id, pane_status}` |
 | `member show` | `ID NAME STATUS` | Detail including kind and placement |
@@ -84,7 +86,7 @@ Send requires integer sender and recipient flags. Both must be active in the sam
 
 ## `permissions.allow` coverage
 
-Use prefix rules such as `Bash(cafleet message *)` to cover ordinary broker operations, including `cafleet message wait ID --timeout 300 --json`. Director capture is covered by `Bash(cafleet fleet capture *)` or a broader authorized prefix. Literal IDs and trailing JSON flags preserve prefix matching.
+Use prefix rules such as `Bash(cafleet message *)` to cover broker operations, including `cafleet message listen ID --timeout 300` and finite `cafleet message wait`. Verify native Monitor authorization separately: a Bash-rule check establishes no Monitor permission. Director capture is covered by `Bash(cafleet fleet capture *)` or a broader authorized prefix. Literal IDs and trailing JSON flags preserve prefix matching.
 
 Keep `Bash(cafleet member prompt *)` and `Bash(cafleet member exec *)` under `permissions.ask`, because their bodies carry operator-controlled input. Ask rules outrank allow rules. The [permission profiles](coding-agent-backends.md#claude-profile-entries) describe each role's needs.
 
@@ -237,7 +239,7 @@ help, even under a missing database or a missing or stale install.
 
 Require the selected backend token and a valid tmux/herdr context. Outside that context fail with `cafleet fleet create must be run inside a tmux or herdr session`. Insert fleet, current Director member and placement in one transaction and backfill `director_member_id` before commit. The Director has `name="Director"` and `description="Root Director for this fleet"`. Creation splits no pane and launches no process. An ordinary member can be created immediately.
 
-The calling pane becomes the Director's concrete placement and receives every message addressed to the Director as a [delivered line](multiplexer-backends.md#push-notifications). Run `fleet create` from the Director's coding-agent session, the one `--coding-agent` declares; a plain shell registered as Director would receive each delivered line as shell input.
+The calling pane becomes the Director's concrete placement. Run `fleet create` from the coding-agent session declared by `--coding-agent`, then arm native [message reception](#message-listen) before depending on member replies. Root-Director messages remain in the durable inbox for native or manual reads; automatic pane previews target ordinary members.
 
 ### `fleet list`
 
@@ -386,15 +388,7 @@ these files that exists:
 | Project settings | `<cwd>/.claude/settings.json` and `<cwd>/.claude/settings.local.json` |
 | Managed settings | `/Library/Application Support/ClaudeCode/managed-settings.json` on macOS, `/etc/claude-code/managed-settings.json` on Linux |
 
-Each rule is tested against these probe commands:
-
-```
-cafleet message send --from-member-id 1 --to-member-id 2 x
-cafleet message poll 1
-cafleet message wait 1 --timeout 300 --json
-cafleet message ack 1
-cafleet message show 1
-```
+Each rule is tested against the broker-command probe registry, maintained as `PROBE_COMMANDS` in the [permission probe source](https://github.com/himkt/cafleet/blob/main/cafleet/src/member_permissions.rs). A representative probe is `cafleet message listen 1 --timeout 300`. This checks Bash command rules; native Monitor authorization is verified separately.
 
 A rule matches a probe when it is the bare `Bash`, or `Bash(<pattern>)` whose
 pattern matches the probe. `*` matches any text; a trailing ` *` or the legacy
@@ -520,7 +514,7 @@ Exit-code semantics are identical to text mode.
 
 `cafleet message send --from-member-id ID --to-member-id ID (TEXT | --file PATH) [--json]`
 
-Resolve the complete text body before starting the five-second persistence/notification budget, including when `--file -` waits for stdin. Persist one point-to-point delivery, then drain the recipient's pending messages oldest-first into its pane within the remaining budget, the new message included. Every recipient with a concrete pane receives delivered lines, ordinary member and Director alike. A self-send persists with no pane input. A committed/persisted send remains successful with exit 0; held/unavailable notifications preserve the stdout record and `notification_sent=false`.
+Resolve the complete text body before starting the five-second persistence/notification budget, including when `--file -` waits for stdin. Persist one point-to-point delivery, then drain an ordinary recipient's pending messages oldest-first into its concrete pane within the remaining budget, the new message included. Root-Director messages use native or manual broker reads: sends succeed with `notification_sent=false`, no pane-delivery diagnostic and no multiplexer requirement. Self-sends persist with no pane input. A committed/persisted send remains successful with exit 0; held/unavailable ordinary-member notifications preserve the stdout record and `notification_sent=false`.
 
 `notification_sent` is `true` exactly when this invocation delivered the newly committed message, including when it was drained after an older one. When another invocation delivered the new message, `notification_sent` stays `false` and stderr carries no diagnostic; the recipient still received the line. Messages left pending when the budget no longer covers another submission stay pending with no diagnostic; the next send to that recipient or a [message wait](#message-wait) rotation retries them. [Push notifications](multiplexer-backends.md#push-notifications) specifies the line, the drain and under-lock revalidation.
 
@@ -548,7 +542,7 @@ After a failed delivery the sender sends exactly one follow-up to the same recip
 
 Timeout is an integer in `1..=1800`, default `300`. Validate an active subject and live fleet. Existing unread deliveries return immediately; otherwise check at one-second monotonic intervals. The invocation is a blocking receive for scripts and manual use and never ACKs messages.
 
-Between inbox checks, retry pending deliveries for at most one member per interval with an in-memory round-robin cursor. Select the concrete placements of every other member of the fleet, the Director included; exclude the wait's own subject, self-notifications, ACKed and already-notified rows. Each attempt drains that member's pending messages under the [delivery procedure](multiplexer-backends.md#push-notifications) without consulting pane state. Persist an input claim before the first possible keystroke. Read unresolved claims and message eligibility in the same receive snapshot. Preserve their uncertain-delivery diagnostics across invocations, skip those exact messages and continue with the oldest unclaimed message for each member. Recheck the inbox before starting another attempt. Shared input locks and under-lock revalidation keep multiple waiters safe.
+Between inbox checks, retry pending deliveries for at most one ordinary member per interval with an in-memory round-robin cursor. Select concrete ordinary-member placements in the fleet, excluding its root Director, the wait's own subject, self-notifications, ACKed and already-notified rows. Each attempt drains that member's pending messages under the [delivery procedure](multiplexer-backends.md#push-notifications) without consulting pane state. Persist an input claim before the first possible keystroke. Read unresolved claims and message eligibility in the same receive snapshot. Preserve their uncertain-delivery diagnostics across invocations, skip those exact messages and continue with the oldest unclaimed message for each member. Recheck the inbox before starting another attempt. Shared input locks and under-lock revalidation keep multiple waiters safe.
 
 Start each receive check or notification attempt before the monotonic receive deadline. An attempt already in flight retains its original five-second budget for the lock wait, revalidation, Escape, typing, settle and Enter. A busy pane lock makes the attempt wait up to 1.5 seconds; a lock still busy then adds a `not_sent` entry with `member ID's pane input remained busy; preview MESSAGE_ID was not sent.` to `notification_errors`. Cap subprocess/database busy waits to its remaining budget and start input only with time reserved for settle and Enter. Mandatory database finalization uses the later of the original deadline and one second after finalization begins, keeping pane transport within its original budget. A receive returns by its deadline plus at most one six-second in-flight attempt/finalization allowance. A snapshot blocked until receive expiry returns `timeout` with retained notification diagnostics; earlier transient contention can retry before expiry. Corruption and other fatal storage errors retain their causes.
 
@@ -564,7 +558,43 @@ Pending placement and a placement change at claim time are ordinary holds that k
 
 Text is `Messages available for member ID.` plus normal messages, or `Timed out waiting for member ID.`; diagnostics go to stderr. Both outcomes exit 0. Deleted subject/fleet or corrupt/unreadable state exits 1 with its cause and retains earlier uncertain-delivery diagnostics on stderr, including when JSON output was requested. Ctrl+C outside a delivery attempt terminates the process normally; inside an attempt it takes effect when the attempt's [termination-deferral span](multiplexer-backends.md#termination-during-pane-input) ends.
 
-A script or operator uses `message wait` to block until deliveries arrive, then polls and ACKs the consumed messages. Delivered lines already reach every placed recipient's pane, so the wait is an optional receive path.
+A script or operator uses `message wait` for finite manual reception and ordinary-member retry recovery, then polls and ACKs consumed messages. Native Director reception retains the existing listener process between events.
+
+### `message listen`
+
+`cafleet message listen MEMBER_ID [--timeout SECONDS]`
+
+Stream any active member's pending inbox through UTF-8 JSONL. Derive and pin its fleet at startup, using the configured database and ordinary schema/assets guards. Require a live root Director with a concrete registered placement, without resolving a multiplexer or checking its executable/physical pane. The subject's own placement may be absent. Unknown/inactive startup subjects use `Member ID not found`, exit 1.
+
+| Surface | Contract |
+|---|---|
+| Lease | Optional integer `1..=1800`; absence runs until closure, cancellation or failure |
+| Expiry | One monotonic lease from startup; activity leaves expiry unchanged |
+| Output | Compact tagged JSON object plus LF, flushed per record; JSON strings escape controls/newlines |
+| Startup | Validate/pin identity, then emit and flush `ready` before replay |
+| Idle | Check immediately, then wait one second after a snapshot emits zero new IDs, shortened by the lease |
+| Completion | Flush `closed`, then exit 0 for expiry or normal subject/fleet closure |
+| Failure | Diagnostic on stderr and exit 1; parser usage errors retain exit 2 |
+
+The command always emits JSONL; text mode and `--json` are absent. Stdout contains protocol records only:
+
+```json
+{"event":"ready","member_id":1,"fleet_id":1}
+{"event":"message","message":{"message_id":12,"from_member_id":2,"to_member_id":1,"created_at":"2026-10-25T00:50:00.000000+00:00","status_state":"input_required","status_timestamp":"2026-10-25T00:50:00.000000+00:00","text":"complete (doc)\nFull original body"}}
+{"event":"closed","member_id":1,"reason":"timeout"}
+```
+
+The inner message is exactly the [full message record](message-envelope.md#persisted-shape), preserving original text beyond CLI/pane limits. `closed.reason` is `timeout`, `member_inactive` or `fleet_deleted`; fleet deletion takes precedence when both lifecycle closures are observed. Check normal closures before revalidating a continuing live fleet. Missing persisted rows, changed fleet identity, invalid stored enums/root relationships or missing root placement are fatal errors.
+
+Each short read transaction validates identity and selects every `input_required` record for the pinned subject ordered by `(created_at ASC, message_id ASC)`. Commit before output or sleep. A later commit with an earlier timestamp emits when first observed. A process-local ID set suppresses already-emitted pending IDs; insert only after the complete record and LF flush successfully. Retain only IDs still pending in successful snapshots; a failed snapshot leaves the set unchanged. A snapshot containing only previously emitted pending IDs waits one second, while newly emitted records permit immediate recheck.
+
+Listening leaves consumption, `notified_at` and `preview_started_at` unchanged and performs no pane retry, lock or dispatch. Stamped pending self-sends remain stream-eligible. Concurrent listeners are independent read-only observers with no consumer lock; restart replays all pending IDs. ACK-before-snapshot removes a message, while ACK racing with buffered output may leave a stale pending envelope. Reconcile known/replayed IDs with `poll --json` or `show --json` before acting, record deferred actions and explicitly ACK consumption. Completed records need no second action or ACK.
+
+Each snapshot has a fresh database deadline at most five seconds away, shortened by the remaining lease. Scoped busy waiting and an execution progress handler every 1,000 VM instructions bound lock/SQL work. Check that deadline before/after prepare and execution, before/after decoding each row and before commit. Expiry discards partial snapshots; interrupted SQL maps to deadline exceeded only when that deadline expired. Restore busy handling and remove the listener-owned progress handler on every path, preserving cleanup failures alongside the original cause. These cooperative boundaries include row collection without claiming hard real-time preemption of one allocation or SQL operation.
+
+Output owns one serialized record at a time and applies backpressure before selecting more messages. Nonblocking filesystem/poll output preserves/restores descriptor flags on normal return, resumes partial writes from their byte offset and checks every write/flush. Its five-second deadline is shortened by the lease. Broken pipe, write-zero, flush failure or output deadline exhaustion terminates visibly with exit 1, even after partial records. Normal lease expiry between records uses a separate bounded final write for `closed`. Complete records survive a later error; an incomplete final line remains unconsumed and recovers through broker replay. Only the current snapshot, one record and pending emitted IDs occupy listener memory.
+
+Database contention retries stay inside the snapshot budget; exhaustion or another fatal error terminates the stream. The listener retains its connection/PID across healthy events and ordinary signal behavior outside pane termination deferral. Host cancellation may end it without `closed`. Native owners retain one handle, reconcile durable state after failure and establish old-process termination before replacement. The [manual lifecycle](../how-to/mixed-backend-team.md#manual-lifecycle) explains operation; installed backend instructions own concrete native tool recipes and their evidence limits.
 
 ### `message ack`
 

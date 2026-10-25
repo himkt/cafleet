@@ -215,9 +215,9 @@ The lock excludes CAFleet writers; the user's keyboard and host UI can change at
 
 ## Push notifications {#push-notifications}
 
-Every recipient with a concrete pane, the Director included, receives its messages as lines typed into its pane. A self-send persists with no pane input. The Director's placement is the pane that ran [`fleet create`](cli-options.md#fleet-create), so that pane is the Director's coding-agent session.
+Active ordinary recipients with concrete panes receive automatic message lines. The fleet's root Director receives through native [message listen](cli-options.md#message-listen) or manual broker reads, with zero automatic pane input. Self-sends persist with no pane input.
 
-Read preview eligibility in short consistent snapshots before and after acquiring the shared input lock, then revalidate activity, fleet, concrete placement, message status and `notified_at` before writing. The invocation validates its connection before notification operations. One connection-scoped database budget owns input eligibility; commit every read snapshot before multiplexer I/O. Each delivered message becomes one literal line:
+Read preview eligibility in short consistent snapshots before and after acquiring the shared input lock, then revalidate ordinary-member kind, activity, fleet, concrete placement, message status and `notified_at` before writing. Exclude the Director before selecting a preview, locking a pane or resolving a multiplexer. The invocation validates its connection before notification operations. One connection-scoped database budget owns input eligibility; commit every read snapshot before multiplexer I/O. Each delivered message becomes one literal line:
 
 ```text
 [cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] BODY [cafleet] Resume your work if something was still running. [cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.
@@ -233,23 +233,23 @@ For example:
 
 A synchronous send drains the recipient's pending messages oldest-first, ordered by `(created_at, message_id)`, within one lock hold and one five-second budget:
 
-1. Take the eligibility snapshot. An inactive recipient, a fleet mismatch or no pending message ends the attempt with nothing to deliver. A placement without a concrete pane holds delivery.
+1. Take the eligibility snapshot. An inactive/ineligible recipient, a fleet mismatch or no pending message ends the attempt with nothing to deliver. A placement without a concrete pane holds delivery.
 2. Wait for the [pane input lock](#pane-input-lock).
 3. Under the lock, re-read the snapshot; a changed placement holds delivery. Resolve the multiplexer and check its availability.
 4. Select the oldest pending unclaimed message; the drain ends when none remains.
 5. When the remaining budget no longer covers the lead's reservation plus a 0.5-second minimum literal budget, stop. For the first message this fails as `not_sent` with `insufficient pane input budget for literal input, settle and Enter`; later messages stay pending with no diagnostic.
-6. Claim the message. A departed recipient ends the drain, and a placement change or an earlier candidate holds it. A message ACKed or stamped meanwhile is skipped.
+6. Claim the message. A departed recipient or one now serving as root Director ends the drain, and a placement change or an earlier candidate holds it. A message ACKed or stamped meanwhile is skipped.
 7. Submit its line, with the Escape lead for the first line and the direct lead afterwards. Stamp `notified_at`, then continue at step 4. A message the recipient ACKed between claim and stamp still counts as delivered.
 
 The lock is held from placement revalidation through the last Enter and the last `notified_at` stamp of the drain.
 
-Claim a selected message with one conditional UPDATE inside a short IMMEDIATE transaction while holding the pane input lock. Revalidate placement, preserve oldest-unclaimed ordering and commit before multiplexer input. A zero-row claim settles that obsolete attempt. After a confirmed no-input failure, retry transient claim-release contention within one absolute completion budget and retain `not_sent` plus the storage cause if release still fails. An ambiguous write, process exit or failed stamp leaves the claim durable. Stamp `notified_at` only after complete submission while the message remains pending. Mandatory finalization uses the later of the original deadline and one second after finalization begins. Unresolved claims suspend automatic input for their exact messages; later unclaimed messages remain eligible. The Director discovers such claims through `unconfirmed_previews` in [member list](cli-options.md#member-list-output); after inspecting the pane, it prompts the member with `member prompt` to poll its durable inbox, and the member ACKs consumed messages normally.
+Claim a selected message with one conditional UPDATE inside a short IMMEDIATE transaction while holding the pane input lock. Revalidate ordinary-member eligibility and placement, preserve oldest-unclaimed ordering and commit before multiplexer input. A zero-row claim settles that obsolete attempt. After a confirmed no-input failure, retry transient claim-release contention within one absolute completion budget and retain `not_sent` plus the storage cause if release still fails. An ambiguous write, process exit or failed stamp leaves the claim durable. Stamp `notified_at` only after complete submission while the message remains pending. Mandatory finalization uses the later of the original deadline and one second after finalization begins. Unresolved claims suspend automatic input for their exact messages; later unclaimed messages remain eligible. The Director discovers ordinary-member claims through `unconfirmed_previews` in [member list](cli-options.md#member-list-output); after inspecting the pane, it prompts the member with `member prompt` to poll its durable inbox, and the member ACKs consumed messages normally. The Director consumes its own pending records through broker reads.
 
 Delivery leaves `status_state` unchanged. A delivered message, inline or pointer, stays `input_required` and in `message poll` output until the recipient ACKs the ID shown in the line's `[cafleet msg ID …]` prefix.
 
 ### Held delivery {#held-delivery}
 
-Pending placement and a placement change at claim time are holds. Lock contention waits for the lock within the attempt budget. A message remains pending while the lock stays busy, the pane is not yet placed or the budget runs out. The next send to that recipient, or a [message wait](cli-options.md#message-wait) rotation, retries it. Rotation selects the concrete placements of every other member of the fleet, the Director included, never the wait's own subject, and attempts at most one member per interval. After an uncertain delivery, subsequent waits reconstruct diagnostics from the same message snapshots and skip the claimed message while selecting later unclaimed messages for that member. Successful snapshots can establish ACK, departure or notification by another invocation.
+Pending placement and a placement change at claim time are holds. Lock contention waits for the lock within the attempt budget. A message remains pending while the lock stays busy, the pane is not yet placed or the budget runs out. The next send to that ordinary recipient, or a [message wait](cli-options.md#message-wait) rotation, retries it. Rotation selects concrete ordinary-member placements, excluding the root Director and the wait's own subject, and attempts at most one member per interval. After an uncertain delivery, subsequent waits reconstruct diagnostics from the same message snapshots and skip the claimed message while selecting later unclaimed messages for that member. Successful snapshots can establish ACK, departure or notification by another invocation.
 
 Transport and stamp failures after persistence remain diagnostics alongside a successful send result. No notification outcome erases a committed delivery.
 
@@ -257,9 +257,9 @@ Transport and stamp failures after persistence remain diagnostics alongside a su
 
 What a single Escape does depends on the backend, and a backend may need more than one Escape to interrupt a running session. Delivery is correct whatever Escape does: when Escape does not interrupt, the line is still typed into the composer and the host submits or queues it. Both trailing clauses are conditional, so they stay accurate either way.
 
-- Where Escape interrupts a working turn, the delivery interrupts it, the Director's turn included. The resume clause tells the recipient to continue.
-- Where Escape dismisses an open question, confirmation or approval prompt, the delivery dismisses it. In the Director's pane this includes an open question to the operator. The dismissed-prompt note tells the recipient the rejection did not come from the user, and the Director re-asks the question.
-- Escape does not reliably clear typed composer text on every host. A draft typed into a member pane, or text the operator typed but did not submit in the Director's pane, can merge with the delivered line and be submitted with it.
+- Where Escape interrupts an ordinary member's working turn, the resume clause tells the recipient to continue.
+- Where Escape dismisses an ordinary member's question, confirmation or approval prompt, the dismissed-prompt note tells that member the rejection did not come from the user and to re-issue the required tool call.
+- Escape does not reliably clear typed composer text on every host. A draft in an ordinary member's pane can merge with the delivered line and be submitted with it.
 - Two sends in quick succession from different senders each lead with Escape; the second can interrupt the turn the first delivery started.
 - Interrupting a host turn can also end its in-flight shell tool; the CLI defers termination signals across its spans ([termination during pane input](#termination-during-pane-input)).
 

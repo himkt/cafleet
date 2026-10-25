@@ -33,7 +33,7 @@ Store literal fleet and member IDs from CLI JSON and use them on every broker co
 
 ### Diagnostics and progress
 
-Each wake on a delivered reply resumes evidence-based facilitation. Inspect a suspected stall with `cafleet member capture <member-id> --lines 200`; disclose deletion and re-spawn to the user rather than silently replacing a member. Apply [generic replacement](../../cafleet/roles/director.md#model-replacement) with that local disclosure constraint. Elapsed time supplies no completion signal.
+Each native receive batch/wake resumes evidence-based facilitation. Inspect a suspected stall with `cafleet member capture <member-id> --lines 200`; disclose deletion and re-spawn to the user rather than silently replacing a member. Apply [generic replacement](../../cafleet/roles/director.md#model-replacement) with that local disclosure constraint. Elapsed time supplies no completion signal.
 
 ### Free-form user replies
 
@@ -111,9 +111,9 @@ cafleet fleet create --name "design-doc-create-<slug>" --coding-agent <backend> 
 Retain `fleet_id` and `director.member_id` for subsequent commands. Ordinary member creation can begin immediately.
 
 
-#### 1b. Wake on delivered replies
+#### 1b. Arm native Director reception
 
-After creating/dispatching a member, end your turn; a delivered `[cafleet msg ID …]` line wakes you. On every wake run `cafleet message poll <director-member-id> --json`, ACK every consumed delivery before ending the turn and act on it; keep deferred actions in host-owned state. Inspect roster, `unconfirmed_previews`, panes and artifacts on every wake until the delegated reply or explicit user handoff. Follow [Director wake](../../cafleet/reference/supervision.md#director-wake).
+After Director registration, arm native reception before depending on member ready replies. Follow [Director wake](../../cafleet/reference/supervision.md#director-wake) and the executing [backend recipe](../../cafleet/reference/coding-agents.md) to retain one receiver through dispatch and replies. On every received batch/wake run `cafleet message poll <director-member-id> --json`, reconcile replay, record deferred actions, ACK consumption and dispatch ready work. Inspect roster, ordinary-member `unconfirmed_previews`, panes and artifacts until delegated work resolves or explicit user handoff; consume Director pending IDs through broker reads. Preserve user decision gates and host continuation controls.
 
 #### 1c. Locate role definitions (path-by-reference)
 
@@ -189,7 +189,7 @@ Placement-audit semantics — non-gating, retry a missing or pending row, dispat
 
 > Read [Payload exemptions](../reference/coordination.md#payload-exemptions) for this pre-draft exchange. Both ends use `--json` for complete questions and answers and `--file` for long bodies. Hidden question payload artifacts are allowed; design-document content waits for answers.
 
-1. Wake on the Drafter’s delivered questions; retrieve the full body with `cafleet message poll <director-member-id> --json`.
+1. Receive the Drafter’s questions through the owned native receiver; retrieve the full body with `cafleet message poll <director-member-id> --json`.
 2. `cafleet message ack <message-id>` each received message after reading it.
 3. Relay the questions to the user via {decision_surface}. If {decision_surface} caps how many questions it shows at once (your overlay states the cap) and the number exceeds it, split them into multiple sequential calls to relay all questions without omission.
 4. Relay the user's answers back to the Drafter (free-form, per the Clarification Exemption above):
@@ -213,13 +213,13 @@ Enter this step after a fresh Drafter reports `complete (doc)` or a resume Draft
    cafleet message send --from-member-id <director-member-id> \
      --to-member-id <reviewer-member-id> "ready (doc)"
    ```
-2. **Wake on the delivered Reviewer reply**; read the full response and ACK it. Round-1 fresh review arrives as `complete (doc) — N issues`; approval arrives as `approved (doc)`. Each finding is recorded as a `COMMENT(reviewer): [TAG] <body>` marker inline in the design doc — the Director does NOT relay the finding text in cafleet.
+2. **Receive the Reviewer reply through native reception**; read the full response and ACK it. Round-1 fresh review arrives as `complete (doc) — N issues`; approval arrives as `approved (doc)`. Each finding is recorded as a `COMMENT(reviewer): [TAG] <body>` marker inline in the design doc — the Director does NOT relay the finding text in cafleet.
 3. **On feedback**: Route the Drafter to address the markers in-doc:
    ```bash
    cafleet message send --from-member-id <director-member-id> \
      --to-member-id <drafter-member-id> "ready (doc)"
    ```
-4. Wake on each delivered reply through the correction route. When the Drafter’s `addressed (doc)` arrives and its markers are resolved, ACK the reply and loop back to step 1, routing `ready (doc)` to the Reviewer.
+4. Receive each reply through the owned native receiver throughout the correction route. When the Drafter’s `addressed (doc)` arrives and its markers are resolved, ACK the reply and loop back to step 1, routing `ready (doc)` to the Reviewer.
 5. Repeat until the Reviewer explicitly signals `approved (doc)`.
 6. **Iteration limit**: Aim for 2–3 rounds. If not converging, escalate to the user: summarize the remaining issues at a high level (read directly from the surviving `COMMENT(reviewer)` markers in the doc) and use {decision_surface} to ask whether to continue iterating or abort. Do not proceed to Step 4 until the Reviewer has approved.
 
@@ -259,7 +259,7 @@ the review or approval gate.
    ```bash
    cafleet message send --from-member-id <director-member-id> --to-member-id <drafter-member-id> "ready (doc) — user approved; finalize"
    ```
-   The Drafter rechecks marker absence, sets Status to Approved, refreshes Last Updated and Progress consistently, verifies actionable implementation steps, and returns `addressed (doc)`. Wake on that delivered confirmation, then read and ACK it before teardown. Plain `ready (doc)` routes revision or a work nudge; neither that message nor a marker-free document alone authorizes finalization.
+   The Drafter rechecks marker absence, sets Status to Approved, refreshes Last Updated and Progress consistently, verifies actionable implementation steps, and returns `addressed (doc)`. Receive that confirmation through native reception, then read and ACK it before teardown. Plain `ready (doc)` routes revision or a work nudge; neither that message nor a marker-free document alone authorizes finalization.
 
 2. Run the canonical teardown after reading [Shutdown](../../cafleet/reference/supervision.md#shutdown) immediately before teardown. Delete the Drafter and Reviewer before deregistering the fleet.
 
