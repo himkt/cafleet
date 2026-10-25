@@ -646,12 +646,17 @@ fn output_backpressure_releases_the_snapshot_and_ends_as_failure_within_the_leas
 
 #[test]
 fn normal_stdout_completion_restores_the_shared_descriptor_flags() {
-    use nix::fcntl::{FcntlArg, fcntl};
-    use std::io::{Seek, SeekFrom};
+    use nix::fcntl::{FcntlArg, OFlag, fcntl};
+    use std::io::{Seek, SeekFrom, Write};
     let _resource = common::process_test_resource_guard();
     let (cli, fleet, director, _) = fixture();
     let mut file = tempfile::tempfile().unwrap();
+    file.write_all(b"initialize descriptor write history")
+        .unwrap();
+    file.set_len(0).unwrap();
+    file.rewind().unwrap();
     let before = fcntl(&file, FcntlArg::F_GETFL).unwrap();
+    assert_eq!(before & OFlag::O_NONBLOCK.bits(), 0);
     let child = ChildGuard(Some(cli.spawn_with_stdout(
         &["message", "listen", &director.to_string(), "--timeout", "1"],
         std::process::Stdio::from(file.try_clone().unwrap()),
@@ -659,7 +664,9 @@ fn normal_stdout_completion_restores_the_shared_descriptor_flags() {
     let output = child.output();
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     assert_eq!(stderr(&output), "");
-    assert_eq!(fcntl(&file, FcntlArg::F_GETFL).unwrap(), before);
+    let after = fcntl(&file, FcntlArg::F_GETFL).unwrap();
+    assert_eq!(after & OFlag::O_NONBLOCK.bits(), 0);
+    assert_eq!(after, before);
     file.seek(SeekFrom::Start(0)).unwrap();
     let mut records = String::new();
     file.read_to_string(&mut records).unwrap();
