@@ -169,6 +169,13 @@ class PortalExtractionTests(unittest.TestCase):
         self.assertEqual(rows[0]["promptDiscountPercent"], 60)
         self.assertEqual(rows[0]["minDiscountFraction"], "0.5")
         self.assertTrue(rows[0]["hasDiscount"])
+        for fraction in (0.49999999999999994, 0.5000000000000001):
+            with self.subTest(fraction=fraction):
+                models = fixture_models()
+                models[0]["minDiscountFraction"] = fraction
+                extracted = self.extract(replace_models(models))["models"][0]
+                self.assertEqual(extracted["minDiscountFraction"], str(fraction))
+                self.assertEqual(extracted["promptDollarsPerMillion"], "0.19999999999999998")
 
     def test_individual_zero_prices_and_unpublished_qualifiers_remain_explicit(self):
         facts = self.extract(fixture_html())
@@ -310,7 +317,11 @@ class PortalExtractionTests(unittest.TestCase):
             ("originalCompletionDollarsPerMillion", 0.1),
             ("hasDiscount", False),
             ("promptDiscountPercent", None),
+            ("promptDiscountPercent", 1),
+            ("promptDiscountPercent", 50),
             ("minDiscountFraction", None),
+            ("minDiscountFraction", 0.1),
+            ("minDiscountFraction", 0.6),
         )
         for field, value in changes:
             with self.subTest(field=field, value=value):
