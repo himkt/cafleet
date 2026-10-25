@@ -1,7 +1,7 @@
 # OpenCode full model catalog and model-name backend routing
 
-**Status**: Approved
-**Progress**: 0/20 tasks complete
+**Status**: Complete
+**Progress**: 20/20 tasks complete
 **Last Updated**: 2026-10-24
 
 ## Overview
@@ -10,13 +10,13 @@ The `opencode` Model catalog becomes a mirror of every model the OpenCode Consol
 
 ## Success Criteria
 
-- [ ] The `## opencode` → `### Model catalog` table in `skills/cafleet/reference/coding-agents.md` holds one row per OpenCode Console model ID listed on the refresh date, excluding models whose published deprecation date has passed, in a single table ordered most → least capable with a `Class` on every row.
-- [ ] `.claude/skills/cafleet-model-list-refresh/SKILL.md` § OpenCode Console procedure specifies the full-catalog mirror (no curated-subset rule remains).
-- [ ] `skills/cafleet/roles/director.md` resolves "opus member" / "gpt6.1-sol member" to `--coding-agent claude --model claude-opus-5-5` / `--coding-agent codex --model gpt-6.1-sol` on every fleet backend, including an `opencode` fleet.
-- [ ] `skills/cafleet/roles/director.md` resolves "spawn a claude member with opencode" to `--coding-agent opencode --model opencode/claude-opus-5-5`.
-- [ ] The opencode Role defaults (`opencode/deepseek-v4.1-flash-free`, `opencode/glm-5.3-flash-free`) are unchanged and still present in the catalog.
-- [ ] `docs/docs/concepts/coding-agents.md` and `docs/docs/spec/coding-agent-backends.md` describe the same routing and catalog facts for operators; the stale codex example values are replaced.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build` pass, including a new docs-sync guard on the opencode catalog shape.
+- [x] The `## opencode` → `### Model catalog` table in `skills/cafleet/reference/coding-agents.md` holds one row per OpenCode Console model ID listed on the refresh date, excluding models whose published deprecation date has passed, in a single table ordered most → least capable with a `Class` on every row.
+- [x] `.claude/skills/cafleet-model-list-refresh/SKILL.md` § OpenCode Console procedure specifies the full-catalog mirror (no curated-subset rule remains).
+- [x] `skills/cafleet/roles/director.md` resolves "opus member" / "gpt6.1-sol member" to `--coding-agent claude --model claude-opus-5-5` / `--coding-agent codex --model gpt-6.1-sol` on every fleet backend, including an `opencode` fleet.
+- [x] `skills/cafleet/roles/director.md` resolves "spawn a claude member with opencode" to `--coding-agent opencode --model opencode/claude-opus-5-5`.
+- [x] The opencode Role defaults (`opencode/deepseek-v4.1-flash-free`, `opencode/glm-5.3-flash-free`) are unchanged and still present in the catalog.
+- [x] `docs/docs/concepts/coding-agents.md` and `docs/docs/spec/coding-agent-backends.md` describe the same routing and catalog facts for operators; the stale codex example values are replaced.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build` pass, including a new docs-sync guard on the opencode catalog shape.
 
 ---
 
@@ -136,7 +136,7 @@ Effort follows the selected backend's Role defaults and Runtime bindings as toda
 The Director normalizes loose spellings before matching, so "gpt6.1-sol", "GPT 6.1 Sol" and "Opus 5.5" resolve to catalog tokens:
 
 1. **Comparison key.** Lowercase the reference and every candidate token, and drop every character that is not a letter or digit (`gpt-6.1-sol` → `gpt61sol`; `GPT 6.1 Sol` → `gpt61sol`). Strip the `opencode/` prefix from opencode catalog tokens before keying. A Claude candidate also matches its key with the leading `claude` removed (`claude-opus-5-5` → `opus55`, matching "Opus 5.5").
-2. **Native catalog first.** For a Claude or GPT reference (classified by the row 2 / row 3 key-prefix test), a key equal to the key of exactly one `Model` or `Alias` token in the native (`claude` / `codex`) catalog resolves to that token.
+2. **Native catalog first.** For a Claude or GPT reference (classified by the row 2 / row 3 key-prefix test), a key equal to the key of exactly one `Model` or `Alias` token in the native (`claude` / `codex`) catalog resolves to that row's `Model` token.
 3. **Spelling dictionary.** A Claude or GPT reference equal to no native token key but to exactly one Claude/GPT ID key in the opencode catalog resolves to that ID **without** the `opencode/` prefix and stays on the native backend as a manual pass-through `--model` (e.g. "sonnet 4.6" → `--coding-agent claude --model claude-sonnet-4-6`).
 4. **Exact shape.** A reference already written as an exact `claude-*` / `gpt-*` token that matches nothing passes through verbatim to its native backend (manual pass-through).
 5. **Otherwise ask.** No key-equal token, or more than one token sharing the key, is relayed to the operator via {decision_surface}.
@@ -221,41 +221,41 @@ The existing `backend_bindings_have_unique_values_and_local_model_defaults` test
 
 ### Step 1: Operator documentation
 
-- [ ] Update `docs/docs/concepts/coding-agents.md` § Model choice per Specification § 8 <!-- completed: -->
-- [ ] Update `docs/docs/spec/coding-agent-backends.md` § Model selection example values per Specification § 8 <!-- completed: -->
-- [ ] Run `mise //docs:build` and fix any broken links <!-- completed: -->
+- [x] Update `docs/docs/concepts/coding-agents.md` § Model choice per Specification § 8 <!-- completed: 2026-10-24T12:49 -->
+- [x] Update `docs/docs/spec/coding-agent-backends.md` § Model selection example values per Specification § 8 <!-- completed: 2026-10-24T12:49 -->
+- [x] Run `mise //docs:build` and fix any broken links <!-- completed: 2026-10-24T12:49 -->
 
 ### Step 2: Director routing policy
 
-- [ ] Replace the first sentence of `skills/cafleet/roles/director.md` § Model selection with the three-step resolution order (Specification § 3) and add the whole-catalog cost-efficiency clause (§ 7) <!-- completed: -->
-- [ ] Replace the § Model-name-to-backend inference table and its precedence paragraph with the five-row table and slash-case explanation (§ 3) <!-- completed: -->
-- [ ] Add the worked-resolutions table, the normalization procedure (§ 4), the explicit backend mapping tables (§ 5), the failure-handling rules (§ 6) and the pinning boundary (§ 7) <!-- completed: -->
-- [ ] Check every table cell against the two-sentence cap and `{decision_surface}` placeholder usage <!-- completed: -->
+- [x] Replace the first sentence of `skills/cafleet/roles/director.md` § Model selection with the three-step resolution order (Specification § 3) and add the whole-catalog cost-efficiency clause (§ 7) <!-- completed: 2026-10-24T12:50 -->
+- [x] Replace the § Model-name-to-backend inference table and its precedence paragraph with the five-row table and slash-case explanation (§ 3) <!-- completed: 2026-10-24T12:50 -->
+- [x] Add the worked-resolutions table, the normalization procedure (§ 4), the explicit backend mapping tables (§ 5), the failure-handling rules (§ 6) and the pinning boundary (§ 7) <!-- completed: 2026-10-24T12:51 -->
+- [x] Check every table cell against the two-sentence cap and `{decision_surface}` placeholder usage <!-- completed: 2026-10-24T12:53 -->
 
 ### Step 3: Refresh skill
 
-- [ ] Rewrite `.claude/skills/cafleet-model-list-refresh/SKILL.md` § OpenCode Console procedure intro and steps 2–5 per Specification § 2 <!-- completed: -->
-- [ ] Confirm no "curated subset" wording remains anywhere outside `design-docs/` (`grep -rn -i curated` over `skills/`, `.claude/`, `docs/docs/`) <!-- completed: -->
+- [x] Rewrite `.claude/skills/cafleet-model-list-refresh/SKILL.md` § OpenCode Console procedure intro and steps 2–5 per Specification § 2 <!-- completed: 2026-10-24T12:55 -->
+- [x] Confirm no "curated subset" wording remains anywhere outside `design-docs/` (`grep -rn -i curated` over `skills/`, `.claude/`, `docs/docs/`) <!-- completed: 2026-10-24T13:09 -->
 
 ### Step 4: Populate the catalog via the refresh procedure
 
-- [ ] Fetch all five approved sources per the refresh skill; stop and report on any fetch/parse failure <!-- completed: -->
-- [ ] Build the opencode table from the Console page per Specification § 1: every listed ID, past-deprecation IDs (bound through the *Endpoints* table's display-name → `Model ID` mapping) dropped, base-tier prices, notes for long-context rates, discounts and future deprecation dates <!-- completed: -->
-- [ ] Order the table most → least capable with a Class on every row, preserving the claude/codex relative order and placing unverified models last <!-- completed: -->
-- [ ] Rewrite the opencode catalog preamble per Specification § 1 <!-- completed: -->
-- [ ] Re-verify the `claude` and `codex` tables and the claude context windows per the existing refresh procedure <!-- completed: -->
-- [ ] Ask the maintainer (via the Director) to confirm keeping all six Role defaults and to approve the proposed catalog diff, including the ordering and classes <!-- completed: -->
-- [ ] Apply the approved diff and set the shared "last refreshed" date in `coding-agents.md` <!-- completed: -->
+- [x] Fetch all five approved sources per the refresh skill; stop and report on any fetch/parse failure <!-- completed: 2026-10-24T13:02 -->
+- [x] Build the opencode table from the Console page per Specification § 1: every listed ID, past-deprecation IDs (bound through the *Endpoints* table's display-name → `Model ID` mapping) dropped, base-tier prices, notes for long-context rates, discounts and future deprecation dates <!-- completed: 2026-10-24T13:02 -->
+- [x] Order the table most → least capable with a Class on every row, preserving the claude/codex relative order and placing unverified models last <!-- completed: 2026-10-24T13:02 -->
+- [x] Rewrite the opencode catalog preamble per Specification § 1 <!-- completed: 2026-10-24T13:02 -->
+- [x] Re-verify the `claude` and `codex` tables and the claude context windows per the existing refresh procedure <!-- completed: 2026-10-24T13:02 -->
+- [x] Ask the maintainer (via the Director) to confirm keeping all six Role defaults and to approve the proposed catalog diff, including the ordering and classes <!-- completed: 2026-10-24T13:04 -->
+- [x] Apply the approved diff and set the shared "last refreshed" date in `coding-agents.md` <!-- completed: 2026-10-24T13:09 -->
 
 ### Step 5: Docs-sync guard
 
-- [ ] Add the `opencode_catalog_rows_are_unique_prefixed_and_priced` test to `cafleet/tests/docs_sync.rs` (Specification § 9) <!-- completed: -->
-- [ ] Run `mise //cafleet:test opencode_catalog_rows` and confirm it passes against the populated table, then confirm it fails on a temporary local edit that duplicates a row or drops the `opencode/` prefix, and revert that edit <!-- completed: -->
+- [x] Add the `opencode_catalog_rows_are_unique_prefixed_and_priced` test to `cafleet/tests/docs_sync.rs` (Specification § 9) <!-- completed: 2026-10-24T13:18 -->
+- [x] Run `mise //cafleet:test opencode_catalog_rows` and confirm it passes against the populated table, then confirm it fails on a temporary local edit that duplicates a row or drops the `opencode/` prefix, and revert that edit <!-- completed: 2026-10-24T13:18 -->
 
 ### Step 6: Validation
 
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck` <!-- completed: -->
-- [ ] Run `mise //docs:build` <!-- completed: -->
+- [x] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck` <!-- completed: 2026-10-24T13:27 -->
+- [x] Run `mise //docs:build` <!-- completed: 2026-10-24T13:14 -->
 
 ---
 
@@ -266,3 +266,5 @@ The existing `backend_bindings_have_unique_values_and_local_model_defaults` test
 | 2026-10-24 | Initial draft |
 | 2026-10-24 | Reviewer round 1: deprecation binding and 76-row count, key-prefix family test and key equality, Claude Code / Codex explicit mapping, pinning boundary, catalog population before the docs-sync guard |
 | 2026-10-24 | Reviewer round 2: delisted deprecated names need no action; display-name → ID mapping read from the *Endpoints* table |
+| 2026-10-24 | Clarify that native Alias matches resolve to the corresponding Model token, keeping normalization consistent with the worked resolutions |
+| 2026-10-24 | Complete implementation and validation, obtain independent Reviewer and maintainer approval, and publish pull request #487 |
