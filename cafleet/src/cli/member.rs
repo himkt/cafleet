@@ -521,8 +521,7 @@ fn delete(
 
 fn show(conn: &mut Connection, member_id: i64, json: bool) -> Result<(), CafleetError> {
     let member = load_member(conn, member_id, true)?;
-    let unconfirmed = broker::members::unconfirmed_previews(conn, member_id)?;
-    let value = presentation::member_detail(&member, &unconfirmed);
+    let value = presentation::member_detail(&member);
     emit(json, &value, || format_member_detail(&value));
     Ok(())
 }

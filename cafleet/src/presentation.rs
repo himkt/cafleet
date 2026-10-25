@@ -122,17 +122,11 @@ pub fn member(row: &MemberRecord) -> Value {
 pub fn member_activity(row: &MemberActivity) -> Value {
     json!({"member_id":row.member.member_id,"name":row.member.name,
         "kind":row.member.kind.as_str(),"placement":row.member.placement.as_ref().map(placement),
-        "last_sent":row.last_sent,"last_recv":row.last_recv,"last_ack":row.last_ack,"idle":row.idle,
-        "unconfirmed_previews":row.unconfirmed_previews})
+        "last_sent":row.last_sent,"last_recv":row.last_recv,"last_ack":row.last_ack,"idle":row.idle})
 }
 
-pub fn member_detail(row: &MemberRecord, unconfirmed_previews: &[i64]) -> Value {
-    let mut value = member(row);
-    value
-        .as_object_mut()
-        .expect("a member presents as an object")
-        .insert("unconfirmed_previews".into(), json!(unconfirmed_previews));
-    value
+pub fn member_detail(row: &MemberRecord) -> Value {
+    member(row)
 }
 
 pub fn message(row: &MessageRecord) -> Value {

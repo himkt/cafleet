@@ -227,7 +227,6 @@ fn roster_rows(
             last_recv: if activity { row.get(13)? } else { None },
             last_ack: if activity { row.get(14)? } else { None },
             idle: None,
-            unconfirmed_previews: Vec::new(),
         })
     })
     .map_err(db_err)?
@@ -250,25 +249,8 @@ pub fn list_members(conn: &Connection, fleet_id: i64) -> Result<Vec<MemberActivi
     let mut rows = roster_rows(conn, fleet_id, true)?;
     for row in &mut rows {
         row.idle = idle_seconds(row, now);
-        row.unconfirmed_previews = unconfirmed_previews(conn, row.member.member_id)?;
     }
     Ok(rows)
-}
-
-/// Durable delivery claims that automatic delivery skips: started, never stamped, still unread.
-pub fn unconfirmed_previews(conn: &Connection, member_id: i64) -> Result<Vec<i64>, CafleetError> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT message_id FROM messages
-             WHERE to_member_id=?1 AND status_state='input_required'
-               AND preview_started_at IS NOT NULL AND notified_at IS NULL
-             ORDER BY created_at, message_id",
-        )
-        .map_err(db_err)?;
-    stmt.query_map([member_id], |row| row.get(0))
-        .map_err(db_err)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(db_err)
 }
 
 pub(crate) fn capture_roster(
