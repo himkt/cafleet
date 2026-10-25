@@ -12,7 +12,7 @@ Resolve the five runtime placeholders from Runtime bindings for the relevant ope
 
 For example, a Codex Director selecting an OpenCode reviewer uses the OpenCode catalog and reviewer defaults with the Codex decision surface and local execution tools. A Claude Director inspecting Codex applies the target backend’s capture cues. User overrides and selection decisions follow [Director model-selection policy](../roles/director.md#model-selection).
 
-Model catalogs, their provenance/context notes, canonical Role defaults, and shared freshness metadata are maintained exclusively by the `cafleet-model-list-refresh` skill from the official sources in each backend section, refreshed at least every 30 days (last refreshed: 2026-10-24). Runtime bindings, bound runtime notes, pane cues, and worked resolutions belong to runtime documentation maintenance. The freshness date applies to model data; structural reorganization preserves that date.
+Model catalogs, their provenance/context notes, canonical Role defaults, and shared freshness metadata are maintained exclusively by the `cafleet-model-list-refresh` skill from the official sources in each backend section, refreshed at least every 30 days (last refreshed: 2026-10-25). Runtime bindings, bound runtime notes, pane cues, and worked resolutions belong to runtime documentation maintenance. The freshness date applies to model data; structural reorganization preserves that date.
 
 Prices are standard provider USD rates per MTok and are planning estimates, not an invoice guarantee. Each backend's catalog is ordered most → least capable as reviewed judgment. Context windows are listed for the `claude` backend, whose model strings are the ones a context-window suffix can apply to. Selection policy, including cost efficiency mode and reviewer/member rules, lives in [Director model selection](../roles/director.md#model-selection).
 
@@ -205,6 +205,7 @@ flags on `member create`. A price of `0.00` marks an explicitly free rate;
 models with both rates free are offered by OpenCode Console for a limited time.
 A Claude or GPT row here gives its OpenCode spawn token; a bare model-name
 reference selects the native backend under [Director model selection](../roles/director.md#model-selection).
+The [OpenCode Go table](#opencode-go) below lists the subscription-provider models.
 
 | Model | Class | Input $/MTok | Output $/MTok |
 |---|---|---|---|
@@ -313,6 +314,105 @@ Promotional rows use the currently billed rates. List prices below are input/out
 | `opencode/mistral-large-4` | 50% off | 1.36 | 4.18 | Not published |
 
 Source: [OpenCode Console models and pricing](https://opencode.ai/v2/docs/console/models/).
+
+#### OpenCode Go
+
+The table lists every model on the [OpenCode Go](https://opencode.ai/v2/docs/console/go) page; the `opencode-go/` prefix is part of the `--model` value. These tokens are available only when the operator's configured providers include an OpenCode Go subscription; the Director checks availability per spawn under [Director model selection](../roles/director.md#model-selection).
+
+| Model | Class | Input $/MTok | Output $/MTok |
+|---|---|---|---|
+| opencode-go/gemini-4-argon | Frontier general tier for complex coding and multimodal work | 2.00 | 10.00 |
+| opencode-go/kimi-k3.1-pro | Strong agentic tier for complex coding workflows | 2.00 | 10.00 |
+| opencode-go/kimi-k3 | Strong agentic tier for complex coding workflows | 3.00 | 15.00 |
+| opencode-go/grok-4.7 | Strong general tier for coding and reasoning | 2.00 | 6.00 |
+| opencode-go/glm-5.3 | Strong general coding tier with agentic workflows | 1.40 | 4.40 |
+| opencode-go/qwen3.8-max | Strong general tier for coding and reasoning | 2.00 | 6.00 |
+| opencode-go/deepseek-v4-pro | Strong reasoning tier for coding and tool use | 1.32 | 3.96 |
+| opencode-go/mimo-v2.6-pro | Strong general tier for coding and reasoning | 0.435 | 0.87 |
+| opencode-go/glm-5.2 | Strong general coding tier | 1.40 | 4.40 |
+| opencode-go/kimi-k2.7-code | Strong agentic tier tuned for code | 0.95 | 4.00 |
+| opencode-go/mimo-v2.5-pro | Prior MiMo Pro tier for coding and reasoning | 0.435 | 0.87 |
+| opencode-go/muse-spark-1.3-contributor | Balanced general tier for routine coding | 0.10 | 0.20 |
+| opencode-go/minimax-m3.1-flash | Efficient agentic tier for routine coding workflows | 0.15 | 0.60 |
+| opencode-go/minimax-m3 | Efficient agentic tier for routine coding workflows | 0.30 | 1.20 |
+| opencode-go/muse-spark-1.2-contributor | Earlier general tier for routine coding | 0.10 | 0.20 |
+| opencode-go/mimo-v2.6-flash | Efficient general tier for routine coding | 0.14 | 0.28 |
+| opencode-go/mimo-v2.5 | Prior MiMo tier for routine coding | 0.14 | 0.28 |
+| opencode-go/hy3 | Efficient general tier for routine coding workflows | 0.14 | 0.58 |
+| opencode-go/longcat-2.0 | Efficient general tier for routine coding | 0.30 | 1.20 |
+| opencode-go/deepseek-v4.1-flash | Efficient reasoning and coding tier | 0.30 | 1.20 |
+| opencode-go/gpt-6-luna | Fast efficient tier for focused, high-volume tasks | 0.10 | 0.50 |
+| opencode-go/claude-haiku-5-5 | Fast lowest-cost tier; routine checks and bounded tasks | 0.10 | 0.50 |
+| opencode-go/gpt-5.6-luna | Prior efficient Luna tier for focused coding tasks | 0.20 | 1.20 |
+| opencode-go/qwen3.8-flash | Fast low-cost tier for routine coding tasks | 0.15 | 0.47 |
+| opencode-go/qwen3.7-plus | Efficient general tier for routine coding and reasoning | 0.40 | 1.60 |
+| opencode-go/glm-5.3-flash | Fast low-cost GLM tier for routine work | 0.15 | 0.50 |
+| opencode-go/hy4-preview | Preview coding tier; capability unverified | 0.834 | 2.501 |
+| opencode-go/step-5-preview | Preview coding tier; capability unverified | 1.00 | 2.70 |
+| opencode-go/beam-free | Free experimental tier; capability unverified | 0.00 | 0.00 |
+| opencode-go/longcat-2.5-preview-free | Free preview tier; capability unverified | 0.00 | 0.00 |
+
+Prices are per-token amounts in USD per MTok counted against the subscription's usage limits. Plans are Go ($10/month) and Go Plus ($40/month), for single-member workspaces. Each model's usage is capped at 20% of its monthly limit per 5 hours, 50% per week and 100% per month; with Extra Usage enabled, usage beyond the limits bills the pay-as-you-go balance.
+
+| Model | Go monthly limit $ | Go Plus monthly limit $ |
+|---|---|---|
+| `opencode-go/gemini-4-argon` | 30 | 120 |
+| `opencode-go/kimi-k3.1-pro` | 15 | 60 |
+| `opencode-go/kimi-k3` | 15 | 60 |
+| `opencode-go/grok-4.7` | 15 | 60 |
+| `opencode-go/glm-5.3` | 15 | 120 |
+| `opencode-go/qwen3.8-max` | 15 | 60 |
+| `opencode-go/deepseek-v4-pro` | 15 | 60 |
+| `opencode-go/mimo-v2.6-pro` | 15 | 60 |
+| `opencode-go/glm-5.2` | 60 | 180 |
+| `opencode-go/kimi-k2.7-code` | 60 | 180 |
+| `opencode-go/mimo-v2.5-pro` | 15 | 60 |
+| `opencode-go/muse-spark-1.3-contributor` | 60 | 120 |
+| `opencode-go/minimax-m3.1-flash` | 20 | 80 |
+| `opencode-go/minimax-m3` | 60 | 180 |
+| `opencode-go/muse-spark-1.2-contributor` | 60 | 120 |
+| `opencode-go/mimo-v2.6-flash` | 60 | 120 |
+| `opencode-go/mimo-v2.5` | 60 | 120 |
+| `opencode-go/hy3` | 60 | 240 |
+| `opencode-go/longcat-2.0` | 60 | 240 |
+| `opencode-go/deepseek-v4.1-flash` | 80 | 160 |
+| `opencode-go/gpt-6-luna` | 15 | 60 |
+| `opencode-go/claude-haiku-5-5` | 15 | 60 |
+| `opencode-go/gpt-5.6-luna` | 15 | 60 |
+| `opencode-go/qwen3.8-flash` | 30 | 90 |
+| `opencode-go/qwen3.7-plus` | 60 | 180 |
+| `opencode-go/glm-5.3-flash` | 60 | 180 |
+| `opencode-go/hy4-preview` | 30 | 120 |
+| `opencode-go/step-5-preview` | 15 | 60 |
+| `opencode-go/beam-free` | Unlimited | Unlimited |
+| `opencode-go/longcat-2.5-preview-free` | Unlimited | Unlimited |
+
+The table uses base (shortest-prompt) rates. Long-context rates below are input/output USD per MTok.
+
+| Model | Prompt length | Input $/MTok | Output $/MTok |
+|---|---|---|---|
+| `opencode-go/grok-4.7` | > 200K tokens | 4.00 | 12.00 |
+| `opencode-go/gpt-6-luna` | > 272K tokens | 0.20 | 0.75 |
+| `opencode-go/claude-haiku-5-5` | > 100K tokens | 0.50 | 2.50 |
+| `opencode-go/gpt-5.6-luna` | > 272K tokens | 0.40 | 1.80 |
+| `opencode-go/qwen3.7-plus` | > 256K tokens | 1.20 | 4.80 |
+
+Promotional rows use the currently billed rates. List prices below are input/output USD per MTok.
+
+| Model | Discount | List input $/MTok | List output $/MTok | Discount end |
+|---|---|---|---|---|
+| `opencode-go/gemini-4-argon` | 50% off | 4.00 | 20.00 | 2026-11-30 |
+
+Rows with Peak and Off-Peak prices use the Peak rate as the conservative planning estimate. Off-Peak rates are input/output USD per MTok.
+
+| Model | Off-Peak input $/MTok | Off-Peak output $/MTok | Off-Peak hours |
+|---|---|---|---|
+| `opencode-go/deepseek-v4-pro` | 0.66 | 1.98 | All hours except 01:00–04:00 and 06:00–10:00 UTC Monday–Friday; weekends included |
+| `opencode-go/deepseek-v4.1-flash` | 0.15 | 0.60 | All hours except 01:00–04:00 and 06:00–10:00 UTC Monday–Friday; weekends included |
+
+In Settings → Privacy, `deepseek-v4.1-flash` and `deepseek-v4-pro` require Global under Regions; `muse-spark-1.3-contributor` and `muse-spark-1.2-contributor` require "Allow paid endpoints that train on request data".
+
+Source: [OpenCode Go](https://opencode.ai/v2/docs/console/go).
 
 ### Note → applies at
 
