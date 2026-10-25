@@ -200,7 +200,7 @@ mod tests {
                 vec![
                     "claude",
                     "--permission-mode",
-                    "dontAsk",
+                    "auto",
                     "--prompt-suggestions",
                     "false",
                     "--allowedTools",
@@ -213,8 +213,7 @@ mod tests {
                 CodingAgent::Codex,
                 vec![
                     "codex",
-                    "--ask-for-approval",
-                    "never",
+                    "--approve-for-me",
                     "--sandbox",
                     "workspace-write",
                 ],
