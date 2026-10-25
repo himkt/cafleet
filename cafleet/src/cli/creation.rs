@@ -1,49 +1,7 @@
-//! Ownership and explicit compensation for CLI creation operations.
-
 use rusqlite::Connection;
 
 use crate::broker;
 use crate::error::CafleetError;
-use crate::multiplexer::MultiplexerError;
-
-type PaneKill<'a> = dyn Fn(&str) -> Result<(), MultiplexerError> + 'a;
-
-pub(crate) struct PaneGuard<'a> {
-    kill: Box<PaneKill<'a>>,
-    pane_id: Option<String>,
-}
-
-impl<'a> PaneGuard<'a> {
-    pub(crate) fn with_kill(pane_id: String, kill: Box<PaneKill<'a>>) -> Self {
-        Self {
-            kill,
-            pane_id: Some(pane_id),
-        }
-    }
-
-    pub(crate) fn finish(&mut self) {
-        self.pane_id = None;
-    }
-
-    fn cleanup(&mut self) -> Option<String> {
-        let pane_id = self.pane_id.take()?;
-        let error = (self.kill)(&pane_id).err().map(|error| error.to_string());
-        error.map(|error| format!("cleanup failed for pane {pane_id}: {error}"))
-    }
-
-    pub(crate) fn rollback(&mut self, primary: CafleetError) -> CafleetError {
-        match self.cleanup() {
-            Some(diagnostic) => primary.with_cleanup(diagnostic),
-            None => primary,
-        }
-    }
-}
-
-impl Drop for PaneGuard<'_> {
-    fn drop(&mut self) {
-        let _ = self.cleanup();
-    }
-}
 
 pub(crate) struct RegistrationGuard<'a> {
     conn: &'a mut Connection,
@@ -92,41 +50,10 @@ impl Drop for RegistrationGuard<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::Cell;
-
-    #[test]
-    fn pane_guard_cleans_once_unless_finished() {
-        for finish in [false, true] {
-            for fail in [false, true] {
-                let calls = Cell::new(0);
-                let mut guard = PaneGuard::with_kill(
-                    "%9".into(),
-                    Box::new(|pane| {
-                        assert_eq!(pane, "%9");
-                        calls.set(calls.get() + 1);
-                        if fail {
-                            Err(MultiplexerError::new("close failed"))
-                        } else {
-                            Ok(())
-                        }
-                    }),
-                );
-                if finish {
-                    guard.finish();
-                }
-                let error = guard.rollback(CafleetError::Usage("primary".into()));
-                assert_eq!(error.exit_code(), 2);
-                assert_eq!(error.to_string().contains("close failed"), !finish && fail);
-                guard.rollback(CafleetError::App("second".into()));
-                drop(guard);
-                assert_eq!(calls.get(), usize::from(!finish));
-            }
-        }
-    }
 
     #[test]
     fn registration_guard_drop_obeys_ownership() {
-        use crate::broker::test_support as common;
+        use crate::broker::tests as common;
         for finish in [false, true] {
             let mut conn = Connection::open_in_memory().unwrap();
             crate::db::migrate_to_head(&mut conn).unwrap();
@@ -141,10 +68,44 @@ mod tests {
                 .query_row(
                     "SELECT status FROM members WHERE member_id=?1",
                     [member],
-                    |r| r.get(0),
+                    |row| row.get(0),
                 )
                 .unwrap();
             assert_eq!(status, if finish { "active" } else { "deregistered" });
+        }
+    }
+
+    #[test]
+    fn rollback_keeps_primary_exit_and_reports_cleanup_failure_once() {
+        use crate::broker::tests as common;
+        for cleanup_fails in [false, true] {
+            let mut conn = Connection::open_in_memory().unwrap();
+            crate::db::migrate_to_head(&mut conn).unwrap();
+            let (fleet, _) = common::create_fleet(&mut conn, "rollback");
+            let worker = common::register(&mut conn, fleet, "worker", None);
+            if cleanup_fails {
+                conn.execute_batch(
+                    "CREATE TRIGGER refuse_cleanup BEFORE UPDATE OF status ON members
+                     BEGIN SELECT RAISE(ABORT, 'cleanup blocked'); END;",
+                )
+                .unwrap();
+            }
+            let mut guard = RegistrationGuard::new(&mut conn, worker);
+            let error = guard.rollback(CafleetError::Usage("invalid placeholder".into()));
+            assert_eq!(error.exit_code(), 2);
+            assert!(error.to_string().starts_with("invalid placeholder"));
+            assert_eq!(error.to_string().contains("cleanup blocked"), cleanup_fails);
+            assert_eq!(
+                guard
+                    .rollback(CafleetError::App("second".into()))
+                    .to_string(),
+                "second"
+            );
+            drop(guard);
+            assert_eq!(
+                broker::get_member(&conn, worker, fleet).unwrap().is_some(),
+                cleanup_fails
+            );
         }
     }
 }

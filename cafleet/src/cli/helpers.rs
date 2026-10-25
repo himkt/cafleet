@@ -1,7 +1,3 @@
-//! Shared CLI plumbing: the schema-version and stale-assets guards, the
-//! positional-`TEXT` / `--file` body reader, multiplexer resolution, and the
-//! JSON-vs-text emit fork.
-
 use serde_json::Value;
 
 use crate::error::CafleetError;
@@ -9,67 +5,11 @@ use crate::output::format_json;
 pub use crate::runtime::resolve_mux;
 use crate::runtime::system::read_stdin;
 
-/// Preserve the CLI guard's wording while sharing schema classification.
-pub(crate) fn schema_guard(schema: &crate::diagnosis::SchemaState) -> Result<(), CafleetError> {
-    schema.require_current()
-}
-
-pub(crate) fn stale_assets_guard(
-    assets: &crate::diagnosis::AssetReport,
-    cli_version: &str,
-) -> Result<(), CafleetError> {
-    use crate::diagnosis::AssetState;
-    let mut current = 0;
-    let mut stale = Vec::new();
-    for agent in &assets.agents {
-        match &agent.state {
-            AssetState::PathError { cause, .. } => return Err(cause.clone()),
-            AssetState::Current { .. } => current += 1,
-            AssetState::Stale { install, .. } => {
-                current += 1;
-                stale.push(format!(
-                    "{}={}",
-                    agent.coding_agent, install.cafleet_version
-                ));
-            }
-            AssetState::NotInstalled { .. } => {}
-        }
-    }
-    if current == 0 {
-        return Err(CafleetError::App(
-            "no assets install is recorded at the resolved paths; run 'cafleet setup' to install"
-                .into(),
-        ));
-    }
-    if !stale.is_empty() {
-        return Err(CafleetError::App(format!(
-            "stale assets detected ({}; CLI {cli_version}); run 'cafleet setup' to reinstall",
-            stale.join(", ")
-        )));
-    }
-    Ok(())
-}
-
-/// Render `path` with a `~` abbreviation when it sits under `home`.
-pub(crate) fn tilde(path: &str, home: &std::path::Path) -> String {
-    match std::path::Path::new(path).strip_prefix(home) {
-        Ok(rest) => format!("~/{}", rest.display()),
-        Err(_) => path.to_string(),
-    }
-}
-
-/// Whitespace per the empty-text contract: Unicode whitespace plus
-/// U+001C–U+001F (SPEC §6.4 parity with `str.isspace`).
 fn is_blank(text: &str) -> bool {
     text.chars()
         .all(|c| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
 }
 
-/// The shared positional-`TEXT` / file-flag body reader (SPEC §6.3 *text-body
-/// input*): `-` = stdin, raw-bytes UTF-8 decode with no newline translation,
-/// uniform empty-body rejection. Exactly one source is present — clap's
-/// required argument group enforces it at parse time. Error strings name the
-/// file flag the caller exposes via `flag`.
 pub fn resolve_body(
     inline: Option<&str>,
     file: Option<&str>,
@@ -122,7 +62,7 @@ fn read_body(inline: Option<&str>, file: Option<&str>, flag: &str) -> Result<Str
                     }
                     _ => format!("{flag} {path}: file is not readable."),
                 };
-                CafleetError::App(message)
+                CafleetError::App(format!("{message} ({e})"))
             })?;
             String::from_utf8(bytes)
                 .map_err(|_| CafleetError::App(format!("{flag} {path}: file is not valid UTF-8.")))
@@ -133,11 +73,93 @@ fn read_body(inline: Option<&str>, file: Option<&str>, flag: &str) -> Result<Str
     }
 }
 
-/// The JSON-vs-text emit fork shared by every one-shot subcommand.
 pub fn emit(json: bool, payload: &Value, text: impl FnOnce() -> String) {
     if json {
         println!("{}", format_json(payload));
     } else {
         println!("{}", text());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn body_files_preserve_exact_bytes_and_report_invalid_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("body.txt");
+        let name = path.to_str().unwrap();
+        for text in ["界🙂\nnext\r\n", "{literal}\ttext", " padded "] {
+            std::fs::write(&path, text).unwrap();
+            assert_eq!(resolve_body(None, Some(name), "--file").unwrap(), text);
+        }
+        for text in ["", " \t\n", "\u{1c}\u{1f}", "\u{2003}"] {
+            std::fs::write(&path, text).unwrap();
+            assert_eq!(
+                resolve_body(Some(text), None, "--file")
+                    .unwrap_err()
+                    .exit_code(),
+                2
+            );
+            assert_eq!(
+                resolve_body(None, Some(name), "--file")
+                    .unwrap_err()
+                    .exit_code(),
+                1
+            );
+        }
+        std::fs::write(&path, [0xff]).unwrap();
+        assert!(
+            resolve_body(None, Some(name), "--file")
+                .unwrap_err()
+                .to_string()
+                .contains("UTF-8")
+        );
+        std::fs::remove_file(&path).unwrap();
+        assert!(
+            resolve_body(None, Some(name), "--file")
+                .unwrap_err()
+                .to_string()
+                .contains(name)
+        );
+        assert!(resolve_body(None, Some(dir.path().to_str().unwrap()), "--file").is_err());
+    }
+
+    #[test]
+    fn native_command_files_strip_only_one_terminal_line_ending() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("command.txt");
+        let name = path.to_str().unwrap();
+        for (source, expected) in [
+            ("printf '界🙂'", "printf '界🙂'"),
+            ("echo literal\n", "echo literal"),
+            ("echo literal\r\n", "echo literal"),
+            ("  echo literal  \n", "  echo literal  "),
+        ] {
+            std::fs::write(&path, source).unwrap();
+            assert_eq!(resolve_command_body(None, Some(name)).unwrap(), expected);
+        }
+        for source in [
+            "",
+            "  ",
+            "echo x\n\n",
+            "echo x\r",
+            "echo\tx",
+            "one\ntwo",
+            "\0",
+            "\u{7f}",
+        ] {
+            std::fs::write(&path, source).unwrap();
+            assert!(
+                resolve_command_body(None, Some(name)).is_err(),
+                "{source:?}"
+            );
+        }
+        assert_eq!(
+            resolve_command_body(Some("echo literal"), None).unwrap(),
+            "echo literal"
+        );
+        assert!(resolve_command_body(Some("echo literal\n"), None).is_err());
     }
 }

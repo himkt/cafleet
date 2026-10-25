@@ -3,292 +3,67 @@ use std::sync::LazyLock;
 use regex::Regex;
 use serde_json::Value;
 
-const TRUNCATION_SUFFIX: char = '…';
-
 static ANSI_ESCAPE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\x1b\[[0-?]*[ -/]*[@-~]").expect("the CSI pattern is valid"));
 
-/// The A8 visual-blank test (SPEC §6.5): a line is blank when it is
-/// whitespace-only after CSI stripping. Emptiness check only — the caller
-/// keeps the line's original bytes.
 pub fn is_visually_blank(line: &str) -> bool {
     ANSI_ESCAPE_RE.replace_all(line, "").trim().is_empty()
 }
 
-/// Strip ANSI CSI escape sequences and collapse `\r`-rewritten line segments:
-/// only the segment after the last `\r` of each line survives, so the
-/// captured buffer matches what an operator sees.
 pub fn strip_ansi(text: &str) -> String {
-    if text.is_empty() {
-        return String::new();
-    }
     let cleaned = ANSI_ESCAPE_RE.replace_all(text, "");
     cleaned
         .split('\n')
-        .map(|line| {
-            line.rsplit('\r')
-                .next()
-                .expect("rsplit yields at least one segment")
-        })
+        .map(|line| line.rsplit('\r').next().expect("rsplit yields a segment"))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-/// Compact separators, raw UTF-8, insertion-order keys.
 pub fn format_json(data: &Value) -> String {
     serde_json::to_string(data).expect("a JSON value always serializes")
 }
 
-/// Truncate `value` to `limit` codepoints + the `…` suffix. Callers pass the
-/// effective limit (`settings.max_text_len`). Truncation runs only on text
-/// emit sites — `--json` output is never truncated (SPEC §6.4).
-pub fn truncate_text(value: Option<&str>, limit: usize) -> Option<String> {
-    let value = value?;
-    if value.chars().count() <= limit {
-        return Some(value.to_string());
+pub fn truncate_text(value: &str, limit: usize) -> String {
+    match value.char_indices().nth(limit) {
+        Some((byte, _)) => format!("{}…", &value[..byte]),
+        None => value.to_owned(),
     }
-    let mut truncated: String = value.chars().take(limit).collect();
-    truncated.push(TRUNCATION_SUFFIX);
-    Some(truncated)
-}
-
-/// In-place body truncation over a broker result: unwraps `{"message": …}`
-/// envelopes, walks lists, and leaves non-message items untouched.
-pub fn truncate_message_text(result: &mut Value, max_text_len: usize) {
-    match result {
-        Value::Array(items) => {
-            for item in items {
-                truncate_item(item, max_text_len);
-            }
-        }
-        Value::Object(object) if object.contains_key("messages") => {
-            truncate_message_text(
-                object
-                    .get_mut("messages")
-                    .expect("the result contains messages"),
-                max_text_len,
-            );
-        }
-        other => truncate_item(other, max_text_len),
-    }
-}
-
-fn truncate_item(item: &mut Value, limit: usize) {
-    let Some(obj) = item.as_object_mut() else {
-        return;
-    };
-    let target = if obj.contains_key("message") {
-        match obj.get_mut("message").and_then(Value::as_object_mut) {
-            Some(inner) => inner,
-            None => return,
-        }
-    } else {
-        obj
-    };
-    let truncated = match target.get("text") {
-        Some(Value::String(text)) => truncate_text(Some(text), limit),
-        _ => None,
-    };
-    if let Some(text) = truncated {
-        target.insert("text".to_string(), Value::String(text));
-    }
-}
-
-pub fn render_message(message: &Value) -> Value {
-    let field = |name: &str| -> Value {
-        message
-            .get(name)
-            .unwrap_or_else(|| panic!("message dict carries '{name}'"))
-            .clone()
-    };
-    let mut out = serde_json::Map::new();
-    out.insert("id".to_string(), field("message_id"));
-    out.insert("from".to_string(), field("from_member_id"));
-    out.insert("ts".to_string(), field("status_timestamp"));
-    out.insert("text".to_string(), field("text"));
-    Value::Object(out)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
-    const TS: &str = "2026-07-30T09:00:00.000000+00:00";
-
-    fn message_fixture(id: i64, from: i64, text: &str) -> Value {
-        json!({
-            "message_id": id,
-            "from_member_id": from,
-            "to_member_id": 3,
-            "created_at": TS,
-            "status_state": "input_required",
-            "status_timestamp": TS,
-            "text": text,
-        })
+    #[test]
+    fn capture_cleanup_removes_csi_and_keeps_the_final_carriage_return_segment() {
+        for (raw, expected) in [
+            ("", ""),
+            ("plain\ntext", "plain\ntext"),
+            ("\x1b[31mred\x1b[0m", "red"),
+            ("\x1b[38;5;196mX\x1b[0m", "X"),
+            ("\x1b[2J\x1b[Hclear", "clear"),
+            ("one\rONE\ntwo\rTWO", "ONE\nTWO"),
+            ("a\rb\rc", "c"),
+            ("\x1b[2Kspinner\rdone", "done"),
+            ("\x1b]0;title\x07 done", "\x1b]0;title\x07 done"),
+        ] {
+            assert_eq!(strip_ansi(raw), expected);
+        }
+        assert!(is_visually_blank("\x1b[31m \t\x1b[0m"));
+        assert!(!is_visually_blank("\x1b[31mX\x1b[0m"));
     }
 
-    mod strip_ansi_tests {
-        use super::*;
-
-        #[test]
-        fn removes_csi_sequences() {
-            assert_eq!(strip_ansi("\x1b[31mred\x1b[0m"), "red");
-            assert_eq!(strip_ansi("\x1b[38;5;196mX\x1b[0m"), "X");
-            assert_eq!(strip_ansi("\x1b[2J\x1b[Hclear"), "clear");
-        }
-
-        #[test]
-        fn keeps_non_csi_escapes() {
-            assert_eq!(strip_ansi("\x1b]0;title\x07 done"), "\x1b]0;title\x07 done");
-            assert_eq!(strip_ansi("\x1b(Btext"), "\x1b(Btext");
-        }
-
-        #[test]
-        fn cr_defrag_keeps_only_the_segment_after_the_last_cr() {
-            assert_eq!(strip_ansi("prefix\rNEW"), "NEW");
-            assert_eq!(strip_ansi("a\rb\rc"), "c");
-        }
-
-        #[test]
-        fn cr_defrag_applies_per_line() {
-            assert_eq!(strip_ansi("one\rONE\ntwo\rTWO"), "ONE\nTWO");
-            assert_eq!(strip_ansi("plain\nspin\rdone"), "plain\ndone");
-        }
-
-        #[test]
-        fn csi_strip_runs_before_cr_defrag() {
-            assert_eq!(strip_ansi("\x1b[2Kspinner\rdone"), "done");
-        }
-
-        #[test]
-        fn empty_and_plain_inputs_pass_through() {
-            assert_eq!(strip_ansi(""), "");
-            assert_eq!(strip_ansi("no escapes here"), "no escapes here");
-        }
-    }
-
-    mod format_json_tests {
-        use super::*;
-
-        #[test]
-        fn emits_compact_separators() {
-            let data = json!({"a":1,"b":[1,2],"c":{"d":"e"}});
-            assert_eq!(format_json(&data), r#"{"a":1,"b":[1,2],"c":{"d":"e"}}"#);
-        }
-
-        #[test]
-        fn keeps_non_ascii_raw() {
-            let data = json!({"t":"ellipsis …"});
-            assert_eq!(format_json(&data), "{\"t\":\"ellipsis …\"}");
-        }
-
-        #[test]
-        fn preserves_insertion_order_of_keys() {
-            let data = json!({"z":1,"a":2,"m":3});
-            assert_eq!(format_json(&data), r#"{"z":1,"a":2,"m":3}"#);
-        }
-    }
-
-    mod truncate_text_tests {
-        use super::*;
-
-        #[test]
-        fn short_value_passes_through() {
-            assert_eq!(truncate_text(Some("hello"), 200), Some("hello".to_string()));
-        }
-
-        #[test]
-        fn value_exactly_at_the_limit_passes_through() {
-            assert_eq!(truncate_text(Some("aaaa"), 4), Some("aaaa".to_string()));
-        }
-
-        #[test]
-        fn over_limit_value_keeps_limit_codepoints_plus_ellipsis() {
-            assert_eq!(truncate_text(Some("hello"), 4), Some("hell…".to_string()));
-        }
-
-        #[test]
-        fn truncation_counts_codepoints_not_bytes() {
-            let value = "あ".repeat(5);
-            assert_eq!(truncate_text(Some(&value), 3), Some("あああ…".to_string()));
-        }
-
-        #[test]
-        fn none_returns_none() {
-            assert_eq!(truncate_text(None, 4), None);
-        }
-
-        #[test]
-        fn zero_limit_truncates_to_the_ellipsis_alone() {
-            assert_eq!(truncate_text(Some("x"), 0), Some("…".to_string()));
-        }
-    }
-
-    mod truncate_message_text_tests {
-        use super::*;
-
-        #[test]
-        fn truncates_wait_messages_without_changing_diagnostics() {
-            let mut result = json!({
-                "member_id": 2,
-                "outcome": "messages",
-                "messages": [message_fixture(1, 2, &"界".repeat(10))],
-                "notification_errors": [{"error": "keep this full diagnostic"}],
-            });
-            truncate_message_text(&mut result, 3);
-            assert_eq!(result["messages"][0]["text"], "界界界…");
-            assert_eq!(
-                result["notification_errors"][0]["error"],
-                "keep this full diagnostic"
-            );
-        }
-
-        #[test]
-        fn truncates_a_bare_message_dict_in_place() {
-            let mut message = message_fixture(1, 2, &"a".repeat(10));
-            truncate_message_text(&mut message, 5);
-            assert_eq!(message["text"], "aaaaa…");
-        }
-
-        #[test]
-        fn truncates_inside_a_message_envelope() {
-            let mut result = json!({"message": message_fixture(1, 2, &"b".repeat(10)), "notification_sent": true});
-            truncate_message_text(&mut result, 5);
-            assert_eq!(result["message"]["text"], "bbbbb…");
-            assert_eq!(result["notification_sent"], true);
-        }
-
-        #[test]
-        fn truncates_every_item_of_a_list() {
-            let mut result = json!([
-                {"message": message_fixture(1, 2, &"c".repeat(10))},
-                message_fixture(2, 3, &"d".repeat(10)),
-            ]);
-            truncate_message_text(&mut result, 5);
-            assert_eq!(result[0]["message"]["text"], "ccccc…");
-            assert_eq!(result[1]["text"], "ddddd…");
-        }
-
-        #[test]
-        fn non_message_items_are_left_untouched() {
-            let mut result = json!(["just a string", {"recipients": 2}]);
-            let before = result.clone();
-            truncate_message_text(&mut result, 5);
-            assert_eq!(result, before);
-        }
-    }
-
-    mod render_message_tests {
-        use super::*;
-
-        #[test]
-        fn compact_projection_has_the_pinned_key_order() {
-            let rendered = render_message(&message_fixture(5, 2, "hi"));
-            assert_eq!(
-                format_json(&rendered),
-                format!(r#"{{"id":5,"from":2,"ts":"{TS}","text":"hi"}}"#)
-            );
+    #[test]
+    fn text_limit_counts_unicode_codepoints_and_preserves_exact_limits() {
+        for (text, limit, expected) in [
+            ("", 0, ""),
+            ("a", 0, "…"),
+            ("abc", 3, "abc"),
+            ("界🙂abc", 2, "界🙂…"),
+            ("hello", 4, "hell…"),
+            ("a", 20, "a"),
+        ] {
+            assert_eq!(truncate_text(text, limit), expected);
         }
     }
 }

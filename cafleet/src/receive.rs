@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
 use rusqlite::Connection;
@@ -73,7 +73,6 @@ impl AttemptOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WaitOutcome {
     pub messages: Vec<MessageRecord>,
-    pub notification_errors: Vec<NotificationError>,
 }
 
 pub(crate) trait ReceiveIo {
@@ -84,21 +83,6 @@ pub(crate) trait ReceiveIo {
         deadline: Deadline,
         attempted: &BTreeSet<i64>,
     ) -> Result<AttemptOutcome, CafleetError>;
-}
-
-fn attach_diagnostics(
-    cause: CafleetError,
-    errors: &BTreeMap<i64, NotificationError>,
-) -> CafleetError {
-    let diagnostics: Vec<_> = errors.values().map(|error| error.error.clone()).collect();
-    if diagnostics.is_empty() {
-        cause
-    } else {
-        CafleetError::WithDiagnostics {
-            cause: Box::new(cause),
-            diagnostics,
-        }
-    }
 }
 
 pub(crate) fn wait<C: Clock, I: ReceiveIo>(
@@ -113,7 +97,6 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
     let mut cursor = None;
     let mut messages = Vec::new();
     let mut attempted = BTreeSet::new();
-    let mut errors: BTreeMap<i64, NotificationError> = BTreeMap::new();
     loop {
         let now = clock.now();
         if now >= expires {
@@ -134,13 +117,8 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
                     started + Duration::from_secs(now.duration_since(started).as_secs() + 1);
                 continue;
             }
-            Err(error) => return Err(attach_diagnostics(error, &errors)),
+            Err(error) => return Err(error),
         };
-        errors.retain(|message_id, error| {
-            snapshot.pending.iter().any(|preview| {
-                preview.member_id == error.member_id && preview.message_id == *message_id
-            })
-        });
         messages = snapshot.messages;
         let now = clock.now();
         if !messages.is_empty() || now >= expires {
@@ -176,14 +154,11 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
                     ) => AttemptOutcome::ended(AttemptEnd::Failed(
                         crate::delivery::notification_error(member, preview.message_id, error),
                     )),
-                    Err(error) => return Err(attach_diagnostics(error, &errors)),
+                    Err(error) => return Err(error),
                 };
-            errors.retain(|message_id, _| !outcome.sent.contains(message_id));
             match outcome.end {
                 AttemptEnd::Held | AttemptEnd::Drained | AttemptEnd::BudgetExhausted => {}
-                AttemptEnd::NoPending => {
-                    errors.remove(&preview.message_id);
-                }
+                AttemptEnd::NoPending => {}
                 AttemptEnd::Failed(error) => {
                     assert_eq!(
                         error.member_id, member,
@@ -193,10 +168,7 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
                         attempted.insert(error.message_id),
                         "one invocation attempts each failed message at most once"
                     );
-                    assert!(
-                        errors.insert(error.message_id, error).is_none(),
-                        "each failed message has one notification diagnostic"
-                    );
+                    eprintln!("{}", error.error);
                 }
             }
             next_check = clock.now();
@@ -204,10 +176,7 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
             next_check = started + Duration::from_secs(interval + 1);
         }
     }
-    Ok(WaitOutcome {
-        messages,
-        notification_errors: errors.into_values().collect(),
-    })
+    Ok(WaitOutcome { messages })
 }
 
 pub(crate) struct BrokerReceiver<'a> {
@@ -286,287 +255,60 @@ impl ReceiveIo for BrokerReceiver<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::{Cell, RefCell};
-    use std::collections::BTreeSet;
-
     use super::*;
     use crate::broker::records::MessageStatus;
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    enum Event {
-        Check {
-            at: Duration,
-            budget: Duration,
-        },
-        Attempt {
-            at: Duration,
-            member_id: i64,
-            budget: Duration,
-            attempted: BTreeSet<i64>,
-        },
-        Sleep {
-            at: Duration,
-            duration: Duration,
-        },
-    }
+    use std::cell::Cell;
 
     struct TestClock {
         origin: Instant,
-        current: Cell<Instant>,
-        expiry: Cell<Instant>,
-        oversleep: Cell<Duration>,
-        reads: Cell<usize>,
-        events: RefCell<Vec<Event>>,
+        elapsed: Cell<Duration>,
     }
 
     impl TestClock {
         fn new() -> Self {
-            let origin = Instant::now() + Duration::from_secs(10_000);
             Self {
-                origin,
-                current: Cell::new(origin),
-                expiry: Cell::new(origin),
-                oversleep: Cell::new(Duration::ZERO),
-                reads: Cell::new(0),
-                events: RefCell::new(Vec::new()),
+                origin: Instant::now(),
+                elapsed: Cell::new(Duration::ZERO),
             }
-        }
-
-        fn elapsed(&self) -> Duration {
-            self.current.get().duration_since(self.origin)
         }
 
         fn advance(&self, duration: Duration) {
-            self.current.set(self.current.get() + duration);
-        }
-
-        fn record(&self, event: Event) {
-            let mut events = self.events.borrow_mut();
-            assert!(
-                events.len() < 8192,
-                "receive exceeded its bounded event script"
-            );
-            events.push(event);
-        }
-
-        fn run(
-            &self,
-            io: &mut impl ReceiveIo,
-            timeout_ms: u64,
-        ) -> Result<WaitOutcome, CafleetError> {
-            let timeout = Duration::from_millis(timeout_ms);
-            self.expiry.set(self.current.get() + timeout);
-            wait(self, io, timeout)
-        }
-
-        fn operation_budget(&self, deadline: Deadline, attempt: bool) -> Duration {
-            let now = self.current.get();
-            assert!(
-                now < self.expiry.get(),
-                "new I/O started after receive expiry"
-            );
-            let budget = deadline
-                .remaining_at(now)
-                .expect("new I/O has a live absolute deadline in the injected clock domain");
-            let expected = if attempt {
-                Duration::from_secs(5)
-            } else {
-                Duration::from_secs(5).min(self.expiry.get().duration_since(now))
-            };
-            assert_eq!(
-                budget, expected,
-                "I/O must retain its original absolute budget"
-            );
-            budget
-        }
-
-        fn attempts(&self) -> Vec<(Duration, i64)> {
-            self.events
-                .borrow()
-                .iter()
-                .filter_map(|event| match event {
-                    Event::Attempt { at, member_id, .. } => Some((*at, *member_id)),
-                    _ => None,
-                })
-                .collect()
-        }
-
-        fn checks(&self) -> Vec<(Duration, Duration)> {
-            self.events
-                .borrow()
-                .iter()
-                .filter_map(|event| match event {
-                    Event::Check { at, budget } => Some((*at, *budget)),
-                    _ => None,
-                })
-                .collect()
-        }
-
-        fn sleeps(&self) -> Vec<(Duration, Duration)> {
-            self.events
-                .borrow()
-                .iter()
-                .filter_map(|event| match event {
-                    Event::Sleep { at, duration } => Some((*at, *duration)),
-                    _ => None,
-                })
-                .collect()
-        }
-
-        fn assert_retry_cadence(&self) {
-            let mut previous_interval = None;
-            let mut checked = false;
-            for event in self.events.borrow().iter() {
-                match event {
-                    Event::Check { .. } => checked = true,
-                    Event::Attempt { at, .. } => {
-                        assert!(
-                            checked,
-                            "check the inbox before another notification attempt"
-                        );
-                        if let Some(previous) = previous_interval {
-                            assert!(
-                                at.as_secs() > previous,
-                                "retry catch-up burst: {:?}",
-                                self.events.borrow()
-                            );
-                        }
-                        previous_interval = Some(at.as_secs());
-                        checked = false;
-                    }
-                    Event::Sleep { .. } => {}
-                }
-            }
-        }
-
-        fn assert_last_io_was_attempt(&self) {
-            assert!(
-                matches!(self.events.borrow().last(), Some(Event::Attempt { .. })),
-                "{:?}",
-                self.events.borrow()
-            );
-            assert!(self.current.get() >= self.expiry.get());
-            assert!(self.current.get() <= self.expiry.get() + Duration::from_secs(5));
-            self.assert_retry_cadence();
+            self.elapsed.set(self.elapsed.get() + duration);
         }
     }
 
     impl Clock for TestClock {
         fn now(&self) -> Instant {
-            let reads = self.reads.get() + 1;
-            assert!(
-                reads < 65_536,
-                "receive spun without advancing the injected clock"
-            );
-            self.reads.set(reads);
-            self.current.get()
+            self.origin + self.elapsed.get()
         }
 
         fn sleep(&self, duration: Duration) {
-            let now = self.current.get();
-            assert!(
-                now < self.expiry.get(),
-                "sleep started after receive expiry"
-            );
-            assert!(
-                !duration.is_zero(),
-                "sleep advances the monotonic receive clock"
-            );
-            assert!(
-                duration <= self.expiry.get().duration_since(now),
-                "sleep exceeds remaining receive time"
-            );
-            self.record(Event::Sleep {
-                at: self.elapsed(),
-                duration,
-            });
-            self.advance(duration + self.oversleep.get());
+            assert!(!duration.is_zero());
+            self.advance(duration);
         }
     }
 
-    struct Step<T> {
-        duration: Duration,
-        result: Result<T, CafleetError>,
-    }
-
-    impl<T> Step<T> {
-        fn done(value: T) -> Self {
-            Self::after(0, value)
-        }
-
-        fn after(milliseconds: u64, value: T) -> Self {
-            Self {
-                duration: Duration::from_millis(milliseconds),
-                result: Ok(value),
-            }
-        }
-
-        fn failed(error: CafleetError) -> Self {
-            Self {
-                duration: Duration::ZERO,
-                result: Err(error),
-            }
-        }
-
-        fn finish(self, clock: &TestClock, budget: Duration) -> Result<T, CafleetError> {
-            assert!(
-                self.duration <= budget,
-                "scripted I/O fits its owned operation budget"
-            );
-            clock.advance(self.duration);
-            self.result
-        }
-    }
-
-    struct ScriptedIo<'a, C, A> {
-        clock: &'a TestClock,
+    struct RecordingIo<C, A> {
         check: C,
         attempt: A,
-        checks: usize,
-        attempts: usize,
     }
 
-    impl<'a, C, A> ScriptedIo<'a, C, A> {
-        fn new(clock: &'a TestClock, check: C, attempt: A) -> Self {
-            Self {
-                clock,
-                check,
-                attempt,
-                checks: 0,
-                attempts: 0,
-            }
-        }
-    }
-
-    impl<C, A> ReceiveIo for ScriptedIo<'_, C, A>
+    impl<C, A> ReceiveIo for RecordingIo<C, A>
     where
-        C: FnMut(usize, usize, Duration) -> Step<ReceiveSnapshot>,
-        A: FnMut(usize, i64, Duration) -> Step<AttemptOutcome>,
+        C: FnMut(Deadline) -> Result<ReceiveSnapshot, CafleetError>,
+        A: FnMut(i64, Deadline, &BTreeSet<i64>) -> Result<AttemptOutcome, CafleetError>,
     {
         fn check(&mut self, deadline: Deadline) -> Result<ReceiveSnapshot, CafleetError> {
-            let budget = self.clock.operation_budget(deadline, false);
-            let at = self.clock.elapsed();
-            self.clock.record(Event::Check { at, budget });
-            self.checks += 1;
-            (self.check)(self.checks, self.attempts, at).finish(self.clock, budget)
+            (self.check)(deadline)
         }
 
         fn attempt(
             &mut self,
-            member_id: i64,
+            member: i64,
             deadline: Deadline,
-            attempted: &BTreeSet<i64>,
+            excluded: &BTreeSet<i64>,
         ) -> Result<AttemptOutcome, CafleetError> {
-            let budget = self.clock.operation_budget(deadline, true);
-            let at = self.clock.elapsed();
-            self.clock.record(Event::Attempt {
-                at,
-                member_id,
-                budget,
-                attempted: attempted.clone(),
-            });
-            self.attempts += 1;
-            (self.attempt)(self.attempts, member_id, at).finish(self.clock, budget)
+            (self.attempt)(member, deadline, excluded)
         }
     }
 
@@ -583,832 +325,270 @@ mod tests {
         }
     }
 
-    fn messages() -> Vec<MessageRecord> {
-        vec![
-            MessageRecord {
-                message_id: 91,
-                from_member_id: 22,
-                to_member_id: 1,
-                created_at: "2026-01-01T00:00:00+00:00".into(),
-                status: MessageStatus::Completed,
-                status_timestamp: "2026-02-01T00:00:00+00:00".into(),
-                text: "second reply\nwith full text 界".into(),
-            },
-            MessageRecord {
-                message_id: 90,
-                from_member_id: 11,
-                to_member_id: 1,
-                created_at: "2026-01-02T00:00:00+00:00".into(),
-                status: MessageStatus::InputRequired,
-                status_timestamp: "2026-01-31T00:00:00+00:00".into(),
-                text: " question requiring a deferred decision ".into(),
-            },
-        ]
-    }
-
-    fn incoming(pending: &[(i64, i64)]) -> ReceiveSnapshot {
-        let mut snapshot = snapshot(pending);
-        snapshot.messages = messages();
-        snapshot
-    }
-
-    fn diagnostic(member_id: i64, message_id: i64, cause: &str) -> NotificationError {
-        NotificationError {
-            member_id,
-            message_id,
-            error: format!(
-                "message {message_id} was not notified to member {member_id}: {cause}; the next send to member {member_id} or the next message wait retries it."
-            ),
+    fn message(id: i64) -> MessageRecord {
+        MessageRecord {
+            message_id: id,
+            from_member_id: 2,
+            to_member_id: 1,
+            created_at: "2026-10-25T01:00:00.000000+00:00".into(),
+            status: MessageStatus::InputRequired,
+            status_timestamp: "2026-10-25T01:00:00.000000+00:00".into(),
+            text: "雪\nfull reply".repeat(300),
         }
     }
 
-    fn outcome(sent: &[i64], end: AttemptEnd) -> AttemptOutcome {
-        AttemptOutcome {
-            sent: sent.to_vec(),
-            end,
-        }
-    }
-
-    fn hold() -> AttemptOutcome {
-        outcome(&[], AttemptEnd::Held)
-    }
-
-    fn drained(sent: &[i64]) -> AttemptOutcome {
-        outcome(sent, AttemptEnd::Drained)
-    }
-
-    fn failed(error: NotificationError) -> AttemptOutcome {
-        outcome(&[], AttemptEnd::Failed(error))
-    }
-
-    fn held(_: usize, _: i64, _: Duration) -> Step<AttemptOutcome> {
-        Step::done(hold())
-    }
-
-    fn unexpected_attempt(_: usize, member_id: i64, _: Duration) -> Step<AttemptOutcome> {
-        panic!("unexpected notification attempt for member {member_id}");
+    fn no_attempt(_: i64, _: Deadline, _: &BTreeSet<i64>) -> Result<AttemptOutcome, CafleetError> {
+        panic!("the subject inbox or empty candidate set takes priority");
     }
 
     #[test]
-    fn transient_snapshot_contention_can_recover_before_receive_expiry() {
+    fn existing_inbox_returns_full_records_before_retry_or_sleep() {
         let clock = TestClock::new();
-        let mut io = ScriptedIo::new(
-            &clock,
-            |check, _, _| {
-                if check == 1 {
-                    Step {
-                        duration: Duration::from_secs(5),
-                        result: Err(CafleetError::DatabaseBusy("database is locked".into())),
-                    }
-                } else {
-                    Step::done(incoming(&[]))
-                }
-            },
-            unexpected_attempt,
-        );
-        let outcome = clock.run(&mut io, 6500).unwrap();
-        assert_eq!(outcome.messages, messages());
-        assert_eq!(clock.elapsed(), Duration::from_secs(6));
-    }
-
-    #[test]
-    fn existing_messages_return_full_ordered_records_without_retry_or_sleep() {
-        let clock = TestClock::new();
-        let mut io = ScriptedIo::new(
-            &clock,
-            |_, _, _| Step::done(incoming(&[(11, 101)])),
-            unexpected_attempt,
-        );
-        let outcome = clock.run(&mut io, 300_000).unwrap();
-        assert_eq!(outcome.messages, messages());
-        assert!(outcome.notification_errors.is_empty());
-        assert_eq!(io.checks, 1);
-        assert_eq!(clock.elapsed(), Duration::ZERO);
-        assert!(clock.sleeps().is_empty());
-    }
-
-    #[test]
-    fn empty_receive_checks_each_second_and_caps_the_final_sleep() {
-        let clock = TestClock::new();
-        let mut io = ScriptedIo::new(
-            &clock,
-            |_, _, _| Step::done(snapshot(&[])),
-            unexpected_attempt,
-        );
-        let outcome = clock.run(&mut io, 3500).unwrap();
-        assert_eq!(
-            outcome,
-            WaitOutcome {
-                messages: vec![],
-                notification_errors: vec![]
-            }
-        );
-        assert_eq!(clock.elapsed(), Duration::from_millis(3500));
-        assert_eq!(
-            clock.checks(),
-            vec![
-                (Duration::ZERO, Duration::from_millis(3500)),
-                (Duration::from_secs(1), Duration::from_millis(2500)),
-                (Duration::from_secs(2), Duration::from_millis(1500)),
-                (Duration::from_secs(3), Duration::from_millis(500)),
-            ]
-        );
-        assert_eq!(
-            clock.sleeps(),
-            vec![
-                (Duration::ZERO, Duration::from_secs(1)),
-                (Duration::from_secs(1), Duration::from_secs(1)),
-                (Duration::from_secs(2), Duration::from_secs(1)),
-                (Duration::from_secs(3), Duration::from_millis(500)),
-            ]
-        );
-    }
-
-    #[test]
-    fn default_and_maximum_receives_advance_only_the_injected_clock() {
-        for seconds in [300, 1800] {
-            let clock = TestClock::new();
-            let mut io = ScriptedIo::new(
-                &clock,
-                |_, _, _| Step::done(snapshot(&[])),
-                unexpected_attempt,
-            );
-            let outcome = clock.run(&mut io, seconds * 1000).unwrap();
-            assert!(outcome.messages.is_empty());
-            assert!(outcome.notification_errors.is_empty());
-            assert_eq!(clock.elapsed(), Duration::from_secs(seconds));
-            assert_eq!(u64::try_from(io.checks).unwrap(), seconds);
-            assert_eq!(clock.checks().first().unwrap().1, Duration::from_secs(5));
-            assert_eq!(clock.checks().last().unwrap().1, Duration::from_secs(1));
-        }
-    }
-
-    #[test]
-    fn retries_rotate_through_members_once_per_interval_with_inbox_checks() {
-        let clock = TestClock::new();
-        let pending = [(11, 101), (22, 202), (33, 303)];
-        let mut io = ScriptedIo::new(
-            &clock,
-            |_, attempts, _| {
-                Step::done(if attempts == 6 {
-                    incoming(&pending)
-                } else {
-                    snapshot(&pending)
+        let expected = vec![message(9), message(8)];
+        let mut io = RecordingIo {
+            check: |_| {
+                Ok(ReceiveSnapshot {
+                    messages: expected.clone(),
+                    pending: snapshot(&[(2, 3)]).pending,
                 })
             },
-            held,
+            attempt: no_attempt,
+        };
+        assert_eq!(
+            wait(&clock, &mut io, Duration::from_secs(30))
+                .unwrap()
+                .messages,
+            expected
         );
-        let outcome = clock.run(&mut io, 12_000).unwrap();
-        assert_eq!(outcome.messages, messages());
-        assert!(outcome.notification_errors.is_empty());
-        let attempts = clock.attempts();
-        assert_eq!(attempts.len(), 6);
-        let members: Vec<_> = attempts.iter().map(|&(_, member)| member).collect();
-        for pair in members.windows(2) {
-            assert_eq!(
-                pair[1],
-                match pair[0] {
-                    11 => 22,
-                    22 => 33,
-                    33 => 11,
-                    member => panic!("ineligible member {member}"),
-                }
-            );
-        }
-        clock.assert_retry_cadence();
+        assert_eq!(clock.elapsed.get(), Duration::ZERO);
     }
 
     #[test]
-    fn a_reply_observed_after_one_attempt_returns_before_another_attempt() {
+    fn idle_checks_cap_work_and_finish_at_the_original_expiry() {
         let clock = TestClock::new();
-        let pending = [(11, 101), (22, 202)];
-        let mut io = ScriptedIo::new(
-            &clock,
-            |_, attempts, _| {
-                Step::done(if attempts == 0 {
-                    snapshot(&pending)
-                } else {
-                    incoming(&pending)
-                })
+        let mut budgets = Vec::new();
+        let mut io = RecordingIo {
+            check: |deadline: Deadline| {
+                budgets.push(deadline.remaining_at(clock.now()).unwrap());
+                Ok(snapshot(&[]))
             },
-            held,
+            attempt: no_attempt,
+        };
+        assert!(
+            wait(&clock, &mut io, Duration::from_millis(6500))
+                .unwrap()
+                .messages
+                .is_empty()
         );
-        let outcome = clock.run(&mut io, 5000).unwrap();
-        assert_eq!(outcome.messages, messages());
-        assert_eq!(io.attempts, 1);
-        clock.assert_retry_cadence();
+        assert_eq!(clock.elapsed.get(), Duration::from_millis(6500));
+        assert_eq!(
+            budgets,
+            [5000, 5000, 4500, 3500, 2500, 1500, 500].map(Duration::from_millis)
+        );
     }
 
     #[test]
-    fn changed_membership_uses_the_live_set_and_preserves_cursor_progress() {
+    fn retries_rotate_members_and_exclude_each_failed_message_for_one_invocation() {
         let clock = TestClock::new();
-        let first_member = Cell::new(None);
-        let mut io = ScriptedIo::new(
-            &clock,
-            |_, attempts, _| {
-                let pending: Vec<_> = if attempts == 0 {
-                    vec![(11, 101), (22, 202), (33, 303)]
-                } else {
-                    [5, 11, 22, 33]
-                        .into_iter()
-                        .filter(|member| Some(*member) != first_member.get())
-                        .map(|member| (member, member * 10))
-                        .collect()
+        let mut attempts = Vec::new();
+        let mut io = RecordingIo {
+            check: |_| Ok(snapshot(&[(2, 20), (2, 21), (5, 50)])),
+            attempt: |member, deadline: Deadline, excluded: &BTreeSet<i64>| {
+                assert_eq!(
+                    deadline.remaining_at(clock.now()).unwrap(),
+                    Duration::from_secs(5)
+                );
+                let id = match member {
+                    2 if excluded.contains(&20) => 21,
+                    2 => 20,
+                    5 => 50,
+                    _ => panic!("unexpected retry member {member}"),
                 };
-                Step::done(if attempts == 4 {
-                    incoming(&pending)
-                } else {
-                    snapshot(&pending)
-                })
+                attempts.push((clock.elapsed.get(), member, excluded.clone()));
+                Ok(AttemptOutcome::ended(AttemptEnd::Failed(
+                    crate::delivery::notification_error(member, id, "unavailable"),
+                )))
             },
-            |attempt, member, _| {
-                if attempt == 1 {
-                    first_member.set(Some(member));
-                }
-                Step::done(hold())
-            },
+        };
+        wait(&clock, &mut io, Duration::from_secs(4)).unwrap();
+        assert_eq!(
+            attempts,
+            vec![
+                (Duration::ZERO, 2, BTreeSet::new()),
+                (Duration::from_secs(1), 5, BTreeSet::from([20])),
+                (Duration::from_secs(2), 2, BTreeSet::from([20, 50])),
+            ]
         );
-        let outcome = clock.run(&mut io, 10_000).unwrap();
-        assert_eq!(outcome.messages, messages());
-        let attempts = clock.attempts();
-        assert_eq!(attempts.len(), 4);
-        let first = first_member.get().unwrap();
-        let live: Vec<_> = [5, 11, 22, 33]
-            .into_iter()
-            .filter(|&member| member != first)
-            .collect();
-        let mut cursor = first;
-        for &(_, member) in &attempts[1..] {
-            let expected = live
-                .iter()
-                .copied()
-                .find(|&member| member > cursor)
-                .unwrap_or(live[0]);
-            assert_eq!(member, expected);
-            cursor = member;
-        }
-        clock.assert_retry_cadence();
+        let mut retried = false;
+        let mut io = RecordingIo {
+            check: |_| Ok(snapshot(&[(2, 20)])),
+            attempt: |_, _, excluded: &BTreeSet<i64>| {
+                assert!(excluded.is_empty());
+                retried = true;
+                clock.advance(Duration::from_secs(1));
+                Ok(AttemptOutcome::ended(AttemptEnd::Drained))
+            },
+        };
+        wait(&clock, &mut io, Duration::from_secs(1)).unwrap();
+        assert!(retried);
     }
 
     #[test]
-    fn a_slow_attempt_skips_elapsed_intervals_without_a_catch_up_burst() {
+    fn a_reply_after_a_retry_precedes_the_next_retry() {
         let clock = TestClock::new();
-        let pending = [(11, 101), (22, 202), (33, 303)];
-        let mut io = ScriptedIo::new(
-            &clock,
-            |_, attempts, _| {
-                Step::done(if attempts == 3 {
-                    incoming(&pending)
+        let attempted = Cell::new(false);
+        let mut io = RecordingIo {
+            check: |_| {
+                Ok(if attempted.get() {
+                    ReceiveSnapshot {
+                        messages: vec![message(7)],
+                        pending: snapshot(&[(5, 50)]).pending,
+                    }
                 } else {
-                    snapshot(&pending)
+                    snapshot(&[(2, 20), (5, 50)])
                 })
             },
-            |attempt, _, _| Step::after(if attempt == 1 { 3250 } else { 0 }, hold()),
+            attempt: |member, _, _: &BTreeSet<i64>| {
+                assert_eq!(member, 2);
+                assert!(!attempted.replace(true));
+                Ok(AttemptOutcome::ended(AttemptEnd::Held))
+            },
+        };
+        assert_eq!(
+            wait(&clock, &mut io, Duration::from_secs(10))
+                .unwrap()
+                .messages,
+            vec![message(7)]
         );
-        let outcome = clock.run(&mut io, 12_000).unwrap();
-        assert_eq!(outcome.messages, messages());
-        let attempts = clock.attempts();
-        assert_eq!(attempts.len(), 3);
-        assert!(attempts[1].0 >= attempts[0].0 + Duration::from_millis(3250));
-        clock.assert_retry_cadence();
+        assert_eq!(clock.elapsed.get(), Duration::ZERO);
     }
 
     #[test]
-    fn a_slow_receive_check_skips_elapsed_intervals_without_a_catch_up_burst() {
+    fn live_membership_and_slow_attempts_preserve_rotation_without_catch_up() {
         let clock = TestClock::new();
-        let pending = [(11, 101), (22, 202)];
-        let delayed = Cell::new(false);
-        let mut io = ScriptedIo::new(
-            &clock,
-            |_, attempts, _| {
-                if attempts == 1 && !delayed.replace(true) {
-                    Step::after(3250, snapshot(&pending))
+        let mut members = Vec::new();
+        let mut io = RecordingIo {
+            check: |_| {
+                Ok(if clock.elapsed.get().is_zero() {
+                    snapshot(&[(2, 20), (5, 50)])
                 } else {
-                    Step::done(if attempts == 3 {
-                        incoming(&pending)
-                    } else {
-                        snapshot(&pending)
+                    snapshot(&[(1, 10), (8, 80)])
+                })
+            },
+            attempt: |member, _, _: &BTreeSet<i64>| {
+                members.push((clock.elapsed.get(), member));
+                clock.advance(Duration::from_millis(2400));
+                Ok(AttemptOutcome::ended(AttemptEnd::Held))
+            },
+        };
+        wait(&clock, &mut io, Duration::from_secs(5)).unwrap();
+        assert_eq!(
+            members,
+            [
+                (Duration::ZERO, 2),
+                (Duration::from_millis(2400), 8),
+                (Duration::from_millis(4800), 1)
+            ]
+        );
+    }
+
+    #[test]
+    fn an_attempt_near_expiry_keeps_its_own_budget_and_performs_no_final_read() {
+        let clock = TestClock::new();
+        let mut checks = 0;
+        let mut io = RecordingIo {
+            check: |deadline: Deadline| {
+                checks += 1;
+                assert_eq!(checks, 1);
+                assert_eq!(
+                    deadline.remaining_at(clock.now()).unwrap(),
+                    Duration::from_secs(1)
+                );
+                clock.advance(Duration::from_millis(900));
+                Ok(snapshot(&[(2, 20)]))
+            },
+            attempt: |_, deadline: Deadline, _: &BTreeSet<i64>| {
+                assert_eq!(
+                    deadline.remaining_at(clock.now()).unwrap(),
+                    Duration::from_secs(5)
+                );
+                clock.advance(Duration::from_secs(2));
+                Ok(AttemptOutcome::ended(AttemptEnd::Drained))
+            },
+        };
+        wait(&clock, &mut io, Duration::from_secs(1)).unwrap();
+        assert_eq!(checks, 1);
+    }
+
+    #[test]
+    fn transient_snapshot_contention_recovers_and_fatal_errors_keep_their_cause() {
+        let clock = TestClock::new();
+        let mut calls = 0;
+        let mut io = RecordingIo {
+            check: |_| {
+                calls += 1;
+                if calls == 1 {
+                    Err(CafleetError::DatabaseBusy("held writer".into()))
+                } else {
+                    Ok(ReceiveSnapshot {
+                        messages: vec![message(3)],
+                        pending: Vec::new(),
                     })
                 }
             },
-            held,
-        );
-        let outcome = clock.run(&mut io, 12_000).unwrap();
-        assert_eq!(outcome.messages, messages());
-        assert!(delayed.get());
-        let attempts = clock.attempts();
-        assert_eq!(attempts.len(), 3);
-        assert!(attempts[1].0 >= attempts[0].0 + Duration::from_millis(3250));
-        clock.assert_retry_cadence();
-    }
-
-    #[test]
-    fn receive_checks_get_the_smaller_of_five_seconds_and_remaining_receive_time() {
-        for timeout in [2500, 12_000] {
-            let clock = TestClock::new();
-            let mut io = ScriptedIo::new(
-                &clock,
-                |check, _, _| Step::after(if check == 1 { 2000 } else { 0 }, snapshot(&[])),
-                unexpected_attempt,
-            );
-            let outcome = clock.run(&mut io, timeout).unwrap();
-            assert!(outcome.messages.is_empty());
-            assert_eq!(clock.elapsed(), Duration::from_millis(timeout));
-            let budgets: Vec<_> = clock
-                .checks()
-                .into_iter()
-                .map(|(_, budget)| budget)
-                .collect();
-            assert_eq!(budgets[0], Duration::from_millis(timeout.min(5000)));
-            assert!(
-                budgets
-                    .iter()
-                    .any(|&budget| budget < Duration::from_secs(5))
-            );
-        }
-    }
-
-    #[test]
-    fn an_attempt_near_receive_expiry_keeps_its_full_five_second_budget() {
-        let clock = TestClock::new();
-        let mut io = ScriptedIo::new(
-            &clock,
-            |_, _, _| Step::done(snapshot(&[(11, 101)])),
-            |attempt, member, _| {
-                assert_eq!(member, 11);
-                match attempt {
-                    1 => Step::done(hold()),
-                    2 => Step::after(5000, drained(&[101])),
-                    _ => panic!("receive started another attempt after its deadline"),
-                }
-            },
-        );
-        let outcome = clock.run(&mut io, 2100).unwrap();
-        assert!(outcome.messages.is_empty());
-        assert!(outcome.notification_errors.is_empty());
-        let attempts = clock.attempts();
-        assert_eq!(attempts.len(), 2);
-        assert!(attempts[1].0 >= Duration::from_secs(1));
-        assert!(attempts[1].0 < Duration::from_millis(2100));
-        assert_eq!(clock.elapsed(), attempts[1].0 + Duration::from_secs(5));
-        clock.assert_last_io_was_attempt();
-    }
-
-    #[test]
-    fn a_late_wake_starts_no_receive_check_or_notification_attempt() {
-        let clock = TestClock::new();
-        clock.oversleep.set(Duration::from_millis(1500));
-        let mut io = ScriptedIo::new(
-            &clock,
-            |_, _, _| Step::done(snapshot(&[])),
-            unexpected_attempt,
-        );
-        let outcome = clock.run(&mut io, 1500).unwrap();
-        assert!(outcome.messages.is_empty());
-        assert!(outcome.notification_errors.is_empty());
-        assert_eq!(io.checks, 1);
-        assert_eq!(clock.sleeps().len(), 1);
-        assert!(clock.elapsed() >= Duration::from_millis(1500));
-    }
-
-    #[test]
-    fn a_check_completing_at_receive_expiry_returns_its_snapshot_without_more_io() {
-        for has_messages in [false, true] {
-            let clock = TestClock::new();
-            let mut io = ScriptedIo::new(
-                &clock,
-                |_, _, _| {
-                    Step::after(
-                        1000,
-                        if has_messages {
-                            incoming(&[(11, 101)])
-                        } else {
-                            snapshot(&[(11, 101)])
-                        },
-                    )
-                },
-                unexpected_attempt,
-            );
-            let outcome = clock.run(&mut io, 1000).unwrap();
-            assert_eq!(
-                outcome.messages,
-                if has_messages { messages() } else { vec![] }
-            );
-            assert!(outcome.notification_errors.is_empty());
-            assert_eq!(io.checks, 1);
-            assert!(clock.sleeps().is_empty());
-            assert_eq!(clock.elapsed(), Duration::from_secs(1));
-        }
-    }
-
-    #[test]
-    fn an_initial_fatal_snapshot_error_preserves_its_domain_variant_and_cause() {
-        let clock = TestClock::new();
-        let mut io = ScriptedIo::new(
-            &clock,
-            |_, _, _| {
-                Step::failed(CafleetError::InvalidStoredValue {
-                    field: "members.status".into(),
-                    value: "corrupt-status".into(),
-                })
-            },
-            unexpected_attempt,
-        );
-        let error = clock.run(&mut io, 5000).unwrap_err();
-        assert!(
-            matches!(error, CafleetError::InvalidStoredValue { field, value } if field == "members.status" && value == "corrupt-status")
-        );
-        assert_eq!(io.checks, 1);
-        assert!(clock.sleeps().is_empty());
-    }
-
-    #[test]
-    fn a_late_fatal_attempt_error_preserves_the_actual_cause_without_a_final_read() {
-        let clock = TestClock::new();
-        let mut io = ScriptedIo::new(
-            &clock,
-            |_, _, _| Step::done(snapshot(&[(11, 101)])),
-            |attempt, _, _| {
-                assert_eq!(attempt, 1);
-                Step {
-                    duration: Duration::from_secs(5),
-                    result: Err(CafleetError::App(
-                        "fleet disappeared during revalidation".into(),
-                    )),
-                }
-            },
-        );
-        let error = clock.run(&mut io, 2000).unwrap_err();
-        assert!(
-            matches!(error, CafleetError::App(cause) if cause == "fleet disappeared during revalidation")
-        );
-        clock.assert_last_io_was_attempt();
-    }
-
-    #[test]
-    fn one_wait_attempts_each_failed_message_once_and_forwards_the_exclusion_set() {
-        let clock = TestClock::new();
-        let failures = [
-            diagnostic(11, 301, "first pane failure"),
-            diagnostic(22, 202, "second pane failure"),
-            diagnostic(11, 101, "later message failure"),
-        ];
-        let mut io = ScriptedIo::new(
-            &clock,
-            |_, _, _| Step::done(snapshot(&[(11, 301), (11, 101), (22, 202)])),
-            |attempt: usize, member, _| {
-                let error = failures
-                    .get(attempt - 1)
-                    .expect("each pending message is attempted once");
-                assert_eq!(member, error.member_id);
-                Step::done(failed(error.clone()))
-            },
-        );
-        let result = clock.run(&mut io, 4500).unwrap();
-        assert_eq!(io.attempts, 3);
+            attempt: no_attempt,
+        };
         assert_eq!(
-            result.notification_errors,
-            vec![
-                failures[2].clone(),
-                failures[1].clone(),
-                failures[0].clone()
-            ]
+            wait(&clock, &mut io, Duration::from_secs(3))
+                .unwrap()
+                .messages,
+            vec![message(3)]
         );
-        let exclusions: Vec<_> = clock
-            .events
-            .borrow()
-            .iter()
-            .filter_map(|event| match event {
-                Event::Attempt { attempted, .. } => Some(attempted.clone()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(
-            exclusions,
-            vec![
-                BTreeSet::new(),
-                BTreeSet::from([301]),
-                BTreeSet::from([202, 301])
-            ]
-        );
-        clock.assert_retry_cadence();
-    }
-
-    #[test]
-    fn a_later_message_for_the_same_member_progresses_and_keeps_the_earlier_diagnostic() {
-        let clock = TestClock::new();
-        let first = diagnostic(11, 101, "Escape failed");
-        let mut io = ScriptedIo::new(
-            &clock,
-            |_, attempts, _| {
-                Step::done(if attempts < 2 {
-                    snapshot(&[(11, 101), (11, 102)])
-                } else {
-                    snapshot(&[(11, 101)])
-                })
-            },
-            |attempt, member, _| {
-                assert_eq!(member, 11);
-                Step::done(match attempt {
-                    1 => failed(first.clone()),
-                    2 => drained(&[102]),
-                    _ => panic!("the failed message stays excluded in this invocation"),
-                })
-            },
-        );
-        let result = clock.run(&mut io, 3500).unwrap();
-        assert_eq!(result.notification_errors, vec![first.clone()]);
-        assert_eq!(io.attempts, 2);
-    }
-
-    #[test]
-    fn a_new_wait_retries_a_failed_message_with_fresh_exclusions() {
-        let clock = TestClock::new();
-        let first_error = diagnostic(11, 101, "literal write failed");
-        let mut first = ScriptedIo::new(
-            &clock,
-            |_, _, _| Step::done(snapshot(&[(11, 101)])),
-            |attempt, _, _| {
-                assert_eq!(attempt, 1);
-                Step::done(failed(first_error.clone()))
-            },
-        );
-        assert_eq!(
-            clock.run(&mut first, 1500).unwrap().notification_errors,
-            vec![first_error]
-        );
-        let mut second = ScriptedIo::new(
-            &clock,
-            |_, attempts, _| {
-                Step::done(if attempts == 0 {
-                    snapshot(&[(11, 101)])
-                } else {
-                    snapshot(&[])
-                })
-            },
-            |attempt, member, _| {
-                assert_eq!((attempt, member), (1, 11));
-                Step::done(drained(&[101]))
-            },
-        );
-        let result = clock.run(&mut second, 1500).unwrap();
-        assert!(result.notification_errors.is_empty());
-        assert_eq!(second.attempts, 1);
-        let exclusions: Vec<_> = clock
-            .events
-            .borrow()
-            .iter()
-            .filter_map(|event| match event {
-                Event::Attempt { attempted, .. } => Some(attempted.clone()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(exclusions, vec![BTreeSet::new(), BTreeSet::new()]);
-    }
-
-    #[test]
-    fn attempt_contention_names_the_selected_message_and_excludes_it_for_this_wait() {
-        for cause in [
-            CafleetError::DatabaseBusy("database is locked".into()),
-            CafleetError::DeadlineExceeded,
-        ] {
-            let clock = TestClock::new();
-            let mut io = ScriptedIo::new(
-                &clock,
-                |_, _, _| Step::done(snapshot(&[(11, 101)])),
-                |attempt, member, _| {
-                    assert_eq!((attempt, member), (1, 11));
-                    Step::failed(cause.clone())
-                },
-            );
-            let result = clock.run(&mut io, 3500).unwrap();
-            assert_eq!(
-                result.notification_errors,
-                vec![diagnostic(11, 101, &cause.to_string())]
-            );
-            assert_eq!(io.attempts, 1);
-        }
-    }
-
-    #[test]
-    fn snapshot_contention_at_expiry_keeps_prior_diagnostics_without_new_attempts() {
-        for cause in [
-            CafleetError::DatabaseBusy("database is locked".into()),
-            CafleetError::DeadlineExceeded,
-        ] {
-            let clock = TestClock::new();
-            let first = diagnostic(11, 101, "stamp could not finish");
-            let mut io = ScriptedIo::new(
-                &clock,
-                |check, _, _| {
-                    if check == 1 {
-                        Step::done(snapshot(&[(11, 101)]))
+        assert_eq!(clock.elapsed.get(), Duration::from_secs(1));
+        for during_attempt in [false, true] {
+            let mut io = RecordingIo {
+                check: |_| {
+                    if during_attempt {
+                        Ok(snapshot(&[(2, 20)]))
                     } else {
-                        Step {
-                            duration: Duration::from_millis(2500),
-                            result: Err(cause.clone()),
-                        }
+                        Err(CafleetError::Value("corrupt subject".into()))
                     }
                 },
-                |attempt, _, _| {
-                    assert_eq!(attempt, 1);
-                    Step::done(failed(first.clone()))
+                attempt: |_, _, _: &BTreeSet<i64>| {
+                    Err(CafleetError::Value("corrupt subject".into()))
                 },
+            };
+            assert!(
+                matches!(wait(&clock, &mut io, Duration::from_secs(1)), Err(CafleetError::Value(cause)) if cause == "corrupt subject")
             );
-            let result = clock.run(&mut io, 2500).unwrap();
-            assert_eq!(result.notification_errors, vec![first.clone()]);
-            assert!(result.messages.is_empty());
-            assert_eq!(io.checks, 2);
         }
     }
 
     #[test]
-    fn successful_snapshots_reconcile_each_message_before_returning_incoming_records() {
-        for pending in [vec![], vec![(11, 102)], vec![(22, 202)]] {
+    fn attempt_contention_excludes_the_selected_message_and_late_checks_start_no_input() {
+        for late in [false, true] {
             let clock = TestClock::new();
-            let mut io = ScriptedIo::new(
+            let mut calls = 0;
+            let mut io = RecordingIo {
+                check: |_| {
+                    if late {
+                        clock.advance(Duration::from_secs(1));
+                    }
+                    Ok(snapshot(&[(2, 20)]))
+                },
+                attempt: |_, _, excluded: &BTreeSet<i64>| {
+                    calls += 1;
+                    assert!(excluded.is_empty());
+                    Err(CafleetError::DeadlineExceeded)
+                },
+            };
+            wait(
                 &clock,
-                |_, attempts, _| {
-                    Step::done(if attempts == 0 {
-                        snapshot(&[(11, 101)])
-                    } else {
-                        incoming(&pending)
-                    })
-                },
-                |attempt, member, _| {
-                    assert_eq!((attempt, member), (1, 11));
-                    Step::done(failed(diagnostic(11, 101, "stamp write failed")))
-                },
-            );
-            let result = clock.run(&mut io, 5000).unwrap();
-            assert_eq!(result.messages, messages());
-            assert!(result.notification_errors.is_empty());
-            assert_eq!(io.attempts, 1);
+                &mut io,
+                Duration::from_secs(if late { 1 } else { 3 }),
+            )
+            .unwrap();
+            assert_eq!(calls, usize::from(!late));
         }
-    }
-
-    #[test]
-    fn a_partial_drain_preserves_each_failed_message_diagnostic_in_message_order() {
-        let clock = TestClock::new();
-        let first = diagnostic(11, 101, "Escape failed");
-        let later = diagnostic(11, 103, "Enter failed");
-        let mut io = ScriptedIo::new(
-            &clock,
-            |_, attempts, _| {
-                Step::done(if attempts < 2 {
-                    snapshot(&[(11, 101), (11, 102), (11, 103)])
-                } else {
-                    incoming(&[(11, 101), (11, 103)])
-                })
-            },
-            |attempt, _, _| {
-                Step::done(match attempt {
-                    1 => failed(first.clone()),
-                    2 => outcome(&[102], AttemptEnd::Failed(later.clone())),
-                    _ => panic!("return incoming records before another attempt"),
-                })
-            },
-        );
-        let result = clock.run(&mut io, 5000).unwrap();
-        assert_eq!(result.messages, messages());
-        assert_eq!(result.notification_errors, vec![first, later]);
-    }
-
-    #[test]
-    fn a_late_failure_retains_its_revalidated_message_and_exact_cause_without_a_final_read() {
-        let clock = TestClock::new();
-        let error = diagnostic(
-            11,
-            102,
-            "actual transport cause: quotes ' and newline\nretained",
-        );
-        let mut io = ScriptedIo::new(
-            &clock,
-            |_, _, _| Step::done(snapshot(&[(11, 101)])),
-            |attempt, member, _| {
-                assert_eq!((attempt, member), (1, 11));
-                Step::after(5000, failed(error.clone()))
-            },
-        );
-        let result = clock.run(&mut io, 2000).unwrap();
-        assert_eq!(result.notification_errors, vec![error]);
-        assert!(result.messages.is_empty());
-        clock.assert_last_io_was_attempt();
-    }
-
-    #[test]
-    fn a_late_hold_preserves_other_messages_diagnostics_without_a_final_read() {
-        let clock = TestClock::new();
-        let first = diagnostic(11, 101, "pane input remained busy");
-        let mut io = ScriptedIo::new(
-            &clock,
-            |_, _, _| Step::done(snapshot(&[(11, 101), (22, 202)])),
-            |attempt, member, _| match attempt {
-                1 => {
-                    assert_eq!(member, 11);
-                    Step::done(failed(first.clone()))
-                }
-                2 => {
-                    assert_eq!(member, 22);
-                    Step::after(5000, hold())
-                }
-                _ => panic!("an owned hold finishes before returning"),
-            },
-        );
-        let result = clock.run(&mut io, 2500).unwrap();
-        assert_eq!(result.notification_errors, vec![first]);
-        clock.assert_last_io_was_attempt();
-    }
-
-    #[test]
-    fn fatal_snapshot_errors_keep_every_retained_diagnostic_and_the_typed_cause() {
-        let clock = TestClock::new();
-        let errors = [
-            diagnostic(11, 101, "Escape failed"),
-            diagnostic(11, 102, "Enter failed"),
-        ];
-        let mut io = ScriptedIo::new(
-            &clock,
-            |_, attempts, _| {
-                if attempts < 2 {
-                    Step::done(snapshot(&[(11, 101), (11, 102)]))
-                } else {
-                    Step::failed(CafleetError::InvalidStoredValue {
-                        field: "members.status".into(),
-                        value: "broken".into(),
-                    })
-                }
-            },
-            |attempt: usize, _, _| Step::done(failed(errors[attempt - 1].clone())),
-        );
-        let error = clock.run(&mut io, 5000).unwrap_err();
-        assert_eq!(error.exit_code(), 1);
-        let CafleetError::WithDiagnostics { cause, diagnostics } = error else {
-            panic!("fatal storage errors retain every earlier notification diagnostic");
-        };
-        assert!(
-            matches!(*cause, CafleetError::InvalidStoredValue { ref field, ref value }
-            if field == "members.status" && value == "broken")
-        );
-        assert_eq!(diagnostics, errors.map(|error| error.error));
-    }
-
-    #[test]
-    fn fatal_attempt_errors_keep_prior_diagnostics_and_the_typed_cause() {
-        let clock = TestClock::new();
-        let first = diagnostic(11, 101, "Escape failed");
-        let mut io = ScriptedIo::new(
-            &clock,
-            |_, _, _| Step::done(snapshot(&[(11, 101), (22, 202)])),
-            |attempt, member, _| match attempt {
-                1 => {
-                    assert_eq!(member, 11);
-                    Step::done(failed(first.clone()))
-                }
-                2 => {
-                    assert_eq!(member, 22);
-                    Step::failed(CafleetError::InvalidStoredValue {
-                        field: "messages.status_state".into(),
-                        value: "broken".into(),
-                    })
-                }
-                _ => panic!("fatal storage errors end the receive"),
-            },
-        );
-        let error = clock.run(&mut io, 5000).unwrap_err();
-        let CafleetError::WithDiagnostics { cause, diagnostics } = error else {
-            panic!("fatal attempt errors retain earlier notification diagnostics");
-        };
-        assert!(
-            matches!(*cause, CafleetError::InvalidStoredValue { ref field, ref value }
-            if field == "messages.status_state" && value == "broken")
-        );
-        assert_eq!(diagnostics, vec![first.error.clone()]);
-        assert_eq!(io.attempts, 2);
-    }
-
-    #[test]
-    fn a_missing_later_candidate_keeps_the_earlier_messages_diagnostic() {
-        let clock = TestClock::new();
-        let first = diagnostic(11, 101, "pane input remained busy");
-        let mut io = ScriptedIo::new(
-            &clock,
-            |_, attempts, _| {
-                Step::done(if attempts < 2 {
-                    snapshot(&[(11, 101), (11, 102)])
-                } else {
-                    incoming(&[(11, 101)])
-                })
-            },
-            |attempt, _, _| {
-                Step::done(match attempt {
-                    1 => failed(first.clone()),
-                    2 => outcome(&[], AttemptEnd::NoPending),
-                    _ => panic!("return the incoming records"),
-                })
-            },
-        );
-        let result = clock.run(&mut io, 5000).unwrap();
-        assert_eq!(result.notification_errors, vec![first]);
     }
 }

@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use serde_json::Value;
@@ -374,7 +374,7 @@ impl HerdrMultiplexer {
     }
 
     /// `herdr pane read` prints the raw terminal buffer (no envelope); the
-    /// shared A8 windowing ([`super::capture_window`]) enforces the last-N
+    /// shared capture windowing ([`super::capture_window`]) enforces the last-N
     /// window client-side — the daemon may return more rows than requested.
     pub fn capture_pane(
         &self,
@@ -403,17 +403,6 @@ impl HerdrMultiplexer {
             None,
         )?;
         Ok(super::capture_window(&raw, lines))
-    }
-
-    pub fn list_pane_ids(&self) -> Result<BTreeSet<String>, MultiplexerError> {
-        let result = self.run_json(&herdr_argv(&["herdr", "pane", "list"]), Some(5))?;
-        let panes = result["panes"]
-            .as_array()
-            .ok_or_else(|| MultiplexerError::new("herdr pane list missing 'panes' field"))?;
-        panes
-            .iter()
-            .map(|pane| Ok(str_field(pane, "pane list", "pane_id")?.to_string()))
-            .collect()
     }
 
     pub fn kill_pane(
@@ -546,7 +535,7 @@ fn right_column(panes: &[Value]) -> Result<Vec<Value>, MultiplexerError> {
 mod tests {
     use serde_json::json;
 
-    use crate::multiplexer::test_support::{
+    use crate::multiplexer::recording::{
         FakeRunner, argv, env, herdr_envelope, herdr_error_stderr, run_event, sleep_event,
     };
     use crate::multiplexer::{HerdrMultiplexer, Lead, MultiplexerContext, RunError};
@@ -591,12 +580,6 @@ mod tests {
             .to_str()
             .unwrap()
             .to_string()
-    }
-
-    #[test]
-    fn name_is_herdr() {
-        let runner = FakeRunner::with_binary("herdr");
-        assert_eq!(HerdrMultiplexer::new(runner, herdr_env()).name(), "herdr");
     }
 
     #[test]
@@ -670,6 +653,7 @@ mod tests {
             "panes": [{"pane_id": "w1:p1", "tab_id": "w1:t1", "workspace_id": "w1"}]
         }))));
         runner.respond(Ok(herdr_envelope(json!({"pane": {"pane_id": "w1:p2"}}))));
+        runner.succeed(1);
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
         let pane = mux
             .split_window(
@@ -729,6 +713,7 @@ mod tests {
                 ]
             }
         }))));
+        runner.succeed(2);
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
         let pane = mux
             .split_window(&reference(), &[], &argv(&["claude"]))
@@ -781,6 +766,7 @@ mod tests {
         runner.respond(Err(RunError::Failed {
             stderr: "layout read boom".to_string(),
         }));
+        runner.succeed(1);
         let mux = HerdrMultiplexer::new(runner, herdr_env());
         let pane = mux
             .split_window(&reference(), &[], &argv(&["claude"]))
@@ -791,6 +777,7 @@ mod tests {
     #[test]
     fn send_prompt_preserves_literal_text_and_settles_before_enter() {
         let runner = FakeRunner::with_binary("herdr");
+        runner.succeed(2);
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
         let text = "  /help with literal $HOME; !  ";
         mux.send_prompt("w1:p2", text, Lead::Direct).unwrap();
@@ -805,7 +792,7 @@ mod tests {
         assert_eq!(events.len(), 3, "{events:?}");
         assert_eq!(events[1], sleep_event(1.0));
         for event in events {
-            if let crate::multiplexer::test_support::Event::Run { timeout_secs, .. } = event {
+            if let crate::multiplexer::recording::Event::Run { timeout_secs, .. } = event {
                 assert!(timeout_secs.is_some_and(|seconds| seconds > 0 && seconds <= 5));
             }
         }
@@ -814,6 +801,7 @@ mod tests {
     #[test]
     fn escape_lead_sends_the_escape_key_and_settles_before_the_literal() {
         let runner = FakeRunner::with_binary("herdr");
+        runner.succeed(3);
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
         let text = "[cafleet msg 5 from 2 timestamp] hello";
         mux.send_prompt("w1:p2", text, Lead::Escape).unwrap();
@@ -937,7 +925,7 @@ mod tests {
         assert_eq!(
             mux.capture_pane("w1:p2", 20).unwrap(),
             "raw\nbuffer",
-            "trailing whitespace-only lines are dropped before the slice (A8)"
+            "trailing whitespace-only lines are dropped before the slice"
         );
         assert_styled_read(&runner, "w1:p2", "1020");
 
@@ -947,9 +935,6 @@ mod tests {
         );
     }
 
-    // A8: TUI-painted empty rows carry ANSI sequences — a trailing line is
-    // blank when it is whitespace-only AFTER per-line CSI stripping; the kept
-    // lines keep their original bytes.
     #[test]
     fn capture_pane_blank_detection_is_ansi_aware() {
         let runner = FakeRunner::with_binary("herdr");
@@ -965,8 +950,6 @@ mod tests {
         );
     }
 
-    // A8: the daemon may return more rows than requested; after the blank tail
-    // is dropped, the last-N window is enforced client-side.
     #[test]
     fn capture_pane_enforces_the_last_n_window_client_side() {
         let runner = FakeRunner::with_binary("herdr");
@@ -986,8 +969,6 @@ mod tests {
         );
     }
 
-    // A8: the fetch depth is requested lines + 1000, so a blank tail deeper
-    // than N still leaves the drawn bottom inside the fetched buffer.
     #[test]
     fn capture_pane_over_fetch_survives_a_blank_tail_deeper_than_n() {
         let runner = FakeRunner::with_binary("herdr");
@@ -999,24 +980,6 @@ mod tests {
             "a depth-N fetch window would have been all-blank here"
         );
         assert_styled_read(&runner, "w1:p2", "1002");
-    }
-
-    #[test]
-    fn list_pane_ids_reads_the_pane_list_envelope() {
-        let runner = FakeRunner::with_binary("herdr");
-        runner.respond(Ok(herdr_envelope(json!({
-            "panes": [{"pane_id": "w1:p1"}, {"pane_id": "w1:p2"}]
-        }))));
-        let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
-        let panes = mux.list_pane_ids().unwrap();
-        assert_eq!(
-            panes,
-            ["w1:p1", "w1:p2"].iter().map(|s| s.to_string()).collect()
-        );
-        assert_eq!(
-            runner.events(),
-            vec![run_event(&["herdr", "pane", "list"], Some(5))]
-        );
     }
 
     #[test]
@@ -1035,6 +998,7 @@ mod tests {
                 "splits": [{"direction": "right", "rect": {"x": 0, "y": 0}, "ratio": 0.6}]
             }
         }))));
+        runner.succeed(1);
         let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
         mux.kill_pane("w1:p2", false).unwrap();
         assert_eq!(
@@ -1057,6 +1021,47 @@ mod tests {
                 ]),
             ],
             "pre-close tab read → close → anchor on a survivor → restore width"
+        );
+    }
+
+    #[test]
+    fn closing_a_member_equalizes_the_surviving_right_column_in_geometry_order() {
+        let runner = FakeRunner::with_binary("herdr");
+        runner.respond(Ok(herdr_envelope(json!({"pane":{"tab_id":"w1:t1"}}))));
+        runner.succeed(1);
+        runner.respond(Ok(herdr_envelope(
+            json!({"panes":[{"pane_id":"w1:p1", "tab_id":"w1:t1"}]}),
+        )));
+        runner.respond(Ok(herdr_envelope(json!({"layout": {
+            "panes": [
+                {"pane_id":"w1:p4", "rect":{"x":60,"y":15}},
+                {"pane_id":"w1:p1", "rect":{"x":0,"y":0}},
+                {"pane_id":"w1:p3", "rect":{"x":60,"y":0}}
+            ],
+            "splits": [{"direction":"down", "rect":{"x":60,"y":15}, "ratio":0.2}]
+        }}))));
+        runner.succeed(1);
+        let mux = crate::multiplexer::AnyMultiplexer::Herdr(HerdrMultiplexer::new(
+            runner.clone(),
+            herdr_env(),
+        ));
+        let layout = mux.close_pane("w1:p2", false).unwrap();
+        assert_eq!(runner.run_argvs().len(), 2);
+        mux.restore_after_close(layout).unwrap();
+        let calls = runner.run_argvs();
+        assert_eq!(
+            calls[4],
+            argv(&[
+                "herdr",
+                "pane",
+                "resize",
+                "--pane",
+                "w1:p3",
+                "--direction",
+                "down",
+                "--amount",
+                "0.3"
+            ])
         );
     }
 
@@ -1103,5 +1108,75 @@ mod tests {
             mux.kill_pane("w1:p2", false).is_err(),
             "without ignore_missing the close failure propagates"
         );
+    }
+
+    #[test]
+    fn failed_run_closes_the_owned_pane_once_and_preserves_cleanup_failure() {
+        for close_fails in [false, true] {
+            let runner = FakeRunner::with_binary("herdr");
+            runner.respond(Ok(herdr_envelope(
+                json!({"panes": [{"pane_id":"w1:p1", "tab_id":"w1:t1"}]}),
+            )));
+            runner.respond(Ok(herdr_envelope(json!({"pane":{"pane_id":"w1:p9"}}))));
+            runner.respond(Err(RunError::Failed {
+                stderr: "primary run failure".into(),
+            }));
+            runner.respond(Err(RunError::Failed {
+                stderr: "optional pane lookup failed".into(),
+            }));
+            runner.respond(if close_fails {
+                Err(RunError::Failed {
+                    stderr: "close failed".into(),
+                })
+            } else {
+                Ok(String::new())
+            });
+            let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+            let error = mux
+                .split_window(&reference(), &[], &argv(&["agent", "a'b", "$(literal)"]))
+                .unwrap_err();
+            assert!(error.to_string().contains("primary run failure"));
+            assert!(
+                matches!(error.pane_cleanup(), Some(crate::multiplexer::PaneCleanup::Attempted { pane_id, error }) if pane_id == "w1:p9" && error.is_some() == close_fails)
+            );
+            drop(mux);
+            let calls = runner.run_argvs();
+            assert_eq!(calls.iter().filter(|call| call[2] == "close").count(), 1);
+            assert_eq!(
+                calls[2],
+                argv(&[
+                    "herdr",
+                    "pane",
+                    "run",
+                    "w1:p9",
+                    "agent 'a'\"'\"'b' '$(literal)'"
+                ])
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_split_id_keeps_unowned_panes_untouched() {
+        for split in [
+            Ok(herdr_envelope(json!({"pane":{}}))),
+            Ok(herdr_envelope(json!({"pane":{"pane_id":" "}}))),
+            Err(RunError::Timeout),
+        ] {
+            let runner = FakeRunner::with_binary("herdr");
+            runner.respond(Ok(herdr_envelope(
+                json!({"panes": [{"pane_id":"w1:p1", "tab_id":"w1:t1"}]}),
+            )));
+            runner.respond(split);
+            let mux = HerdrMultiplexer::new(runner.clone(), herdr_env());
+            let error = mux
+                .split_window(&reference(), &[], &argv(&["agent"]))
+                .unwrap_err();
+            assert!(matches!(
+                error.pane_cleanup(),
+                Some(crate::multiplexer::PaneCleanup::Unknown)
+            ));
+            drop(mux);
+            assert_eq!(runner.run_argvs().len(), 2);
+        }
     }
 }

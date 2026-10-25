@@ -188,7 +188,7 @@ fn configure_pipe(fd: BorrowedFd<'_>, started: Instant, timeout: Duration) -> Re
     loop {
         remaining(started, timeout)?;
         let result: io::Result<()> = (|| {
-            let flags = OFlag::from_bits_truncate(fcntl(fd, FcntlArg::F_GETFL)?);
+            let flags = OFlag::from_bits_retain(fcntl(fd, FcntlArg::F_GETFL)?);
             fcntl(fd, FcntlArg::F_SETFL(flags | OFlag::O_NONBLOCK))?;
             Ok(())
         })();
@@ -340,7 +340,7 @@ mod tests {
         fn new() -> Self {
             let serial = PROCESS_FIXTURE_LOCK
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                .expect("the process fixture lock is healthy");
             Self {
                 dir: tempfile::Builder::new()
                     .prefix(".process-test-")

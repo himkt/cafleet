@@ -17,7 +17,6 @@ pub(crate) const MESSAGE_COLUMNS: &str =
 pub(crate) const PENDING_PREVIEW: &str =
     "status_state='input_required' AND notified_at IS NULL AND from_member_id!=to_member_id";
 
-/// Read one full typed-column message row in the pinned key order.
 pub(crate) fn message_row(
     conn: &Connection,
     message_id: i64,
@@ -43,11 +42,9 @@ pub(crate) fn map_message_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Messa
     })
 }
 
-fn required_message_row(conn: &Connection, message_id: i64) -> Result<MessageRecord, CafleetError> {
-    message_row(conn, message_id)?.ok_or_else(|| CafleetError::InvalidStoredValue {
-        field: "messages.message_id".into(),
-        value: message_id.to_string(),
-    })
+pub fn get_message(conn: &Connection, message_id: i64) -> Result<MessageRecord, CafleetError> {
+    message_row(conn, message_id)?
+        .ok_or_else(|| CafleetError::Value(format!("Message {message_id} not found")))
 }
 
 fn sender_fleet(conn: &Connection, from_member_id: i64) -> Result<i64, CafleetError> {
@@ -61,17 +58,7 @@ fn sender_fleet(conn: &Connection, from_member_id: i64) -> Result<i64, CafleetEr
 pub fn send_message(
     conn: &mut Connection,
     from_member_id: i64,
-    to: &str,
-    text: &str,
-) -> Result<MessageRecord, CafleetError> {
-    crate::db::require_current(conn)?;
-    send_message_validated(conn, from_member_id, to, text)
-}
-
-pub(crate) fn send_message_validated(
-    conn: &mut Connection,
-    from_member_id: i64,
-    to: &str,
+    to_member_id: i64,
     text: &str,
 ) -> Result<MessageRecord, CafleetError> {
     let tx = conn
@@ -79,43 +66,39 @@ pub(crate) fn send_message_validated(
         .map_err(db_err)?;
     let fleet_id = sender_fleet(&tx, from_member_id)?;
     super::fleets::require_live_fleet(&tx, fleet_id)?;
-    let to_id: i64 = to
-        .parse()
-        .map_err(|_| CafleetError::Value(format!("Invalid destination format: {to}")))?;
     let recipient: Option<(i64, MemberStatus)> = tx
         .query_row(
             "SELECT fleet_id, status FROM members WHERE member_id=?1",
-            [to_id],
+            [to_member_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()
         .map_err(db_err)?;
     let Some((recipient_fleet, recipient_status)) = recipient else {
         return Err(CafleetError::Value(format!(
-            "Destination member not found: {to_id}"
+            "Destination member not found: {to_member_id}"
         )));
     };
     if recipient_status != MemberStatus::Active {
         return Err(CafleetError::Value(format!(
-            "Destination member not found: {to_id}"
+            "Destination member not found: {to_member_id}"
         )));
     }
     if recipient_fleet != fleet_id {
         return Err(CafleetError::Value(format!(
-            "members {from_member_id} and {to_id} are not in the same fleet."
+            "members {from_member_id} and {to_member_id} are not in the same fleet."
         )));
     }
 
     let now = format_utc(now_utc());
     // A self-send owes no keystroke, so it is settled at insert.
-    let notified_at = (to_id == from_member_id).then_some(&now);
-    tx.execute(
-        "INSERT INTO messages (from_member_id, to_member_id, created_at, status_state, status_timestamp, text, notified_at)
-         VALUES (?1, ?2, ?3, 'input_required', ?3, ?4, ?5)",
-        params![from_member_id, to_id, now, text, notified_at],
-    )
-    .map_err(db_err)?;
-    let message = required_message_row(&tx, tx.last_insert_rowid())?;
+    let notified_at = (to_member_id == from_member_id).then_some(&now);
+    let message = tx.query_row(
+        &format!("INSERT INTO messages (from_member_id, to_member_id, created_at, status_state, status_timestamp, text, notified_at)
+         VALUES (?1, ?2, ?3, 'input_required', ?3, ?4, ?5) RETURNING {MESSAGE_COLUMNS}"),
+        params![from_member_id, to_member_id, now, text, notified_at],
+        map_message_row,
+    ).map_err(db_err)?;
     tx.commit().map_err(db_err)?;
     Ok(message)
 }
@@ -384,14 +367,6 @@ fn select_listen_snapshot(
 }
 
 pub fn ack_message(conn: &mut Connection, message_id: i64) -> Result<MessageRecord, CafleetError> {
-    crate::db::require_current(conn)?;
-    ack_message_validated(conn, message_id)
-}
-
-pub(crate) fn ack_message_validated(
-    conn: &mut Connection,
-    message_id: i64,
-) -> Result<MessageRecord, CafleetError> {
     let now = format_utc(now_utc());
     let updated = conn
         .query_row(
@@ -420,13 +395,122 @@ pub(crate) fn ack_message_validated(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::broker;
+    use crate::broker::tests::{create_fleet, migrated_conn, register};
     use tempfile::TempDir;
 
-    use crate::broker;
-    use crate::broker::test_support as common;
-    use crate::broker::test_support::{create_fleet, migrated_conn, register};
-    use crate::error::CafleetError;
-    use crate::output::format_json;
+    #[test]
+    fn send_poll_show_and_strict_ack_preserve_the_complete_body() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet(&mut conn, "messages");
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
+        let text = format!("Unicode 世界\n{}\n\"quoted\" \u{1b}", "界".repeat(4096));
+        let first = send_message(&mut conn, director, worker, &text).unwrap();
+        let second = send_message(&mut conn, director, worker, "next").unwrap();
+        assert_eq!(first.text, text);
+        assert_eq!(
+            (first.from_member_id, first.to_member_id),
+            (director, worker)
+        );
+        assert_eq!(
+            first.status,
+            super::super::records::MessageStatus::InputRequired
+        );
+        assert_eq!(first.created_at, first.status_timestamp);
+        assert_eq!(get_message(&conn, first.message_id).unwrap(), first);
+        assert_eq!(
+            poll_messages(&conn, worker).unwrap(),
+            [second.clone(), first.clone()]
+        );
+        assert_eq!(notified_at(&conn, first.message_id), None);
+        let ack = ack_message(&mut conn, first.message_id).unwrap();
+        assert_eq!(ack.status, super::super::records::MessageStatus::Completed);
+        assert!(ack.status_timestamp >= first.status_timestamp);
+        assert_eq!(ack.text, text);
+        assert!(ack_message(&mut conn, first.message_id).is_err());
+        assert_eq!(poll_messages(&conn, worker).unwrap(), [second]);
+        assert!(get_message(&conn, 999).is_err());
+        assert!(ack_message(&mut conn, 999).is_err());
+        assert!(poll_messages(&conn, 999).is_err());
+    }
+
+    #[test]
+    fn self_and_pending_placement_messages_have_distinct_preview_states() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet(&mut conn, "preview");
+        let pending = register(&mut conn, fleet, "pending", None);
+        let own = send_message(&mut conn, director, director, "self").unwrap();
+        let assignment = send_message(&mut conn, director, pending, "pending").unwrap();
+        assert_eq!(
+            notified_at(&conn, own.message_id),
+            Some(own.created_at.clone())
+        );
+        assert_eq!(notified_at(&conn, assignment.message_id), None);
+        assert_eq!(get_message(&conn, own.message_id).unwrap(), own);
+        assert_eq!(poll_messages(&conn, pending).unwrap(), [assignment]);
+    }
+
+    #[test]
+    fn sending_requires_active_same_fleet_members_and_a_live_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet(&mut conn, "alpha");
+        let worker = register(&mut conn, fleet, "worker", None);
+        let (_, other) = create_fleet(&mut conn, "other");
+        for (sender, recipient) in [(999, worker), (director, 999), (director, other)] {
+            assert!(matches!(
+                send_message(&mut conn, sender, recipient, "invalid"),
+                Err(CafleetError::Value(_))
+            ));
+        }
+        broker::deregister_member(&mut conn, worker).unwrap();
+        assert!(send_message(&mut conn, director, worker, "inactive recipient").is_err());
+        assert!(send_message(&mut conn, worker, director, "inactive sender").is_err());
+        conn.execute(
+            "UPDATE fleets SET director_member_id=NULL WHERE fleet_id=?1",
+            [fleet],
+        )
+        .unwrap();
+        assert!(send_message(&mut conn, director, director, "missing root").is_err());
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM messages", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn corrupt_required_message_values_surface_their_decode_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (_, director) = create_fleet(&mut conn, "corrupt");
+        let message = send_message(&mut conn, director, director, "body").unwrap();
+        conn.execute(
+            "UPDATE messages SET status_state='corrupt' WHERE message_id=?1",
+            [message.message_id],
+        )
+        .unwrap();
+        for result in [
+            get_message(&conn, message.message_id),
+            ack_message(&mut conn, message.message_id),
+        ] {
+            assert!(
+                matches!(result, Err(CafleetError::InvalidStoredValue { field, value }) if field == "messages.status_state" && value == "corrupt")
+            );
+        }
+        assert!(poll_messages(&conn, director).unwrap().is_empty());
+        conn.execute(
+            "UPDATE messages SET status_state='input_required', text=X'00' WHERE message_id=?1",
+            [message.message_id],
+        )
+        .unwrap();
+        assert!(get_message(&conn, message.message_id).is_err());
+        assert!(poll_messages(&conn, director).is_err());
+    }
 
     #[test]
     fn an_ack_that_loses_the_pending_transition_reports_completed() {
@@ -440,8 +524,7 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (fleet, director) = create_fleet(&mut conn, "ack-race");
         let member = register(&mut conn, fleet, "worker", Some("%2"));
-        let message =
-            broker::send_message(&mut conn, director, &member.to_string(), "ready").unwrap();
+        let message = broker::send_message(&mut conn, director, member, "ready").unwrap();
         let path = conn.path().unwrap().to_owned();
         let won = Arc::new(AtomicBool::new(false));
         let observed = won.clone();
@@ -479,161 +562,6 @@ mod tests {
     }
 
     #[test]
-    fn send_message_persists_the_full_row_and_leaves_the_preview_owed() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
-        let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
-
-        let text = "界".repeat(250);
-        let sent =
-            broker::send_message(&mut conn, director_id, &member_id.to_string(), &text).unwrap();
-        let message = crate::presentation::message(&sent);
-        let message_id = sent.message_id;
-        let ts = sent.created_at.clone();
-        let expected = format!(
-            r#"{{"message_id":{message_id},"from_member_id":{director_id},"to_member_id":{member_id},"created_at":"{ts}","status_state":"input_required","status_timestamp":"{ts}","text":"{text}"}}"#
-        );
-        assert_eq!(format_json(&message), expected);
-
-        let stored = broker::get_message(&conn, message_id).unwrap();
-        assert_eq!(crate::presentation::message(&stored), message);
-        assert_eq!(stored.text, text);
-        assert_eq!(
-            notified_at(&conn, message_id),
-            None,
-            "the preview is owed from the insert"
-        );
-    }
-
-    #[test]
-    fn a_self_send_is_settled_at_insert_and_a_paneless_send_persists() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
-        let pending_id = register(&mut conn, fleet_id, "pending", None);
-
-        let self_send =
-            broker::send_message(&mut conn, director_id, &director_id.to_string(), "note").unwrap();
-        assert_eq!(
-            notified_at(&conn, self_send.message_id),
-            Some(self_send.created_at.clone()),
-            "a self-send owes no keystroke"
-        );
-
-        let pending_send =
-            broker::send_message(&mut conn, director_id, &pending_id.to_string(), "hi").unwrap();
-        for (sent, recipient, text) in [
-            (&self_send, director_id, "note"),
-            (&pending_send, pending_id, "hi"),
-        ] {
-            let stored = broker::get_message(&conn, sent.message_id).unwrap();
-            assert_eq!(stored.from_member_id, director_id);
-            assert_eq!(stored.to_member_id, recipient);
-            assert_eq!(stored.text, text);
-            assert_eq!(stored.status.as_str(), "input_required");
-            assert_eq!(
-                crate::presentation::message(&stored),
-                crate::presentation::message(sent)
-            );
-        }
-        assert_ne!(self_send.message_id, pending_send.message_id);
-    }
-
-    #[test]
-    fn send_message_rejects_a_non_integer_destination() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (_, director_id) = create_fleet(&mut conn, "alpha");
-        let err = broker::send_message(&mut conn, director_id, "abc", "hi")
-            .expect_err("a non-integer destination must error");
-        assert!(matches!(err, CafleetError::Value(_)));
-        assert_eq!(err.message(), "Invalid destination format: abc");
-    }
-
-    #[test]
-    fn send_message_rejects_an_inactive_sender() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let _ = create_fleet(&mut conn, "alpha");
-        let err = broker::send_message(&mut conn, 999, "1", "hi")
-            .expect_err("an unknown sender must error");
-        assert!(matches!(err, CafleetError::Value(_)));
-        assert_eq!(err.message(), "Sender member not found or not active: 999");
-    }
-
-    #[test]
-    fn send_message_rejects_a_missing_destination() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (_, director_id) = create_fleet(&mut conn, "alpha");
-        let err = broker::send_message(&mut conn, director_id, "999", "hi")
-            .expect_err("a missing destination must error");
-        assert!(matches!(err, CafleetError::Value(_)));
-        assert_eq!(err.message(), "Destination member not found: 999");
-    }
-
-    #[test]
-    fn send_message_rejects_a_cross_fleet_destination() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (_, director_a) = create_fleet(&mut conn, "alpha");
-        let (fleet_b, _) = create_fleet(&mut conn, "beta");
-        let stranger_id = register(&mut conn, fleet_b, "stranger", Some("%5"));
-        let err = broker::send_message(&mut conn, director_a, &stranger_id.to_string(), "hi")
-            .expect_err("a cross-fleet destination must error");
-        assert!(matches!(err, CafleetError::Value(_)));
-        assert_eq!(
-            err.message(),
-            format!("members {director_a} and {stranger_id} are not in the same fleet.")
-        );
-    }
-
-    #[test]
-    fn poll_returns_only_the_recipients_unacked_messages_newest_first() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
-        let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
-
-        let first = common::send(&mut conn, director_id, member_id, "one");
-        let second = common::send(&mut conn, director_id, member_id, "two");
-        let first_id = first["message"]["message_id"].as_i64().unwrap();
-        let second_id = second["message"]["message_id"].as_i64().unwrap();
-
-        let pending = broker::poll_messages(&conn, member_id)
-            .map(|records| {
-                records
-                    .iter()
-                    .map(crate::presentation::message)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap();
-        assert_eq!(pending.len(), 2);
-        assert_eq!(pending[0]["message_id"], second_id, "newest first");
-        assert_eq!(pending[1]["message_id"], first_id);
-
-        broker::ack_message(&mut conn, first_id).unwrap();
-        let pending = broker::poll_messages(&conn, member_id)
-            .map(|records| {
-                records
-                    .iter()
-                    .map(crate::presentation::message)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap();
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0]["message_id"], second_id);
-
-        common::send(&mut conn, member_id, director_id, "outgoing");
-        let pending = broker::poll_messages(&conn, member_id).unwrap();
-        assert_eq!(
-            pending.iter().map(|row| row.message_id).collect::<Vec<_>>(),
-            [second_id]
-        );
-    }
-
-    #[test]
     fn poll_scopes_by_recipient_and_orders_by_status_timestamp_then_descending_id() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
@@ -643,13 +571,13 @@ mod tests {
         let mut ids = Vec::new();
         for text in ["first", "second", "third"] {
             ids.push(
-                broker::send_message(&mut conn, director, &worker.to_string(), text)
+                broker::send_message(&mut conn, director, worker, text)
                     .unwrap()
                     .message_id,
             );
         }
-        broker::send_message(&mut conn, director, &peer.to_string(), "other inbox").unwrap();
-        broker::send_message(&mut conn, worker, &director.to_string(), "outgoing").unwrap();
+        broker::send_message(&mut conn, director, peer, "other inbox").unwrap();
+        broker::send_message(&mut conn, worker, director, "outgoing").unwrap();
         conn.execute("UPDATE messages SET status_timestamp='2026-02-01T00:00:00+00:00',created_at='2020-01-01T00:00:00+00:00' WHERE message_id IN (?1,?2)",
             rusqlite::params![ids[0], ids[1]]).unwrap();
         conn.execute("UPDATE messages SET status_timestamp='2026-01-01T00:00:00+00:00',created_at='2099-01-01T00:00:00+00:00' WHERE message_id=?1", [ids[2]]).unwrap();
@@ -660,67 +588,7 @@ mod tests {
         );
         assert!(rows.iter().all(|row| row.to_member_id == worker));
     }
-    #[test]
-    fn poll_rejects_an_unknown_member() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let _ = create_fleet(&mut conn, "alpha");
-        let err = broker::poll_messages(&conn, 999)
-            .map(|records| {
-                records
-                    .iter()
-                    .map(crate::presentation::message)
-                    .collect::<Vec<_>>()
-            })
-            .expect_err("an unknown member must error");
-        assert!(matches!(err, CafleetError::Value(_)));
-        assert_eq!(err.message(), "Member 999 not found");
-    }
 
-    #[test]
-    fn ack_transitions_the_message_and_restamps_status_timestamp() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
-        let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
-        let sent = common::send(&mut conn, director_id, member_id, "hi");
-        let message_id = sent["message"]["message_id"].as_i64().unwrap();
-        let sent_ts = sent["message"]["status_timestamp"]
-            .as_str()
-            .unwrap()
-            .to_string();
-
-        let acked = broker::ack_message(&mut conn, message_id)
-            .map(|record| crate::presentation::message_envelope(&record))
-            .unwrap();
-        let message = &acked["message"];
-        assert_eq!(message["status_state"], "completed");
-        let acked_ts = message["status_timestamp"].as_str().unwrap();
-        assert!(
-            acked_ts >= sent_ts.as_str(),
-            "status_timestamp restamped on ack"
-        );
-    }
-
-    #[test]
-    fn ack_error_surfaces_are_pinned() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
-        let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
-        let sent = common::send(&mut conn, director_id, member_id, "hi");
-        let message_id = sent["message"]["message_id"].as_i64().unwrap();
-
-        let err = broker::ack_message(&mut conn, 999).expect_err("missing message");
-        assert!(matches!(err, CafleetError::Value(_)));
-        assert_eq!(err.message(), "Message 999 not found");
-
-        broker::ack_message(&mut conn, message_id).unwrap();
-        let err = broker::ack_message(&mut conn, message_id)
-            .expect_err("a completed message cannot be acked again");
-        assert!(matches!(err, CafleetError::Value(_)));
-        assert_eq!(err.message(), "Cannot ACK message in state completed");
-    }
     #[test]
     fn send_failure_rolls_back_the_message_without_leaving_an_identifier_gap() {
         let dir = TempDir::new().unwrap();
@@ -732,8 +600,7 @@ mod tests {
             BEGIN SELECT RAISE(ABORT, 'injected message failure'); END;",
         )
         .unwrap();
-        let error =
-            broker::send_message(&mut conn, director, &worker.to_string(), "first").unwrap_err();
+        let error = broker::send_message(&mut conn, director, worker, "first").unwrap_err();
         assert!(
             error.message().contains("injected message failure"),
             "{error}"
@@ -745,8 +612,7 @@ mod tests {
             0
         );
         conn.execute_batch("DROP TRIGGER reject_message").unwrap();
-        let message =
-            broker::send_message(&mut conn, director, &worker.to_string(), "second").unwrap();
+        let message = broker::send_message(&mut conn, director, worker, "second").unwrap();
         assert_eq!(message.message_id, 1);
     }
 
@@ -756,16 +622,14 @@ mod tests {
         let mut conn = migrated_conn(&dir);
         let (fleet, director) = create_fleet(&mut conn, "selection");
         let worker = register(&mut conn, fleet, "worker", Some("%2"));
-        let self_message =
-            broker::send_message(&mut conn, worker, &worker.to_string(), "self").unwrap();
+        let self_message = broker::send_message(&mut conn, worker, worker, "self").unwrap();
         conn.execute(
             "UPDATE messages SET notified_at=NULL WHERE message_id=?1",
             [self_message.message_id],
         )
         .unwrap();
-        let previous =
-            broker::send_message(&mut conn, director, &worker.to_string(), "previous").unwrap();
-        let next = broker::send_message(&mut conn, director, &worker.to_string(), "next").unwrap();
+        let previous = broker::send_message(&mut conn, director, worker, "previous").unwrap();
+        let next = broker::send_message(&mut conn, director, worker, "next").unwrap();
         let excluded = std::collections::BTreeSet::from([previous.message_id]);
         assert_eq!(
             broker::oldest_pending_preview(&conn, worker, &excluded)
@@ -805,7 +669,7 @@ mod tests {
         let mut ids = Vec::new();
         for text in ["acked", "notified", "oldest", "newest"] {
             ids.push(
-                broker::send_message(&mut conn, director, &worker.to_string(), text)
+                broker::send_message(&mut conn, director, worker, text)
                     .unwrap()
                     .message_id,
             );

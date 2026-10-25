@@ -97,10 +97,42 @@ pub struct MessageRecord {
     pub text: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FleetRecord {
+    pub fleet_id: i64,
+    pub name: Option<String>,
+    pub created_at: String,
+    pub deleted_at: Option<String>,
+    pub director_member_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FleetSummary {
+    pub fleet_id: i64,
+    pub name: Option<String>,
+    pub created_at: String,
+    pub director_member_id: Option<i64>,
+    pub member_count: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreatedFleet {
+    pub fleet_id: i64,
+    pub name: Option<String>,
+    pub created_at: String,
+    pub director: MemberRecord,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeletedFleet {
+    pub fleet_id: i64,
+    pub deregistered_count: usize,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::broker::{self, test_support as common};
+    use crate::broker::{self, tests as common};
 
     fn fixture() -> (tempfile::TempDir, rusqlite::Connection, i64, i64) {
         let dir = tempfile::Builder::new()
@@ -139,7 +171,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            matches!(broker::send_message(&mut conn, director, &worker.to_string(), "pending assignment"),
+            matches!(broker::send_message(&mut conn, director, worker, "pending assignment"),
             Err(CafleetError::InvalidStoredValue { field, value })
             if field == "members.status" && value == "corrupt-recipient")
         );
@@ -147,5 +179,21 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))
             .unwrap();
         assert_eq!(messages, 0);
+    }
+
+    #[test]
+    fn invalid_required_string_storage_returns_sql_conversion_failures() {
+        for damage in [
+            "UPDATE members SET name=X'00' WHERE member_id=1",
+            "UPDATE member_placements SET mux_session=X'00' WHERE member_id=1",
+        ] {
+            let (_dir, conn, fleet, director) = fixture();
+            conn.execute_batch(damage).unwrap();
+            assert!(
+                broker::get_member(&conn, director, fleet).is_err(),
+                "{damage}"
+            );
+            assert!(broker::list_members(&conn, fleet).is_err(), "{damage}");
+        }
     }
 }

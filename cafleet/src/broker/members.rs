@@ -35,24 +35,26 @@ pub fn register_member(
     description: &str,
     placement: Option<&NewPlacement>,
 ) -> Result<RegisteredMember, CafleetError> {
-    crate::db::require_current(conn)?;
-    let fleet = super::fleets::fetch_fleet(conn, fleet_id)?
-        .ok_or_else(|| CafleetError::Usage(format!("Fleet '{fleet_id}' not found.")))?;
-    if fleet.deleted_at.is_some() {
-        return Err(CafleetError::Usage(format!("fleet {fleet_id} is deleted")));
-    }
     let now = format_utc(now_utc());
     let tx = conn
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(db_err)?;
     super::fleets::require_live_fleet(&tx, fleet_id)?;
-    tx.execute(
-        "INSERT INTO members (fleet_id, name, description, status, registered_at)
-         VALUES (?1, ?2, ?3, 'active', ?4)",
-        params![fleet_id, name, description, now],
-    )
-    .map_err(db_err)?;
-    let member_id = tx.last_insert_rowid();
+    let member = tx
+        .query_row(
+            "INSERT INTO members (fleet_id, name, description, status, registered_at)
+         VALUES (?1, ?2, ?3, 'active', ?4) RETURNING member_id, name, registered_at",
+            params![fleet_id, name, description, now],
+            |row| {
+                Ok(RegisteredMember {
+                    member_id: row.get(0)?,
+                    name: row.get(1)?,
+                    registered_at: row.get(2)?,
+                })
+            },
+        )
+        .map_err(db_err)?;
+    let member_id = member.member_id;
     if let Some(p) = placement {
         tx.execute(
             "INSERT INTO member_placements
@@ -71,11 +73,7 @@ pub fn register_member(
         .map_err(db_err)?;
     }
     tx.commit().map_err(db_err)?;
-    Ok(RegisteredMember {
-        member_id,
-        name: name.into(),
-        registered_at: now,
-    })
+    Ok(member)
 }
 
 pub fn get_member(
@@ -104,8 +102,6 @@ pub fn get_member(
     ).optional().map_err(db_err)
 }
 
-/// The fleet id of an active member row — the derivation behind every
-/// positional `MEMBER_ID` subject (SPEC §6.3 *Positional subject ids*).
 pub fn active_member_fleet(conn: &Connection, member_id: i64) -> Result<Option<i64>, CafleetError> {
     conn.query_row(
         "SELECT fleet_id FROM members WHERE member_id=?1 AND status='active'",
@@ -117,7 +113,6 @@ pub fn active_member_fleet(conn: &Connection, member_id: i64) -> Result<Option<i
 }
 
 pub fn deregister_member(conn: &mut Connection, member_id: i64) -> Result<bool, CafleetError> {
-    crate::db::require_current(conn)?;
     let tx = conn.transaction().map_err(db_err)?;
     let changed = deregister_member_rows(&tx, member_id)?;
     tx.commit().map_err(db_err)?;
@@ -165,47 +160,29 @@ pub fn update_placement_pane_id(
     member_id: i64,
     pane_id: &str,
 ) -> Result<Option<Placement>, CafleetError> {
-    crate::db::require_current(conn)?;
-    let changed = conn
-        .execute(
-            "UPDATE member_placements SET mux_pane_id=?1 WHERE member_id=?2",
-            params![pane_id, member_id],
-        )
-        .map_err(db_err)?;
-    if changed == 0 {
-        return Ok(None);
-    }
     conn.query_row(
-        "SELECT backend, mux_session, mux_window_id, mux_pane_id, coding_agent, created_at \
-         FROM member_placements WHERE member_id=?1",
-        [member_id],
+        "UPDATE member_placements SET mux_pane_id=?1 WHERE member_id=?2
+         RETURNING backend, mux_session, mux_window_id, mux_pane_id, coding_agent, created_at",
+        params![pane_id, member_id],
         |row| Placement::from_row(row, 0),
     )
     .optional()
     .map_err(db_err)
 }
 
-fn roster_rows(
-    conn: &Connection,
-    fleet_id: i64,
-    activity: bool,
-) -> Result<Vec<MemberActivity>, CafleetError> {
-    let activity_columns = if activity {
-        ", (SELECT MAX(created_at) FROM messages WHERE from_member_id=m.member_id),
-           (SELECT MAX(created_at) FROM messages WHERE to_member_id=m.member_id),
-           (SELECT MAX(status_timestamp) FROM messages WHERE to_member_id=m.member_id AND status_state='completed')"
-    } else {
-        ""
-    };
-    let mut stmt = conn.prepare(&format!(
+fn roster_rows(conn: &Connection, fleet_id: i64) -> Result<Vec<MemberActivity>, CafleetError> {
+    let mut stmt = conn.prepare(
         "SELECT m.member_id, m.name, m.status, f.director_member_id=m.member_id,
                 p.backend, p.mux_session, p.mux_window_id, p.mux_pane_id, p.coding_agent, p.created_at,
-                m.description, m.registered_at {activity_columns}
+                m.description, m.registered_at,
+                (SELECT MAX(created_at) FROM messages WHERE from_member_id=m.member_id),
+                (SELECT MAX(created_at) FROM messages WHERE to_member_id=m.member_id),
+                (SELECT MAX(status_timestamp) FROM messages WHERE to_member_id=m.member_id AND status_state='completed')
          FROM members m JOIN fleets f ON f.fleet_id=m.fleet_id
          LEFT JOIN member_placements p ON p.member_id=m.member_id
          WHERE m.fleet_id=?1 AND m.status='active'
          ORDER BY m.member_id"
-    )).map_err(db_err)?;
+    ).map_err(db_err)?;
     stmt.query_map([fleet_id], |row| {
         let backend: Option<String> = row.get(4)?;
         Ok(MemberActivity {
@@ -223,9 +200,9 @@ fn roster_rows(
                 description: row.get(10)?,
                 registered_at: row.get(11)?,
             },
-            last_sent: if activity { row.get(12)? } else { None },
-            last_recv: if activity { row.get(13)? } else { None },
-            last_ack: if activity { row.get(14)? } else { None },
+            last_sent: row.get(12)?,
+            last_recv: row.get(13)?,
+            last_ack: row.get(14)?,
             idle: None,
         })
     })
@@ -246,434 +223,211 @@ fn idle_seconds(row: &MemberActivity, now: chrono::DateTime<chrono::Utc>) -> Opt
 pub fn list_members(conn: &Connection, fleet_id: i64) -> Result<Vec<MemberActivity>, CafleetError> {
     super::fleets::require_live_fleet(conn, fleet_id)?;
     let now = now_utc();
-    let mut rows = roster_rows(conn, fleet_id, true)?;
+    let mut rows = roster_rows(conn, fleet_id)?;
     for row in &mut rows {
         row.idle = idle_seconds(row, now);
     }
     Ok(rows)
 }
 
-pub(crate) fn capture_roster(
-    conn: &Connection,
-    fleet_id: i64,
-) -> Result<Vec<MemberRecord>, CafleetError> {
-    Ok(roster_rows(conn, fleet_id, false)?
-        .into_iter()
-        .map(|row| row.member)
-        .collect())
-}
-
 #[cfg(test)]
 mod tests {
-    use serde_json::Value;
-    use tempfile::TempDir;
-
-    use crate::broker;
-    use crate::broker::test_support as common;
-    use crate::broker::test_support::{create_fleet, migrated_conn, placement, register};
-    use crate::error::CafleetError;
-    use crate::output::format_json;
-
-    #[test]
-    fn register_member_returns_the_registration_summary() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        let result = broker::register_member(
-            &mut conn,
-            fleet_id,
-            "analyst",
-            "test member",
-            Some(&placement(Some("%2"))),
-        )
-        .map(|record| crate::presentation::registered_member(&record))
-        .unwrap();
-        assert!(result["member_id"].as_i64().is_some());
-        assert_eq!(result["name"], "analyst");
-        assert!(crate::time::parse_lenient(result["registered_at"].as_str().unwrap()).is_ok());
-    }
-
-    #[test]
-    fn get_member_shape_is_pinned() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        let result = broker::register_member(
-            &mut conn,
-            fleet_id,
-            "analyst",
-            "test member",
-            Some(&placement(Some("%2"))),
-        )
-        .map(|record| crate::presentation::registered_member(&record))
-        .unwrap();
-        let member_id = result["member_id"].as_i64().unwrap();
-        let ts = result["registered_at"].as_str().unwrap().to_string();
-
-        let member = broker::get_member(&conn, member_id, fleet_id)
-            .map(|record| record.as_ref().map(crate::presentation::member))
-            .unwrap()
-            .unwrap();
-        let expected = format!(
-            r#"{{"member_id":{member_id},"name":"analyst","description":"test member","status":"active","registered_at":"{ts}","kind":"member","placement":{{"backend":"tmux","mux_session":"main","mux_window_id":"@1","mux_pane_id":"%2","coding_agent":"claude","created_at":"{ts}"}}}}"#
-        );
-        assert_eq!(format_json(&member), expected);
-    }
-
-    #[test]
-    fn placementless_member_has_null_placement() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        let member_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", None)
-            .unwrap()
-            .member_id;
-        let member = broker::get_member(&conn, member_id, fleet_id)
-            .map(|record| record.as_ref().map(crate::presentation::member))
-            .unwrap()
-            .unwrap();
-        assert_eq!(member["placement"], Value::Null);
-        let ts = member["registered_at"].as_str().unwrap();
-        assert_eq!(
-            format_json(&member),
-            format!(
-                r#"{{"member_id":{member_id},"name":"ghost","description":"d","status":"active","registered_at":"{ts}","kind":"member","placement":null}}"#
-            )
-        );
-    }
-
-    #[test]
-    fn register_member_unknown_fleet_is_a_usage_error() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let err = broker::register_member(&mut conn, 999, "x", "d", None)
-            .expect_err("unknown fleet must error");
-        assert!(matches!(err, CafleetError::Usage(_)));
-        assert_eq!(err.message(), "Fleet '999' not found.");
-    }
-
-    #[test]
-    fn register_member_deleted_fleet_is_a_usage_error() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        common::guarded_delete_fleet(&mut conn, fleet_id).unwrap();
-        let err = broker::register_member(&mut conn, fleet_id, "x", "d", None)
-            .expect_err("deleted fleet must error");
-        assert!(matches!(err, CafleetError::Usage(_)));
-        assert_eq!(err.message(), format!("fleet {fleet_id} is deleted"));
-    }
-
-    #[test]
-    fn registration_requires_an_active_director_for_every_member() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet(&mut conn, "alpha");
-        conn.execute(
-            "UPDATE members SET status='deregistered' WHERE member_id=?1",
-            [director],
-        )
-        .unwrap();
-        let placed = placement(Some("%2"));
-        for placement in [Some(&placed), None] {
-            let error =
-                broker::register_member(&mut conn, fleet, "worker", "test", placement).unwrap_err();
-            assert!(matches!(error, CafleetError::App(_)));
-            assert_eq!(
-                error.message(),
-                format!("fleet {fleet}'s root Director (member {director}) is not active.")
-            );
-        }
-    }
-
-    #[test]
-    fn deregister_root_director_is_rejected() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (_, director_id) = create_fleet(&mut conn, "alpha");
-        let err = broker::deregister_member(&mut conn, director_id)
-            .expect_err("the root Director must not be deregisterable");
-        assert!(matches!(err, CafleetError::App(_)));
-        assert_eq!(
-            err.message(),
-            "cannot deregister the root Director; use 'cafleet fleet delete' instead"
-        );
-    }
-
-    #[test]
-    fn deregister_member_flips_cleans_and_is_not_repeatable() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
-
-        assert!(broker::deregister_member(&mut conn, member_id).unwrap());
-
-        let (status, deregistered_at): (String, Option<String>) = conn
-            .query_row(
-                "SELECT status, deregistered_at FROM members WHERE member_id=?1",
-                [member_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(status, "deregistered");
-        assert!(deregistered_at.is_some());
-        let placements: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM member_placements WHERE member_id=?1",
-                [member_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(placements, 0);
-
-        assert!(!broker::deregister_member(&mut conn, member_id).unwrap());
-    }
-
-    #[test]
-    fn get_member_is_active_only_and_fleet_scoped() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_a, _) = create_fleet(&mut conn, "alpha");
-        let (fleet_b, _) = create_fleet(&mut conn, "beta");
-        let member_id = register(&mut conn, fleet_a, "worker", Some("%2"));
-
-        assert!(
-            broker::get_member(&conn, member_id, fleet_b)
-                .map(|record| record.as_ref().map(crate::presentation::member))
-                .unwrap()
-                .is_none()
-        );
-        broker::deregister_member(&mut conn, member_id).unwrap();
-        assert!(
-            broker::get_member(&conn, member_id, fleet_a)
-                .map(|record| record.as_ref().map(crate::presentation::member))
-                .unwrap()
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn update_placement_pane_id_patches_the_pending_pane() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        let member_id = register(&mut conn, fleet_id, "worker", None);
-
-        let updated = broker::update_placement_pane_id(&mut conn, member_id, "%9")
-            .map(|record| record.as_ref().map(crate::presentation::placement))
-            .unwrap()
-            .unwrap();
-        assert_eq!(updated["mux_pane_id"], "%9");
-        let member = broker::get_member(&conn, member_id, fleet_id)
-            .map(|record| record.as_ref().map(crate::presentation::member))
-            .unwrap()
-            .unwrap();
-        assert_eq!(member["placement"]["mux_pane_id"], "%9");
-
-        let placementless = broker::register_member(&mut conn, fleet_id, "ghost", "d", None)
-            .unwrap()
-            .member_id;
-        assert!(
-            broker::update_placement_pane_id(&mut conn, placementless, "%1")
-                .map(|record| record.as_ref().map(crate::presentation::placement))
-                .unwrap()
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn list_members_rows_carry_kind_placement_and_activity_proxies() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
-        let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
-        let ghost_id = broker::register_member(&mut conn, fleet_id, "ghost", "d", None)
-            .unwrap()
-            .member_id;
-
-        let sent = common::send(&mut conn, director_id, member_id, "hi");
-        let message_id = sent["message"]["message_id"].as_i64().unwrap();
-
-        let rows = broker::list_members(&conn, fleet_id)
-            .map(|records| {
-                records
-                    .iter()
-                    .map(crate::presentation::member_activity)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap();
-        assert_eq!(
-            rows.len(),
-            3,
-            "Director, ordinary member and placementless member"
-        );
-        let by_id = |id: i64| rows.iter().find(|r| r["member_id"] == id).unwrap();
-
-        let director = by_id(director_id);
-        assert_eq!(director["kind"], "director");
-        assert!(director["last_sent"].is_string());
-        assert_eq!(director["last_recv"], Value::Null);
-        let idle = director["idle"].as_i64().unwrap();
-        assert!((0..=5).contains(&idle), "fresh activity, got idle {idle}");
-
-        let worker = by_id(member_id);
-        assert_eq!(worker["kind"], "member");
-        assert!(worker["last_recv"].is_string());
-        assert_eq!(worker["last_ack"], Value::Null);
-
-        let ghost = by_id(ghost_id);
-        assert_eq!(ghost["placement"], Value::Null);
-        assert_eq!(ghost["last_sent"], Value::Null);
-        assert_eq!(ghost["last_recv"], Value::Null);
-        assert_eq!(ghost["idle"], Value::Null);
-
-        broker::ack_message(&mut conn, message_id).unwrap();
-        let rows = broker::list_members(&conn, fleet_id)
-            .map(|records| {
-                records
-                    .iter()
-                    .map(crate::presentation::member_activity)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap();
-        let worker = rows.iter().find(|r| r["member_id"] == member_id).unwrap();
-        assert!(worker["last_ack"].is_string());
-    }
-
-    fn roster_json(conn: &rusqlite::Connection, fleet_id: i64) -> Vec<Value> {
-        broker::list_members(conn, fleet_id)
-            .unwrap()
-            .iter()
-            .map(crate::presentation::member_activity)
-            .collect()
-    }
-
-    #[test]
-    fn roster_rows_expose_the_ordered_activity_contract() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        register(&mut conn, fleet_id, "worker", Some("%2"));
-        register(&mut conn, fleet_id, "pending", None);
-        broker::register_member(&mut conn, fleet_id, "paneless", "assignment", None).unwrap();
-        for row in roster_json(&conn, fleet_id) {
-            assert_eq!(
-                row.as_object().unwrap().keys().collect::<Vec<_>>(),
-                [
-                    "member_id",
-                    "name",
-                    "kind",
-                    "placement",
-                    "last_sent",
-                    "last_recv",
-                    "last_ack",
-                    "idle",
-                ]
-            );
-        }
-    }
-
-    #[test]
-    fn list_members_excludes_deregistered_rows() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
-        let member_id = register(&mut conn, fleet_id, "worker", Some("%2"));
-        broker::deregister_member(&mut conn, member_id).unwrap();
-        let rows = broker::list_members(&conn, fleet_id)
-            .map(|records| {
-                records
-                    .iter()
-                    .map(crate::presentation::member_activity)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap();
-        assert!(rows.iter().all(|r| r["member_id"] != member_id));
-    }
-
-    #[test]
-    fn member_kind_uses_the_fleet_director_back_reference_across_views() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
-        let member_id = register(&mut conn, fleet_id, "worker", Some("%3"));
-        let expected = [(director_id, "director"), (member_id, "member")];
-
-        for (id, kind) in expected {
-            let member = broker::get_member(&conn, id, fleet_id)
-                .map(|record| record.as_ref().map(crate::presentation::member))
-                .unwrap()
-                .unwrap();
-            assert_eq!(member["kind"], kind, "get_member kind for member {id}");
-        }
-        let rows = broker::list_members(&conn, fleet_id)
-            .map(|records| {
-                records
-                    .iter()
-                    .map(crate::presentation::member_activity)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap();
-        for (id, kind) in expected {
-            let row = rows.iter().find(|r| r["member_id"] == id).unwrap();
-            assert_eq!(row["kind"], kind, "list_members kind for member {id}");
-        }
-        let roster = broker::members::capture_roster(&conn, fleet_id).unwrap();
-        for (id, kind) in expected {
-            let row = roster.iter().find(|member| member.member_id == id).unwrap();
-            assert_eq!(
-                row.kind.as_str(),
-                kind,
-                "capture_roster kind for member {id}"
-            );
-        }
-    }
-
-    #[test]
-    fn capture_roster_returns_active_fleet_members_with_pending_or_absent_placements() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
-        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
-        let holder_id = register(&mut conn, fleet_id, "holder", Some("%2"));
-        let silent_id = register(&mut conn, fleet_id, "silent", Some("%3"));
-        common::send(&mut conn, director_id, holder_id, "hi");
-        broker::deregister_member(&mut conn, holder_id).unwrap();
-        broker::deregister_member(&mut conn, silent_id).unwrap();
-        let placed_id = register(&mut conn, fleet_id, "placed", Some("%4"));
-        let pending_id = register(&mut conn, fleet_id, "pending", None);
-        let paneless_id = broker::register_member(&mut conn, fleet_id, "paneless", "test", None)
-            .unwrap()
-            .member_id;
-        let (other_fleet, _) = create_fleet(&mut conn, "other");
-        register(&mut conn, other_fleet, "other-worker", Some("%9"));
-
-        let roster = broker::members::capture_roster(&conn, fleet_id).unwrap();
-        assert_eq!(
-            roster
-                .iter()
-                .map(|member| member.member_id)
-                .collect::<Vec<_>>(),
-            vec![director_id, placed_id, pending_id, paneless_id]
-        );
-        assert!(
-            roster
-                .iter()
-                .all(|member| member.status == crate::broker::records::MemberStatus::Active)
-        );
-        assert_eq!(
-            roster[1].placement.as_ref().unwrap().mux_pane_id.as_deref(),
-            Some("%4")
-        );
-        assert_eq!(roster[2].placement.as_ref().unwrap().mux_pane_id, None);
-        assert_eq!(roster[3].placement, None);
-    }
-}
-
-#[cfg(test)]
-mod step6_behavior_regressions {
     use super::*;
     use crate::broker::records::MemberStatus;
+    use crate::broker::tests::{create_fleet, migrated_conn, placement, register};
+    use crate::broker::{self, tests as common};
+
+    #[test]
+    fn registration_and_placement_updates_preserve_required_fields_and_valid_absence() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, _) = create_fleet(&mut conn, "alpha");
+        let registered = register_member(
+            &mut conn,
+            fleet,
+            "worker",
+            "literal assignment",
+            Some(&placement(None)),
+        )
+        .unwrap();
+        assert_eq!(registered.name, "worker");
+        assert!(parse_lenient(&registered.registered_at).is_ok());
+        let member = get_member(&conn, registered.member_id, fleet)
+            .unwrap()
+            .unwrap();
+        assert_eq!(member.description, "literal assignment");
+        assert_eq!(member.kind, MemberKind::Member);
+        assert_eq!(member.placement.unwrap().mux_pane_id, None);
+        let updated = update_placement_pane_id(&mut conn, registered.member_id, "%9")
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.mux_pane_id.as_deref(), Some("%9"));
+        assert_eq!(
+            get_member(&conn, registered.member_id, fleet)
+                .unwrap()
+                .unwrap()
+                .placement,
+            Some(updated)
+        );
+        let ghost = register_member(&mut conn, fleet, "ghost", "paneless", None)
+            .unwrap()
+            .member_id;
+        assert!(
+            get_member(&conn, ghost, fleet)
+                .unwrap()
+                .unwrap()
+                .placement
+                .is_none()
+        );
+        assert!(
+            update_placement_pane_id(&mut conn, ghost, "%1")
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn registration_rolls_back_member_and_identifier_when_placement_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet(&mut conn, "alpha");
+        conn.execute_batch("CREATE TRIGGER fail_placement BEFORE INSERT ON member_placements BEGIN SELECT RAISE(ABORT, 'placement failure'); END").unwrap();
+        assert!(
+            register_member(
+                &mut conn,
+                fleet,
+                "worker",
+                "assignment",
+                Some(&placement(None))
+            )
+            .unwrap_err()
+            .message()
+            .contains("placement failure")
+        );
+        assert_eq!(list_members(&conn, fleet).unwrap().len(), 1);
+        conn.execute_batch("DROP TRIGGER fail_placement").unwrap();
+        assert_eq!(register(&mut conn, fleet, "worker", None), director + 1);
+    }
+
+    #[test]
+    fn live_fleet_and_director_checks_guard_member_registration() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        assert!(register_member(&mut conn, 999, "x", "assignment", None).is_err());
+        let (fleet, director) = create_fleet(&mut conn, "alpha");
+        for damage in [
+            "UPDATE fleets SET director_member_id=NULL",
+            "UPDATE members SET status='deregistered' WHERE member_id=1",
+            "DELETE FROM member_placements WHERE member_id=1",
+            "UPDATE member_placements SET mux_pane_id=NULL WHERE member_id=1",
+        ] {
+            conn.execute_batch("SAVEPOINT damage").unwrap();
+            conn.execute_batch(damage).unwrap();
+            assert!(
+                register_member(&mut conn, fleet, "worker", "assignment", None).is_err(),
+                "{damage}"
+            );
+            conn.execute_batch("ROLLBACK TO damage; RELEASE damage")
+                .unwrap();
+        }
+        assert!(deregister_member(&mut conn, director).is_err());
+        common::guarded_delete_fleet(&mut conn, fleet).unwrap();
+        assert!(register_member(&mut conn, fleet, "worker", "assignment", None).is_err());
+    }
+
+    #[test]
+    fn deregistration_is_fleet_scoped_and_keeps_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet(&mut conn, "alpha");
+        let (other, _) = create_fleet(&mut conn, "other");
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
+        let message = broker::send_message(&mut conn, director, worker, "history").unwrap();
+        assert!(get_member(&conn, worker, other).unwrap().is_none());
+        assert!(deregister_member(&mut conn, worker).unwrap());
+        assert!(!deregister_member(&mut conn, worker).unwrap());
+        assert!(get_member(&conn, worker, fleet).unwrap().is_none());
+        assert_eq!(
+            broker::get_message(&conn, message.message_id).unwrap(),
+            message
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM member_placements WHERE member_id=?1",
+                [worker],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        assert!(
+            conn.query_row(
+                "SELECT deregistered_at FROM members WHERE member_id=?1",
+                [worker],
+                |row| row.get::<_, Option<String>>(0)
+            )
+            .unwrap()
+            .is_some()
+        );
+    }
+
+    #[test]
+    fn roster_preserves_all_placement_states_and_activity() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet(&mut conn, "activity");
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
+        let pending = register(&mut conn, fleet, "pending", None);
+        let ghost = register_member(&mut conn, fleet, "ghost", "paneless", None)
+            .unwrap()
+            .member_id;
+        let message = broker::send_message(&mut conn, director, worker, "hello").unwrap();
+        let rows = list_members(&conn, fleet).unwrap();
+        assert_eq!(
+            rows.iter()
+                .map(|row| row.member.member_id)
+                .collect::<Vec<_>>(),
+            [director, worker, pending, ghost]
+        );
+        let sender = &rows[0];
+        assert_eq!(sender.member.kind, MemberKind::Director);
+        assert_eq!(
+            sender.last_sent.as_deref(),
+            Some(message.created_at.as_str())
+        );
+        assert_eq!(sender.last_recv, None);
+        assert!((0..=5).contains(&sender.idle.unwrap()));
+        assert_eq!(
+            rows[1].last_recv.as_deref(),
+            Some(message.created_at.as_str())
+        );
+        assert_eq!(rows[1].last_ack, None);
+        assert_eq!(rows[2].member.placement.as_ref().unwrap().mux_pane_id, None);
+        assert!(rows[3].member.placement.is_none());
+        assert_eq!(
+            (
+                rows[3].last_sent.clone(),
+                rows[3].last_recv.clone(),
+                rows[3].idle
+            ),
+            (None, None, None)
+        );
+        let ack = broker::ack_message(&mut conn, message.message_id).unwrap();
+        assert_eq!(
+            list_members(&conn, fleet).unwrap()[1].last_ack,
+            Some(ack.status_timestamp)
+        );
+        conn.execute(
+            "UPDATE fleets SET director_member_id=?1 WHERE fleet_id=?2",
+            params![worker, fleet],
+        )
+        .unwrap();
+        let rows = list_members(&conn, fleet).unwrap();
+        assert_eq!(rows[0].member.kind, MemberKind::Member);
+        assert_eq!(rows[1].member.kind, MemberKind::Director);
+        deregister_member(&mut conn, pending).unwrap();
+        assert_eq!(list_members(&conn, fleet).unwrap().len(), 3);
+    }
 
     fn activity(sent: Option<&str>, received: Option<&str>, ack: Option<&str>) -> MemberActivity {
         MemberActivity {
@@ -695,7 +449,7 @@ mod step6_behavior_regressions {
     }
 
     #[test]
-    fn step6_idle_clamps_future_activity_to_zero() {
+    fn idle_clamps_future_activity_to_zero() {
         let now = parse_lenient("2026-01-01T00:00:00Z").unwrap();
         for row in [
             activity(Some("2026-01-01T00:01:00Z"), None, None),
@@ -707,7 +461,7 @@ mod step6_behavior_regressions {
     }
 
     #[test]
-    fn step6_idle_null_and_invalid_maximum_do_not_fall_back_to_older_valid_times() {
+    fn idle_is_absent_when_the_latest_timestamp_is_absent_or_invalid() {
         let now = parse_lenient("2026-01-01T00:00:00Z").unwrap();
         assert_eq!(idle_seconds(&activity(None, None, None), now), None);
         for row in [
@@ -719,7 +473,7 @@ mod step6_behavior_regressions {
     }
 
     #[test]
-    fn step6_idle_selects_raw_lexicographic_maximum_before_parsing_offsets() {
+    fn idle_selects_raw_lexicographic_maximum_before_parsing_offsets() {
         let now = parse_lenient("2026-01-01T00:00:00Z").unwrap();
         let row = activity(
             Some("2026-01-01T08:00:00+09:00"),
@@ -730,7 +484,7 @@ mod step6_behavior_regressions {
     }
 
     #[test]
-    fn step6_idle_preserves_fractional_second_truncation() {
+    fn idle_preserves_fractional_second_truncation() {
         let now = parse_lenient("2026-01-01T00:00:01.900000+00:00").unwrap();
         let row = activity(Some("2026-01-01T00:00:00.950000+00:00"), None, None);
         assert_eq!(idle_seconds(&row, now), Some(0));

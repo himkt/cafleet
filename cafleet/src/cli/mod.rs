@@ -1,8 +1,3 @@
-//! The `cafleet` command tree (SPEC §6.3, §10): clap parsing, the shared
-//! option surface, the schema-version and stale-assets guard prologues, and
-//! the per-group handlers. Orchestration glue only — it wires broker /
-//! multiplexer / output / coding-agent.
-
 pub(crate) mod creation;
 mod doctor;
 pub(crate) mod fleet;
@@ -12,16 +7,9 @@ mod message;
 mod setup;
 
 use clap::{Parser, Subcommand};
-use rusqlite::Connection;
 
 use crate::config::Settings;
-use crate::diagnosis::{self, AssetMode};
 use crate::error::CafleetError;
-
-pub(crate) struct InvocationHooks<'a> {
-    pub(crate) connect: &'a dyn Fn(&str) -> Result<Connection, CafleetError>,
-    pub(crate) asset_env: crate::config_dir::EnvLookup<'a>,
-}
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -38,11 +26,9 @@ struct CliArgs {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Migrate the database schema and install the coding-agent assets
-    /// (skills and presets).
+    /// Migrate storage and install embedded coding-agent skills/presets.
     Setup(setup::SetupArgs),
-    /// Print the four-section environment diagnosis (multiplexer, database,
-    /// coding agents, member permissions).
+    /// Report independent environment, database and backend checks.
     Doctor(doctor::DoctorArgs),
     /// Fleet lifecycle.
     #[command(subcommand)]
@@ -50,190 +36,60 @@ enum Command {
     /// Member lifecycle and pane interaction.
     #[command(subcommand)]
     Member(member::MemberCommand),
-    /// Message broker.
+    /// Durable point-to-point messages.
     #[command(subcommand)]
     Message(message::MessageCommand),
 }
 
-/// Parse the argv and run the selected command. clap's own parse errors exit
-/// 2 and `--help` / `--version` exit 0 before this returns.
 pub fn run() -> Result<(), CafleetError> {
     let args = CliArgs::parse();
     let settings = Settings::from_env()?;
-    dispatch(
-        &settings,
-        args,
-        &InvocationHooks {
-            connect: &crate::db::connect,
-            asset_env: &|name| std::env::var(name).ok(),
-        },
-    )
+    dispatch(&settings, args.command)
 }
 
-#[cfg(test)]
-pub(crate) fn run_with_hooks(
-    settings: &Settings,
-    argv: &[&str],
-    hooks: &InvocationHooks<'_>,
-) -> Result<(), CafleetError> {
-    let args = CliArgs::try_parse_from(argv).map_err(|e| CafleetError::Usage(e.to_string()))?;
-    dispatch(settings, args, hooks)
-}
-
-fn dispatch(
-    settings: &Settings,
-    args: CliArgs,
-    hooks: &InvocationHooks<'_>,
-) -> Result<(), CafleetError> {
+fn invocation_connection(database_url: &str) -> Result<rusqlite::Connection, CafleetError> {
+    let path = crate::db::database_path(database_url)?;
+    if !std::path::Path::new(path).try_exists().map_err(|cause| {
+        CafleetError::App(format!("cannot inspect database at '{path}': {cause}"))
+    })? {
+        return Err(CafleetError::App(
+            "no cafleet database; run 'cafleet setup'".into(),
+        ));
+    }
     let deadline = crate::input::Deadline::new();
-    match args.command {
-        Command::Setup(cmd) => setup::run(settings, cmd, hooks),
-        Command::Doctor(cmd) => doctor::run(settings, cmd, hooks),
-        command => {
-            let mut conn = (hooks.connect)(&settings.database_url)?;
-            let schema = crate::input::with_database_budget(&mut conn, deadline, |conn| {
-                Ok(diagnosis::classify_selected_schema(
-                    conn,
-                    crate::db::head_version(),
-                    &settings.database_url,
-                ))
-            })?;
-            helpers::schema_guard(&schema)?;
-            {
-                let home = std::path::PathBuf::from(
-                    std::env::var("HOME")
-                        .map_err(|_| CafleetError::App("HOME is not set".into()))?,
-                );
-                let assets = crate::input::with_database_budget(&mut conn, deadline, |conn| {
-                    diagnosis::diagnose_assets(
-                        Some(conn),
-                        hooks.asset_env,
-                        &home,
-                        VERSION,
-                        AssetMode::Guard,
-                    )
-                });
-                helpers::stale_assets_guard(&assets?, VERSION)?;
-            }
-            let mut command = command;
+    let validate = |conn: &mut rusqlite::Connection| {
+        crate::input::with_database_budget(conn, deadline, |conn| {
+            crate::diagnosis::classify_selected_schema(
+                conn,
+                crate::db::head_version(),
+                database_url,
+            )
+            .require_current()
+        })
+    };
+    let mut preflight = crate::db::connect_read_only(database_url)?;
+    validate(&mut preflight)?;
+    drop(preflight);
+    let mut conn = crate::db::connect(database_url)?;
+    validate(&mut conn)?;
+    Ok(conn)
+}
+
+fn dispatch(settings: &Settings, command: Command) -> Result<(), CafleetError> {
+    match command {
+        Command::Setup(cmd) => setup::run(settings, cmd),
+        Command::Doctor(cmd) => doctor::run(settings, cmd),
+        mut command => {
+            let mut conn = invocation_connection(&settings.database_url)?;
             if let Command::Member(command) = &mut command {
                 member::prepare_input(command)?;
             }
             let deadline = crate::input::Deadline::new();
-            let mut slot = Some(conn);
             match command {
-                Command::Fleet(cmd) => fleet::run(&mut slot, settings, cmd, deadline),
-                Command::Member(cmd) => member::run(
-                    slot.as_mut().expect("open invocation connection"),
-                    settings,
-                    cmd,
-                    deadline,
-                ),
-                Command::Message(cmd) => message::run(
-                    slot.as_mut().expect("open invocation connection"),
-                    settings,
-                    cmd,
-                ),
+                Command::Fleet(cmd) => fleet::run(&mut conn, settings, cmd, deadline),
+                Command::Member(cmd) => member::run(&mut conn, settings, cmd, deadline),
+                Command::Message(cmd) => message::run(&mut conn, settings, cmd),
                 Command::Setup(_) | Command::Doctor(_) => unreachable!("handled above"),
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::broker::{self, test_support as common};
-    use std::cell::Cell;
-
-    #[test]
-    fn ack_reuses_the_guard_connection() {
-        let dir = tempfile::tempdir().unwrap();
-        let settings = Settings::from_lookup(|_| None).unwrap();
-        let opens = Cell::new(0);
-        let connect = |_: &str| {
-            opens.set(opens.get() + 1);
-            let mut conn = Connection::open_in_memory().unwrap();
-            crate::db::migrate_to_head(&mut conn).unwrap();
-            let (_, director) = common::create_fleet(&mut conn, "invocation");
-            broker::record_asset_install(
-                &mut conn,
-                "claude",
-                dir.path().to_str().unwrap(),
-                VERSION,
-            )
-            .unwrap();
-            let message =
-                broker::send_message(&mut conn, director, &director.to_string(), "ack").unwrap();
-            assert_eq!(message.message_id, 1);
-            Ok(conn)
-        };
-        run_with_hooks(
-            &settings,
-            &["cafleet", "message", "ack", "1", "--json"],
-            &InvocationHooks {
-                connect: &connect,
-                asset_env: &|_| Some(dir.path().display().to_string()),
-            },
-        )
-        .unwrap();
-        assert_eq!(opens.get(), 1);
-    }
-
-    #[test]
-    fn setup_reuses_open_connections_and_retries_failed_opens() {
-        for initial in ["missing", "head", "ahead", "open failure"] {
-            let dir = tempfile::tempdir().unwrap();
-            let url = format!("sqlite:///{}", dir.path().join("database.db").display());
-            let settings =
-                Settings::from_lookup(|name| (name == "CAFLEET_DATABASE_URL").then(|| url.clone()))
-                    .unwrap();
-            let opens = Cell::new(0);
-            let connect = |url: &str| {
-                opens.set(opens.get() + 1);
-                if initial == "open failure" && opens.get() == 1 {
-                    return Err(CafleetError::App("first open failed".into()));
-                }
-                let mut conn = crate::db::connect(url).unwrap();
-                if initial != "missing" {
-                    crate::db::migrate_to_head(&mut conn).unwrap();
-                }
-                if initial == "ahead" {
-                    conn.execute(
-                        "UPDATE refinery_schema_history SET version=version+1 WHERE version=?1",
-                        [crate::db::head_version()],
-                    )
-                    .unwrap();
-                }
-                Ok(conn)
-            };
-            let result = run_with_hooks(
-                &settings,
-                &["cafleet", "setup", "--coding-agent", "claude"],
-                &InvocationHooks {
-                    connect: &connect,
-                    asset_env: &|name| {
-                        assert_eq!(name, "CLAUDE_CONFIG_DIR");
-                        Some(dir.path().display().to_string())
-                    },
-                },
-            );
-            assert_eq!(
-                result.is_ok(),
-                matches!(initial, "missing" | "head"),
-                "{initial}"
-            );
-            assert_eq!(opens.get(), if initial == "open failure" { 2 } else { 1 });
-            let conn = crate::db::connect(&url).unwrap();
-            let rows = broker::list_asset_installs(&conn).unwrap();
-            if initial == "ahead" {
-                assert!(rows.is_empty());
-                assert!(!dir.path().join("skills").exists());
-            } else {
-                assert_eq!(rows.len(), 1);
-                assert_eq!(rows[0]["coding_agent"], "claude");
-                assert_eq!(rows[0]["cafleet_version"], VERSION);
-                assert!(dir.path().join("skills/cafleet/SKILL.md").is_file());
             }
         }
     }
@@ -243,6 +99,59 @@ mod tests {
 mod parser_contracts {
     use super::*;
     use clap::error::ErrorKind;
+
+    #[test]
+    fn ordinary_commands_preserve_refused_wal_database_and_sidecar_bytes() {
+        for mutation in [
+            "PRAGMA application_id=42",
+            "UPDATE refinery_schema_history SET version=99 WHERE version=(SELECT MAX(version) FROM refinery_schema_history)",
+            "ALTER TABLE messages RENAME COLUMN text TO wrong",
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("registry.db");
+            let settings = Settings {
+                database_url: format!("sqlite:///{}", path.display()),
+                max_text_len: 200,
+                multiplexer: None,
+            };
+            let mut conn = crate::db::connect(&settings.database_url).unwrap();
+            crate::db::migrate_to_head(&mut conn).unwrap();
+            conn.execute_batch("PRAGMA journal_mode=WAL").unwrap();
+            conn.execute_batch(mutation).unwrap();
+            conn.execute_batch("BEGIN; SELECT * FROM refinery_schema_history")
+                .unwrap();
+            let before = ["", "-wal", "-shm"].map(|suffix| {
+                let file = std::path::PathBuf::from(format!("{}{suffix}", path.display()));
+                let bytes = std::fs::read(&file).unwrap();
+                (file, bytes)
+            });
+            for command in [
+                Command::Fleet(fleet::FleetCommand::List { json: true }),
+                Command::Member(member::MemberCommand::Show {
+                    member_id: 1,
+                    json: true,
+                }),
+                Command::Message(message::MessageCommand::Poll {
+                    member_id: 1,
+                    json: true,
+                }),
+            ] {
+                assert!(dispatch(&settings, command).is_err(), "{mutation}");
+                for (file, bytes) in &before {
+                    assert_eq!(&std::fs::read(file).unwrap(), bytes, "{}", file.display());
+                }
+            }
+            conn.execute_batch("ROLLBACK").unwrap();
+        }
+    }
+
+    #[test]
+    fn ordinary_commands_require_storage_without_creating_a_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing.db");
+        assert!(invocation_connection(&format!("sqlite:///{}", path.display())).is_err());
+        assert!(!path.exists());
+    }
 
     fn parse(args: &[&str]) -> Command {
         CliArgs::try_parse_from(std::iter::once("cafleet").chain(args.iter().copied()))
@@ -441,7 +350,7 @@ mod parser_contracts {
             panic!("expected fleet creation");
         };
         assert_eq!(name, "alpha");
-        assert_eq!(coding_agent, "codex");
+        assert_eq!(coding_agent, crate::coding_agent::CodingAgent::Codex);
         assert!(json);
     }
 
@@ -465,7 +374,8 @@ mod parser_contracts {
             "--to-member-id",
             "18",
         ];
-        for base in [member.as_slice(), send.as_slice()] {
+        let exec = ["member", "exec", "17"];
+        for base in [member.as_slice(), send.as_slice(), exec.as_slice()] {
             assert_error(base, ErrorKind::MissingRequiredArgument, "--file");
             let both: Vec<_> = base
                 .iter()
@@ -483,6 +393,9 @@ mod parser_contracts {
                     ("member", Command::Member(member::MemberCommand::Create { fleet_id, .. })) => {
                         assert_eq!(fleet_id, 17)
                     }
+                    ("member", Command::Member(member::MemberCommand::Exec { member_id, .. })) => {
+                        assert_eq!(member_id, 17)
+                    }
                     (
                         "message",
                         Command::Message(message::MessageCommand::Send {
@@ -495,6 +408,51 @@ mod parser_contracts {
                 }
             }
         }
+    }
+
+    #[test]
+    fn receive_leases_validate_integer_bounds_and_optional_listening() {
+        assert!(matches!(
+            parse(&["message", "wait", "17"]),
+            Command::Message(message::MessageCommand::Wait {
+                member_id: 17,
+                timeout: 300,
+                ..
+            })
+        ));
+        assert!(matches!(
+            parse(&["message", "listen", "17"]),
+            Command::Message(message::MessageCommand::Listen {
+                member_id: 17,
+                timeout: None
+            })
+        ));
+        for command in ["wait", "listen"] {
+            for seconds in ["1", "1800"] {
+                let parsed = parse(&["message", command, "17", "--timeout", seconds]);
+                match parsed {
+                    Command::Message(message::MessageCommand::Wait { timeout, .. }) => {
+                        assert_eq!(timeout, seconds.parse::<u64>().unwrap());
+                    }
+                    Command::Message(message::MessageCommand::Listen { timeout, .. }) => {
+                        assert_eq!(timeout, Some(seconds.parse::<u64>().unwrap()));
+                    }
+                    _ => panic!("expected finite receive"),
+                }
+            }
+            for seconds in ["0", "1801", "fraction", "1.5"] {
+                assert_error(
+                    &["message", command, "17", "--timeout", seconds],
+                    ErrorKind::ValueValidation,
+                    seconds,
+                );
+            }
+        }
+        assert_error(
+            &["message", "listen", "17", "--json"],
+            ErrorKind::UnknownArgument,
+            "--json",
+        );
     }
 
     #[test]

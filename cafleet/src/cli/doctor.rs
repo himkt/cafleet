@@ -1,23 +1,14 @@
-//! `cafleet doctor` — the four-section environment diagnosis (SPEC §6.3
-//! *doctor*): multiplexer, database, coding agents, member permissions,
-//! rendered without early abort. Guard-exempt: it reports instead of
-//! blocking; exit 1 iff any rendered issue.
-
 use std::path::{Path, PathBuf};
 
 use clap::Args;
-use serde_json::{Value, json};
-use unicode_width::UnicodeWidthStr;
+use rusqlite::{Connection, OptionalExtension, params};
+use serde_json::json;
 
-use super::InvocationHooks;
-use super::helpers::{emit, resolve_mux, tilde};
+use crate::coding_agent::{CodingAgent, SpawnProbe};
 use crate::config::Settings;
-use crate::config_dir::DirSource;
-use crate::diagnosis::{self, AssetMode, AssetReport, AssetState, SchemaState};
+use crate::diagnosis::{self, SchemaState};
 use crate::error::CafleetError;
-use crate::member_permissions::{self, Finding, FindingKind};
-use crate::multiplexer::{Multiplexer, MultiplexerContext};
-use crate::presentation;
+use crate::runtime::system::SystemProbe;
 
 #[derive(Args)]
 pub struct DoctorArgs {
@@ -26,305 +17,333 @@ pub struct DoctorArgs {
     json: bool,
 }
 
-struct MuxOk {
-    backend: String,
-    context: MultiplexerContext,
-    presence_var: &'static str,
-    presence_value: String,
+#[derive(Debug)]
+struct Check {
+    name: String,
+    status: &'static str,
+    detail: String,
 }
 
-struct AgentRow {
-    agent: &'static str,
-    path_cell: String,
-    source_cell: String,
-    setup_cell: String,
-    is_issue: bool,
+impl Check {
+    fn new(name: impl Into<String>, status: &'static str, detail: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            status,
+            detail: detail.into(),
+        }
+    }
 }
 
-pub fn run(
-    settings: &Settings,
-    args: DoctorArgs,
-    hooks: &InvocationHooks<'_>,
-) -> Result<(), CafleetError> {
-    let home = PathBuf::from(
-        std::env::var("HOME").map_err(|_| CafleetError::App("HOME is not set".to_string()))?,
-    );
-
-    let mux = multiplexer_report(settings);
-    let conn = (hooks.connect)(&settings.database_url);
-    let head = crate::db::head_version();
-    let schema = match &conn {
-        Ok(conn) => diagnosis::classify_selected_schema(conn, head, &settings.database_url),
-        Err(cause) => SchemaState::Unreachable {
-            cause: cause.clone(),
-        },
-    };
-    let db_ok = matches!(schema, SchemaState::Head { .. });
-    let asset_conn = if db_ok { conn.as_ref().ok() } else { None };
-    let assets = diagnosis::diagnose_assets(
-        asset_conn,
-        hooks.asset_env,
-        &home,
-        super::VERSION,
-        AssetMode::Report,
-    );
-    let assets = assets?;
-    let agents = agent_rows(&home, &assets);
-    let superseded = &assets.superseded;
-    let permissions = claude_member_permissions(&assets)?;
-    let findings = permissions.as_deref().unwrap_or_default();
-
-    let issues = usize::from(mux.is_err())
-        + usize::from(!db_ok)
-        + agents.iter().filter(|row| row.is_issue).count()
-        + findings.len();
-    let agents_ok = agents.iter().all(|row| !row.is_issue);
-
-    let payload = json!({
-        "multiplexer": match &mux {
-            Ok(m) => json!({
-                "ok": true,
-                "backend": m.backend,
-                "session": m.context.session,
-                "window_id": m.context.window_id,
-                "pane_id": m.context.pane_id,
-                "presence_var": m.presence_var,
-                "presence_value": m.presence_value,
-                "error": Value::Null,
-            }),
-            Err(error) => json!({
-                "ok": false,
-                "backend": Value::Null,
-                "session": Value::Null,
-                "window_id": Value::Null,
-                "pane_id": Value::Null,
-                "presence_var": Value::Null,
-                "presence_value": Value::Null,
-                "error": error,
-            }),
-        },
-        "database": presentation::doctor_database(&schema, head),
-        "coding_agents": presentation::doctor_assets(&assets, super::VERSION),
-        "member_permissions": presentation::doctor_member_permissions(findings),
-        "issues": issues,
+pub fn run(settings: &Settings, args: DoctorArgs) -> Result<(), CafleetError> {
+    let mux = super::helpers::resolve_mux(settings).and_then(|mux| {
+        mux.ensure_available()?;
+        let context = mux.context_discovery()?;
+        Ok(format!(
+            "{} session={} window={} pane={}",
+            mux.name(),
+            context.session,
+            context.window_id,
+            context.pane_id
+        ))
     });
+    let mut checks = vec![match mux {
+        Ok(detail) => Check::new("multiplexer", "ok", detail),
+        Err(cause) => Check::new("multiplexer", "error", cause.to_string()),
+    }];
+    let (conn, schema) = database(settings);
+    checks.push(match &schema {
+        SchemaState::Head { version } => {
+            Check::new("database", "ok", format!("compatible schema {version}"))
+        }
+        schema => Check::new(
+            "database",
+            "error",
+            schema
+                .require_current()
+                .expect_err("a non-head schema is unavailable")
+                .to_string(),
+        ),
+    });
+    let home = std::env::var("HOME")
+        .map(PathBuf::from)
+        .map_err(|_| CafleetError::App("HOME is not set".into()));
+    checks.extend(agent_checks(
+        conn.as_ref(),
+        &schema,
+        &SystemProbe,
+        home.as_deref(),
+    ));
+    if args.json {
+        println!(
+            "{}",
+            json!({"checks": checks.iter().map(|check| json!({
+            "name": check.name, "status": check.status, "detail": check.detail,
+        })).collect::<Vec<_>>()})
+        );
+    } else {
+        for check in &checks {
+            let detail = check.detail.replace('\n', "\\n").replace('\r', "\\r");
+            println!("{} {}: {}", check.status, check.name, detail);
+        }
+    }
+    if checks.iter().any(|check| check.status == "error") {
+        Err(CafleetError::App("doctor found errors".into()))
+    } else {
+        Ok(())
+    }
+}
 
-    emit(args.json, &payload, || {
-        let mut lines = vec![format!("cafleet {}", super::VERSION)];
-        match &mux {
-            Ok(m) => {
-                lines.push("✓ multiplexer".to_string());
-                lines.push(format!("  {:<10} {}", "backend:", m.backend));
-                lines.push(format!("  {:<10} {}", "session:", m.context.session));
-                lines.push(format!("  {:<10} {}", "window_id:", m.context.window_id));
-                lines.push(format!("  {:<10} {}", "pane_id:", m.context.pane_id));
-                lines.push(format!(
-                    "  {:<10} {}={}",
-                    "presence:", m.presence_var, m.presence_value
-                ));
-            }
-            Err(error) => {
-                lines.push("✗ multiplexer".to_string());
-                lines.push(format!("  {error}"));
-            }
+fn database(settings: &Settings) -> (Option<Connection>, SchemaState) {
+    let opened = (|| {
+        let path = crate::db::database_path(&settings.database_url)?;
+        if !Path::new(path).try_exists().map_err(|cause| {
+            CafleetError::App(format!("cannot inspect database at '{path}': {cause}"))
+        })? {
+            return Ok(None);
         }
-        lines.push(format!("{} database", if db_ok { "✓" } else { "✗" }));
-        lines.push(format!(
-            "  {}",
-            presentation::doctor_database_detail(&schema)
-        ));
-        lines.push(format!(
-            "{} coding agents",
-            if agents_ok { "✓" } else { "✗" }
-        ));
-        for line in framed_table(&agents) {
-            lines.push(format!("  {line}"));
+        let conn = crate::db::connect_read_only(&settings.database_url)?;
+        Ok(Some(conn))
+    })();
+    match opened {
+        Ok(Some(conn)) => {
+            let schema = diagnosis::classify_selected_schema(
+                &conn,
+                crate::db::head_version(),
+                &settings.database_url,
+            );
+            (Some(conn), schema)
         }
-        for row in superseded {
-            lines.push(format!(
-                "  note: {} was previously set up at {}",
-                row.coding_agent,
-                tilde(&row.path, &home)
-            ));
-        }
-        lines.push(format!(
-            "{} member permissions",
-            if findings.is_empty() { "✓" } else { "✗" }
-        ));
-        for detail in member_permission_lines(permissions.as_deref(), &home) {
-            lines.push(format!("  claude: {detail}"));
-        }
-        lines.push(match issues {
-            0 => "no issues found".to_string(),
-            1 => "1 issue found".to_string(),
-            n => format!("{n} issues found"),
+        Ok(None) => (None, SchemaState::Missing),
+        Err(cause) => (None, SchemaState::Unreachable { cause }),
+    }
+}
+
+fn agent_checks(
+    conn: Option<&Connection>,
+    schema: &SchemaState,
+    probe: &dyn SpawnProbe,
+    home: Result<&Path, &CafleetError>,
+) -> Vec<Check> {
+    let mut checks = Vec::new();
+    for agent in CodingAgent::all() {
+        let name = agent.name();
+        let paths = home
+            .map_err(Clone::clone)
+            .and_then(|home| agent.config_dir(&|name| probe.env_var(name), home));
+        checks.push(match &paths {
+            Ok(path) => Check::new(
+                format!("{name}.configuration"),
+                "ok",
+                path.path.display().to_string(),
+            ),
+            Err(cause) => Check::new(format!("{name}.configuration"), "error", cause.to_string()),
         });
-        lines.join("\n")
-    });
-
-    if issues > 0 {
-        std::process::exit(1);
-    }
-    Ok(())
-}
-
-fn multiplexer_report(settings: &Settings) -> Result<MuxOk, String> {
-    let mux = resolve_mux(settings).map_err(|e| e.to_string())?;
-    mux.ensure_available().map_err(|e| e.to_string())?;
-    let context = mux.context_discovery().map_err(|e| e.to_string())?;
-    let presence_var = match mux.name() {
-        "herdr" => "HERDR_ENV",
-        _ => "TMUX",
-    };
-    Ok(MuxOk {
-        backend: mux.name().to_string(),
-        context,
-        presence_var,
-        presence_value: std::env::var(presence_var).unwrap_or_default(),
-    })
-}
-
-/// The member-permission findings for claude; `None` when the claude assets
-/// are not installed at the resolved config directory, so nothing is checked.
-fn claude_member_permissions(report: &AssetReport) -> Result<Option<Vec<Finding>>, CafleetError> {
-    let installed_at = report.agents.iter().find_map(|agent| match &agent.state {
-        AssetState::Current { identity, .. } | AssetState::Stale { identity, .. }
-            if agent.coding_agent == "claude" =>
-        {
-            Some(&identity.path)
+        let available = probe.binary_on_path(agent.binary_name());
+        checks.push(Check::new(
+            format!("{name}.executable"),
+            if available { "ok" } else { "info" },
+            if available {
+                format!("{} is on PATH", agent.binary_name())
+            } else {
+                format!("{} is optional and absent from PATH", agent.binary_name())
+            },
+        ));
+        if *agent == CodingAgent::Opencode {
+            checks.push(match (&paths, available) {
+                (Err(cause), _) => Check::new(
+                    format!("{name}.preset"),
+                    "info",
+                    format!("unavailable: configuration failed: {cause}"),
+                ),
+                (_, false) => Check::new(
+                    format!("{name}.preset"),
+                    "info",
+                    "unavailable: executable is absent",
+                ),
+                (Ok(path), true) => {
+                    let preset = agent
+                        .required_preset(&path.path)
+                        .expect("OpenCode has a required preset");
+                    match std::fs::read(&preset) {
+                        Ok(_) => {
+                            Check::new(format!("{name}.preset"), "ok", preset.display().to_string())
+                        }
+                        Err(cause) => Check::new(
+                            format!("{name}.preset"),
+                            "error",
+                            format!(
+                                "{}: {cause}; run 'cafleet setup --coding-agent {name}'",
+                                preset.display()
+                            ),
+                        ),
+                    }
+                }
+            });
         }
-        _ => None,
-    });
-    let Some(config_dir) = installed_at else {
-        return Ok(None);
-    };
-    let cwd = std::env::current_dir().map_err(|error| {
-        CafleetError::App(format!("cannot read the working directory: {error}"))
-    })?;
-    Ok(Some(member_permissions::diagnose(
-        &member_permissions::claude_settings_files(config_dir, &cwd),
-    )))
-}
-
-fn member_permission_lines(findings: Option<&[Finding]>, home: &Path) -> Vec<String> {
-    let Some(findings) = findings else {
-        return vec!["– not installed".to_string()];
-    };
-    if findings.is_empty() {
-        return vec!["no setting blocks the member broker commands".to_string()];
+        let install_name = format!("{name}.installation");
+        checks.push(match (&paths, schema) {
+            (Err(cause), _) => Check::new(
+                install_name,
+                "info",
+                format!("unavailable: configuration failed: {cause}"),
+            ),
+            (_, SchemaState::Head { .. }) => {
+                let conn = conn.expect("a head-compatible database has an open connection");
+                install_check(
+                    conn,
+                    *agent,
+                    &paths.as_ref().expect("configuration succeeded").path,
+                )
+            }
+            _ => {
+                let cause = schema
+                    .require_current()
+                    .expect_err("a non-head schema is unavailable");
+                Check::new(install_name, "info", format!("unavailable: {cause}"))
+            }
+        });
     }
-    findings
-        .iter()
-        .map(|finding| {
-            let file = tilde(&finding.file.display().to_string(), home);
-            match &finding.kind {
-                FindingKind::BlockingRule {
-                    list,
-                    rule,
-                    command,
-                } => format!("{file} permissions.{list} \"{rule}\" matches \"{command}\""),
-                FindingKind::ManagedRulesOnly { command } => format!(
-                    "{file} allowManagedPermissionRulesOnly is true and its permissions.allow \
-                     does not match \"{command}\""
-                ),
-                FindingKind::Unreadable => format!("{file} is not valid JSON"),
-            }
-        })
-        .collect()
+    checks
 }
 
-/// Render typed asset facts using the existing text-only cells.
-fn agent_rows(home: &Path, report: &AssetReport) -> Vec<AgentRow> {
-    report
-        .agents
-        .iter()
-        .map(|agent| {
-            let (identity, setup_cell, is_issue) = match &agent.state {
-                AssetState::Current { identity, install } => {
-                    (identity, format!("✓ {}", install.cafleet_version), false)
-                }
-                AssetState::Stale { identity, install } => (
-                    identity,
-                    format!(
-                        "✗ {} → cafleet setup --coding-agent {}",
-                        install.cafleet_version, agent.coding_agent
-                    ),
-                    true,
-                ),
-                AssetState::NotInstalled { identity } => (
-                    identity,
-                    format!("– cafleet setup --coding-agent {}", agent.coding_agent),
-                    false,
-                ),
-                AssetState::PathError {
-                    variable,
-                    raw_value,
-                    ..
-                } => {
-                    return AgentRow {
-                        agent: agent.coding_agent,
-                        path_cell: raw_value.clone(),
-                        source_cell: format!("${variable}"),
-                        setup_cell: format!("✗ {variable} is not an absolute path"),
-                        is_issue: true,
-                    };
-                }
-            };
-            AgentRow {
-                agent: agent.coding_agent,
-                path_cell: tilde(&identity.path.display().to_string(), home),
-                source_cell: match identity.source {
-                    DirSource::EnvVar(name) => format!("${name}"),
-                    DirSource::Default => "default".into(),
-                },
-                setup_cell,
-                is_issue,
-            }
-        })
-        .collect()
+fn install_check(conn: &Connection, agent: CodingAgent, path: &Path) -> Check {
+    let name = format!("{}.installation", agent.name());
+    let recorded = conn.query_row(
+        "SELECT cafleet_version, installed_at FROM asset_installs WHERE coding_agent=?1 AND path=?2",
+        params![agent.name(), path.display().to_string()],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+    ).optional();
+    match recorded {
+        Ok(Some((version, when))) if version == super::VERSION => {
+            Check::new(name, "ok", format!("recorded {version} at {when}"))
+        }
+        Ok(Some((version, when))) => Check::new(
+            name,
+            "info",
+            format!(
+                "recorded {version} at {when}; run 'cafleet setup --coding-agent {}'",
+                agent.name()
+            ),
+        ),
+        Ok(None) => Check::new(
+            name,
+            "info",
+            format!(
+                "no installation recorded at {}; run 'cafleet setup --coding-agent {}'",
+                path.display(),
+                agent.name()
+            ),
+        ),
+        Err(cause) => Check::new(name, "error", format!("installation query failed: {cause}")),
+    }
 }
 
-/// The light box-drawing framed table, aligned by display width.
-fn framed_table(agents: &[AgentRow]) -> Vec<String> {
-    const HEADER: [&str; 4] = ["coding agent", "path", "source", "setup"];
-    let body: Vec<[&str; 4]> = agents
-        .iter()
-        .map(|row| {
-            [
-                row.agent,
-                row.path_cell.as_str(),
-                row.source_cell.as_str(),
-                row.setup_cell.as_str(),
-            ]
-        })
-        .collect();
-    let widths: Vec<usize> = (0..HEADER.len())
-        .map(|column| {
-            body.iter()
-                .map(|row| row[column].width())
-                .chain(std::iter::once(HEADER[column].width()))
-                .max()
-                .expect("the header supplies at least one width")
-        })
-        .collect();
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let bar = |left: char, mid: char, right: char| {
-        let segments: Vec<String> = widths.iter().map(|w| "─".repeat(w + 2)).collect();
-        format!("{left}{}{right}", segments.join(&mid.to_string()))
-    };
-    let line = |cells: &[&str; 4]| {
-        let padded: Vec<String> = cells
+    struct Probe {
+        home: PathBuf,
+        executable: bool,
+        invalid: Option<&'static str>,
+    }
+    impl SpawnProbe for Probe {
+        fn binary_on_path(&self, name: &str) -> bool {
+            assert!(crate::coding_agent::coding_agent(name).is_some());
+            self.executable
+        }
+        fn home_dir(&self) -> PathBuf {
+            self.home.clone()
+        }
+        fn env_var(&self, name: &str) -> Option<String> {
+            assert!(
+                CodingAgent::all()
+                    .iter()
+                    .any(|agent| agent.config_variable() == name)
+            );
+            (self.invalid == Some(name)).then(|| "relative".into())
+        }
+    }
+
+    fn find<'a>(checks: &'a [Check], name: &str) -> &'a Check {
+        checks
             .iter()
-            .zip(&widths)
-            .map(|(cell, width)| format!(" {cell}{} ", " ".repeat(width - cell.width())))
-            .collect();
-        format!("│{}│", padded.join("│"))
-    };
-
-    let mut out = vec![bar('┌', '┬', '┐'), line(&HEADER), bar('├', '┼', '┤')];
-    for row in &body {
-        out.push(line(row));
+            .find(|check| check.name == name)
+            .expect("every diagnostic has its stable name")
     }
-    out.push(bar('└', '┴', '┘'));
-    out
+
+    #[test]
+    fn independent_failures_keep_executable_discovery_and_mark_dependent_checks_unavailable() {
+        let home = tempfile::tempdir().unwrap();
+        let probe = Probe {
+            home: home.path().into(),
+            executable: false,
+            invalid: Some("OPENCODE_CONFIG_DIR"),
+        };
+        let checks = agent_checks(None, &SchemaState::Missing, &probe, Ok(home.path()));
+        assert_eq!(find(&checks, "opencode.configuration").status, "error");
+        assert_eq!(find(&checks, "opencode.executable").status, "info");
+        for name in [
+            "opencode.preset",
+            "opencode.installation",
+            "claude.installation",
+            "codex.installation",
+        ] {
+            let check = find(&checks, name);
+            assert_eq!(check.status, "info");
+            assert!(check.detail.starts_with("unavailable:"));
+        }
+        assert_eq!(find(&checks, "claude.configuration").status, "ok");
+    }
+
+    #[test]
+    fn healthy_database_distinguishes_absent_stale_current_and_failed_install_queries() {
+        let home = tempfile::tempdir().unwrap();
+        let mut conn = crate::broker::tests::migrated_conn(&home);
+        let probe = Probe {
+            home: home.path().into(),
+            executable: true,
+            invalid: None,
+        };
+        let schema = SchemaState::Head {
+            version: crate::db::head_version(),
+        };
+        crate::broker::record_asset_install(
+            &mut conn,
+            "claude",
+            &home.path().join(".claude").display().to_string(),
+            super::super::VERSION,
+        )
+        .unwrap();
+        crate::broker::record_asset_install(
+            &mut conn,
+            "codex",
+            &home.path().join(".codex").display().to_string(),
+            "old",
+        )
+        .unwrap();
+        let checks = agent_checks(Some(&conn), &schema, &probe, Ok(home.path()));
+        assert_eq!(find(&checks, "claude.installation").status, "ok");
+        assert_eq!(find(&checks, "codex.installation").status, "info");
+        assert_eq!(find(&checks, "opencode.installation").status, "info");
+        assert!(
+            find(&checks, "opencode.installation")
+                .detail
+                .starts_with("no installation recorded")
+        );
+        assert_eq!(find(&checks, "opencode.preset").status, "error");
+        conn.execute(
+            "UPDATE asset_installs SET cafleet_version=X'00' WHERE coding_agent='claude'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            find(
+                &agent_checks(Some(&conn), &schema, &probe, Ok(home.path())),
+                "claude.installation"
+            )
+            .status,
+            "error"
+        );
+    }
 }

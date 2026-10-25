@@ -1,27 +1,12 @@
-//! Backend config-dir resolution (SPEC §6.3 *Config-dir resolution*): the
-//! single owner of the `CLAUDE_CONFIG_DIR` / `CODEX_HOME` /
-//! `OPENCODE_CONFIG_DIR` env-var lookups. Each env-resolving function takes
-//! an injected env lookup and the home directory, so tests run against
-//! fakes; `opencode_skills_base` reads no variable and stays infallible.
-
 use std::path::{Path, PathBuf};
 
 use crate::error::CafleetError;
 
 pub type EnvLookup<'a> = &'a dyn Fn(&str) -> Option<String>;
 
-/// The winning origin of a resolved directory, feeding `doctor`'s `source`
-/// column and JSON.
-#[derive(Debug)]
-pub enum DirSource {
-    EnvVar(&'static str),
-    Default,
-}
-
 #[derive(Debug)]
 pub struct ResolvedDir {
     pub path: PathBuf,
-    pub source: DirSource,
 }
 
 pub fn claude_config_dir(env: EnvLookup, home: &Path) -> Result<ResolvedDir, CafleetError> {
@@ -48,13 +33,9 @@ fn resolve(
     default: PathBuf,
 ) -> Result<ResolvedDir, CafleetError> {
     match env(var) {
-        None => Ok(ResolvedDir {
-            path: default,
-            source: DirSource::Default,
-        }),
+        None => Ok(ResolvedDir { path: default }),
         Some(value) if Path::new(&value).is_absolute() => Ok(ResolvedDir {
             path: PathBuf::from(value),
-            source: DirSource::EnvVar(var),
         }),
         Some(value) => Err(CafleetError::App(format!(
             "{var} must be an absolute path (got '{value}')"
@@ -82,27 +63,19 @@ mod tests {
     }
 
     #[test]
-    fn unset_variable_resolves_the_default_with_default_source() {
+    fn unset_variable_resolves_the_default() {
         for (resolve, var, default_dir) in ENV_RESOLVERS {
             let resolved = resolve(&|_| None, &home()).unwrap();
             assert_eq!(resolved.path, home().join(default_dir), "default for {var}");
-            assert!(
-                matches!(resolved.source, DirSource::Default),
-                "unset {var} must report the Default source"
-            );
         }
     }
 
     #[test]
-    fn absolute_value_is_used_verbatim_with_env_var_source() {
+    fn absolute_value_is_used_verbatim() {
         for (resolve, var, _default_dir) in ENV_RESOLVERS {
             let lookup = move |name: &str| (name == var).then(|| "/custom/cfg".to_string());
             let resolved = resolve(&lookup, &home()).unwrap();
             assert_eq!(resolved.path, PathBuf::from("/custom/cfg"));
-            assert!(
-                matches!(resolved.source, DirSource::EnvVar(name) if name == var),
-                "source must carry the winning variable name for {var}"
-            );
         }
     }
 
@@ -116,7 +89,6 @@ mod tests {
                 home().join(default_dir),
                 "{var}'s resolver must ignore every other variable"
             );
-            assert!(matches!(resolved.source, DirSource::Default));
         }
     }
 

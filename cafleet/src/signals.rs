@@ -109,4 +109,20 @@ mod tests {
             assert!(defers_all(&inherited));
         });
     }
+
+    #[test]
+    fn unwinding_restores_the_callers_signal_mask() {
+        on_fresh_thread(|| {
+            let previous = blocked();
+            assert!(
+                std::panic::catch_unwind(|| {
+                    let _span = DeferTermination::begin().unwrap();
+                    assert!(defers_all(&blocked()));
+                    panic!("unwind protected work");
+                })
+                .is_err()
+            );
+            assert_eq!(blocked(), previous);
+        });
+    }
 }

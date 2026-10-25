@@ -1,18 +1,12 @@
-//! The `message` group and its shared handler sequence (SPEC §6.3 *message
-//! group*): handler → emit fork (JSON = the complete untruncated result;
-//! text = truncation + compact rendering). The broker derives the fleet and
-//! recipient from the subject row.
-
 use rusqlite::Connection;
 
 use clap::{Args, Subcommand};
-use serde_json::Value;
 
-use super::helpers::resolve_body;
+use super::helpers::{emit, resolve_body};
 use crate::broker;
 use crate::config::Settings;
 use crate::error::CafleetError;
-use crate::output::{format_indexed_list, format_message, truncate_message_text};
+use crate::output::{format_message, format_messages};
 use crate::presentation;
 use crate::receive::{AttemptEnd, BrokerReceiver, SystemClock};
 
@@ -93,22 +87,6 @@ pub enum MessageCommand {
     },
 }
 
-/// The emit fork of the shared handler sequence: JSON is the complete,
-/// untruncated machine form; text truncates then renders compactly.
-fn emit_result(
-    settings: &Settings,
-    mut result: Value,
-    json: bool,
-    text: impl FnOnce(&Value) -> String,
-) {
-    if json {
-        println!("{}", crate::output::format_json(&result));
-    } else {
-        truncate_message_text(&mut result, settings.max_text_len);
-        println!("{}", text(&result));
-    }
-}
-
 pub fn run(
     conn: &mut Connection,
     settings: &Settings,
@@ -123,17 +101,10 @@ pub fn run(
         } => {
             let text = resolve_body(body.text.as_deref(), body.file.as_deref(), "--file")?;
             let deadline = crate::input::Deadline::new();
-
             let message = crate::input::with_database_budget(conn, deadline, |conn| {
-                broker::messaging::send_message_validated(
-                    conn,
-                    from_member_id,
-                    &to_member_id.to_string(),
-                    &text,
-                )
+                broker::send_message(conn, from_member_id, to_member_id, &text)
             })?;
             let message_id = message.message_id;
-            // Escape into the sender's own pane would interrupt the turn running this command.
             let notification_sent = if from_member_id == to_member_id {
                 false
             } else {
@@ -157,22 +128,24 @@ pub fn run(
                     }
                 }
             };
-            emit_result(
-                settings,
-                presentation::send_outcome(&message, notification_sent),
+            emit(
                 json,
-                |result| format!("Message sent.\n{}", format_message(result)),
+                &presentation::send_outcome(&message, notification_sent),
+                || {
+                    format!(
+                        "Message sent.\n{}",
+                        format_message(&message, settings.max_text_len)
+                    )
+                },
             );
             Ok(())
         }
         MessageCommand::Poll { member_id, json } => {
-            let result = broker::poll_messages(conn, member_id)?
-                .iter()
-                .map(presentation::message)
-                .collect();
-            emit_result(settings, Value::Array(result), json, |result| {
-                let items = result.as_array().expect("poll returns a list");
-                format_indexed_list(items, format_message, "No messages found.")
+            let messages = broker::poll_messages(conn, member_id)?;
+            let payload =
+                serde_json::Value::Array(messages.iter().map(presentation::message).collect());
+            emit(json, &payload, || {
+                format_messages(&messages, settings.max_text_len)
             });
             Ok(())
         }
@@ -187,63 +160,42 @@ pub fn run(
                 &mut receiver,
                 std::time::Duration::from_secs(timeout),
             )?;
-            let messages: Vec<_> = outcome.messages.iter().map(presentation::message).collect();
-            let errors: Vec<_> = outcome
-                .notification_errors
-                .iter()
-                .map(|error| {
-                    serde_json::json!({
-                        "member_id": error.member_id,
-                        "message_id": error.message_id,
-                        "error": error.error,
-                    })
-                })
-                .collect();
-            if !json {
-                for error in &outcome.notification_errors {
-                    eprintln!("{}", error.error);
+            let messages = &outcome.messages;
+            let payload = serde_json::json!({
+                "member_id":member_id,
+                "outcome":if messages.is_empty() { "timeout" } else { "messages" },
+                "messages":messages.iter().map(presentation::message).collect::<Vec<_>>(),
+            });
+            emit(json, &payload, || {
+                if messages.is_empty() {
+                    format!("Timed out waiting for member {member_id}.")
+                } else {
+                    format!(
+                        "Messages available for member {member_id}.\n{}",
+                        format_messages(messages, settings.max_text_len)
+                    )
                 }
-            }
-            emit_result(
-                settings,
-                serde_json::json!({
-                    "member_id": member_id,
-                    "outcome": if messages.is_empty() { "timeout" } else { "messages" },
-                    "messages": messages,
-                    "notification_errors": errors,
-                }),
-                json,
-                |result| {
-                    let items = result["messages"]
-                        .as_array()
-                        .expect("wait returns a message list");
-                    if items.is_empty() {
-                        format!("Timed out waiting for member {member_id}.")
-                    } else {
-                        format!(
-                            "Messages available for member {member_id}.\n{}",
-                            format_indexed_list(items, format_message, "No messages found.")
-                        )
-                    }
-                },
-            );
+            });
             Ok(())
         }
         MessageCommand::Listen { member_id, timeout } => {
             crate::listen::run(conn, member_id, timeout.map(std::time::Duration::from_secs))
         }
         MessageCommand::Ack { message_id, json } => {
-            let result = presentation::message_envelope(&broker::messaging::ack_message_validated(
-                conn, message_id,
-            )?);
-            emit_result(settings, result, json, |result| {
-                format!("Message acknowledged.\n{}", format_message(result))
+            let message = broker::ack_message(conn, message_id)?;
+            emit(json, &presentation::message_envelope(&message), || {
+                format!(
+                    "Message acknowledged.\n{}",
+                    format_message(&message, settings.max_text_len)
+                )
             });
             Ok(())
         }
         MessageCommand::Show { message_id, json } => {
-            let result = presentation::message_envelope(&broker::get_message(conn, message_id)?);
-            emit_result(settings, result, json, format_message);
+            let message = broker::get_message(conn, message_id)?;
+            emit(json, &presentation::message_envelope(&message), || {
+                format_message(&message, settings.max_text_len)
+            });
             Ok(())
         }
     }

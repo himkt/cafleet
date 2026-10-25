@@ -30,7 +30,7 @@ pub(crate) fn pending_previews(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::broker::{self, test_support as common};
+    use crate::broker::{self, tests as common};
 
     #[test]
     fn preview_rotation_selects_only_concrete_ordinary_placements() {
@@ -39,15 +39,8 @@ mod tests {
         let (fleet, director) = common::create_fleet(&mut conn, "rotation");
         let pending = common::register(&mut conn, fleet, "pending", None);
         let placed = common::register(&mut conn, fleet, "placed", Some("%2"));
-        broker::send_message(
-            &mut conn,
-            director,
-            &pending.to_string(),
-            "wait for placement",
-        )
-        .unwrap();
-        let message =
-            broker::send_message(&mut conn, director, &placed.to_string(), "deliver now").unwrap();
+        broker::send_message(&mut conn, director, pending, "wait for placement").unwrap();
+        let message = broker::send_message(&mut conn, director, placed, "deliver now").unwrap();
         assert_eq!(
             pending_previews(&conn, fleet, director).unwrap(),
             vec![(placed, message.message_id)]
@@ -61,10 +54,8 @@ mod tests {
         let (fleet, director) = common::create_fleet(&mut conn, "director");
         let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
         let observer = common::register(&mut conn, fleet, "observer", Some("%3"));
-        let reply =
-            broker::send_message(&mut conn, worker, &director.to_string(), "reply").unwrap();
-        let assignment =
-            broker::send_message(&mut conn, director, &worker.to_string(), "assignment").unwrap();
+        let reply = broker::send_message(&mut conn, worker, director, "reply").unwrap();
+        let assignment = broker::send_message(&mut conn, director, worker, "assignment").unwrap();
         assert_eq!(
             pending_previews(&conn, fleet, observer).unwrap(),
             vec![(worker, assignment.message_id)]
@@ -78,9 +69,8 @@ mod tests {
         let mut conn = common::migrated_conn(&dir);
         let (fleet, director) = common::create_fleet(&mut conn, "subject");
         let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
-        broker::send_message(&mut conn, worker, &director.to_string(), "reply").unwrap();
-        let to_worker =
-            broker::send_message(&mut conn, director, &worker.to_string(), "assignment").unwrap();
+        broker::send_message(&mut conn, worker, director, "reply").unwrap();
+        let to_worker = broker::send_message(&mut conn, director, worker, "assignment").unwrap();
         assert_eq!(
             pending_previews(&conn, fleet, director).unwrap(),
             vec![(worker, to_worker.message_id)]
@@ -100,15 +90,10 @@ mod tests {
             rusqlite::params![director, fleet],
         )
         .unwrap();
-        let ordinary = broker::send_message(
-            &mut conn,
-            director,
-            &former_director.to_string(),
-            "ordinary assignment",
-        )
-        .unwrap();
-        let reply =
-            broker::send_message(&mut conn, observer, &director.to_string(), "root reply").unwrap();
+        let ordinary =
+            broker::send_message(&mut conn, director, former_director, "ordinary assignment")
+                .unwrap();
+        let reply = broker::send_message(&mut conn, observer, director, "root reply").unwrap();
         assert_eq!(
             pending_previews(&conn, fleet, observer).unwrap(),
             vec![(former_director, ordinary.message_id)]

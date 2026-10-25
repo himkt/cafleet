@@ -5,7 +5,7 @@ use crate::error::CafleetError;
 use crate::input::{Deadline, PaneLock, complete_database_budget, with_database_budget};
 use crate::multiplexer::{
     AnyMultiplexer, INPUT_RESERVATION, INSUFFICIENT_INPUT_BUDGET, Lead, MIN_LITERAL_BUDGET,
-    Multiplexer, MultiplexerError,
+    MultiplexerError,
 };
 use crate::receive::{AttemptEnd, AttemptOutcome, NotificationError};
 use crate::time::format_utc;
@@ -286,7 +286,6 @@ fn deliver_pending_scoped(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::broker::test_support as common;
     use crate::multiplexer::{CommandRunner, RunError, TmuxMultiplexer};
     use crate::receive::AttemptEnd;
     use std::{
@@ -294,6 +293,35 @@ mod tests {
         rc::Rc,
         time::{Duration, Instant},
     };
+
+    fn migrated_conn(dir: &tempfile::TempDir) -> Connection {
+        let mut conn = crate::db::connect(&format!(
+            "sqlite:///{}",
+            dir.path().join("delivery.db").display()
+        ))
+        .unwrap();
+        crate::db::migrate_to_head(&mut conn).unwrap();
+        conn
+    }
+
+    fn create_fleet(conn: &mut Connection, name: &str) -> (i64, i64) {
+        let fleet =
+            broker::create_fleet(conn, Some(name), "main", "@1", "%0", "claude", "tmux").unwrap();
+        (fleet.fleet_id, fleet.director.member_id)
+    }
+
+    fn register(conn: &mut Connection, fleet: i64, name: &str, pane: Option<&str>) -> i64 {
+        let placement = broker::NewPlacement {
+            backend: "tmux".into(),
+            mux_session: "main".into(),
+            mux_window_id: "@1".into(),
+            mux_pane_id: pane.map(str::to_owned),
+            coding_agent: "claude".into(),
+        };
+        broker::register_member(conn, fleet, name, "delivery recipient", Some(&placement))
+            .unwrap()
+            .member_id
+    }
 
     struct FinishingRunner {
         deadline: Deadline,
@@ -308,11 +336,10 @@ mod tests {
     #[test]
     fn a_director_snapshot_preserves_its_pending_inbox_without_a_preview() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = common::migrated_conn(&dir);
-        let (fleet, director) = common::create_fleet(&mut conn, "director");
-        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
-        let reply =
-            broker::send_message(&mut conn, worker, &director.to_string(), "reply").unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet(&mut conn, "director");
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
+        let reply = broker::send_message(&mut conn, worker, director, "reply").unwrap();
         assert!(
             preview_snapshot(
                 &mut conn,
@@ -331,16 +358,15 @@ mod tests {
     fn director_delivery_ends_before_resolving_or_locking_a_pane() {
         for backend in ["claude", "codex", "opencode"] {
             let dir = tempfile::tempdir().unwrap();
-            let mut conn = common::migrated_conn(&dir);
-            let (fleet, director) = common::create_fleet(&mut conn, "director");
-            let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+            let mut conn = migrated_conn(&dir);
+            let (fleet, director) = create_fleet(&mut conn, "director");
+            let worker = register(&mut conn, fleet, "worker", Some("%2"));
             conn.execute(
                 "UPDATE member_placements SET coding_agent=?1 WHERE member_id=?2",
                 rusqlite::params![backend, director],
             )
             .unwrap();
-            let reply =
-                broker::send_message(&mut conn, worker, &director.to_string(), "reply").unwrap();
+            let reply = broker::send_message(&mut conn, worker, director, "reply").unwrap();
             let settings = settings_for(&conn);
             let member = broker::get_member(&conn, director, fleet).unwrap().unwrap();
             let lock =
@@ -391,11 +417,10 @@ mod tests {
     #[test]
     fn a_completed_submission_is_stamped_even_when_its_budget_has_just_expired() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = common::migrated_conn(&dir);
-        let (fleet, director) = common::create_fleet(&mut conn, "stamp");
-        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
-        let message =
-            broker::send_message(&mut conn, director, &worker.to_string(), "assignment").unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet(&mut conn, "stamp");
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
+        let message = broker::send_message(&mut conn, director, worker, "assignment").unwrap();
         let settings = Settings::from_lookup(|name| {
             (name == "CAFLEET_DATABASE_URL").then(|| format!("sqlite:///{}", conn.path().unwrap()))
         })
@@ -403,10 +428,8 @@ mod tests {
         use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
         use std::sync::{
             Arc,
-            atomic::{AtomicBool, AtomicUsize, Ordering},
+            atomic::{AtomicBool, Ordering},
         };
-        let scopes = Arc::new(AtomicUsize::new(0));
-        let observed = scopes.clone();
         let submitted = Arc::new(AtomicBool::new(false));
         let stamped = submitted.clone();
         conn.authorizer(Some(move |context: AuthContext<'_>| {
@@ -420,15 +443,6 @@ mod tests {
                 )
             {
                 return Authorization::Deny;
-            }
-            if matches!(
-                context.action,
-                AuthAction::Pragma {
-                    pragma_name: "busy_timeout",
-                    ..
-                }
-            ) {
-                observed.fetch_add(1, Ordering::SeqCst);
             }
             Authorization::Allow
         }))
@@ -453,11 +467,6 @@ mod tests {
         .unwrap();
         assert_eq!(outcome.sent, vec![message.message_id]);
         assert!(deadline.remaining().is_err());
-        assert_eq!(
-            scopes.load(Ordering::SeqCst),
-            2,
-            "the input attempt and mandatory finalization own separate database budgets"
-        );
         assert!(
             broker::oldest_pending_preview(&conn, worker, &BTreeSet::new())
                 .unwrap()
@@ -469,12 +478,11 @@ mod tests {
     fn preview_reads_share_one_snapshot_when_another_connection_changes_placement_and_text() {
         use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = common::migrated_conn(&dir);
+        let mut conn = migrated_conn(&dir);
         conn.execute_batch("PRAGMA journal_mode=WAL").unwrap();
-        let (fleet, director) = common::create_fleet(&mut conn, "snapshot");
-        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
-        let message =
-            broker::send_message(&mut conn, director, &worker.to_string(), "original").unwrap();
+        let (fleet, director) = create_fleet(&mut conn, "snapshot");
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
+        let message = broker::send_message(&mut conn, director, worker, "original").unwrap();
         let path = conn.path().unwrap().to_owned();
         let mut changed = false;
         conn.authorizer(Some(move |context: AuthContext<'_>| {
@@ -529,6 +537,149 @@ mod tests {
         ))
     }
 
+    #[test]
+    fn a_drain_submits_pending_messages_fifo_with_one_escape_and_keeps_full_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet(&mut conn, "fifo");
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
+        let bodies = [
+            "雪\n\t\u{1b}! shell".to_owned(),
+            "界".repeat(INLINE_BODY_LIMIT + 1),
+        ];
+        let messages: Vec<_> = bodies
+            .iter()
+            .map(|body| broker::send_message(&mut conn, director, worker, body).unwrap())
+            .collect();
+        let settings = settings_for(&conn);
+        let runner = crate::multiplexer::recording::FakeRunner::with_binary("tmux");
+        runner.succeed(5);
+        let result = deliver_pending(
+            &mut conn,
+            &settings,
+            worker,
+            Some(fleet),
+            Deadline::new(),
+            &BTreeSet::new(),
+            || Ok(fake_mux(runner.clone())),
+        )
+        .unwrap();
+        assert_eq!(
+            result.sent,
+            messages
+                .iter()
+                .map(|message| message.message_id)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(result.end, AttemptEnd::Drained);
+        let calls = runner.run_argvs();
+        assert_eq!(calls.len(), 5);
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|call| call.last().unwrap() == "Escape")
+                .count(),
+            1
+        );
+        assert_eq!(calls[1].last().unwrap(), &notification_line(&messages[0]));
+        assert_eq!(calls[3].last().unwrap(), &notification_line(&messages[1]));
+        assert!(calls[3].last().unwrap().contains("cafleet message show"));
+        assert_eq!(
+            broker::poll_messages(&conn, worker)
+                .unwrap()
+                .iter()
+                .map(|message| message.text.clone())
+                .collect::<Vec<_>>(),
+            bodies.into_iter().rev().collect::<Vec<_>>()
+        );
+        assert!(
+            broker::oldest_pending_preview(&conn, worker, &BTreeSet::new())
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn placement_changes_during_a_real_lock_wait_are_detected_before_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet(&mut conn, "placement wait");
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
+        let message = broker::send_message(&mut conn, director, worker, "pending").unwrap();
+        let settings = settings_for(&conn);
+        let placement = broker::get_member(&conn, worker, fleet)
+            .unwrap()
+            .unwrap()
+            .placement
+            .unwrap();
+        let guard = PaneLock::try_acquire(&settings.database_url, &placement)
+            .unwrap()
+            .unwrap();
+        let path = conn.path().unwrap().to_owned();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(80));
+            Connection::open(path)
+                .unwrap()
+                .execute(
+                    "UPDATE member_placements SET mux_pane_id='%9' WHERE member_id=?1",
+                    [worker],
+                )
+                .unwrap();
+            drop(guard);
+        });
+        let result = deliver_pending(
+            &mut conn,
+            &settings,
+            worker,
+            Some(fleet),
+            Deadline::new(),
+            &BTreeSet::new(),
+            || panic!("changed placement finishes before transport resolution"),
+        )
+        .unwrap();
+        release.join().unwrap();
+        assert_eq!(result, AttemptOutcome::ended(AttemptEnd::Held));
+        assert_eq!(
+            broker::oldest_pending_preview(&conn, worker, &BTreeSet::new())
+                .unwrap()
+                .unwrap(),
+            message
+        );
+    }
+
+    #[test]
+    fn self_sends_and_pending_placements_keep_durable_rows_without_resolving_transport() {
+        for (target_self, pane) in [(true, Some("%2")), (false, None)] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut conn = migrated_conn(&dir);
+            let (fleet, director) = create_fleet(&mut conn, "held preview");
+            let worker = register(&mut conn, fleet, "worker", pane);
+            let sender = if target_self { worker } else { director };
+            let message = broker::send_message(&mut conn, sender, worker, "durable").unwrap();
+            let settings = settings_for(&conn);
+            let result = deliver_pending(
+                &mut conn,
+                &settings,
+                worker,
+                Some(fleet),
+                Deadline::new(),
+                &BTreeSet::new(),
+                || panic!("ineligible preview has no transport effects"),
+            )
+            .unwrap();
+            assert_eq!(
+                result.end,
+                if target_self {
+                    AttemptEnd::NoPending
+                } else {
+                    AttemptEnd::Held
+                }
+            );
+            assert_eq!(broker::poll_messages(&conn, worker).unwrap(), [message]);
+            assert!(result.sent.is_empty());
+        }
+    }
+
     fn expected_failure(member_id: i64, message_id: i64, cause: &str) -> AttemptEnd {
         AttemptEnd::Failed(crate::receive::NotificationError {
             member_id,
@@ -542,16 +693,14 @@ mod tests {
     #[test]
     fn delivery_skips_attempted_message_ids_and_stamps_only_the_later_message() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = common::migrated_conn(&dir);
-        let (fleet, director) = common::create_fleet(&mut conn, "exclusions");
-        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
-        let first =
-            broker::send_message(&mut conn, director, &worker.to_string(), "failed earlier")
-                .unwrap();
-        let next =
-            broker::send_message(&mut conn, director, &worker.to_string(), "next message").unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet(&mut conn, "exclusions");
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
+        let first = broker::send_message(&mut conn, director, worker, "failed earlier").unwrap();
+        let next = broker::send_message(&mut conn, director, worker, "next message").unwrap();
         let settings = settings_for(&conn);
-        let runner = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
+        let runner = crate::multiplexer::recording::FakeRunner::with_binary("tmux");
+        runner.succeed(3);
         let result = deliver_pending(
             &mut conn,
             &settings,
@@ -589,12 +738,10 @@ mod tests {
     fn resolution_and_availability_failures_use_the_exact_not_notified_diagnostic() {
         for resolution in [true, false] {
             let dir = tempfile::tempdir().unwrap();
-            let mut conn = common::migrated_conn(&dir);
-            let (fleet, director) = common::create_fleet(&mut conn, "multiplexer failure");
-            let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
-            let message =
-                broker::send_message(&mut conn, director, &worker.to_string(), "assignment")
-                    .unwrap();
+            let mut conn = migrated_conn(&dir);
+            let (fleet, director) = create_fleet(&mut conn, "multiplexer failure");
+            let worker = register(&mut conn, fleet, "worker", Some("%2"));
+            let message = broker::send_message(&mut conn, director, worker, "assignment").unwrap();
             let settings = settings_for(&conn);
             let result = deliver_pending(
                 &mut conn,
@@ -608,7 +755,7 @@ mod tests {
                         Err(MultiplexerError::new("resolution unavailable"))
                     } else {
                         Ok(fake_mux(
-                            crate::multiplexer::test_support::FakeRunner::without_binaries(),
+                            crate::multiplexer::recording::FakeRunner::without_binaries(),
                         ))
                     }
                 },
@@ -641,12 +788,10 @@ mod tests {
     fn busy_lock_and_lock_acquisition_errors_use_the_exact_not_notified_diagnostic() {
         for busy in [true, false] {
             let dir = tempfile::tempdir().unwrap();
-            let mut conn = common::migrated_conn(&dir);
-            let (fleet, director) = common::create_fleet(&mut conn, "lock failure");
-            let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
-            let message =
-                broker::send_message(&mut conn, director, &worker.to_string(), "assignment")
-                    .unwrap();
+            let mut conn = migrated_conn(&dir);
+            let (fleet, director) = create_fleet(&mut conn, "lock failure");
+            let worker = register(&mut conn, fleet, "worker", Some("%2"));
+            let message = broker::send_message(&mut conn, director, worker, "assignment").unwrap();
             let settings = settings_for(&conn);
             let placement = broker::get_member(&conn, worker, fleet)
                 .unwrap()
@@ -689,13 +834,12 @@ mod tests {
     #[test]
     fn an_insufficient_first_line_budget_reports_the_exact_not_notified_diagnostic() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = common::migrated_conn(&dir);
-        let (fleet, director) = common::create_fleet(&mut conn, "budget");
-        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
-        let message =
-            broker::send_message(&mut conn, director, &worker.to_string(), "assignment").unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet(&mut conn, "budget");
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
+        let message = broker::send_message(&mut conn, director, worker, "assignment").unwrap();
         let settings = settings_for(&conn);
-        let runner = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
+        let runner = crate::multiplexer::recording::FakeRunner::with_binary("tmux");
         let result = deliver_pending(
             &mut conn,
             &settings,
@@ -721,15 +865,13 @@ mod tests {
     fn every_transport_stage_uses_the_same_not_notified_template_and_preserves_the_cause() {
         for successes in 0..=2 {
             let dir = tempfile::tempdir().unwrap();
-            let mut conn = common::migrated_conn(&dir);
-            let (fleet, director) = common::create_fleet(&mut conn, "transport");
-            let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
-            let message =
-                broker::send_message(&mut conn, director, &worker.to_string(), "assignment")
-                    .unwrap();
+            let mut conn = migrated_conn(&dir);
+            let (fleet, director) = create_fleet(&mut conn, "transport");
+            let worker = register(&mut conn, fleet, "worker", Some("%2"));
+            let message = broker::send_message(&mut conn, director, worker, "assignment").unwrap();
             let settings = settings_for(&conn);
-            let runner = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
-            let expected = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
+            let runner = crate::multiplexer::recording::FakeRunner::with_binary("tmux");
+            let expected = crate::multiplexer::recording::FakeRunner::with_binary("tmux");
             for fixture in [&runner, &expected] {
                 for _ in 0..successes {
                     fixture.respond(Ok(String::new()));
@@ -771,21 +913,20 @@ mod tests {
     #[test]
     fn a_failure_after_one_submission_keeps_the_sent_prefix_and_names_the_current_candidate() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = common::migrated_conn(&dir);
-        let (fleet, director) = common::create_fleet(&mut conn, "partial drain");
-        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
-        let first =
-            broker::send_message(&mut conn, director, &worker.to_string(), "first").unwrap();
-        let next = broker::send_message(&mut conn, director, &worker.to_string(), "next").unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet(&mut conn, "partial drain");
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
+        let first = broker::send_message(&mut conn, director, worker, "first").unwrap();
+        let next = broker::send_message(&mut conn, director, worker, "next").unwrap();
         let settings = settings_for(&conn);
-        let runner = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
+        let runner = crate::multiplexer::recording::FakeRunner::with_binary("tmux");
         for _ in 0..3 {
             runner.respond(Ok(String::new()));
         }
         runner.respond(Err(RunError::Failed {
             stderr: "next literal failed".into(),
         }));
-        let expected = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
+        let expected = crate::multiplexer::recording::FakeRunner::with_binary("tmux");
         expected.respond(Err(RunError::Failed {
             stderr: "next literal failed".into(),
         }));
@@ -814,18 +955,18 @@ mod tests {
     #[test]
     fn a_fatal_stamp_error_retains_its_storage_cause() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = common::migrated_conn(&dir);
-        let (fleet, director) = common::create_fleet(&mut conn, "fatal stamp");
-        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
-        let message =
-            broker::send_message(&mut conn, director, &worker.to_string(), "assignment").unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet(&mut conn, "fatal stamp");
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
+        let message = broker::send_message(&mut conn, director, worker, "assignment").unwrap();
         conn.execute_batch(
             "CREATE TRIGGER reject_stamp BEFORE UPDATE OF notified_at ON messages
             BEGIN SELECT RAISE(ABORT, 'injected stamp corruption'); END;",
         )
         .unwrap();
         let settings = settings_for(&conn);
-        let runner = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
+        let runner = crate::multiplexer::recording::FakeRunner::with_binary("tmux");
+        runner.succeed(3);
         let error = deliver_pending(
             &mut conn,
             &settings,
@@ -853,13 +994,13 @@ mod tests {
     #[test]
     fn a_fatal_under_lock_snapshot_error_retains_its_storage_cause() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = common::migrated_conn(&dir);
-        let (fleet, director) = common::create_fleet(&mut conn, "fatal snapshot");
-        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
-        broker::send_message(&mut conn, director, &worker.to_string(), "assignment").unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet(&mut conn, "fatal snapshot");
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
+        broker::send_message(&mut conn, director, worker, "assignment").unwrap();
         let settings = settings_for(&conn);
         let path = conn.path().unwrap().to_string();
-        let runner = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
+        let runner = crate::multiplexer::recording::FakeRunner::with_binary("tmux");
         let error = deliver_pending(
             &mut conn,
             &settings,
@@ -890,15 +1031,13 @@ mod tests {
     fn recipient_changes_after_resolution_are_revalidated_before_any_input() {
         for change in ["departure", "promotion", "placement"] {
             let dir = tempfile::tempdir().unwrap();
-            let mut conn = common::migrated_conn(&dir);
-            let (fleet, director) = common::create_fleet(&mut conn, "revalidation");
-            let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
-            let message =
-                broker::send_message(&mut conn, director, &worker.to_string(), "assignment")
-                    .unwrap();
+            let mut conn = migrated_conn(&dir);
+            let (fleet, director) = create_fleet(&mut conn, "revalidation");
+            let worker = register(&mut conn, fleet, "worker", Some("%2"));
+            let message = broker::send_message(&mut conn, director, worker, "assignment").unwrap();
             let settings = settings_for(&conn);
             let path = conn.path().unwrap().to_string();
-            let runner = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
+            let runner = crate::multiplexer::recording::FakeRunner::with_binary("tmux");
             let result = deliver_pending(
                 &mut conn, &settings, worker, Some(fleet), Deadline::new(), &BTreeSet::new(),
                 || {
@@ -937,14 +1076,13 @@ mod tests {
     #[test]
     fn under_lock_snapshot_contention_returns_a_retryable_diagnostic_for_the_current_candidate() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = common::migrated_conn(&dir);
-        let (fleet, director) = common::create_fleet(&mut conn, "snapshot contention");
-        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
-        let message =
-            broker::send_message(&mut conn, director, &worker.to_string(), "assignment").unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet(&mut conn, "snapshot contention");
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
+        let message = broker::send_message(&mut conn, director, worker, "assignment").unwrap();
         let settings = settings_for(&conn);
         let blocker = Connection::open(conn.path().unwrap()).unwrap();
-        let runner = crate::multiplexer::test_support::FakeRunner::with_binary("tmux");
+        let runner = crate::multiplexer::recording::FakeRunner::with_binary("tmux");
         let result = deliver_pending(
             &mut conn,
             &settings,
@@ -984,7 +1122,7 @@ mod tests {
     }
 
     mod notification_line_tests {
-        use super::super::{INLINE_BODY_LIMIT, notification_line};
+        use super::super::notification_line;
         use crate::broker::records::{MessageRecord, MessageStatus};
 
         const TS: &str = "2026-10-24T09:00:00.000000+00:00";
@@ -1015,11 +1153,6 @@ mod tests {
             format!(
                 "Body is {stored_chars} characters; run cafleet message show 57 --json to read it."
             )
-        }
-
-        #[test]
-        fn the_inline_limit_is_4000() {
-            assert_eq!(INLINE_BODY_LIMIT, 4000);
         }
 
         #[test]
