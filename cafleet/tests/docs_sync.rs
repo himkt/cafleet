@@ -710,14 +710,10 @@ mod structural_contracts {
         }
     }
 
-    #[test]
-    fn opencode_catalog_rows_are_unique_prefixed_and_priced() {
-        let catalog = INVENTORY
-            .document(BACKENDS)
-            .section("opencode")
-            .unwrap()
-            .section("model-catalog")
-            .unwrap();
+    fn assert_catalog_rows_are_unique_prefixed_and_priced(
+        catalog: &Region<'_>,
+        required_prefix: &str,
+    ) {
         let rows = catalog.rows().unwrap();
         assert_eq!(
             rows[0].1,
@@ -730,9 +726,12 @@ mod structural_contracts {
         for (line, row) in rows.iter().skip(2) {
             let model = row[0].trim_matches('`');
             assert!(
-                model.starts_with("opencode/"),
+                model.starts_with(required_prefix),
                 "{}",
-                catalog.error(*line, &format!("model {model} needs the opencode/ prefix"))
+                catalog.error(
+                    *line,
+                    &format!("model {model} needs the {required_prefix} prefix")
+                )
             );
             assert!(
                 models.insert(model),
@@ -771,6 +770,30 @@ mod structural_contracts {
                 );
             }
         }
+    }
+
+    #[test]
+    fn opencode_catalog_rows_are_unique_prefixed_and_priced() {
+        let catalog = INVENTORY
+            .document(BACKENDS)
+            .section("opencode")
+            .unwrap()
+            .section("model-catalog")
+            .unwrap();
+        assert_catalog_rows_are_unique_prefixed_and_priced(&catalog, "opencode/");
+    }
+
+    #[test]
+    fn opencode_go_catalog_rows_are_unique_prefixed_and_priced() {
+        let catalog = INVENTORY
+            .document(BACKENDS)
+            .section("opencode")
+            .unwrap()
+            .section("model-catalog")
+            .unwrap()
+            .section("opencode-go")
+            .unwrap();
+        assert_catalog_rows_are_unique_prefixed_and_priced(&catalog, "opencode-go/");
     }
 
     #[test]
