@@ -211,12 +211,7 @@ mod tests {
             ),
             (
                 CodingAgent::Codex,
-                vec![
-                    "codex",
-                    "--approve-for-me",
-                    "--sandbox",
-                    "workspace-write",
-                ],
+                vec!["codex", "--approve-for-me", "--sandbox", "workspace-write"],
             ),
             (
                 CodingAgent::Opencode,

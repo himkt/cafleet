@@ -105,7 +105,7 @@ mod tests {
     use std::os::unix::fs::symlink;
 
     #[test]
-    fn installed_opencode_preset_allows_only_broker_shell_communications() {
+    fn installed_opencode_preset_preserves_routine_permissions_and_dispatch_denials() {
         let home = tempfile::tempdir().unwrap();
         let mut conn = crate::broker::tests::migrated_conn(&home);
         let paths = agent_paths(&|_| None, home.path(), CodingAgent::Opencode).unwrap();
@@ -125,7 +125,31 @@ mod tests {
             serde_json::json!({
                 "shell": {
                     "*": "deny",
-                    "cafleet message *": "allow"
+                    "git add *": "allow",
+                    "git commit *": "allow",
+                    "git diff *": "allow",
+                    "git grep *": "allow",
+                    "git log *": "allow",
+                    "git ls-tree *": "allow",
+                    "git ls-files *": "allow",
+                    "git branch *": "allow",
+                    "git status": "allow",
+                    "grep *": "allow",
+                    "ls": "allow",
+                    "ls *": "allow",
+                    "stat *": "allow",
+                    "tree": "allow",
+                    "tree *": "allow",
+                    "mise //cafleet:test": "allow",
+                    "mise //cafleet:test *": "allow",
+                    "mise //cafleet:lint": "allow",
+                    "mise //cafleet:format": "allow",
+                    "mise //cafleet:typecheck": "allow",
+                    "mise //cafleet:build": "allow",
+                    "wc *": "allow",
+                    "cafleet *": "allow",
+                    "cafleet member prompt *": "deny",
+                    "cafleet member exec *": "deny"
                 },
                 "read": {
                     "*": "allow",
@@ -146,6 +170,14 @@ mod tests {
                 "plan_exit": "deny"
             })
         );
+        let broad_allow = frontmatter.find("\"cafleet *\"").unwrap();
+        for dispatch in ["cafleet member prompt *", "cafleet member exec *"] {
+            let dispatch_deny = frontmatter.find(&format!("\"{dispatch}\"")).unwrap();
+            assert!(
+                broad_allow < dispatch_deny,
+                "specific dispatch denial follows the broader CAFleet allow: {dispatch}"
+            );
+        }
     }
 
     #[test]
