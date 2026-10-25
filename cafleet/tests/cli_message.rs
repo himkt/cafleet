@@ -12,7 +12,7 @@ fn fleet_with_member(cli: &Cli) -> (i64, i64, i64) {
 }
 
 #[test]
-fn a_member_to_director_send_reports_its_notification_into_the_director_pane() {
+fn a_member_to_director_send_preserves_the_durable_inbox_without_pane_input() {
     let cli = Cli::new();
     let (_, director_id, member_id) = fleet_with_member(&cli);
     let output = cli.run(&[
@@ -27,19 +27,45 @@ fn a_member_to_director_send_reports_its_notification_into_the_director_pane() {
     ]);
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     let payload: serde_json::Value = serde_json::from_str(stdout(&output).trim()).unwrap();
-    assert_eq!(payload["notification_sent"], true);
+    assert_eq!(payload["notification_sent"], false);
     assert_eq!(stderr(&output), "");
-    let calls = cli.shim_calls();
-    assert_eq!(
-        calls.first().map(String::as_str),
-        Some("send-keys -t %0 Escape")
-    );
-    assert!(
-        calls
-            .iter()
-            .any(|line| line.starts_with("send-keys -t %0 -l -- [cafleet msg ")),
-        "{calls:?}"
-    );
+    assert!(cli.shim_calls().is_empty(), "{:?}", cli.shim_calls());
+    let polled = cli.run(&["message", "poll", &director_id.to_string(), "--json"]);
+    assert_eq!(code(&polled), 0, "{}", stderr(&polled));
+    let inbox: serde_json::Value = serde_json::from_str(&stdout(&polled)).unwrap();
+    assert_eq!(inbox, serde_json::json!([payload["message"]]));
+    let state: (Option<String>, Option<String>, String) = cli
+        .sqlite()
+        .query_row(
+            "SELECT notified_at, preview_started_at, status_state FROM messages WHERE message_id=?1",
+            [payload["message"]["message_id"].as_i64().unwrap()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(state, (None, None, "input_required".into()));
+}
+
+#[test]
+fn a_director_send_succeeds_when_the_multiplexer_executable_is_unavailable() {
+    let cli = Cli::new();
+    let (_, director, worker) = fleet_with_member(&cli);
+    std::fs::remove_file(cli.shim_dir.join("tmux")).unwrap();
+    let output = cli.run_outside_tmux(&[
+        "message",
+        "send",
+        "--from-member-id",
+        &worker.to_string(),
+        "--to-member-id",
+        &director.to_string(),
+        "reply without a multiplexer",
+        "--json",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(stderr(&output), "");
+    let sent: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(sent["notification_sent"], false);
+    assert_eq!(sent["message"]["status_state"], "input_required");
+    assert!(cli.shim_calls().is_empty());
 }
 
 #[test]

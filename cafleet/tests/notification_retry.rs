@@ -170,15 +170,16 @@ fn immediate_incoming_messages_take_priority_over_pending_outgoing_notifications
 }
 
 #[test]
-fn retries_include_the_director_and_exclude_the_subject_self_acked_notified_and_pending_placements()
-{
+fn an_ordinary_subject_retries_only_other_ordinary_members_with_eligible_previews() {
     let _test_resource = common::process_test_resource_guard();
     let fixture = Fixture::new();
     let subject = fixture.worker("observer");
     let worker = fixture.worker("worker");
+    let eligible = fixture.worker("eligible");
     let pending = fixture.worker("pending");
     let director = fixture.director_pane();
-    let to_director = fixture.reply(&worker, "Director receives in its pane");
+    let to_director = fixture.reply(&worker, "Director receives through its inbox");
+    let assignment = fixture.assignment(&eligible, "ordinary member receives in its pane");
     let self_id = fixture.message(worker.id, worker.id, "self note");
     let acked = fixture.assignment(&worker, "consumed");
     fixture.ack(acked);
@@ -200,19 +201,32 @@ fn retries_include_the_director_and_exclude_the_subject_self_acked_notified_and_
         )
         .unwrap();
     fixture.assignment(&pending, "pending pane");
+    let before_director: (Option<String>, Option<String>, String) = fixture
+        .cli
+        .sqlite()
+        .query_row(
+            "SELECT notified_at, preview_started_at, status_state FROM messages WHERE message_id=?1",
+            [to_director],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
     let result = json(&fixture.spawn(subject.id, 1).output());
     assert_result(&result, subject.id, "timeout");
     assert_eq!(result["notification_errors"], serde_json::json!([]));
-    assert!(fixture.stamp(to_director).is_some());
+    assert_eq!(fixture.stamp(to_director), None);
+    assert!(fixture.stamp(assignment).is_some());
     assert!(fixture.stamp(self_id).is_some());
-    let literals = literals_for(&fixture, &director);
+    let literals = literals_for(&fixture, &eligible);
     assert_eq!(literals.len(), 1, "{:?}", fixture.cli.shim_calls());
     assert!(
-        literals[0].contains(&format!("[cafleet msg {to_director} from {} ", worker.id)),
+        literals[0].contains(&format!(
+            "[cafleet msg {assignment} from {} ",
+            fixture.director
+        )),
         "{literals:?}"
     );
-    assert_eq!(fixture.count("escape", &director), 1);
-    for untouched in [&subject, &worker, &pending] {
+    assert_eq!(fixture.count("escape", &eligible), 1);
+    for untouched in [&director, &subject, &worker, &pending] {
         assert!(
             fixture
                 .events()
@@ -222,6 +236,23 @@ fn retries_include_the_director_and_exclude_the_subject_self_acked_notified_and_
             untouched.pane
         );
     }
+    let after_director: (Option<String>, Option<String>, String) = fixture
+        .cli
+        .sqlite()
+        .query_row(
+            "SELECT notified_at, preview_started_at, status_state FROM messages WHERE message_id=?1",
+            [to_director],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(after_director, before_director);
+    let inbox =
+        json(
+            &fixture
+                .cli
+                .run(&["message", "poll", &fixture.director.to_string(), "--json"]),
+        );
+    assert_eq!(inbox[0]["message_id"], to_director);
     assert_no_capture(&fixture);
 }
 

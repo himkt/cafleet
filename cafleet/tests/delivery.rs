@@ -508,7 +508,7 @@ fn a_notification_stamp_failure_survives_a_new_wait_without_resubmission() {
 }
 
 #[test]
-fn a_member_to_director_send_is_delivered_into_the_directors_pane() {
+fn a_member_to_director_send_leaves_an_unclaimed_pending_record_without_pane_input() {
     let fixture = Fixture::new();
     let output = fixture.cli.run(&[
         "message",
@@ -522,23 +522,19 @@ fn a_member_to_director_send_is_delivered_into_the_directors_pane() {
     ]);
     let result = payload(&output);
     let id = result["message"]["message_id"].as_i64().unwrap();
-    assert_eq!(result["notification_sent"], true);
+    assert_eq!(result["notification_sent"], false);
     assert_eq!(stderr(&output), "");
-    assert!(fixture.stamp(id).is_some());
+    assert_eq!(fixture.stamp(id), None);
+    assert!(!fixture.claimed(id));
     assert_eq!(fixture.state(id), "input_required");
-    let ts = result["message"]["created_at"].as_str().unwrap();
-    assert_eq!(
-        fixture.writes_to("%0"),
-        [
-            "send-keys -t %0 Escape".to_owned(),
-            format!(
-                "send-keys -t %0 -l -- [cafleet msg {id} from {} {ts}] reply for the Director {CLAUSES}",
-                fixture.worker
-            ),
-            "send-keys -t %0 Enter".to_owned(),
-        ]
-    );
-    assert!(fixture.writes_to(&fixture.pane).is_empty());
+    assert!(fixture.cli.shim_calls().is_empty());
+    let inbox =
+        payload(
+            &fixture
+                .cli
+                .run(&["message", "poll", &fixture.director.to_string(), "--json"]),
+        );
+    assert_eq!(inbox, serde_json::json!([result["message"]]));
 }
 
 #[test]
