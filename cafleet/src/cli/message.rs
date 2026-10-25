@@ -57,12 +57,21 @@ pub enum MessageCommand {
         /// Recipient whose inbox is received.
         #[arg(value_name = "MEMBER_ID")]
         member_id: i64,
-        /// Maximum seconds; use the default for a host-native background task.
+        /// Maximum seconds to wait.
         #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u64).range(1..=1800))]
         timeout: u64,
         /// Output in JSON format.
         #[arg(long)]
         json: bool,
+    },
+    /// Stream full pending inbox records as JSONL without consuming them.
+    Listen {
+        /// Active recipient whose inbox is streamed.
+        #[arg(value_name = "MEMBER_ID")]
+        member_id: i64,
+        /// Optional monotonic lease in seconds.
+        #[arg(long, value_name = "SECONDS", value_parser = clap::value_parser!(u64).range(1..=1800))]
+        timeout: Option<u64>,
     },
     /// Acknowledge a received message.
     Ack {
@@ -208,6 +217,9 @@ pub fn run(
                 },
             );
             Ok(())
+        }
+        MessageCommand::Listen { member_id, timeout } => {
+            crate::listen::run(conn, member_id, timeout.map(std::time::Duration::from_secs))
         }
         MessageCommand::Ack { message_id, json } => {
             let result = presentation::message_envelope(&broker::messaging::ack_message_validated(

@@ -9,10 +9,11 @@ use serde_json::Value;
 
 /// One invocation of every broker command a claude member is spawned allowed
 /// to run; a setting blocks a member when it blocks any of these.
-pub(crate) const PROBE_COMMANDS: [&str; 5] = [
+pub(crate) const PROBE_COMMANDS: [&str; 6] = [
     "cafleet message send --from-member-id 1 --to-member-id 2 x",
     "cafleet message poll 1",
     "cafleet message wait 1 --timeout 300 --json",
+    "cafleet message listen 1 --timeout 300",
     "cafleet message ack 1",
     "cafleet message show 1",
 ];
