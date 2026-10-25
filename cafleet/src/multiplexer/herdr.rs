@@ -364,7 +364,7 @@ impl HerdrMultiplexer {
             bounded.runner.as_ref(),
             &PaneInput {
                 escape: herdr_argv(&["herdr", "pane", "send-keys", target_pane_id, "escape"]),
-                literal: herdr_argv(&["herdr", "pane", "send-text", target_pane_id, "--", text]),
+                literal: herdr_argv(&["herdr", "pane", "send-text", target_pane_id, text]),
                 enter: herdr_argv(&["herdr", "pane", "send-keys", target_pane_id, "enter"]),
             },
             lead,
