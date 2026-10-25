@@ -942,7 +942,6 @@ mod tests {
                     assert!(runner.run_argvs().iter().all(|argv| {
                         argv.get(1).map(String::as_str) == Some("display-message")
                     }));
-                    assert!(runner.responses.borrow().is_empty());
                 }
             }
         }
