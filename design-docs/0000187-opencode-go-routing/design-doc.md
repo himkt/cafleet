@@ -1,7 +1,7 @@
 # OpenCode Go catalog and `opencode-go/` provider preference
 
-**Status**: Approved
-**Progress**: 0/24 tasks complete
+**Status**: Complete
+**Progress**: 24/24 tasks complete
 **Last Updated**: 2026-10-25
 
 ## Overview
@@ -10,15 +10,15 @@ The `cafleet-model-list-refresh` skill gains the OpenCode Go page as an approved
 
 ## Success Criteria
 
-- [ ] `.claude/skills/cafleet-model-list-refresh/SKILL.md` lists the OpenCode Go page in its approved-source allowlist and specifies an OpenCode Go procedure that mirrors every Go model into the `opencode-go` table.
-- [ ] `skills/cafleet/reference/coding-agents.md` `## opencode` → `### Model catalog` contains a `#### OpenCode Go` sub-heading whose table holds one `opencode-go/<model-id>` row per model on the Go page's *Endpoints* table on the refresh date, followed by notes explaining usage-limit pricing, plans and per-model monthly limits.
-- [ ] `skills/cafleet/roles/director.md` resolves "glm-5.3 member" to `--coding-agent opencode --model opencode-go/glm-5.3` when `opencode models` lists `opencode-go/glm-5.3`, and to `opencode/glm-5.3` when it lists only `opencode/glm-5.3`.
-- [ ] `director.md` honors provider-prefixed tokens, opencode Role defaults and family-word mappings verbatim (no `opencode-go/` swap), and keeps bare Claude/GPT names on their native backends.
-- [ ] `director.md` relays to the operator, without spawning, when `opencode models` fails or lists neither candidate token.
-- [ ] `director.md` § Model selection states that cost efficiency mode on OpenCode prefers a listed `opencode-go/` model that can finish the task reliably.
-- [ ] The opencode Role defaults (`opencode/deepseek-v4.1-flash-free`, `opencode/glm-5.3-flash-free`) are unchanged.
-- [ ] `docs/docs/concepts/coding-agents.md` and `docs/docs/spec/coding-agent-backends.md` describe the Go table and provider preference for operators.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build` pass, including a docs-sync guard on the `opencode-go` table shape.
+- [x] `.claude/skills/cafleet-model-list-refresh/SKILL.md` lists the OpenCode Go page in its approved-source allowlist and specifies an OpenCode Go procedure that mirrors every Go model into the `opencode-go` table.
+- [x] `skills/cafleet/reference/coding-agents.md` `## opencode` → `### Model catalog` contains a `#### OpenCode Go` sub-heading whose table holds one `opencode-go/<model-id>` row per model on the Go page's *Endpoints* table on the refresh date, followed by notes explaining usage-limit pricing, plans and per-model monthly limits.
+- [x] `skills/cafleet/roles/director.md` resolves "glm-5.3 member" to `--coding-agent opencode --model opencode-go/glm-5.3` when `opencode models` lists `opencode-go/glm-5.3`, and to `opencode/glm-5.3` when it lists only `opencode/glm-5.3`.
+- [x] `director.md` honors provider-prefixed tokens, opencode Role defaults and family-word mappings verbatim (no `opencode-go/` swap), and keeps bare Claude/GPT names on their native backends.
+- [x] `director.md` relays to the operator, without spawning, when `opencode models` fails or lists neither candidate token.
+- [x] `director.md` § Model selection states that cost efficiency mode on OpenCode prefers a listed `opencode-go/` model that can finish the task reliably.
+- [x] The opencode Role defaults (`opencode/deepseek-v4.1-flash-free`, `opencode/glm-5.3-flash-free`) are unchanged.
+- [x] `docs/docs/concepts/coding-agents.md` and `docs/docs/spec/coding-agent-backends.md` describe the Go table and provider preference for operators.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build` pass, including a docs-sync guard on the `opencode-go` table shape.
 
 ---
 
@@ -184,7 +184,7 @@ The following sentence ("Relay a missing or ambiguous match through Model routin
 
 A Go usage limit reached by a running member needs no new handling; the existing failure and Model replacement rules apply.
 
-**Worked resolutions.** The table gains a `opencode models lists` column (`—` where provider choice does not run). The existing "glm-5.3 member" row splits into the first two rows below; the other rows are added, and every other existing row keeps its value with `—`.
+**Worked resolutions.** The table gains a `opencode models lists` column (`—` where provider choice does not run). The existing "glm-5.3 member" row splits into the first two rows below; the other rows are added. Existing rows preserve their resolved flags: "opus member with OpenCode" lists `opencode/claude-opus-5-5` as provider-choice evidence, "sonnet 4.6 member with OpenCode" lists `opencode/claude-sonnet-4-6`, and rows that skip provider choice use `—`.
 
 | Operator says | Fleet backend | `opencode models` lists | Resolved flags |
 |---|---|---|---|
@@ -253,45 +253,45 @@ Both assert the header `Model | Class | Input $/MTok | Output $/MTok`, the prefi
 
 ### Step 1: Operator documentation
 
-- [ ] Update `docs/docs/concepts/coding-agents.md` § Model choice per Specification § 6 <!-- completed: -->
-- [ ] Add the `opencode-go/glm-5.3` example value in `docs/docs/spec/coding-agent-backends.md` § Model selection <!-- completed: -->
-- [ ] Run `mise //docs:build` and fix any broken links <!-- completed: -->
+- [x] Update `docs/docs/concepts/coding-agents.md` § Model choice per Specification § 6 <!-- completed: 2026-10-25T04:17 -->
+- [x] Add the `opencode-go/glm-5.3` example value in `docs/docs/spec/coding-agent-backends.md` § Model selection <!-- completed: 2026-10-25T04:17 -->
+- [x] Run `mise //docs:build` and fix any broken links <!-- completed: 2026-10-25T04:18 -->
 
 ### Step 2: Director routing policy
 
-- [ ] Replace the cost-efficiency comparison sentence in `skills/cafleet/roles/director.md` § Model selection and add the OpenCode cost ranking after it (Specification § 5) <!-- completed: -->
-- [ ] Update Model-name normalization steps 1 and 3, inference rows 4–5 and the precedence-paragraph wording (Specification § 4) <!-- completed: -->
-- [ ] Replace the OpenCode explicit-mapping table and rewrite the two paragraphs under it per the replacement table (Specification § 4) <!-- completed: -->
-- [ ] Add the `#### OpenCode provider choice` subsection (Specification § 3) <!-- completed: -->
-- [ ] Rewrite the first Model routing failures row, add its three rows, and add the worked-resolutions column and rows (Specification § 4) <!-- completed: -->
-- [ ] Add the OpenCode stronger-set and bare-ID cap sentences to § Model replacement (Specification § 5) <!-- completed: -->
-- [ ] Confirm `grep -n -i "opencode catalog" skills/cafleet/roles/director.md` finds no sentence that still assumes a single `opencode/` table <!-- completed: -->
-- [ ] Check every edited table cell against the two-sentence cap and `{decision_surface}` placeholder usage <!-- completed: -->
+- [x] Replace the cost-efficiency comparison sentence in `skills/cafleet/roles/director.md` § Model selection and add the OpenCode cost ranking after it (Specification § 5) <!-- completed: 2026-10-25T04:19 -->
+- [x] Update Model-name normalization steps 1 and 3, inference rows 4–5 and the precedence-paragraph wording (Specification § 4) <!-- completed: 2026-10-25T04:19 -->
+- [x] Replace the OpenCode explicit-mapping table and rewrite the two paragraphs under it per the replacement table (Specification § 4) <!-- completed: 2026-10-25T04:19 -->
+- [x] Add the `#### OpenCode provider choice` subsection (Specification § 3) <!-- completed: 2026-10-25T04:19 -->
+- [x] Rewrite the first Model routing failures row, add its three rows, and add the worked-resolutions column and rows (Specification § 4) <!-- completed: 2026-10-25T04:20 -->
+- [x] Add the OpenCode stronger-set and bare-ID cap sentences to § Model replacement (Specification § 5) <!-- completed: 2026-10-25T04:20 -->
+- [x] Confirm `grep -n -i "opencode catalog" skills/cafleet/roles/director.md` finds no sentence that still assumes a single `opencode/` table <!-- completed: 2026-10-25T04:21 -->
+- [x] Check every edited table cell against the two-sentence cap and `{decision_surface}` placeholder usage <!-- completed: 2026-10-25T04:21 -->
 
 ### Step 3: Refresh skill
 
-- [ ] Add the Go page to § Approved sources and rewrite its intro without a page count (Specification § 2) <!-- completed: -->
-- [ ] Update Refresh procedure steps 1 and 3 <!-- completed: -->
-- [ ] Add § OpenCode Go procedure (Specification § 2) <!-- completed: -->
+- [x] Add the Go page to § Approved sources and rewrite its intro without a page count (Specification § 2) <!-- completed: 2026-10-25T04:21 -->
+- [x] Update Refresh procedure steps 1 and 3 <!-- completed: 2026-10-25T04:21 -->
+- [x] Add § OpenCode Go procedure (Specification § 2) <!-- completed: 2026-10-25T04:22 -->
 
 ### Step 4: Populate the Go table via the refresh procedure
 
-- [ ] Fetch every approved source per the refresh skill; stop and report on any fetch/parse failure <!-- completed: -->
-- [ ] Build the `#### OpenCode Go` table, preamble and notes per Specification § 1, and add the Console preamble sentence pointing at it <!-- completed: -->
-- [ ] Re-verify the `claude`, `codex` and `opencode` Console tables per the existing procedure <!-- completed: -->
-- [ ] Ask the maintainer (via the Director) to confirm keeping all six Role defaults and to approve the proposed catalog diff, including the Go ordering and classes <!-- completed: -->
-- [ ] Apply the approved diff and set the shared "last refreshed" date in `coding-agents.md` <!-- completed: -->
+- [x] Fetch every approved source per the refresh skill; stop and report on any fetch/parse failure <!-- completed: 2026-10-25T04:30 -->
+- [x] Build the `#### OpenCode Go` table, preamble and notes per Specification § 1, and add the Console preamble sentence pointing at it <!-- completed: 2026-10-25T04:30 -->
+- [x] Re-verify the `claude`, `codex` and `opencode` Console tables per the existing procedure <!-- completed: 2026-10-25T04:31 -->
+- [x] Ask the maintainer (via the Director) to confirm keeping all six Role defaults and to approve the proposed catalog diff, including the Go ordering and classes <!-- completed: 2026-10-25T04:38 -->
+- [x] Apply the approved diff and set the shared "last refreshed" date in `coding-agents.md` <!-- completed: 2026-10-25T04:38 -->
 
 ### Step 5: Docs-sync guard
 
-- [ ] Extract the shared catalog-row helper and add `opencode_go_catalog_rows_are_unique_prefixed_and_priced` (Specification § 7) <!-- completed: -->
-- [ ] Run `mise //cafleet:test opencode` and confirm both catalog tests pass, then confirm the Go test fails on a temporary local edit that duplicates a Go row or drops the `opencode-go/` prefix, and revert that edit <!-- completed: -->
+- [x] Extract the shared catalog-row helper and add `opencode_go_catalog_rows_are_unique_prefixed_and_priced` (Specification § 7) <!-- completed: 2026-10-25T04:33 -->
+- [x] Run `mise //cafleet:test opencode` and confirm both catalog tests pass, then confirm the Go test fails on a temporary local edit that duplicates a Go row or drops the `opencode-go/` prefix, and revert that edit <!-- completed: 2026-10-25T04:44 -->
 
 ### Step 6: Validation
 
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck` <!-- completed: -->
-- [ ] Run `mise //docs:build` <!-- completed: -->
-- [ ] Confirm `grep -nE -i "five|four|fifth|sixth" .claude/skills/cafleet-model-list-refresh/SKILL.md` finds no source count, and reread the rewritten § Approved sources intro and Refresh procedure step 1 for any remaining ordinal reference to a source <!-- completed: -->
+- [x] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck` <!-- completed: 2026-10-25T04:53 -->
+- [x] Run `mise //docs:build` <!-- completed: 2026-10-25T04:44 -->
+- [x] Confirm `grep -nE -i "five|four|fifth|sixth" .claude/skills/cafleet-model-list-refresh/SKILL.md` finds no source count, and reread the rewritten § Approved sources intro and Refresh procedure step 1 for any remaining ordinal reference to a source <!-- completed: 2026-10-25T04:44 -->
 
 ---
 
@@ -302,3 +302,4 @@ Both assert the header `Model | Class | Input $/MTok | Output $/MTok`, the prefi
 | 2026-10-25 | Initial draft |
 | 2026-10-25 | Reviewer round 1: Go note-table headers and parse-failure cases, replacement wording for every single-table sentence, candidate-ID de-duplication, OpenCode cost ranking shared by cost efficiency mode and Model replacement, concepts-page rewrites |
 | 2026-10-25 | Reviewer and user approved; Status set to Approved |
+| 2026-10-25 | Implementation complete; all 24 tasks and Success Criteria verified, independent Reviewer approved in one round, and maintainer authorized publication in PR #492 |
