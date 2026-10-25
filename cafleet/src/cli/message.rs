@@ -14,7 +14,7 @@ use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::output::{format_indexed_list, format_message, truncate_message_text};
 use crate::presentation;
-use crate::receive::{AttemptEnd, BrokerReceiver, Delivery, SystemClock};
+use crate::receive::{AttemptEnd, BrokerReceiver, SystemClock};
 
 #[derive(Args)]
 #[group(required = true, multiple = false)]
@@ -137,8 +137,14 @@ pub fn run(
             let notification_sent = if from_member_id == to_member_id {
                 false
             } else {
-                match crate::runtime::deliver_pending(conn, settings, to_member_id, None, deadline)
-                {
+                match crate::runtime::deliver_pending(
+                    conn,
+                    settings,
+                    to_member_id,
+                    None,
+                    deadline,
+                    &std::collections::BTreeSet::new(),
+                ) {
                     Ok(outcome) => {
                         if let AttemptEnd::Failed(error) = &outcome.end {
                             eprintln!("Message {message_id} was persisted. {}", error.error);
@@ -182,12 +188,17 @@ pub fn run(
                 std::time::Duration::from_secs(timeout),
             )?;
             let messages: Vec<_> = outcome.messages.iter().map(presentation::message).collect();
-            let errors: Vec<_> = outcome.notification_errors.iter().map(|error| serde_json::json!({
-                "member_id": error.member_id,
-                "message_id": error.message_id,
-                "delivery": match error.delivery { Delivery::NotSent => "not_sent", Delivery::Uncertain => "uncertain" },
-                "error": error.error,
-            })).collect();
+            let errors: Vec<_> = outcome
+                .notification_errors
+                .iter()
+                .map(|error| {
+                    serde_json::json!({
+                        "member_id": error.member_id,
+                        "message_id": error.message_id,
+                        "error": error.error,
+                    })
+                })
+                .collect();
             if !json {
                 for error in &outcome.notification_errors {
                     eprintln!("{}", error.error);

@@ -123,18 +123,25 @@ pub(crate) fn send_message_validated(
 pub fn oldest_pending_preview(
     conn: &Connection,
     member_id: i64,
+    attempted: &std::collections::BTreeSet<i64>,
 ) -> Result<Option<MessageRecord>, CafleetError> {
-    conn.query_row(
-        &format!(
+    let mut statement = conn
+        .prepare(&format!(
             "SELECT {MESSAGE_COLUMNS} FROM messages \
-             WHERE to_member_id=?1 AND {PENDING_PREVIEW} AND preview_started_at IS NULL \
-             ORDER BY created_at, message_id LIMIT 1"
-        ),
-        [member_id],
-        map_message_row,
-    )
-    .optional()
-    .map_err(db_err)
+             WHERE to_member_id=?1 AND {PENDING_PREVIEW} \
+             ORDER BY created_at, message_id"
+        ))
+        .map_err(db_err)?;
+    let rows = statement
+        .query_map([member_id], map_message_row)
+        .map_err(db_err)?;
+    for row in rows {
+        let message = row.map_err(db_err)?;
+        if !attempted.contains(&message.message_id) {
+            return Ok(Some(message));
+        }
+    }
+    Ok(None)
 }
 
 pub(crate) fn stamp_notified_validated(
@@ -151,29 +158,6 @@ pub(crate) fn stamp_notified_validated(
         )
         .map_err(db_err)?;
     Ok(changed == 1)
-}
-
-pub(crate) fn claim_preview(
-    conn: &Connection,
-    message_id: i64,
-    member_id: i64,
-) -> Result<Option<MessageRecord>, CafleetError> {
-    conn.query_row(
-        &format!("UPDATE messages SET preview_started_at=?1 WHERE message_id=?2 AND to_member_id=?3 AND {PENDING_PREVIEW} AND preview_started_at IS NULL RETURNING {MESSAGE_COLUMNS}"),
-        params![format_utc(now_utc()), message_id, member_id],
-        map_message_row,
-    )
-    .optional()
-    .map_err(db_err)
-}
-
-pub(crate) fn release_preview(conn: &Connection, message_id: i64) -> Result<(), CafleetError> {
-    conn.execute(
-        "UPDATE messages SET preview_started_at=NULL WHERE message_id=?1",
-        [message_id],
-    )
-    .map(|_| ())
-    .map_err(db_err)
 }
 
 pub fn poll_messages(

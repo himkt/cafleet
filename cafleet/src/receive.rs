@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 
 use rusqlite::Connection;
@@ -31,7 +31,6 @@ impl Clock for SystemClock {
 pub(crate) struct PendingPreview {
     pub member_id: i64,
     pub message_id: i64,
-    pub started: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,17 +39,10 @@ pub(crate) struct ReceiveSnapshot {
     pub pending: Vec<PendingPreview>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Delivery {
-    NotSent,
-    Uncertain,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NotificationError {
     pub member_id: i64,
     pub message_id: i64,
-    pub delivery: Delivery,
     pub error: String,
 }
 
@@ -90,23 +82,15 @@ pub(crate) trait ReceiveIo {
         &mut self,
         member_id: i64,
         deadline: Deadline,
+        attempted: &BTreeSet<i64>,
     ) -> Result<AttemptOutcome, CafleetError>;
 }
 
-fn preserve_uncertainty(
+fn attach_diagnostics(
     cause: CafleetError,
     errors: &BTreeMap<i64, NotificationError>,
 ) -> CafleetError {
-    let diagnostics: Vec<_> = errors
-        .values()
-        .filter(|error| error.delivery == Delivery::Uncertain)
-        .map(|error| {
-            format!(
-                "preview {} delivery to member {} is uncertain: {}",
-                error.message_id, error.member_id, error.error
-            )
-        })
-        .collect();
+    let diagnostics: Vec<_> = errors.values().map(|error| error.error.clone()).collect();
     if diagnostics.is_empty() {
         cause
     } else {
@@ -128,6 +112,7 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
     let mut last_interval = None;
     let mut cursor = None;
     let mut messages = Vec::new();
+    let mut attempted = BTreeSet::new();
     let mut errors: BTreeMap<i64, NotificationError> = BTreeMap::new();
     loop {
         let now = clock.now();
@@ -149,21 +134,13 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
                     started + Duration::from_secs(now.duration_since(started).as_secs() + 1);
                 continue;
             }
-            Err(error) => return Err(preserve_uncertainty(error, &errors)),
+            Err(error) => return Err(attach_diagnostics(error, &errors)),
         };
-        errors.retain(|member, error| {
+        errors.retain(|message_id, error| {
             snapshot.pending.iter().any(|preview| {
-                preview.member_id == *member && preview.message_id == error.message_id
+                preview.member_id == error.member_id && preview.message_id == *message_id
             })
         });
-        for preview in snapshot.pending.iter().filter(|preview| preview.started) {
-            errors.entry(preview.member_id).or_insert_with(|| NotificationError {
-                member_id: preview.member_id,
-                message_id: preview.message_id,
-                delivery: Delivery::Uncertain,
-                error: format!("preview {} delivery to member {} is uncertain: an earlier input attempt has no confirmed notification stamp. Inspect the pane before retrying.", preview.message_id, preview.member_id),
-            });
-        }
         messages = snapshot.messages;
         let now = clock.now();
         if !messages.is_empty() || now >= expires {
@@ -173,13 +150,10 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
         let selected = if last_interval == Some(interval) {
             None
         } else {
-            let eligible = snapshot.pending.iter().filter(|preview| {
-                !preview.started
-                    && !errors.get(&preview.member_id).is_some_and(|error| {
-                        error.delivery == Delivery::Uncertain
-                            && error.message_id == preview.message_id
-                    })
-            });
+            let eligible = snapshot
+                .pending
+                .iter()
+                .filter(|preview| !attempted.contains(&preview.message_id));
             eligible
                 .clone()
                 .filter(|preview| cursor.is_none_or(|cursor| preview.member_id > cursor))
@@ -190,42 +164,39 @@ pub(crate) fn wait<C: Clock, I: ReceiveIo>(
             let member = preview.member_id;
             cursor = Some(member);
             last_interval = Some(interval);
-            let outcome = match io.attempt(member, Deadline::until(now + Duration::from_secs(5))) {
-                Ok(outcome) => outcome,
-                Err(error @ (CafleetError::DatabaseBusy(_) | CafleetError::DeadlineExceeded)) => {
-                    AttemptOutcome::ended(AttemptEnd::Failed(NotificationError {
-                        member_id: member,
-                        message_id: preview.message_id,
-                        delivery: Delivery::NotSent,
-                        error: error.to_string(),
-                    }))
-                }
-                Err(error) => return Err(preserve_uncertainty(error, &errors)),
-            };
+            let outcome =
+                match io.attempt(
+                    member,
+                    Deadline::until(now + Duration::from_secs(5)),
+                    &attempted,
+                ) {
+                    Ok(outcome) => outcome,
+                    Err(
+                        error @ (CafleetError::DatabaseBusy(_) | CafleetError::DeadlineExceeded),
+                    ) => AttemptOutcome::ended(AttemptEnd::Failed(
+                        crate::delivery::notification_error(member, preview.message_id, error),
+                    )),
+                    Err(error) => return Err(attach_diagnostics(error, &errors)),
+                };
+            errors.retain(|message_id, _| !outcome.sent.contains(message_id));
             match outcome.end {
-                AttemptEnd::Held => {}
+                AttemptEnd::Held | AttemptEnd::Drained | AttemptEnd::BudgetExhausted => {}
                 AttemptEnd::NoPending => {
-                    if errors
-                        .get(&member)
-                        .is_some_and(|error| error.message_id == preview.message_id)
-                    {
-                        errors.remove(&member);
-                    }
-                }
-                AttemptEnd::Drained | AttemptEnd::BudgetExhausted => {
-                    if errors
-                        .get(&member)
-                        .is_some_and(|error| outcome.sent.contains(&error.message_id))
-                    {
-                        errors.remove(&member);
-                    }
+                    errors.remove(&preview.message_id);
                 }
                 AttemptEnd::Failed(error) => {
                     assert_eq!(
                         error.member_id, member,
                         "the owned attempt reports its selected member"
                     );
-                    errors.insert(member, error);
+                    assert!(
+                        attempted.insert(error.message_id),
+                        "one invocation attempts each failed message at most once"
+                    );
+                    assert!(
+                        errors.insert(error.message_id, error).is_none(),
+                        "each failed message has one notification diagnostic"
+                    );
                 }
             }
             next_check = clock.now();
@@ -281,10 +252,9 @@ impl ReceiveIo for BrokerReceiver<'_> {
             let messages = broker::poll_messages(&tx, self.member_id)?;
             let pending = broker::panes::pending_previews(&tx, fleet, self.member_id)?
                 .into_iter()
-                .map(|(member_id, message_id, started)| PendingPreview {
+                .map(|(member_id, message_id)| PendingPreview {
                     member_id,
                     message_id,
-                    started,
                 })
                 .collect();
             tx.commit().map_err(broker::members::db_err)?;
@@ -298,11 +268,19 @@ impl ReceiveIo for BrokerReceiver<'_> {
         &mut self,
         member_id: i64,
         deadline: Deadline,
+        attempted: &BTreeSet<i64>,
     ) -> Result<AttemptOutcome, CafleetError> {
         let fleet = crate::input::with_database_budget(self.conn, deadline, |conn| {
             subject_fleet(conn, self.member_id, self.fleet_id)
         })?;
-        crate::runtime::deliver_pending(self.conn, self.settings, member_id, Some(fleet), deadline)
+        crate::runtime::deliver_pending(
+            self.conn,
+            self.settings,
+            member_id,
+            Some(fleet),
+            deadline,
+            attempted,
+        )
     }
 }
 

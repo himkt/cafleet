@@ -262,26 +262,6 @@ fn completion_deadline(deadline: Deadline) -> Deadline {
     Deadline::until(deadline.0.max(Instant::now() + Duration::from_secs(1)))
 }
 
-pub(crate) fn retry_database_completion<T>(
-    conn: &mut Connection,
-    deadline: Deadline,
-    mut operation: impl FnMut(&mut Connection) -> Result<T, CafleetError>,
-) -> Result<T, CafleetError> {
-    let completion = completion_deadline(deadline);
-    scoped_database_budget(conn, completion, true, |conn| {
-        loop {
-            match operation(conn) {
-                Err(error @ CafleetError::DatabaseBusy(_)) => {
-                    if !completion.retry() {
-                        return Err(error);
-                    }
-                }
-                result => return result,
-            }
-        }
-    })
-}
-
 fn scoped_database_budget<T>(
     conn: &mut Connection,
     deadline: Deadline,
