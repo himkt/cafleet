@@ -53,7 +53,7 @@ Per-backend capabilities:
 |---|---|---|---|
 | `claude` | Passes through verbatim | `haiku`, `sonnet`, `opus`, `fable` | none — the binary rejects unknown models |
 | `codex` | Passes through verbatim | `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-luna` | none — the binary rejects unknown models |
-| `opencode` | `<provider-id>/<model-id>`, split on the **first** `/` into two non-empty segments (model ids may contain further slashes) | `opencode/claude-opus-5-5`, `opencode/gpt-6.1-sol`, `anthropic/claude-sonnet-4-6` | exit 2 with `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').` |
+| `opencode` | `<provider-id>/<model-id>`, split on the **first** `/` into two non-empty segments (model ids may contain further slashes) | `opencode/claude-opus-5-5`, `opencode/gpt-6.1-sol`, `opencode-go/glm-5.3`, `anthropic/claude-sonnet-4-6` | exit 2 with `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').` |
 
 ## Reasoning effort {#reasoning-effort}
 

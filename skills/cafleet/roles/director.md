@@ -32,7 +32,16 @@ Resolve the backend per member from the operator's reference to that member, in 
 2. **Model-name inference.** Otherwise, infer the backend from a model, alias or family name through [Model-name-to-backend inference](#model-name-to-backend-inference). Apply this rule on every fleet backend, including `opencode`.
 3. **Fleet backend.** Otherwise, use the fleet's (your own) backend and its Role default for the member's role.
 
-Pass the selected model with `--model` and its supported effort with `--effort`; OpenCode omits effort. In cost efficiency mode, compare models within the chosen backend's whole catalog, ordered most → least capable; the OpenCode catalog includes its Claude, GPT and free rows and retains the `opencode/` prefix.
+Pass the selected model with `--model` and its supported effort with `--effort`; OpenCode omits effort. In cost efficiency mode, compare models within the chosen backend's whole catalog, ordered most → least capable; the OpenCode catalog comprises its Console table (`opencode/` prefix, including Claude, GPT and free rows) and its OpenCode Go table (`opencode-go/` prefix), ranked by OpenCode cost ranking below.
+
+**OpenCode cost ranking.** Given a set of OpenCode candidate IDs (the whole catalog in cost efficiency mode, or the stronger set in Model replacement):
+
+1. Run `opencode models` once for the spawn; relay a failure through [OpenCode provider choice](#opencode-provider-choice).
+2. If it lists at least one `opencode-go/` token, the Go candidates are the `opencode-go/<id>` tokens it lists for IDs in the set. Treat them as effectively free: choose a Go candidate that can finish the task reliably, preferring it over every Console token, including Console rows priced `0.00`. Among several reliable Go candidates, choose the one with the lowest Go-table rates, since lower amounts consume less of the usage limit.
+3. Otherwise, or when no Go candidate can finish the task reliably, choose the cheapest reliable `opencode/<id>` token it lists for IDs in the set, by Console-table prices.
+4. If neither step selects a token, relay an operator choice via {decision_surface} through Model routing failures.
+
+The selected token is final; skip OpenCode provider choice for it.
 
 - **Reviewer** (every team spawn): use `--model {reviewer_model}` and, when supported, `--effort {reviewer_effort}` from the selected backend's Role defaults.
 - **Other members**: use `--model {other_model}` and, when supported, `--effort {other_effort}` from the selected backend's Role defaults.
@@ -113,30 +122,38 @@ When the operator names a model rather than a backend ("please create a member w
 | 1 | Contains a `/` — provider-prefixed (e.g. `opencode/glm-5.3`, `anthropic/claude-sonnet-4-6`) | `opencode` | `--coding-agent opencode --model <provider-id>/<model-id>`, verbatim |
 | 2 | Claude reference: its key starts with `claude`, `fable`, `opus`, `sonnet` or `haiku` — `claude`, `opus`, `claude-opus-4-8`, `Opus 5.5` | `claude` | `--coding-agent claude --model <token>` resolved through Model-name normalization; the family word `claude` alone uses the claude Role default for the role |
 | 3 | GPT reference: its key starts with `gpt` — `gpt`, `gpt-6.1-sol`, `gpt6.1-sol`, `GPT 6 Luna` | `codex` | `--coding-agent codex --model <token>` resolved through Model-name normalization; the family word `gpt` alone uses the codex Role default for the role |
-| 4 | Any other bare name whose key equals the key of exactly one opencode catalog ID — `glm-5.3`, `kimi-k3` | `opencode` | `--coding-agent opencode --model opencode/<console-model-id>` |
+| 4 | Any other bare name whose key equals the key of exactly one OpenCode candidate ID (normalization step 1) — `glm-5.3`, `kimi-k3.1-pro` | `opencode` | `--coding-agent opencode --model <token>`, token from OpenCode provider choice |
 | 5 | Anything else — no key-equal ID, or more than one (e.g. `o3-mini`, `gemini`) | none | Ask the operator for the explicit `--coding-agent` + `--model` pair via {decision_surface} |
 
-The rows apply as ordered precedence — the first match wins. Row 1 wins over row 2 for `anthropic/claude-sonnet-4-6`, which contains both `claude` and a `/`: a provider-prefixed token is itself an explicit OpenCode request. A bare name infers `opencode` only through row 4; Claude and GPT names select their native backends even when the opencode catalog lists the model.
+The rows apply as ordered precedence — the first match wins. Row 1 wins over row 2 for `anthropic/claude-sonnet-4-6`, which contains both `claude` and a `/`: a provider-prefixed token is itself an explicit OpenCode request. A bare name infers `opencode` only through row 4; Claude and GPT names select their native backends even when either OpenCode table lists the model.
 
-Match catalog keys by equality: `glm-5.3` matches only `opencode/glm-5.3`, never `opencode/glm-5.3-flash` or `opencode/glm-5.3-flash-free`.
+Match candidate ID keys by equality: `glm-5.3` matches only the ID `glm-5.3`, never `glm-5.3-flash` or `glm-5.3-flash-free`.
 
 #### Worked resolutions
 
-| Operator says | Fleet backend | Resolved flags |
-|---|---|---|
-| "opus member" | `opencode` | `--coding-agent claude --model claude-opus-5-5` |
-| "gpt6.1-sol member" | `opencode` | `--coding-agent codex --model gpt-6.1-sol` |
-| "claude member" (reviewer) | `codex` | `--coding-agent claude --model claude-opus-5-5 --effort high` |
-| "spawn a claude member with opencode" | any | `--coding-agent opencode --model opencode/claude-opus-5-5` |
-| "opus member with OpenCode" | any | `--coding-agent opencode --model opencode/claude-opus-5-5` |
-| "gpt reviewer with OpenCode" | any | `--coding-agent opencode --model opencode/gpt-6-astra` |
-| "sonnet 4.6 member with OpenCode" | any | `--coding-agent opencode --model opencode/claude-sonnet-4-6` |
-| "opus 4.8 member with Claude Code" | any | `--coding-agent claude --model claude-opus-4-8` (manual pass-through) |
-| "reviewer with Codex" | any | `--coding-agent codex --model gpt-6-astra --effort high` |
-| "opus member with Codex" | any | none — relay as a mismatched pair through Model routing failures |
-| "glm-5.3 member" | `claude` | `--coding-agent opencode --model opencode/glm-5.3` |
-| "gpt-5.4 member" | `opencode` | `--coding-agent codex --model gpt-5.4` (manual pass-through) |
-| "a member" (no model, no backend) | `opencode` | `--coding-agent opencode --model opencode/glm-5.3-flash-free` |
+| Operator says | Fleet backend | `opencode models` lists | Resolved flags |
+|---|---|---|---|
+| "opus member" | `opencode` | — | `--coding-agent claude --model claude-opus-5-5` |
+| "gpt6.1-sol member" | `opencode` | — | `--coding-agent codex --model gpt-6.1-sol` |
+| "claude member" (reviewer) | `codex` | — | `--coding-agent claude --model claude-opus-5-5 --effort high` |
+| "spawn a claude member with opencode" | any | — | `--coding-agent opencode --model opencode/claude-opus-5-5` |
+| "opus member with OpenCode" | any | `opencode/claude-opus-5-5` | `--coding-agent opencode --model opencode/claude-opus-5-5` |
+| "gpt reviewer with OpenCode" | any | — | `--coding-agent opencode --model opencode/gpt-6-astra` |
+| "sonnet 4.6 member with OpenCode" | any | `opencode/claude-sonnet-4-6` | `--coding-agent opencode --model opencode/claude-sonnet-4-6` |
+| "opus 4.8 member with Claude Code" | any | — | `--coding-agent claude --model claude-opus-4-8` (manual pass-through) |
+| "reviewer with Codex" | any | — | `--coding-agent codex --model gpt-6-astra --effort high` |
+| "opus member with Codex" | any | — | none — relay as a mismatched pair through Model routing failures |
+| "glm-5.3 member" | `claude` | `opencode/glm-5.3`, `opencode-go/glm-5.3` | `--coding-agent opencode --model opencode-go/glm-5.3` |
+| "glm-5.3 member" | `claude` | `opencode/glm-5.3` only | `--coding-agent opencode --model opencode/glm-5.3` |
+| "kimi-k3.1-pro member" | any | `opencode-go/kimi-k3.1-pro` | `--coding-agent opencode --model opencode-go/kimi-k3.1-pro` |
+| "kimi-k3.1-pro member" | any | no `opencode-go/` lines | none — relay (neither candidate listed) |
+| "haiku member with OpenCode" | any | `opencode-go/claude-haiku-5-5` | `--coding-agent opencode --model opencode-go/claude-haiku-5-5` |
+| "haiku member" | `opencode` | — | `--coding-agent claude --model claude-haiku-5-5` |
+| "opencode/glm-5.3 member" | any | — | `--coding-agent opencode --model opencode/glm-5.3` |
+| "claude member with OpenCode" | any | — | `--coding-agent opencode --model opencode/claude-opus-5-5` |
+| "gpt-5.4 member" | `opencode` | — | `--coding-agent codex --model gpt-5.4` (manual pass-through) |
+| "a member" (no model, no backend) | `opencode` | — | `--coding-agent opencode --model opencode/glm-5.3-flash-free` |
+| "glm-5.3 member with OpenCode" | any | command fails | none — relay |
 
 Effort follows the selected backend's Role defaults and Runtime bindings; OpenCode omits `--effort`.
 
@@ -144,9 +161,9 @@ Effort follows the selected backend's Role defaults and Runtime bindings; OpenCo
 
 Normalize loose spellings before matching, so "gpt6.1-sol", "GPT 6.1 Sol" and "Opus 5.5" resolve to catalog tokens:
 
-1. **Comparison key.** Lowercase the reference and every candidate token, and drop every character that is not a letter or digit (`gpt-6.1-sol` and `GPT 6.1 Sol` both become `gpt61sol`). Strip the `opencode/` prefix from opencode catalog tokens before keying. A Claude candidate also matches its key with the leading `claude` removed (`claude-opus-5-5` becomes `opus55`, matching "Opus 5.5").
+1. **Comparison key.** Lowercase the reference and every candidate token, and drop every character that is not a letter or digit (`gpt-6.1-sol` and `GPT 6.1 Sol` both become `gpt61sol`). OpenCode candidates are the distinct bare IDs of the Console and OpenCode Go tables: strip the `opencode/` or `opencode-go/` prefix before keying, and count an ID listed in both tables once. A Claude candidate also matches its key with the leading `claude` removed (`claude-opus-5-5` becomes `opus55`, matching "Opus 5.5").
 2. **Native catalog first.** For a Claude or GPT reference (classified by the inference table's row 2 / row 3 key-prefix test), a key equal to the key of exactly one `Model` or `Alias` token in the native (`claude` / `codex`) catalog resolves to that row's `Model` token.
-3. **Spelling dictionary.** A Claude or GPT reference equal to no native token key but to exactly one Claude/GPT ID key in the opencode catalog resolves to that ID without the `opencode/` prefix. Keep the native backend and pass the ID as a manual `--model` value ("sonnet 4.6" becomes `--coding-agent claude --model claude-sonnet-4-6`).
+3. **Spelling dictionary.** A Claude or GPT reference equal to no native token key but to exactly one Claude/GPT ID key among the OpenCode candidates resolves to that bare ID. Keep the native backend and pass the ID as a manual `--model` value ("sonnet 4.6" becomes `--coding-agent claude --model claude-sonnet-4-6`).
 4. **Exact shape.** A reference already written as an exact `claude-*` / `gpt-*` token that matches nothing passes through verbatim to its native backend.
 5. **Otherwise ask.** Relay a reference with no key-equal token, or more than one token sharing the key, to the operator via {decision_surface}.
 
@@ -158,16 +175,16 @@ When the first backend-resolution step selects an explicit backend, resolve `--m
 
 | Reference given with the OpenCode request | Resolved `--model` |
 |---|---|
-| No model (e.g. "spawn an opencode reviewer") | The opencode Role default for the role |
-| Provider-prefixed token (`opencode/…`, `anthropic/…`) | The token, verbatim |
-| Claude family word (`claude`) | `opencode/` + the `claude` backend's Role default for the role |
-| GPT family word (`gpt`) | `opencode/` + the `codex` backend's Role default for the role |
-| Claude alias (`fable`, `opus`, `sonnet`, `haiku`) | `opencode/` + the `claude` catalog Model that the alias names |
-| Any other model name | The opencode catalog ID whose key equals the reference's key |
+| No model (e.g. "spawn an opencode reviewer") | The opencode Role default for the role, verbatim |
+| Provider-prefixed token (`opencode/…`, `opencode-go/…`, `anthropic/…`) | The token, verbatim |
+| Claude family word (`claude`) | `opencode/` + the `claude` backend's Role default for the role, verbatim |
+| GPT family word (`gpt`) | `opencode/` + the `codex` backend's Role default for the role, verbatim |
+| Claude alias (`fable`, `opus`, `sonnet`, `haiku`) | The `claude` catalog Model the alias names, as an ID through OpenCode provider choice |
+| Any other model name | The OpenCode candidate ID whose key equals the reference's key, through OpenCode provider choice |
 
-The last row uses only Model-name normalization step 1, including the leading-`claude` strip, against opencode catalog IDs. It requires exactly one key-equal ID, so "sonnet 4.6 with OpenCode" resolves to `opencode/claude-sonnet-4-6`; normalization steps 2–4 apply only to native-backend resolution.
+Verbatim rows produce a complete token and skip provider choice. The last row uses only Model-name normalization step 1, including the leading-`claude` strip, against the OpenCode candidate IDs. It requires exactly one key-equal ID, so "sonnet 4.6 with OpenCode" resolves to the ID `claude-sonnet-4-6` before provider choice; normalization steps 2–4 apply only to native-backend resolution.
 
-With the current Role defaults, `claude` maps to `opencode/claude-opus-5-5` for every role; `gpt` maps to `opencode/gpt-6-astra` for reviewers and `opencode/gpt-6.1-sol` for other members; `opus` maps to `opencode/claude-opus-5-5`. Require every mapped token, including a Role default and excluding the verbatim provider-prefixed row, to exist in the opencode catalog. Relay a missing or ambiguous match through Model routing failures before spawning.
+With the current Role defaults, `claude` maps to `opencode/claude-opus-5-5` for every role; `gpt` maps to `opencode/gpt-6-astra` for reviewers and `opencode/gpt-6.1-sol` for other members; `opus` resolves the ID `claude-opus-5-5` and `haiku` the ID `claude-haiku-5-5`, which provider choice turns into `opencode-go/claude-haiku-5-5` when `opencode models` lists it. Require every Role-default and family-word token to exist in the Console table, and every resolved ID to be an OpenCode candidate ID; the verbatim provider-prefixed row is exempt. Relay a missing or ambiguous match through Model routing failures before spawning.
 
 **Claude Code / Codex.**
 
@@ -180,11 +197,33 @@ With the current Role defaults, `claude` maps to `opencode/claude-opus-5-5` for 
 
 Relay an unresolved reference from Model-name normalization step 5 through the same failure procedure.
 
+#### OpenCode provider choice
+
+Apply this procedure when an OpenCode spawn's model resolves to a bare model ID through inference row 4 or an explicit-OpenCode mapping row that yields an ID. Rows that produce a complete provider-prefixed token keep that token verbatim.
+
+The candidate tokens are `opencode-go/<id>` when the OpenCode Go table lists the ID, and `opencode/<id>` when the Console table lists it. At least one candidate exists because the ID was resolved against those tables.
+
+1. Run `opencode models` once for this spawn as the Director's own command.
+2. Read its output as one `provider/model` token per line, matching candidate tokens exactly and ignoring every other provider.
+3. Choose the token using this table:
+
+| `opencode models` result | `--model` |
+|---|---|
+| Non-zero exit, or no output | none — relay via {decision_surface} |
+| Lists the `opencode-go/<id>` candidate | `opencode-go/<id>` |
+| Lists only the `opencode/<id>` candidate | `opencode/<id>` |
+| Lists neither candidate (e.g. a Go-only ID without a Go subscription) | none — relay via {decision_surface} |
+
+Preserve the operator's explicit provider: a reference that carries a provider prefix keeps its complete token and skips this procedure.
+
 #### Model routing failures
 
 | Condition | Director behavior |
 |---|---|
-| Explicit OpenCode request whose mapped model is absent from the opencode catalog (e.g. "claude-opus-4-1 with OpenCode") | Relay via {decision_surface} before spawning |
+| Explicit OpenCode request whose mapped model is absent from both OpenCode tables (e.g. "claude-opus-4-1 with OpenCode") | Relay via {decision_surface} before spawning |
+| `opencode models` exits non-zero or prints nothing during provider choice, cost efficiency selection or replacement | Relay via {decision_surface} before spawning; never fall back to `opencode/` |
+| `opencode models` lists neither candidate token | Relay via {decision_surface} before spawning |
+| Cost efficiency selection or replacement on OpenCode finds no listed token that can finish the task reliably | Relay an operator choice via {decision_surface}, as when no listed model fits the task |
 | Pinned backend and model that do not belong together (e.g. "opus member with Codex") | Relay via {decision_surface} before spawning |
 | Ambiguous normalization (two tokens share the key) or no match | Relay via {decision_surface} |
 | Native backend binary missing (`Error: binary <name> not found on PATH`, exit 1) | Report the failure and relay the operator choice via {decision_surface}; preserve the backend selected by the model reference |
@@ -280,12 +319,12 @@ Read [Recovery](../reference/supervision.md#recovery) immediately before replaci
 For each replacement, in order:
 
 1. **Freeze and hand off** — freeze new work for the task and request one concise state report (completed work, modified paths, commands/tests run, blockers, next step); if the member cannot respond promptly, `cafleet member capture` is the handoff evidence.
-2. **Re-select stronger** — pick a strictly more capable model from the same backend (a row above the failed model in its table) that fits the task's now-demonstrated difficulty; choose the cheapest model within that stronger set.
+2. **Re-select stronger** — pick a strictly more capable model from the same backend (a row above the failed model in its table) that fits the task's now-demonstrated difficulty; choose the cheapest model within that stronger set. For an OpenCode member, the stronger set is every ID ranked above the failed ID in each OpenCode table that lists the failed ID, and OpenCode cost ranking chooses within it.
 3. **Record** — note the trigger, evidence pointers, old/new model, and attempt number in your coordination notes (no secrets or prompt contents).
 4. **Delete before create** — `cafleet member delete` the old member through the standard lifecycle before spawning the replacement; all normal spawn/audit/prompt-substitution rules apply.
 5. **Resume, not restart** — spawn the replacement with the original assignment plus the bounded handoff and the same deliverable paths, route the original task pointer, and have the Reviewer re-evaluate at the normal review point.
 
-Caps and fail-closed cases: the initial member plus at most two replacements per task; each replacement strictly more capable than its predecessor; a `(task pointer, model)` pair is never retried. An unlisted manual model, a user-pinned model or effort, an empty stronger set, a reached cap, or ambiguous evidence all mean the Director relays an operator choice (approve a named higher-cost/manual override, simplify/re-scope, or stop) instead of auto-replacing.
+Caps and fail-closed cases: the initial member plus at most two replacements per task; each replacement strictly more capable than its predecessor; a `(task pointer, model)` pair is never retried. For an OpenCode member, the model in a `(task pointer, model)` pair is the bare ID, so `opencode/X` after a failed `opencode-go/X` is a retry of the same model. An unlisted manual model, a user-pinned model or effort, an empty stronger set, a reached cap, or ambiguous evidence all mean the Director relays an operator choice (approve a named higher-cost/manual override, simplify/re-scope, or stop) instead of auto-replacing.
 
 ## Member Delete
 
