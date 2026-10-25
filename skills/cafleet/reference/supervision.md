@@ -81,7 +81,7 @@ At every wake and active workflow boundary:
 
 ### Routing member command requests
 
-A member runs host-permitted commands and sends required denied commands through [prompt-routing](prompt-routing.md). Authorize native dispatch, inspect the actual result and explicitly continue the member after completion evidence when its host has not resumed it. Process requests in inbox order and close every request with an action or reasoned reply.
+A member executes task commands under its backend's selected permission policy and routes an observed permission denial through [prompt-routing](prompt-routing.md). Review the exact command/cwd/environment and actual refusal under existing host and operator authority, preserving native guards and managed denials. Handle denied prerequisites before ready and inspect unresolved interactive approvals that may prevent a member from sending. Ordinary nonzero results retain normal recovery. Inspect any authorized execution result and explicitly continue the member after completion evidence when its host has not resumed it. Process requests in inbox order and close each with an action or reasoned reply; routing alone grants no permission override.
 
 ## Stall Response
 

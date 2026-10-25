@@ -49,7 +49,7 @@ Render ordinary-member prompts from the required [shared frame](../../cafleet/ro
 When you see cafleet message poll output with a message from the Director, act on those instructions.
 ```
 
-The shared frame supplies identity placeholders, reader/startup ordering, complete backend-supported skill loading and the supplied host-rule source. Preserve each table's hard lines and start cue verbatim. The role opens first, sends operational ready and loads its prerequisites before substantive work. Selected roles load both `cafleet` and `cafleet-design-doc`; members continue this assigned workflow.
+The shared frame supplies identity placeholders, reader/startup ordering, complete backend-supported skill loading and the supplied host-rule source. The CLI prepends the mandatory command-routing policy with literal broker identities to every member prompt. Preserve each table's hard lines and start cue verbatim. The member opens its role through a native reader or a permitted shell read when shell is the only reader, routes any actual denial, completes startup reads, then sends ready before substantive work. Selected roles load both `cafleet` and `cafleet-design-doc`; members continue this assigned workflow.
 
 ## Process
 

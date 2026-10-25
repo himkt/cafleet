@@ -65,6 +65,40 @@ fn malformed(detail: &str) -> CafleetError {
     CafleetError::Usage(format!("Malformed custom prompt: {detail}. {BRACE_HINT}"))
 }
 
+pub fn assemble_member_prompt(
+    body: &str,
+    fleet_id: i64,
+    member_id: i64,
+    director_member_id: i64,
+    coding_agent: &str,
+) -> Result<String, CafleetError> {
+    let assignment =
+        substitute_spawn_placeholders(body, fleet_id, member_id, director_member_id, coding_agent)?;
+    Ok(format!(
+        r#"MANDATORY CAFLEET COMMAND ROUTING
+Execute task shell commands under the backend's selected permission policy.
+Route an observed permission denial to the Director with the exact command, working directory, required environment and actual refusal reason.
+Use authorized cafleet message communication commands for broker coordination.
+Use native file tools within your assigned role scope.
+Read prerequisites with native file tools or permitted shell commands before sending ready.
+Preserve the host permission and sandbox settings.
+Automatic approval review preserves native guards, explicit deny rules and managed policies.
+When automatic review is selected, surface an unavailable automatic mode to the Director.
+Surface an unresolved approval to the Director.
+An ordinary nonzero command result follows normal error recovery.
+Director review follows existing host and operator authority; a routed request does not override a native or managed denial.
+Await an actual result or explicit continuation before resuming work that depends on a routed request.
+
+FLEET ID: {fleet_id}
+YOUR MEMBER ID: {member_id}
+DIRECTOR MEMBER ID: {director_member_id}
+Report a denied command: cafleet message send --from-member-id {member_id} --to-member-id {director_member_id} "Need to run: <exact command>. Cwd: <absolute working directory>. Environment: <required overrides or none>. Refusal: <actual permission denial>."
+After required startup reads, send: cafleet message send --from-member-id {member_id} --to-member-id {director_member_id} "ready"
+
+{assignment}"#
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

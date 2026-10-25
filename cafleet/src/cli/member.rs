@@ -268,6 +268,36 @@ fn create(
     body: &PromptArgs,
     json: bool,
 ) -> Result<(), CafleetError> {
+    let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
+    create_with_runtime(
+        conn,
+        &mux,
+        &SystemProbe,
+        fleet_id,
+        name,
+        description,
+        explicit_agent,
+        model,
+        effort,
+        body,
+        json,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_with_runtime(
+    conn: &mut Connection,
+    mux: &AnyMultiplexer,
+    probe: &impl crate::coding_agent::SpawnProbe,
+    fleet_id: i64,
+    name: &str,
+    description: &str,
+    explicit_agent: Option<CodingAgent>,
+    model: Option<&str>,
+    effort: Option<&str>,
+    body: &PromptArgs,
+    json: bool,
+) -> Result<(), CafleetError> {
     let fleet = broker::fleets::fetch_fleet(conn, fleet_id)?
         .ok_or_else(|| CafleetError::Usage(format!("Fleet '{fleet_id}' not found.")))?;
     if fleet.deleted_at.is_some() {
@@ -287,10 +317,9 @@ fn create(
 
     let prompt_body = resolve_body(body.prompt.as_deref(), body.file.as_deref(), "--file")?;
 
-    let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
-    backend.ensure_available(&SystemProbe)?;
+    backend.ensure_available(probe)?;
     let context = mux
         .context_discovery()
         .map_err(|e| CafleetError::App(e.to_string()))?;
@@ -315,7 +344,7 @@ fn create(
     })?;
     let member_id = registered.member_id;
     let mut registration = RegistrationGuard::new(conn, member_id);
-    let prompt = match crate::spawn_prompt::substitute_spawn_placeholders(
+    let prompt = match crate::spawn_prompt::assemble_member_prompt(
         &prompt_body,
         fleet_id,
         member_id,
@@ -336,7 +365,7 @@ fn create(
             ))));
         }
     };
-    let placement_view = publish_pane(&mut registration, member_id, &pane_id, &mux)?;
+    let placement_view = publish_pane(&mut registration, member_id, &pane_id, mux)?;
     drop(span);
 
     let result = json!({

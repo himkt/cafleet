@@ -1,6 +1,6 @@
 # Director Role
 
-You are a **Director** managing one or more members in a CAFleet team. Members spawn with workspace-scoped auto-approval: each runs the commands its harness allows itself and routes the rest to you, and you run a routed command in the member's pane with `cafleet member exec`. What each backend denies is the `{permission_flags}` note in that backend's section of [`coding-agents.md`](../reference/coding-agents.md).
+You are a **Director** managing one or more members in a CAFleet team. Members execute task commands under their backend's selected permission policy and route observed permission denials to you. Review the exact command, working directory, required environment and actual refusal under existing host and operator authority; preserve native guards, explicit denies and managed policies. Inspect any authorized execution result before dependent work continues. Handle denied prerequisites before ready and supervise unresolved interactive approvals that can prevent a member from sending. Each backend's host posture and mode availability remain in its `{permission_flags}` note in [`coding-agents.md`](../reference/coding-agents.md).
 
 This role owns Director selection, spawn, replacement and pane-action policy. Supervision owns orchestration, recovery and shutdown.
 
@@ -254,7 +254,7 @@ Fixed frame — the identity lines carry the CLI's four `str.format` placeholder
 ```text
 You are ‹ROLE TITLE› in a ‹TEAM NAME› team (CAFleet-native).
 
-ROLE DEFINITION: Open [INSERT abs path to roles/‹role›.md] with an available text reader BEFORE any other action. That file is your authoritative role definition.‹ROLE-DEF SUFFIX› Re-read it whenever you are unsure of protocol.
+ROLE DEFINITION: Open [INSERT abs path to roles/‹role›.md] with an available native file reader as your first prerequisite. That file is your authoritative role definition.‹ROLE-DEF SUFFIX› Re-read it whenever you are unsure of protocol. Use permitted shell reads when shell is the only reader; route an actual denial using the runtime prompt's literal broker identities.
 
 Load these skills at startup:
 - the cafleet skill — ‹cafleet-load purpose›
@@ -271,18 +271,18 @@ CODING AGENT: {coding_agent}
 ‹IMPORTANT / ROLE-CONSTRAINT LINES›
 Host prerequisites: [INSERT required host-rule paths or equivalent session-supplied instructions and their source]. Use supplied equivalents for absent optional files; route an essential unknown rule to the Director before dependent work.
 
-Use an available non-shell text reader for prerequisites; shell file reads may precede ready when shell is the only reader.
+Use native file tools within your assigned role scope and execute task commands under the backend's selected permission policy. Route an observed permission denial with the exact command/cwd/environment/refusal to the Director. When automatic review is selected, surface an unavailable automatic mode to the Director. Surface unresolved approval, use authorized cafleet message commands for coordination, and preserve native guards, managed policies and host permission/sandbox settings. Ordinary nonzero results follow normal recovery.
 
-On spawn, as your first operational broker shell command, send the ready signal: cafleet message send --from-member-id {member_id} --to-member-id {director_member_id} "ready"
+After required startup reads, send the ready signal: cafleet message send --from-member-id {member_id} --to-member-id {director_member_id} "ready"
 
 ‹START CUE›
 ```
 
-Rendering is **two-stage**: the Director substitutes the values it already knows as literals before the call (`BASE`, the absolute role-file path, the cafleet-load purpose phrase), then the CLI substitutes the four identity placeholders shown in the skeleton above (`{member_id}` is the member's own newly-allocated id, which only the CLI can fill). The Director must leave **no stray single braces** other than those four. After spawn the member sees literal labeled lines — `FLEET ID: 24`, `DIRECTOR MEMBER ID: 84`, `YOUR MEMBER ID: 88`, `CODING AGENT: claude` — and uses those integers on every `cafleet` command. There is no `COMMUNICATION PROTOCOL` command-example block: the member learns poll/send/ack command shapes from the `cafleet` skill and its role file. The `CODING AGENT:` line keeps the spawned binary and the overlay selector in lockstep for every role: when `--coding-agent` is omitted at spawn, the CLI records — and `{coding_agent}` renders — the backend inherited from the Director's placement row.
+Rendering is **two-stage**: the Director substitutes the values it already knows as literals before the call (`BASE`, the absolute role-file path, the cafleet-load purpose phrase), then the CLI substitutes the four identity placeholders shown in the skeleton above (`{member_id}` is the member's own newly-allocated id, which only the CLI can fill). The CLI prepends the shared mandatory routing policy and literal broker identities to every rendered assignment, including prompts without a role or skill load. That preamble supplies the denial-report and ready shapes needed during startup. The Director must leave **no stray single braces** other than those four. After spawn the member sees literal labeled lines — `FLEET ID: 24`, `DIRECTOR MEMBER ID: 84`, `YOUR MEMBER ID: 88`, `CODING AGENT: claude` — and uses those integers on every `cafleet` command. The `CODING AGENT:` line keeps the spawned binary and the overlay selector in lockstep for every role: when `--coding-agent` is omitted at spawn, the CLI records — and `{coding_agent}` renders — the backend inherited from the Director's placement row.
 
-Use an available non-shell text reader for prerequisite files. When shell is the only text reader, prerequisite file-reading commands may precede ready; ready still precedes ordinary task work.
+Use native file readers for prerequisite files and permitted shell reads when shell is the only reader. Route an actual denial with command/cwd/environment/refusal evidence and await resolution before dependent startup work. Complete required startup reads, then send ready before task work.
 
-The ready-signal line is part of the **fixed frame**, not a per-role delta slot: every skeleton render carries it, and no consuming skill repeats or varies it. Its `{member_id}` / `{director_member_id}` placeholders are two of the CLI's four identity placeholders, rendered to literal integers at spawn — the member receives a copy-pastable command.
+The ready-signal line is part of the **fixed frame**, not a per-role delta slot: every skeleton render carries it, and no consuming skill repeats or varies it. Its `{member_id}` / `{director_member_id}` placeholders are two of the CLI's four identity placeholders, rendered to literal integers at spawn. A denied prerequisite may require routing before ready; the runtime preamble supplies literal broker identities even before the role file can be read.
 
 Per-role delta slots (each consuming skill's spawn section fills these):
 
@@ -304,7 +304,7 @@ Retain Bash hygiene and member-authority obligations when an optional host-rule 
 Write spawn-related scratch under resolved `${BASE}` or the skill's explicit output directory, following the [BASE contract](../reference/base-dir.md). A selected temporary BASE is valid; an ad-hoc temporary fallback is not. The pre-spawn `--file` input at `<BASE>/.prompts/<role>-<UTC-compact>.md` is the canonical audit artifact for every CAFleet-native team-skill spawn:
 
 - `<role>` is the lowercased `--name`; `<UTC-compact>` is `YYYYMMDDTHHMMSSZ`. Create `<BASE>/.prompts/` on first write; on a same-second collision append the suffix `_2`, `_3`, … (never overwrite).
-- The pre-spawn file IS the audit artifact — there is no post-spawn re-render. The `--file` path is the single source of truth for what was spawned, in perpetuity. It carries the four `{...}` identity placeholders **pre-substitution** — that is expected; the CLI renders them at spawn.
+- The pre-spawn file IS the authored-assignment audit artifact. It carries the four `{...}` identity placeholders **pre-substitution**; the CLI renders them once, then prepends its shared routing policy and literal broker identities. Preserve the file as the source of the assignment body.
 
 **`${BASE} == <unset>` fallback**: when startup-time `${BASE}` resolution returned the `<unset>` sentinel, follow the guarded-skip protocol in [`reference/base-dir.md`](../reference/base-dir.md) § *No-bypass write protocol* — skip the `<BASE>/.prompts/<role>-<ts>.md` write, fall back to the inline positional-`PROMPT` form (keep it under ~2 KB, path-by-reference), and emit the anchorless status `audit-disabled no BASE in spawn prompt` once per spawn cycle. The spawn still proceeds.
 

@@ -22,7 +22,7 @@ Prices are standard provider USD rates per MTok and are planning estimates, not 
 | Placeholder | Value |
 |---|---|
 | `{decision_surface}` | the AskUserQuestion tool |
-| `{permission_flags}` | `--permission-mode dontAsk` |
+| `{permission_flags}` | `--permission-mode auto` |
 | `{pane_title}` | `claude --name <member-name>` sets `#{pane_title}` to the member name |
 | `{skill_loader}` | the Skill tool |
 | `{effort_levels}` | `low`, `medium`, `high`, `xhigh`, `max` (spawn flag `--effort <level>`) |
@@ -64,9 +64,9 @@ Sources: [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pr
 | A separate evaluator checks the session condition against the transcript; native background work defers evaluation and returns a host result. Per-record reception follows the native recipe below. | [Director wake](supervision.md#director-wake) |
 | Receive Director records through one owned Monitor task using the native recipe below. Preserve the supplied `/goal` state and pending user decisions across events and renewal. | [Director wake](supervision.md#director-wake); [native reception](#claude-native-director-reception) |
 | Native shell probes displayed command/stdout/stderr followed by a model turn; its trigger and a second permission check were not established. The Director authorizes routed native input under its host rules. | [Command authorization](prompt-routing.md#director-side-dispatch) |
-| `dontAsk` permits spawn-allowed broker tools, built-in read-only work and matching host allow rules; denied work routes to the Director. Protected file edits need the Director or a host-rule change. | `{permission_flags}`; [routing](prompt-routing.md#member-side-reconsider-then-route) |
+| Members execute task commands in native `auto` mode and route observed denials with command/cwd/environment/refusal evidence. Native deny/ask rules, hooks and managed policy retain precedence; unavailable auto can start in Manual, and unresolved prompts require Director attention. Preserve the actual request and authority rather than inferring automatic success. | `{permission_flags}`; [routing](prompt-routing.md#member-side-observed-denial) |
 
-Evidence: Claude Code 2.1.296, checked 2026-10-22; [host continuation](https://code.claude.com/docs/en/goal) and [block cap](https://code.claude.com/docs/en/hooks-guide#stop-hook-hits-the-block-cap). Local probes establish only exercised behavior.
+Evidence: Claude Code 2.1.296, checked 2026-10-22; [host continuation](https://code.claude.com/docs/en/goal) and [block cap](https://code.claude.com/docs/en/hooks-guide#stop-hook-hits-the-block-cap). The launch selects [auto permission mode](https://code.claude.com/docs/en/permission-modes); mode selection alone establishes no effective live availability. Local probes establish only exercised behavior.
 
 #### Claude native Director reception
 
@@ -91,7 +91,7 @@ Evidence: Claude Code 2.1.301 stream probes established separate event turns fro
 | Placeholder | Value |
 |---|---|
 | `{decision_surface}` | a Director-relayed operator message |
-| `{permission_flags}` | `--ask-for-approval never --sandbox workspace-write` |
+| `{permission_flags}` | `--approve-for-me --sandbox workspace-write` |
 | `{pane_title}` | no `--name` analog |
 | `{skill_loader}` | reading each requested skill core, own backend section and role-required references by the absolute paths the spawn prompt provides |
 | `{effort_levels}` | `minimal`, `low`, `medium`, `high`, `xhigh` (spawn flag `--effort <level>`, forwarded as `--config=model_reasoning_effort=<level>`) |
@@ -126,9 +126,9 @@ Sources: [OpenAI pricing](https://developers.openai.com/api/docs/pricing) and [C
 | The objective belongs to the thread with model-callable lifecycle tools and optional token-budget accounting. Retain native session handles and explicitly read the owned receiver while delegated work remains, preserving goal activation, pause, completion and budget authority. | [Director wake](supervision.md#director-wake); [native reception](#codex-native-director-reception) |
 | Native shell input displayed command, exit code, duration and output. Installed protocol metadata describes unsandboxed dispatch while public CLI guidance describes current approval/sandbox settings; the effective TUI boundary and protocol path were not established. | [Native authorization](prompt-routing.md#director-side-dispatch) |
 | The Director authorizes routed native input under its host rules; harmless command visibility establishes no second member-tool permission check. Inspect output before explicit continuation. | [Dispatch and continuation](prompt-routing.md#director-side-dispatch) |
-| Run host-permitted workspace commands directly and route required denied operations. The configured sandbox and approval posture remain authoritative. | `{permission_flags}`; [member routing](prompt-routing.md#member-side-reconsider-then-route) |
+| Members execute task commands with automatic approval review and an explicit `workspace-write` sandbox. Preserve sandbox restrictions and managed policy; route observed refusals with command/cwd/environment/refusal evidence and surface unavailable review or unresolved approval. Native file tools remain within role scope. | `{permission_flags}`; [member routing](prompt-routing.md#member-side-observed-denial) |
 
-Evidence: Codex CLI 0.162.1, checked 2026-10-22; [host continuation](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex) and [command reference](https://learn.chatgpt.com/docs/developer-commands).
+Evidence: Codex CLI 0.162.1, checked 2026-10-22; [host continuation](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex) and [command reference](https://learn.chatgpt.com/docs/developer-commands). Installed CLI help maps `--approve-for-me` to automatic approval review with workspace protection; [auto-review](https://learn.chatgpt.com/docs/sandboxing/auto-review) availability depends on the host policy. Launch arguments alone establish no live review result.
 
 #### Codex native Director reception
 
@@ -391,12 +391,13 @@ Source: [OpenCode Go](https://opencode.ai/v2/docs/console/go).
 | A member routes concrete questions to the Director and receives the operator's answer as a message. | `{decision_surface}`; [user relay](supervision.md#user-delegation-protocol) |
 | Members perform assignments using the selected provider/model, workspace reads/edits, permitted tools and broker communication. A Director without a verified native stream adapter uses explicit manual `poll`/finite `wait` and states that reception limit. | [Director wake](supervision.md#director-wake) |
 | `OPENCODE_CONFIG_DIR` adds a preset search directory alongside default home configuration. Same-name agent definitions can merge across sources; inspect the effective configuration when customizing a preset. | `{permission_flags}`; preset discovery |
-| The preset uses the last matching permission rule, so the specific `member prompt` and `member exec` denies win over the broad `cafleet *` allow. Denied member commands receive no permission prompt, while permitted broker commands run normally. | `{permission_flags}`; [member routing](prompt-routing.md#member-side-reconsider-then-route) |
+| The preset's shell map has a deny base, literal routine/broker allow patterns and explicit native-dispatch denies. Last-match precedence keeps `cafleet member prompt *` and `cafleet member exec *` denied despite the broad `cafleet *` allow. Role authority still scopes permitted tools; route observed denials with command/cwd/environment/refusal evidence. | `{permission_flags}`; [member routing](prompt-routing.md#member-side-observed-denial) |
 | MCP tools' participation in preset permission evaluation and compound-shell permission matching are unverified on opencode 2.1.4. Keep loaded configurations free of MCP servers and submit one command per invocation. | `{permission_flags}`; [command isolation](../SKILL.md#one-shot-command-isolation) |
 | Each pane runs `opencode mini --standalone --agent cafleet` with `--prompt`, optional model selection and a private server. | `{permission_flags}`; member spawn |
+| Mini uses the selected preset's fixed allow/deny policy. Execute permitted role-authorized commands and route observed refusals with actual evidence. Surface unresolved approval to the Director and retain native deny rules; supervision handles prompts that prevent the member from sending. | `{permission_flags}`; [member routing](prompt-routing.md#member-side-observed-denial) |
 | Mini receives pushed notifications and direct prompts as submitted user turns. Captures can expose only the status bar; inspect retained session records for omitted input/output and broker poll/ACK for message consumption. | [Push notifications](runtime/spec/multiplexer-backends.md#push-notifications); prompt dispatch |
 | Leading-`!` input runs a native shell command in `mini`. Preserve Director authorization and member-tool permissions because the native path's effective boundary and any second permission check remain unestablished. | [Native dispatch](prompt-routing.md#director-side-dispatch) |
-| The `cafleet` preset allows its declared workspace/broker tools and denies unmatched shell commands; route a required denied command. A permission popup is an issue to capture and relay. | `{permission_flags}`; [member routing](prompt-routing.md#member-side-reconsider-then-route) |
+| The `cafleet` preset retains native file boundaries and its declared shell allowlist. Broad patterns grant no Director-only actions or Git write authority. Use native readers for prerequisites and permitted shell reads when shell is the only reader; route an actual denial before dependent startup work. Capture and relay unresolved permission prompts. | `{permission_flags}`; [member routing](prompt-routing.md#member-side-observed-denial) |
 
 ## Template
 
@@ -404,7 +405,7 @@ Add a `## <name>` backend with every subsection below. Fill every value, keep ru
 
 ### Runtime bindings
 
-Supply all five tokens: `{decision_surface}` (recorded user-reaction surface; members relay), `{permission_flags}` (exact auto-approval flags), `{pane_title}` (title mechanism or no analog), `{skill_loader}` (supported loader or complete absolute-path reads), and `{effort_levels}` (accepted values/flag or unsupported).
+Supply all five tokens: `{decision_surface}` (recorded user-reaction surface; members relay), `{permission_flags}` (selected permission mechanism and exact flags), `{pane_title}` (title mechanism or no analog), `{skill_loader}` (supported loader or complete absolute-path reads), and `{effort_levels}` (accepted values/flag or unsupported).
 
 ### Role defaults
 
@@ -416,4 +417,4 @@ List exact spawn tokens, valid aliases, reviewed most-to-least capability orderi
 
 ### Note → applies at
 
-Use a `Note | Applies at` table, one caveat per row. Every Applies-at cell names the token and affected `<skill>/<file>` section. Bind a `{permission_flags}` row stating the posture's denial semantics — what a member runs unprompted, what the harness denies, and when the member routes — to the member command-execution, prompt-routing, Director, and supervision instructions that point at it.
+Use a `Note | Applies at` table, one caveat per row. Every Applies-at cell names the token and affected `<skill>/<file>` section. Bind a `{permission_flags}` row describing the selected native permission policy and its limits alongside the shared behavior: members execute role-authorized task commands, route observed permission denials with actual evidence, and surface unresolved approval to the Director. When automatic review is selected, surface an unavailable automatic mode to the Director. Preserve native guards, explicit denies, managed policies and file/sandbox boundaries. Link the member command-execution, prompt-routing, Director and supervision instructions that consume it.

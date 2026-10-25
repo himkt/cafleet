@@ -21,9 +21,17 @@ run setup. Setup installs embedded skills and presets offline; use
 
 ## Configure
 
-CAFleet is designed to run inside a coding agent without per-command
-permission prompts. Each backend has a different config file and permission
-system:
+CAFleet injects the mandatory command-routing instruction and literal broker
+identities into every member prompt. Members execute task commands under the
+backend's selected permission policy and route observed permission
+denials with the exact command, working directory, environment and refusal.
+Use native file tools within role scope and permitted shell reads for
+prerequisites when shell is the only reader. Surface unresolved approval to
+the Director under every policy. When automatic review is selected, report
+unavailable automatic mode to the Director. Ordinary command errors follow
+normal recovery. Native guards, explicit denies, managed policies and host
+permission/sandbox settings remain authoritative. Each backend has a
+different config file and permission system:
 
 | Backend | Config file | Manual configuration | Installed by `cafleet setup` | Reference |
 |---|---|---|---|---|
@@ -44,9 +52,11 @@ that need one.
 ### Claude Code
 
 Add the profile below that matches the permission mode your Director session
-runs in to your user-level `~/.claude/settings.json`. Members start in
-`dontAsk` mode whichever mode the Director uses, so both profiles pre-approve
-what members need beyond their broker commands.
+runs in to your user-level `~/.claude/settings.json`. Members select native
+`auto` mode whichever mode the Director uses. Availability and explicit
+deny/ask rules remain authoritative; unavailable mode or unresolved approval
+is reported to the Director. These profiles preserve native file access and
+Director dispatch permissions alongside the shared member routing instruction.
 
 | Behavior | Auto mode profile | Other-modes profile |
 |---|---|---|
@@ -61,9 +71,10 @@ the second runs an arbitrary command there; the operator confirms each
 invocation.
 
 A claude member needs no allow rule of its own for the broker commands:
-cafleet passes them on the member's spawn command line. A `deny` or `ask` rule
-that matches a broker command still blocks a member, and `cafleet doctor`
-reports it — see
+cafleet passes them on the member's spawn command line. An effective `deny`
+refuses a broker call, while `ask` retains a human approval boundary in auto
+mode. Both can prevent unattended broker progress, and `cafleet doctor`
+reports them — see
 [Spawn-time allow rules](spec/coding-agent-backends.md#spawn-time-allow-rules).
 
 `Edit` and `Write` let members write files. They apply to every session that
@@ -72,9 +83,8 @@ Claude Code's protected paths without a prompt or classifier review.
 [What each profile entry is for](spec/coding-agent-backends.md#claude-profile-entries)
 names the role that needs each entry and gives the path rule that confines
 this approval.
-[What members can run](spec/coding-agent-backends.md#claude-member-permissions)
-covers denied commands and the entries to add for your project's own task
-commands.
+[Member command routing](spec/coding-agent-backends.md#claude-member-permissions)
+covers observed-denial routing, native dispatch and file-edit boundaries.
 
 #### Auto mode {#auto-mode-profile}
 
