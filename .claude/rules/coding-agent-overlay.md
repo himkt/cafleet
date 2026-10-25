@@ -4,15 +4,14 @@ Write CAFleet base instructions so they read the same on every backend: family `
 
 ## Where backend specifics live
 
-`skills/cafleet/reference/coding-agents.md` is the canonical backend reference. Each self-contained `## claude`, `## codex`, or `## opencode` section contains these five subsections in order:
+`skills/cafleet/reference/coding-agents.md` is the canonical backend reference. Each self-contained backend section contains these four subsections in order:
 
 1. **Runtime bindings**: the five runtime placeholders for decision surface, permission flags, pane title, skill loader, and effort levels.
 2. **Role defaults**: the concrete model and effort assignments for reviewers and other members; models come from the backend catalog and effort matches its runtime capability.
 3. **Model catalog**: exact spawn tokens, aliases, reviewed capability classes/order, prices, context notes, and official provenance.
 4. **Note → applies at**: constraints bound to their tokens and consuming instructions.
-5. **Pane-state capture cues**: styled idle/working/awaiting_user/draft/unknown cues and their Director evidence-handling owner.
 
-Add a backend by copying `## Template` and supplying all five subsections. Keep each section complete for its own backend, with shared policy and supervision linked to their authoritative homes. Model selection belongs to `skills/cafleet/roles/director.md` § Model selection. The `cafleet-model-list-refresh` skill owns catalogs, provenance/context notes, Role defaults, and shared freshness metadata; runtime documentation maintenance owns the remaining subsections.
+Add a backend by copying `## Template` and supplying all four subsections. Keep each section complete for its own backend, with shared policy and supervision linked to their authoritative homes. Model selection belongs to `skills/cafleet/roles/director.md` § Model selection. The `cafleet-model-list-refresh` skill owns catalogs, provenance/context notes, Role defaults, and shared freshness metadata; runtime documentation maintenance owns the remaining subsections.
 
 ## Reader contract
 
@@ -22,9 +21,8 @@ Resolve by the subject of the action:
 |---|---|---|
 | Execute current instructions | Executing agent's `CODING AGENT:` identity, or its own identity when standalone | Its Runtime bindings and bound notes, including local execution and decision tools. |
 | Select/configure a spawned member | Backend selected under Director policy | Its Model catalog and Role defaults; validate its effort and launch capabilities against Runtime bindings. |
-| Interpret a captured pane | Observed member's recorded backend | Its capture cues, retaining the observer's own tools and decision surface. |
 
-For example, a Codex Director selecting an OpenCode reviewer resolves the OpenCode reviewer default and effort capability while keeping Codex decision and execution tools. A Claude Director inspecting Codex applies the target backend’s capture cues while keeping its own tools. Ordinary members resolve their own runtime section without acquiring model-selection duties.
+For example, a Codex Director selecting an OpenCode reviewer resolves the OpenCode reviewer default and effort capability while keeping Codex decision and execution tools. Ordinary members resolve their own runtime section without acquiring model-selection duties.
 
 ## How the base and overlay connect
 
