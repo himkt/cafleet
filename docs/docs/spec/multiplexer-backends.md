@@ -198,10 +198,10 @@ Escape is meant to interrupt a working turn or close an open prompt so the line 
 | Input | tmux argv | herdr argv |
 |---|---|---|
 | Escape | `tmux send-keys -t PANE Escape` | `herdr pane send-keys PANE escape` |
-| Literal | `tmux send-keys -t PANE -l -- TEXT` | `herdr pane send-text PANE -- TEXT` |
+| Literal | `tmux send-keys -t PANE -l -- TEXT` | `herdr pane send-text PANE TEXT` |
 | Enter | `tmux send-keys -t PANE Enter` | `herdr pane send-keys PANE enter` |
 
-Native shell input starts with `! ` followed by the validated actual command. Composer controls begin the submitted input. The argument terminator `--` before the literal payload keeps leading hyphens as text.
+Native shell input starts with `! ` followed by the validated actual command. Composer controls begin the submitted input. Tmux uses the `--` option terminator before its literal payload to preserve leading hyphens. Herdr receives the complete payload as one TEXT argument immediately after the pane ID.
 
 Deletion and explicit pane-input operations start their five-second budgets after invocation schema and asset guards. Resolve native command bodies before starting their input budget. Each submission has one five-second transport budget:
 
