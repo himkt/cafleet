@@ -145,6 +145,8 @@ mod tests {
             opencode().build_spawn_argv("do it", "ignored", Some("openai/gpt-4"), None),
             argv(&[
                 "opencode",
+                "mini",
+                "--standalone",
                 "--agent",
                 "cafleet",
                 "--model",
@@ -156,7 +158,32 @@ mod tests {
         );
         assert_eq!(
             opencode().build_spawn_argv("do it", "ignored", None, None),
-            argv(&["opencode", "--agent", "cafleet", "--prompt", "do it"])
+            argv(&[
+                "opencode",
+                "mini",
+                "--standalone",
+                "--agent",
+                "cafleet",
+                "--prompt",
+                "do it",
+            ])
+        );
+    }
+
+    #[test]
+    fn spawn_argv_preserves_the_prompt_as_one_literal_argument() {
+        let prompt = "--model 'quoted value'\n{member_id} \"next line\"";
+        assert_eq!(
+            opencode().build_spawn_argv(prompt, "display name with spaces", None, None),
+            argv(&[
+                "opencode",
+                "mini",
+                "--standalone",
+                "--agent",
+                "cafleet",
+                "--prompt",
+                prompt,
+            ])
         );
     }
 

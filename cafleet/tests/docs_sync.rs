@@ -2437,6 +2437,54 @@ mod structural_contracts {
     }
 
     #[test]
+    fn opencode_preset_declares_the_shell_allowlist_and_member_dispatch_denials() {
+        let preset = std::fs::read_to_string(root().join("presets/opencode/cafleet.md")).unwrap();
+        let frontmatter = preset
+            .strip_prefix("---\n")
+            .and_then(|text| text.split_once("\n---\n"))
+            .expect("the opencode preset has delimited frontmatter")
+            .0;
+        assert!(frontmatter.contains("deny-by-default shell allowlist"));
+        let shell = frontmatter
+            .split_once("    \"shell\": {\n")
+            .expect("the opencode preset declares its command rules under shell")
+            .1
+            .split_once("\n    },")
+            .expect("the shell ruleset has a closing delimiter")
+            .0;
+        assert!(shell.starts_with("      \"*\": \"deny\","));
+        let broker = shell.find("\"cafleet *\": \"allow\"").unwrap();
+        for dispatch in ["prompt", "exec"] {
+            let denial = shell
+                .find(&format!("\"cafleet member {dispatch} *\": \"deny\""))
+                .unwrap();
+            assert!(
+                broker < denial,
+                "the member dispatch denial follows its broker allow rule"
+            );
+        }
+        assert!(preset.contains("Shell defaults to deny"));
+    }
+
+    #[test]
+    fn opencode_preset_matches_the_verbatim_specification() {
+        let preset = std::fs::read_to_string(root().join("presets/opencode/cafleet.md")).unwrap();
+        let specification = INVENTORY
+            .document("SPEC.md")
+            .section("exact-preset-file-contents-verbatim")
+            .unwrap();
+        let verbatim = specification
+            .text
+            .split_once("````markdown\n")
+            .expect("the specification includes the verbatim preset fence")
+            .1
+            .split_once("````")
+            .expect("the verbatim preset fence is closed")
+            .0;
+        assert_eq!(preset, verbatim);
+    }
+
+    #[test]
     fn migration_rule_points_to_the_current_chain_guard() {
         INVENTORY
             .document(".claude/rules/database-migrations.md")
