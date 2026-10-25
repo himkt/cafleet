@@ -352,7 +352,7 @@ fi
             } else {
                 vec![
                     format!("pane send-keys {pane} escape"),
-                    format!("pane send-text {pane} -- ! {command}"),
+                    format!("pane send-text {pane} ! {command}"),
                     format!("pane send-keys {pane} enter"),
                 ]
             };

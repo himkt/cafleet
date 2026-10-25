@@ -1370,6 +1370,9 @@ fn herdr_uses_the_same_input_guard_and_submits_escape_first_without_reading() {
         &fixture.cli.shim_dir.join("herdr"),
         r#"#!/bin/sh
 printf '%s\n' "$*" >> "$CAFLEET_TEST_TMUX_LOG"
+if [ "$1" = "pane" ] && [ "$2" = "send-text" ]; then
+    printf 'literal-argc %s\nliteral-text %s\n' "$#" "$4" >> "$CAFLEET_TEST_TMUX_LOG"
+fi
 if [ "$1" = "pane" ] && [ "$2" = "read" ]; then
     echo "unexpected pane read" >&2
     exit 1
@@ -1384,6 +1387,14 @@ fi
     let payload = json(&fixture.run("prompt"));
     assert_eq!(payload["pane_id"], "w1:p2");
     let calls = fixture.cli.shim_calls();
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|line| line.starts_with("literal-"))
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["literal-argc 4", "literal-text hello worker"]
+    );
     assert!(
         calls.iter().all(|line| !line.starts_with("pane read")),
         "{calls:?}"
@@ -1397,7 +1408,7 @@ fi
         writes,
         [
             "pane send-keys w1:p2 escape",
-            "pane send-text w1:p2 -- hello worker",
+            "pane send-text w1:p2 hello worker",
             "pane send-keys w1:p2 enter",
         ]
     );
