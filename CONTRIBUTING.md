@@ -1,4 +1,3 @@
 # Contributing to CAFleet
 
-The contributor guide has moved. See <https://himkt.github.io/cafleet/contributing>
-(source: `docs/docs/contributing.md`).
+See the [contributor guide](https://himkt.github.io/cafleet/contributing) for development, checks and publication. Its source is [docs/docs/contributing.md](docs/docs/contributing.md).

@@ -1,1 +1,0 @@
-../../../../../docs/docs/spec/data-model.md
