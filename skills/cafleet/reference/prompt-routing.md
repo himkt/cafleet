@@ -1,6 +1,6 @@
 # Routing a command through the Director
 
-A member executes task commands under the backend's selected permission policy and routes an observed permission denial to the Director. Preserve native guards, explicit deny rules, managed policies and host permission/sandbox settings. The Director reviews the exact command and actual refusal under existing host and operator authority. Routing supplies no automatic override of a native or managed denial. The runtime prompt carries this behavioral contract and literal broker identities for every member-create path.
+A member runs each command its host permits. A required unavailable command routes through the Director, whose host rules authorize the native pane action. Preserve the actual command and inspect native output.
 
 ## The Director's pane primitives
 
@@ -11,25 +11,23 @@ A member executes task commands under the backend's selected permission policy a
 
 Every writer shares the bounded pane-input lock and leads with Escape; no writer checks pane readiness. Successful submission establishes no command exit status.
 
-## Member-side: observed denial
+## Member-side: reconsider, then route
 
-Follow [member command execution](../roles/member.md#command-execution). Use native readers for prerequisite files and permitted shell reads when shell is the only reader. Inspect each command's actual result. An ordinary nonzero result follows normal recovery; an observed permission denial routes with its exact command, working directory, required environment and actual refusal reason. The same route is available before ready when a prerequisite is denied.
+Follow [member command execution](../roles/member.md#command-execution). Try an authorized command, inspect its observed result, and reconsider incorrect flags/paths or an appropriate permitted alternative.
 
-After a returned permission denial, send:
+If the necessary command remains denied, send:
 
 ```bash
-cafleet message send --from-member-id <my-member-id> --to-member-id <director-member-id> "Need to run: <exact command>. Cwd: <absolute working directory>. Environment: <required overrides or none>. Refusal: <actual permission denial>."
+cafleet message send --from-member-id <my-member-id> --to-member-id <director-member-id> "Need to run: <command>. My harness denied it."
 ```
 
-For hard-to-quote commands, use a permitted native editor to write the exact one-line command and refusal evidence under supplied BASE and name its path. End the turn for Director review. A denied file edit needs an authorized host-rule change or Director edit. If broker communication itself fails, report the observed failure to the operator.
+For hard-to-quote commands, write the exact one-line command under supplied BASE and name its path. End the turn so the Director can submit native input. A denied file edit needs a host allow rule or Director edit. If the broker send is also denied, report both observed failures to the operator.
 
-Surface unresolved approval to the Director. When automatic review is selected, surface an unavailable automatic mode to the Director. Preserve the actual pending request rather than inferring consent. An interactive prompt can prevent a member from sending; the Director's supervision must inspect that state. The prompt-level routing contract provides no deterministic refusal-event interception.
-
-Await an actual result or explicit continuation before continuing dependent work. Use the visible host transcript when the host resumes you or the Director sends a continuation prompt. Report only observed output and preserve the original exit status; a dispatch receipt establishes submission only.
+Native output remains visible in the host transcript. Continue from it when the host resumes you or the Director sends an explicit continuation prompt. Report only output you actually observed.
 
 ## Director-side dispatch
 
-Read the command/cwd/environment/refusal evidence and record the outstanding action in host-owned state. Resolve the request under existing host and operator authority; an effective native or managed denial retains that authority. When a native dispatch is authorized, submit its exact command and ACK consumption:
+Read the request, record the outstanding action in host-owned state, authorize its exact command, then dispatch and ACK consumption:
 
 ```bash
 cafleet member exec <member-id> "<command>"

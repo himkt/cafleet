@@ -23,15 +23,8 @@ The flag means slightly different things per command:
   and is recorded as placement metadata. When the flag is omitted, the member inherits the spawning Director's placement backend (an explicit
   value still wins).
 
-Every member prompt begins with the mandatory command-routing policy and
-literal broker identities. Members execute task commands under the backend's
-selected permission policy and report an actual permission denial with
-the exact command, working directory, environment and refusal. Native guards,
-explicit denies, managed policies and host permission/sandbox settings remain
-authoritative. Surface unresolved approval to the Director under every policy.
-When automatic review is selected, report unavailable automatic mode to the
-Director. Ordinary command errors follow normal recovery. This prompt
-instruction supplies a behavioral contract. Native file tools remain within role scope. A claude
+Each backend is spawned with flags that enable shell commands with no runtime
+permission prompts, and with its broker commands already allowed: a claude
 member needs no user-level allow rule to send, poll, or ACK. The per-backend
 spawn argv, shell-command posture, and sandbox trade-offs are specified in
 [Coding-agent backends § Spawn argv](../spec/coding-agent-backends.md#spawn-argv).
@@ -39,9 +32,8 @@ spawn argv, shell-command posture, and sandbox trade-offs are specified in
 ## cafleet usage from a member pane
 
 The cafleet CLI works unchanged from any backend pane. Identity reaches a
-member through its spawn prompt: `cafleet member create` renders four assignment
-placeholders once and prepends the common routing policy with literal broker
-identities, so the member reads its ids as plain text lines
+member through its spawn prompt: `cafleet member create` renders four identity
+placeholders to literals, so the member reads its ids as plain text lines
 (e.g. `FLEET ID: 1`, `YOUR MEMBER ID: 4`) and passes them explicitly on every
 command. Each placeholder and its label line is in
 [CLI options § Spawn-prompt substitution](../spec/cli-options.md#spawn-prompt-substitution). The only environment variable forwarded into the pane is
@@ -49,8 +41,8 @@ command. Each placeholder and its label line is in
 Each backend honors a leading-`!` shell shortcut on the coding agent's input line,
 including opencode `mini`; backend-specific permission limits are in
 [Coding-agent backends](../spec/coding-agent-backends.md).
-`cafleet member exec` submits a visible native command Escape-first; a member routes
-an observed permission denial through the Director under existing authority — see
+`cafleet member exec` submits a visible native command Escape-first; a member routes a
+command its harness does not run through the Director — see
 [Command routing](member-lifecycle.md#command-routing). For the full
 broker CLI reference, see [CLI options](../spec/cli-options.md).
 
@@ -138,7 +130,7 @@ accepted levels, forwarding forms, and rejection strings are in
 |---|---|---|---|
 | Reasoning effort | supported | supported | not supported |
 | Pane title | supported, via `--name` | not supported | not supported |
-| Sandbox isolation | not supported — existing host permissions apply | supported — OS-level, kernel-enforced | not supported — the preset's shell allowlist and explicit denies apply |
+| Sandbox isolation | not supported — the operator's allow list is the safety floor | supported — OS-level, kernel-enforced | not supported — a deny-by-default shell allowlist |
 
 `--effort` with the `opencode` backend exits 2 with
 `opencode does not support reasoning effort.` before any side effect. Because

@@ -4,8 +4,6 @@ https://github.com/user-attachments/assets/bd2b195a-f3de-4fa3-bcc8-3c6ef9f1016a
 
 CAFleet multiplexes independent coding-agent sessions in tmux or herdr and coordinates them through durable messages. Use its CLI and skills for delegated research, implementation and review across coding-agent backends. The host owns continuation; the Director receives durable replies through native inbox tools and inspects visible command results.
 
-Every member prompt carries a mandatory command-routing instruction and literal broker identities. Members execute task commands under the backend's selected permission policy and route observed permission denials to the Director with the exact command, working directory, environment and refusal. Native guards, explicit denies, managed policies and host permission/sandbox settings remain authoritative. Surface unresolved approval to the Director under every policy; when automatic review is selected, also report unavailable automatic mode. Native file tools remain within the assigned role.
-
 ## Install
 
 Install the CLI with Homebrew, then run the setup:

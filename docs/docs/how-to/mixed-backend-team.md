@@ -34,18 +34,16 @@ Example output: `1 director=2`. Creation registers the current pane without star
 
 Save this prompt as `/home/cafleet-demo/work/demo/.prompts/member.md` with a fresh filename. Keep identity placeholders and double other literal braces:
 
-The CLI prepends the mandatory command-routing policy and literal broker identities to every member prompt. Members execute task commands under the backend's selected permission policy and route observed permission denials with command/cwd/environment/refusal evidence. Use native file readers for startup prerequisites and permitted shell reads when shell is the only reader; an actual denial follows the same route before ready. Preserve native guards, managed policies and host permission/sandbox settings, and surface unresolved approval to the Director. When automatic review is selected, surface an unavailable automatic mode to the Director.
-
 ```text
 You are an ordinary CAFleet member.
-ROLE DEFINITION: Open /home/cafleet-demo/.claude/skills/cafleet/roles/member.md as your first prerequisite with a native file reader; use a permitted shell read when shell is the only reader, routing an actual denial using the runtime preamble. Follow that role definition.
+ROLE DEFINITION: Open /home/cafleet-demo/.claude/skills/cafleet/roles/member.md BEFORE any other action. Follow that role definition.
 Read /home/cafleet-demo/.claude/skills/cafleet/reference/coding-agents.md and resolve your backend, then load /home/cafleet-demo/.claude/skills/cafleet/SKILL.md as an assigned member. Read /home/cafleet-demo/.claude/skills/cafleet/reference/base-dir.md and the supplied host instructions before task work.
 FLEET ID: {fleet_id}
 DIRECTOR MEMBER ID: {director_member_id}
 YOUR MEMBER ID: {member_id}
 BASE: /home/cafleet-demo/work/demo
 CODING AGENT: {coding_agent}
-After required startup reads, send: cafleet message send --from-member-id {member_id} --to-member-id {director_member_id} "ready"
+As your first operational broker command, send: cafleet message send --from-member-id {member_id} --to-member-id {director_member_id} "ready"
 Poll and ACK your assignment, perform it, poll before reporting completion and on every wake, then handle queued assignments before becoming idle.
 ```
 
@@ -87,7 +85,7 @@ cafleet message wait 2 --timeout 300 --json
 
 ### Run a command for a member
 
-A member routes a returned permission denial, for example `Need to run: mise //cafleet:test. Cwd: /home/cafleet-demo/work/demo. Environment: none. Refusal: <actual permission denial>.` Review that evidence under existing host and operator authority. When native dispatch is authorized, submit the exact command:
+A member can ask `Need to run: mise //cafleet:test. My harness denied it.` Authorize and dispatch the exact command:
 
 ```bash
 cafleet member exec 3 "mise //cafleet:test"

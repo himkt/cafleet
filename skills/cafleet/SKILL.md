@@ -12,13 +12,9 @@ description: >-
 
 Use the `cafleet` CLI to register as a member, send and receive messages, and discover other members on the CAFleet message broker. CLI commands access SQLite directly.
 
-## Mandatory member command routing
-
-Every `member create` prompt begins with the shared command-routing policy and literal broker identities, including ad-hoc assignments that load no skill. Members execute task shell commands under the backend's selected permission policy and use authorized `cafleet message` commands for coordination. An observed permission denial routes to the Director with the exact command, working directory, required environment and actual refusal reason. Ordinary command errors follow normal recovery. Preserve native guards, explicit deny rules, managed policies and host permission/sandbox settings; surface unresolved approval to the Director. When automatic review is selected, surface an unavailable automatic mode to the Director. The Director reviews routed requests under existing host and operator authority and supplies actual results or an explicit continuation before dependent work resumes. The injected instruction defines agent behavior; native backend permissions enforce execution boundaries.
-
 ## Required reading
 
-Open your authoritative role first with an available native file reader; use permitted shell reads when shell is the only reader. Complete startup reads, send ready, then process assignments. An actual prerequisite denial follows the same routing contract using the runtime prompt's literal broker identities, and may require a broker request before ready.
+Open your authoritative role first. Use an available non-shell text reader for prerequisites; when shell is the only text reader, prerequisite file reads may precede ready. Ready is a member's first operational broker shell command and precedes task work.
 
 | # | Read | Timing and responsibility |
 |---|---|---|
@@ -31,7 +27,7 @@ Load skills through your executing backend's supported loader. Absolute-path loa
 |---|---|
 | [Member role](roles/member.md) | Ordinary-member startup and command authority. |
 | [Director role](roles/director.md) and [Supervision](reference/supervision.md) | Director setup, before orchestration; the role gates backend and prompt reads. |
-| [Command routing](reference/prompt-routing.md) | Before routing an observed denial or reviewing a member's denied command. |
+| [Command routing](reference/prompt-routing.md) | Before routing a command your harness denied, or running one a member routed to you. |
 | [Recovery](reference/supervision.md#recovery) / [Shutdown](reference/supervision.md#shutdown) | Director reads the applicable section immediately before that action. |
 
 Use the [command index](#command-index) on demand for exact runtime flags, outputs and errors.
@@ -58,7 +54,7 @@ Used only when your backend's section omits a token or your backend is unknown. 
 | `{reviewer_effort}` | omit `--effort` to use the backend default |
 | `{other_model}` | the spawning Director's own model (inherit the parent) |
 | `{other_effort}` | omit `--effort` to use the backend default |
-| `{permission_flags}` | describe the posture neutrally as "host-configured permissions" — for prose uses only; spawn-flag construction never falls here |
+| `{permission_flags}` | describe the mode neutrally as "workspace-scoped auto-approval" — for prose uses only; spawn-flag construction never falls here |
 | `{pane_title}` | no `--name` analog |
 | `{skill_loader}` | reading the skill's `SKILL.md` + your overlay by absolute path |
 | `{effort_levels}` | unsupported — omit `--effort` |
@@ -77,7 +73,7 @@ In the Director's own commands, substitute the literal ids printed by `cafleet f
 
 ### Spawned-member identity via `str.format` substitution
 
-`cafleet member create` uses the Rust spawn-placeholder mini-formatter on the resolved assignment body (supplied as exactly one of the positional `PROMPT` or `--file <path>`), rendering exactly four placeholders to literals at spawn time. The runtime then prepends the mandatory routing instruction and literal broker identities. It accepts exact names and doubled literal braces only, not Python format specifications, conversions, or attribute/index access:
+`cafleet member create` uses the Rust spawn-placeholder mini-formatter on the resolved spawn prompt (supplied as exactly one of the positional `PROMPT` or `--file <path>`), rendering exactly four placeholders to literals at spawn time. It accepts exact names and doubled literal braces only, not Python format specifications, conversions, or attribute/index access:
 
 - `{fleet_id}` — the member's fleet id.
 - `{member_id}` — the member's **own** newly-allocated id (the CLI allocates it during the spawn and substitutes it itself — the Director never needs to know it).
@@ -110,7 +106,7 @@ Every one-shot `cafleet` process is the **only command in its shell-tool invocat
 
 Leading `NAME=value` assignments that set the environment of the CAFleet process are allowed; they do not start another process. They must immediately precede the CAFleet executable — do not substitute an `env` helper process or append another command. Shell redirection does not authorize another process either; a command that needs a long body uses the positional argument or `--file <path>`, not a pipe.
 
-**Permission-error diagnostic.** For an operating-system permission error — `Operation not permitted` / `Permission denied`, including a multiplexer socket or pane-command failure — inspect invocation isolation and the host's permission boundary. An authorized broker communication combined with another command requires a separate isolated broker invocation. Members relay task-command failures to the Director for a newly authorized action. A message whose persisted id was already reported is committed (§ *Send (Unicast)*): send its body once only.
+**Permission-error diagnostic.** For an operating-system permission error — `Operation not permitted` / `Permission denied`, including a multiplexer socket or pane-command failure — check invocation isolation and the host's permission boundary. If the failed invocation combined commands, re-run the CAFleet command as its own isolated invocation; route a still-required denied command through the Director. A message whose persisted id was already reported is committed (§ *Send (Unicast)*): send its body once only.
 
 Command isolation complements the Director-side wake procedure in [`reference/supervision.md`](reference/supervision.md#director-wake).
 

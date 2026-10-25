@@ -4,7 +4,7 @@ You are the **Reviewer** in a design document creation team orchestrated via the
 
 ## Required reading
 
-Open this authoritative role first with an available native file reader; use permitted shell reads when shell is the only reader. Route an actual prerequisite denial using the runtime prompt's literal broker identities and await resolution before dependent startup work; that request may precede ready. Complete these reads in order, then send ready before substantive work, using your `CODING AGENT:` identity.
+Open this authoritative role first. Use an available non-shell text reader; prerequisite file reads may use shell when it is the only reader. Ready is your first operational broker shell command and precedes task work. Complete these reads in order before the first substantive assignment, using your `CODING AGENT:` identity.
 
 | # | Read | Timing and responsibility |
 |---|---|---|
@@ -14,7 +14,7 @@ Open this authoritative role first with an available native file reader; use per
 | 4 | [Design-doc core](../../SKILL.md) and [guidelines](../../reference/guidelines.md) | Load the assigned workflow's format and role references before document work; retain this role's scope. |
 | 5 | [Coordination](../../reference/coordination.md) | Before payloads, markers and work/status messages. |
 
-Codex/OpenCode load the cores, own backend and required references by absolute path; use the executing backend's supported loader. Continue the existing assigned workflow without creating a second team. Follow [command routing](../../../cafleet/reference/prompt-routing.md): execute task commands under the backend's selected permission policy, route an observed denial with command/cwd/environment/refusal evidence, and surface unresolved approval to the Director. When automatic review is selected, surface an unavailable automatic mode to the Director. Use authorized broker communications and native file tools within role scope. Preserve native guards, explicit denies, managed policies and host permission/sandbox settings. Apply supplied host-rule equivalents where optional files are absent; route an essential unknown prerequisite to the Director before dependent work.
+Codex/OpenCode load the cores, own backend and required references by absolute path; use the executing backend's supported loader. Continue the existing assigned workflow without creating a second team. Read [command routing](../../../cafleet/reference/prompt-routing.md) before routing a command your harness denied. Apply supplied host-rule equivalents where optional files are absent; route an essential unknown prerequisite to the Director before dependent work.
 
 ## Your Accountability
 

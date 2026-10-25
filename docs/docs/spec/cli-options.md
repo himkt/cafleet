@@ -630,8 +630,8 @@ one root Director by construction, so no override flag exists.
 | `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; when omitted, the member — every role — inherits the spawning Director's placement backend. Exits 1 with `Error: binary <name> not found on PATH` when the binary is missing. The opencode backend additionally requires its agent preset at the resolved preset path (via `OPENCODE_CONFIG_DIR` — see [Config-dir resolution](#config-dir-resolution)); a missing preset or an invalid variable exits 1 per [Error Messages](#error-messages). |
 | `--model` | no | Model forwarded to the backend binary's own `--model` flag. The opencode backend additionally requires `<provider-id>/<model-id>`; per-backend formats and create-time validation are in [Model selection](coding-agent-backends.md#model-selection). |
 | `--effort` | no | Reasoning-effort level forwarded to the backend binary, validated per backend before any side effect. Accepted levels, forwarding forms, and rejection strings are in [Reasoning effort](coding-agent-backends.md#reasoning-effort). |
-| positional `PROMPT` | one of | Inline authored assignment body (backend-neutral template). Exactly one of `PROMPT` / `--file`. |
-| `--file PATH` | one of | Path to a UTF-8 file whose contents are the authored assignment body (`-` = stdin). Follow the shared [body-input and transport contract](#text-body-input). |
+| positional `PROMPT` | one of | Inline spawn prompt (backend-neutral template). Exactly one of `PROMPT` / `--file`. |
+| `--file PATH` | one of | Path to a UTF-8 file whose contents are the spawn prompt (`-` = stdin). Follow the shared [body-input and transport contract](#text-body-input). |
 | `--json` | no | Output as JSON |
 
 
@@ -643,43 +643,18 @@ The per-backend spawn argv and auto-approval flags live in
 
 #### Spawn-prompt substitution
 
-The pure spawn-placeholder formatter renders the resolved authored assignment
-body, substituting exactly four placeholders once:
+`member create` renders its resolved spawn prompt body
+with the same formatter, substituting exactly four placeholders:
 
-| Placeholder | Substituted value | Example in a labeled assignment |
+| Placeholder | Substituted value | How the spawned member sees it |
 |---|---|---|
 | `{fleet_id}` | The member's fleet id | `FLEET ID: <fleet_id>` |
 | `{member_id}` | The member's own newly-allocated id | `YOUR MEMBER ID: <member_id>` |
 | `{director_member_id}` | The fleet's root Director id | `DIRECTOR MEMBER ID: <director_member_id>` |
 | `{coding_agent}` | The resolved backend name (`claude`, `codex`, or `opencode`) | `CODING AGENT: <coding_agent>` |
 
-The runtime prompt-assembly wrapper then prepends the mandatory CAFleet
-command-routing instruction, literal fleet/member/Director identities, and
-concrete broker denial-report and ready examples. This complete child
-prompt is assembled for every registered backend, explicit or inherited,
-and every inline/file/stdin assignment, including ad-hoc prompts that load
-no role or skill. The preamble tells members to execute task commands under
-the backend's selected permission policy and route an observed
-permission denial with the exact command, working directory, required
-environment and actual refusal reason. It preserves native guards, explicit
-denies, managed policies and host permission/sandbox settings. Members surface
-unresolved approval under every policy, and unavailable automatic mode when
-automatic review is selected. They use native file tools within role scope
-and authorized broker communications, and handle ordinary nonzero results
-through normal recovery. Prerequisites use native readers or permitted shell
-reads; an actual denial may require routing before ready. Director review
-uses existing host/operator authority and grants no automatic denial override.
-This is a prompt-level contract; runtime tests establish assembly and argv
-behavior, rather than deterministic refusal interception or live mode availability.
-
-The authored body follows that preamble after exactly one placeholder
-substitution. Its remaining UTF-8 bytes, leading/trailing whitespace, CRLF
-line endings, quotes and escaped literal braces retain the pure formatter's
-behavior; the wrapper performs no additional body formatting or shell
-expansion. The first three identity labels are supplied by the preamble even
-when the assignment omits them. `{coding_agent}` renders within the assignment
-when authored there. The only environment variable forwarded into the pane
-is `CAFLEET_DATABASE_URL`.
+Identity reaches the spawned member as literals rendered into its prompt; the
+only environment variable forwarded into the pane is `CAFLEET_DATABASE_URL`.
 The formatter accepts only the four exact names above and doubled literal
 braces (`{{` / `}}`), not Python format specifications, conversions, or
 attribute/index access. An unknown placeholder or
@@ -694,8 +669,8 @@ the placement.
 
 #### Creation failure compensation {#creation-failure-compensation}
 
-Member creation registers a pending placement, formats the assignment body
-and assembles the shared preamble, creates a pane, and patches its id. The CLI owns a registration guard after successful
+Member creation registers a pending placement, renders the prompt, creates a
+pane, and patches its id. The CLI owns a registration guard after successful
 registration and acquires a pane guard only when `split_window` succeeds.
 The backend owns the pane before that return; see
 [pane ownership](multiplexer-backends.md#pane-creation-ownership).

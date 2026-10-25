@@ -17,12 +17,13 @@ sources, under explicit maintainer review. The repository file is the release
 source: a running Director reads only its deployed skill replica, so a refresh
 reaches Directors exclusively through the release/deployment transaction below.
 
-This skill maintains each backend's Model catalog, its provenance/context notes, its canonical Role defaults table, and shared/catalog-specific freshness metadata. Preserve Runtime bindings, bound runtime notes, and worked resolutions as runtime documentation owned outside model refreshes. The common catalog preamble specifies maintainer-owned refresh at least every 30 days, a last-refreshed date for model data, standard provider USD per MTok as planning estimates, reviewed capability ordering, and Director ownership of selection policy.
+This skill maintains each backend's Model catalog, its provenance/context notes, its canonical Role defaults table, and the shared freshness metadata. Preserve Runtime bindings, bound runtime notes, and worked resolutions as runtime documentation owned outside model refreshes. The common catalog preamble specifies maintainer-owned refresh at least every 30 days, a last-refreshed date for model data, standard provider USD per MTok as planning estimates, reviewed capability ordering, and Director ownership of selection policy.
 
 ## Approved sources (exhaustive allowlist)
 
-Fetch **only** the official pages listed in this table, using each for the
-facts identified in its row. Claude Code model configuration is capability authority for the `claude`
+Fetch **only** the official pages listed in this table. Every page except
+Claude Code model configuration is pricing and availability authority.
+Claude Code model configuration is capability authority for the `claude`
 backend's context windows and `[1m]` applicability; use the pricing sources
 to price models, never the capability page. Search results, third-party price
 sites, and social posts are never model-list authority.
@@ -35,25 +36,22 @@ sites, and social posts are never model-list authority.
 | OpenCode Console models and pricing | `opencode` prices and availability | `https://opencode.ai/v2/docs/console/models/` |
 | OpenCode Go models and usage-limit pricing | `opencode-go` prices and availability | `https://opencode.ai/v2/docs/console/go` |
 | Claude Code model configuration | `claude` context windows and `[1m]` applicability | `https://code.claude.com/docs/en/model-config.md` |
-| Nous Portal models | `hermes` catalog IDs, types and Portal-billed prices | `https://portal.nousresearch.com/models` |
 
 ## Refresh procedure
 
-1. **Confirm the refresh scope and fetch its approved sources.** A full
-   refresh covers every maintained backend catalog; a maintainer-selected
-   partial refresh covers only its selected catalogs, including a Hermes-only
-   bootstrap. Fetch every source feeding that scope. If any required source
-   cannot be fetched or parsed, **stop**: leave the model list unchanged, report the error, and
+1. **Fetch every approved source.** If any source cannot be fetched or
+   parsed, **stop**: leave the model list unchanged, report the error, and
    let it become stale rather than fabricating values.
 2. **Extract pricing facts only**: the currently effective standard input and
    output prices (USD per MTok) and availability/deprecation qualifiers. Do
    not copy long provider text into the repository, and do not present the
    pricing pages as benchmark evidence — they are pricing/availability
    sources only.
-3. **Follow the dedicated procedure for each selected catalog.** Provider
-   pricing pages feed the catalogs identified in the approved-source table;
-   catalogs with a dedicated procedure use that procedure below. For `codex`,
-   pricing and availability come from different pages: price each model from the OpenAI
+3. **Refresh the `claude` and `codex` tables** from their provider pricing
+   pages, **refresh the `opencode` table** with the OpenCode Console procedure,
+   and **refresh the `opencode-go` table** with the OpenCode Go procedure below.
+   Follow each dedicated procedure for its catalog. For `codex`, pricing and
+   availability come from different pages: price each model from the OpenAI
    pricing page, but take Codex availability from the Codex models page
    (`https://learn.chatgpt.com/docs/models.md`) — the table carries only the
    models Codex currently offers in its model picker. A model absent there
@@ -62,9 +60,9 @@ sites, and social posts are never model-list authority.
    still prices it; legacy models remain manual pass-through `--model`
    values.
 4. **Ask the maintainer for role defaults.** Show the current and available
-   catalog tokens for reviewer and other members on each selected backend.
-   Ask which model each role should use and which supported effort level
-   should accompany it when its backend supports effort. Record the maintainer's
+   catalog tokens for reviewer and other members on each backend.
+   Ask which model each role should use and, for Claude and Codex, which
+   supported effort level should accompany it. Record the maintainer's
    choices in the proposed diff. OpenCode omits effort because its backend
    does not support it. A refresh keeps the existing role defaults only when
    the maintainer explicitly chooses to keep them.
@@ -72,10 +70,10 @@ sites, and social posts are never model-list authority.
    and the most-to-least-capable row ordering are reviewed maintainer
    judgment, not provider benchmark claims; changing a class or the ordering
    requires reviewed policy approval in the same pull request. Every row
-   carries both prices from its approved source. Set the Role defaults within
-   the refresh scope from the maintainer's choices, using local catalog entries or aliases and
+   carries both prices from its approved source. Set the six Role defaults
+   from the maintainer's choices, using local catalog entries or aliases and
    effort levels accepted by the selected backend.
-6. **When `claude` is selected, re-verify every row's context window**, even
+6. **Re-verify every `claude` row's context window on every refresh**, even
    when the prices are unchanged. Take each window from the Claude Code model
    configuration page's *Extended context* section and record it in the
    `claude` table's `Context` column. That page is also the authority for
@@ -100,19 +98,18 @@ sites, and social posts are never model-list authority.
    require explicit maintainer approval before applying the model-data changes in
    `skills/cafleet/reference/coding-agents.md`. Preserve the common catalog
    preamble contract described above. Apply catalogs, provenance/context notes,
-   Role defaults, and the applicable freshness metadata together after approval and
-   successful validation. Advance the shared *last refreshed* date only when
-   every catalog it covers has been verified. A partial refresh preserves
-   unrelated catalogs, defaults and freshness, and records the selected
-   catalog's verification date without making unrelated data appear fresh.
-   A failed refresh makes **no** edit.
+   Role defaults, and the *last refreshed* date together after approval and
+   successful validation. The Director's staleness check reads that date, so
+   every successful refresh keeps it present and current. A failed refresh
+   makes **no** edit.
 
 ## OpenCode Console procedure (the `opencode` table)
 
 The `opencode` catalog mirrors every model listed by the OpenCode Console,
 excluding models past their published deprecation date, and uses the Console's
 prices. Model IDs differ from display names, and free/preview models appear
-and disappear. Re-verify the complete Console catalog whenever it is selected:
+and disappear. On **every** refresh, even when the claude/codex prices are
+unchanged:
 
 1. **Price from the Console page only.** Console's own USD-per-MTok rates are
    the billing rates for the `opencode` backend. Never price a Console model
@@ -152,7 +149,7 @@ and disappear. Re-verify the complete Console catalog whenever it is selected:
 
 ## OpenCode Go procedure (the `opencode-go` table)
 
-Run this procedure whenever this catalog is selected. Maintain a separate `#### OpenCode Go`
+Run this procedure on every refresh. Maintain a separate `#### OpenCode Go`
 section after the Console table and its notes, within the `opencode` backend's
 `### Model catalog`. Point to it from the Console preamble; the shared
 last-refreshed date covers both tables.
@@ -217,77 +214,6 @@ last-refreshed date covers both tables.
    and state that their capability is unverified in their Class. A new row's
    Class and position, and changes to existing ones, are reviewed policy
    changes approved in the same pull request.
-
-## Hermes procedure (the `hermes` table)
-
-Use https://portal.nousresearch.com/models as the catalog and billing authority.
-A Hermes-only refresh follows this procedure within its explicit scope; preserve
-the other catalogs, their defaults and the shared freshness date. Initializing
-model data grants no Hermes runtime milestone or automatic selection eligibility.
-
-1. **Capture the complete approved page.** Save the official Models page's
-   HTML and record its acquisition date and visible Text, Embeddings, total,
-   displayed range and page counts. Select the complete catalog view. If direct
-   access fails, use an authorized browser to save that same approved page.
-   Keep snapshots and resources in the task's scratch area; repository tests
-   use synthetic fixtures. A first rendered table is insufficient.
-2. **Establish coverage of every display page.** The supported saved format
-   carries the complete ModelsBrowser `rows` prop across JSON-encoded React
-   Flight string fragments. Verify the official client resource filters and
-   slices that full input in memory, and reconcile all unique IDs with the
-   visible type/total counts and pagination. Otherwise fetch and reconcile
-   every page through a reviewed complete format before proceeding. A changed
-   format or unverifiable pagination stops the refresh for parser review.
-3. **Extract facts offline.** From this skill directory, run:
-
-   ```text
-   python3 -B scripts/extract_hermes_portal.py /absolute/path/to/saved-models.html
-   ```
-
-   The standard-library extractor decodes JSON without evaluating JavaScript,
-   concatenates every Flight string fragment and selects the single `rows`
-   property. It validates the entire array before emitting one JSON object to
-   stdout, containing metadata and all model facts in source order. It performs
-   no network, subprocess, profile, catalog or filesystem mutation. Missing or
-   malformed packets, incomplete/conflicting arrays, duplicate IDs, missing
-   fields, inconsistent types/counts/pages, invalid rates and unreviewed fields
-   fail with an error and no partial stdout facts. Run its synthetic offline
-   checks from the repository root with `mise //:model-refresh-test`.
-4. **Retain exact identity and type.** Select every fact whose `modality` is
-   `text` for the coding-agent catalog. Keep Embeddings in completeness evidence
-   and outside that catalog. Copy IDs exactly, preserving provider prefixes,
-   suffix case, free/region/preview/version variants and every other distinction.
-   Display names are labels, so repeated names remain separate rows by exact
-   ID. A missing or contradictory ID/type stops the refresh; infer neither from
-   a display name or an upstream catalog.
-5. **Preserve billed rates and qualifiers.** Use Portal's input/output USD per
-   million tokens, with each published zero rate recorded as `0.00`. The fact
-   output preserves exact JSON decimal precision, both list rates, discount
-   flags/badges and free variants. Retain that precision separately from any
-   reviewed table display rounding. Record every promotional rate, list-rate
-   comparison, published end date and time/context/tier qualifier. The current
-   payload schema publishes no end-date or tier fields, so its metadata says
-   `Not published`; independently reconcile this with visible pricing and
-   official qualifiers before proposing an update. A newly published qualifier
-   requires parser/fixture review, rather than silently dropping it. An absent
-   necessary fact stops the refresh with the previous model data intact.
-6. **Review eligibility and policy separately.** Price and Text type supply
-   catalog facts, rather than evidence of agent tool loops. Give each row a
-   reviewed Class, capability ordering and explicit tool-loop eligibility note.
-   Keep unverified choices manual until the applicable runtime/tool-use evidence
-   supports automatic role selection. Ask the maintainer to select reviewer and
-   ordinary-member defaults and supported reasoning effort, including an
-   explicit choice to retain existing values where they exist. Preserve exact
-   manual Hermes tokens without OpenCode mapping. Portal cost comparisons apply
-   only with verified effective Nous Portal routing and an eligible model;
-   another provider or an unverified `auto` route requires an operator choice.
-7. **Propose the complete scoped transaction.** Present the exact catalog,
-   classes/order, eligibility, rates/qualifiers, role defaults, effort and
-   applicable verification-date change for explicit maintainer approval.
-   Apply only that approved model-data scope atomically through the release
-   procedure below after validation. Preserve unrelated data and freshness;
-   retain the previous state intact whenever collection, validation or approval
-   is incomplete. Runtime setup, installation and support gates remain separate.
 
 ## Cadence and staleness
 

@@ -120,7 +120,7 @@ impl CodingAgent {
             Self::Claude => &[
                 "claude",
                 "--permission-mode",
-                "auto",
+                "dontAsk",
                 "--prompt-suggestions",
                 "false",
                 "--allowedTools",
@@ -128,7 +128,13 @@ impl CodingAgent {
                 "--name",
                 display_name,
             ],
-            Self::Codex => &["codex", "--approve-for-me", "--sandbox", "workspace-write"],
+            Self::Codex => &[
+                "codex",
+                "--ask-for-approval",
+                "never",
+                "--sandbox",
+                "workspace-write",
+            ],
             Self::Opencode => &["opencode", "mini", "--standalone", "--agent", "cafleet"],
         };
         let mut argv = base
@@ -194,7 +200,7 @@ mod tests {
                 vec![
                     "claude",
                     "--permission-mode",
-                    "auto",
+                    "dontAsk",
                     "--prompt-suggestions",
                     "false",
                     "--allowedTools",
@@ -205,7 +211,13 @@ mod tests {
             ),
             (
                 CodingAgent::Codex,
-                vec!["codex", "--approve-for-me", "--sandbox", "workspace-write"],
+                vec![
+                    "codex",
+                    "--ask-for-approval",
+                    "never",
+                    "--sandbox",
+                    "workspace-write",
+                ],
             ),
             (
                 CodingAgent::Opencode,
