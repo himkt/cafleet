@@ -313,6 +313,33 @@ fn startup_validation_errors_precede_ready_and_midstream_errors_preserve_complet
 }
 
 #[test]
+fn a_startup_snapshot_that_outlives_the_lease_fails_before_emitting_ready() {
+    let clock = TestClock::new();
+    let mut io = ScriptedInbox {
+        clock: &clock,
+        snapshots: Vec::new(),
+        script: |_, check| {
+            assert_eq!(check, 1);
+            clock.elapsed.set(Duration::from_secs(2));
+            Ok(open(Vec::new()))
+        },
+    };
+    let mut output = RecordingOutput::new(&clock);
+    assert!(matches!(
+        listen(
+            &clock,
+            &mut io,
+            &mut output,
+            1,
+            Some(Duration::from_secs(1))
+        ),
+        Err(CafleetError::DeadlineExceeded)
+    ));
+    assert!(output.records.is_empty());
+    assert_eq!(io.snapshots.len(), 1);
+}
+
+#[test]
 fn a_snapshot_budget_failure_terminates_the_stream_instead_of_becoming_a_timeout() {
     let clock = TestClock::new();
     let mut io = ScriptedInbox {
@@ -745,7 +772,7 @@ fn success_and_query_failure_both_remove_the_owned_handler_and_restore_busy_time
         assert_eq!(result.is_err(), corrupt);
         std::thread::sleep(Duration::from_millis(60));
         assert_handler_cleared(&conn);
-        let timeout: u64 = conn
+        let timeout: u32 = conn
             .query_row("PRAGMA busy_timeout", [], |row| row.get(0))
             .unwrap();
         assert_eq!(timeout, 137);
@@ -793,11 +820,13 @@ fn an_unrelated_sqlite_interrupt_preserves_its_cause_before_the_deadline() {
             }
         }
         Authorization::Allow
-    }));
+    }))
+    .unwrap();
     let result = listen_snapshot(&mut conn, director, Some(fleet), Deadline::new());
     interrupted.join().unwrap();
     assert!(result.is_err());
     assert!(!matches!(result, Err(CafleetError::DeadlineExceeded)));
-    conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+    conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+        .unwrap();
     assert_handler_cleared(&conn);
 }
