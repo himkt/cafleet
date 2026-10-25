@@ -148,7 +148,7 @@ fn a_lock_busy_send_prints_the_persisted_prefix_and_keeps_the_message_pending() 
     assert_eq!(
         stderr(&output).trim_end(),
         format!(
-            "Message {id} was persisted. member {member_id}'s pane input remained busy; preview {id} was not sent."
+            "Message {id} was persisted. message {id} was not notified to member {member_id}: pane input remained busy; the next send to member {member_id} or the next message wait retries it."
         )
     );
     let polled = cli.run(&["message", "poll", &member_id.to_string(), "--json"]);
