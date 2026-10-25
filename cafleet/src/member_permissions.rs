@@ -9,10 +9,11 @@ use serde_json::Value;
 
 /// One invocation of every broker command a claude member is spawned allowed
 /// to run; a setting blocks a member when it blocks any of these.
-pub(crate) const PROBE_COMMANDS: [&str; 5] = [
+pub(crate) const PROBE_COMMANDS: [&str; 6] = [
     "cafleet message send --from-member-id 1 --to-member-id 2 x",
     "cafleet message poll 1",
     "cafleet message wait 1 --timeout 300 --json",
+    "cafleet message listen 1 --timeout 300",
     "cafleet message ack 1",
     "cafleet message show 1",
 ];
@@ -162,6 +163,24 @@ mod tests {
     use super::*;
 
     const SEND: &str = "cafleet message send --from-member-id 1 --to-member-id 2 x";
+
+    #[test]
+    fn listen_broker_command_rules_produce_permission_diagnostics() {
+        let dir = TempDir::new().unwrap();
+        let command = *PROBE_COMMANDS
+            .iter()
+            .find(|command| command.starts_with("cafleet message listen "))
+            .expect("the broker diagnostics include a representative listen invocation");
+        for list in ["deny", "ask"] {
+            let rule = "Bash(cafleet message listen *)";
+            let contents = serde_json::json!({"permissions":{(list):[rule]}}).to_string();
+            let file = settings_file(&dir, "listen-settings.json", &contents, false);
+            assert_eq!(
+                diagnose(std::slice::from_ref(&file)),
+                [blocking(&file, list, rule, command)]
+            );
+        }
+    }
 
     fn settings_file(dir: &TempDir, name: &str, contents: &str, managed: bool) -> SettingsFile {
         let path = dir.path().join(name);

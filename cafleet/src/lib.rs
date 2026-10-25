@@ -10,6 +10,7 @@ pub mod delivery;
 pub(crate) mod diagnosis;
 pub mod embedded;
 pub mod error;
+pub(crate) mod listen;
 pub(crate) mod member_permissions;
 pub mod multiplexer;
 pub mod output;
@@ -21,3 +22,6 @@ pub mod spawn_prompt;
 pub mod time;
 
 pub mod input;
+
+#[cfg(test)]
+mod listen_tests;

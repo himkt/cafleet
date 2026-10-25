@@ -10,7 +10,7 @@ Each member reads its role and required host rules, sends `ready` as its first o
 
 ## Assignment and receiving
 
-Messages are point-to-point. Send individually to every selected recipient. Every recipient's messages, the Director's included, are delivered into its pane as one line with Escape first, and the recipient ACKs each delivered ID after acting on it. ACK every read delivery immediately, retaining unfinished actions in host-owned task state. See [run a fleet](../how-to/mixed-backend-team.md#manual-lifecycle).
+Messages are point-to-point. Send individually to every selected recipient. Ordinary members receive Escape-first pane previews; the root Director uses a persistent native inbox stream or explicit manual broker reads. Record deferred actions and ACK consumption, retaining unfinished work in host-owned task state. Arm Director reception before relying on ready replies and collect the receiver's exit during teardown. See [run a fleet](../how-to/mixed-backend-team.md#manual-lifecycle).
 
 ## Command routing
 

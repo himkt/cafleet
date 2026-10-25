@@ -133,4 +133,4 @@ Use the [manual lifecycle](../how-to/mixed-backend-team.md#manual-lifecycle) for
 
 ## Director wake
 
-Replies are delivered into the Director's pane on every backend, so the Director ends its turn after dispatch and wakes on each delivered line. On every wake it polls, ACKs consumed deliveries before ending the turn, keeps deferred work in host-owned task state and checks the evidence. Follow [the manual lifecycle](../how-to/mixed-backend-team.md#manual-lifecycle).
+Director reception uses the executing backend's native stdout tools, with one owned receiver and explicit ACK consumption. The installed CAFleet backend instructions own concrete recipes; a backend without a verified adapter uses explicit manual broker reads and states that limit. Follow [the manual lifecycle](../how-to/mixed-backend-team.md#manual-lifecycle), preserving host continuation controls and pending user decisions.

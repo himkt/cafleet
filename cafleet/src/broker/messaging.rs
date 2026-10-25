@@ -1,8 +1,14 @@
 use rusqlite::{Connection, OptionalExtension, params};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+use std::time::Instant;
 
 use super::members::db_err;
 use super::records::{MemberStatus, MessageRecord};
 use crate::error::CafleetError;
+use crate::input::{Deadline, with_database_budget};
 use crate::time::{format_utc, now_utc};
 
 pub(crate) const MESSAGE_COLUMNS: &str =
@@ -190,6 +196,207 @@ pub fn poll_messages(
         .collect::<Result<Vec<_>, _>>()
         .map_err(db_err)?;
     Ok(rows)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InboxClosure {
+    MemberInactive,
+    FleetDeleted,
+}
+
+#[derive(Debug)]
+pub(crate) enum InboxSnapshot {
+    Open {
+        fleet_id: i64,
+        messages: Vec<MessageRecord>,
+    },
+    Closed {
+        fleet_id: i64,
+        reason: InboxClosure,
+    },
+}
+
+pub(crate) fn listen_snapshot(
+    conn: &mut Connection,
+    member_id: i64,
+    expected_fleet: Option<i64>,
+    deadline: Deadline,
+) -> Result<InboxSnapshot, CafleetError> {
+    listen_snapshot_with_clock(conn, member_id, expected_fleet, deadline, Instant::now)
+}
+
+pub(crate) fn listen_snapshot_with_clock(
+    conn: &mut Connection,
+    member_id: i64,
+    expected_fleet: Option<i64>,
+    deadline: Deadline,
+    now: impl Fn() -> Instant,
+) -> Result<InboxSnapshot, CafleetError> {
+    with_database_budget(conn, deadline, |conn| {
+        let interrupted = Arc::new(AtomicBool::new(false));
+        let observed = Arc::clone(&interrupted);
+        conn.progress_handler(
+            1_000,
+            Some(move || {
+                let expired = deadline.remaining().is_err();
+                if expired {
+                    observed.store(true, Ordering::Relaxed);
+                }
+                expired
+            }),
+        )
+        .map_err(db_err)?;
+        let result = read_listen_snapshot(
+            conn,
+            member_id,
+            expected_fleet,
+            deadline,
+            &now,
+            &interrupted,
+        );
+        let cleanup = conn
+            .progress_handler(0, None::<fn() -> bool>)
+            .map_err(db_err);
+        match (result, cleanup) {
+            (Ok(snapshot), Ok(())) => Ok(snapshot),
+            (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
+            (Err(error), Err(cleanup)) => Err(error.with_cleanup(format!(
+                "removing listener progress handler failed: {cleanup}"
+            ))),
+        }
+    })
+}
+
+fn read_listen_snapshot(
+    conn: &mut Connection,
+    member_id: i64,
+    expected_fleet: Option<i64>,
+    deadline: Deadline,
+    now: &impl Fn() -> Instant,
+    interrupted: &AtomicBool,
+) -> Result<InboxSnapshot, CafleetError> {
+    deadline.remaining_at(now())?;
+    let tx = conn.transaction().map_err(db_err)?;
+    let result = select_listen_snapshot(&tx, member_id, expected_fleet, deadline, now).and_then(
+        |snapshot| {
+            deadline.remaining_at(now())?;
+            tx.execute_batch("COMMIT").map_err(db_err)?;
+            Ok(snapshot)
+        },
+    );
+    let result = match result {
+        Err(_) if interrupted.load(Ordering::Relaxed) => Err(CafleetError::DeadlineExceeded),
+        result => result,
+    };
+    match result {
+        Ok(snapshot) => Ok(snapshot),
+        Err(error) => match tx.rollback().map_err(db_err) {
+            Ok(()) => Err(error),
+            Err(cleanup) => {
+                Err(error.with_cleanup(format!("rolling back listener snapshot failed: {cleanup}")))
+            }
+        },
+    }
+}
+
+fn select_listen_snapshot(
+    conn: &Connection,
+    member_id: i64,
+    expected_fleet: Option<i64>,
+    deadline: Deadline,
+    now: &impl Fn() -> Instant,
+) -> Result<InboxSnapshot, CafleetError> {
+    deadline.remaining_at(now())?;
+    let subject: Option<(i64, MemberStatus)> = conn
+        .query_row(
+            "SELECT fleet_id, status FROM members WHERE member_id=?1",
+            [member_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(db_err)?;
+    deadline.remaining_at(now())?;
+    let Some((fleet_id, status)) = subject else {
+        return Err(if expected_fleet.is_some() {
+            CafleetError::InvalidStoredValue {
+                field: "members.member_id".into(),
+                value: member_id.to_string(),
+            }
+        } else {
+            CafleetError::Value(format!("Member {member_id} not found"))
+        });
+    };
+    if expected_fleet.is_some_and(|expected| expected != fleet_id) {
+        return Err(CafleetError::App(format!(
+            "Member {member_id} changed fleets during listen"
+        )));
+    }
+    if expected_fleet.is_none() && status != MemberStatus::Active {
+        return Err(CafleetError::Value(format!("Member {member_id} not found")));
+    }
+    deadline.remaining_at(now())?;
+    let fleet = super::fleets::fetch_fleet(conn, fleet_id)?.ok_or_else(|| {
+        CafleetError::InvalidStoredValue {
+            field: "fleets.fleet_id".into(),
+            value: fleet_id.to_string(),
+        }
+    })?;
+    deadline.remaining_at(now())?;
+    if expected_fleet.is_some() {
+        if fleet.deleted_at.is_some() {
+            return Ok(InboxSnapshot::Closed {
+                fleet_id,
+                reason: InboxClosure::FleetDeleted,
+            });
+        }
+        if status != MemberStatus::Active {
+            return Ok(InboxSnapshot::Closed {
+                fleet_id,
+                reason: InboxClosure::MemberInactive,
+            });
+        }
+    }
+    deadline.remaining_at(now())?;
+    let live = super::fleets::require_live_fleet(conn, fleet_id)?;
+    deadline.remaining_at(now())?;
+    let root = live
+        .director_member_id
+        .expect("a live fleet has its root Director");
+    for id in [member_id, root] {
+        deadline.remaining_at(now())?;
+        super::members::get_member(conn, id, fleet_id)?.ok_or_else(|| {
+            CafleetError::InvalidStoredValue {
+                field: "members.member_id".into(),
+                value: id.to_string(),
+            }
+        })?;
+        deadline.remaining_at(now())?;
+        if member_id == root {
+            break;
+        }
+    }
+    deadline.remaining_at(now())?;
+    let mut statement = conn
+        .prepare(&format!(
+            "SELECT {MESSAGE_COLUMNS} FROM messages \
+             WHERE to_member_id=?1 AND status_state='input_required' \
+             ORDER BY created_at ASC, message_id ASC"
+        ))
+        .map_err(db_err)?;
+    deadline.remaining_at(now())?;
+    let mut rows = statement.query([member_id]).map_err(db_err)?;
+    deadline.remaining_at(now())?;
+    let mut messages = Vec::new();
+    loop {
+        deadline.remaining_at(now())?;
+        let row = rows.next().map_err(db_err)?;
+        deadline.remaining_at(now())?;
+        let Some(row) = row else { break };
+        let message = map_message_row(row).map_err(db_err)?;
+        deadline.remaining_at(now())?;
+        messages.push(message);
+    }
+    Ok(InboxSnapshot::Open { fleet_id, messages })
 }
 
 pub fn ack_message(conn: &mut Connection, message_id: i64) -> Result<MessageRecord, CafleetError> {

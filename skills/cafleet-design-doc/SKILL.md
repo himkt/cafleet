@@ -42,7 +42,7 @@ Each workflow body (create / interview / execute) carries its own Required-readi
 
 For a main-session user request matching a scenario below, invoke this skill and run the linked workflow as a full CAFleet team — proactively, the moment the request matches, without waiting for the user to say "use cafleet".
 
-**Routing into a workflow means executing its entire orchestration.** The Director registers its current session with `cafleet fleet create`, spawns the role team, receives each ready and drives the workflow’s review/revision rounds through approval. The Director wakes on replies delivered into its pane while delegated work remains; the linked workflow body owns its phase gates.
+**Routing into a workflow means executing its entire orchestration.** The Director registers its current session with `cafleet fleet create`, spawns the role team, receives each ready and drives the workflow’s review/revision rounds through approval. The Director retains native inbox reception while delegated work remains; the linked workflow body owns its phase gates.
 
 | When the user wants to… | Invoke this skill and run |
 |:--|:--|

@@ -89,9 +89,9 @@ cafleet fleet create --name "design-doc-interview-<slug>" --coding-agent <backen
 
 Retain `fleet_id` and `director.member_id` for subsequent commands. Ordinary member creation can begin immediately.
 
-#### 2b. Wake on delivered replies
+#### 2b. Arm native Director reception
 
-After creating/dispatching a member, end your turn; a delivered `[cafleet msg ID …]` line wakes you. On every wake run `cafleet message poll <director-member-id> --json`, ACK every consumed delivery before ending the turn and act on it; keep deferred actions in host-owned state. Inspect roster, `unconfirmed_previews`, panes and artifacts on every wake until the delegated reply or explicit user handoff. Follow [Director wake](../../cafleet/reference/supervision.md#director-wake).
+After Director registration, arm native reception before depending on member ready replies. Follow [Director wake](../../cafleet/reference/supervision.md#director-wake) and the executing [backend recipe](../../cafleet/reference/coding-agents.md) to retain one receiver through dispatch and replies. On every received batch/wake run `cafleet message poll <director-member-id> --json`, reconcile replay, record deferred actions, ACK consumption and dispatch ready work. Inspect roster, ordinary-member `unconfirmed_previews`, panes and artifacts until delegated work resolves or explicit user handoff; consume Director pending IDs through broker reads. Preserve user decision gates and host continuation controls.
 
 #### 2c. Locate the Analyzer role file (path-by-reference)
 
@@ -127,9 +127,9 @@ Render the prompt to `${BASE}/.prompts/analyzer-<UTC-compact>.md` per the 2c aud
 
 #### 2e. Wait for the Analyzer's question list
 
-Wake on the delivered Analyzer reply, then run `cafleet message poll <director-member-id> --json`. **The `--json` flag is required**: text-mode `cafleet message poll` truncates each message body to 200 codepoints + `…`, which would silently mangle the Analyzer's numbered question list — `--json` carries the complete body. Acknowledge with `cafleet message ack <message-id>`.
+Receive the Analyzer reply through the owned native receiver, then run `cafleet message poll <director-member-id> --json`. **The `--json` flag is required**: text-mode `cafleet message poll` truncates each message body to 200 codepoints + `…`, which would silently mangle the Analyzer's numbered question list — `--json` carries the complete body. Acknowledge with `cafleet message ack <message-id>`.
 
-The Analyzer follows the read-only stdin branch in [Payload exemptions](../reference/coordination.md#payload-exemptions); a concrete unavailable transport is routed to the Director, and no delivery is inferred. The reply must be a flat numbered list following the format specified in [roles/analyzer.md](roles/analyzer.md), terminated by a `Total: N questions` line. If the Analyzer returns a malformed list, send a single corrective `cafleet message send` requesting the canonical format — wake on the delivered corrected reply and run `cafleet message poll <director-member-id> --json` again. After 2 corrective rounds, escalate to the user via {decision_surface} (options: retry the Analyzer once more / abort the interview / proceed with the partial list).
+The Analyzer follows the read-only stdin branch in [Payload exemptions](../reference/coordination.md#payload-exemptions); a concrete unavailable transport is routed to the Director, and no delivery is inferred. The reply must be a flat numbered list following the format specified in [roles/analyzer.md](roles/analyzer.md), terminated by a `Total: N questions` line. If the Analyzer returns a malformed list, send a single corrective `cafleet message send` requesting the canonical format — receive the corrected reply through native reception and run `cafleet message poll <director-member-id> --json` again. After 2 corrective rounds, escalate to the user via {decision_surface} (options: retry the Analyzer once more / abort the interview / proceed with the partial list).
 
 #### 2f. Tear down the Analyzer
 

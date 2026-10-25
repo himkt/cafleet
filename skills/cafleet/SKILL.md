@@ -63,7 +63,7 @@ Used only when your backend's section omits a token or your backend is unknown. 
 
 Every `cafleet` invocation that touches members or messages names its **subject** as a positional integer id placed immediately after the subcommand name; ids that describe a relationship stay as flags:
 
-- Positional `MEMBER_ID` — **the member in question**: the requester on `message poll`, and the target on `member delete` / `show` / `prompt` / `exec` / `capture`. The fleet is derived from the member row.
+- Positional `MEMBER_ID` — **the member in question**: the recipient on `message poll` / `wait` / `listen`, and the target on `member delete` / `show` / `prompt` / `exec` / `capture`. The fleet is derived from the member row.
 - Positional `MESSAGE_ID` — the message on `message ack` / `message show`; recipient and fleet are derived from the message row.
 - Positional `FLEET_ID` — the fleet on `fleet show` / `fleet delete` / `member list` / `fleet capture`.
 - `--from-member-id <int>` / `--to-member-id <int>` — the two parties of a two-party command: the **sender** and the **recipient** on `message send`. The fleet is derived from the sender row.
@@ -118,7 +118,7 @@ cafleet message send --from-member-id <my-member-id> --to-member-id <target-memb
 
 Supply exactly one positional text body or `--file <path>`; `--file -` reads stdin. Use file input for long/multiline bodies. Text previews truncate by `CAFLEET_MAX_TEXT_LEN`; use `--json` for full payloads. [JSON](reference/runtime/spec/cli-options.md#json-output) returns the full record.
 
-[Push notifications](reference/runtime/spec/multiplexer-backends.md#push-notifications) deliver every message Escape-first into its recipient's pane, the Director's included, as one `[cafleet msg ID from SENDER TIMESTAMP]` line carrying the full body or a `cafleet message show ID --json` pointer. The recipient ACKs that ID after acting on it. Holds and post-commit delivery errors preserve the committed ID and successful stdout record; consume that existing row. The next send to the recipient retries a pending notification. [Send outcomes](reference/runtime/spec/cli-options.md#message-send) define exact diagnostics.
+[Push notifications](reference/runtime/spec/multiplexer-backends.md#push-notifications) deliver ordinary-member messages Escape-first into the recipient's pane as one `[cafleet msg ID from SENDER TIMESTAMP]` line carrying the full body or a `cafleet message show ID --json` pointer. The root Director receives through native `message listen` or explicit manual broker reads, with no automatic pane input. Sends to the root Director report `notification_sent: false` without a pane-delivery diagnostic or multiplexer requirement. The recipient records deferred actions and ACKs consumption. Holds and post-commit ordinary-member delivery errors preserve the committed ID and successful stdout record; the next send to that ordinary recipient retries a pending notification. [Send outcomes](reference/runtime/spec/cli-options.md#message-send) define exact diagnostics.
 
 Fan out with an individual send per selected recipient. Retain each committed ID and report a failed recipient explicitly.
 
@@ -138,17 +138,28 @@ Moves a message from `input_required` to `completed`. The positional `MESSAGE_ID
 cafleet message ack <message-id>
 ```
 
+## Listen (Native Inbox Stream)
 
+```bash
+cafleet message listen <my-member-id> --timeout 300
+```
+
+Read full pending message records as JSONL from one persistent process. `--timeout` is an optional positive lease of at most 1800 seconds; omitting it keeps reception live until closure, cancellation or failure. Output always uses `ready`, `message` and `closed` tagged envelopes; this command has no `--json` or text mode. Idle checks emit nothing. Listening changes neither consumption nor preview state and performs no pane retries.
+
+Initial replay and later snapshots emit pending records oldest-first, suppressing already-emitted IDs within the process. Restart replays every still-pending ID. Reconcile known IDs through `poll --json` or `show --json`, record deferred work, then ACK new consumption. Preserve complete JSONL records across native chunks and retain incomplete data for the next read. [The command contract](reference/runtime/spec/cli-options.md#message-listen) owns ordering, deadlines, failures and closure reasons.
+
+Directors follow [supervision](reference/supervision.md#director-wake) and their [backend recipe](reference/coding-agents.md) to retain one native handle, recover errors and retire reception. Native tools own receive handles; broker state owns delivery and consumption.
 
 ## Command index
 
-Use the runtime owner for exact flags, outputs and errors. Ordinary members retain Send/Poll/Wait/ACK/show authority; Director actions follow [Director policy](roles/director.md).
+Use the runtime owner for exact flags, outputs and errors. Ordinary members retain Send/Poll/Wait/Listen/ACK/show authority; Director actions follow [Director policy](roles/director.md).
 
 | Need | Owner |
 |---|---|
 | Current command registry and subjects | [CLI summary](reference/runtime/spec/cli-options.md#subcommand-summary) |
 | Full JSON/text outputs | [Output shapes](reference/runtime/spec/cli-options.md#output-shapes) |
 | Scripted receive and retries | [Message wait](reference/runtime/spec/cli-options.md#message-wait) |
+| Persistent native reception | [Message listen](reference/runtime/spec/cli-options.md#message-listen), [Director lifecycle](reference/supervision.md#director-wake) |
 | Fleet/member creation and compensation | [Lifecycle contracts](reference/runtime/spec/cli-options.md#member-create) |
 | Read-only roster pane snapshot | [Fleet capture](reference/runtime/spec/cli-options.md#fleet-capture) |
 | Explicit native shell input | [Member exec](reference/runtime/spec/cli-options.md#member-exec), [routing](reference/prompt-routing.md) |

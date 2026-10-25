@@ -65,7 +65,7 @@ Per-backend capabilities:
 
 ## Claude {#claude}
 
-A separate evaluator checks the session condition against the transcript (Claude Code 2.1.296, checked 2026-10-22). Native background work defers evaluation and returns a host result; external panes supply evidence when the Director reads broker/pane state. An unmet condition can immediately start another turn without native background work; consecutive tool-free stops reach the configured block cap, eight by default. While a goal is active, each continued Director turn with outstanding delegated work ends with the bounded foreground wait `cafleet message wait <director-member-id> --timeout 30 --json`.
+A separate evaluator checks the session condition against the transcript; native background work defers evaluation and returns a host result. Use one native Monitor task for Director inbox records, retaining its handle across separate events and renewing after observed source-task exit. The installed CAFleet skill's Claude native instructions own discovery, invocation, renewal and evidence limits; the [manual lifecycle](../how-to/mixed-backend-team.md#manual-lifecycle) explains operation. Preserve supplied `/goal` state and pending user decisions; manual finite reception remains available when Monitor is unavailable or denied.
 
 Native composer controls act at the beginning of submitted input. A local probe merged control text into a concurrent preview, so serialize complete input and inspect capture evidence. Native shell probes displayed command/stdout/stderr followed by a model turn; the trigger and any second permission check were not established. The Director authorizes each routed command under its host rules.
 
@@ -89,7 +89,7 @@ rules on its spawn command line, so the member does not depend on any
 
 | Member | Rules |
 |---|---|
-| Broker capability | `Bash(cafleet message *)`, including `message wait` |
+| Broker capability | `Bash(cafleet message *)`, including finite `message wait` and `message listen` |
 | Work capability | Host-configured read/edit/command rules |
 
 `--allowedTools` takes several values, so it sits before `--name`, which ends
@@ -159,9 +159,11 @@ Director to make the edit.
 | The classifier blocks a Director `cafleet` command | Auto mode judged the action outside the request | Add a pattern for that subcommand per [`permissions.allow` coverage](cli-options.md#permissionsallow-coverage) |
 | `defaultMode: "auto"` has no effect | It is set in a project or local settings file, or auto mode is unavailable for the organization or model | Move it to `~/.claude/settings.json`, removing it from the project file. When auto mode is unavailable, use the other-modes profile. |
 
+Verify native Monitor authorization separately from Bash broker rules. Monitor events remain broker events during an open user decision. Actual expiry, cancellation, child cleanup and independently observed continuation preservation require acceptance evidence.
+
 ## Codex {#codex}
 
-The objective belongs to the thread, with model-callable lifecycle tools and optional token-budget accounting (Codex CLI 0.162.1, checked 2026-10-22). A two-turn tool-bearing probe observed continuation and model-reported completion. Preserve the user's objective, activation authority and budget; retain live tool/session handles and collect explicit broker/pane evidence. While a thread objective is active, each continued Director turn with outstanding delegated work ends with the bounded foreground wait `cafleet message wait <director-member-id> --timeout 30 --json`.
+The objective belongs to the thread, with model-callable lifecycle tools and optional token-budget accounting. Retain one native execution session handle for Director inbox reception and explicitly read it while delegated work remains, independently of whether a host goal exists. The installed CAFleet skill's Codex native instructions own tool calls, bounded reads, leases and recovery; the [manual lifecycle](../how-to/mixed-backend-team.md#manual-lifecycle) explains operation. Preserve supplied goal activation, pause, completion and budget authority. A background process alone supplies no unsolicited per-line wake after a model turn ends; fully idle Codex reconciles its inbox on the next user/native activation.
 
 A native shell probe displayed the actual command, exit code, duration and output. Installed protocol metadata describes unsandboxed dispatch while public CLI guidance describes current approval/sandbox settings; the TUI's effective boundary and protocol path were not established. Treat native input as a Director-authorized action rather than assume a second member-tool permission check.
 

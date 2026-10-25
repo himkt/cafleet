@@ -1,4 +1,5 @@
 use crate::broker;
+use crate::broker::records::MemberKind;
 use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::input::{
@@ -99,6 +100,9 @@ fn preview_snapshot(
         let Some(member) = broker::get_member(conn, member_id, fleet_id)? else {
             return Ok(None);
         };
+        if member.kind != MemberKind::Member {
+            return Ok(None);
+        }
         let Some(message) = broker::oldest_pending_preview(conn, member_id)? else {
             return Ok(None);
         };
@@ -107,8 +111,7 @@ fn preview_snapshot(
 }
 
 enum ClaimSkip {
-    /// The member is no longer active.
-    Gone,
+    Ineligible,
     /// The placement changed, or an earlier candidate appeared.
     Held,
     /// The message was ACKed or stamped meanwhile.
@@ -131,8 +134,11 @@ fn claim_current_preview(
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(broker::members::db_err)?;
     let Some(current) = broker::get_member(&tx, member.member_id, member.fleet_id)? else {
-        return Ok(PreviewClaim::Skipped(ClaimSkip::Gone));
+        return Ok(PreviewClaim::Skipped(ClaimSkip::Ineligible));
     };
+    if current.kind != MemberKind::Member {
+        return Ok(PreviewClaim::Skipped(ClaimSkip::Ineligible));
+    }
     if current.placement != member.placement {
         return Ok(PreviewClaim::Skipped(ClaimSkip::Held));
     }
@@ -267,7 +273,7 @@ fn deliver_pending_scoped(
         }
         let message = match claim_current_preview(conn, &member, candidate.message_id, deadline)? {
             PreviewClaim::Ready(message) => message,
-            PreviewClaim::Skipped(ClaimSkip::Gone) => break AttemptEnd::NoPending,
+            PreviewClaim::Skipped(ClaimSkip::Ineligible) => break AttemptEnd::NoPending,
             PreviewClaim::Skipped(ClaimSkip::Held) => break AttemptEnd::Held,
             PreviewClaim::Skipped(ClaimSkip::Settled) => continue,
         };
@@ -409,7 +415,7 @@ mod tests {
     }
 
     #[test]
-    fn a_gone_member_skip_is_distinct_from_a_placement_hold() {
+    fn an_inactive_member_leaves_its_preview_unclaimed() {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = common::migrated_conn(&dir);
         let (fleet, director) = common::create_fleet(&mut conn, "gone");
@@ -420,8 +426,16 @@ mod tests {
         broker::deregister_member(&mut conn, worker).unwrap();
         assert!(matches!(
             claim_current_preview(&mut conn, &member, message.message_id, Deadline::new()).unwrap(),
-            PreviewClaim::Skipped(ClaimSkip::Gone)
+            PreviewClaim::Skipped(_)
         ));
+        assert!(
+            conn.query_row(
+                "SELECT preview_started_at IS NULL FROM messages WHERE message_id=?1",
+                [message.message_id],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap()
+        );
     }
 
     fn settings_for(conn: &Connection) -> Settings {
@@ -429,64 +443,152 @@ mod tests {
         Settings::from_lookup(|name| (name == "CAFLEET_DATABASE_URL").then(|| url.clone())).unwrap()
     }
 
-    struct RecordingRunner {
-        calls: std::cell::RefCell<Vec<Vec<String>>>,
-    }
-
-    impl CommandRunner for RecordingRunner {
-        fn binary_exists(&self, _: &str) -> bool {
-            true
-        }
-        fn run(&self, argv: &[String], _: Option<u64>) -> Result<String, RunError> {
-            assert_ne!(argv[1], "capture-pane", "delivery never captures the pane");
-            self.calls.borrow_mut().push(argv.to_vec());
-            Ok(String::new())
-        }
-        fn sleep(&self, _: f64) {}
-    }
-
     #[test]
-    fn a_director_with_a_concrete_pane_receives_the_escape_first_line() {
+    fn a_director_snapshot_preserves_its_pending_inbox_without_a_preview() {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = common::migrated_conn(&dir);
         let (fleet, director) = common::create_fleet(&mut conn, "director");
         let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
         let reply =
             broker::send_message(&mut conn, worker, &director.to_string(), "reply").unwrap();
-        let settings = settings_for(&conn);
-        let runner = Rc::new(RecordingRunner {
-            calls: std::cell::RefCell::new(Vec::new()),
-        });
-        let mux = AnyMultiplexer::Tmux(TmuxMultiplexer::new(
-            runner.clone(),
-            HashMap::from([("TMUX".into(), "test".into())]),
+        assert!(
+            preview_snapshot(&mut conn, director, Some(fleet), Deadline::new())
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(broker::poll_messages(&conn, director).unwrap(), vec![reply]);
+    }
+
+    #[test]
+    fn director_delivery_ends_before_resolving_or_locking_a_pane() {
+        for backend in ["claude", "codex", "opencode"] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut conn = common::migrated_conn(&dir);
+            let (fleet, director) = common::create_fleet(&mut conn, "director");
+            let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+            conn.execute(
+                "UPDATE member_placements SET coding_agent=?1 WHERE member_id=?2",
+                rusqlite::params![backend, director],
+            )
+            .unwrap();
+            let reply =
+                broker::send_message(&mut conn, worker, &director.to_string(), "reply").unwrap();
+            let settings = settings_for(&conn);
+            let member = broker::get_member(&conn, director, fleet).unwrap().unwrap();
+            let lock =
+                crate::input::lock_path(&settings.database_url, member.placement.as_ref().unwrap())
+                    .unwrap();
+            let outcome = deliver_pending(
+                &mut conn,
+                &settings,
+                director,
+                Some(fleet),
+                Deadline::new(),
+                || panic!("Director delivery must finish before multiplexer resolution"),
+            )
+            .unwrap();
+            assert!(outcome.sent.is_empty());
+            assert!(matches!(outcome.end, AttemptEnd::NoPending));
+            assert!(!lock.exists(), "{backend}: {}", lock.display());
+            let (notified, claimed): (Option<String>, Option<String>) = conn
+                .query_row(
+                    "SELECT notified_at, preview_started_at FROM messages WHERE message_id=?1",
+                    [reply.message_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!((notified, claimed), (None, None));
+            assert_eq!(broker::poll_messages(&conn, director).unwrap(), vec![reply]);
+        }
+    }
+
+    #[test]
+    fn a_member_promoted_to_root_director_is_ineligible_for_a_stale_claim() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        let (fleet, director) = common::create_fleet(&mut conn, "promotion");
+        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+        let member = broker::get_member(&conn, worker, fleet).unwrap().unwrap();
+        let message =
+            broker::send_message(&mut conn, director, &worker.to_string(), "assignment").unwrap();
+        conn.execute(
+            "UPDATE fleets SET director_member_id=?1 WHERE fleet_id=?2",
+            rusqlite::params![worker, fleet],
+        )
+        .unwrap();
+        assert!(matches!(
+            claim_current_preview(&mut conn, &member, message.message_id, Deadline::new()).unwrap(),
+            PreviewClaim::Skipped(_)
         ));
+        assert!(
+            conn.query_row(
+                "SELECT preview_started_at IS NULL AND notified_at IS NULL FROM messages WHERE message_id=?1",
+                [message.message_id],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap()
+        );
+        assert_eq!(broker::poll_messages(&conn, worker).unwrap(), vec![message]);
+    }
+
+    #[test]
+    fn a_current_director_is_ineligible_for_a_direct_claim() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        let (fleet, director) = common::create_fleet(&mut conn, "director-claim");
+        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+        let member = broker::get_member(&conn, director, fleet).unwrap().unwrap();
+        let reply =
+            broker::send_message(&mut conn, worker, &director.to_string(), "reply").unwrap();
+        assert!(matches!(
+            claim_current_preview(&mut conn, &member, reply.message_id, Deadline::new()).unwrap(),
+            PreviewClaim::Skipped(_)
+        ));
+        assert!(
+            conn.query_row(
+                "SELECT preview_started_at IS NULL AND notified_at IS NULL FROM messages WHERE message_id=?1",
+                [reply.message_id],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn a_director_with_existing_preview_metadata_receives_no_automatic_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        let (fleet, director) = common::create_fleet(&mut conn, "director-metadata");
+        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+        let reply =
+            broker::send_message(&mut conn, worker, &director.to_string(), "reply").unwrap();
+        conn.execute(
+            "UPDATE messages SET preview_started_at=created_at WHERE message_id=?1",
+            [reply.message_id],
+        )
+        .unwrap();
+        let settings = settings_for(&conn);
         let outcome = deliver_pending(
             &mut conn,
             &settings,
             director,
             Some(fleet),
             Deadline::new(),
-            || Ok(mux),
+            || panic!("Director preview metadata belongs to broker reads"),
         )
         .unwrap();
-        assert_eq!(outcome.sent, vec![reply.message_id]);
-        assert!(matches!(outcome.end, AttemptEnd::Drained));
-        let calls = runner.calls.borrow();
-        assert_eq!(calls.len(), 3, "{calls:?}");
-        assert_eq!(calls[0], ["tmux", "send-keys", "-t", "%0", "Escape"]);
-        assert_eq!(calls[1][..6], ["tmux", "send-keys", "-t", "%0", "-l", "--"]);
-        assert_eq!(calls[1][6], notification_line(&reply));
-        assert_eq!(calls[2], ["tmux", "send-keys", "-t", "%0", "Enter"]);
-        let (notified, state): (Option<String>, String) = conn
+        assert!(outcome.sent.is_empty());
+        assert!(matches!(outcome.end, AttemptEnd::NoPending));
+        let (notified, claimed): (Option<String>, String) = conn
             .query_row(
-                "SELECT notified_at, status_state FROM messages WHERE message_id=?1",
+                "SELECT notified_at, preview_started_at FROM messages WHERE message_id=?1",
                 [reply.message_id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert!(notified.is_some());
-        assert_eq!(state, "input_required");
+        assert_eq!(notified, None);
+        assert_eq!(claimed, reply.created_at);
+        assert_eq!(broker::poll_messages(&conn, director).unwrap(), vec![reply]);
     }
 
     impl CommandRunner for FinishingRunner {
