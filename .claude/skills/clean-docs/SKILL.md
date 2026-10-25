@@ -25,11 +25,11 @@ workflow body (`<workflow>/<workflow>.md`) carries only its own trigger
 scenario, scan mechanics, artifact spec, and guarantees, citing the spine here
 rather than restating it.
 
-Resolve runtime tools from the executing agent's backend. For spawns, read the selected member backend's Model catalog and Role defaults under the CAFleet Director's model-selection policy; validate its effort and launch capabilities there. Interpret captured panes using the observed member's backend cues.
+Resolve runtime tools from the executing agent's backend. For spawns, read the selected member backend's Model catalog and Role defaults under the CAFleet Director's model-selection policy; validate its effort and launch capabilities there.
 
 ## Required reading
 
-Identify the executing backend (members use `CODING AGENT`), resolve its [runtime bindings](../../../skills/cafleet/reference/coding-agents.md), and load `cafleet` for BASE, member startup or Director orchestration. Read [coordination](../../../skills/cafleet-design-doc/reference/coordination.md) for verbs, pointers and marker pairing, then this shared spine once. A workflow's Required reading adds only its phase-specific prerequisites. Resolve model tokens from the selected spawn backend's Role defaults, runtime tokens from the executing backend, and capture cues from the observed backend; use documented defaults only in their allowed cases.
+Identify the executing backend (members use `CODING AGENT`), resolve its [runtime bindings](../../../skills/cafleet/reference/coding-agents.md), and load `cafleet` for BASE, member startup or Director orchestration. Read [coordination](../../../skills/cafleet-design-doc/reference/coordination.md) for verbs, pointers and marker pairing, then this shared spine once. A workflow's Required reading adds only its phase-specific prerequisites. Resolve model tokens from the selected spawn backend's Role defaults and runtime tokens from the executing backend; use documented defaults only in their allowed cases.
 
 ## Dispatch
 
@@ -239,8 +239,7 @@ When you see cafleet message poll output with a message from the Director, act o
 `SKILL.md`, the workflow bodies, and every `<workflow>/roles/*.md` are
 backend-neutral: they use `{reviewer_model}` /
 `{skill_loader}` / `{decision_surface}` / `{permission_flags}` tokens resolved
-from the executing agent's Runtime bindings or, for model placeholders, the selected spawn backend's Role defaults in `../../../skills/cafleet/reference/coding-agents.md`. Capture interpretation uses the observed member's backend cues, and
-every member's spawn-prompt identity block carries a
+from the executing agent's Runtime bindings or, for model placeholders, the selected spawn backend's Role defaults in `../../../skills/cafleet/reference/coding-agents.md`. Every member's spawn-prompt identity block carries a
 `CODING AGENT: {coding_agent}` line so the member resolves its overlay. Role
 files are referenced by absolute path in spawn prompts (never inlined); spawns
 use `--file`.

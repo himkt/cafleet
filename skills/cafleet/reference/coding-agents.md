@@ -6,13 +6,12 @@ Each backend section is self-contained. Select the backend by the subject of the
 |---|---|---|
 | Execute current instructions | The executing agent's `CODING AGENT:` identity, or its own identity when standalone | Its Runtime bindings and corresponding notes for decision surface, skill loader, and local execution tools. Required-reading row one gates this lookup; an ordinary member needs only its own runtime section. |
 | Select/configure a spawned member | The backend selected under [Director model-selection policy](../roles/director.md#model-selection) | Its Model catalog and Role defaults; validate target effort and launch capabilities against its Runtime bindings. |
-| Interpret a captured member pane | The observed member's recorded backend | Its Pane-state capture cues, while retaining the observer's own execution tools and decision surface. |
 
 Resolve the five runtime placeholders from Runtime bindings for the relevant operation and model/effort placeholders from the selected backend’s Role defaults. Apply notes at their named instructions and emit concrete command values using the core skill's [Resolve your overlay](../SKILL.md#resolve-your-overlay) procedure and its documented neutral defaults for explicitly allowed missing/unknown-backend cases. Report a missing required backend section, malformed table, or broken supported-backend reference as a documentation defect.
 
-For example, a Codex Director selecting an OpenCode reviewer uses the OpenCode catalog and reviewer defaults with the Codex decision surface and local execution tools. A Claude Director inspecting Codex applies the target backend’s capture cues. User overrides and selection decisions follow [Director model-selection policy](../roles/director.md#model-selection).
+For example, a Codex Director selecting an OpenCode reviewer uses the OpenCode catalog and reviewer defaults with the Codex decision surface and local execution tools. User overrides and selection decisions follow [Director model-selection policy](../roles/director.md#model-selection).
 
-Model catalogs, their provenance/context notes, canonical Role defaults, and shared freshness metadata are maintained exclusively by the `cafleet-model-list-refresh` skill from the official sources in each backend section, refreshed at least every 30 days (last refreshed: 2026-10-25). Runtime bindings, bound runtime notes, pane cues, and worked resolutions belong to runtime documentation maintenance. The freshness date applies to model data; structural reorganization preserves that date.
+Model catalogs, their provenance/context notes, canonical Role defaults, and shared freshness metadata are maintained exclusively by the `cafleet-model-list-refresh` skill from the official sources in each backend section, refreshed at least every 30 days (last refreshed: 2026-10-25). Runtime bindings, bound runtime notes, and worked resolutions belong to runtime documentation maintenance. The freshness date applies to model data; structural reorganization preserves that date.
 
 Prices are standard provider USD rates per MTok and are planning estimates, not an invoice guarantee. Each backend's catalog is ordered most → least capable as reviewed judgment. Context windows are listed for the `claude` backend, whose model strings are the ones a context-window suffix can apply to. Selection policy, including cost efficiency mode and reviewer/member rules, lives in [Director model selection](../roles/director.md#model-selection).
 
@@ -64,7 +63,6 @@ Sources: [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pr
 | `AskUserQuestion` supports up to four options; its built-in Other path accepts free text. Members relay a concrete question to the Director. | `{decision_surface}`; [user relay](supervision.md#user-delegation-protocol) |
 | A separate evaluator checks the session condition against the transcript; native background work defers evaluation and returns a host result. Per-record reception follows the native recipe below. | [Director wake](supervision.md#director-wake) |
 | Receive Director records through one owned Monitor task using the native recipe below. Preserve the supplied `/goal` state and pending user decisions across events and renewal. | [Director wake](supervision.md#director-wake); [native reception](#claude-native-director-reception) |
-| Composer controls act at the beginning of submitted input; a local probe merged control text into a concurrent preview. Serialize complete input and inspect its capture. | [Native dispatch](prompt-routing.md#director-side-dispatch) |
 | Native shell probes displayed command/stdout/stderr followed by a model turn; its trigger and a second permission check were not established. The Director authorizes routed native input under its host rules. | [Command authorization](prompt-routing.md#director-side-dispatch) |
 | `dontAsk` permits spawn-allowed broker tools, built-in read-only work and matching host allow rules; denied work routes to the Director. Protected file edits need the Director or a host-rule change. | `{permission_flags}`; [routing](prompt-routing.md#member-side-reconsider-then-route) |
 
@@ -85,20 +83,6 @@ The finite CLI lease normally ends before the tested Monitor lifetime. On `close
 Use verified native cancellation with observed child cleanup, or stop renewal and drain the finite lease. Preserve the supplied `/goal` activation, pause, completion and budget controls; receiving, ACKing and renewal use no goal lifecycle calls. Ordinary `Bash(run_in_background=true)` provides a different capability: observed completion notification did not establish per-line reception while the process lived. Where Monitor is unavailable or denied, disclose the limitation and use manual `poll`/finite `wait`.
 
 Evidence: Claude Code 2.1.301 stream probes established separate event turns from one process. Actual Monitor expiry, cancellation, child cleanup and independently observed goal/decision preservation require acceptance evidence; the invocation shape alone establishes none of them.
-
-### Pane-state capture cues
-
-Use these cues for Director visual inspection of a fresh `member capture` / `fleet capture`; delivery and dispatch do not consult them. Approval/work outranks idle cues; preserve drafts and treat ambiguity as unknown.
-
-| State | claude capture cue |
-|---|---|
-| `idle` | Empty `>` composer with recognized dim/grey host suggestion or placeholder decoration and no active/approval evidence |
-| `working` | Spinner, streaming, shell/tool activity or `esc to interrupt` |
-| `awaiting_user` | Question/confirmation/approval box awaiting a selection |
-| `draft` | User-input styled unsent text in the composer, including text identical to a host suggestion |
-| `unknown` | Missing, truncated, unrecognized or ambiguous composer/style evidence |
-
-Follow [Director evidence handling](supervision.md#idle-semantics). An empty composer establishes no task completion.
 
 ## codex
 
@@ -159,20 +143,6 @@ On `closed`/exit, establish termination and follow [receiver recovery](supervisi
 Reception, ACK and renewal preserve the supplied goal's activation, pause, completion and budget authority. They never call a goal lifecycle tool, start a goal, resume a paused goal or change its budget. Required user decisions gate dependent work while independent authorized work may continue. Automatic Director reception uses stdout and broker reads only, with no pane controls or queue bridge.
 
 Evidence: Codex CLI 0.162.1 stream probes established one retained session/process across receive–act–receive. Independently observed goal-state and open-decision preservation require acceptance evidence; absence of goal lifecycle calls alone proves no state preservation.
-
-### Pane-state capture cues
-
-Use these cues for Director visual inspection of a fresh `member capture` / `fleet capture`; delivery and dispatch do not consult them. Approval/work outranks idle cues; preserve drafts and treat ambiguity as unknown.
-
-| State | codex capture cue |
-|---|---|
-| `idle` | Empty native composer or verified decoration-styled placeholder without active/approval evidence |
-| `working` | Active turn/working indicator, streaming, tool or native shell execution |
-| `awaiting_user` | Confirmation or approval prompt awaiting input |
-| `draft` | Unsent user-styled composer text, including text identical to a placeholder |
-| `unknown` | Missing, truncated, unrecognized or ambiguous composer/style evidence |
-
-Follow [Director evidence handling](supervision.md#idle-semantics). An empty composer establishes no task completion.
 
 ## opencode
 
@@ -420,24 +390,8 @@ Source: [OpenCode Go](https://opencode.ai/v2/docs/console/go).
 |---|---|
 | A member routes concrete questions to the Director and receives the operator's answer as a message. | `{decision_surface}`; [user relay](supervision.md#user-delegation-protocol) |
 | Members perform assignments using the selected provider/model, workspace reads/edits, permitted tools and broker communication. A Director without a verified native stream adapter uses explicit manual `poll`/finite `wait` and states that reception limit. | [Director wake](supervision.md#director-wake) |
-| The TUI documents leading `!` native shell input and conversation-visible output. A local native-input permission probe was outside this investigation; preserve member-tool permissions and Director authorization. | [Native dispatch](prompt-routing.md#director-side-dispatch) |
+| Leading-`!` native shell input is unverified for opencode `mini`; preserve member-tool permissions and Director authorization. | [Native dispatch](prompt-routing.md#director-side-dispatch) |
 | The `cafleet` preset allows its declared workspace/broker tools and denies unmatched shell commands; route a required denied command. A permission popup is an issue to capture and relay. | `{permission_flags}`; [member routing](prompt-routing.md#member-side-reconsider-then-route) |
-
-Provenance: [OpenCode shell input](https://docs.opencode.ai/docs/tui/#shell-commands).
-
-### Pane-state capture cues
-
-Use these cues for Director visual inspection of a fresh `member capture` / `fleet capture`; delivery and dispatch do not consult them. Approval/work outranks idle cues; preserve drafts and treat ambiguity as unknown.
-
-| State | opencode capture cue |
-|---|---|
-| `idle` | Affirmative empty composer or verified decoration-styled placeholder without active/approval evidence |
-| `working` | Streaming, generation, tool/shell activity or interrupt cue |
-| `awaiting_user` | Question/permission/selection popup awaiting a choice |
-| `draft` | Unsent user-input styled text in the recognized composer |
-| `unknown` | Missing, truncated, unrecognized or ambiguous composer/style evidence |
-
-Follow [Director evidence handling](supervision.md#idle-semantics). An empty composer establishes no task completion.
 
 ## Template
 
@@ -457,8 +411,4 @@ List exact spawn tokens, valid aliases, reviewed most-to-least capability orderi
 
 ### Note → applies at
 
-Use a `Note | Applies at` table, one caveat per row. Every Applies-at cell names the token and affected `<skill>/<file>` section. Bind the pane-cue table to Director capture inspection and the Director's reading of a pane capture. Bind a `{permission_flags}` row stating the posture's denial semantics — what a member runs unprompted, what the harness denies, and when the member routes — to the member command-execution, prompt-routing, Director, and supervision instructions that point at it.
-
-### Pane-state capture cues
-
-Provide backend-specific styled cues for `idle`, `working`, `awaiting_user`, `draft` and `unknown`. Bind receiving and native-input facts to their consuming supervision/routing instructions. Preserve input when evidence is ambiguous.
+Use a `Note | Applies at` table, one caveat per row. Every Applies-at cell names the token and affected `<skill>/<file>` section. Bind a `{permission_flags}` row stating the posture's denial semantics — what a member runs unprompted, what the harness denies, and when the member routes — to the member command-execution, prompt-routing, Director, and supervision instructions that point at it.

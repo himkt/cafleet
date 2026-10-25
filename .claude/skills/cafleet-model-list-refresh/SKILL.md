@@ -17,7 +17,7 @@ sources, under explicit maintainer review. The repository file is the release
 source: a running Director reads only its deployed skill replica, so a refresh
 reaches Directors exclusively through the release/deployment transaction below.
 
-This skill maintains each backend's Model catalog, its provenance/context notes, its canonical Role defaults table, and the shared freshness metadata. Preserve Runtime bindings, bound runtime notes, pane-state capture cues, and worked resolutions as runtime documentation owned outside model refreshes. The common catalog preamble specifies maintainer-owned refresh at least every 30 days, a last-refreshed date for model data, standard provider USD per MTok as planning estimates, reviewed capability ordering, and Director ownership of selection policy.
+This skill maintains each backend's Model catalog, its provenance/context notes, its canonical Role defaults table, and the shared freshness metadata. Preserve Runtime bindings, bound runtime notes, and worked resolutions as runtime documentation owned outside model refreshes. The common catalog preamble specifies maintainer-owned refresh at least every 30 days, a last-refreshed date for model data, standard provider USD per MTok as planning estimates, reviewed capability ordering, and Director ownership of selection policy.
 
 ## Approved sources (exhaustive allowlist)
 
@@ -244,6 +244,6 @@ it does not replace the embedded-binary build/release → upgrade → setup path
 
 This skill owns model catalogs, provenance/context notes, canonical Role defaults,
 and freshness metadata in the unified reference. Runtime documentation maintenance
-owns Runtime bindings, bound notes, pane cues, and worked resolutions. The CAFleet
+owns Runtime bindings, bound notes, and worked resolutions. The CAFleet
 Director owns per-spawn selection under `skills/cafleet/roles/director.md`; `cafleet member create` remains the execution
 boundary.

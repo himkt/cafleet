@@ -36,12 +36,12 @@ Use the [command index](#command-index) on demand for exact runtime flags, outpu
 
 You have read `reference/coding-agents.md` (Required-reading row #1). Resolve values by the subject of the action:
 
-1. **Select the subject.** For your current instructions, use your `CODING AGENT:` identity (your own identity when standalone) and its Runtime bindings. For a member spawn, select the backend under [Director model-selection policy](roles/director.md#model-selection), then read that backend's Model catalog and Role defaults and validate target effort and launch capabilities against its Runtime bindings. For captured panes, use the observed member's recorded backend and its Pane-state capture cues. Keep the observer's own tools and decision surface.
+1. **Select the subject.** For your current instructions, use your `CODING AGENT:` identity (your own identity when standalone) and its Runtime bindings. For a member spawn, select the backend under [Director model-selection policy](roles/director.md#model-selection), then read that backend's Model catalog and Role defaults and validate target effort and launch capabilities against its Runtime bindings. Keep the executing agent's own tools and decision surface.
 2. **Materialize values.** Resolve the five runtime placeholders from Runtime bindings for the relevant operation, and the role's model and effort from the selected spawn backend's Role defaults.
 3. **Apply notes.** At each instruction named in the selected backend's *Note → applies at* table, follow that note's caveat. An ordinary member resolves its own runtime section; it acquires no model-selection duty.
 4. **Self-check at emission.** Emit concrete values in commands and messages. Resolve any remaining literal `{token}` before emitting it.
 
-For example, a Codex Director spawning an OpenCode reviewer reads OpenCode Role defaults and effort capability while retaining Codex decision and execution tools. A Claude Director inspecting Codex applies the target backend’s capture cues.
+For example, a Codex Director spawning an OpenCode reviewer reads OpenCode Role defaults and effort capability while retaining Codex decision and execution tools.
 
 ### Documented defaults
 
