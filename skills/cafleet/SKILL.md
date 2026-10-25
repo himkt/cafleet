@@ -102,11 +102,11 @@ When you need a recorded user reaction — **approve**, **choose among options**
 
 ## One-shot command isolation
 
-Every one-shot `cafleet` process is the **only command in its shell-tool invocation**. Run a sequence of CAFleet operations as separate shell-tool calls. Do not place a one-shot CAFleet command beside another command using a newline, `;`, `&&`, a pipe, shell `&`, or any other setup/follow-up command — a compound invocation does not match the host's single-command allow rules.
+Every one-shot `cafleet` process is the **only command in its shell-tool invocation**. Run a sequence of CAFleet operations as separate shell-tool calls. Keep each actual process explicit for the host's permission rules; submit setup/follow-up commands separated by a newline, `;`, `&&`, a pipe or shell `&` as individual invocations.
 
 Leading `NAME=value` assignments that set the environment of the CAFleet process are allowed; they do not start another process. They must immediately precede the CAFleet executable — do not substitute an `env` helper process or append another command. Shell redirection does not authorize another process either; a command that needs a long body uses the positional argument or `--file <path>`, not a pipe.
 
-**Permission-error diagnostic.** A CAFleet command that fails with an operating-system permission error — `Operation not permitted` / `Permission denied`, commonly surfacing as a multiplexer socket or pane-command failure — signals that the invocation likely ran outside your coding agent's command auto-approval scope: a compound invocation does not match single-command allow rules, so the shell tool executes it under the agent's restricted sandbox or permission set. The response is to re-run the CAFleet command as its own isolated invocation. A message whose persisted id was already reported is committed (§ *Send (Unicast)*): send its body once only.
+**Permission-error diagnostic.** For an operating-system permission error — `Operation not permitted` / `Permission denied`, including a multiplexer socket or pane-command failure — check invocation isolation and the host's permission boundary. If the failed invocation combined commands, re-run the CAFleet command as its own isolated invocation; route a still-required denied command through the Director. A message whose persisted id was already reported is committed (§ *Send (Unicast)*): send its body once only.
 
 Command isolation complements the Director-side wake procedure in [`reference/supervision.md`](reference/supervision.md#director-wake).
 

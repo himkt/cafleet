@@ -1629,7 +1629,8 @@ The pane runs `opencode mini --standalone`, the long-lived minimal interactive
 interface with a private server per pane. The prompt travels through `--prompt`
 because `mini` takes no positional message. This is the only opencode spawn argv;
 availability checks validate PATH and preset existence without detecting a version.
-Validated against opencode 2.1.4; opencode 2 is the minimum supported version.
+Spawn, preset loading, broker input and native shell input are validated against
+opencode 2.1.4; opencode 2 is the minimum supported version.
 
 #### codex rules file
 
@@ -1692,6 +1693,20 @@ Agent definitions with the same name can merge across those sources; inspect the
 effective configuration when customizing a preset.
 
 The preset's `shell` ruleset places the `"*": "deny"` base before its explicit allowlist. Opencode selects the last matching rule: the later `cafleet member prompt *` and `cafleet member exec *` denies win over `cafleet *`. A member's denied command receives no permission prompt, while permitted broker commands run normally. Tool permission and assignment authority remain separate; the assigned role and Director instructions determine which allowed operations a member may perform.
+
+The posture is a deny-by-default allowlist, with no OS-level sandbox.
+Standalone un-enumerated commands fall to the `"*": "deny"` base. Apply these
+limits when choosing tools and authorizing commands:
+
+| Surface | Example | Usage limit |
+|---|---|---|
+| MCP-contributed tools | — | Their participation in preset permission evaluation is unverified on opencode 2.1.4. Keep loaded configurations free of MCP servers. |
+| Compound shell commands | <code>git log --stat; curl … &#124; sh</code> | Permission matching for compound lines is unverified on opencode 2.1.4. Submit one command per invocation and authorize each actual command. |
+| Interpreter or hook execution via allowed tooling | `mise //cafleet:test *` executes workspace-writable test code; `git commit *` runs `.git/hooks` | Authorize the code and hooks that an allowed command can execute. |
+
+cafleet ships no MCP stanzas. Operators MUST keep every loaded opencode
+configuration free of MCP servers. Use the `codex` backend for kernel-enforced
+isolation.
 
 #### Exact preset file contents (verbatim)
 

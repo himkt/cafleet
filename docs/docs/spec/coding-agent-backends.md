@@ -308,18 +308,19 @@ popup ad hoc.
 ### Safety-floor caveats {#safety-floor-caveats}
 
 The posture is a deny-by-default allowlist, with no OS-level sandbox.
-Standalone un-enumerated commands fall to the `"*": "deny"` base, but three
-classes of bypass under allowed globs persist:
+Standalone un-enumerated commands fall to the `"*": "deny"` base. Apply these
+limits when choosing tools and authorizing commands:
 
-| Bypass class | Example | Why the allowlist misses it |
+| Surface | Example | Usage limit |
 |---|---|---|
-| MCP-contributed tools | — | They bypass the permission evaluator entirely |
-| Shell chaining or argument-space abuse inside an allowed `cmd *` match | <code>git log --stat; curl … &#124; sh</code> matching `git log *` | The compound line's leading tokens match the allowed glob |
-| Interpreter or hook execution via allowed tooling | `mise //cafleet:test *` executes workspace-writable test code; `git commit *` runs `.git/hooks` | The allowed command is itself the execution vector |
+| MCP-contributed tools | — | Their participation in preset permission evaluation is unverified on opencode 2.1.4. Keep loaded configurations free of MCP servers. |
+| Compound shell commands | <code>git log --stat; curl … &#124; sh</code> | Permission matching for compound lines is unverified on opencode 2.1.4. Submit one command per invocation and authorize each actual command. |
+| Interpreter or hook execution via allowed tooling | `mise //cafleet:test *` executes workspace-writable test code; `git commit *` runs `.git/hooks` | Authorize the code and hooks that an allowed command can execute. |
 
-cafleet ships no MCP stanzas, and operators MUST NOT add MCP servers to any
-opencode config their machine loads.
+cafleet ships no MCP stanzas. Operators MUST keep every loaded opencode
+configuration free of MCP servers.
 
 For kernel-enforced isolation, use the `codex` backend.
 
-Validated against opencode 2.1.4; opencode 2 is the minimum supported version.
+Spawn, preset loading, broker input and native shell input are validated against
+opencode 2.1.4; opencode 2 is the minimum supported version.

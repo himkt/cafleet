@@ -53,10 +53,11 @@ invocation, and run a sequence of CAFleet operations as separate shell-tool
 calls. This rule is backend-neutral and applies identically to `claude`,
 `codex`, and `opencode` panes.
 
-The reason is host permission matching: a compound invocation — a one-shot
-CAFleet command placed beside another command with a newline, `;`, `&&`, a
-pipe, or shell `&` — does not match single-command allow rules, so the host
-prompts for it or runs it under a restricted permission set.
+Keep each actual process explicit for the host's permission rules. Submit
+commands separated by a newline, `;`, `&&`, a pipe or shell `&` as individual
+invocations. Opencode's permission matching for compound shell lines is
+unverified; its [permission limits](../spec/coding-agent-backends.md#safety-floor-caveats)
+apply alongside command isolation.
 
 Leading `NAME=value` environment assignments immediately preceding the
 `cafleet` executable are allowed: they set the CAFleet process's environment
