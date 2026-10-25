@@ -107,6 +107,14 @@ mod tests {
     }
 
     #[test]
+    fn a_zero_text_limit_is_a_valid_explicit_setting() {
+        let settings =
+            Settings::from_lookup(|name| (name == "CAFLEET_MAX_TEXT_LEN").then(|| "0".into()))
+                .unwrap();
+        assert_eq!(settings.max_text_len, 0);
+    }
+
+    #[test]
     fn non_integer_max_text_len_fails_loudly() {
         let result = Settings::from_lookup(|name| match name {
             "CAFLEET_MAX_TEXT_LEN" => Some("twenty".to_string()),

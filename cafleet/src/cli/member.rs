@@ -2,17 +2,17 @@ use clap::{Args, Subcommand};
 use rusqlite::Connection;
 use serde_json::{Value, json};
 
-use super::creation::{PaneGuard, RegistrationGuard};
+use super::creation::RegistrationGuard;
 
 use super::helpers::{emit, resolve_body, resolve_command_body, resolve_mux};
 use crate::broker::records::MemberRecord;
 use crate::broker::{self, NewPlacement};
 use crate::capture::{CaptureSnapshot, MemberCapture, write_member_capture};
-use crate::coding_agent::coding_agent;
+use crate::coding_agent::{CodingAgent, coding_agent};
 use crate::config::Settings;
 use crate::error::CafleetError;
 
-use crate::multiplexer::{Lead, Multiplexer};
+use crate::multiplexer::{AnyMultiplexer, Lead, PaneCleanup, PaneOwnership};
 use crate::output::{format_member, format_member_detail, format_member_list};
 use crate::presentation;
 use crate::runtime::system::SystemProbe;
@@ -55,8 +55,8 @@ pub enum MemberCommand {
         #[arg(long)]
         description: String,
         /// Backend binary to spawn / record [default: inherits the Director's backend].
-        #[arg(long = "coding-agent", value_parser = ["claude", "codex", "opencode"])]
-        coding_agent: Option<String>,
+        #[arg(long = "coding-agent", value_enum)]
+        coding_agent: Option<CodingAgent>,
         /// Model passed to the backend binary.
         #[arg(long)]
         model: Option<String>,
@@ -152,8 +152,6 @@ fn require_pane(
         })
 }
 
-/// Fetch the member by id — the fleet is derived from the member row —
-/// optionally tolerating a missing placement row (SPEC §6.3 *Load-member*).
 fn load_member(
     conn: &Connection,
     member_id: i64,
@@ -172,43 +170,26 @@ fn load_member(
     Ok(member)
 }
 
-/// Resolve the effective coding agent: an explicit flag wins; otherwise
-/// inherit the Director's placement backend.
 fn resolve_coding_agent(
     conn: &Connection,
     fleet_id: i64,
     director_id: i64,
-    explicit: Option<&str>,
-) -> Result<String, CafleetError> {
+    explicit: Option<CodingAgent>,
+) -> Result<CodingAgent, CafleetError> {
     if let Some(agent) = explicit {
-        return Ok(agent.to_string());
+        return Ok(agent);
     }
-    let unresolved = |detail: String| {
+    let director = broker::get_member(conn, director_id, fleet_id)?
+        .ok_or_else(|| CafleetError::App(format!("Director (member {director_id}) not found.")))?;
+    let placement = director.placement.ok_or_else(|| {
         CafleetError::App(format!(
-            "cannot resolve the member's coding agent: {detail} \
-             Re-run with an explicit --coding-agent."
+            "Director (member {director_id}) has no placement; supply --coding-agent."
         ))
-    };
-    let director = match broker::get_member(conn, director_id, fleet_id) {
-        Ok(Some(director)) => director,
-        Ok(None) => {
-            return Err(unresolved(format!(
-                "Director (member {director_id}) not found."
-            )));
-        }
-        Err(error) => {
-            return Err(unresolved(format!(
-                "failed to fetch the Director: {}.",
-                error.message()
-            )));
-        }
-    };
-    match director.placement.as_ref().map(|p| p.coding_agent.as_str()) {
-        Some(agent) => Ok(agent.to_string()),
-        None => Err(unresolved(format!(
-            "Director (member {director_id}) has no placement."
-        ))),
-    }
+    })?;
+    coding_agent(&placement.coding_agent).ok_or(CafleetError::InvalidStoredValue {
+        field: "member_placements.coding_agent".into(),
+        value: placement.coding_agent,
+    })
 }
 
 pub(crate) fn prepare_input(command: &mut MemberCommand) -> Result<(), CafleetError> {
@@ -244,7 +225,7 @@ pub fn run(
             fleet_id,
             &name,
             &description,
-            coding_agent.as_deref(),
+            coding_agent,
             model.as_deref(),
             effort.as_deref(),
             &body,
@@ -281,7 +262,7 @@ fn create(
     fleet_id: i64,
     name: &str,
     description: &str,
-    explicit_agent: Option<&str>,
+    explicit_agent: Option<CodingAgent>,
     model: Option<&str>,
     effort: Option<&str>,
     body: &PromptArgs,
@@ -298,9 +279,8 @@ fn create(
              with 'cafleet fleet create'."
         )));
     };
-    let agent_name = resolve_coding_agent(conn, fleet_id, director_id, explicit_agent)?;
-    let backend = coding_agent(&agent_name)
-        .unwrap_or_else(|| panic!("'{agent_name}' is a registry-validated backend"));
+    let backend = resolve_coding_agent(conn, fleet_id, director_id, explicit_agent)?;
+    let agent_name = backend.name();
 
     backend.validate_model(model)?;
     backend.validate_effort(effort)?;
@@ -326,7 +306,7 @@ fn create(
         mux_session: context.session.clone(),
         mux_window_id: context.window_id.clone(),
         mux_pane_id: None,
-        coding_agent: agent_name.clone(),
+        coding_agent: agent_name.into(),
     };
     let registered = broker::register_member(conn, fleet_id, name, description, Some(&placement))
         .map_err(|error| match error {
@@ -340,7 +320,7 @@ fn create(
         fleet_id,
         member_id,
         director_id,
-        &agent_name,
+        agent_name,
     ) {
         Ok(prompt) => prompt,
         Err(original) => return Err(registration.rollback(original)),
@@ -356,9 +336,30 @@ fn create(
             ))));
         }
     };
-    let mut pane = PaneGuard::with_kill(pane_id.clone(), Box::new(|id| mux.kill_pane(id, true)));
+    let placement_view = publish_pane(&mut registration, member_id, &pane_id, &mux)?;
+    drop(span);
 
-    let patched = broker::update_placement_pane_id(registration.connection(), member_id, &pane_id);
+    let result = json!({
+        "member_id": member_id,
+        "name": name,
+        "registered_at": registered.registered_at,
+        "placement": presentation::placement(&placement_view),
+    });
+    emit(json, &result, || {
+        format_member(&registered, &placement_view)
+    });
+    Ok(())
+}
+
+fn publish_pane(
+    registration: &mut RegistrationGuard<'_>,
+    member_id: i64,
+    pane_id: &str,
+    mux: &AnyMultiplexer,
+) -> Result<crate::broker::records::Placement, CafleetError> {
+    let mut pane = PaneOwnership::new(pane_id.to_owned(), |id| mux.kill_pane(id, true));
+
+    let patched = broker::update_placement_pane_id(registration.connection(), member_id, pane_id);
     let placement_view = match patched {
         Ok(Some(placement)) => placement,
         outcome => {
@@ -368,22 +369,20 @@ fn create(
                 }
                 _ => CafleetError::App("placement row vanished before pane-id patch".into()),
             };
-            let primary = pane.rollback(primary);
+            let primary = match pane.rollback() {
+                PaneCleanup::Attempted {
+                    pane_id,
+                    error: Some(error),
+                } => primary.with_cleanup(format!("cleanup failed for pane {pane_id}: {error}")),
+                PaneCleanup::Attempted { error: None, .. } => primary,
+                PaneCleanup::Unknown => unreachable!("the CLI owns a concrete pane"),
+            };
             return Err(registration.rollback(primary));
         }
     };
     pane.finish();
     registration.finish();
-    drop(span);
-
-    let result = json!({
-        "member_id": member_id,
-        "name": name,
-        "registered_at": registered.registered_at,
-        "placement": presentation::placement(&placement_view),
-    });
-    emit(json, &result, || format_member(&result));
-    Ok(())
+    Ok(placement_view)
 }
 
 enum DeleteAction {
@@ -391,27 +390,13 @@ enum DeleteAction {
     Close(String),
 }
 
-fn delete(
+fn lock_member_deletion(
     conn: &mut Connection,
     settings: &Settings,
     member_id: i64,
-    json: bool,
     deadline: crate::input::Deadline,
-) -> Result<(), CafleetError> {
-    let fleet = crate::input::with_database_budget(conn, deadline, |conn| {
-        let fleet_id = broker::active_member_fleet(conn, member_id)?
-            .ok_or_else(|| CafleetError::App(format!("Member {member_id} not found")))?;
-        let fleet = broker::fleets::fetch_fleet(conn, fleet_id)?
-            .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;
-        Ok(fleet)
-    })?;
-    if fleet.director_member_id == Some(member_id) {
-        return Err(CafleetError::App(
-            "cannot deregister the root Director; use 'cafleet fleet delete' instead".to_string(),
-        ));
-    }
-
-    let locked = crate::input::lock_deletion(
+) -> Result<crate::input::LockedDeletion<MemberRecord, DeleteAction>, CafleetError> {
+    crate::input::lock_deletion(
         conn,
         settings,
         deadline,
@@ -462,78 +447,94 @@ fn delete(
                 "member {member_id}'s pane input remained busy for 5 seconds; member was not deleted."
             ))
         },
-    )?;
-    let member = &locked.snapshot;
+    )
+}
+
+fn delete(
+    conn: &mut Connection,
+    settings: &Settings,
+    member_id: i64,
+    json: bool,
+    deadline: crate::input::Deadline,
+) -> Result<(), CafleetError> {
+    let locked = lock_member_deletion(conn, settings, member_id, deadline)?;
     let pane_status = match &locked.value {
         DeleteAction::Deregistered(status) => status.to_string(),
-        DeleteAction::Close(pane_id) => {
+        DeleteAction::Close(_) => {
             let mux = resolve_mux(settings)
                 .map_err(|error| CafleetError::App(error.to_string()))?
                 .bounded(deadline);
             mux.ensure_available()
                 .map_err(|error| CafleetError::App(error.to_string()))?;
-            let layout = mux.close_pane(pane_id, true).map_err(|error| {
-                CafleetError::App(format!(
-                    "kill_pane failed for pane {pane_id}: {error}. The {} server may be \
-                     unreachable. Verify with 'cafleet doctor', then re-run the command.",
-                    mux.name()
-                ))
-            })?;
-            crate::input::complete_database_budget(conn, deadline, |conn| {
-                let tx = conn
-                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                    .map_err(crate::broker::members::db_err)?;
-                let current = load_member(&tx, member_id, true)?;
-                if current.placement != member.placement {
-                    return Err(CafleetError::App(
-                        "member placement changed after pane close".into(),
-                    ));
-                }
-                let changed = crate::broker::members::deregister_member_rows(&tx, member_id)?;
-                assert!(
-                    changed,
-                    "the input-locked member remains active until deregistration"
-                );
-                tx.commit().map_err(crate::broker::members::db_err)
-            })
-            .map_err(|error| {
-                CafleetError::App(format!(
-                    "pane {pane_id} was closed, but deregister failed: {}",
-                    error.message()
-                ))
-            })?;
-            if let Err(error) = mux.restore_after_close(layout) {
-                eprintln!(
-                    "Member {member_id} was deregistered; optional layout restoration failed: {error}"
-                );
-            }
-            format!("{pane_id} (killed)")
+            close_member(conn, member_id, &locked, &mux, deadline)?
         }
     };
-
     drop(locked);
-    let result = json!({"member_id": member_id, "pane_status": pane_status});
-    emit(json, &result, || {
-        format!("Member deleted.\n  member_id: {member_id}\n  pane_id:   {pane_status}")
-    });
+    emit(
+        json,
+        &json!({"member_id":member_id, "pane_status":pane_status}),
+        || format!("Member deleted.\n  member_id: {member_id}\n  pane_id:   {pane_status}"),
+    );
     Ok(())
+}
+
+fn close_member(
+    conn: &mut Connection,
+    member_id: i64,
+    locked: &crate::input::LockedDeletion<MemberRecord, DeleteAction>,
+    mux: &AnyMultiplexer,
+    deadline: crate::input::Deadline,
+) -> Result<String, CafleetError> {
+    let DeleteAction::Close(pane_id) = &locked.value else {
+        unreachable!("pane close requires a concrete input-locked placement");
+    };
+    let layout = mux.close_pane(pane_id, true).map_err(|error| {
+        CafleetError::App(format!(
+            "kill_pane failed for pane {pane_id}: {error}. Verify with 'cafleet doctor'."
+        ))
+    })?;
+    crate::input::complete_database_budget(conn, deadline, |conn| {
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(crate::broker::members::db_err)?;
+        let current = load_member(&tx, member_id, true)?;
+        if current.placement != locked.snapshot.placement {
+            return Err(CafleetError::App(
+                "member placement changed after pane close".into(),
+            ));
+        }
+        let changed = crate::broker::members::deregister_member_rows(&tx, member_id)?;
+        assert!(
+            changed,
+            "the input-locked member stays active until deregistration"
+        );
+        tx.commit().map_err(crate::broker::members::db_err)
+    })
+    .map_err(|error| {
+        CafleetError::App(format!(
+            "pane {pane_id} was closed, but deregister failed: {}",
+            error.message()
+        ))
+    })?;
+    if let Err(error) = mux.restore_after_close(layout) {
+        eprintln!(
+            "Member {member_id} was deregistered; optional layout restoration failed: {error}"
+        );
+    }
+    Ok(format!("{pane_id} (killed)"))
 }
 
 fn show(conn: &mut Connection, member_id: i64, json: bool) -> Result<(), CafleetError> {
     let member = load_member(conn, member_id, true)?;
-    let value = presentation::member_detail(&member);
-    emit(json, &value, || format_member_detail(&value));
+    let value = presentation::member(&member);
+    emit(json, &value, || format_member_detail(&member));
     Ok(())
 }
 
 fn list(conn: &mut Connection, fleet_id: i64, json: bool) -> Result<(), CafleetError> {
-    let members: Vec<Value> = broker::list_members(conn, fleet_id)?
-        .iter()
-        .map(presentation::member_activity)
-        .collect();
-    emit(json, &Value::Array(members.clone()), || {
-        format_member_list(&members)
-    });
+    let members = broker::list_members(conn, fleet_id)?;
+    let payload = Value::Array(members.iter().map(presentation::member_activity).collect());
+    emit(json, &payload, || format_member_list(&members));
     Ok(())
 }
 
@@ -680,33 +681,122 @@ fn capture(
 
 #[cfg(test)]
 mod tests {
-    use super::MemberCommand;
+    use super::*;
+    use crate::broker::tests as common;
+    use crate::input::{Deadline, PaneLock};
+    use crate::multiplexer::{CommandRunner, RunError, TmuxMultiplexer};
     use clap::Parser;
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use std::time::{Duration, Instant};
 
-    struct DeleteKillRelease(std::path::PathBuf);
+    fn fixture() -> (tempfile::TempDir, Connection, Settings, i64, i64, i64) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = common::migrated_conn(&dir);
+        let settings = Settings {
+            database_url: format!("sqlite:///{}", conn.path().unwrap()),
+            max_text_len: 200,
+            multiplexer: Some("tmux".into()),
+        };
+        let (fleet, director) = common::create_fleet(&mut conn, "deletion");
+        let worker = common::register(&mut conn, fleet, "worker", None);
+        (dir, conn, settings, fleet, director, worker)
+    }
 
-    impl Drop for DeleteKillRelease {
-        fn drop(&mut self) {
-            std::fs::write(&self.0, b"release").unwrap();
+    struct CloseRunner {
+        check: Box<dyn Fn()>,
+        calls: Cell<usize>,
+        failure: Option<&'static str>,
+    }
+
+    impl CommandRunner for CloseRunner {
+        fn binary_exists(&self, name: &str) -> bool {
+            assert_eq!(name, "tmux");
+            true
+        }
+
+        fn run(&self, argv: &[String], _: Option<u64>) -> Result<String, RunError> {
+            assert_eq!(argv, &["tmux", "kill-pane", "-t", "%9"]);
+            self.calls.set(self.calls.get() + 1);
+            (self.check)();
+            match self.failure {
+                Some(cause) => Err(RunError::Failed {
+                    stderr: cause.into(),
+                }),
+                None => Ok(String::new()),
+            }
+        }
+
+        fn sleep(&self, _: f64) {
+            panic!("pane deletion has no input settle");
         }
     }
 
-    fn pending_delete_in_private_process(home: &std::path::Path) {
-        use rusqlite::hooks::{AuthAction, AuthContext, Authorization, TransactionOperation};
-        use std::sync::mpsc;
-        use std::time::{Duration, Instant};
+    #[test]
+    fn publication_transfers_owned_panes_or_compensates_each_failure_once() {
+        for (failure, kill_fails, cleanup_fails) in [
+            ("none", false, false),
+            ("missing", false, false),
+            ("update", false, false),
+            ("update", true, false),
+            ("update", true, true),
+        ] {
+            let (_dir, mut conn, _, fleet, _, worker) = fixture();
+            if failure == "missing" {
+                conn.execute("DELETE FROM member_placements WHERE member_id=?1", [worker])
+                    .unwrap();
+            } else if failure == "update" {
+                conn.execute_batch(
+                    "CREATE TRIGGER reject_publication BEFORE UPDATE ON member_placements
+                     BEGIN SELECT RAISE(ABORT, 'publication blocked'); END;",
+                )
+                .unwrap();
+            }
+            if cleanup_fails {
+                conn.execute_batch(
+                    "CREATE TRIGGER reject_cleanup BEFORE UPDATE OF status ON members
+                     BEGIN SELECT RAISE(ABORT, 'cleanup blocked'); END;",
+                )
+                .unwrap();
+            }
+            let runner = Rc::new(CloseRunner {
+                calls: Cell::new(0),
+                check: Box::new(|| {}),
+                failure: kill_fails.then_some("close blocked"),
+            });
+            let mux =
+                AnyMultiplexer::Tmux(TmuxMultiplexer::new(runner.clone(), Default::default()));
+            let mut registration = RegistrationGuard::new(&mut conn, worker);
+            let result = publish_pane(&mut registration, worker, "%9", &mux);
+            drop(registration);
+            if failure == "none" {
+                assert_eq!(result.unwrap().mux_pane_id.as_deref(), Some("%9"));
+                assert_eq!(runner.calls.get(), 0);
+            } else {
+                let error = result.unwrap_err();
+                assert_eq!(error.exit_code(), 1);
+                let text = error.to_string();
+                assert!(text.contains("placement"), "{text}");
+                assert_eq!(text.contains("close blocked"), kill_fails);
+                assert_eq!(text.contains("cleanup blocked"), cleanup_fails);
+                assert_eq!(runner.calls.get(), 1);
+            }
+            assert_eq!(
+                broker::get_member(&conn, worker, fleet).unwrap().is_some(),
+                failure == "none" || cleanup_fails
+            );
+        }
+    }
 
-        let database_url = format!("sqlite:///{}", home.join("broker_test.db").display());
-        let mut deletion = crate::db::connect(&database_url).unwrap();
-        let (entered_tx, entered_rx) = mpsc::channel();
-        let (release_tx, release_rx) = mpsc::channel();
-        let mut gated = false;
-        let expire_after_close =
-            std::env::var_os("CAFLEET_TEST_DELETE_EXPIRE_AFTER_CLOSE").is_some();
-        let expires = Instant::now() + Duration::from_secs(5);
-        deletion
-            .authorizer(Some(move |context: AuthContext<'_>| {
-                if !gated
+    #[test]
+    fn deletion_reloads_a_published_pending_pane_and_retains_ownership_through_completion() {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization, TransactionOperation};
+        for expire_after_close in [false, true] {
+            let (_dir, mut conn, settings, fleet, director, worker) = fixture();
+            let path = conn.path().unwrap().to_owned();
+            let mut published = false;
+            conn.authorizer(Some(move |context: AuthContext<'_>| {
+                if !published
                     && matches!(
                         context.action,
                         AuthAction::Transaction {
@@ -714,190 +804,161 @@ mod tests {
                         }
                     )
                 {
-                    gated = true;
-                    entered_tx.send(()).unwrap();
-                    release_rx.recv_timeout(Duration::from_secs(3)).unwrap();
-                }
-                if expire_after_close
-                    && matches!(
-                        context.action,
-                        AuthAction::Update {
-                            table_name: "members",
-                            ..
-                        }
-                    )
-                {
-                    std::thread::sleep(
-                        expires.saturating_duration_since(Instant::now())
-                            + Duration::from_millis(10),
-                    );
+                    published = true;
+                    Connection::open(&path)
+                        .unwrap()
+                        .execute(
+                            "UPDATE member_placements SET mux_pane_id='%9' WHERE member_id=?1",
+                            [worker],
+                        )
+                        .unwrap();
                 }
                 Authorization::Allow
             }))
             .unwrap();
-        let settings = crate::config::Settings {
-            database_url: database_url.clone(),
-            max_text_len: 200,
-            multiplexer: Some("tmux".into()),
-        };
-        let _kill_release = DeleteKillRelease(home.join("release-kill"));
-        let deleting = std::thread::spawn(move || {
-            super::delete(
-                &mut deletion,
-                &settings,
-                2,
-                true,
-                crate::input::Deadline::until(expires),
-            )
-        });
-        entered_rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("deletion reaches its first registry transaction");
-        let mut creation = crate::db::connect(&database_url).unwrap();
-        let patched = crate::broker::update_placement_pane_id(&mut creation, 2, "%9")
-            .unwrap()
-            .expect("creation patches the pending placement before deletion mutates it");
-        assert_eq!(patched.mux_pane_id.as_deref(), Some("%9"));
-        release_tx.send(()).unwrap();
-
-        let entered = home.join("kill-entered");
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while !entered.exists() && !deleting.is_finished() {
-            assert!(
-                Instant::now() < deadline,
-                "deletion reaches concrete pane close"
+            let deadline = Deadline::until(Instant::now() + Duration::from_millis(100));
+            let locked = lock_member_deletion(&mut conn, &settings, worker, deadline).unwrap();
+            let placement = locked.snapshot.placement.clone().unwrap();
+            assert_eq!(placement.mux_pane_id.as_deref(), Some("%9"));
+            let url = settings.database_url.clone();
+            let runner = Rc::new(CloseRunner {
+                calls: Cell::new(0),
+                failure: None,
+                check: Box::new(move || {
+                    assert!(PaneLock::try_acquire(&url, &placement).unwrap().is_none());
+                    crate::db::connect(&url)
+                        .unwrap()
+                        .execute_batch("BEGIN IMMEDIATE; ROLLBACK;")
+                        .expect("pane close holds no SQLite writer transaction");
+                    if expire_after_close {
+                        std::thread::sleep(Duration::from_millis(110));
+                    }
+                }),
+            });
+            let mux =
+                AnyMultiplexer::Tmux(TmuxMultiplexer::new(runner.clone(), Default::default()))
+                    .bounded(deadline);
+            assert_eq!(
+                close_member(&mut conn, worker, &locked, &mux, deadline).unwrap(),
+                "%9 (killed)"
             );
-            std::thread::sleep(Duration::from_millis(10));
+            assert_eq!(runner.calls.get(), 1);
+            assert!(broker::get_member(&conn, worker, fleet).unwrap().is_none());
+            assert!(
+                broker::get_member(&conn, director, fleet)
+                    .unwrap()
+                    .is_some()
+            );
+            let placement = locked.snapshot.placement.as_ref().unwrap().clone();
+            assert!(
+                PaneLock::try_acquire(&settings.database_url, &placement)
+                    .unwrap()
+                    .is_none()
+            );
+            drop(locked);
+            assert!(
+                PaneLock::try_acquire(&settings.database_url, &placement)
+                    .unwrap()
+                    .is_some()
+            );
         }
-        assert!(
-            entered.exists(),
-            "deletion must close the pane published after its pending snapshot"
-        );
-        assert!(
-            crate::input::PaneLock::try_acquire(&database_url, &patched)
-                .unwrap()
-                .is_none(),
-            "the concrete pane close retains exclusive input ownership"
-        );
-        creation.busy_timeout(Duration::ZERO).unwrap();
-        creation
-            .execute_batch("BEGIN IMMEDIATE; ROLLBACK;")
-            .expect("a blocked multiplexer close leaves the SQLite writer available");
-        std::fs::write(home.join("release-kill"), b"release").unwrap();
-        deleting.join().unwrap().unwrap();
-        assert_eq!(
-            std::fs::read_to_string(home.join("mux-calls")).unwrap(),
-            "kill-pane -t %9\n"
-        );
-        let (status, deregistered_at): (String, Option<String>) = creation
-            .query_row(
-                "SELECT status,deregistered_at FROM members WHERE member_id=2",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(status, "deregistered");
-        assert!(deregistered_at.is_some());
-        let placements: i64 = creation
-            .query_row(
-                "SELECT count(*) FROM member_placements WHERE member_id=2",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(placements, 0);
-        let director_status: String = creation
-            .query_row("SELECT status FROM members WHERE member_id=1", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(director_status, "active");
     }
 
     #[test]
-    fn member_delete_revalidates_a_pending_placement_before_registry_mutation() {
-        run_private_delete_regression(false);
-    }
-
-    #[test]
-    fn successful_pane_close_is_finalized_when_the_operation_budget_expires() {
-        run_private_delete_regression(true);
-    }
-
-    fn run_private_delete_regression(expire_after_close: bool) {
-        use std::os::unix::fs::PermissionsExt;
-        use std::process::{Command, Stdio};
-        use std::time::{Duration, Instant};
-
-        if let Some(home) = std::env::var_os("CAFLEET_TEST_PENDING_DELETE_UNIT_HOME") {
-            pending_delete_in_private_process(std::path::Path::new(&home));
-            return;
-        }
-        let home = tempfile::TempDir::new().unwrap();
-        let mut conn = crate::broker::test_support::migrated_conn(&home);
-        let (fleet, _) = crate::broker::test_support::create_fleet(&mut conn, "pending-delete");
-        let member = crate::broker::test_support::register(&mut conn, fleet, "worker", None);
-        assert_eq!(member, 2);
-        drop(conn);
-        let bin = home.path().join("bin");
-        std::fs::create_dir(&bin).unwrap();
-        let tmux = bin.join("tmux");
-        std::fs::write(
-            &tmux,
-            r#"#!/bin/sh
-[ "$*" = 'kill-pane -t %9' ] || exit 91
-printf '%s\n' "$*" >> "$HOME/mux-calls"
-printf 'entered\n' > "$HOME/kill-entered"
-loops=0
-while [ ! -e "$HOME/release-kill" ] && [ "$loops" -lt 600 ]; do
-    /bin/sleep 0.01
-    loops=$((loops + 1))
-done
-[ -e "$HOME/release-kill" ] || exit 92
-"#,
+    fn irreversible_close_preserves_the_registry_error_and_releases_ownership_on_return() {
+        let (_dir, mut conn, settings, fleet, _, worker) = fixture();
+        broker::update_placement_pane_id(&mut conn, worker, "%9").unwrap();
+        conn.execute_batch(
+            "CREATE TRIGGER reject_deregister BEFORE UPDATE OF status ON members
+             BEGIN SELECT RAISE(ABORT, 'deregister blocked'); END;",
         )
         .unwrap();
-        std::fs::set_permissions(&tmux, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let mut command = Command::new(std::env::current_exe().unwrap());
-        command.args([
-                "--exact",
-                "cli::member::tests::member_delete_revalidates_a_pending_placement_before_registry_mutation",
-                "--nocapture",
-            ])
-            .env_clear()
-            .env("HOME", home.path())
-            .env("PATH", &bin)
-            .env("TMUX", "/tmp/cafleet-test,1,0")
-            .env("TMUX_PANE", "%0")
-            .env("CAFLEET_TEST_PENDING_DELETE_UNIT_HOME", home.path())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        if expire_after_close {
-            command.env("CAFLEET_TEST_DELETE_EXPIRE_AFTER_CLOSE", "1");
-        }
-        let mut child = command.spawn().unwrap();
-        let deadline = Instant::now() + Duration::from_secs(9);
-        loop {
-            if child.try_wait().unwrap().is_some() {
-                let output = child.wait_with_output().unwrap();
-                assert!(
-                    output.status.success(),
-                    "private deletion regression: stdout={}, stderr={}",
-                    String::from_utf8_lossy(&output.stdout),
-                    String::from_utf8_lossy(&output.stderr)
-                );
-                break;
-            }
-            if Instant::now() >= deadline {
-                child.kill().unwrap();
-                let output = child.wait_with_output().unwrap();
-                panic!(
-                    "private deletion regression exceeded cleanup bound: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        let deadline = Deadline::new();
+        let locked = lock_member_deletion(&mut conn, &settings, worker, deadline).unwrap();
+        let runner = Rc::new(CloseRunner {
+            calls: Cell::new(0),
+            failure: None,
+            check: Box::new(|| {}),
+        });
+        let mux = AnyMultiplexer::Tmux(TmuxMultiplexer::new(runner.clone(), Default::default()))
+            .bounded(deadline);
+        let error = close_member(&mut conn, worker, &locked, &mux, deadline)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("was closed") && error.contains("deregister blocked"),
+            "{error}"
+        );
+        assert_eq!(runner.calls.get(), 1);
+        assert!(broker::get_member(&conn, worker, fleet).unwrap().is_some());
+    }
+
+    #[test]
+    fn root_targets_and_invalid_native_input_fail_before_multiplexer_effects() {
+        let (_dir, mut conn, settings, _, director, worker) = fixture();
+        assert!(
+            prompt(
+                &mut conn,
+                &settings,
+                director,
+                "body",
+                false,
+                Deadline::new()
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("Director's own pane")
+        );
+        let body = ExecBodyArgs {
+            command: Some("echo literal".into()),
+            file: None,
+        };
+        assert!(
+            exec(
+                &mut conn,
+                &settings,
+                director,
+                &body,
+                false,
+                Deadline::new()
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("Director's own pane")
+        );
+        assert!(lock_member_deletion(&mut conn, &settings, director, Deadline::new()).is_err());
+        assert!(
+            prompt(
+                &mut conn,
+                &settings,
+                worker,
+                "two\nlines",
+                false,
+                Deadline::new()
+            )
+            .is_err()
+        );
+        let pending = load_member(&conn, worker, false).unwrap();
+        assert!(require_pane(&pending, worker, "capture").is_err());
+    }
+
+    #[test]
+    fn backend_inheritance_and_explicit_selection_preserve_required_stored_values() {
+        let (_dir, conn, _, fleet, director, _) = fixture();
+        assert_eq!(
+            resolve_coding_agent(&conn, fleet, director, None).unwrap(),
+            CodingAgent::Claude
+        );
+        assert_eq!(
+            resolve_coding_agent(&conn, fleet, director, Some(CodingAgent::Codex)).unwrap(),
+            CodingAgent::Codex
+        );
+        conn.execute(
+            "UPDATE member_placements SET coding_agent='broken' WHERE member_id=?1",
+            [director],
+        )
+        .unwrap();
+        assert!(resolve_coding_agent(&conn, fleet, director, None).is_err());
     }
 
     #[derive(Parser)]

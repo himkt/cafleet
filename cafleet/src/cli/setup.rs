@@ -1,239 +1,230 @@
-//! `cafleet setup` — the single onboarding and schema-management entry point
-//! (SPEC §6.3, §8): the refinery db half, then the offline embedded assets
-//! half, failing independently.
-
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::Args;
 use rusqlite::Connection;
 
-use super::InvocationHooks;
-use crate::assets::{TARGET_AGENTS, agent_paths, install_agent};
+use crate::assets::{agent_paths, install_agent};
+use crate::coding_agent::CodingAgent;
 use crate::config::Settings;
-use crate::diagnosis::{SchemaState, asset_table_exists};
+use crate::config_dir::EnvLookup;
+use crate::diagnosis::SchemaState;
 use crate::error::CafleetError;
 
 #[derive(Args)]
 pub struct SetupArgs {
-    /// Install the named agent's assets (space-delimited, repeatable; default: all agents).
-    #[arg(long = "coding-agent", value_name = "AGENT", num_args = 1.., value_parser = ["claude", "codex", "opencode"])]
-    coding_agent: Vec<String>,
+    /// Install selected backends' assets (repeatable; default: every backend).
+    #[arg(long = "coding-agent", value_name = "AGENT", num_args = 1.., value_enum)]
+    coding_agent: Vec<CodingAgent>,
 }
 
-pub fn run(
-    settings: &Settings,
-    args: SetupArgs,
-    hooks: &InvocationHooks<'_>,
-) -> Result<(), CafleetError> {
-    let mut slot = None;
-    let mut failed_halves = Vec::new();
-    let db_result = db_half_in_slot(settings, &mut slot, hooks);
-    if let Err(error) = db_result {
-        println!("db half failed: {}", error.message());
-        failed_halves.push("db");
-    }
-    let assets_result = (|| {
-        if slot.is_none() {
-            slot = Some((hooks.connect)(&settings.database_url)?);
-        }
-        let conn = slot.as_mut().expect("assets connection opened");
-        setup_write_guard(&crate::diagnosis::classify_selected_schema(
-            conn,
-            crate::db::head_version(),
-            &settings.database_url,
-        ))?;
-        assets_half(conn, &args.coding_agent, hooks.asset_env)
-    })();
-    if let Err(error) = assets_result {
-        println!("assets half failed: {}", error.message());
-        failed_halves.push("assets");
-    }
-    if failed_halves.is_empty() {
-        Ok(())
-    } else {
-        Err(CafleetError::App(format!(
-            "{} half failed",
-            failed_halves.join(" and ")
-        )))
-    }
-}
-
-/// Retain ownership across the two independent setup halves.
-fn db_half_in_slot(
-    settings: &Settings,
-    slot: &mut Option<Connection>,
-    hooks: &InvocationHooks<'_>,
-) -> Result<(), CafleetError> {
-    let path = settings
-        .database_url
-        .strip_prefix("sqlite:///")
-        .ok_or_else(|| {
-            CafleetError::App(format!(
-                "database URL must use the sqlite scheme (sqlite:///<path>); got '{}'",
-                settings.database_url
-            ))
-        })?;
-    if path.is_empty() {
-        return Err(CafleetError::App(
-            "database URL has no file path".to_string(),
-        ));
-    }
-    let db_file = PathBuf::from(path);
-    if let Some(parent) = db_file.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| CafleetError::App(format!("cannot create {}: {e}", parent.display())))?;
-    }
-
-    *slot = Some((hooks.connect)(&settings.database_url)?);
-    let conn = slot.as_mut().expect("database connection opened");
-    let head = crate::db::head_version();
-    let schema = crate::diagnosis::classify_selected_schema(conn, head, &settings.database_url);
-    let recorded = match schema {
-        SchemaState::Unreachable { cause } => return Err(cause),
-        SchemaState::Incompatible { path } => {
-            return Err(crate::diagnosis::incompatible_format(&path));
-        }
-        SchemaState::Missing => None,
-        SchemaState::Behind { recorded, .. } | SchemaState::Ahead { recorded, .. } => {
-            Some(recorded)
-        }
-        SchemaState::Head { version } => Some(version),
-    };
-    if let Some(version) = recorded {
-        if version > head {
-            return Err(CafleetError::App(format!(
-                "DB schema is at version {version} which is unknown to this version \
-                 of cafleet. Refusing to downgrade automatically."
-            )));
-        }
-        if version == head {
-            println!("Already at head ({head}); nothing to do.");
-            return Ok(());
-        }
-    }
-    crate::db::migrate_to_head(conn)?;
-    let after = crate::diagnosis::classify_schema(conn, head);
-    super::helpers::schema_guard(&after)?;
-    match recorded {
-        None => println!(
-            "Created {} and applied migrations to head ({head}).",
-            db_file.display()
-        ),
-        Some(version) => println!("Upgraded from {version} to {head}."),
-    }
-    Ok(())
-}
-
-fn setup_write_guard(schema: &SchemaState) -> Result<(), CafleetError> {
-    match schema {
-        SchemaState::Ahead { recorded, .. } => Err(CafleetError::App(format!(
-            "DB schema is at version {recorded} which is unknown to this version of cafleet. Refusing to downgrade automatically."
-        ))),
-        SchemaState::Incompatible { path } => Err(crate::diagnosis::incompatible_format(path)),
-        SchemaState::Unreachable { cause } => Err(cause.clone()),
-        SchemaState::Missing => Err(CafleetError::App(
-            "the database schema is missing or outdated; run 'cafleet setup' first".into(),
-        )),
-        SchemaState::Head { .. } | SchemaState::Behind { .. } => Ok(()),
-    }
-}
-
-/// The assets half (SPEC §6.3): the explicit selector installs exactly the
-/// named agents; the no-flag form installs all three. An install failure
-/// aborts the loop; rows recorded before the failure remain.
-fn assets_half(
-    conn: &mut Connection,
-    selected: &[String],
-    env: crate::config_dir::EnvLookup<'_>,
-) -> Result<(), CafleetError> {
-    if !asset_table_exists(conn)? {
-        return Err(CafleetError::App(
-            "the database schema is missing or outdated; run 'cafleet setup' first".into(),
-        ));
-    }
+pub fn run(settings: &Settings, args: SetupArgs) -> Result<(), CafleetError> {
+    let mut conn = prepare_database(settings)?;
     let home = PathBuf::from(
         std::env::var("HOME").map_err(|_| CafleetError::App("HOME is not set".into()))?,
     );
-    for agent in TARGET_AGENTS {
-        if !selected.is_empty() && !selected.iter().any(|value| value == agent) {
-            continue;
+    install_selected(
+        &mut conn,
+        &args.coding_agent,
+        &|name| std::env::var(name).ok(),
+        &home,
+    )
+}
+
+fn prepare_database(settings: &Settings) -> Result<Connection, CafleetError> {
+    let path = crate::db::database_path(&settings.database_url)?;
+    if path.is_empty() {
+        return Err(CafleetError::App("database URL has no file path".into()));
+    }
+    let db_file = Path::new(path);
+    if let Some(parent) = db_file.parent().filter(|path| !path.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent).map_err(|error| {
+            CafleetError::App(format!("cannot create {}: {error}", parent.display()))
+        })?;
+    }
+    if db_file.try_exists().map_err(|cause| {
+        CafleetError::App(format!("cannot inspect database at '{path}': {cause}"))
+    })? {
+        let conn = crate::db::connect_read_only(&settings.database_url)?;
+        let schema = crate::diagnosis::classify_selected_schema(
+            &conn,
+            crate::db::head_version(),
+            &settings.database_url,
+        );
+        match schema {
+            SchemaState::Missing | SchemaState::Behind { .. } | SchemaState::Head { .. } => {}
+            _ => schema.require_current()?,
         }
-        let paths = agent_paths(env, &home, agent)?;
-        install_agent(conn, agent, &paths, super::VERSION)?;
+    }
+    let mut conn = crate::db::connect(&settings.database_url)?;
+    let head = crate::db::head_version();
+    let schema = crate::diagnosis::classify_selected_schema(&conn, head, &settings.database_url);
+    match schema {
+        SchemaState::Missing | SchemaState::Behind { .. } => {
+            crate::db::migrate_to_head(&mut conn)?;
+            crate::diagnosis::classify_schema(&conn, head).require_current()?;
+            println!(
+                "Applied migrations to head ({head}) at {}.",
+                db_file.display()
+            );
+        }
+        SchemaState::Head { .. } => println!("Already at head ({head})."),
+        _ => schema.require_current()?,
+    }
+    Ok(conn)
+}
+
+fn install_selected(
+    conn: &mut Connection,
+    selected: &[CodingAgent],
+    env: EnvLookup<'_>,
+    home: &Path,
+) -> Result<(), CafleetError> {
+    for agent in CodingAgent::all() {
+        if selected.is_empty() || selected.contains(agent) {
+            let paths = agent_paths(env, home, *agent)?;
+            install_agent(conn, *agent, &paths, super::VERSION)?;
+        }
     }
     Ok(())
 }
 
 #[cfg(test)]
-mod parser_contracts {
+mod tests {
+    use super::*;
     use crate::cli::{CliArgs, Command};
     use clap::Parser;
 
+    fn settings(home: &Path) -> Settings {
+        Settings::from_lookup(|name| {
+            (name == "CAFLEET_DATABASE_URL")
+                .then(|| format!("sqlite:///{}", home.join("registry.db").display()))
+        })
+        .unwrap()
+    }
+
     #[test]
-    fn setup_selections_preserve_order_and_duplicates_across_flag_forms() {
-        let cases: &[(&[&str], &[&str])] = &[
-            (&["cafleet", "setup"], &[]),
-            (&["cafleet", "setup", "--coding-agent", "codex"], &["codex"]),
-            (
-                &["cafleet", "setup", "--coding-agent", "claude", "codex"],
-                &["claude", "codex"],
-            ),
-            (
-                &[
-                    "cafleet",
-                    "setup",
-                    "--coding-agent",
-                    "claude",
-                    "--coding-agent",
-                    "codex",
-                ],
-                &["claude", "codex"],
-            ),
-            (
-                &[
-                    "cafleet",
-                    "setup",
-                    "--coding-agent",
-                    "claude",
-                    "--coding-agent",
-                    "codex",
-                    "--coding-agent",
-                    "opencode",
-                ],
-                &["claude", "codex", "opencode"],
-            ),
-            (
-                &[
-                    "cafleet",
-                    "setup",
-                    "--coding-agent",
-                    "claude",
-                    "codex",
-                    "--coding-agent",
-                    "opencode",
-                ],
-                &["claude", "codex", "opencode"],
-            ),
-            (
-                &[
-                    "cafleet",
-                    "setup",
-                    "--coding-agent",
-                    "opencode",
-                    "claude",
-                    "--coding-agent",
-                    "claude",
-                ],
-                &["opencode", "claude", "claude"],
-            ),
-        ];
-        for (argv, expected) in cases {
-            let Command::Setup(args) = CliArgs::try_parse_from(*argv).unwrap().command else {
-                panic!("{argv:?} must parse as setup");
-            };
-            assert_eq!(args.coding_agent, *expected, "{argv:?}");
+    fn parser_uses_enum_choices_and_supports_repeated_multi_value_selection() {
+        let Command::Setup(args) = CliArgs::try_parse_from([
+            "cafleet",
+            "setup",
+            "--coding-agent",
+            "opencode",
+            "claude",
+            "--coding-agent",
+            "claude",
+        ])
+        .unwrap()
+        .command
+        else {
+            panic!("setup command")
+        };
+        assert_eq!(
+            args.coding_agent,
+            [
+                CodingAgent::Opencode,
+                CodingAgent::Claude,
+                CodingAgent::Claude
+            ]
+        );
+        assert!(
+            CliArgs::try_parse_from(["cafleet", "setup", "--coding-agent", "unknown"]).is_err()
+        );
+    }
+
+    #[test]
+    fn setup_records_successes_before_the_first_asset_failure() {
+        let home = tempfile::tempdir().unwrap();
+        let settings = settings(home.path());
+        let mut conn = prepare_database(&settings).unwrap();
+        let error = install_selected(
+            &mut conn,
+            &[],
+            &|name| (name == "CODEX_HOME").then(|| "relative".into()),
+            home.path(),
+        )
+        .unwrap_err();
+        assert!(error.message().contains("CODEX_HOME"));
+        crate::diagnosis::classify_schema(&conn, crate::db::head_version())
+            .require_current()
+            .unwrap();
+        let names = conn
+            .prepare("SELECT coding_agent FROM asset_installs ORDER BY coding_agent")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(names, ["claude"]);
+        assert!(!home.path().join(".config/opencode").exists());
+    }
+
+    #[test]
+    fn selected_installation_ignores_unrelated_configuration_and_is_repeatable() {
+        let home = tempfile::tempdir().unwrap();
+        let settings = settings(home.path());
+        for _ in 0..2 {
+            let mut conn = prepare_database(&settings).unwrap();
+            install_selected(
+                &mut conn,
+                &[CodingAgent::Claude, CodingAgent::Claude],
+                &|name| (name != "CLAUDE_CONFIG_DIR").then(|| "relative".into()),
+                home.path(),
+            )
+            .unwrap();
+            assert_eq!(
+                conn.query_row("SELECT COUNT(*) FROM asset_installs", [], |row| row
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                1
+            );
+        }
+    }
+
+    #[test]
+    fn foreign_ahead_and_malformed_databases_are_unchanged_on_refusal() {
+        for mutation in [
+            "PRAGMA application_id=42",
+            "UPDATE refinery_schema_history SET version=99 WHERE version=(SELECT MAX(version) FROM refinery_schema_history)",
+            "ALTER TABLE messages RENAME COLUMN text TO wrong",
+        ] {
+            let home = tempfile::tempdir().unwrap();
+            let settings = settings(home.path());
+            let conn = prepare_database(&settings).unwrap();
+            conn.execute_batch(mutation).unwrap();
+            drop(conn);
+            let path = crate::db::database_path(&settings.database_url).unwrap();
+            let before = std::fs::read(path).unwrap();
+            assert!(prepare_database(&settings).is_err(), "{mutation}");
+            assert_eq!(std::fs::read(path).unwrap(), before);
+            assert!(!home.path().join(".claude").exists());
+        }
+    }
+
+    #[test]
+    fn refused_wal_databases_and_sidecars_remain_byte_identical_with_a_held_reader() {
+        for mutation in [
+            "PRAGMA application_id=42",
+            "UPDATE refinery_schema_history SET version=99 WHERE version=(SELECT MAX(version) FROM refinery_schema_history)",
+            "ALTER TABLE messages RENAME COLUMN text TO wrong",
+        ] {
+            let home = tempfile::tempdir().unwrap();
+            let settings = settings(home.path());
+            let conn = prepare_database(&settings).unwrap();
+            conn.execute_batch("PRAGMA journal_mode=WAL").unwrap();
+            conn.execute_batch(mutation).unwrap();
+            conn.execute_batch("BEGIN; SELECT * FROM refinery_schema_history")
+                .unwrap();
+            let path = crate::db::database_path(&settings.database_url).unwrap();
+            let before = ["", "-wal", "-shm"].map(|suffix| {
+                let path = PathBuf::from(format!("{path}{suffix}"));
+                let bytes = std::fs::read(&path).unwrap();
+                (path, bytes)
+            });
+            assert!(prepare_database(&settings).is_err(), "{mutation}");
+            for (path, bytes) in before {
+                assert_eq!(std::fs::read(&path).unwrap(), bytes, "{}", path.display());
+            }
+            conn.execute_batch("ROLLBACK").unwrap();
         }
     }
 }

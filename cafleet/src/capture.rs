@@ -1,9 +1,9 @@
-//! Mode-exact capture facts and output dispatch shared by the two CLI paths.
+//! Targeted capture content, timestamp and digest.
 use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
 use std::io::Write;
 
-use crate::{broker::records::MemberKind, error::CafleetError, output, presentation, time};
+use crate::{error::CafleetError, output, presentation, time};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CaptureSnapshot {
@@ -36,16 +36,6 @@ pub(crate) struct MemberCapture {
     pub lines: i64,
     pub snapshot: CaptureSnapshot,
 }
-pub(crate) struct ScanEntry {
-    pub member_id: i64,
-    pub name: String,
-    pub kind: MemberKind,
-    pub coding_agent: String,
-    pub pane_id: Option<String>,
-    pub lines: i64,
-    pub outcome: Result<CaptureSnapshot, String>,
-}
-
 pub(crate) fn write_member_capture(
     out: &mut dyn Write,
     capture: &MemberCapture,
@@ -62,19 +52,6 @@ pub(crate) fn write_member_capture(
     };
     result.map_err(|e| CafleetError::App(format!("stdout write failed: {e}")))
 }
-pub(crate) fn write_scan(
-    out: &mut dyn Write,
-    entries: &[ScanEntry],
-    json: bool,
-) -> Result<(), CafleetError> {
-    let rendered = if json {
-        output::format_json(&presentation::scan_json(entries))
-    } else {
-        presentation::scan_text(entries)
-    };
-    writeln!(out, "{rendered}").map_err(|e| CafleetError::App(format!("stdout write failed: {e}")))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,7 +95,7 @@ mod tests {
         );
     }
     #[test]
-    fn output_failures_propagate_from_both_capture_dispatchers() {
+    fn output_failures_propagate_from_member_capture() {
         struct Fail;
         impl io::Write for Fail {
             fn write(&mut self, _: &[u8]) -> io::Result<usize> {
@@ -131,12 +108,6 @@ mod tests {
         for json in [false, true] {
             assert!(
                 write_member_capture(&mut Fail, &capture(), json)
-                    .unwrap_err()
-                    .to_string()
-                    .contains("output unavailable")
-            );
-            assert!(
-                write_scan(&mut Fail, &[], json)
                     .unwrap_err()
                     .to_string()
                     .contains("output unavailable")

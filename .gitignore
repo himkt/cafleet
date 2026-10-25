@@ -1,53 +1,16 @@
 .*
 
-# ==== Global-gitignore overrides ====
-# Our user-global ~/.config/git/ignore excludes design-docs/, CLAUDE.md, and .claude/.
-# This repo tracks them, so override. The leading `.*` blanket also needs the
-# tracked dot-directories re-included.
-!design-docs
 !CLAUDE.md
 !.claude
-!.claude/rules
 !.claude/skills
 !.claude/settings.json
 !.github
 !.bumpversion.toml
 
-# Per-session harness state inside .claude/ — never committed.
 .claude/scheduled_tasks.lock
-
-# ==== Build outputs ====
-# Cargo build directory.
 /cafleet/target/
-
-# rspress documentation site built by `mise //docs:build`.
 /docs/doc_build/
-
-# ==== Toolchain caches ====
 /docs/node_modules/
-
-# ==== Generated content ====
-# Research-shaped task folders — one per topic, produced by clean-docs runs and
-# other research-shaped tasks.
+/design-docs/
 /researches/
-
-# ==== CAFleet runtime artifacts at the repo root ====
-# Stray spawn-prompt audit writes at the repo root; the canonical location is
-# per-task hidden `.prompts/` folders (`researches/<slug>/.prompts/`,
-# `design-docs/<NNNNNNN>-<slug>/.prompts/`).
 /.prompts/
-
-# Spawn-prompt audit re-renders written by the Director when ${BASE} = repo root
-# (${BASE}/<role>.md — one per spawned member-role per invocation).
-/drafter.md
-/drafter-resume.md
-/reviewer.md
-/programmer.md
-/tester.md
-/verifier.md
-/analyzer.md
-
-# Clarification-phase scratch (Director ↔ Drafter file-based relay when broker
-# truncation cuts off long question/answer payloads).
-/drafter-questions.md
-/director-answers.md

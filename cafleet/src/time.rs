@@ -7,7 +7,7 @@ pub fn now_utc() -> DateTime<Utc> {
 }
 
 /// Emit the canonical storage form: fixed-width 6-digit microseconds and the
-/// literal `+00:00` offset, so rows sort lexicographically (SPEC §5.1).
+/// literal `+00:00` offset, so rows sort lexicographically.
 pub fn format_utc(dt: DateTime<Utc>) -> String {
     dt.format("%Y-%m-%dT%H:%M:%S%.6f+00:00").to_string()
 }

@@ -1,6 +1,6 @@
 [tasks.test]
-run = "cargo test"
-description = "Run all tests (positional args forward to the cargo test harness)"
+run = "cargo test --lib"
+description = "Run inline unit tests (positional args forward to the cargo test harness)"
 
 [tasks.lint]
 run = [

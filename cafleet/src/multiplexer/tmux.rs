@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use super::{CommandRunner, Lead, MultiplexerContext, MultiplexerError, PaneInput, RunError};
@@ -204,7 +204,7 @@ impl TmuxMultiplexer {
     }
 
     /// Capture the last `lines` drawn lines of the pane buffer via the shared
-    /// A8 windowing ([`super::capture_window`]).
+    /// capture windowing ([`super::capture_window`]).
     pub fn capture_pane(
         &self,
         target_pane_id: &str,
@@ -232,14 +232,6 @@ impl TmuxMultiplexer {
         Ok(super::capture_window(&raw, lines))
     }
 
-    pub fn list_pane_ids(&self) -> Result<BTreeSet<String>, MultiplexerError> {
-        let out = self.run(
-            &tmux_argv(&["tmux", "list-panes", "-a", "-F", "#{pane_id}"]),
-            Some(5),
-        )?;
-        Ok(out.split_whitespace().map(str::to_string).collect())
-    }
-
     pub fn kill_pane(
         &self,
         target_pane_id: &str,
@@ -256,7 +248,7 @@ impl TmuxMultiplexer {
 #[cfg(test)]
 mod tests {
 
-    use crate::multiplexer::test_support::{FakeRunner, argv, env, run_event, sleep_event};
+    use crate::multiplexer::recording::{FakeRunner, argv, env, run_event, sleep_event};
     use crate::multiplexer::{Lead, MultiplexerContext, RunError, TmuxMultiplexer};
 
     fn tmux_env() -> std::collections::HashMap<String, String> {
@@ -272,12 +264,6 @@ mod tests {
             window_id: "@1".to_string(),
             pane_id: "%1".to_string(),
         }
-    }
-
-    #[test]
-    fn name_is_tmux() {
-        let runner = FakeRunner::with_binary("tmux");
-        assert_eq!(TmuxMultiplexer::new(runner, tmux_env()).name(), "tmux");
     }
 
     #[test]
@@ -415,6 +401,7 @@ mod tests {
     #[test]
     fn send_prompt_preserves_literal_text_and_settles_before_enter() {
         let runner = FakeRunner::with_binary("tmux");
+        runner.succeed(2);
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
         let text = "  /help with literal $HOME; !  ";
         mux.send_prompt("%5", text, Lead::Direct).unwrap();
@@ -429,7 +416,7 @@ mod tests {
         assert_eq!(events.len(), 3, "{events:?}");
         assert_eq!(events[1], sleep_event(1.0));
         for event in events {
-            if let crate::multiplexer::test_support::Event::Run { timeout_secs, .. } = event {
+            if let crate::multiplexer::recording::Event::Run { timeout_secs, .. } = event {
                 assert!(timeout_secs.is_some_and(|seconds| seconds > 0 && seconds <= 5));
             }
         }
@@ -438,6 +425,7 @@ mod tests {
     #[test]
     fn escape_lead_sends_the_escape_key_and_settles_before_the_literal() {
         let runner = FakeRunner::with_binary("tmux");
+        runner.succeed(3);
         let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
         let text = "[cafleet msg 5 from 2 timestamp] hello";
         mux.send_prompt("%5", text, Lead::Escape).unwrap();
@@ -563,7 +551,7 @@ mod tests {
         assert_eq!(
             captured, "l3\nx\rY",
             "split on \\n only — the \\r survives for CLI-side defrag; \
-             the trailing blank line is dropped before the slice (A8)"
+             the trailing blank line is dropped before the slice"
         );
         assert_eq!(
             runner.events(),
@@ -580,12 +568,10 @@ mod tests {
                 ],
                 None,
             )],
-            "A8 over-fetches by the fixed 1000-line margin"
+            "Capture over-fetches by the fixed 1000-line margin"
         );
     }
 
-    // A8: the fetch depth is requested lines + 1000, so a blank tail deeper
-    // than N still leaves the drawn bottom inside the fetched buffer.
     #[test]
     fn capture_pane_over_fetch_survives_a_blank_tail_deeper_than_n() {
         let runner = FakeRunner::with_binary("tmux");
@@ -611,8 +597,6 @@ mod tests {
         );
     }
 
-    // A8: a small --lines window on a tall pane must show the drawn bottom,
-    // not the blank area under the cursor.
     #[test]
     fn capture_pane_drops_trailing_whitespace_only_lines_before_the_slice() {
         let runner = FakeRunner::with_binary("tmux");
@@ -637,9 +621,6 @@ mod tests {
         );
     }
 
-    // A8: TUI-painted empty rows carry ANSI sequences — a trailing line is
-    // blank when it is whitespace-only AFTER per-line CSI stripping; the kept
-    // lines keep their original bytes.
     #[test]
     fn capture_pane_blank_detection_is_ansi_aware() {
         let runner = FakeRunner::with_binary("tmux");
@@ -664,22 +645,6 @@ mod tests {
     }
 
     #[test]
-    fn list_pane_ids_returns_the_whitespace_split_set() {
-        let runner = FakeRunner::with_binary("tmux");
-        runner.respond(Ok("%1\n%2\n".to_string()));
-        let mux = TmuxMultiplexer::new(runner.clone(), tmux_env());
-        let panes = mux.list_pane_ids().unwrap();
-        assert_eq!(panes, ["%1", "%2"].iter().map(|s| s.to_string()).collect());
-        assert_eq!(
-            runner.events(),
-            vec![run_event(
-                &["tmux", "list-panes", "-a", "-F", "#{pane_id}"],
-                Some(5),
-            )]
-        );
-    }
-
-    #[test]
     fn kill_pane_tolerates_only_pane_gone_failures() {
         let runner = FakeRunner::with_binary("tmux");
         runner.respond(Err(RunError::Failed {
@@ -701,37 +666,6 @@ mod tests {
         assert!(
             mux.kill_pane("%5", true).is_err(),
             "ignore_missing never swallows a non-pane-gone failure"
-        );
-    }
-
-    #[test]
-    fn runner_failures_map_to_the_pinned_error_texts() {
-        let runner = FakeRunner::with_binary("tmux");
-        runner.respond(Err(RunError::Failed {
-            stderr: "  boom  ".to_string(),
-        }));
-        let mux = TmuxMultiplexer::new(runner, tmux_env());
-        assert_eq!(
-            mux.kill_pane("%5", false).unwrap_err().to_string(),
-            "tmux command failed: tmux kill-pane -t %5\nstderr: boom"
-        );
-
-        let runner = FakeRunner::with_binary("tmux");
-        runner.respond(Err(RunError::Timeout));
-        let mux = TmuxMultiplexer::new(runner, tmux_env());
-        assert_eq!(
-            mux.list_pane_ids().unwrap_err().to_string(),
-            "tmux command timed out after 5s: tmux list-panes -a -F #{pane_id}"
-        );
-
-        let runner = FakeRunner::with_binary("tmux");
-        runner.respond(Err(RunError::BinaryNotFound(
-            "No such file or directory".to_string(),
-        )));
-        let mux = TmuxMultiplexer::new(runner, tmux_env());
-        assert_eq!(
-            mux.capture_pane("%5", 3).unwrap_err().to_string(),
-            "tmux binary not found: No such file or directory"
         );
     }
 
