@@ -354,7 +354,7 @@ fn receive_preserves_a_storage_read_failure_during_the_loop() {
     let fixture = Fixture::new();
     let worker = fixture.worker("worker");
     fixture.refuse_escape(&worker);
-    fixture.assignment(&worker, "pending assignment");
+    let message = fixture.assignment(&worker, "pending assignment");
     let mut waiting = fixture.spawn(fixture.director, 5);
     waiting.until("receive has started", || {
         fixture.count("failed", &worker) >= 1
@@ -372,6 +372,44 @@ fn receive_preserves_a_storage_read_failure_during_the_loop() {
         "{}",
         stderr(&output)
     );
+    assert!(stderr(&output).contains(&format!(
+        "message {message} was not notified to member {}:",
+        worker.id
+    )));
+    assert!(stderr(&output).contains("escape refused by test"));
+}
+
+#[test]
+fn a_fatal_stamp_error_exits_one_and_attaches_every_prior_notification_diagnostic() {
+    let _test_resource = common::process_test_resource_guard();
+    let fixture = Fixture::new();
+    let first = fixture.worker("first");
+    let second = fixture.worker("second");
+    let previous = fixture.assignment(&first, "failed notification");
+    let current = fixture.assignment(&second, "fatal stamp");
+    fixture.refuse_escape(&first);
+    fixture
+        .cli
+        .sqlite()
+        .execute_batch(&format!(
+            "CREATE TRIGGER reject_stamp BEFORE UPDATE OF notified_at ON messages
+         WHEN NEW.to_member_id={} BEGIN SELECT RAISE(ABORT, 'fatal stamp storage failure'); END;",
+            second.id
+        ))
+        .unwrap();
+    let output = fixture.spawn(fixture.director, 6).output();
+    assert_eq!(code(&output), 1);
+    assert_eq!(stdout(&output), "");
+    let error = stderr(&output);
+    assert!(error.contains("fatal stamp storage failure"), "{error}");
+    assert!(error.contains(&format!(
+        "message {previous} was not notified to member {}: tmux command failed: tmux send-keys -t {} Escape\nstderr: escape refused by test; the next send to member {} or the next message wait retries it.",
+        first.id, first.pane, first.id
+    )), "{error}");
+    assert_eq!(fixture.stamp(previous), None);
+    assert_eq!(fixture.stamp(current), None);
+    assert_eq!(fixture.count("escape", &first), 1);
+    assert_eq!(fixture.count("enter_done", &second), 1);
 }
 
 #[test]
@@ -399,7 +437,7 @@ fn ctrl_c_terminates_the_owned_finite_receive_without_registry_state() {
     fixture.assignment(&worker, "work retained after cancellation");
     let before = fixture.records();
     let mut waiting = fixture.spawn(fixture.director, 10);
-    waiting.until("receive reached a released not-sent attempt", || {
+    waiting.until("receive finished its notification attempt", || {
         fixture.count("failed", &worker) >= 1
     });
     waiting.signal(nix::sys::signal::Signal::SIGINT);

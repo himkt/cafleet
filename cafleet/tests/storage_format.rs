@@ -235,6 +235,76 @@ fn a_v2_database_upgrades_in_place_preserving_every_application_row() {
 }
 
 #[test]
+fn an_upgraded_v2_pending_notification_is_retried_by_the_next_send() {
+    let _resource = common::process_test_resource_guard();
+    let cli = Cli::new();
+    let mut conn = cafleet::db::connect(&cli.db_url()).unwrap();
+    let migrations = [
+        refinery::Migration::unapplied(
+            "V1__baseline",
+            include_str!("../migrations/V1__baseline.sql"),
+        )
+        .unwrap(),
+        refinery::Migration::unapplied(
+            "V2__preview_attempts",
+            include_str!("../migrations/V2__preview_attempts.sql"),
+        )
+        .unwrap(),
+    ];
+    refinery::Runner::new(&migrations)
+        .set_grouped(true)
+        .run(&mut conn)
+        .unwrap();
+    conn.execute_batch(
+        "INSERT INTO fleets(fleet_id, name, created_at) VALUES(1, 'upgrade', '2026-01-01T00:00:00Z');
+         INSERT INTO members(member_id, fleet_id, name, description, status, registered_at) VALUES
+             (1, 1, 'Director', 'director', 'active', '2026-01-01T00:00:00Z'),
+             (2, 1, 'worker', 'assignment', 'active', '2026-01-01T00:00:00Z');
+         INSERT INTO member_placements(member_id, mux_session, mux_window_id, mux_pane_id, backend, coding_agent, created_at) VALUES
+             (1, 'main', '@1', '%0', 'tmux', 'claude', '2026-01-01T00:00:00Z'),
+             (2, 'main', '@1', '%6', 'tmux', 'claude', '2026-01-01T00:00:00Z');
+         UPDATE fleets SET director_member_id=1 WHERE fleet_id=1;
+         INSERT INTO messages(message_id, from_member_id, to_member_id, created_at, status_state, status_timestamp, text, notified_at, preview_started_at)
+             VALUES(7, 1, 2, '2026-01-01T00:00:00Z', 'input_required', '2026-01-01T00:00:00Z', 'upgrade retries this ID', NULL, '2026-01-01T00:00:01Z');",
+    )
+    .unwrap();
+    cafleet::db::migrate_to_head(&mut conn).unwrap();
+    drop(conn);
+    cli.seed_asset_row("claude", VERSION);
+    let output = cli.run(&[
+        "message",
+        "send",
+        "--from-member-id",
+        "1",
+        "--to-member-id",
+        "2",
+        "trigger retry",
+        "--json",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(stderr(&output), "");
+    let result: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(result["notification_sent"], true);
+    let literals = cli.literal_calls();
+    assert_eq!(literals.len(), 2);
+    assert!(literals[0].contains("[cafleet msg 7 from 1 "));
+    assert!(literals[1].contains(&format!(
+        "[cafleet msg {} from 1 ",
+        result["message"]["message_id"].as_i64().unwrap()
+    )));
+    let row: (String, Option<String>) = cli
+        .sqlite()
+        .query_row(
+            "SELECT status_state, notified_at FROM messages WHERE message_id=7",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(row.0, "input_required");
+    assert!(row.1.is_some());
+}
+
+#[test]
 fn default_setup_uses_the_current_file_and_preserves_the_predecessor_and_sidecars() {
     let cli = Cli::new();
     let directory = cli.home.path().join(".local/share/cafleet");

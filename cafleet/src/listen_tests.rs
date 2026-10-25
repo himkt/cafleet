@@ -606,8 +606,8 @@ fn broker_snapshots_are_read_only_oldest_first_and_ignore_preview_metadata() {
     let (_dir, mut conn, fleet, director, worker) = broker_fixture();
     let later = broker::send_message(&mut conn, worker, &director.to_string(), "later").unwrap();
     let earlier = broker::send_message(&mut conn, director, &director.to_string(), "self").unwrap();
-    let tied = broker::send_message(&mut conn, worker, &director.to_string(), "claimed").unwrap();
-    conn.execute("UPDATE messages SET created_at='1900-01-01T00:00:00+00:00', preview_started_at=status_timestamp WHERE message_id IN (?1, ?2)", [earlier.message_id, tied.message_id]).unwrap();
+    let tied = broker::send_message(&mut conn, worker, &director.to_string(), "notified").unwrap();
+    conn.execute("UPDATE messages SET created_at='1900-01-01T00:00:00+00:00', notified_at=status_timestamp WHERE message_id IN (?1, ?2)", [earlier.message_id, tied.message_id]).unwrap();
     let changes = conn.total_changes();
     let messages = snapshot_messages(
         listen_snapshot(&mut conn, director, Some(fleet), Deadline::new()).unwrap(),
@@ -705,7 +705,7 @@ fn a_long_running_select_without_lock_contention_is_interrupted_and_cleans_its_h
          WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000000)
          SELECT m.message_id+n.x*1000000 AS message_id, m.from_member_id, m.to_member_id,
                 printf('%09d', 1000000-n.x) AS created_at, m.status_state, m.status_timestamp, m.text,
-                m.notified_at, m.preview_started_at
+                m.notified_at
          FROM stored_messages m CROSS JOIN n;"
     ).unwrap();
     let started = Instant::now();
@@ -853,7 +853,7 @@ fn an_unrelated_sqlite_interrupt_preserves_its_cause_before_the_deadline() {
          WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000000)
          SELECT m.message_id+n.x*1000000 AS message_id, m.from_member_id, m.to_member_id,
                 printf('%09d', 1000000-n.x) AS created_at, m.status_state, m.status_timestamp, m.text,
-                m.notified_at, m.preview_started_at
+                m.notified_at
          FROM stored_messages m CROSS JOIN n;"
     ).unwrap();
     let interrupt = conn.get_interrupt_handle();

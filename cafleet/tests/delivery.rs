@@ -69,17 +69,6 @@ impl Fixture {
             .unwrap()
     }
 
-    fn claimed(&self, id: i64) -> bool {
-        self.cli
-            .sqlite()
-            .query_row(
-                "SELECT preview_started_at IS NOT NULL FROM messages WHERE message_id=?1",
-                [id],
-                |row| row.get(0),
-            )
-            .unwrap()
-    }
-
     fn state(&self, id: i64) -> String {
         self.cli
             .sqlite()
@@ -144,8 +133,8 @@ impl Fixture {
 
     fn lock_busy_stderr(&self, new: i64, preview: i64) -> String {
         format!(
-            "Message {new} was persisted. member {}'s pane input remained busy; preview {preview} was not sent.",
-            self.worker
+            "Message {new} was persisted. message {preview} was not notified to member {}: pane input remained busy; the next send to member {} or the next message wait retries it.",
+            self.worker, self.worker
         )
     }
 }
@@ -258,13 +247,13 @@ fn budget_exhaustion_leaves_later_messages_pending_without_a_diagnostic() {
     );
     assert!(delivered < ids.len(), "{stamped:?}");
     for id in &ids[delivered..] {
-        assert!(!fixture.claimed(*id), "no claim is left behind");
+        assert_eq!(fixture.stamp(*id), None);
     }
     assert_eq!(fixture.cli.literal_calls().len(), delivered);
 }
 
 #[test]
-fn a_message_acked_between_claim_and_stamp_counts_as_sent_and_the_next_line_has_no_escape() {
+fn a_message_acked_while_typing_counts_as_notified_and_the_next_line_has_no_escape() {
     let mut fixture = Fixture::new();
     fixture.cli.block_tmux("literal");
     let child = fixture.spawn_send("acked while typing");
@@ -324,6 +313,36 @@ fn a_member_deregistered_during_the_lock_wait_ends_without_input() {
 }
 
 #[test]
+fn a_fatal_snapshot_error_after_commit_preserves_stdout_and_its_storage_cause() {
+    let fixture = Fixture::new();
+    let lock = fixture.cli.lock_pane(&fixture.pane);
+    let child = fixture.spawn_send("committed before snapshot corruption");
+    let id = fixture.wait_for_id_of("committed before snapshot corruption");
+    std::thread::sleep(Duration::from_millis(200));
+    fixture
+        .cli
+        .sqlite()
+        .execute(
+            "UPDATE members SET description=zeroblob(1) WHERE member_id=?1",
+            [fixture.worker],
+        )
+        .unwrap();
+    drop(lock);
+    let output = wait_output(child);
+    let result = payload(&output);
+    assert_eq!(result["message"]["message_id"], id);
+    assert_eq!(result["notification_sent"], false);
+    let error = stderr(&output);
+    assert!(
+        error.starts_with(&format!("Message {id} was persisted. ")),
+        "{error}"
+    );
+    assert!(error.contains("Invalid column type Blob"), "{error}");
+    assert_eq!(fixture.stamp(id), None);
+    assert!(fixture.writes_to(&fixture.pane).is_empty());
+}
+
+#[test]
 fn a_lock_released_within_the_wait_still_delivers() {
     for delay in [Duration::from_millis(400), Duration::from_millis(1250)] {
         let fixture = Fixture::new();
@@ -354,8 +373,14 @@ fn a_lock_still_busy_at_the_reserved_deadline_reports_the_lock_busy_diagnostic()
     assert!(waited >= Duration::from_millis(1400), "{waited:?}");
     assert!(waited < Duration::from_secs(4), "{waited:?}");
     assert_eq!(fixture.stamp(id), None);
-    assert!(!fixture.claimed(id));
     assert!(fixture.writes_to(&fixture.pane).is_empty());
+    drop(_lock);
+    let recovered = payload(&fixture.send("retry after lock contention"));
+    assert_eq!(recovered["notification_sent"], true);
+    assert!(fixture.stamp(id).is_some());
+    let literals = fixture.cli.literal_calls();
+    assert_eq!(literals.len(), 2);
+    assert!(literals[0].contains(&format!("[cafleet msg {id} from ")));
 }
 
 #[test]
@@ -421,7 +446,7 @@ fn acked_and_already_notified_rows_are_excluded_from_preview_selection() {
 }
 
 #[test]
-fn a_failed_escape_preserves_the_committed_message_and_releases_its_claim() {
+fn a_failed_escape_preserves_the_committed_message_for_the_next_send() {
     let mut fixture = Fixture::new();
     fixture.cli.fail_subcommand = Some("send-keys".into());
     let output = fixture.send("persist exactly once");
@@ -429,7 +454,6 @@ fn a_failed_escape_preserves_the_committed_message_and_releases_its_claim() {
     let id = result["message"]["message_id"].as_i64().unwrap();
     assert_eq!(result["notification_sent"], false);
     assert_eq!(fixture.stamp(id), None);
-    assert!(!fixture.claimed(id));
     assert_eq!(
         fixture
             .cli
@@ -446,10 +470,17 @@ fn a_failed_escape_preserves_the_committed_message_and_releases_its_claim() {
     );
     assert!(error.contains("forced failure"), "{error}");
     assert_eq!(fixture.cli.literal_calls().len(), 0);
+    fixture.cli.fail_subcommand = None;
+    let recovered = payload(&fixture.send("trigger retry"));
+    assert_eq!(recovered["notification_sent"], true);
+    assert!(fixture.stamp(id).is_some());
+    let literals = fixture.cli.literal_calls();
+    assert_eq!(literals.len(), 2);
+    assert!(literals[0].contains(&format!("[cafleet msg {id} from ")));
 }
 
 #[test]
-fn a_notification_stamp_failure_survives_a_new_wait_without_resubmission() {
+fn a_fatal_stamp_error_preserves_the_committed_record_and_the_next_send_retries_it() {
     let fixture = Fixture::new();
     fixture.cli.sqlite().execute_batch("CREATE TRIGGER reject_notification_stamp BEFORE UPDATE OF notified_at ON messages
         WHEN NEW.notified_at IS NOT NULL BEGIN SELECT RAISE(ABORT, 'injected notification stamp failure'); END;").unwrap();
@@ -459,56 +490,48 @@ fn a_notification_stamp_failure_survives_a_new_wait_without_resubmission() {
     assert_eq!(result["notification_sent"], false);
     assert_eq!(fixture.stamp(id), None);
     let error = stderr(&output);
-    assert!(error.contains(&id.to_string()), "{error}");
-    assert!(error.contains("uncertain"), "{error}");
+    assert!(
+        error.starts_with(&format!("Message {id} was persisted. ")),
+        "{error}"
+    );
     assert!(
         error.contains("injected notification stamp failure"),
         "{error}"
     );
-    assert!(fixture.claimed(id));
-    for _ in 0..2 {
-        let waiting = fixture.cli.run(&[
-            "message",
-            "wait",
-            &fixture.director.to_string(),
-            "--timeout",
-            "1",
-            "--json",
-        ]);
-        let result = payload(&waiting);
-        let errors = result["notification_errors"].as_array().unwrap();
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0]["message_id"], id);
-        assert_eq!(errors[0]["delivery"], "uncertain");
-    }
-    let enters = || {
-        fixture
-            .cli
-            .shim_calls()
-            .iter()
-            .filter(|line| line.ends_with(" Enter"))
-            .count()
-    };
-    assert_eq!(
-        enters(),
-        1,
-        "fresh waits preserve the durable claim and never inject another preview"
-    );
+    assert_eq!(fixture.cli.literal_calls().len(), 1);
+    let waiting = fixture.cli.run(&[
+        "message",
+        "wait",
+        &fixture.director.to_string(),
+        "--timeout",
+        "2",
+        "--json",
+    ]);
+    assert_eq!(code(&waiting), 1);
+    assert_eq!(stdout(&waiting), "");
+    assert!(stderr(&waiting).contains("injected notification stamp failure"));
+    assert_eq!(fixture.stamp(id), None);
+    assert_eq!(fixture.cli.literal_calls().len(), 2);
     fixture
         .cli
         .sqlite()
         .execute_batch("DROP TRIGGER reject_notification_stamp")
         .unwrap();
-    let later = payload(&fixture.send("later message still gets its own notification"));
+    let later = payload(&fixture.send("later message"));
     let later_id = later["message"]["message_id"].as_i64().unwrap();
     assert_eq!(later["notification_sent"], true);
+    assert!(fixture.stamp(id).is_some());
     assert!(fixture.stamp(later_id).is_some());
-    assert_eq!(fixture.stamp(id), None);
-    assert_eq!(enters(), 2);
+    let literals = fixture.cli.literal_calls();
+    assert_eq!(literals.len(), 4);
+    for literal in &literals[..3] {
+        assert!(literal.contains(&format!("[cafleet msg {id} from ")));
+    }
+    assert!(literals[3].contains(&format!("[cafleet msg {later_id} from ")));
 }
 
 #[test]
-fn a_member_to_director_send_leaves_an_unclaimed_pending_record_without_pane_input() {
+fn a_member_to_director_send_leaves_a_pending_record_without_pane_input() {
     let fixture = Fixture::new();
     let output = fixture.cli.run(&[
         "message",
@@ -525,7 +548,6 @@ fn a_member_to_director_send_leaves_an_unclaimed_pending_record_without_pane_inp
     assert_eq!(result["notification_sent"], false);
     assert_eq!(stderr(&output), "");
     assert_eq!(fixture.stamp(id), None);
-    assert!(!fixture.claimed(id));
     assert_eq!(fixture.state(id), "input_required");
     assert!(fixture.cli.shim_calls().is_empty());
     let inbox =

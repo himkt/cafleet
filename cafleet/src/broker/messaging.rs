@@ -767,7 +767,7 @@ mod tests {
     }
 
     #[test]
-    fn preview_selection_skips_claimed_rows_and_self_messages() {
+    fn preview_selection_skips_attempted_ids_and_self_messages_without_hiding_pending_rows() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
         let (fleet, director) = create_fleet(&mut conn, "selection");
@@ -780,36 +780,35 @@ mod tests {
         )
         .unwrap();
         let previous =
-            broker::send_message(&mut conn, director, &worker.to_string(), "claimed").unwrap();
+            broker::send_message(&mut conn, director, &worker.to_string(), "previous").unwrap();
         let next = broker::send_message(&mut conn, director, &worker.to_string(), "next").unwrap();
-        assert!(
-            super::claim_preview(&conn, previous.message_id, director)
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            super::claim_preview(&conn, previous.message_id, worker)
-                .unwrap()
-                .is_some()
-        );
-        assert!(
-            super::claim_preview(&conn, previous.message_id, worker)
-                .unwrap()
-                .is_none()
-        );
+        let excluded = std::collections::BTreeSet::from([previous.message_id]);
         assert_eq!(
-            broker::oldest_pending_preview(&conn, worker)
+            broker::oldest_pending_preview(&conn, worker, &excluded)
                 .unwrap()
                 .unwrap()
                 .message_id,
             next.message_id
         );
         assert_eq!(
+            broker::oldest_pending_preview(&conn, worker, &std::collections::BTreeSet::new())
+                .unwrap()
+                .unwrap()
+                .message_id,
+            previous.message_id
+        );
+        assert!(
+            broker::oldest_pending_preview(
+                &conn,
+                worker,
+                &std::collections::BTreeSet::from([previous.message_id, next.message_id])
+            )
+            .unwrap()
+            .is_none()
+        );
+        assert_eq!(
             broker::panes::pending_previews(&conn, fleet, director).unwrap(),
-            vec![
-                (worker, previous.message_id, true),
-                (worker, next.message_id, false)
-            ]
+            vec![(worker, previous.message_id), (worker, next.message_id)]
         );
     }
 
@@ -836,7 +835,7 @@ mod tests {
         conn.execute_batch("UPDATE messages SET created_at='2026-01-01T00:00:00+00:00', status_timestamp='2099-01-01T00:00:00+00:00' WHERE message_id=3;
             UPDATE messages SET created_at='2026-02-01T00:00:00+00:00', status_timestamp='2020-01-01T00:00:00+00:00' WHERE message_id=4;").unwrap();
         assert_eq!(
-            broker::oldest_pending_preview(&conn, worker)
+            broker::oldest_pending_preview(&conn, worker, &std::collections::BTreeSet::new())
                 .unwrap()
                 .unwrap()
                 .message_id,

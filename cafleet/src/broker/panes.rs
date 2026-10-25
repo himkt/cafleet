@@ -50,7 +50,7 @@ mod tests {
             broker::send_message(&mut conn, director, &placed.to_string(), "deliver now").unwrap();
         assert_eq!(
             pending_previews(&conn, fleet, director).unwrap(),
-            vec![(placed, message.message_id, false)]
+            vec![(placed, message.message_id)]
         );
     }
 
@@ -67,7 +67,7 @@ mod tests {
             broker::send_message(&mut conn, director, &worker.to_string(), "assignment").unwrap();
         assert_eq!(
             pending_previews(&conn, fleet, observer).unwrap(),
-            vec![(worker, assignment.message_id, false)]
+            vec![(worker, assignment.message_id)]
         );
         assert_eq!(broker::poll_messages(&conn, director).unwrap(), vec![reply]);
     }
@@ -83,7 +83,7 @@ mod tests {
             broker::send_message(&mut conn, director, &worker.to_string(), "assignment").unwrap();
         assert_eq!(
             pending_previews(&conn, fleet, director).unwrap(),
-            vec![(worker, to_worker.message_id, false)]
+            vec![(worker, to_worker.message_id)]
         );
         assert!(pending_previews(&conn, fleet, worker).unwrap().is_empty());
     }
@@ -111,7 +111,7 @@ mod tests {
             broker::send_message(&mut conn, observer, &director.to_string(), "root reply").unwrap();
         assert_eq!(
             pending_previews(&conn, fleet, observer).unwrap(),
-            vec![(former_director, ordinary.message_id, false)]
+            vec![(former_director, ordinary.message_id)]
         );
         assert_eq!(broker::poll_messages(&conn, director).unwrap(), vec![reply]);
     }

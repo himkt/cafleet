@@ -171,8 +171,6 @@ impl Fixture {
             .count()
     }
 
-    /// Make every Escape into `worker`'s pane fail before any text is typed,
-    /// so each attempt ends `not_sent` and releases its claim.
     pub fn refuse_escape(&self, worker: &Worker) {
         self.fail(worker, "escape", "escape refused by test");
     }

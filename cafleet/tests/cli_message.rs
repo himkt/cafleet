@@ -34,15 +34,15 @@ fn a_member_to_director_send_preserves_the_durable_inbox_without_pane_input() {
     assert_eq!(code(&polled), 0, "{}", stderr(&polled));
     let inbox: serde_json::Value = serde_json::from_str(&stdout(&polled)).unwrap();
     assert_eq!(inbox, serde_json::json!([payload["message"]]));
-    let state: (Option<String>, Option<String>, String) = cli
+    let state: (Option<String>, String) = cli
         .sqlite()
         .query_row(
-            "SELECT notified_at, preview_started_at, status_state FROM messages WHERE message_id=?1",
+            "SELECT notified_at, status_state FROM messages WHERE message_id=?1",
             [payload["message"]["message_id"].as_i64().unwrap()],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
-    assert_eq!(state, (None, None, "input_required".into()));
+    assert_eq!(state, (None, "input_required".into()));
 }
 
 #[test]
@@ -113,16 +113,15 @@ fn a_self_send_never_drains_another_pending_message_into_the_senders_own_pane() 
             "a self-send produces no pane input: {:?}",
             cli.shim_calls()
         );
-        let (notified, claimed): (Option<String>, bool) = cli
+        let notified: Option<String> = cli
             .sqlite()
             .query_row(
-                "SELECT notified_at, preview_started_at IS NOT NULL FROM messages WHERE message_id=?1",
+                "SELECT notified_at FROM messages WHERE message_id=?1",
                 [pending],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| row.get(0),
             )
             .unwrap();
         assert_eq!(notified, None, "the other pending message stays pending");
-        assert!(!claimed);
     }
 }
 

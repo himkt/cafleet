@@ -336,23 +336,17 @@ fn listening_preserves_preview_and_consumption_state_including_a_stamped_self_se
     let (cli, fleet, director, worker) = fixture();
     let self_send = cli.seed_message(director, director, "self note");
     let stamped = cli.seed_message(worker, director, "already notified");
-    let claimed = cli.seed_message(worker, director, "uncertain old preview");
+    let pending = cli.seed_message(worker, director, "pending notification");
     cli.sqlite()
         .execute(
             "UPDATE messages SET notified_at=created_at WHERE message_id=?1",
             [stamped],
         )
         .unwrap();
-    cli.sqlite()
-        .execute(
-            "UPDATE messages SET preview_started_at=created_at WHERE message_id=?1",
-            [claimed],
-        )
-        .unwrap();
     let before = stored_messages(&cli);
     let mut listener = Listener::start(&cli, director, Some(1));
     listener.ready(director, fleet);
-    for id in [self_send, stamped, claimed] {
+    for id in [self_send, stamped, pending] {
         listener.message(id);
     }
     listener.closed(director, "timeout");
