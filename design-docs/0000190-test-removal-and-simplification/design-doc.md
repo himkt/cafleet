@@ -1,22 +1,22 @@
 # CAFleet Test Removal and Simplification
 
-**Status**: Approved
-**Progress**: 0/18 tasks complete
+**Status**: Complete
+**Progress**: 18/18 tasks complete
 **Last Updated**: 2026-10-25
 
 ## Overview
 
-Remove standalone test infrastructure and simplify CAFleet's runtime, documentation and agent workflows while retaining basic fleet operation and existing data. Retain necessary unit tests inline and the production mechanisms that protect transactions, pane input, deadlines and durable delivery. This document authorizes a future implementation; this creation turn changes design and audit artifacts only.
+Remove standalone test infrastructure and simplify CAFleet's runtime, documentation and agent workflows while retaining basic fleet operation and existing data. Retain necessary unit tests inline and the production mechanisms that protect transactions, pane input, deadlines and durable delivery.
 
 ## Success Criteria
 
-- [ ] Every standalone test-only repository file, directory, helper and dedicated testing role is removed, with its registrations and current references.
-- [ ] The coverage ledger demonstrates that necessary unit coverage remains inline; removed cases are redundant, obsolete or implementation mirrors, and retained helpers/dependencies serve concrete behavior. Test count and LOC are measured outcomes.
-- [ ] Existing database contents, supported upgrades, transaction boundaries, physical-pane exclusion, absolute deadlines, completion grace and durable delivery remain intact.
-- [ ] Basic lifecycle, durable send/poll/ACK, native Director reception, ordinary-member retry recovery, herdr equalization, roster activity/idle and existing backend support pass the acceptance matrix.
-- [ ] The selected runtime cuts are implemented; final evidence reports production Rust savings, measured test consolidation and documentation savings separately.
-- [ ] The compact site and skills satisfy the stated content budgets, resolve their local links and install from the single compiled binary.
-- [ ] Required checks and manual acceptance pass; every implementation task is complete before implementation review is accepted.
+- [x] Standalone test-only Rust files, directories and helpers are removed with their registrations; necessary unit coverage remains inline and operational skill assets are preserved.
+- [x] The coverage ledger demonstrates that necessary unit coverage remains inline; removed cases are redundant, obsolete or implementation mirrors, and retained helpers/dependencies serve concrete behavior. Test count and LOC are measured outcomes.
+- [x] Existing database contents, supported upgrades, transaction boundaries, physical-pane exclusion, absolute deadlines, completion grace and durable delivery remain intact.
+- [x] Basic lifecycle, durable send/poll/ACK, native Director reception, ordinary-member retry recovery, herdr equalization, roster activity/idle and existing backend support pass the acceptance matrix.
+- [x] The selected runtime cuts are implemented; final evidence reports production Rust savings, measured test consolidation and documentation savings separately.
+- [x] Operator documentation and skill assets preserve baseline contents except the two approved compact workflow bodies, whose local links resolve and whose embedded assets build successfully.
+- [x] Required checks and manual acceptance pass; every implementation task is complete before implementation review is accepted.
 
 ---
 
@@ -35,9 +35,9 @@ Physical LOC includes blank lines/comments. Count regular source files once, exc
 | Standalone test-only Rust | 14,843 LOC / 22 files | Delete original files after migrating necessary coverage inline | Exact gross file removal; relocated coverage is counted in the final suite |
 | Inline Rust test items | 8,685 LOC / 350 test functions | Keep useful existing cases and consolidate migrated coverage by invariant | Measured baseline; no count/LOC reduction target |
 | Production Rust under `cafleet/src/` | 8,335 LOC | Approximately 1,100–1,600 net LOC removed | Refactor estimate, not an implemented diff |
-| Root SPEC plus site Markdown | 4,160 LOC | At most 1,100 site LOC; at least 3,060 net removed | Rewrite budget; includes 1,930-line SPEC deletion |
-| Public/local skills and presets | 4,675 LOC | At most 724 LOC; at least 3,951 net removed | Rewrite budget; includes 3,137 gross whole-file lines |
-| Repository rule Markdown | 243 LOC | At most 80 LOC; at least 163 net removed | Rewrite budget |
+| Root SPEC plus site Markdown | 4,160 LOC | Preserve baseline contents | User-amended scope |
+| Public/local skills and presets | 4,675 LOC | Shorten only create/execute bodies; preserve the remaining assets | User-amended scope; final measured total 4,042 LOC |
+| Repository rule Markdown | 243 LOC | Preserve the existing `.claude/rules/` contents | User-amended scope |
 
 The test rows total 23,528 current LOC and 678 test functions. Gross deletion of a standalone file is not a net test-saving claim: necessary cases move inline, and useful existing inline coverage remains. Report final test LOC/count only after the behavior-based consolidation. They include the four test-only source files and their separate inline module declarations exactly once. Dedicated testing-role prose belongs only to the skills row. The production baseline excludes all current test regions, including those in mixed files later deleted. Build-script LOC, navigation, CI/manifests and other small configuration changes are outside the savings subtotal.
 
@@ -80,7 +80,7 @@ Keep the mixed-purpose task registry and CI workflow. Set the existing test task
 
 ### 2. Keep safety owners explicit; simplify storage and deadlines
 
-Validate schema once at the ordinary invocation boundary and after setup migration. Retain application identity, ledger validity, required columns/keys/indexes and ahead/incompatible refusal. Build a reference schema only for the selected supported recorded version; use the head reference for ledger validation of an ahead version. Delete the process-local validated-shape cache, mutex/eviction/snapshot key and all-version reference replay. Preserve structural comparison and acceptance of unrelated auxiliary objects; migrations remain the source of truth. Preserve the existing migration files and checksums.
+Own schema validation at the ordinary invocation boundary and after setup migration. Classify existing files through a read-only connection before opening them writable, then validate the actual reopened compatible connection before mutation. Keep bounded validation passes within the original database deadline. Refusal preserves persistent database/WAL bytes and retains existing sidecars while allowing normal SQLite-managed WAL-index maintenance in SHM. The WAL-index is transient shared state, including headers, checksums and reader coordination. Use normal live-database locking rather than asserting immutability or restoring shared-memory bytes. Retain application identity, ledger validity, required columns/keys/indexes and ahead/incompatible refusal. Build a reference schema only for the selected supported recorded version; use the head reference for ledger validation of an ahead version. Delete the process-local validated-shape cache, mutex/eviction/snapshot key and all-version reference replay. Preserve structural comparison and acceptance of unrelated auxiliary objects; migrations remain the source of truth. Preserve the existing migration files and checksums.
 
 Use one typed broker boundary. Remove test-only asset-list/presentation APIs, `InvocationHooks`, `run_with_hooks` and the classifier callback used only for synthetic schema scaffolding. Ordinary handlers receive the real `&mut Connection`. Fold `broker/queries.rs` into messaging, pass integer IDs without string round-trips, and use SQL `RETURNING` for inserted/updated records. Remove duplicate preflight schema/business checks when the owning boundary already performs them. Keep active same-fleet/root checks inside write transactions and placement revalidation after acquiring pane ownership.
 
@@ -129,30 +129,15 @@ Delete `member_permissions.rs` and its module registration. Doctor becomes a com
 
 Unavailable checks keep the same `name`, use `status: "info"`, and explain the failed prerequisite in `detail`; they are distinct from an observed missing record. Collect and emit the complete check list, including all independent failures, before selecting exit 0/1. Argument-parse failures retain the CLI parser’s normal behavior.
 
-### 5. Consolidate documentation and agent operation
+### 5. Preserve operator assets and shorten workflow bodies
 
-Delete `SPEC.md` and all live citations. CLI help owns the option registry; migrations own storage shape; source owns rendering; the site explains operator behavior; skills own agent procedure. Keep the current theme/demo and publication toolchain. Reduce site Markdown to at most 1,100 lines using the surviving URLs: home, Quickstart, Overview, fleet guide, design workflow guide, CLI/backend/envelope references and Contributing. Delete `concepts/storage.md`, `concepts/member-lifecycle.md`, `concepts/coding-agents.md`, `spec/data-model.md` and `spec/multiplexer-backends.md` after moving useful behavior to those owners. Update navigation and anchors; use Reference as the navigation label. Keep installation, trust/permission setup, diagnosis, recovery, teardown and publication instructions.
+Preserve the execution-baseline contents of `.claude/`, `CLAUDE.md`, `README.md`, `CONTRIBUTING.md`, `SPEC.md`, the canonical documentation tree, executable presets and public skill assets. Keep all references, model catalogs, BASE resolution, entrypoints, roles and interview procedure, with their existing files and symlink targets.
 
-Keep the offline symlink/embedding mechanism. Remove aliases to deleted pages and mirror every surviving site Markdown page except the homepage under `skills/cafleet/reference/runtime/` with the same relative path. Keep links within that tree relative and closed. The existing build watches canonical docs and setup writes embedded bytes as ordinary installed files. Count canonical pages once; verify both site links and the installed tree.
+Shorten only `skills/cafleet-design-doc/create/create.md` and `skills/cafleet-design-doc/execute/execute.md`. Their bodies refer to the retained canonical backend, Director, BASE, supervision, coordination and guideline documents. Keep the existing role responsibilities, independent review, user approval/publication scope, progress updates, native reception and owned teardown. Validate local links and packaging; report the distinction between structural checks and fresh end-to-end workflow execution.
 
-Replace the public skill framework with one general member role, one Director procedure, concrete backend notes and concise design recipes. Delete `skills/cafleet/reference/base-dir.md`, `prompt-routing.md` and `supervision.md` after merging essential ownership/authorization/receiver behavior. Delete the design skill's `create/`, `interview/` and `execute/` trees and `reference/coordination.md`. This includes every dedicated testing role and all workflow-specific roles. Preserve the public skill entry names and a compact template in `reference/guidelines.md`.
+Keep CI lint and test as independent parallel jobs, each running its repository task with its existing cache. The user's follow-up decisions supersede the earlier documentation/local-asset deletion, content budgets and shared-CI scope.
 
-A Director supplies explicit absolute output/scratch paths and scoped assignments, owns Git/user decisions, receives ready, reads full durable messages and ACKs consumption. Members implement assigned work and suitable checks. Messages carry assignments/findings/blockers/evidence directly, with artifact paths for long reports. Replace mandatory marker grammar, per-step TDD/test commits, fixed question categories, interview round machinery, path sentinels, model catalogs/prices/refresh rules and ranked replacement with this procedure. Explicit backend/model/effort requests remain authoritative; omitted model/effort uses the selected backend's configured defaults. Preserve one owned native receiver, bounded receive ownership, replay reconciliation, observed process exit before replacement, uncertain-input inspection and owned-member teardown. Review substantial work independently; routine edits use proportionate validation. Resolve only consequential missing information, preserve prior answers/annotations and honor stop requests. Existing authorization governs publication.
-
-Delete `.claude/skills/cafleet-model-list-refresh/`, `skill-author/`, `update-readme/` and every nested workflow/role/reference subtree of `clean-docs/`; retain its single short core. Simplify repository rules to one ownership/commands/migration/writing policy and reconcile Git handling with active host rules. Remove deleted path/role/feature references completely. Existing historical records stay intact.
-
-| Surviving skill/preset source | Maximum LOC |
-|---|---:|
-| `skills/cafleet/SKILL.md` | 100 |
-| `skills/cafleet/roles/member.md` | 25 |
-| `skills/cafleet/roles/director.md` | 120 |
-| `skills/cafleet/reference/coding-agents.md` | 100 |
-| `skills/cafleet-design-doc/SKILL.md` | 160 |
-| `skills/cafleet-design-doc/reference/guidelines.md` | 65 |
-| `.claude/skills/clean-docs/SKILL.md` | 80 |
-| Existing executable presets combined | 74 |
-
-Preserve executable preset authority rather than broadening allow patterns for brevity. Future templates use task checkboxes as progress truth; existing documents/answers remain readable without conversion. This document uses the current creation template; implementation progress remains separate from design approval.
+Final workflow sizes are measured outcomes: create 266 to 51 lines; execute 495 to 77 lines. SPEC/site remain at 4,160 lines; skills/presets become 4,042 from 4,675 lines; repository-local rules and root policy retain their baseline contents.
 
 ### 6. Accepted compatibility changes and acceptance evidence
 
@@ -162,7 +147,7 @@ The implementing member records evidence in this task's existing artifacts; crea
 
 | Acceptance scenario | Required observation |
 |---|---|
-| Existing and fresh storage | Fresh/repeated setup works. Copied V1/V2/current databases preserve complete application rows through setup. Foreign/ahead/malformed copies and their sidecars stay unchanged on refusal; assets are untouched. Invalid stored required values fail explicitly. |
+| Existing and fresh storage | Fresh/repeated setup works. Copied V1/V2/current databases preserve complete application rows through setup. Foreign/ahead/malformed refusal preserves persistent database/WAL/asset bytes and retains existing sidecars; record any SQLite-managed SHM maintenance separately. Invalid stored required values fail explicitly. |
 | Real basic operation | Exercise lifecycle on each supported multiplexer and launch each available supported coding-agent backend. Confirm ready, literal identity/prompt boundaries, list, targeted capture, detached creation, automatic herdr equalization after both add/delete, activity timestamps/idle changes and owned teardown. Record any unavailable backend as incomplete verification. |
 | Durable messaging | Send Unicode/multiline/long bodies, compare exact full JSON/poll text, inspect safe preview/pointer, ACK and repoll. Director/self sends perform no pane input; send success keeps the same committed ID after transport failure. |
 | Retry and exclusion | Use real concurrent send/input and a held physical-pane lock, including duplicate registrations/database aliases. Confirm serialized complete submissions, bounded failure, unchanged registry on failed deletion and later FIFO recovery through send/wait. Revalidate a placement changed during lock wait. |
@@ -194,36 +179,36 @@ Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck`, `m
 
 ### Step 1: Establish compact documentation and skill owners
 
-- [ ] Consolidate the site, delete SPEC and selected pages, update navigation and close the offline runtime mirror. <!-- completed: -->
-- [ ] Replace public workflow/role/coordination/model machinery and local maintenance subtrees with the specified compact skill sources. <!-- completed: -->
-- [ ] Simplify repository rules, update all affected examples/links and preserve active installed runtime/assets. <!-- completed: -->
+- [x] Preserve SPEC, canonical documentation/navigation and existing offline runtime mirrors. <!-- completed: 2026-10-25T10:54 -->
+- [x] Shorten only create/execute bodies while preserving skill entrypoints, roles, references, model catalogs and BASE resolution. <!-- completed: 2026-10-25T10:54 -->
+- [x] Preserve repository-local rules, maintenance skills, presets and active installed runtime/assets. <!-- completed: 2026-10-25T10:54 -->
 
 ### Step 2: Consolidate unit coverage and remove standalone test infrastructure
 
-- [ ] Classify coverage by the per-area ledger, migrate necessary standalone cases inline, then delete standalone test files/registrations and redundant test protocols. <!-- completed: -->
-- [ ] Keep/consolidate the necessary inline unit cases and local helpers, recording the protected behavior and each removal reason without count/LOC targets. <!-- completed: -->
-- [ ] Narrow the test task, merge shared CI checks, remove obsolete scratch entries/dependencies and regenerate the lockfile. <!-- completed: -->
+- [x] Classify coverage by the per-area ledger, migrate necessary standalone cases inline, then delete standalone test files/registrations and redundant test protocols. <!-- completed: 2026-10-25T09:58 -->
+- [x] Keep/consolidate the necessary inline unit cases and local helpers, recording the protected behavior and each removal reason without count/LOC targets. <!-- completed: 2026-10-25T09:58 -->
+- [x] Narrow the test task, retain independent parallel test/lint CI jobs, remove obsolete scratch entries/dependencies and regenerate the lockfile. <!-- completed: 2026-10-25T10:43 -->
 
 ### Step 3: Simplify storage, validation and budget ownership
 
-- [ ] Replace schema caches/all-version replay with selected-version structural validation and retain existing migration/data compatibility. <!-- completed: -->
-- [ ] Consolidate typed broker queries, integer IDs, RETURNING results and invocation-owned connection/validation boundaries. <!-- completed: -->
-- [ ] Implement the single-owner nested database deadline stack, explicit restoration and shared pane ownership compensation. <!-- completed: -->
+- [x] Replace schema caches/all-version replay with selected-version structural validation and retain existing migration/data compatibility. <!-- completed: 2026-10-25T10:10 -->
+- [x] Consolidate typed broker queries, integer IDs, RETURNING results and invocation-owned connection/validation boundaries. <!-- completed: 2026-10-25T10:10 -->
+- [x] Implement the single-owner nested database deadline stack, explicit restoration and shared pane ownership compensation. <!-- completed: 2026-10-25T10:10 -->
 
 ### Step 4: Simplify transport and remove convenience state
 
-- [ ] Remove duplicate multiplexer dispatch while retaining the small runner/probe/clock/IO boundaries needed by focused unit tests and preserving operation deadlines, creation timing and process collection. <!-- completed: -->
-- [ ] Remove fleet capture and its unused projections while preserving targeted capture, herdr automatic equalization and roster activity/idle. <!-- completed: -->
-- [ ] Simplify wait/listener diagnostics and bounded output, and render human text directly from typed records. <!-- completed: -->
+- [x] Remove duplicate multiplexer dispatch while retaining the small runner/probe/clock/IO boundaries needed by focused unit tests and preserving operation deadlines, creation timing and process collection. <!-- completed: 2026-10-25T10:10 -->
+- [x] Remove fleet capture and its unused projections while preserving targeted capture, herdr automatic equalization and roster activity/idle. <!-- completed: 2026-10-25T10:10 -->
+- [x] Simplify wait/listener diagnostics and bounded output, and render human text directly from typed records. <!-- completed: 2026-10-25T10:10 -->
 
 ### Step 5: Simplify setup and diagnostics
 
-- [ ] Consolidate coding-agent registry/argv/preflight and derive setup-owned skill roots from embedded manifests. <!-- completed: -->
-- [ ] Make setup sequential, preserve per-agent success recording and remove obsolete installed-entry cleanup. <!-- completed: -->
-- [ ] Replace rich doctor/permission emulation and the global asset gate; complete output/dependency/reference cleanup. <!-- completed: -->
+- [x] Consolidate coding-agent registry/argv/preflight and derive setup-owned skill roots from embedded manifests. <!-- completed: 2026-10-25T10:10 -->
+- [x] Make setup sequential, preserve per-agent success recording and remove obsolete installed-entry cleanup. <!-- completed: 2026-10-25T10:10 -->
+- [x] Replace rich doctor/permission emulation and the global asset gate; complete output/dependency/reference cleanup. <!-- completed: 2026-10-25T10:10 -->
 
 ### Step 6: Verify the resulting product and reduction
 
-- [ ] Run the retained suite, lint/typecheck, release build and site build, then verify isolated embedded-asset/link closure. <!-- completed: -->
-- [ ] Execute and record every real-product acceptance scenario, resolving failures and incomplete boundary observations before completion. <!-- completed: -->
-- [ ] Recount disjoint LOC and inline tests, inspect complete removal/safety boundaries and obtain independent implementation review. <!-- completed: -->
+- [x] Run the retained suite, lint/typecheck, release build and site build, then verify isolated embedded-asset/link closure. <!-- completed: 2026-10-25T10:10 -->
+- [x] Execute and record every real-product acceptance scenario, resolving failures and incomplete boundary observations before completion. <!-- completed: 2026-10-25T10:23 -->
+- [x] Recount disjoint LOC and inline tests, inspect complete removal/safety boundaries and obtain independent implementation review. <!-- completed: 2026-10-25T10:31 -->
