@@ -1,7 +1,7 @@
 # opencode v2 mini spawn, capture-cue and draft removal, and at-least-once preview delivery
 
-**Status**: Approved
-**Progress**: 0/51 tasks complete
+**Status**: Complete
+**Progress**: 54/54 tasks complete
 **Last Updated**: 2026-10-25
 
 ## Overview
@@ -10,17 +10,17 @@ Spawn opencode members through the opencode v2 `opencode mini --standalone` subc
 
 ## Success Criteria
 
-- [ ] `cafleet member create --coding-agent opencode` spawns `opencode mini --standalone --agent cafleet [--model M] --prompt P`; an opencode v2.1.4 member reaches `ready`, receives a pushed `[cafleet msg …]` line as a submitted user turn, and polls/ACKs it.
-- [ ] No source, test, doc, skill or rule mentions opencode 1.x or the bare `opencode` TUI argv; every opencode behavior the docs assert is either observed on v2.1.4 by a Step 10 probe or stated as unverified; the docs state opencode 2 as the minimum supported version.
-- [ ] The embedded preset declares its command allowlist under the `shell` permission key, and `opencode debug agents` (v2.1.4) lists the allowlist under `shell` and every other preset permission key.
-- [ ] No backend section or Template in `skills/cafleet/reference/coding-agents.md` contains a `Pane-state capture cues` subsection; `.claude/rules/coding-agent-overlay.md` specifies four subsections.
-- [ ] `skills/cafleet/reference/supervision.md` carries one capture-reading rule (≈20-line default capture, `--lines` for more, empty composer ≠ completion) and no Idle Semantics evidence table; no retained-draft detection or preservation procedure remains in any skill, doc or SPEC.
-- [ ] Migration `V3__drop_preview_claims.sql` drops `messages.preview_started_at`; a V2 database upgrades in place with every row preserved, and the chain guard expects `[(1, baseline), (2, preview_attempts), (3, drop_preview_claims)]`.
-- [ ] `member list --json` and `member show --json` no longer emit `unconfirmed_previews`.
-- [ ] `message wait --json` notification diagnostics have the shape `{member_id, message_id, error}`. No `delivery` key, `not_sent` or `uncertain` classification appears on the message notification surfaces: `message send` / `message wait` output, preview notification diagnostics, and their docs, SPEC.md passages and tests. `member prompt` / `member exec` dispatch uncertainty and the multiplexer's `submission_started` classifier are a separate surface and stay.
-- [ ] Every preview notification failure emits the single not-notified diagnostic defined in § Notification diagnostic, `message wait` retains one diagnostic per not-notified message, and a later send or `message wait` re-notifies the message.
-- [ ] One `message send` or `message wait` invocation attempts each pending message's notification at most once.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build` pass.
+- [x] `cafleet member create --coding-agent opencode` spawns `opencode mini --standalone --agent cafleet [--model M] --prompt P`; an opencode v2.1.4 member reaches `ready`, receives a pushed `[cafleet msg …]` line as a submitted user turn, and polls/ACKs it.
+- [x] No source, test, doc, skill or rule mentions opencode 1.x or the bare `opencode` TUI argv; every opencode behavior the docs assert is either observed on v2.1.4 by a Step 10 probe or stated as unverified; the docs state opencode 2 as the minimum supported version.
+- [x] The embedded preset declares its command allowlist under the `shell` permission key, and `opencode debug agents` (v2.1.4) lists the allowlist under `shell` and every other preset permission key.
+- [x] No backend section or Template in `skills/cafleet/reference/coding-agents.md` contains a `Pane-state capture cues` subsection; `.claude/rules/coding-agent-overlay.md` specifies four subsections.
+- [x] `skills/cafleet/reference/supervision.md` carries one capture-reading rule (≈20-line default capture, `--lines` for more, empty composer ≠ completion) and no Idle Semantics evidence table; no retained-draft detection or preservation procedure remains in any skill, doc or SPEC.
+- [x] Migration `V3__drop_preview_claims.sql` drops `messages.preview_started_at`; a V2 database upgrades in place with every row preserved, and the chain guard expects `[(1, baseline), (2, preview_attempts), (3, drop_preview_claims)]`.
+- [x] `member list --json` and `member show --json` no longer emit `unconfirmed_previews`.
+- [x] `message wait --json` notification diagnostics have the shape `{member_id, message_id, error}`. No `delivery` key, `not_sent` or `uncertain` classification appears on the message notification surfaces: `message send` / `message wait` output, preview notification diagnostics, and their docs, SPEC.md passages and tests. `member prompt` / `member exec` dispatch uncertainty and the multiplexer's `submission_started` classifier are a separate surface and stay.
+- [x] Every preview notification failure emits the single not-notified diagnostic defined in § Notification diagnostic, `message wait` retains one diagnostic per not-notified message, and a later send or `message wait` re-notifies the message.
+- [x] One `message send` or `message wait` invocation attempts each pending message's notification at most once.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build` pass.
 
 ---
 
@@ -88,8 +88,10 @@ These are verified during implementation (Step 10) and recorded in both homes �
 | P2 | Every preset permission key is a v2 permission name | Install the renamed preset into `<scratch>` (`cafleet setup --coding-agent opencode` with `OPENCODE_CONFIG_DIR=<scratch>`), run `opencode debug agents`, and confirm `shell`, `read`, `edit`, `external_directory`, `webfetch`, `websearch`, `repo_clone`, `question`, `plan_enter` and `plan_exit` each appear with the preset's decisions | Preset verbatim copy (SPEC.md), `coding-agent-backends.md` § preset and § Safety-floor caveats |
 | P3 | Last matching rule wins | From the scratch member, attempt `cafleet member prompt <id> x`; observe a denial without a permission popup, while `cafleet message poll <id>` runs | `coding-agent-backends.md` § preset ("selects the **last** matching rule") and its SPEC.md copy |
 | P4 | `mini --standalone` member spawn | Spawn one opencode member with the repo-built binary in a scratch fleet; observe its `ready` | `coding-agent-backends.md` spawn table and § Opencode; SPEC.md argv block |
-| P5 | Push notification and `member prompt` into `mini` | Send a message from the scratch Director to the member; `member capture` shows the `[cafleet msg …]` line submitted as a user turn, and the member polls and ACKs it. Then `member prompt` a short instruction and observe it submitted | `multiplexer-backends.md` § Prompt dispatch and § Accepted trade-offs and their SPEC.md copies |
+| P5 | Push notification and `member prompt` into `mini` | Send a message from the scratch Director to the member; capture and the retained mini session establish the exact `[cafleet msg …]` user turn, poll and ACK. Then `member prompt` a short instruction and observe its exact user turn. When capture contains only the status bar, retain that limitation and use the session records for submission evidence. | `multiplexer-backends.md` § Prompt dispatch and § Accepted trade-offs and their SPEC.md copies |
 | P6 | Leading-`!` native shell input in `mini` (used by `member exec`) | `cafleet member exec <id> "pwd"` into that member, then `member capture` | Listed below |
+
+The owning living documentation states supported behavior and usage-relevant limits directly in the section that owns each fact. Probe IDs, procedures, dates, fixture/model details, parser-disambiguation steps and evidence provenance stay in this design document and retained verification reports. Configuration-source merging and capture visibility remain in the relevant specifications because they affect how users configure and supervise members.
 
 Outcomes:
 
@@ -108,6 +110,12 @@ P6 rewrites, from the observed result, every text that asserts leading-`!` input
 | SPEC.md § backend notes | The **opencode** paragraph's "The TUI documents leading `!` input …" sentence |
 
 A v2 provenance link replaces the v1 one only when an official v2 page documents the behavior. Probes run in a scratch fleet and a scratch `OPENCODE_CONFIG_DIR` with the repo-built binary, so the active executing fleet's installed runtime and assets stay intact.
+
+#### Herdr literal input correction from live verification
+
+The initial P5/P6 run on herdr 0.9.5 retained a literal `-- ` prefix on every delivered input. `herdr pane send-text --help` specifies `<PANE_ID> <TEXT>`; CAFleet supplied the extra positional argument `--`. The malformed `-- ! pwd` became a conversational turn. A Director-owned diagnostic with exactly `herdr pane send-text PANE "! pwd"` followed by Enter produced a native shell record with command ` pwd`, exit 0 and the repository path on opencode 2.1.4. The observed defect belongs to herdr argument construction; this result requires no replacement native-command routing choice.
+
+Herdr literal writes pass the validated payload as one TEXT argument: `["herdr", "pane", "send-text", PANE, TEXT]`. Tmux retains its own `--` option terminator. The shared input guard, Escape lead, settling, Enter, operation deadline and dispatch-result semantics stay intact. The transport table and its SPEC.md copy state each backend's exact argv. Tests assert exact payload preservation for leading hyphens, metacharacters and `! ` native input. Rebuild and freeze the corrected repo runtime, retain its hash, and rerun P5/P6 through that runtime before recording the final observed result. Preserve the original malformed-input evidence separately.
 
 ### Part 2 — Remove per-backend pane-state capture cues
 
@@ -330,84 +338,90 @@ Documentation first (docs/, README, SPEC, skills, rules), then code, per `.claud
 
 ### Step 1: Human-facing docs (`docs/`)
 
-- [ ] `docs/docs/spec/coding-agent-backends.md`: opencode argv row, `mini --standalone` paragraph, preset `shell` ruleset, minimum-version sentence, claude composer-serialization sentences removed; leading-`!` texts (P6 table) state the behavior as unverified for `mini` until Step 10 <!-- completed: -->
-- [ ] `docs/docs/concepts/coding-agents.md`: Sandbox isolation row says "a deny-by-default shell allowlist"; the leading-`!` sentence states the behavior as unverified for `mini` until Step 10 <!-- completed: -->
-- [ ] `docs/docs/concepts/member-lifecycle.md`: replace the retained-draft sentence with the capture-reading rule <!-- completed: -->
-- [ ] `docs/docs/spec/cli-options.md`: member list/show, message send, wait and listen per Part 4 <!-- completed: -->
-- [ ] `docs/docs/spec/data-model.md` and `docs/docs/spec/message-envelope.md`: drop `preview_started_at`, claim and `unconfirmed_previews` <!-- completed: -->
-- [ ] `docs/docs/spec/multiplexer-backends.md`: drain, lock, failure table and retry rules per Part 4; reword the composer-text limitation bullet <!-- completed: -->
-- [ ] `docs/docs/how-to/mixed-backend-team.md`: drop the `unconfirmed_previews` clause <!-- completed: -->
+- [x] `docs/docs/spec/coding-agent-backends.md`: opencode argv row, `mini --standalone` paragraph, preset `shell` ruleset, minimum-version sentence, claude composer-serialization sentences removed; leading-`!` texts (P6 table) state the behavior as unverified for `mini` until Step 10 <!-- completed: 2026-10-25T05:12 -->
+- [x] `docs/docs/concepts/coding-agents.md`: Sandbox isolation row says "a deny-by-default shell allowlist"; the leading-`!` sentence states the behavior as unverified for `mini` until Step 10 <!-- completed: 2026-10-25T05:12 -->
+- [x] `docs/docs/concepts/member-lifecycle.md`: replace the retained-draft sentence with the capture-reading rule <!-- completed: 2026-10-25T05:12 -->
+- [x] `docs/docs/spec/cli-options.md`: member list/show, message send, wait and listen per Part 4 <!-- completed: 2026-10-25T05:12 -->
+- [x] `docs/docs/spec/data-model.md` and `docs/docs/spec/message-envelope.md`: drop `preview_started_at`, claim and `unconfirmed_previews` <!-- completed: 2026-10-25T05:13 -->
+- [x] `docs/docs/spec/multiplexer-backends.md`: drain, lock, failure table and retry rules per Part 4; reword the composer-text limitation bullet <!-- completed: 2026-10-25T05:13 -->
+- [x] `docs/docs/how-to/mixed-backend-team.md`: drop the `unconfirmed_previews` clause <!-- completed: 2026-10-25T05:13 -->
 
 ### Step 2: README.md and SPEC.md
 
-- [ ] Run the `/update-readme` reconciliation; confirm README.md needs no change (it carries no affected surface) <!-- completed: -->
-- [ ] SPEC.md: opencode argv block and prose, verbatim preset copy (`shell`), claude composer sentences removed, composer limitation bullet reworded <!-- completed: -->
-- [ ] SPEC.md: storage validation, roster, member list/show, message send/wait/listen, drain, lock, failure table, retry and pane-input budget passages per Part 4 <!-- completed: -->
+- [x] Run the `/update-readme` reconciliation; confirm README.md needs no change (it carries no affected surface) <!-- completed: 2026-10-25T05:14 -->
+- [x] SPEC.md: opencode argv block and prose, verbatim preset copy (`shell`), claude composer sentences removed, composer limitation bullet reworded <!-- completed: 2026-10-25T05:14 -->
+- [x] SPEC.md: storage validation, roster, member list/show, message send/wait/listen, drain, lock, failure table, retry and pane-input budget passages per Part 4 <!-- completed: 2026-10-25T05:15 -->
 
 ### Step 3: Agent-facing skills
 
-- [ ] `skills/cafleet/reference/coding-agents.md`: delete every cue subsection and the Template one, the reader-table row, example and ownership mentions; delete the claude composer note row; the opencode leading-`!` note row states the behavior as unverified for `mini` until Step 10 <!-- completed: -->
-- [ ] `skills/cafleet/SKILL.md` § Resolve your overlay: delete captured-pane step text and example <!-- completed: -->
-- [ ] `skills/cafleet/reference/supervision.md`: Reading captures section, Director wake steps 4–5, Sender follow-up, Team-facilitation, Escalation, Recovery; retarget `#idle-semantics` links <!-- completed: -->
-- [ ] `skills/cafleet/roles/director.md`: Member List, Member Prompt draft sentence, Director wake summary <!-- completed: -->
-- [ ] `skills/cafleet-design-doc/{create,interview,execute}` bodies and roles: drop pane-cue and `unconfirmed_previews` mentions <!-- completed: -->
-- [ ] `.claude/skills/clean-docs/SKILL.md` and `.claude/skills/cafleet-model-list-refresh/SKILL.md`: drop capture-cue mentions <!-- completed: -->
+- [x] `skills/cafleet/reference/coding-agents.md`: delete every cue subsection and the Template one, the reader-table row, example and ownership mentions; delete the claude composer note row; the opencode leading-`!` note row states the behavior as unverified for `mini` until Step 10 <!-- completed: 2026-10-25T05:17 -->
+- [x] `skills/cafleet/SKILL.md` § Resolve your overlay: delete captured-pane step text and example <!-- completed: 2026-10-25T05:17 -->
+- [x] `skills/cafleet/reference/supervision.md`: Reading captures section, Director wake steps 4–5, Sender follow-up, Team-facilitation, Escalation, Recovery; retarget `#idle-semantics` links <!-- completed: 2026-10-25T05:17 -->
+- [x] `skills/cafleet/roles/director.md`: Member List, Member Prompt draft sentence, Director wake summary <!-- completed: 2026-10-25T05:18 -->
+- [x] `skills/cafleet-design-doc/{create,interview,execute}` bodies and roles: drop pane-cue and `unconfirmed_previews` mentions <!-- completed: 2026-10-25T05:18 -->
+- [x] `.claude/skills/clean-docs/SKILL.md` and `.claude/skills/cafleet-model-list-refresh/SKILL.md`: drop capture-cue mentions <!-- completed: 2026-10-25T05:18 -->
 
 ### Step 4: Project rules
 
-- [ ] `.claude/rules/coding-agent-overlay.md`: four subsections, two reader-contract rows, example sentence trimmed <!-- completed: -->
-- [ ] Documentation sweep: § Residue sweep with the pathspec narrowed to `docs SPEC.md README.md skills .claude`; every match is an allowed match <!-- completed: -->
+- [x] `.claude/rules/coding-agent-overlay.md`: four subsections, two reader-contract rows, example sentence trimmed <!-- completed: 2026-10-25T05:19 -->
+- [x] Documentation sweep: § Residue sweep with the pathspec narrowed to `docs SPEC.md README.md skills .claude`; every match is an allowed match <!-- completed: 2026-10-25T05:19 -->
 
 ### Step 5: opencode spawn and preset
 
-- [ ] Rewrite `spawn_argv_uses_the_prompt_flag_pair_and_ignores_display_name` to pin `opencode mini --standalone --agent cafleet [--model M] --prompt P` (test first) <!-- completed: -->
-- [ ] Update `build_spawn_argv` and the module doc comment in `cafleet/src/coding_agent/opencode.rs` <!-- completed: -->
-- [ ] `presets/opencode/cafleet.md`: `bash` → `shell` key, description and body wording <!-- completed: -->
-- [ ] Update `cafleet/tests/docs_sync.rs` preset/SPEC verbatim checks for the renamed key <!-- completed: -->
+- [x] Rewrite `spawn_argv_uses_the_prompt_flag_pair_and_ignores_display_name` to pin `opencode mini --standalone --agent cafleet [--model M] --prompt P` (test first) <!-- completed: 2026-10-25T05:23 -->
+- [x] Update `build_spawn_argv` and the module doc comment in `cafleet/src/coding_agent/opencode.rs` <!-- completed: 2026-10-25T05:24 -->
+- [x] `presets/opencode/cafleet.md`: `bash` → `shell` key, description and body wording <!-- completed: 2026-10-25T05:25 -->
+- [x] Update `cafleet/tests/docs_sync.rs` preset/SPEC verbatim checks for the renamed key <!-- completed: 2026-10-25T05:25 -->
 
 ### Step 6: Migration V3
 
-- [ ] Test first: chain test expects V3; head-shape test drops `preview_started_at`; storage_format test upgrades a V2 database containing a claimed-unstamped pending row and asserts every row survives and the column is gone <!-- completed: -->
-- [ ] Add `cafleet/migrations/V3__drop_preview_claims.sql` <!-- completed: -->
-- [ ] Update the expected chain registry and head shape in `cafleet/src/db/mod.rs`; rewrite `db/mod.rs` tests that read `preview_started_at` <!-- completed: -->
+- [x] Test first: chain test expects V3; head-shape test drops `preview_started_at`; storage_format test upgrades a V2 database containing a claimed-unstamped pending row and asserts every row survives and the column is gone <!-- completed: 2026-10-25T05:29 -->
+- [x] Add `cafleet/migrations/V3__drop_preview_claims.sql` <!-- completed: 2026-10-25T05:29 -->
+- [x] Update the expected chain registry and head shape in `cafleet/src/db/mod.rs`; rewrite `db/mod.rs` tests that read `preview_started_at` <!-- completed: 2026-10-25T05:29 -->
 
 ### Step 7: At-least-once delivery
 
-- [ ] Test first (`cafleet/tests/notification_retry.rs`, `cafleet/tests/delivery.rs`): a failed preview (busy lock, transport failure before typing, failure after typing began, stamp failure) leaves `notified_at` NULL and the next send re-notifies it; the formerly-upgraded claimed row is re-notified <!-- completed: -->
-- [ ] Test first (`receive.rs` unit tests, `cafleet/tests/message_wait.rs`): one wait attempts each pending message at most once; a later message for the same member stays eligible; a later wait retries the failed one; reconciliation removes entries on ACK, departure or external notification <!-- completed: -->
-- [ ] Test first: every per-attempt failure path emits the exact not-notified diagnostic; `message wait --json` errors are `{member_id, message_id, error}`; a fatal storage error in the under-lock snapshot or stamp makes `message wait` exit 1 with its cause and attached diagnostics, and makes `message send` print `Message NEW_ID was persisted. CAUSE` <!-- completed: -->
-- [ ] `cafleet/src/broker/messaging.rs`: delete `claim_preview`, `release_preview`; `oldest_pending_preview` drops the claim filter and accepts the `attempted` exclusion <!-- completed: -->
-- [ ] `cafleet/src/broker/panes.rs`: `pending_previews` returns `(member_id, message_id)` <!-- completed: -->
-- [ ] `cafleet/src/delivery.rs`: drain procedure per § Drain procedure, `attempted` parameter, diagnostic helper; delete claim types and claim tests <!-- completed: -->
-- [ ] `cafleet/src/receive.rs`: delete `Delivery`, `NotificationError.delivery`, `PendingPreview.started`, synthetic no-stamp error; add `attempted` set; `attach_diagnostics` <!-- completed: -->
-- [ ] `cafleet/src/runtime` and `cafleet/src/cli/message.rs`: forward `attempted`; JSON diagnostics without `delivery` <!-- completed: -->
-- [ ] Rewrite `cafleet/src/listen_tests.rs`, `cafleet/tests/message_listen.rs`, `cafleet/tests/pane_input.rs`, `cafleet/tests/cli_message.rs` and `cafleet/tests/common/receive.rs` fixtures that set `preview_started_at` or `Delivery`; delete tests that exist only for claim suspension <!-- completed: -->
+- [x] Test first (`cafleet/tests/notification_retry.rs`, `cafleet/tests/delivery.rs`): a failed preview (busy lock, transport failure before typing, failure after typing began, stamp failure) leaves `notified_at` NULL and the next send re-notifies it; the formerly-upgraded claimed row is re-notified <!-- completed: 2026-10-25T05:46 -->
+- [x] Test first (`receive.rs` unit tests, `cafleet/tests/message_wait.rs`): one wait attempts each pending message at most once; a later message for the same member stays eligible; a later wait retries the failed one; reconciliation removes entries on ACK, departure or external notification <!-- completed: 2026-10-25T05:46 -->
+- [x] Test first: every per-attempt failure path emits the exact not-notified diagnostic; `message wait --json` errors are `{member_id, message_id, error}`; a fatal storage error in the under-lock snapshot or stamp makes `message wait` exit 1 with its cause and attached diagnostics, and makes `message send` print `Message NEW_ID was persisted. CAUSE` <!-- completed: 2026-10-25T05:46 -->
+- [x] `cafleet/src/broker/messaging.rs`: delete `claim_preview`, `release_preview`; `oldest_pending_preview` drops the claim filter and accepts the `attempted` exclusion <!-- completed: 2026-10-25T05:46 -->
+- [x] `cafleet/src/broker/panes.rs`: `pending_previews` returns `(member_id, message_id)` <!-- completed: 2026-10-25T05:46 -->
+- [x] `cafleet/src/delivery.rs`: drain procedure per § Drain procedure, `attempted` parameter, diagnostic helper; delete claim types and claim tests <!-- completed: 2026-10-25T05:47 -->
+- [x] `cafleet/src/receive.rs`: delete `Delivery`, `NotificationError.delivery`, `PendingPreview.started`, synthetic no-stamp error; add `attempted` set; `attach_diagnostics` <!-- completed: 2026-10-25T05:47 -->
+- [x] `cafleet/src/runtime` and `cafleet/src/cli/message.rs`: forward `attempted`; JSON diagnostics without `delivery` <!-- completed: 2026-10-25T05:47 -->
+- [x] Rewrite `cafleet/src/listen_tests.rs`, `cafleet/tests/message_listen.rs`, `cafleet/tests/pane_input.rs`, `cafleet/tests/cli_message.rs` and `cafleet/tests/common/receive.rs` fixtures that set `preview_started_at` or `Delivery`; delete tests that exist only for claim suspension <!-- completed: 2026-10-25T05:51 -->
 
 ### Step 8: Member list and show output
 
-- [ ] Test first: `member list --json` and `member show --json` key sets equal the current contract without `unconfirmed_previews` (`cafleet/tests/cli_member.rs`, `broker/members.rs` tests) <!-- completed: -->
-- [ ] Delete `MemberActivity.unconfirmed_previews`, `broker::members::unconfirmed_previews`, its roster population, and the key in `presentation::member_activity` / `member_detail`; simplify `cli/member.rs::show` <!-- completed: -->
+- [x] Test first: `member list --json` and `member show --json` key sets equal the current contract without `unconfirmed_previews` (`cafleet/tests/cli_member.rs`, `broker/members.rs` tests, and the `storage_format::member_output_uses_registration_fields_and_the_director_back_reference` assertion); rerun the two deferred Step 6 member-show tests <!-- completed: 2026-10-25T05:58 -->
+- [x] Delete `MemberActivity.unconfirmed_previews`, `broker::members::unconfirmed_previews`, its roster population, and the key in `presentation::member_activity` / `member_detail`; simplify `cli/member.rs::show` <!-- completed: 2026-10-25T05:57 -->
 
 ### Step 9: Docs-sync assertions
 
-- [ ] `cafleet/tests/docs_sync.rs`: delete cue-subsection and draft-phrase assertions; assert the four-subsection backend structure and the Reading captures rule <!-- completed: -->
-- [ ] `cafleet/tests/docs_sync.rs`: update claim/`unconfirmed_previews`/`uncertain` phrase assertions to the at-least-once wording <!-- completed: -->
-- [ ] `cafleet/tests/docs_sync.rs`: replace the verbatim old lock-busy preview string with the not-notified diagnostic template <!-- completed: -->
+- [x] `cafleet/tests/docs_sync.rs`: delete cue-subsection and draft-phrase assertions; assert the four-subsection backend structure and the Reading captures rule <!-- completed: 2026-10-25T06:03 -->
+- [x] `cafleet/tests/docs_sync.rs`: update claim/`unconfirmed_previews`/`uncertain` phrase assertions to the at-least-once wording <!-- completed: 2026-10-25T06:03 -->
+- [x] `cafleet/tests/docs_sync.rs`: replace the verbatim old lock-busy preview string with the not-notified diagnostic template <!-- completed: 2026-10-25T06:03 -->
+
+### Step 9a: Herdr literal input correction from live verification
+
+- [x] `docs/docs/spec/multiplexer-backends.md` and SPEC.md: specify herdr `pane send-text PANE TEXT` and scope the `--` terminator explanation to tmux <!-- completed: 2026-10-25T06:27 -->
+- [x] Herdr unit and pane-input integration tests: assert one exact TEXT argument, including leading hyphens, metacharacters and native `! ` input <!-- completed: 2026-10-25T06:34 -->
+- [x] `cafleet/src/multiplexer/herdr.rs`: pass the payload directly after the pane ID; preserve shared guard, timing and dispatch semantics <!-- completed: 2026-10-25T06:34 -->
 
 ### Step 10: Verification and live probes
 
-- [ ] `mise //cafleet:test` <!-- completed: -->
-- [ ] `mise //cafleet:lint` <!-- completed: -->
-- [ ] `mise //cafleet:typecheck` <!-- completed: -->
-- [ ] `mise //docs:build`; inspect rendered tables touched in Parts 2–4 <!-- completed: -->
-- [ ] Probe P1: `OPENCODE_CONFIG_DIR` honored by `opencode debug config` <!-- completed: -->
-- [ ] Probe P2: install the renamed preset into the scratch config dir; `opencode debug agents` lists `shell` and every other preset permission key with its decisions <!-- completed: -->
-- [ ] Probe P4: in a scratch fleet using the repo-built binary, spawn an opencode member with `mini --standalone`; confirm `ready` <!-- completed: -->
-- [ ] Probe P3: the scratch member's `cafleet member prompt` attempt is denied without a popup while `cafleet message poll` runs <!-- completed: -->
-- [ ] Probe P5: a pushed message reaches the member as a submitted user turn and is polled/ACKed; a `member prompt` is submitted <!-- completed: -->
-- [ ] Probe P6: `cafleet member exec` with leading-`!` input and `member capture` <!-- completed: -->
-- [ ] Record every probe result in the owning docs per § Verification and open items; on a contradicted probe, stop and report it to the Director <!-- completed: -->
-- [ ] Rerun § Residue sweep repository-wide; every match is an allowed match <!-- completed: -->
+- [x] `mise //cafleet:test` <!-- completed: 2026-10-25T06:44 -->
+- [x] `mise //cafleet:lint` <!-- completed: 2026-10-25T06:09 -->
+- [x] `mise //cafleet:typecheck` <!-- completed: 2026-10-25T06:09 -->
+- [x] `mise //docs:build`; inspect rendered tables touched in Parts 2–4 <!-- completed: 2026-10-25T07:05 -->
+- [x] Probe P1: `OPENCODE_CONFIG_DIR` honored by `opencode debug config` <!-- completed: 2026-10-25T05:16 -->
+- [x] Probe P2: install the renamed preset into the scratch config dir; `opencode debug agents` lists `shell` and every other preset permission key with its decisions <!-- completed: 2026-10-25T05:56 -->
+- [x] Probe P4: in a scratch fleet using the repo-built binary, spawn an opencode member with `mini --standalone`; confirm `ready` <!-- completed: 2026-10-25T06:26 -->
+- [x] Probe P3: the scratch member's `cafleet member prompt` attempt is denied without a popup while `cafleet message poll` runs <!-- completed: 2026-10-25T06:26 -->
+- [x] Probe P5: a pushed message reaches the member as a submitted user turn and is polled/ACKed; a `member prompt` is submitted <!-- completed: 2026-10-25T06:41 -->
+- [x] Probe P6: `cafleet member exec` with leading-`!` input and `member capture` <!-- completed: 2026-10-25T06:41 -->
+- [x] Record every probe result in the owning docs per § Verification and open items; on a contradicted probe, stop and report it to the Director <!-- completed: 2026-10-25T06:50 -->
+- [x] Rerun § Residue sweep repository-wide; every match is an allowed match <!-- completed: 2026-10-25T06:52 -->
 
 ---
 
@@ -416,3 +430,5 @@ Documentation first (docs/, README, SPEC, skills, rules), then code, per `.claud
 | Date | Changes |
 |------|---------|
 | 2026-10-25 | Initial draft |
+| 2026-10-25 | Live probes isolated the herdr literal-input prefix defect; add its transport correction and exact-input rerun, and retain session evidence when mini capture exposes only the status bar. |
+| 2026-10-25 | Completed all 54 implementation tasks and 11 success criteria. Independent review approved after one documentation revision; all required checks and live probes passed. Published [PR #493](https://github.com/himkt/cafleet/pull/493). The user authorized committing this completed design document; audit artifacts remain outside version control. |
