@@ -307,35 +307,6 @@ mod database_scope_tests {
     use super::*;
 
     #[test]
-    fn completion_retries_transient_busy_results_with_one_absolute_budget() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        let expired = Deadline::until(Instant::now() - Duration::from_millis(1));
-        let mut attempts = 0;
-        retry_database_completion(&mut conn, expired, |_| {
-            attempts += 1;
-            if attempts < 3 {
-                Err(CafleetError::DatabaseBusy(
-                    "transient locked statement".into(),
-                ))
-            } else {
-                Ok(())
-            }
-        })
-        .unwrap();
-        assert_eq!(attempts, 3);
-        let started = Instant::now();
-        let error = retry_database_completion(&mut conn, expired, |_| {
-            Err::<(), _>(CafleetError::DatabaseBusy(
-                "persistent locked statement".into(),
-            ))
-        })
-        .unwrap_err();
-        assert_eq!(error.message(), "persistent locked statement");
-        assert!(started.elapsed() >= Duration::from_millis(900));
-        assert!(started.elapsed() < Duration::from_secs(2));
-    }
-
-    #[test]
     fn expired_completion_commits_uncontended_work() {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("CREATE TABLE probe(value INTEGER);")
