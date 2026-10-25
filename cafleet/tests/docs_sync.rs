@@ -24,12 +24,11 @@ mod structural_contracts {
         "skill_loader",
         "effort_levels",
     ];
-    const SUBSECTIONS: [&str; 5] = [
+    const SUBSECTIONS: [&str; 4] = [
         "runtime-bindings",
         "role-defaults",
         "model-catalog",
         "note--applies-at",
-        "pane-state-capture-cues",
     ];
     const DEFAULTS: [&str; 4] = [
         "reviewer_model",
@@ -814,50 +813,48 @@ mod structural_contracts {
     }
 
     #[test]
-    fn backend_capture_cues_are_director_inspection_guidance() {
-        let document = INVENTORY.document(BACKENDS);
-        for backend in ["claude", "codex", "opencode"] {
-            let section = document.section(backend).unwrap();
-            let cues = section.section("pane-state-capture-cues").unwrap();
-            cues.require(&["member capture", "fleet capture"]).unwrap();
-            cues.require_pattern(
-                "cues guide Director visual inspection",
-                r"(?i)Director.{0,20}(visual )?inspection",
-            );
-            cues.require_pattern(
-                "delivery and dispatch never consult the cues",
-                r"(?i)delivery and dispatch do not consult",
-            );
-            assert!(
-                !cues.text.contains("transport evidence"),
-                "{}",
-                cues.error(
-                    cues.line,
-                    "capture cues are not transport readiness evidence"
-                )
-            );
-            let rows = cues.rows().unwrap();
-            let actual = rows
-                .iter()
-                .skip(2)
-                .map(|(_, row)| row[0].trim_matches('`'))
-                .collect::<BTreeSet<_>>();
-            assert_eq!(
-                actual,
-                BTreeSet::from(["idle", "working", "awaiting_user", "draft", "unknown"]),
-                "{}",
-                cues.error(
-                    cues.line,
-                    "capture cues must distinguish empty, active and retained input"
-                )
-            );
-            assert_eq!(
-                rows.len() - 2,
-                actual.len(),
-                "{}",
-                cues.error(cues.line, "duplicate state")
-            );
-        }
+    fn capture_reading_uses_content_and_assignment_evidence() {
+        let captures = INVENTORY
+            .document(SUPERVISION)
+            .section("reading-captures")
+            .unwrap();
+        captures
+            .require(&[
+                "cafleet member capture <member-id>",
+                "20",
+                "--lines",
+                "messages and artifacts",
+            ])
+            .unwrap();
+        captures.require_pattern(
+            "captures guide actions independently of delivery and dispatch",
+            r"(?is)Captures guide your next action only.{0,60}delivery and dispatch never consult them",
+        );
+        captures.require_pattern(
+            "an empty composer requires completion evidence",
+            r"(?is)empty composer does not establish task completion",
+        );
+        captures.require_pattern(
+            "assignment deadlines belong to the Director",
+            r"(?is)Expected ready/reply deadlines belong to the assignment.{0,60}checked by the Director",
+        );
+        let rule = INVENTORY.document(".claude/rules/coding-agent-overlay.md");
+        rule.section("where-backend-specifics-live")
+            .unwrap()
+            .require(&["four subsections"])
+            .unwrap();
+        let readers = rule.section("reader-contract").unwrap().rows().unwrap();
+        assert_eq!(
+            readers.len(),
+            4,
+            "the reader contract defines its two selecting operations"
+        );
+        let lifecycle = INVENTORY.document("docs/docs/concepts/member-lifecycle.md");
+        lifecycle.require(&["20", "--lines"]).unwrap();
+        lifecycle.require_pattern(
+            "human capture guidance judges completion from task evidence",
+            r"(?is)empty composer does not mean the task is complete",
+        );
     }
 
     #[test]
@@ -1103,10 +1100,6 @@ mod structural_contracts {
             "prompt rejects the Director's own pane",
             r"(?i)rejects the Director's own pane",
         );
-        prompt.require_pattern(
-            "retained draft check before prompting",
-            r"(?is)draft.{0,80}before prompting",
-        );
         INVENTORY
             .document(DIRECTOR)
             .section("member-capture")
@@ -1243,18 +1236,20 @@ mod structural_contracts {
                 .section("member-list-output")
                 .unwrap()
                 .require(&[
-                    "unconfirmed_previews",
+                    "member_id",
+                    "name",
+                    "kind",
+                    "placement",
+                    "last_sent",
+                    "last_recv",
+                    "last_ack",
                     "idle",
-                    "preview_started_at",
-                    "notified_at",
-                    "input_required",
-                    "(created_at, message_id)",
                 ])
                 .unwrap();
             document
                 .section("member-show")
                 .unwrap()
-                .require(&["unconfirmed_previews", "last key"])
+                .require(&["kind", "placement", "--json"])
                 .unwrap();
         }
         spec.section("member-capture")
@@ -1400,8 +1395,6 @@ mod structural_contracts {
             "cafleet fleet capture",
             "cafleet member capture",
             "cafleet member list <fleet-id> --json",
-            "unconfirmed_previews",
-            "cafleet member prompt <member-id> \"cafleet message poll <member-id> --json\"",
             "ready",
             "message",
             "closed",
@@ -1424,10 +1417,6 @@ mod structural_contracts {
         supervision.require_pattern(
             "deferred actions remain host-owned",
             r"(?is)deferred.{0,120}host-owned",
-        );
-        supervision.require_pattern(
-            "retained draft relay",
-            r"(?is)(draft|did not submit).{0,220}(relay|ask the user)",
         );
         wake.require_pattern(
             "required decisions await operator answers",
@@ -1501,7 +1490,7 @@ mod structural_contracts {
         );
         supervision.require_pattern(
             "captures never gate delivery",
-            r"(?is)delivery and dispatch never wait on (them|captures)",
+            r"(?is)delivery and dispatch never consult them",
         );
         for path in [CORE, DIRECTOR] {
             INVENTORY
@@ -1598,6 +1587,12 @@ mod structural_contracts {
     fn wait_specifies_bounded_results_and_notification_retry_ownership() {
         for path in ["docs/docs/spec/cli-options.md", "SPEC.md"] {
             let wait = INVENTORY.document(path).section("message-wait").unwrap();
+            INVENTORY
+                .document(path)
+                .section("message-send")
+                .unwrap()
+                .require(&["message MESSAGE_ID was not notified to member MEMBER_ID: CAUSE; the next send to member MEMBER_ID or the next message wait retries it."])
+                .unwrap();
             wait.require(&[
                 "--timeout",
                 "300",
@@ -1607,9 +1602,11 @@ mod structural_contracts {
                 "messages",
                 "notification_errors",
                 "message_id",
-                "delivery",
-                "not_sent",
-                "uncertain",
+                "error",
+                "{member_id, message_id, error}",
+                "one diagnostic per not-notified message",
+                "ordered by message ID",
+                "retains earlier notification diagnostics",
             ])
             .unwrap();
             wait.require_pattern("monotonic deadline", r"(?i)monotonic");
@@ -1627,6 +1624,14 @@ mod structural_contracts {
                 r"(?is)(exit.{0,40}0|0.{0,40}(exit|outcome))",
             );
             wait.require_pattern("diagnostics revalidated", r"(?i)revalidat\w*");
+            wait.require_pattern(
+                "each pending message is attempted at most once per invocation",
+                r"(?is)One invocation attempts each pending message at most once",
+            );
+            wait.require_pattern(
+                "later messages for the same recipient remain eligible",
+                r"(?is)later messages for the same member remain eligible",
+            );
             wait.require(&["ACK", "Director"]).unwrap();
         }
     }
@@ -1647,7 +1652,7 @@ mod structural_contracts {
             "Body is N characters; run cafleet message show MESSAGE_ID --json to read it.",
             "4000",
             "CAFLEET_MAX_TEXT_LEN",
-            "unconfirmed_previews",
+            "at-least-once",
         ])
         .unwrap();
         mux.require_pattern(
@@ -1676,8 +1681,12 @@ mod structural_contracts {
             r"(?is)leaves `status_state` unchanged.{0,200}ACK",
         );
         mux.require_pattern(
-            "a retained draft can merge with a delivery",
-            r"(?is)draft.{0,240}merge",
+            "unsent composer text may be submitted with a notification",
+            r"(?is)unsent text.{0,100}submitted together with the delivered line",
+        );
+        mux.require_pattern(
+            "partially submitted notifications remain retryable",
+            r"(?is)next send.{0,100}message wait.{0,80}retries it.{0,180}appear twice",
         );
         mux.require_pattern(
             "retry rotation selects other ordinary members",
@@ -1687,7 +1696,7 @@ mod structural_contracts {
             .document("docs/docs/spec/cli-options.md")
             .section("message-send")
             .unwrap();
-        send.require(&["notification_sent", "persisted", "preview"])
+        send.require(&["notification_sent", "persisted", "notification"])
             .unwrap();
         send.require_pattern(
             "committed send remains successful",
@@ -1838,7 +1847,6 @@ mod structural_contracts {
                     "created_at ASC, message_id ASC",
                     "input_required",
                     "notified_at",
-                    "preview_started_at",
                     "poll --json",
                     "show --json",
                     "ACK",
@@ -1866,7 +1874,10 @@ mod structural_contracts {
                 "restart replays pending records",
                 r"(?is)restart replays.{0,30}pending IDs",
             );
-            listen.require_pattern("listener consumption and preview fields remain unchanged", r"(?is)leaves consumption.{0,100}notified_at.{0,100}preview_started_at.{0,50}unchanged");
+            listen.require_pattern(
+                "listener consumption and notification state remain unchanged",
+                r"(?is)leaves consumption.{0,100}notified_at.{0,50}unchanged",
+            );
             listen.require_pattern(
                 "snapshot completion precedes output and sleep",
                 r"(?is)Commit before output or sleep",
@@ -2134,7 +2145,7 @@ mod structural_contracts {
     }
 
     #[test]
-    fn input_contract_preserves_drafts_and_serializes_complete_submission() {
+    fn input_contract_serializes_complete_submission_and_bounds_lock_ownership() {
         let mux = INVENTORY.document("docs/docs/spec/multiplexer-backends.md");
         mux.require(&[
             ".pane-locks/",
@@ -2142,7 +2153,7 @@ mod structural_contracts {
             "tmux send-keys -t PANE Escape",
             "herdr pane send-keys PANE escape",
             "insufficient pane input budget for literal input, settle and Enter",
-            "member ID's pane input remained busy; preview MESSAGE_ID was not sent.",
+            "message MESSAGE_ID was not notified to member MEMBER_ID: pane input remained busy; the next send to member MEMBER_ID or the next message wait retries it.",
             "member ID's pane input remained busy; prompt was not dispatched.",
             "member ID's pane input remained busy; native command was not dispatched.",
         ])
@@ -2170,7 +2181,8 @@ mod structural_contracts {
                 "SIGTERM",
                 "SIGHUP",
                 "SIGKILL",
-                "unconfirmed_previews",
+                "notified_at",
+                "duplicate line is possible",
             ])
             .unwrap();
         let backends = INVENTORY.document("docs/docs/spec/coding-agent-backends.md");
