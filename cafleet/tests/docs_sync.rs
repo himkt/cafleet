@@ -1023,8 +1023,16 @@ mod structural_contracts {
         ])
         .unwrap();
         send.require_pattern(
-            "every recipient, the Director included, receives Escape-first lines",
-            r"(?is)Escape-first.{0,80}recipient's pane.{0,40}Director",
+            "ordinary members receive Escape-first pane previews",
+            r"(?is)ordinary.member.{0,80}Escape-first.{0,80}recipient's pane",
+        );
+        send.require_pattern(
+            "the root Director receives through the native inbox stream",
+            r"(?is)root Director.{0,80}(native|message listen)",
+        );
+        send.require_pattern(
+            "Director sends report broker persistence without pane submission",
+            r"(?is)Director.{0,120}notification_sent.{0,20}false",
         );
         let routing = INVENTORY.document(ROUTING);
         routing
@@ -1361,7 +1369,7 @@ mod structural_contracts {
     }
 
     #[test]
-    fn director_wakes_on_delivered_lines_and_polls_each_wake() {
+    fn director_owns_native_reception_and_reconciles_each_received_batch() {
         let supervision = INVENTORY.document(SUPERVISION);
         let wake = supervision.section("director-wake").unwrap();
         wake.require(&[
@@ -1371,38 +1379,58 @@ mod structural_contracts {
             "cafleet member list <fleet-id> --json",
             "unconfirmed_previews",
             "cafleet member prompt <member-id> \"cafleet message poll <member-id> --json\"",
-            "[cafleet msg ID from SENDER TIMESTAMP]",
-            "cafleet message show ID --json",
+            "ready",
+            "message",
+            "closed",
+            "incomplete JSONL",
+            "context compaction",
         ])
         .unwrap();
         wake.require_pattern(
-            "a delivered line wakes the Director",
-            r"(?i)delivered line wakes you",
-        );
-        wake.require_pattern("poll on every wake", r"(?i)(on|every|each).{0,10}wake");
-        wake.require_pattern(
-            "ending the turn is the normal waiting state",
-            r"(?is)end(ing)? (your|the) turn.{0,120}normal waiting state",
+            "one native receiver remains owned across messages",
+            r"(?is)one.{0,30}(owned|native).{0,30}(handle|receiver)",
         );
         wake.require_pattern(
+            "poll on each batch or wake",
+            r"(?i)(on|every|each).{0,35}(batch|wake)",
+        );
+        wake.require_pattern(
+            "empty native output retains the same live receiver",
+            r"(?is)(no output|empty read).{0,100}(same|retain|keep)",
+        );
+        supervision.require_pattern(
             "deferred actions remain host-owned",
-            r"(?is)deferred.{0,180}(host|task|state)",
+            r"(?is)deferred.{0,120}host-owned",
         );
-        wake.require_pattern(
+        supervision.require_pattern(
             "retained draft relay",
             r"(?is)(draft|did not submit).{0,220}(relay|ask the user)",
         );
         wake.require_pattern(
-            "dismissed decision question is re-asked",
-            r"(?is)dismissed.{0,120}re-ask",
+            "required decisions await operator answers",
+            r"(?is)decisions.{0,50}pending.{0,60}(operator|answer)",
         );
-        let continuation = wake.section("waiting-under-host-continuation").unwrap();
-        continuation
-            .require(&["cafleet message wait <director-member-id> --timeout 30 --json"])
+        wake.require_pattern(
+            "automatic Director reception uses stdout and broker reads",
+            r"(?is)Director.{0,70}broker reads and stdout only",
+        );
+        let recovery = wake.section("receiver-recovery").unwrap();
+        recovery
+            .require(&[
+                "Unexpected EOF",
+                "fresh successful",
+                "termination",
+                "manual",
+                "activation",
+                "pause",
+                "completion",
+                "budget",
+                "goal lifecycle",
+            ])
             .unwrap();
-        continuation.require_pattern(
-            "bounded foreground wait only under an active host continuation",
-            r"(?is)active host continuation.{0,200}bounded foreground",
+        recovery.require_pattern(
+            "unknown receiver liveness preserves ownership before replacement",
+            r"(?is)liveness unknown.{0,200}(preserve|retain).{0,100}termination",
         );
         let follow_up = wake.section("sender-follow-up").unwrap();
         follow_up
@@ -1412,10 +1440,38 @@ mod structural_contracts {
             ])
             .unwrap();
         follow_up.require_pattern("exactly one follow-up", r"(?i)exactly one follow-up");
-        supervision.require_pattern(
-            "ACK before ending the turn",
-            r"(?is)ACK.{0,120}before ending the turn",
-        );
+        supervision
+            .section("communication-model")
+            .unwrap()
+            .require(&[
+                "ACK",
+                "consumption",
+                "poll --json",
+                "show --json",
+                "replayed",
+                "completed",
+            ])
+            .unwrap();
+        supervision
+            .section("spawn-protocol")
+            .unwrap()
+            .ordered(&[
+                "cafleet fleet create",
+                "message listen",
+                "ready",
+                "cafleet member create",
+            ])
+            .unwrap();
+        supervision
+            .section("shutdown")
+            .unwrap()
+            .ordered(&[
+                "Consume the final inbox",
+                "cafleet fleet delete",
+                "fleet_deleted",
+                "native task exit",
+            ])
+            .unwrap();
         supervision.require_pattern(
             "explicit user handoff",
             r"(?i)explicit.{0,80}(handoff|hand.{0,10}back)",
@@ -1439,41 +1495,45 @@ mod structural_contracts {
     }
 
     #[test]
-    fn skills_use_message_wait_for_the_director_only_as_the_bounded_continuation_wait() {
-        let command = "cafleet message wait <director-member-id>";
-        let allowed = INVENTORY
-            .document(SUPERVISION)
-            .section("waiting-under-host-continuation")
-            .unwrap();
-        let allowed_start = allowed.line;
-        let allowed_end = allowed.line + allowed.text.lines().count();
-        let mut found = 0;
+    fn native_receive_tool_recipes_have_a_single_backend_owner() {
+        let commands = [
+            "cafleet message listen <director-id> --timeout 300",
+            "cafleet message listen 1 --timeout 210",
+        ];
+        let mut found = BTreeSet::new();
         for (path, text) in INVENTORY.sources.iter().filter(|(path, _)| {
             path.starts_with("skills/") && !path.starts_with("skills/cafleet/reference/runtime/")
         }) {
             let source = INVENTORY.document(path);
             for (offset, line) in text.lines().enumerate() {
-                let Some(start) = line.find(command) else {
-                    continue;
-                };
-                let number = offset + 1;
-                assert!(
-                    path == SUPERVISION && (allowed_start..allowed_end).contains(&number),
-                    "{}",
-                    source.error(
-                        number,
-                        "the Director's message wait belongs only to Director wake's host-continuation wait"
-                    )
-                );
-                assert!(
-                    line[start + command.len()..].starts_with(" --timeout 30 "),
-                    "{}",
-                    source.error(number, "the Director's message wait uses --timeout 30")
-                );
-                found += 1;
+                for command in commands {
+                    if line.contains(command) {
+                        assert_eq!(
+                            path,
+                            BACKENDS,
+                            "{}",
+                            source.error(
+                                offset + 1,
+                                "backend instructions own concrete native receive recipes"
+                            )
+                        );
+                        assert!(found.insert(command), "native recipe duplicated: {command}");
+                    }
+                }
             }
         }
-        assert!(found >= 1, "the host-continuation wait must be documented");
+        assert_eq!(found, BTreeSet::from(commands));
+        let listen = INVENTORY
+            .document(CORE)
+            .section("listen-native-inbox-stream")
+            .unwrap();
+        for target in [
+            "reference/supervision.md#director-wake",
+            "reference/coding-agents.md",
+            "reference/runtime/spec/cli-options.md#message-listen",
+        ] {
+            INVENTORY.require_link(&listen, target).unwrap();
+        }
     }
 
     #[test]
@@ -1572,8 +1632,16 @@ mod structural_contracts {
             r"(?is)oldest.{0,100}(pending|unack)",
         );
         mux.require_pattern(
-            "the Director is delivered into its pane like any recipient",
-            r"(?is)concrete pane, the Director included",
+            "automatic pane previews select concrete ordinary recipients",
+            r"(?is)ordinary recipients.{0,50}concrete panes.{0,50}automatic",
+        );
+        mux.require_pattern(
+            "the root Director reads its inbox through the native stream",
+            r"(?is)root Director.{0,120}message listen.{0,160}(zero|no) automatic pane input",
+        );
+        mux.require_pattern(
+            "Director exclusion precedes preview selection, locking and multiplexer resolution",
+            r"(?is)Exclude the Director before.{0,120}preview.{0,80}lock.{0,80}multiplexer",
         );
         mux.require_pattern("shared input lock", r"(?i)(input|pane).{0,30}lock");
         mux.require_pattern(
@@ -1589,8 +1657,8 @@ mod structural_contracts {
             r"(?is)draft.{0,240}merge",
         );
         mux.require_pattern(
-            "rotation includes the Director but never the subject",
-            r"(?is)Director included, never the wait's own subject",
+            "retry rotation selects other ordinary members",
+            r"(?is)Rotation selects.{0,90}ordinary.member.{0,100}excluding.{0,70}Director.{0,70}subject",
         );
         let send = INVENTORY
             .document("docs/docs/spec/cli-options.md")
@@ -1602,6 +1670,229 @@ mod structural_contracts {
             "committed send remains successful",
             r"(?is)(commit|persist).{0,220}(exit.{0,15}0|success)",
         );
+    }
+
+    #[test]
+    fn codex_recipe_retains_one_session_and_preserves_host_authority() {
+        let recipe = INVENTORY
+            .document(BACKENDS)
+            .section("codex-native-director-reception")
+            .unwrap();
+        recipe
+            .require(&[
+                "exec_command",
+                "session_id",
+                "write_stdin",
+                "chars",
+                "JSONL",
+                "ready",
+                "closed",
+                "context compaction",
+                "activation",
+                "pause",
+                "completion",
+                "budget",
+            ])
+            .unwrap();
+        recipe.require_pattern(
+            "repeated reads use the same session",
+            r"(?is)write_stdin.{0,80}same session",
+        );
+        recipe.require_pattern(
+            "reads have a bounded yield",
+            r"(?is)bounded yield.{0,40}(10,000|10000)",
+        );
+        recipe.require_pattern(
+            "reception runs independently of host goal presence",
+            r"(?is)independently.{0,60}host goal",
+        );
+        recipe.require_pattern(
+            "idle reception waits for a new host activation",
+            r"(?is)next user/native activation.{0,160}fully idle Codex",
+        );
+        recipe.require_pattern(
+            "partial JSONL survives chunk boundaries",
+            r"(?is)incomplete JSONL across chunks",
+        );
+        recipe.require_pattern(
+            "replacement establishes the old receiver exit",
+            r"(?is)closed.{0,100}(establish|observed).{0,40}(termination|exit)",
+        );
+        recipe.require_pattern(
+            "goal lifecycle authority is preserved",
+            r"(?is)(never|no).{0,30}(call|use).{0,30}goal lifecycle",
+        );
+        recipe.require_pattern(
+            "user decisions gate dependent actions",
+            r"(?is)user decisions.{0,50}gate dependent work",
+        );
+        recipe.require_pattern(
+            "goal preservation needs independent state evidence",
+            r"(?is)independently observed goal.state.{0,100}acceptance evidence",
+        );
+        INVENTORY
+            .require_link(&recipe, "supervision.md#receiver-recovery")
+            .unwrap();
+    }
+
+    #[test]
+    fn claude_recipe_owns_monitor_events_renewal_and_source_child_cleanup() {
+        let recipe = INVENTORY
+            .document(BACKENDS)
+            .section("claude-native-director-reception")
+            .unwrap();
+        let examples = recipe.json_examples();
+        assert_eq!(examples.len(), 1);
+        assert_eq!(
+            examples[0]["command"],
+            "cafleet message listen 1 --timeout 210"
+        );
+        assert_eq!(examples[0]["timeout_ms"], 240000);
+        recipe
+            .require(&[
+                "Monitor",
+                "ready",
+                "task ID",
+                "ACK",
+                "replay",
+                "/goal",
+                "pause",
+                "budget",
+                "Bash(run_in_background=true)",
+            ])
+            .unwrap();
+        recipe.require_pattern(
+            "native events carry the stream protocol",
+            r"(?i)(JSONL|protocol record)",
+        );
+        recipe.require_pattern(
+            "Monitor authorization is independently checked",
+            r"(?is)authorization separately from Bash",
+        );
+        recipe.require_pattern(
+            "individual records may start turns before process exit",
+            r"(?is)stdout event.{0,100}new model turn before.{0,40}exits",
+        );
+        recipe.require_pattern(
+            "renewal waits for old task and child exit",
+            r"(?is)establish.{0,100}task.{0,50}source process.{0,50}exited",
+        );
+        recipe.require_pattern(
+            "closure and completion deduplicate by owned task ID",
+            r"(?is)Deduplicate.{0,100}owned task ID",
+        );
+        recipe.require_pattern(
+            "stale completion notifications retain current ownership",
+            r"(?is)ignor.{0,30}stale completion.{0,80}ownership",
+        );
+        recipe.require_pattern(
+            "open questions retain their decision gate",
+            r"(?is)open user question.{0,120}no answer or authority",
+        );
+        recipe.require_pattern(
+            "cancellation and real expiry require acceptance evidence",
+            r"(?is)Actual Monitor expiry.{0,120}acceptance evidence",
+        );
+        INVENTORY
+            .require_link(&recipe, "supervision.md#receiver-recovery")
+            .unwrap();
+    }
+
+    #[test]
+    fn listen_specifies_read_only_jsonl_lifecycle_and_resource_deadlines() {
+        for path in ["docs/docs/spec/cli-options.md", "SPEC.md"] {
+            let listen = INVENTORY.document(path).section("message-listen").unwrap();
+            listen
+                .require(&[
+                    "cafleet message listen MEMBER_ID [--timeout SECONDS]",
+                    "JSONL",
+                    "1..=1800",
+                    "monotonic",
+                    "ready",
+                    "closed",
+                    "member_inactive",
+                    "fleet_deleted",
+                    "created_at ASC, message_id ASC",
+                    "input_required",
+                    "notified_at",
+                    "preview_started_at",
+                    "poll --json",
+                    "show --json",
+                    "ACK",
+                    "backpressure",
+                    "progress handler",
+                    "1,000",
+                    "decoding each row",
+                    "before commit",
+                    "cleanup failures",
+                    "descriptor flags",
+                    "partial writes",
+                    "flush",
+                    "exit 1",
+                ])
+                .unwrap();
+            listen.require_pattern(
+                "new records leave the original lease unchanged",
+                r"(?is)activity leaves expiry unchanged",
+            );
+            listen.require_pattern(
+                "replay suppression waits after no newly emitted IDs",
+                r"(?is)only previously emitted pending IDs waits one second",
+            );
+            listen.require_pattern(
+                "restart replays pending records",
+                r"(?is)restart replays.{0,30}pending IDs",
+            );
+            listen.require_pattern("listener consumption and preview fields remain unchanged", r"(?is)leaves consumption.{0,100}notified_at.{0,100}preview_started_at.{0,50}unchanged");
+            listen.require_pattern(
+                "snapshot completion precedes output and sleep",
+                r"(?is)Commit before output or sleep",
+            );
+            listen.require_pattern(
+                "reader state is released before output",
+                r"(?is)short read transaction.{0,300}Commit before output",
+            );
+            let after = listen
+                .text
+                .split_once("```json\n")
+                .expect("JSONL protocol example")
+                .1;
+            let jsonl = after
+                .split_once("\n```")
+                .expect("closed JSONL protocol example")
+                .0;
+            let records: Vec<serde_json::Value> = jsonl
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+            assert_eq!(
+                records
+                    .iter()
+                    .map(|record| record["event"].as_str().unwrap())
+                    .collect::<Vec<_>>(),
+                ["ready", "message", "closed"]
+            );
+            assert_eq!(records[0].as_object().unwrap().len(), 3);
+            assert_eq!(records[1].as_object().unwrap().len(), 2);
+            assert_eq!(
+                records[1]["message"]
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+                [
+                    "message_id",
+                    "from_member_id",
+                    "to_member_id",
+                    "created_at",
+                    "status_state",
+                    "status_timestamp",
+                    "text"
+                ]
+            );
+            assert_eq!(records[2]["reason"], "timeout");
+        }
     }
 
     #[test]
@@ -1941,15 +2232,33 @@ mod structural_contracts {
                 ])
                 .unwrap();
             workflow.require_pattern(
-                "the Director wakes on delivered replies",
-                r"(?i)delivered `\[cafleet msg ID …\]` line wakes you",
+                "native reception is armed before member replies",
+                r"(?is)arm native reception before depending on member ready replies",
             );
-            workflow.require_pattern("poll on every wake", r"(?i)on every wake");
+            workflow.require_pattern(
+                "one receiver spans dispatch and replies",
+                r"(?is)retain one receiver through dispatch and replies",
+            );
+            workflow.require_pattern(
+                "poll on each native batch or wake",
+                r"(?is)On every received batch/wake",
+            );
+            workflow.require_pattern(
+                "deferred work is recorded before ACK",
+                r"(?is)reconcile replay.{0,80}record deferred actions.{0,50}ACK consumption",
+            );
+            workflow.require_pattern(
+                "host continuation and user decision gates are preserved",
+                r"(?is)Preserve user decision gates and host continuation controls",
+            );
             INVENTORY
                 .require_link(
                     &workflow,
                     "../../cafleet/reference/supervision.md#director-wake",
                 )
+                .unwrap();
+            INVENTORY
+                .require_link(&workflow, "../../cafleet/reference/coding-agents.md")
                 .unwrap();
         }
         INVENTORY
