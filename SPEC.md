@@ -230,6 +230,8 @@ documented search list, so the preset may relocate and remain a valid
 discovers them only at fixed paths — so the skills install ignores the
 variable.
 
+`OPENCODE_CONFIG_DIR` adds a preset search directory alongside default home configuration. Agent definitions with the same name can merge across these sources; inspect the effective configuration when customizing a preset.
+
 **Validation.** A set variable must hold an absolute path. Any other value —
 the empty string, a relative path, a literal unexpanded `~/…` — fails at
 resolution time with exit 1:
@@ -1238,6 +1240,8 @@ Escape is meant to interrupt a working turn or close an open prompt so the line 
 
 Native shell input starts with `! ` followed by the validated actual command. Composer controls begin the submitted input. Tmux uses the `--` option terminator before its literal payload to preserve leading hyphens. Herdr receives the complete payload as one TEXT argument immediately after the pane ID.
 
+Opencode `mini` receives pushed notifications and direct prompts as submitted user turns. Native `! ` input executes a shell command. Poll returns the full persisted message, and ACK consumes its ID.
+
 Deletion and explicit pane-input operations start their five-second budgets after invocation schema and asset guards. Resolve native command bodies before starting their input budget. Each submission has one five-second transport budget:
 
 1. Reserve the one-second settle delay and one second for Enter, plus the 0.5-second Escape settle for the Escape lead. When no time remains beyond the reservation, fail with `insufficient pane input budget for literal input, settle and Enter` and start no input.
@@ -1300,6 +1304,7 @@ What a single Escape does depends on the backend, and a backend may need more th
 - A failed or interrupted notification is retried, so a recipient can see the same `[cafleet msg ID …]` line more than once; it polls and ACKs by ID.
 - Two sends in quick succession from different senders each lead with Escape; the second can interrupt the turn the first delivery started.
 - Interrupting a host turn can also end its in-flight shell tool; the CLI defers termination signals across its spans (termination during pane input).
+- Opencode mini captures can expose only the status bar. Inspect retained session records for submitted input and native shell output when capture omits them; use broker poll and ACK to establish message consumption.
 
 ##### Delivery outcomes
 
@@ -1682,6 +1687,12 @@ resolved install target and raises `opencode agent preset not found at
 not — the remedy names the selector as the targeted repair; plain
 `cafleet setup` also installs it, as it covers all three agents.
 
+Preset discovery includes the relocated directory and default home configuration.
+Agent definitions with the same name can merge across those sources; inspect the
+effective configuration when customizing a preset.
+
+The preset's `shell` ruleset places the `"*": "deny"` base before its explicit allowlist. Opencode selects the last matching rule: the later `cafleet member prompt *` and `cafleet member exec *` denies win over `cafleet *`. A member's denied command receives no permission prompt, while permitted broker commands run normally. Tool permission and assignment authority remain separate; the assigned role and Director instructions determine which allowed operations a member may perform.
+
 #### Exact preset file contents (verbatim)
 
 The checked-in `presets/opencode/cafleet.md` is the content contract: a
@@ -1785,7 +1796,7 @@ Native shell probes displayed command/stdout/stderr followed by a model turn; th
 
 A native shell probe displayed the actual command, exit code, duration and output. Installed protocol metadata describes unsandboxed dispatch while public CLI guidance describes current approval/sandbox settings; the TUI's effective boundary and protocol path were not established. Treat native input as a Director-authorized action rather than assume a second member-tool permission check.
 
-**opencode**: OpenCode members perform supplied assignments with their selected provider/model, workspace reads/edits, permitted tools and broker communication. The Director uses explicit manual broker reads when no verified native adapter is available, states that limitation and coordinates authorized work. Leading-`!` native shell input is unverified for `mini`. Preserve the preset's member-tool permissions and the Director's command authorization.
+**opencode**: OpenCode members perform supplied assignments with their selected provider/model, workspace reads/edits, permitted tools and broker communication. The Director uses explicit manual broker reads when no verified native adapter is available, states that limitation and coordinates authorized work. Leading-`!` input runs a native shell command in `mini`. The native path's effective permission boundary and any second member-tool permission check remain unestablished; preserve the preset's member-tool permissions and the Director's command authorization.
 
 
 

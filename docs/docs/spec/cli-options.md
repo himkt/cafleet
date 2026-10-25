@@ -119,6 +119,8 @@ documented search list, so the preset may relocate and remain a valid
 discovers them only at fixed paths — so the skills install ignores the
 variable.
 
+`OPENCODE_CONFIG_DIR` adds a preset search directory alongside default home configuration. Agent definitions with the same name can merge across these sources; inspect the effective configuration when customizing a preset.
+
 **Validation.** A set variable must hold an absolute path. Any other value —
 the empty string, a relative path, a literal unexpanded `~/…` — fails at
 resolution time with exit 1:

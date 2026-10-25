@@ -35,6 +35,8 @@ The paths above are defaults. `CLAUDE_CONFIG_DIR` and `CODEX_HOME` relocate
 their skills and presets. `OPENCODE_CONFIG_DIR` relocates only the Opencode
 preset; its skills remain under `~/.config/opencode/skills`. See
 [Config-dir resolution](spec/cli-options.md#config-dir-resolution).
+Opencode also loads default home configuration alongside the relocated preset
+directory; same-name agent definitions can merge across these sources.
 
 The snippets below are the recommended starting points for the two backends
 that need one.

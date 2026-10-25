@@ -18,9 +18,8 @@ version/config requirements.
 Shared contract:
 
 - Each posture enables shell commands with no runtime permission prompts.
-- Claude Code and Codex honor the leading-`!` shell shortcut that
+- Each backend honors the leading-`!` shell shortcut that
   [`cafleet member exec`](cli-options.md#member-exec) dispatches through.
-  Leading-`!` native shell input is unverified for opencode `mini`.
 - Every member can run its broker commands from the moment it is spawned:
   claude through [spawn-time allow rules](#spawn-time-allow-rules), codex
   through [the rules file](#cafleet-rules-file), and opencode through
@@ -270,7 +269,7 @@ of these rules, so they add nothing when it is also present.
 
 ## Opencode {#opencode}
 
-OpenCode members perform supplied assignments with their selected provider/model, workspace reads/edits, permitted tools and broker communication. The Director coordinates next steps and routed native shell commands. Leading-`!` native shell input is unverified for `mini`. Preserve the preset's member-tool permissions and the Director's command authorization.
+OpenCode members perform supplied assignments with their selected provider/model, workspace reads/edits, permitted tools and broker communication. The Director coordinates next steps and routed native shell commands. Leading-`!` input runs a native shell command in `mini`. The native path's effective permission boundary and any second member-tool permission check remain unestablished; preserve the preset's member-tool permissions and the Director's command authorization.
 
 The pane runs `opencode mini --standalone`, the long-lived minimal interactive
 interface with a private server per pane. The prompt travels through `--prompt`
@@ -290,6 +289,10 @@ so `cafleet member create --coding-agent opencode` fails with `opencode agent
 preset not found at <preset>; run 'cafleet setup --coding-agent opencode'
 first` when the file is missing.
 
+Preset discovery includes the relocated directory and default home configuration.
+Agent definitions with the same name can merge across those sources; inspect the
+effective configuration when customizing a preset.
+
 The preset's `shell` ruleset is deny-by-default: a `"*": "deny"` base first,
 then an explicit allowlist translated from the operator's Claude Code
 `permissions.allow` set (`cafleet *`, its declared Git commands,
@@ -297,7 +300,7 @@ file-inspection utilities, and the project's cargo-backed mise tasks). opencode 
 **last** matching rule, so this order is the safety floor — every check
 resolves to `allow` or `deny`, never `ask`. Explicit `cafleet member prompt *` and `cafleet member exec *` deny
 entries follow the `cafleet *` allow, so they win: the preset configures
-members, and dispatching a command into another pane is the Director's act. Tool permission and assignment authority are separate: the assigned role and Director instructions determine which allowed operations a member may perform. A permission popup in an opencode pane is
+members, and dispatching a command into another pane is the Director's act. A member's denied command receives no permission prompt, while permitted broker commands run normally. Tool permission and assignment authority are separate: the assigned role and Director instructions determine which allowed operations a member may perform. A permission popup in an opencode pane is
 therefore a regression escape, not a runtime decision: capture the pane,
 escalate, and extend the allowlist by operator decision — do not answer the
 popup ad hoc.

@@ -38,8 +38,9 @@ placeholders to literals, so the member reads its ids as plain text lines
 command. Each placeholder and its label line is in
 [CLI options § Spawn-prompt substitution](../spec/cli-options.md#spawn-prompt-substitution). The only environment variable forwarded into the pane is
 `CAFLEET_DATABASE_URL`.
-Claude Code and Codex honor a leading-`!` shell shortcut on the coding agent's input line;
-leading-`!` native shell input is unverified for opencode `mini`.
+Each backend honors a leading-`!` shell shortcut on the coding agent's input line,
+including opencode `mini`; backend-specific permission limits are in
+[Coding-agent backends](../spec/coding-agent-backends.md).
 `cafleet member exec` submits a visible native command Escape-first; a member routes a
 command its harness does not run through the Director — see
 [Command routing](member-lifecycle.md#command-routing). For the full
