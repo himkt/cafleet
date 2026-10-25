@@ -1,4 +1,5 @@
 use crate::broker;
+use crate::broker::records::MemberKind;
 use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::input::{
@@ -99,6 +100,9 @@ fn preview_snapshot(
         let Some(member) = broker::get_member(conn, member_id, fleet_id)? else {
             return Ok(None);
         };
+        if member.kind != MemberKind::Member {
+            return Ok(None);
+        }
         let Some(message) = broker::oldest_pending_preview(conn, member_id)? else {
             return Ok(None);
         };
@@ -107,8 +111,7 @@ fn preview_snapshot(
 }
 
 enum ClaimSkip {
-    /// The member is no longer active.
-    Gone,
+    Ineligible,
     /// The placement changed, or an earlier candidate appeared.
     Held,
     /// The message was ACKed or stamped meanwhile.
@@ -131,8 +134,11 @@ fn claim_current_preview(
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(broker::members::db_err)?;
     let Some(current) = broker::get_member(&tx, member.member_id, member.fleet_id)? else {
-        return Ok(PreviewClaim::Skipped(ClaimSkip::Gone));
+        return Ok(PreviewClaim::Skipped(ClaimSkip::Ineligible));
     };
+    if current.kind != MemberKind::Member {
+        return Ok(PreviewClaim::Skipped(ClaimSkip::Ineligible));
+    }
     if current.placement != member.placement {
         return Ok(PreviewClaim::Skipped(ClaimSkip::Held));
     }
@@ -267,7 +273,7 @@ fn deliver_pending_scoped(
         }
         let message = match claim_current_preview(conn, &member, candidate.message_id, deadline)? {
             PreviewClaim::Ready(message) => message,
-            PreviewClaim::Skipped(ClaimSkip::Gone) => break AttemptEnd::NoPending,
+            PreviewClaim::Skipped(ClaimSkip::Ineligible) => break AttemptEnd::NoPending,
             PreviewClaim::Skipped(ClaimSkip::Held) => break AttemptEnd::Held,
             PreviewClaim::Skipped(ClaimSkip::Settled) => continue,
         };

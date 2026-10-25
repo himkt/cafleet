@@ -9,9 +9,11 @@ pub(crate) fn pending_previews(
     let mut statement = conn
         .prepare(&format!(
             "SELECT m.member_id, g.message_id, g.preview_started_at IS NOT NULL FROM members m
+         JOIN fleets f ON f.fleet_id=m.fleet_id
          JOIN member_placements p ON p.member_id=m.member_id AND p.mux_pane_id IS NOT NULL
          JOIN messages g ON g.to_member_id=m.member_id
-         WHERE m.fleet_id=?1 AND m.status='active' AND m.member_id!=?2 AND {}
+         WHERE m.fleet_id=?1 AND m.status='active' AND m.member_id!=?2
+         AND m.member_id!=f.director_member_id AND {}
          ORDER BY m.member_id, g.created_at, g.message_id",
             super::messaging::PENDING_PREVIEW,
         ))
