@@ -21,11 +21,12 @@ This skill maintains each backend's Model catalog, its provenance/context notes,
 
 ## Approved sources (exhaustive allowlist)
 
-Fetch **only** these five official pages. Search results, third-party price
-sites, and social posts are never model-list authority. The first four are
-pricing and availability authority; the fifth is capability authority for the
-`claude` backend's context windows and Claude Code model-string syntax, and
-is never used to price a model.
+Fetch **only** the official pages listed in this table. Every page except
+Claude Code model configuration is pricing and availability authority.
+Claude Code model configuration is capability authority for the `claude`
+backend's context windows and `[1m]` applicability; use the pricing sources
+to price models, never the capability page. Search results, third-party price
+sites, and social posts are never model-list authority.
 
 | Source | What it feeds | URL |
 |---|---|---|
@@ -33,11 +34,12 @@ is never used to price a model.
 | OpenAI pricing | `codex` prices | `https://developers.openai.com/api/docs/pricing.md` |
 | Codex model availability | `codex` availability | `https://learn.chatgpt.com/docs/models.md` |
 | OpenCode Console models and pricing | `opencode` prices and availability | `https://opencode.ai/v2/docs/console/models/` |
+| OpenCode Go models and usage-limit pricing | `opencode-go` prices and availability | `https://opencode.ai/v2/docs/console/go` |
 | Claude Code model configuration | `claude` context windows and `[1m]` applicability | `https://code.claude.com/docs/en/model-config.md` |
 
 ## Refresh procedure
 
-1. **Fetch** all five approved sources. If any source cannot be fetched or
+1. **Fetch every approved source.** If any source cannot be fetched or
    parsed, **stop**: leave the model list unchanged, report the error, and
    let it become stale rather than fabricating values.
 2. **Extract pricing facts only**: the currently effective standard input and
@@ -46,11 +48,11 @@ is never used to price a model.
    pricing pages as benchmark evidence — they are pricing/availability
    sources only.
 3. **Refresh the `claude` and `codex` tables** from their provider pricing
-   pages, and **refresh the `opencode` table** with the dedicated procedure
-   below — the Console catalog behaves differently from the provider pages, so
-   follow that procedure exactly. For `codex`, pricing and availability come
-   from different pages: price each model from the OpenAI pricing page, but
-   take Codex availability from the Codex models page
+   pages, **refresh the `opencode` table** with the OpenCode Console procedure,
+   and **refresh the `opencode-go` table** with the OpenCode Go procedure below.
+   Follow each dedicated procedure for its catalog. For `codex`, pricing and
+   availability come from different pages: price each model from the OpenAI
+   pricing page, but take Codex availability from the Codex models page
    (`https://learn.chatgpt.com/docs/models.md`) — the table carries only the
    models Codex currently offers in its model picker. A model absent there
    or demoted to a **legacy model** (reachable only via `codex -m` /
@@ -144,6 +146,74 @@ unchanged:
    capability is unverified in their Class. A new row's Class and position,
    and changes to existing classes or positions, are reviewed policy changes
    approved in the same pull request.
+
+## OpenCode Go procedure (the `opencode-go` table)
+
+Run this procedure on every refresh. Maintain a separate `#### OpenCode Go`
+section after the Console table and its notes, within the `opencode` backend's
+`### Model catalog`. Point to it from the Console preamble; the shared
+last-refreshed date covers both tables.
+
+1. **Price from the Go page only.** Use the Go page's per-token amounts from
+   its price table. These amounts count against subscription usage limits;
+   never price a Go row from the Console page or a vendor page.
+2. **Copy the Go model ID exactly.** Map each display name to its `Model ID`
+   through the Go page's *Endpoints* table, whose header is
+   `Model | Model ID | Endpoint | AI SDK Package`. Write
+   `opencode-go/<model-id>`, with the ID copied verbatim.
+3. **Mirror the Go catalog.** Add every missing listed ID, remove every
+   delisted ID, and re-verify every remaining row's price. Apply published
+   deprecation dates using the Console procedure's display-name binding rule:
+   keep a future-dated model with a note and remove one whose date has passed.
+4. **Apply the row rules and maintain the notes.** Use the Console table's
+   columns: `Model | Class | Input $/MTok | Output $/MTok`, with one row per Go
+   *Endpoints* ID. A price-table display name with no *Endpoints* ID or more
+   than one ID, or an *Endpoints* ID with no price-table row or without both
+   Input and Output prices, is a parse failure: stop under Refresh procedure
+   step 1.
+
+   Use the base (shortest-prompt) tier for long-context pricing, the currently
+   billed rate for promotional discounts, and the Peak rate when the page
+   publishes Off-Peak and Peak rates. Record a free-for-a-limited-time model
+   with `0.00` in both columns.
+
+   The preamble states that this table lists every model on the Go page and
+   that `opencode-go/` is part of the `--model` value. Explain that these tokens
+   require configured providers that include an OpenCode Go subscription and
+   that the Director checks availability per spawn under
+   [Director model selection](../../../skills/cafleet/roles/director.md#model-selection).
+
+   Place these notes beneath the table in this order:
+
+   - Explain that prices are USD per MTok counted against subscription usage
+     limits, rather than pay-as-you-go billing. Record the published plan
+     prices and single-member-workspace restriction. Explain each model's
+     caps of 20% of its monthly limit per 5 hours, 50% per week and 100% per
+     month, and that Extra Usage bills usage beyond the limits to the
+     pay-as-you-go balance.
+   - List every Go model in a monthly-limit table with the header
+     `Model | Go monthly limit $ | Go Plus monthly limit $`. Record a plan's
+     absent limit (a `-` or an omitted value) as `—`; the Director never
+     budgets against it.
+   - List each affected model in the applicable long-context, discount and
+     Off-Peak tables. Use the headers
+     `Model | Prompt length | Input $/MTok | Output $/MTok`,
+     `Model | Discount | List input $/MTok | List output $/MTok | Discount end`,
+     and `Model | Off-Peak input $/MTok | Off-Peak output $/MTok | Off-Peak hours`.
+     Record every long-context rate, each discount's list prices and end date,
+     and each Off-Peak rate and its hours. Use `Not published` for an absent
+     discount end date or Off-Peak hours.
+   - Identify each restricted model by ID and the privacy setting it requires.
+   - End with `Source: [OpenCode Go](https://opencode.ai/v2/docs/console/go).`
+
+   Every note-table `Model` cell is a code-span `opencode-go/<model-id>` token.
+5. **Order and classify every row.** Keep one table ordered most → least
+   capable, with a Class on every row. Reuse the Console Class for each shared
+   ID, and preserve the relative order of IDs shared with the Console,
+   `claude` or `codex` tables. Place unverified preview models at the bottom
+   and state that their capability is unverified in their Class. A new row's
+   Class and position, and changes to existing ones, are reviewed policy
+   changes approved in the same pull request.
 
 ## Cadence and staleness
 
