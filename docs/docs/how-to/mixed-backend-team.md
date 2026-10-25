@@ -73,7 +73,7 @@ ACK every consumed delivery before ending the turn, using its returned ID:
 cafleet message ack 10
 ```
 
-Keep deferred questions/approvals in host-owned task state after ACK. Reconcile known/replayed IDs before acting; completed records need no second action or ACK. Broker events leave pending user decisions pending. On every batch/wake inspect roster, panes and artifacts, including ordinary members' `unconfirmed_previews` in `cafleet member list 1 --json`; consume the Director's own pending IDs through broker reads.
+Keep deferred questions/approvals in host-owned task state after ACK. Reconcile known/replayed IDs before acting; completed records need no second action or ACK. Broker events leave pending user decisions pending. On every batch/wake inspect roster, panes and artifacts; consume the Director's own pending IDs through broker reads.
 
 A clean expired listener lease can renew after its native task exits while authorized work remains. Unexpected EOF or failure requires inspecting the exit, reconciling the inbox and a fresh successful broker health check before replacement. Retain incomplete JSONL across chunks and preserve unACKed messages after damaged output. Establish old-process termination before replacing a receiver. Fully idle Codex waits for the next user/native activation; a background process alone supplies no unsolicited per-line wake.
 
