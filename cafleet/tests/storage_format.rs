@@ -118,6 +118,123 @@ fn setup_initializes_an_empty_sqlite_file_and_is_idempotent() {
 }
 
 #[test]
+fn a_v2_database_upgrades_in_place_preserving_every_application_row() {
+    fn ledger(conn: &rusqlite::Connection) -> Vec<(i64, String, String, String)> {
+        conn.prepare(
+            "SELECT version, name, applied_on, checksum FROM refinery_schema_history ORDER BY version",
+        )
+        .unwrap()
+        .query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+    }
+
+    fn records(conn: &rusqlite::Connection) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
+        [
+            "SELECT * FROM fleets ORDER BY fleet_id",
+            "SELECT * FROM members ORDER BY member_id",
+            "SELECT * FROM member_placements ORDER BY member_id",
+            "SELECT message_id, from_member_id, to_member_id, created_at, status_state, status_timestamp, text, notified_at FROM messages ORDER BY message_id",
+            "SELECT * FROM asset_installs ORDER BY coding_agent, path",
+            "SELECT * FROM sqlite_sequence ORDER BY name",
+        ]
+        .map(|sql| {
+            let mut statement = conn.prepare(sql).unwrap();
+            let width = statement.column_count();
+            statement
+                .query_map([], |row| (0..width).map(|column| row.get(column)).collect())
+                .unwrap()
+                .map(Result::unwrap)
+                .collect()
+        })
+        .into()
+    }
+
+    let cli = Cli::new();
+    let mut conn = cafleet::db::connect(&cli.db_url()).unwrap();
+    let migrations = [
+        refinery::Migration::unapplied(
+            "V1__baseline",
+            include_str!("../migrations/V1__baseline.sql"),
+        )
+        .unwrap(),
+        refinery::Migration::unapplied(
+            "V2__preview_attempts",
+            include_str!("../migrations/V2__preview_attempts.sql"),
+        )
+        .unwrap(),
+    ];
+    refinery::Runner::new(&migrations)
+        .set_grouped(true)
+        .run(&mut conn)
+        .unwrap();
+    conn.execute_batch(
+        "INSERT INTO fleets(fleet_id, name, created_at) VALUES(1, 'preserved fleet', 'created');
+         INSERT INTO members(member_id, fleet_id, name, description, status, registered_at, deregistered_at) VALUES
+             (1, 1, 'Director', 'director assignment', 'active', 'registered', NULL),
+             (2, 1, 'worker', 'worker assignment', 'active', 'registered', NULL),
+             (3, 1, 'departed', 'finished assignment', 'deregistered', 'registered', 'departed');
+         INSERT INTO member_placements(member_id, mux_session, mux_window_id, mux_pane_id, backend, coding_agent, created_at) VALUES
+             (1, 'main', '@1', '%0', 'tmux', 'claude', 'placed'),
+             (2, 'main', '@1', '%1', 'tmux', 'codex', 'placed');
+         UPDATE fleets SET director_member_id=1 WHERE fleet_id=1;
+         INSERT INTO messages(message_id, from_member_id, to_member_id, created_at, status_state, status_timestamp, text, notified_at, preview_started_at) VALUES
+             (7, 1, 2, 'created-7', 'input_required', 'status-7', 'claimed pending', NULL, 'started-7'),
+             (8, 1, 2, 'created-8', 'input_required', 'status-8', 'pending', NULL, NULL),
+             (9, 1, 2, 'created-9', 'input_required', 'status-9', 'notified', 'notified-9', 'started-9'),
+             (10, 2, 1, 'created-10', 'completed', 'status-10', 'completed', NULL, 'started-10');
+         INSERT INTO asset_installs(coding_agent, path, cafleet_version, installed_at)
+             VALUES('claude', '/preserved/config', '0.29.0', 'installed');",
+    )
+    .unwrap();
+    let before = records(&conn);
+    let ledger_before = ledger(&conn);
+    assert_eq!(ledger_before.len(), 2);
+
+    cafleet::db::migrate_to_head(&mut conn).unwrap();
+    drop(conn);
+    let mut conn = cafleet::db::connect(&cli.db_url()).unwrap();
+    assert_eq!(records(&conn), before);
+    let columns = conn
+        .prepare("PRAGMA table_info(messages)")
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(1))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        columns,
+        [
+            "message_id",
+            "from_member_id",
+            "to_member_id",
+            "created_at",
+            "status_state",
+            "status_timestamp",
+            "text",
+            "notified_at",
+        ]
+    );
+    let ledger_after = ledger(&conn);
+    assert_eq!(ledger_after.len(), 3);
+    assert_eq!(ledger_after[..2], ledger_before);
+    assert_eq!(
+        (ledger_after[2].0, ledger_after[2].1.as_str()),
+        (3, "drop_preview_claims")
+    );
+    assert_eq!(
+        conn.query_row("PRAGMA application_id", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        APPLICATION_ID
+    );
+    assert_eq!(cafleet::db::migrate_to_head(&mut conn).unwrap(), 3);
+    assert_eq!(records(&conn), before);
+}
+
+#[test]
 fn default_setup_uses_the_current_file_and_preserves_the_predecessor_and_sidecars() {
     let cli = Cli::new();
     let directory = cli.home.path().join(".local/share/cafleet");
