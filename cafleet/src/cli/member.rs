@@ -703,6 +703,251 @@ mod tests {
         (dir, conn, settings, fleet, director, worker)
     }
 
+    struct CreateProbe {
+        agent: CodingAgent,
+        home: std::path::PathBuf,
+    }
+
+    impl crate::coding_agent::SpawnProbe for CreateProbe {
+        fn binary_on_path(&self, name: &str) -> bool {
+            assert_eq!(name, self.agent.binary_name());
+            true
+        }
+
+        fn home_dir(&self) -> std::path::PathBuf {
+            self.home.clone()
+        }
+
+        fn env_var(&self, name: &str) -> Option<String> {
+            assert_eq!(name, self.agent.config_variable());
+            Some(self.home.join("config").display().to_string())
+        }
+    }
+
+    fn create_runtime(
+        dir: &std::path::Path,
+        agent: CodingAgent,
+        spawn: bool,
+    ) -> (
+        Rc<crate::multiplexer::recording::FakeRunner>,
+        AnyMultiplexer,
+        CreateProbe,
+    ) {
+        use crate::multiplexer::recording::{FakeRunner, env};
+
+        let config = dir.join("config");
+        if let Some(preset) = agent.required_preset(&config) {
+            std::fs::create_dir_all(preset.parent().unwrap()).unwrap();
+            std::fs::write(preset, "test preset").unwrap();
+        }
+        let runner = FakeRunner::with_binary("tmux");
+        runner.respond(Ok("main|@1|%0\n".into()));
+        if spawn {
+            runner.respond(Ok("%9\n".into()));
+            runner.succeed(1);
+        }
+        let mux = AnyMultiplexer::Tmux(TmuxMultiplexer::new(
+            runner.clone(),
+            env(&[("TMUX", "test-session"), ("TMUX_PANE", "%0")]),
+        ));
+        let probe = CreateProbe {
+            agent,
+            home: dir.to_owned(),
+        };
+        (runner, mux, probe)
+    }
+
+    fn assignment_body(dir: &std::path::Path, text: &str, from_file: bool) -> PromptArgs {
+        if from_file {
+            let path = dir.join("assignment.txt");
+            std::fs::write(&path, text).unwrap();
+            PromptArgs {
+                prompt: None,
+                file: Some(path.display().to_string()),
+            }
+        } else {
+            PromptArgs {
+                prompt: Some(text.into()),
+                file: None,
+            }
+        }
+    }
+
+    fn assert_routing_preamble(preamble: &str, fleet: i64, member: i64, director: i64) {
+        assert!(preamble.starts_with("MANDATORY CAFLEET COMMAND ROUTING\n"));
+        for required in [
+            "Route every task shell command to the Director before any local attempt.",
+            "Execute only authorized cafleet message communication commands directly.",
+            "Use native file tools within your assigned role scope.",
+            "Request prerequisite shell reads before ready when no native file reader is available.",
+            "Preserve the host permission and sandbox settings.",
+        ] {
+            assert!(
+                preamble.contains(required),
+                "missing routing rule: {required}"
+            );
+        }
+        for identity in [
+            format!("FLEET ID: {fleet}\n"),
+            format!("YOUR MEMBER ID: {member}\n"),
+            format!("DIRECTOR MEMBER ID: {director}\n"),
+            format!("cafleet message send --from-member-id {member} --to-member-id {director} "),
+        ] {
+            assert!(
+                preamble.contains(&identity),
+                "missing broker identity: {identity}"
+            );
+        }
+    }
+
+    #[test]
+    fn member_create_routes_inline_and_file_assignments_for_every_registered_backend() {
+        let mut shared_preamble = None;
+        for &agent in CodingAgent::all() {
+            for (from_file, explicit) in [
+                (false, Some(agent)),
+                (true, Some(agent)),
+                (false, None),
+                (true, None),
+            ] {
+                let (dir, mut conn, _, _, _, _) = fixture();
+                let (fleet, director) = common::create_fleet(&mut conn, "routing-identities");
+                if explicit.is_none() {
+                    conn.execute(
+                        "UPDATE member_placements SET coding_agent=?1 WHERE member_id=?2",
+                        rusqlite::params![agent.name(), director],
+                    )
+                    .unwrap();
+                }
+                let (runner, mux, probe) = create_runtime(dir.path(), agent, true);
+                let body = assignment_body(
+                    dir.path(),
+                    "  Ad-hoc assignment\r\n界🙂\t\"quoted\" '$HOME; !'\n\
+                     {{\"literal\": \"{{fleet_id}}\"}}\n\
+                     fleet={fleet_id}; member={member_id}; director={director_member_id}; backend={coding_agent}\r\n",
+                    from_file,
+                );
+                create_with_runtime(
+                    &mut conn,
+                    &mux,
+                    &probe,
+                    fleet,
+                    "routing-worker",
+                    "test assignment",
+                    explicit,
+                    None,
+                    None,
+                    &body,
+                    true,
+                )
+                .unwrap();
+                let members = broker::list_members(&conn, fleet).unwrap();
+                let member = members
+                    .iter()
+                    .find(|member| member.member.name == "routing-worker")
+                    .expect("created member is published");
+                let member_id = member.member.member_id;
+                let commands = runner.run_argvs();
+                let split = commands
+                    .iter()
+                    .find(|argv| argv.get(1).map(String::as_str) == Some("split-window"))
+                    .expect("member creation spawns through the multiplexer");
+                let prompt = split
+                    .last()
+                    .expect("spawn argv ends with the literal prompt");
+                let expected_body = format!(
+                    "  Ad-hoc assignment\r\n界🙂\t\"quoted\" '$HOME; !'\n\
+                     {{\"literal\": \"{{fleet_id}}\"}}\n\
+                     fleet={fleet}; member={member_id}; director={director}; backend={}\r\n",
+                    agent.name()
+                );
+                let preamble = prompt
+                    .strip_suffix(&expected_body)
+                    .expect("assignment bytes survive after exactly one placeholder substitution");
+                if let Some(expected) = &shared_preamble {
+                    assert_eq!(preamble, expected, "policy for {agent:?}, file={from_file}");
+                } else {
+                    assert_routing_preamble(preamble, fleet, member_id, director);
+                    shared_preamble = Some(preamble.to_owned());
+                }
+                let binary = split
+                    .iter()
+                    .position(|arg| arg == agent.binary_name())
+                    .expect("selected backend is the literal child executable");
+                assert_eq!(
+                    &split[binary..],
+                    agent.build_spawn_argv(prompt, "routing-worker", None, None)
+                );
+                let published = broker::get_member(&conn, member_id, fleet)
+                    .unwrap()
+                    .unwrap();
+                let placement = published.placement.unwrap();
+                assert_eq!(placement.mux_pane_id.as_deref(), Some("%9"));
+                assert_eq!(placement.coding_agent, agent.name());
+                assert!(runner.responses.borrow().is_empty());
+            }
+        }
+        assert!(
+            shared_preamble.is_some(),
+            "registered backends are exercised"
+        );
+    }
+
+    #[test]
+    fn member_create_rolls_back_invalid_assignments_before_spawning_for_every_backend() {
+        for &agent in CodingAgent::all() {
+            for from_file in [false, true] {
+                for text in ["unknown {not_a_spawn_placeholder}", "unclosed {", "stray }"] {
+                    let (dir, mut conn, _, fleet, director, worker) = fixture();
+                    let (runner, mux, probe) = create_runtime(dir.path(), agent, false);
+                    let body = assignment_body(dir.path(), text, from_file);
+                    let expected = crate::spawn_prompt::substitute_spawn_placeholders(
+                        text,
+                        fleet,
+                        0,
+                        director,
+                        agent.name(),
+                    )
+                    .unwrap_err();
+                    let error = create_with_runtime(
+                        &mut conn,
+                        &mux,
+                        &probe,
+                        fleet,
+                        "invalid-routing-worker",
+                        "invalid assignment",
+                        Some(agent),
+                        None,
+                        None,
+                        &body,
+                        true,
+                    )
+                    .unwrap_err();
+                    assert_eq!(error.exit_code(), 2);
+                    assert_eq!(error.message(), expected.message());
+                    let ids: Vec<_> = broker::list_members(&conn, fleet)
+                        .unwrap()
+                        .iter()
+                        .map(|member| member.member.member_id)
+                        .collect();
+                    assert_eq!(ids.len(), 2);
+                    assert!(ids.contains(&director) && ids.contains(&worker));
+                    assert_eq!(
+                        conn.query_row("SELECT COUNT(*) FROM member_placements", [], |row| {
+                            row.get::<_, i64>(0)
+                        })
+                        .unwrap(),
+                        2
+                    );
+                    assert!(runner.run_argvs().iter().all(|argv| {
+                        argv.get(1).map(String::as_str) == Some("display-message")
+                    }));
+                    assert!(runner.responses.borrow().is_empty());
+                }
+            }
+        }
+    }
+
     struct CloseRunner {
         check: Box<dyn Fn()>,
         calls: Cell<usize>,

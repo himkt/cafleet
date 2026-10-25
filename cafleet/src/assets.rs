@@ -105,6 +105,50 @@ mod tests {
     use std::os::unix::fs::symlink;
 
     #[test]
+    fn installed_opencode_preset_allows_only_broker_shell_communications() {
+        let home = tempfile::tempdir().unwrap();
+        let mut conn = crate::broker::tests::migrated_conn(&home);
+        let paths = agent_paths(&|_| None, home.path(), CodingAgent::Opencode).unwrap();
+        install_agent(&mut conn, CodingAgent::Opencode, &paths, "test-version").unwrap();
+        let (_, target) = paths.preset.unwrap();
+        let text = std::fs::read_to_string(target).unwrap();
+        let (frontmatter, _) = text
+            .strip_prefix("---\n")
+            .unwrap()
+            .split_once("\n---\n")
+            .unwrap();
+        let trailing_commas = regex::Regex::new(r",(\s*[}\]])").unwrap();
+        let parsed: serde_json::Value =
+            serde_json::from_str(&trailing_commas.replace_all(frontmatter, "$1")).unwrap();
+        assert_eq!(
+            parsed["permission"],
+            serde_json::json!({
+                "shell": {
+                    "*": "deny",
+                    "cafleet message *": "allow"
+                },
+                "read": {
+                    "*": "allow",
+                    "**/.env": "deny",
+                    "**/.env.*": "deny"
+                },
+                "edit": {
+                    "*": "allow",
+                    "**/.env": "deny",
+                    "**/.env.*": "deny"
+                },
+                "external_directory": "deny",
+                "webfetch": "deny",
+                "websearch": "deny",
+                "repo_clone": "deny",
+                "question": "deny",
+                "plan_enter": "deny",
+                "plan_exit": "deny"
+            })
+        );
+    }
+
+    #[test]
     fn installation_replaces_owned_symlinks_and_embeds_bytes_at_selected_paths() {
         let home = tempfile::tempdir().unwrap();
         let mut conn = crate::broker::tests::migrated_conn(&home);
