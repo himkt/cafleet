@@ -1,35 +1,44 @@
 # Overview
 
-CAFleet multiplexes independent coding-agent sessions in tmux or herdr and coordinates them through durable point-to-point messages. The CLI ships with embedded skills/presets; the host continues the user's task and owns native tool results.
+CAFleet multiplexes independent coding-agent sessions in tmux or herdr. Use its CLI and skills to delegate research, implementation and review, then collect durable replies while your host continues the task.
 
-## Ownership
+## Core terms
+
+| Term | Definition | Reference |
+|---|---|---|
+| fleet | A namespace identified by a non-secret integer `fleet_id` | [Fleet isolation](#fleet-isolation) |
+| root Director | The current session registered by fleet creation; owns assignments and team lifecycle | [Member lifecycle](member-lifecycle.md) |
+| member | An independent coding-agent session registered in a fleet | [Member lifecycle](member-lifecycle.md) |
+| placement | The association between a member and its multiplexer session, window, pane and backend | [Data model](../spec/data-model.md) |
+| broker | The synchronous SQLite data-access layer used by the CLI | [Storage](storage.md) |
+| message | One point-to-point delivery, consumed through `input_required → completed` | [Message envelope](../spec/message-envelope.md) |
+| inline preview | A literal one-line notification submitted Escape-first into an ordinary recipient's pane, carrying the full body or a show pointer | [Notifications](../spec/multiplexer-backends.md#push-notifications) |
+| receive | A finite inbox wait for scripts and manual use that also retries ordinary-member previews | [Message wait](../spec/cli-options.md#message-wait) |
+| inbox stream | A persistent read-only JSONL observer of pending messages with explicit ACK consumption | [Message listen](../spec/cli-options.md#message-listen) |
+| coding-agent backend | The selected agent binary recorded in a placement | [Coding agents](coding-agents.md) |
+
+## Fleet isolation
+
+Use the literal IDs returned by the CLI. A fleet partitions routing within the local trust model; it supplies no authentication. Members of a fleet share the selected database URL. Cross-fleet sends fail with `members {from} and {to} are not in the same fleet.`; missing destinations fail with `Destination member not found: {to_id}`.
+
+Fleet creation atomically registers the calling Director and its current pane. You can create an ordinary member immediately afterward. The Director owns pane teardown and deletes its members before deregistering the fleet.
+
+## Responsibilities
 
 | Owner | Responsibility |
 |---|---|
-| Host | Permissions, task continuation, native process results and user decisions |
-| Director | Scoped assignments, full-message reception, evidence review, Git and owned teardown |
-| Member | Assigned implementation/research/review and suitable checks |
-| Broker | Atomic registration, persistent messages and explicit consumption |
-| Multiplexer | Concrete pane creation, input, capture, close and layout |
+| Host | Continue its task and own native shell/background results |
+| Director | Assign work, receive replies, inspect evidence, resolve blockers and close the team |
+| CLI | Register sessions, persist messages, stream inbox records, preview ordinary-member messages and submit authorized pane input |
+| Multiplexer | Split, read, type into and close panes while preserving layout ownership |
+| Member | Perform its assignment, report through the broker and route required unavailable commands |
 
-A fleet is a local routing namespace identified by an integer. IDs supply coordination, without authentication. Every participant uses the same selected SQLite database. Fleet creation atomically registers the calling Director and its current pane; member creation starts a separate agent session.
+The [CLI reference](../spec/cli-options.md#subcommand-summary) owns the command registry. The product ships as a CLI with embedded skills/presets and this documentation site.
 
-## Messages
+## Receiving delegated work
 
-A send persists before attempting an ordinary-member preview. Poll reads pending deliveries and ACK marks consumption. The [message record](../spec/message-envelope.md) preserves exact body/routing/status fields. Sends addressed to the root Director and self-sends stay in durable inboxes for native/manual reads.
+The Director owns one native inbox receiver, reconciles full broker records, ACKs consumption and keeps deferred actions in host-owned task state. Ordinary members receive pane previews. Native reception preserves supplied goal controls and user decision gates; the [fleet guide](../how-to/mixed-backend-team.md#manual-lifecycle) explains handle ownership, recovery and manual reception.
 
-An ordinary-member notification leads with Escape and submits one safe line. Busy input or transport failure can leave committed delivery pending. A later send or finite wait retries eligible messages in order. A persisted message ID remains the identity to consume.
+## Design document workflow
 
-The Director owns one native listener and reconciles replay before acting. The listener observes records without ACK or pane effects. Host goal/decision controls remain in force; see [Run a fleet](../how-to/mixed-backend-team.md#receive-results).
-
-## Storage and safety
-
-Setup initializes/migrates compatible databases and refuses incompatible/ahead storage before mutation. Existing data and history remain. Ordinary commands validate the current application shape. Backup and recovery use the selected database plus any live SQLite sidecars; preserve a consistent copy.
-
-Short transactions protect registration, insertion and finalization. External pane I/O happens outside SQLite write transactions. Physical-pane locks use canonical database/backend/session/pane identity, with placement revalidation after ownership. Signals defer during protected side effects, and mandatory storage finalization retains independent completion grace.
-
-Creating/deleting herdr panes preserves automatic sizing/equalization. Targeted capture cleans ANSI/carriage-return redraws by default. Roster activity and idle distinguish recent communication from completion evidence.
-
-## Where to look
-
-[Quickstart](../quickstart.md) owns installation/trust, the [fleet guide](../how-to/mixed-backend-team.md) owns operation/recovery, and the [CLI reference](../spec/cli-options.md) explains command behavior. CLI help owns the exact option registry; migrations own storage shape and source owns rendering. Skills supply agent procedure and [design recipes](../how-to/design-doc-development.md).
+The bundled design-document workflows preserve clarification, independent review, TDD and explicit user approval. Follow the [design document guide](../how-to/design-doc-development.md).

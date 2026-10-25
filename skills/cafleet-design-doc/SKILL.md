@@ -1,53 +1,53 @@
 ---
 name: cafleet-design-doc
-description: Create, refine or implement design documents through scoped CAFleet members and independent review.
+description: >-
+  Use when the user asks to create a design doc, design document, specification,
+  or technical spec (create workflow → Director/Drafter/Reviewer team); to
+  validate, review, or interview an existing design doc through multi-round Q&A
+  (interview workflow); or to implement or execute a design doc (execute workflow
+  → TDD team). Also the standardized format spec — consult the template and
+  guidelines when editing a design doc. Always invoke this skill and route into
+  the matching workflow, orchestrated as a CAFleet team. Teammates in member teams
+  load the core and assigned references through their backend's supported
+  skill-loader without starting another team.
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, AskUserQuestion
 ---
 
-# Design documents
+# Design Document Skill (CAFleet Edition)
 
-Use the [CAFleet core](../cafleet/SKILL.md), your [backend](../cafleet/reference/coding-agents.md) and the [Director procedure](../cafleet/roles/director.md) for coordination. An assigned member continues its existing team and assignment. Read the compact [template and guidelines](reference/guidelines.md) before document edits.
+This skill is the umbrella for the full design-document lifecycle: the standardized **format spec** plus three CAFleet-native **orchestration workflows** (create, validate/interview, implement/execute). It is a dispatcher — consult a reference page for the format, or route to the matching workflow body to run a team.
 
-The Director supplies explicit absolute output/scratch paths, assigns scoped work, receives ready and direct evidence messages, owns Git/user decisions and closes owned members. Use the selected backend's configured model/effort defaults unless the user supplied explicit values. Review substantial work independently and validate routine edits proportionately.
+**Assigned teammates** load this skill through the executing backend's supported loader. Codex/OpenCode use absolute paths for this core, CAFleet core, their own backend section and required role references. Continue the existing assigned workflow; loading this umbrella as a member creates no second team. Main-session user requests follow Dispatch below.
 
-## Choose the work
+## Required reading
 
-| Request | Procedure |
-|---|---|
-| Create a design/specification | Clarify consequential gaps, draft an implementable document, obtain independent review and resolve findings. |
-| Interview/refine an existing design | Read existing content/answers, ask focused unresolved questions, preserve answers and revise affected decisions. |
-| Implement/execute a design | Confirm scope, assign bounded implementation and suitable checks, review evidence and resolve findings. |
+Before routing into a workflow or consulting a reference page, Read your overlay — it is row #1 below. Identify your coding agent first: your spawn prompt's `CODING AGENT:` line names it; a standalone / main-session reader uses its own identity.
 
-Keep the document readable as the current intended specification. Existing annotations and answered questions remain meaningful inputs; preserve their content until incorporated or explicitly resolved.
+**Load-bearing — Read before acting:**
 
-## Create
+| # | Read | What you lose if you skip it |
+|---|------|------------------------------|
+| 1 | your overlay section [`../cafleet/reference/coding-agents.md#<name>`](../cafleet/reference/coding-agents.md) — read **and resolve** it (see *Resolve your overlay* in the cafleet `SKILL.md`) | you skip resolution — the failure modes *Resolve your overlay* closes, e.g. a literal `{decision_surface}` emitted unresolved |
 
-1. Read repository/host rules, existing designs and relevant implementation. Resolve consequential unknown requirements before dependent drafting; use ordinary reasonable choices for routine details.
-2. Select the next seven-digit directory under `design-docs/` or preserve the explicit target. Supply absolute document/scratch paths to members.
-3. Assign a member to write the design: clear behavior, boundaries, compatibility, failure handling, measurable success criteria and executable tasks.
-4. Assign independent review of substantial specifications. Send findings directly with document paths/sections and rationale; revise until the design is coherent and implementable.
-5. Present the concrete result through the host's user-decision surface when approval is required. Carry prior authorization and explicit gates forward.
-6. Mark the design approved when applicable and close the owned team through the Director procedure.
+**On-demand — consult directly (no team), only when the task needs it:**
 
-## Refine
+| Read | When |
+|------|------|
+| [reference/guidelines.md](reference/guidelines.md) | you are writing or checking a doc against the standard structure (the template opens the page), or need section guidelines, quality standards, or formatting rules |
+| [reference/coordination.md](reference/coordination.md) | you need the inter-member verb + pointer + `COMMENT(role)` schema |
 
-1. Read the selected document, related source and existing answers/annotations. Preserve numbering and substantive prior answers.
-2. Identify decisions whose uncertainty affects behavior or implementation. Ask concise, focused questions in ordinary language; independent analysis may help substantial designs.
-3. Record questions/answers beside the document when requested, using the explicit absolute artifact path. A response answers that question; approvals remain their own decision.
-4. Incorporate clarified decisions, reconcile annotations and update affected tasks/success criteria. Review substantial revisions independently.
-5. Honor stop requests and pending decisions. Continue only independent authorized work while a needed answer is pending.
+Each workflow body (create / interview / execute) carries its own Required-reading block for the team it runs — base-dir, supervision, and coordination are gated there, not on this dispatch surface.
 
-## Implement
+## Dispatch
 
-1. Read the approved specification and task checkboxes, then inspect source and existing checks. Verify completed work before resuming from the next unfinished task.
-2. Assign members by bounded ownership, including shared interfaces, expected behavior, checks and evidence paths. Each implementing member owns suitable tests/checks for its change.
-3. Update affected operator docs and agent procedure with the behavior they own. Preserve historical records while fully removing maintained references to removed features.
-4. Implement and run checks appropriate to the affected boundary. Report exact commands/results, limitations and artifacts directly; escalate consequential spec gaps before dependent work.
-5. Check each completed task and its completion timestamp in the same edit. Task checkboxes are progress truth; preserve any existing progress metadata accurately.
-6. Review substantial implementation independently against the design and diff. Resolve findings, rerun affected checks and verify success criteria.
-7. Complete applicable user gates, finalize Git/publication under existing authorization, report evidence and remaining gaps, and tear down owned resources.
+For a main-session user request matching a scenario below, invoke this skill and run the linked workflow as a full CAFleet team — proactively, the moment the request matches, without waiting for the user to say "use cafleet".
 
-## Communication
+**Routing into a workflow means executing its entire orchestration.** The Director registers its current session with `cafleet fleet create`, spawns the role team, receives each ready and drives the workflow’s review/revision rounds through approval. The Director retains native inbox reception while delegated work remains; the linked workflow body owns its phase gates.
 
-Assignments and reports carry their substantive content in durable messages. Use artifact paths for long reports, retain IDs/evidence in host-owned state and ACK consumption after full reads. Report a blocker immediately with the observed cause and needed decision. The Director resolves ownership conflicts and user decisions.
+| When the user wants to… | Invoke this skill and run |
+|:--|:--|
+| Create a design doc / specification / technical spec | the **create** workflow ([create/create.md](create/create.md)) — Director/Drafter/Reviewer team |
+| Validate / review / interview an existing design doc | the **interview** workflow ([interview/interview.md](interview/interview.md)) — multi-round Q&A |
+| Implement / execute a design doc | the **execute** workflow ([execute/execute.md](execute/execute.md)) — TDD team |
 
-Use the general [member procedure](../cafleet/roles/member.md). The Director's receiver remains owned across delegated work and follows observed-exit recovery; broker events preserve host goals, budgets and pending user decisions.
+For the document template, section guidelines, or the coordination protocol — consult the **On-demand** reference pages in § Required reading above (no team needed).

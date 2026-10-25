@@ -1,25 +1,41 @@
 # Design document workflow
 
-Use the `cafleet-design-doc` skill to create, refine or implement a specification with scoped members and independent review.
+Develop a feature through a reviewed design, an interview and an implementation.
+The `cafleet` and `cafleet-design-doc` skills coordinate the teams; give your
+coding agent one prompt per stage.
 
-## Prompts
+## Prompts {#prompts}
 
-| Work | Example prompt | Result |
-|---|---|---|
-| Create | `Create a design doc for <feature>.` | Implementable specification with resolved decisions and independent review |
-| Refine | `Interview me about design-docs/NNNNNNN-<slug>.` | Focused questions, preserved answers and revised decisions |
-| Implement | `Implement design-docs/NNNNNNN-<slug>.` | Scoped implementation, appropriate checks and reviewed evidence |
+Each prompt triggers one `cafleet-design-doc` workflow:
 
-The Director supplies absolute artifact paths, receives ready, reads full reports and owns Git/user decisions. Members own bounded assignments and suitable checks. Substantial work receives independent review; routine edits use proportionate validation. Existing authorization and explicit approval gates govern the next action.
+| Stage | Prompt | Outcome | Team |
+|---|---|---|---|
+| 1. Draft | `Create a design doc for <one-line feature description>.` | Clarification, drafting and review, followed by your approval | Director + Drafter + Reviewer |
+| 2. Refine | `Interview me about design-docs/NNNNNNN-<slug>.` | Questions and persisted answers, with document annotations for revision | Director + Analyzer |
+| 3. Implement | `Implement design-docs/NNNNNNN-<slug>.` | Implementation and checks, fresh review, then your approval | Director + Programmer + Tester for code, optional Verifier, then a fresh Reviewer |
 
-## Artifacts and progress
+These stages invoke create, interview and execute respectively. After an
+interview, resume creation to incorporate its annotations and review the
+revised design before implementation. Documentation/configuration work may
+use a Programmer without a Tester. Contributor setup is in
+[Contributing](../contributing.md).
 
-New documents use `design-docs/NNNNNNN-short-kebab-slug/design-doc.md`. Select the highest existing numeric prefix plus one, padded to seven digits; start at `0000001`. Preserve explicit/existing targets and prior answers/annotations until incorporated.
+## Where output lands
 
-A design states intended behavior, compatibility, failures, measurable success criteria and executable tasks. Task checkboxes are progress truth. Complete each task with its timestamp in the same edit; keep any existing progress metadata accurate.
+Creation writes `design-docs/NNNNNNN-<slug>/design-doc.md` in your repository.
+CAFleet assigns a seven-digit, zero-padded number one above the highest existing
+number in that repository's `design-docs/`, starting at `0000001`. The slug is a
+short kebab-case description, such as `add-search`, giving `0000001-add-search`.
+The interview keeps questions and answers in `question.md` beside it and
+annotates the design; execution updates the design's task progress while
+implementing the approved work.
 
-## Follow the work
+## Watch the team work
 
-Read durable reports with poll/show and inspect roster activity, targeted captures and artifacts. Send findings/blockers/evidence directly, naming artifact paths for long reports. The Director resolves consequential missing information and preserves stop requests and pending user decisions.
+Read durable coordination with message poll/show and inspect the team’s visible panes with member/fleet capture. The Director retains native reception and owns evidence checks until delegated work resolves, preserving host continuation and user gates. Follow the [manual lifecycle](mixed-backend-team.md#manual-lifecycle).
 
-Follow [Run a fleet](mixed-backend-team.md) for reception, recovery and owned teardown. Contributor setup and publication are in [Contributing](../contributing.md).
+## Invocation syntax
+
+See your coding-agent's skill documentation for the literal invocation
+syntax (Claude Code's `/skills`, codex's `/skills`, opencode's skill
+discovery).

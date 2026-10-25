@@ -1,1 +1,0 @@
-../../../../../docs/docs/how-to/design-doc-development.md

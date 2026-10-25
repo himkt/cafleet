@@ -1,3 +1,22 @@
 [
-  { "type": "file", "name": "overview", "label": "Overview" }
+  {
+    "type": "file",
+    "name": "overview",
+    "label": "Overview"
+  },
+  {
+    "type": "file",
+    "name": "coding-agents",
+    "label": "Coding agents"
+  },
+  {
+    "type": "file",
+    "name": "member-lifecycle",
+    "label": "Member lifecycle"
+  },
+  {
+    "type": "file",
+    "name": "storage",
+    "label": "Storage"
+  }
 ]

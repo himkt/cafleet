@@ -1,40 +1,51 @@
 # Contributing
 
-Run repository operations from the root through mise full-path tasks. Follow the [design workflow](how-to/design-doc-development.md) for substantial changes and use proportionate checks for routine edits.
+Develop changes through reviewed designs and the bundled CAFleet workflows. Run repository tasks from the root using mise full-path notation.
 
-## Project owners
+## Project structure
 
-| Path | Responsibility |
+| Entry | Responsibility |
 |---|---|
-| `cafleet/` | Rust CLI, typed broker, native process/multiplexer adapters and embedded asset build |
-| `cafleet/migrations/` | Application storage shape and supported upgrades |
-| `skills/` | Agent procedures and offline runtime references |
-| `presets/` | Executable backend permissions/configuration |
-| `docs/` | Operator content, theme and Node/pnpm publication toolchain |
-| `design-docs/` | Local specifications and evidence |
+| `cafleet/` | Rust CLI, typed synchronous SQLite broker, multiplexer/process adapters and embedded assets |
+| `skills/` | Installed agent-facing skills, roles and references |
+| `presets/` | Backend permission/configuration assets |
+| `docs/` | Independent operator documentation and its Node/pnpm site tooling |
+| `design-docs/` | Numbered design documents and local evidence |
+
+## Rust boundaries
+
+Broker queries return typed records; CLI presenters construct wire output. Shared diagnosis validates identity, schema and assets. Keep durable storage separate from synchronous notification, finite receiving, input ownership and multiplexer I/O. Required state fails at its read boundary. Preserve process pipe draining, owned-child cleanup, pane ownership compensation and layout cleanup.
 
 ## Development
 
-Install the pinned tools with the repository's mise configuration. Use `mise tasks` and package task definitions as the task registry. Run the validation and build tasks defined by each affected package.
+```bash
+git clone https://github.com/himkt/cafleet.git
+```
 
-Keep necessary unit coverage inline in owning production files. Exercise real storage/file-lock/process behavior where appropriate and use small explicit fakes at meaningful boundaries. Assert required state and preserve transaction/input/deadline/delivery guarantees.
+Enter the checkout, then run repository-root tasks:
 
-Migrations extend the contiguous current-family chain. Preserve existing migration files/checksums and valid data; refuse incompatible/ahead databases before mutation.
+```bash
+mise //cafleet:install
+```
 
-### Install a checkout
+```bash
+cafleet setup
+```
 
-`mise //cafleet:install` installs a rebuilt CLI; then run `cafleet setup` to install its embedded skills/presets. Setup refreshes assets captured at binary build time.
+Use `mise tasks` and package task definitions as the task registry. Run Rust validation with `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck`. The release build needs Rust and embedded skills/presets. Reinstall the binary after Rust changes to use the new implementation.
 
-For working-tree skills, use `mise //:skill-install` after setup. Preserve an active executing team's installed binary/assets until teardown; validate checkout builds using isolated configuration/database and disposable owned panes.
+### Installing the skills from your checkout
 
-## Documentation and publication
+Setup installs assets embedded at binary build time. Contributors can install working-tree skills with `mise //:skill-install`; run it after setup when you want those local files. Preserve an active executing team's installed assets until its workflow finishes.
 
-Run `mise //docs:install`, then `mise //docs:build`; the build checks site links. Use the docs task registry for preview. Preserve the theme, demo and pnpm toolchain/lockfile.
+## Building docs locally
 
-CLI help owns option choices, migrations own storage shape, source owns rendering, the site owns operator behavior and skills own agent procedure. Mirror every surviving site Markdown page except the homepage under `skills/cafleet/reference/runtime/` as a relative symlink with the same path. Keep that installed tree's links closed. The build embeds canonical content and setup writes ordinary files.
+The documentation site retains its Node/pnpm toolchain and lockfile. Run `mise //docs:install`, then `mise //docs:build`; the build checks links. Use the docs task registry for preview and other available operations. Update dependencies through the manifest and regenerate its pnpm lockfile deliberately.
 
-Inspect skill/root Markdown links separately from the site build. Update navigation with page changes and fully remove maintained references to deleted features/paths. Historical design/research artifacts retain their evidence.
+## Contributing changes
 
-Write intended behavior directly, describe growing groups by their selecting property and link authoritative registries. Use tables for parallel comparisons and concise prose for rationale.
+Follow the [design document workflow](how-to/design-doc-development.md#prompts). Preserve role boundaries, clarification, review and user approval. The active session's host rules determine Git and artifact handling.
 
-To publish a binary release, run the Bump workflow, merge its version-change pull request, then publish the GitHub release that triggers the release workflow. The workflow definitions own current choices, build targets and permissions. The Pages workflow publishes documentation. Follow the active session's Git/artifact/publication rules and existing user authorization.
+## Documentation style
+
+Write human/operator behavior in the site and agent instructions in skills. State intended behavior directly. Link each shared enumeration to its owner; describe growing groups through their selecting property or registry. Use tables when parallel entries carry multiple shared attributes, with at least two data rows and at most two sentences per cell. Keep literal commands, flags, paths and errors in code spans.
