@@ -21,3 +21,6 @@ pub mod spawn_prompt;
 pub mod time;
 
 pub mod input;
+
+#[cfg(test)]
+mod listen_tests;

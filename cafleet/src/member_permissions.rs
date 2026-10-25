@@ -163,6 +163,24 @@ mod tests {
 
     const SEND: &str = "cafleet message send --from-member-id 1 --to-member-id 2 x";
 
+    #[test]
+    fn listen_broker_command_rules_produce_permission_diagnostics() {
+        let dir = TempDir::new().unwrap();
+        let command = *PROBE_COMMANDS
+            .iter()
+            .find(|command| command.starts_with("cafleet message listen "))
+            .expect("the broker diagnostics include a representative listen invocation");
+        for list in ["deny", "ask"] {
+            let rule = "Bash(cafleet message listen *)";
+            let contents = serde_json::json!({"permissions":{(list):[rule]}}).to_string();
+            let file = settings_file(&dir, "listen-settings.json", &contents, false);
+            assert_eq!(
+                diagnose(std::slice::from_ref(&file)),
+                [blocking(&file, list, rule, command)]
+            );
+        }
+    }
+
     fn settings_file(dir: &TempDir, name: &str, contents: &str, managed: bool) -> SettingsFile {
         let path = dir.path().join(name);
         std::fs::write(&path, contents).unwrap();

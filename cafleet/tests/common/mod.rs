@@ -488,6 +488,14 @@ impl Cli {
             .unwrap()
     }
 
+    pub fn spawn_with_stdout(&self, args: &[&str], output: Stdio) -> std::process::Child {
+        self.command(args, true)
+            .stdout(output)
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap()
+    }
+
     pub fn spawn_with_stdin(&self, args: &[&str]) -> std::process::Child {
         self.command(args, true)
             .stdin(Stdio::piped())
