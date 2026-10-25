@@ -780,6 +780,63 @@ fn success_and_query_failure_both_remove_the_owned_handler_and_restore_busy_time
 }
 
 #[test]
+fn a_failed_snapshot_commit_preserves_rollback_failure_and_removes_the_progress_handler() {
+    use rusqlite::hooks::{AuthAction, AuthContext, Authorization, TransactionOperation};
+    use std::sync::{Arc, Mutex};
+
+    let (_dir, mut conn, fleet, director, _) = broker_fixture();
+    let attempts = Arc::new(Mutex::new(Vec::new()));
+    let observed = Arc::clone(&attempts);
+    conn.authorizer(Some(move |context: AuthContext<'_>| match context.action {
+        AuthAction::Transaction {
+            // rusqlite 0.39 maps SQLite's COMMIT authorizer operation to Unknown.
+            operation: TransactionOperation::Unknown,
+        } => {
+            observed.lock().unwrap().push("commit");
+            Authorization::Deny
+        }
+        AuthAction::Transaction {
+            operation: TransactionOperation::Rollback,
+        } => {
+            observed.lock().unwrap().push("rollback");
+            Authorization::Deny
+        }
+        _ => Authorization::Allow,
+    }))
+    .unwrap();
+    let expiry = Instant::now() + Duration::from_millis(200);
+    let result = listen_snapshot(&mut conn, director, Some(fleet), Deadline::until(expiry));
+    let transaction_open = !conn.is_autocommit();
+    conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+        .unwrap();
+    if transaction_open {
+        conn.execute_batch("ROLLBACK").unwrap();
+    }
+    std::thread::sleep(
+        expiry.saturating_duration_since(Instant::now()) + Duration::from_millis(20),
+    );
+    assert_handler_cleared(&conn);
+
+    let attempts = attempts.lock().unwrap();
+    assert_eq!(attempts.first(), Some(&"commit"));
+    assert!(attempts[1..].contains(&"rollback"), "{attempts:?}");
+    assert!(
+        transaction_open,
+        "the denied rollback leaves its transaction open for explicit cleanup"
+    );
+    let error = result.unwrap_err();
+    let diagnostic = error.message();
+    assert!(
+        diagnostic.contains("rolling back listener snapshot failed"),
+        "{diagnostic}"
+    );
+    assert!(
+        diagnostic.matches("not authorized").count() >= 2,
+        "commit and rollback causes both remain visible: {diagnostic}"
+    );
+}
+
+#[test]
 fn an_unrelated_sqlite_interrupt_preserves_its_cause_before_the_deadline() {
     use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
     let (_dir, mut conn, fleet, director, worker) = broker_fixture();
