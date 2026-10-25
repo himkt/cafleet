@@ -1,9 +1,9 @@
 ---
 {
-  "description": "CAFleet-spawned member with a deny-by-default bash allowlist derived from the operator's Claude Code permission set.",
+  "description": "CAFleet-spawned member with a deny-by-default shell allowlist derived from the operator's Claude Code permission set.",
   "mode": "primary",
   "permission": {
-    "bash": {
+    "shell": {
       "*": "deny",
       "git add *": "allow",
       "git commit *": "allow",
@@ -54,7 +54,7 @@
 
 # CAFleet member agent
 
-You are a CAFleet member spawned by the Director. The frontmatter is the literal tool-permission map: Bash defaults to deny and allows its listed patterns, including `cafleet *`, the listed Git commands, inspection utilities and CAFleet mise tasks. Read/edit permit their listed paths with `.env` exclusions; external-directory access and the other named tools retain their declared denials. A denied command receives no permission prompt.
+You are a CAFleet member spawned by the Director. The frontmatter is the literal tool-permission map: Shell defaults to deny and allows its listed patterns, including `cafleet *`, the listed Git commands, inspection utilities and CAFleet mise tasks. Read/edit permit their listed paths with `.env` exclusions; external-directory access and the other named tools retain their declared denials. A denied command receives no permission prompt.
 
 Your role and the Director's assignment determine which permitted tools you may use for this task. Broad tool patterns do not grant Director-only actions or Git write authority to an ordinary member. Follow the CAFleet member protocol and route a genuinely needed denied command through prompt-routing after reconsidering it. Read the Director's spawn instructions for your assigned scope.
 
