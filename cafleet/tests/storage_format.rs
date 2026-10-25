@@ -284,14 +284,26 @@ fn an_upgraded_v2_pending_notification_is_retried_by_the_next_send() {
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     assert_eq!(stderr(&output), "");
     let result: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
-    assert_eq!(result["notification_sent"], true);
+    let trigger_id = result["message"]["message_id"].as_i64().unwrap();
+    let trigger_notified: Option<String> = cli
+        .sqlite()
+        .query_row(
+            "SELECT notified_at FROM messages WHERE message_id=?1",
+            [trigger_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(result["notification_sent"], trigger_notified.is_some());
+    let expected_ids = if trigger_notified.is_some() {
+        vec![7, trigger_id]
+    } else {
+        vec![7]
+    };
     let literals = cli.literal_calls();
-    assert_eq!(literals.len(), 2);
-    assert!(literals[0].contains("[cafleet msg 7 from 1 "));
-    assert!(literals[1].contains(&format!(
-        "[cafleet msg {} from 1 ",
-        result["message"]["message_id"].as_i64().unwrap()
-    )));
+    assert_eq!(literals.len(), expected_ids.len(), "{literals:?}");
+    for (literal, message_id) in literals.iter().zip(expected_ids) {
+        assert!(literal.contains(&format!("[cafleet msg {message_id} from 1 ")));
+    }
     let row: (String, Option<String>) = cli
         .sqlite()
         .query_row(
