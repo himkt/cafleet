@@ -567,20 +567,14 @@ mod tests {
             .collect()
     }
 
-    fn unconfirmed(conn: &rusqlite::Connection, fleet_id: i64, member_id: i64) -> Value {
-        roster_json(conn, fleet_id)
-            .into_iter()
-            .find(|row| row["member_id"] == member_id)
-            .unwrap()["unconfirmed_previews"]
-            .clone()
-    }
-
     #[test]
-    fn roster_rows_append_unconfirmed_previews_after_idle() {
+    fn roster_rows_expose_the_ordered_activity_contract() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
-        let (fleet_id, director_id) = create_fleet(&mut conn, "alpha");
+        let (fleet_id, _) = create_fleet(&mut conn, "alpha");
         register(&mut conn, fleet_id, "worker", Some("%2"));
+        register(&mut conn, fleet_id, "pending", None);
+        broker::register_member(&mut conn, fleet_id, "paneless", "assignment", None).unwrap();
         for row in roster_json(&conn, fleet_id) {
             assert_eq!(
                 row.as_object().unwrap().keys().collect::<Vec<_>>(),
@@ -593,16 +587,9 @@ mod tests {
                     "last_recv",
                     "last_ack",
                     "idle",
-                    "unconfirmed_previews"
                 ]
             );
-            assert_eq!(row["unconfirmed_previews"], serde_json::json!([]));
         }
-        assert_eq!(
-            unconfirmed(&conn, fleet_id, director_id),
-            serde_json::json!([]),
-            "the Director row carries the field too"
-        );
     }
 
     #[test]
@@ -722,7 +709,6 @@ mod step6_behavior_regressions {
             last_recv: received.map(str::to_owned),
             last_ack: ack.map(str::to_owned),
             idle: None,
-            unconfirmed_previews: Vec::new(),
         }
     }
 
