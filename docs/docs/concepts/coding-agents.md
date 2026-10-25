@@ -71,20 +71,28 @@ is a Director responsibility. The catalog provides exact spawn tokens,
 Claude aliases, reviewed capability classes, standard input/output prices
 and official sources, ordered from most to least capable within each backend.
 The OpenCode catalog lists every Console model with its `opencode/` prefix,
-excluding models past their published deprecation date.
+excluding models past their published deprecation date, and every OpenCode Go
+model with its `opencode-go/` prefix.
 
 A bare Claude or GPT model reference selects Claude Code or Codex on every
 fleet, including an OpenCode fleet. Naming OpenCode for the member selects
-OpenCode with the `opencode/` form of that model. A bare name offered only by
+OpenCode for that model. When the Director resolves an OpenCode model by name,
+it checks the operator's configured providers and uses the OpenCode Go form
+when they offer it, otherwise the Console form. A bare name offered only by
 OpenCode selects OpenCode when it uniquely matches a catalog ID. The Director
-asks the operator to resolve an unknown or ambiguous reference.
+asks the operator to resolve an unknown or ambiguous reference. It also asks
+when the provider check fails or offers neither form. A provider-prefixed model,
+a role default and a family-word request on OpenCode use their written or
+Console form as is.
 
 Use the selected backend’s role defaults and catalog as the source of truth. OpenCode omits unsupported effort.
 
 Only the exact phrase `cost efficiency mode` in the originating user request
 activates cheapest-capable selection for ordinary members. The Director
-chooses a backend first and compares models within that backend. Otherwise,
-ordinary members use the backend's other-member default. Reviewers use their role defaults, including supported effort
+chooses a backend first and compares models within that backend. On OpenCode,
+models available through the operator's OpenCode Go subscription count as
+effectively free and are preferred. Outside cost efficiency mode, ordinary
+members use the backend's other-member default. Reviewers use their role defaults, including supported effort
 levels.
 
 Explicit backend, model and effort values remain overrides. A mismatch or
