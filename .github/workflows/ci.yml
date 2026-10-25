@@ -40,3 +40,4 @@ jobs:
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('cafleet/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-test-
       - run: mise //cafleet:test
+      - run: mise //:model-refresh-test

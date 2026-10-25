@@ -20,6 +20,10 @@ run = [
 ]
 description = "Install skills"
 
+[tasks.model-refresh-test]
+description = "Test offline model-refresh parsers with synthetic fixtures"
+run = "python3 -B -m unittest discover -s .claude/skills/cafleet-model-list-refresh/scripts/tests"
+
 [tasks.all-install]
 run = [
   {"task" = "//cafleet:install"},
