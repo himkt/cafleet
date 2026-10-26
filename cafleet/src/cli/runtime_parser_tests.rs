@@ -2,6 +2,7 @@ use clap::Parser;
 
 use super::CliArgs;
 
+mod permission_entry;
 mod recovery_entry;
 
 fn usage_error(args: &[&str]) -> clap::Error {
