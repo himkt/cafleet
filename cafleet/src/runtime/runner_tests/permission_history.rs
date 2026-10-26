@@ -44,7 +44,15 @@ impl Case {
         mode: DirectorMode,
         source: DecisionSource,
     ) -> Self {
-        let mut fixture = Fixture::new();
+        Self::from_fixture(Fixture::new(), state, decision, mode, source)
+    }
+    fn from_fixture(
+        mut fixture: Fixture,
+        state: Retained,
+        decision: PermissionDecision,
+        mode: DirectorMode,
+        source: DecisionSource,
+    ) -> Self {
         let artifacts = fixture.artifacts();
         let lock = Arc::new(
             RunLock::acquire(&fixture.conn, &fixture.run.owner())
