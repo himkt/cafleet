@@ -1,6 +1,6 @@
 use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
-use std::os::unix::net::UnixListener;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -11,6 +11,50 @@ fn independently_framed(body: &[u8]) -> Vec<u8> {
     let mut bytes = u32::try_from(body.len()).unwrap().to_be_bytes().to_vec();
     bytes.extend_from_slice(body);
     bytes
+}
+
+fn read_fixture_bytes(stream: &mut UnixStream, mut bytes: &mut [u8], deadline: Instant) {
+    while !bytes.is_empty() {
+        assert!(Instant::now() < deadline, "fixture request read timed out");
+        match stream.read(bytes) {
+            Ok(0) => panic!("actual health client closed an incomplete request"),
+            Ok(count) => bytes = &mut bytes[count..],
+            Err(cause)
+                if matches!(
+                    cause.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                ) =>
+            {
+                std::thread::sleep(
+                    Duration::from_millis(2)
+                        .min(deadline.saturating_duration_since(Instant::now())),
+                );
+            }
+            Err(cause) => panic!("fixture request read failed: {cause}"),
+        }
+    }
+}
+
+fn write_fixture_bytes(stream: &mut UnixStream, mut bytes: &[u8], deadline: Instant) {
+    while !bytes.is_empty() {
+        assert!(Instant::now() < deadline, "fixture reply write timed out");
+        match stream.write(bytes) {
+            Ok(0) => panic!("fixture reply write made no progress"),
+            Ok(count) => bytes = &bytes[count..],
+            Err(cause)
+                if matches!(
+                    cause.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                ) =>
+            {
+                std::thread::sleep(
+                    Duration::from_millis(2)
+                        .min(deadline.saturating_duration_since(Instant::now())),
+                );
+            }
+            Err(cause) => panic!("fixture reply write failed: {cause}"),
+        }
+    }
 }
 
 #[test]
@@ -37,7 +81,10 @@ fn runner_review_codec_decodes_every_header_and_body_split() {
     for cut in 0..bytes.len() {
         let mut decoder = ControlDecoder::new();
         assert!(decoder.feed(&bytes[..cut]).unwrap().is_empty());
-        assert_eq!(decoder.feed(&bytes[cut..]).unwrap(), [value.clone()]);
+        assert_eq!(
+            decoder.feed(&bytes[cut..]).unwrap().as_slice(),
+            std::slice::from_ref(&value)
+        );
         decoder.finish().unwrap();
     }
     let mut decoder = ControlDecoder::new();
@@ -190,30 +237,36 @@ fn runner_review_actual_health_client_uses_framing_and_validates_reply_versions(
         }
         let expected_identity = ControlIdentity::from_run(&run);
         let valid = version == Some(json!(1));
+        let deadline = Instant::now() + Duration::from_secs(2);
         std::thread::scope(|scope| {
             let server = scope.spawn(move || {
-                let until = Instant::now() + Duration::from_secs(2);
                 let mut stream = loop {
                     match listener.accept() {
                         Ok((stream, _)) => break stream,
                         Err(cause) if cause.kind() == std::io::ErrorKind::WouldBlock => {}
                         Err(cause) => panic!("fixture socket accept failed: {cause}"),
                     }
-                    assert!(Instant::now() < until);
-                    std::thread::sleep(Duration::from_millis(2));
+                    assert!(Instant::now() < deadline, "fixture socket accept timed out");
+                    std::thread::sleep(
+                        Duration::from_millis(2)
+                            .min(deadline.saturating_duration_since(Instant::now())),
+                    );
                 };
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(1)))
-                    .unwrap();
+                stream.set_nonblocking(true).unwrap();
+                let flags = nix::fcntl::OFlag::from_bits_retain(
+                    nix::fcntl::fcntl(&stream, nix::fcntl::FcntlArg::F_GETFL).unwrap(),
+                );
+                assert!(flags.contains(nix::fcntl::OFlag::O_NONBLOCK));
+                let read_deadline = deadline.min(Instant::now() + Duration::from_secs(1));
                 let mut header = [0; 4];
-                stream.read_exact(&mut header).unwrap();
+                read_fixture_bytes(&mut stream, &mut header, read_deadline);
                 let length = usize::try_from(u32::from_be_bytes(header)).unwrap();
                 assert!(
                     length > 0 && length <= 65536,
                     "actual client sent invalid length {length}"
                 );
                 let mut body = vec![0; length];
-                stream.read_exact(&mut body).unwrap();
+                read_fixture_bytes(&mut stream, &mut body, read_deadline);
                 let request: Value = serde_json::from_slice(&body).unwrap();
                 assert_eq!(request["protocol_version"], 1);
                 assert_eq!(request["kind"], "health");
@@ -222,10 +275,10 @@ fn runner_review_actual_health_client_uses_framing_and_validates_reply_versions(
                     serde_json::to_value(expected_identity).unwrap()
                 );
                 for byte in independently_framed(&serde_json::to_vec(&reply).unwrap()) {
-                    stream.write_all(&[byte]).unwrap();
+                    write_fixture_bytes(&mut stream, &[byte], deadline);
                 }
             });
-            let observed = probe_health(&run, Instant::now() + Duration::from_secs(2));
+            let observed = probe_health(&run, deadline);
             assert_eq!(observed.is_ok(), valid, "{observed:?}");
             if let Ok(health) = observed {
                 assert_eq!(health.output_seq, 7);
