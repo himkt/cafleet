@@ -162,7 +162,7 @@ Use the runtime owner for exact flags, outputs and errors. Ordinary members reta
 | Persistent native reception | [Message listen](reference/runtime/spec/cli-options.md#message-listen), [Director lifecycle](reference/supervision.md#director-wake) |
 | Fleet/member creation and compensation | [Lifecycle contracts](reference/runtime/spec/cli-options.md#member-create) |
 | Read-only roster pane snapshot | [Fleet capture](reference/runtime/spec/cli-options.md#fleet-capture) |
-| Runtime events, input receipts and recovery | [Member runtime procedure](reference/member-runtime.md) and [runtime contract](reference/runtime/spec/member-runtime.md) |
+| Runtime events, mode-dependent permission responses, receipts and recovery | [Member runtime procedure](reference/member-runtime.md) and [runtime contract](reference/runtime/spec/member-runtime.md) |
 | Explicit native shell input | [Member exec](reference/runtime/spec/cli-options.md#member-exec), [routing](reference/prompt-routing.md) |
 | Pane input, exclusion and previews | [Multiplexer contracts](reference/runtime/spec/multiplexer-backends.md) |
 | Host continuation, native waiting and evidence boundaries | Selected backend's bound notes in [coding-agents.md](reference/coding-agents.md) |

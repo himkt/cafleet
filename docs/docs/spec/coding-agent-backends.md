@@ -60,6 +60,12 @@ Per-backend capabilities:
 | `codex` | kernel-enforced ([Codex](#codex)) | no — locate the pane through `cafleet member list` (`pane_id` is ground truth) | Runs commands its workspace/host rules permit; routes required denied commands | `~/.codex/rules/cafleet.rules` (`CODEX_HOME` relocates it), plus the `~/.codex/config.toml` settings and a trusted working directory — a permission posture, not a spawn dependency ([the rules file](#cafleet-rules-file)) |
 | `opencode` | none | no — locate the pane through `cafleet member list` | Deny-by-default allowlist; everything outside it routes to the Director | `~/.opencode/agents/cafleet.md` (`OPENCODE_CONFIG_DIR` relocates it) — a spawn precondition ([the agent preset](#cafleet-agent-preset)) |
 
+## Director decision policy
+
+The Director resolves its own effective approval mode from current host/session evidence, independently of member launch argv. Verified auto permits the Director to evaluate a current permission request and decide allow/deny; other or unknown modes require the user’s request-specific permission. Native and managed rules remain authoritative, including authorization to execute the response command.
+
+The [permission workflow](../concepts/member-permission-events.md) owns consumption and risk review. Request-bound answer support is an independently tested exact-version profile capability; detection or composer support supplies no answer-key mapping. Unknown answer coverage preserves manual native input.
+
 ## Model selection {#model-selection}
 
 | Backend | Accepted value format | Example values | Create-time validation |

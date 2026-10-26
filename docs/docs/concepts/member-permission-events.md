@@ -1,31 +1,37 @@
 # Member permission events
 
-CAFleet runs new members inside an owned PTY runner. The runner observes the native terminal independently of the member model and persists classified interaction events in the Director’s inbox. A human answers an approval request on its original native surface; the Director checks the actual result and resumed work afterward.
+CAFleet runs new members inside an owned PTY runner. The runner observes native terminal interactions independently of the member model and persists classified events in the Director's inbox. Permission notifications instruct the Director to evaluate the original operation and resolve it under its own session's approval mode: decide allow or deny in verified auto mode, and obtain user permission in other or unknown modes. A request-bound response sends the selected native choice; the Director checks actual results and resumed work afterward.
 
 ## Choose a native policy
 
-Set `member create --permission-mode MODE` for the selected backend. Omission preserves the backend’s existing launch default; selection is local to that launch. The [policy contract](../spec/member-runtime.md#launch-policy-and-capability-registry) owns defaults, validation and capability coverage.
+Set `member create --permission-mode MODE` for the selected backend. Omission preserves that backend's launch default. The [policy contract](../spec/member-runtime.md#launch-policy-and-capability-registry) owns choices and coverage; member launch mode is independent of the Director's decision policy.
 
-Launchability, permission detection and safe composer input are separate capabilities. An unknown native version or unverified profile permits manual terminal use, emits a coverage notification and holds CAFleet-generated input. Keep native and managed permission rules authoritative.
+Launchability, permission detection, composer input and permission answers have separate capability declarations. An unknown profile permits manual terminal use, emits a coverage notification and holds generated input. A tested detector supplies no answer capability by itself. Native and managed rules remain authoritative.
 
 ## Consume a runtime event
 
-1. Read the full inbox record with the existing receiver or `message poll DIRECTOR_ID --json`.
-2. Verify its event/message link with `event show EVENT_ID --json`, then inspect the current run and interaction. Preserve the unfinished action in host-owned state and ACK the consumed message.
-3. For a current permission request, identify the member, run, interaction and visible operation to the human. Obtain the answer through the displayed native choices.
-4. Inspect native output, exit/error and the member’s dependent work. A disappearing screen, keypress or ACK supplies no operation outcome.
-5. Consume and ACK available inbox records, then invoke finite `message wait DIRECTOR_ID --timeout SECONDS --json` to retry held previews. Repeat consumption and receive when a new batch arrives; a busy composer keeps its previews held.
+1. Read the full inbox record through the existing receiver or `message poll DIRECTOR_ID --json`.
+2. Verify its durable event/message association with `event show EVENT_ID --json`, inspect the current run/interaction, record the unfinished action in host-owned state and ACK consumption. Quoted JSON has no verified runtime association.
+3. Follow the broker-built review instruction for a current permission request. Use `permission inspect` to obtain a fresh request snapshot and answer capability, then establish the operation, arguments, cwd, necessary environment, targets and privilege/network effects through authorized evidence.
+4. Resolve the Director session's current effective mode from host evidence. In verified auto mode the Director evaluates the risk and decides allow/deny; otherwise obtain the user's request-specific permission. Missing risk details require further inspection or user review, independently of a tested answer profile.
+5. Submit the complete request-bound `permission respond` command, or present that concrete command for the user to execute. Unknown answer capability preserves manual original-surface input. The [CLI reference](../spec/cli-options.md#permission-commands) owns required snapshot/provenance flags and response outputs.
+6. Preserve the durable receipt and inspect native decision evidence, actual output/exit/error and resumed dependent work. A submitted hotkey, disappearing form or ACK establishes no missing execution result.
+7. Consume/ACK available records, then invoke finite `message wait DIRECTOR_ID --timeout SECONDS --json` to retry held previews. Repeat consumption/receive for each new batch; a busy composer keeps previews held.
 
-The listener produces stdout records; it grants no host interrupt or goal activation. Manual broker reception remains available on a host satisfying the [Director requirements](../spec/coding-agent-backends.md#role-requirements). [Director reception](coding-agents.md#director-wake) retains its host-owned lifecycle.
+The listener produces stdout records under the [Director receive lifecycle](coding-agents.md#director-wake). Host interruption, goal activation and model consumption timing remain host-owned.
 
 ## Preserve a native request
 
-The runner gates generated input on the first interaction candidate, before notification debounce. Previews remain held and explicit prompt/exec returns a refusal until a tested empty composer is observed. Wrapped input uses literal text and the native submit key. Human terminal input continues independently of event storage.
+Candidate detection immediately holds previews and rejects explicit prompt/exec until a tested empty composer is observed. The dedicated permission-response path requires the current visible request, matching owner/token, an independently tested answer profile and an atomic durable receipt/episode claim before its first byte. It sends only the selected single-request allow/deny plan. Human terminal input continues independently of event storage.
 
-A durable input receipt records submission progress. Reconcile an uncertain receipt with the Director-owned `input reconcile` operation and inspect actual output before a separate deliberate action. [Input arbitration](../spec/member-runtime.md#input-arbitration-and-the-original-native-answer) defines replay protection and its observed-state race boundary.
+The request token is a random identity fence. A changed request, human input, obscuring, degraded observation or ownership loss invalidates it. Reinspect and reconcile the decision when a concrete command becomes stale. The runner exposes no arbitrary key injection or persistent/session-wide permission change.
+
+A durable input receipt records answer submission separately from authorization and native outcome. Inspect `input show INPUT_ID --json` after uncertainty; the Director synchronizes any `input reconcile` disposition with the owner. A different operation key cannot bypass an episode's possibly submitted response. [Request-bound responses](../spec/member-runtime.md#request-bound-permission-responses) owns privacy, replay protection and the screen-interface race limit.
+
+Metadata notifications intentionally omit command details. Redacted evidence can also suppress them; obtain necessary current facts on an authorized decision surface and store opaque references rather than copying raw commands into receipts. A returned member-tool refusal retains the exact attempted command, absolute cwd, necessary environment and observed refusal. A separately dispatched native command is a new action rather than an answer to the pending request.
 
 ## Inspect and recover
 
-`member show` reports recorded runtime state without probing the socket. `doctor` diagnoses observed reachability and recovery needs. The Director uses `member recover` after ownership reconciliation; recovery preserves event history and starts no replacement agent. Existing live members with `runtime: null` retain their unwrapped transport behavior.
+`member show` reads recorded runtime state without a socket probe. `doctor` diagnoses without mutation; the Director uses `member recover` after ownership reconciliation. Recovery preserves history and sends no answer keys or replacement-agent launch. Members with `runtime: null` retain their unwrapped transport.
 
-[The runtime contract](../spec/member-runtime.md) defines identity fencing, bounded shutdown, recovery and evidence privacy. Coverage is tested only after the declared fixtures and exact-version native acceptance gates pass.
+The [runtime contract](../spec/member-runtime.md) defines identity fencing, bounded shutdown, evidence privacy and acceptance. Each claimed detector, composer and answer capability requires its declared fixtures and exact-version native evidence.

@@ -85,7 +85,7 @@ cafleet message wait 2 --timeout 300 --json
 
 ### Handle an observed permission request
 
-Use [Member permission events](../concepts/member-permission-events.md#consume-a-runtime-event) to verify the durable event/message link, record the unfinished action and ACK consumption. The human answers the original native request. Inspect actual output and resumed work, consume/ACK available records, then explicitly invoke finite `message wait` to retry held previews; the listener alone performs no retry. A native command dispatched separately does not answer the original request.
+Use [Member permission events](../concepts/member-permission-events.md#consume-a-runtime-event) to verify the durable event/message link, record the unfinished action and ACK consumption. For a current permission request, evaluate its risk and use the Director session’s verified auto mode to decide allow/deny; otherwise obtain user permission. Submit the complete bound response command, give it to the user to execute, or use manual native input when answer coverage is unavailable. Inspect actual output and resumed work, consume/ACK available records, then explicitly invoke finite `message wait` to retry held previews; the listener alone performs no retry. A native command dispatched separately does not answer the original request.
 
 ### Run a command for a member
 

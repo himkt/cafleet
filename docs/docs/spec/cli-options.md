@@ -20,6 +20,7 @@ The unified `cafleet` CLI uses literal subject IDs, synchronous SQLite access an
 | `member recover` | Reconcile the recorded run without restarting an agent | `MEMBER_ID` | yes |
 | `event show` | Read a durable runtime event and current state | `EVENT_ID` | yes |
 | `input show` / `input reconcile` | Read / settle a durable input receipt | `INPUT_ID` | yes |
+| `permission inspect` / `permission respond` | Inspect / answer the current native permission request | `INTERACTION_ID` | yes |
 | `message send` | Persist a point-to-point message and preview it for an ordinary recipient | Sender/recipient flags | yes |
 | `message poll` / `message wait` | Read incoming deliveries / block until deliveries arrive | `MEMBER_ID` | yes |
 | `message listen` | Stream pending inbox records through stdout | `MEMBER_ID` | JSONL only |
@@ -58,7 +59,9 @@ The default expands HOME once. An explicit URL has the form `sqlite:///<path>`; 
 | `member show` | `ID NAME STATUS` plus wrapped runtime line | Detail including kind, placement and runtime |
 | `member recover` | Recovery counts/state and cleanup lines | Ordered recovery result |
 | `event show` | Event, runtime and optional interaction lines | Event and current state |
-| `input show` / `input reconcile` | Input receipt line | `{input}` |
+| `input show` / `input reconcile` | Input receipt and optional decision lines | `{input}` |
+| `permission inspect` | Request identity/capability lines | `{request}` |
+| `permission respond` | Answer submission status/stage line | `{response}` |
 | `member list` | Roster rows or `0 members.` | Roster array |
 | `member prompt` | `Sent prompt TEXT_REPR to member NAME (PANE).` plus wrapped input line | `{member_id, pane_id, text, input_id}` |
 | `member exec` | `Dispatched native command to member ID (PANE). Inspect the pane for its result.` plus wrapped input line | `{member_id, pane_id, coding_agent, command, dispatched, input_id}` |
@@ -72,11 +75,11 @@ Roster records include `member_id`, `name`, `kind`, `placement`, `last_sent`, `l
 
 ## JSON output (`--json`) {#json-output}
 
-Use a trailing per-subcommand `--json`. It emits compact single-line JSON with UTF-8 and complete untruncated message text. Application errors remain stderr text; parse errors exit 2. Commands marked no reject the flag, including the root group.
+Use a trailing per-subcommand `--json`. It emits compact single-line JSON with UTF-8 and complete untruncated message text. Application errors remain stderr text, with the [structured permission-response exception](#permission-commands); parse errors exit 2. Commands marked no reject the flag, including the root group.
 
 ## Positional subject ids {#positional-subject-ids}
 
-Place the command’s subject ID immediately after its subcommand; event and input subjects use their positive durable record IDs. The subject row supplies related fleet/recipient state. IDs are complete DB-assigned integers, without prefix resolution or environment defaults. A missing or malformed subject uses the parser's native error, exit 2.
+Place the command’s subject ID immediately after its subcommand; event, input and permission subjects use their positive durable event, input and interaction IDs. The subject row supplies related fleet/recipient state. IDs are complete DB-assigned integers, without prefix resolution or environment defaults. A missing or malformed subject uses the parser's native error, exit 2.
 
 Spawned members read literal `FLEET ID:`, `YOUR MEMBER ID:`, `DIRECTOR MEMBER ID:` and `CODING AGENT:` lines. Pass these literal IDs on each invocation.
 
@@ -88,7 +91,7 @@ Send requires integer sender and recipient flags. Both must be active in the sam
 
 Use prefix rules such as `Bash(cafleet message *)` to cover broker operations, including `cafleet message listen ID --timeout 300` and finite `cafleet message wait`. Verify native Monitor authorization separately: a Bash-rule check establishes no Monitor permission. Director capture is covered by `Bash(cafleet fleet capture *)` or a broader authorized prefix. Literal IDs and trailing JSON flags preserve prefix matching.
 
-Keep `Bash(cafleet member prompt *)` and `Bash(cafleet member exec *)` under `permissions.ask`, because their bodies carry operator-controlled input. Ask rules outrank allow rules. The [permission profiles](coding-agent-backends.md#claude-profile-entries) describe each role's needs.
+Keep `Bash(cafleet member prompt *)` and `Bash(cafleet member exec *)` under `permissions.ask`, because their bodies carry operator-controlled input. Ask rules outrank allow rules. Authorize `cafleet permission respond` under the Director host’s effective policy after its request-specific decision; mode/source flags bypass no ask, deny or managed rule. Ordinary member role authority covers broker reception and evidence routing, while the Director owns permission responses. The [permission profiles](coding-agent-backends.md#claude-profile-entries) describe each role's needs.
 
 ## Message Body Truncation
 
@@ -823,7 +826,7 @@ Wrapped create/show preserves its existing text row and appends `Runtime: run=RU
 
 `cafleet event show EVENT_ID [--json]` returns ordered `event,notification_state,message_id,archive_reason,run,interaction`. The event is the complete [versioned runtime payload](member-runtime.md#persistence-notification-and-read-interfaces), run is the current runtime summary, and nullable interaction contains stored fields in schema order. Text is `Event: EVENT_ID run=RUN_ID seq=EVENT_SEQ kind=KIND notification=STATE message=MESSAGE_ID` followed by the runtime summary line and `Interaction: INTERACTION_ID classification=CLASS closed_at=TIMESTAMP close_reason=REASON` when linked. Unavailable optional text values render `-`.
 
-`cafleet input show INPUT_ID [--json]` and `cafleet input reconcile INPUT_ID --disposition DISPOSITION --evidence-ref REFERENCE [--json]` return `{input}` with the durable row ordered `input_id,run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,disposition,evidence_ref`. Text is `Input: INPUT_ID run=RUN_ID kind=KIND state=STATE disposition=DISPOSITION message=MESSAGE_ID`, with `-` for absent optional fields.
+`cafleet input show INPUT_ID [--json]` and `cafleet input reconcile INPUT_ID --disposition DISPOSITION --evidence-ref REFERENCE [--json]` return `{input}` with the durable row ordered `input_id,run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,disposition,evidence_ref,permission_response`. The nullable audit object and additional text line follow the [permission contract](#permission-response-audit-output). Text is `Input: INPUT_ID run=RUN_ID kind=KIND state=STATE disposition=DISPOSITION message=MESSAGE_ID`, with `-` for absent optional fields.
 
 Reconciliation is Director-owned. CLI disposition tokens are `submitted`, `not-submitted` and `abandoned-uncertain`, persisted with underscores as defined by the [receipt contract](member-runtime.md#input-arbitration-and-the-original-native-answer). Require a nonempty evidence reference, synchronize with the current owner before CAS settlement and preserve uncertainty while an active writer cannot be ruled out. Settlement sends no input and establishes no native command result.
 
@@ -837,9 +840,68 @@ The exceptional form is `cafleet member recover MEMBER_ID --owner-terminated --e
 
 Ordered JSON keys are `member_id,run_id,outcome,replayed_count,inbox_count,archived_count,status,cleanup_diagnostics`. Outcome is `recovered`, `recovering`, `live_or_unreachable` or `operator_reconciliation_required`; counts describe this pass and diagnostics retain cleanup/attestation provenance. Text is `Recovery: member=MEMBER_ID run=RUN_ID outcome=OUTCOME status=STATUS replayed=COUNT inbox=COUNT archived=COUNT`, followed by each bounded diagnostic as `Cleanup: DIAGNOSTIC`. Incomplete or unreachable outcomes remain distinct from confirmed recovery.
 
+## Permission commands {#permission-commands}
+
+`cafleet permission inspect INTERACTION_ID --event-id EVENT_ID --from-member-id DIRECTOR_ID [--json]` reads the current request through its pinned runner. Require positive IDs and an active ordinary target, pinned active Director and live fleet; verify the event/message association and interaction ownership under the existing pane lock. One five-second deadline covers locking, database work and the control exchange. Inspection sends zero child bytes and reserves no receipt. Unknown answer capability is an inspection result; stale ownership or an unavailable owner is an operational error.
+
+The inspection JSON is `{request}`. Its object has ordered keys:
+
+```text
+event_id,message_id,member_id,fleet_id,director_member_id,run_id,owner_epoch,interaction_id,episode_seq,classification,visibility,backend,native_version,profile_version,answer_profile_version,answer_rule_id,answer_capability,capability_reason,supported_decisions,request_token,output_seq,evidence,missing_evidence
+```
+
+IDs/epoch/episode are positive integers; `output_seq` is an unsigned integer. `message_id` is the verified inbox message ID. `classification` is the current interactive class or null, and `visibility` is `visible`, `obscured`, `not_visible` or `unknown`. Native/detector/answer-profile identifiers are nullable when unavailable. `answer_capability` is `tested` or `unknown`; `capability_reason` is null when the current request is answerable and otherwise a bounded explanation. `supported_decisions` contains the currently tested subset of `allow,deny`, in that order; a blocked or unsupported request returns an empty array and null token.
+
+`request_token` is a nullable random lowercase 64-hex value issued by the current runner, bound to the request and invalidated under the [response contract](member-runtime.md#request-bound-permission-responses). `evidence` is the complete post-policy evidence object. `missing_evidence` is an array drawn in order from `operation,arguments,cwd,environment,targets,effects,choice_scope`, identifying facts unavailable from this policy-filtered inspection; the Director obtains necessary facts through authorized current capture/routed evidence before deciding. The token is an identity fence, independently of risk evidence and authorization.
+
+Inspection text is:
+
+```text
+Permission: interaction=INTERACTION_ID event=EVENT_ID member=MEMBER_ID run=RUN_ID epoch=EPOCH visibility=VISIBILITY answers=DECISIONS
+Request: token=TOKEN output_seq=SEQUENCE profile=ANSWER_PROFILE rule=ANSWER_RULE
+```
+
+Join supported decisions with commas and render unavailable values or an empty decision set as `-`. Append `Capability: REASON` when nonnull and `Missing evidence: FIELDS` when the array is nonempty; join fields with commas. Text includes no raw screen content.
+
+`respond` requires this complete request snapshot and decision provenance:
+
+```text
+cafleet permission respond INTERACTION_ID --event-id EVENT_ID --from-member-id DIRECTOR_ID --expected-run-id RUN_ID --expected-owner-epoch EPOCH --request-token TOKEN --decision allow|deny --decision-source director-auto|user --director-mode auto|manual|unknown --mode-evidence-ref REFERENCE --decision-evidence-ref REFERENCE --operation-key KEY [--json]
+```
+
+Require positive IDs/epoch, the token's exact hex form, a nonblank operation key and the [bounded evidence references](member-runtime.md#permission-response-storage). Source `director-auto` requires mode `auto`; source `user` records the user's decision in any mode. Enum/shape/source-mode errors exit 2 before lock or byte effects. These fields are attributed claims: resolve Director mode from current host evidence independently of member launch policy and obtain user permission in other/unknown modes. Native and managed rules still authorize running the command.
+
+Validate a retained operation key against its recorded database/run, response identity and canonical digest before any current-request eligibility check, pane lock or live-owner probe. A matching retained receipt returns its stored result after token revocation, interaction closure, deregistration or owner exit, sending zero bytes; conflicting reuse fails. Validate historical audit relationships against recorded ownership while preserving closed/inactive history. Only an absent key or a positively recorded ready zero-byte attempt enters current live-request validation.
+
+The response JSON is `{response}`, with ordered keys:
+
+```text
+status,input_id,member_id,run_id,owner_epoch,interaction_id,event_id,decision,decision_source,stage,output_seq,reason
+```
+
+`status` is `accepted`, `held`, `rejected` or `uncertain`; `input_id` is nullable until a durable row exists. Decision/source retain their command enums. `stage` is `zero_bytes`, `partial`, `submitted` or `unknown`; accepted has submitted stage, held/rejected has zero-byte stage, and uncertainty reports the observed partial/submitted stage or unknown. `output_seq` is a nullable unsigned integer when no current sequence can be established. `reason` is a nullable bounded explanation. A matching settled/submitted receipt returns accepted without typing; another settled disposition returns rejected without typing and explains that the key is consumed.
+
+Response text is:
+
+```text
+Permission response: interaction=INTERACTION_ID run=RUN_ID decision=DECISION source=SOURCE status=STATUS input=INPUT_ID stage=STAGE output_seq=SEQUENCE
+```
+
+Render null values as `-` and append `Reason: REASON` when nonnull. Accepted means answer-key submission, independently of native approval and execution.
+
+Exit 0 means accepted submission or its matching prior submitted receipt. A structured held/rejected/uncertain reply prints the response in the selected text/JSON form and exits 1, with stderr `Error: permission response STATUS for interaction INTERACTION_ID: REASON`; append ` (input_id=INPUT_ID)` when known. This structured-response stdout is the exception to ordinary application errors being stderr-only. Pre-reply operational failures retain their ordinary error category and include known run/interaction/input context; usage failures exit 2.
+
+The CLI takes semantic decisions. For a new attempt, the pinned runner validates the current stable permission request, token, profile, manual input and output state, atomically reserves its audit/claim/receipt, and sends only a tested single-request native choice. Same-key retries return the prior receipt; a conflicting decision/digest or another key bypassing the episode claim fails. Unknown capability preserves manual native input. `member prompt`, `member exec`, message previews, receipt settlement and recovery remain separate operations.
+
+### Permission-response audit output
+
+`input show` and `input reconcile` append nullable `permission_response` after `evidence_ref`. For a response kind it contains ordered `input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_profile_version,answer_rule_id,decided_at`; every field is required and follows its SQL type/nullability. Other input kinds return null.
+
+Preserve the existing input text line and append `Permission decision: interaction=INTERACTION_ID event=EVENT_ID decision=DECISION source=SOURCE mode=MODE director=DIRECTOR_ID epoch=EPOCH` for a response audit. Settlement records disposition and sends zero bytes; it neither grants a native answer nor releases a possibly transmitted episode claim.
+
 ## Error Messages
 
-Application errors print as stderr text even with `--json`; the flag selects successful output. Input errors use the documented usage/application category. Dispatch, input-lock, compatibility and deletion-lock errors are specified at their action owners above.
+Application errors print as stderr text even with `--json`; the flag selects successful output. The [permission-response exception](#permission-commands) also prints a structured held/rejected/uncertain response to stdout before exit 1 and its stderr diagnostic. Input errors use the documented usage/application category. Dispatch, input-lock, compatibility and deletion-lock errors are specified at their action owners above.
 
 | Command | Situation | Error message | Exit | Notes |
 |---|---|---|---|---|

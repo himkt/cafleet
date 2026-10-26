@@ -23,7 +23,7 @@ cafleet message send --from-member-id <my-member-id> --to-member-id <director-me
 
 For hard-to-quote commands, write the exact one-line command under supplied BASE and name its path. End the turn so the Director can submit native input. A denied file edit needs a host allow rule or Director edit. If the broker send is also denied, report both observed failures to the operator.
 
-Include the exact attempted command, absolute cwd, required environment overrides and observed refusal so the Director can authorize the actual action. A runner-observed native approval remains on its original surface for the human answer under the [runtime procedure](member-runtime.md); an approval screen is not a returned denial that native exec can resolve.
+Include the exact attempted command, absolute cwd, required environment overrides and observed refusal so the Director can authorize the actual action. A runner-observed permission request follows the [runtime procedure](member-runtime.md): the Director evaluates risk, decides allow/deny in its verified auto mode or obtains user permission, then uses a request-bound response or manual native input. A separately dispatched native exec remains a new action rather than an answer to that request.
 
 Native output remains visible in the host transcript. Continue from it when the host resumes you or the Director sends an explicit continuation prompt. Report only output you actually observed.
 

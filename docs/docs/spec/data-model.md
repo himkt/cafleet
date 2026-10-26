@@ -15,6 +15,8 @@ The broker uses typed SQLite columns with per-connection foreign-key enforcement
 | `member_interactions` | Observed interactive episodes and visibility closure |
 | `member_runtime_events` | Sequenced events with atomic Director inbox association or archival |
 | `member_input_operations` | Durable submission receipts and settled replay protection |
+| `member_permission_responses` | Immutable attributed decisions tied to input/event/interaction identity |
+| `member_permission_response_claims` | One possibly transmitted answer per observed episode |
 | `asset_installs` | Installed asset versions by backend and config path |
 | `refinery_schema_history` | Embedded migration ledger |
 
@@ -46,7 +48,7 @@ The [runtime persistence contract](member-runtime.md#persistence-notification-an
 
 Runtime event insertion validates ownership and commits the transition, event and full Director inbox record atomically. A run/sequence retry must match the original immutable transition; generated IDs and commit time are excluded from that comparison. Recovery after member/fleet/Director closure archives historical observations without inventing an active-sender notification.
 
-Wrapped previews use durable operation keys and receipt settlement before cache retirement; accepted delivery can settle its stamp without typing again. The [input contract](member-runtime.md#input-arbitration-and-the-original-native-answer) owns uncertainty, disposition and replay rejection. The public message envelope and ACK transition remain unchanged.
+Wrapped previews use durable operation keys and receipt settlement before cache retirement; accepted delivery can settle its stamp without typing again. The [input contract](member-runtime.md#input-arbitration-and-the-original-native-answer) owns uncertainty, disposition and replay rejection. Permission responses add an immutable audit and episode claim in the same receipt transaction. The [response storage contract](member-runtime.md#permission-response-storage) owns exact V5 SQL fields, constraints, digest inputs and zero-byte claim release; response key submission establishes no native approval or command result. The public message envelope and ACK transition remain unchanged.
 
 ### asset_installs
 

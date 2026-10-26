@@ -15,7 +15,7 @@ Model catalogs, their provenance/context notes, canonical Role defaults, and sha
 
 Prices are standard provider USD rates per MTok and are planning estimates, not an invoice guarantee. Each backend's catalog is ordered most → least capable as reviewed judgment. Context windows are listed for the `claude` backend, whose model strings are the ones a context-window suffix can apply to. Selection policy, including cost efficiency mode and reviewer/member rules, lives in [Director model selection](../roles/director.md#model-selection).
 
-`{permission_flags}` records omitted-policy launch defaults. An explicit `member create --permission-mode MODE` is resolved through the version-qualified backend catalog before spawn, retaining the remaining argv and sandbox boundaries; the selected policy belongs to the run rather than a fleet default.
+`{permission_flags}` records omitted-policy launch defaults. An explicit `member create --permission-mode MODE` is resolved through the version-qualified backend catalog before spawn, retaining the remaining argv and sandbox boundaries; the selected policy belongs to the run rather than a fleet default. The Director resolves its own effective mode separately from current host/session evidence: verified auto permits its risk-based allow/deny decision, while other or unknown modes require user permission. Detection, composer and request-bound answer capabilities are independently tested; the [runtime procedure](member-runtime.md) owns consumption and response.
 
 ## Role requirements
 
@@ -77,7 +77,7 @@ Sources: [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pr
 | A separate evaluator checks the session condition against the transcript; native background work defers evaluation and returns a host result. Per-record reception follows the native recipe below. | [Director wake](supervision.md#director-wake) |
 | Receive Director records through one owned Monitor task using the native recipe below. Preserve the supplied `/goal` state and pending user decisions across events and renewal. | [Director wake](supervision.md#director-wake); [native reception](#claude-native-director-reception) |
 | Native shell probes displayed command/stdout/stderr followed by a model turn; its trigger and a second permission check were not established. The Director authorizes routed native input under its host rules. | [Command authorization](prompt-routing.md#director-side-dispatch) |
-| The omitted `dontAsk` policy permits spawn-allowed broker tools, built-in read-only work and matching host allow rules; returned denials route to the Director. An explicitly interactive native policy can block on an original-surface human answer under the runner procedure; protected file edits retain their host-rule boundary. | `{permission_flags}`; [routing](prompt-routing.md#member-side-reconsider-then-route) |
+| The omitted `dontAsk` policy permits spawn-allowed broker tools, built-in read-only work and matching host allow rules; returned denials route to the Director. An explicitly interactive native policy can block on a request-bound Director/user response or manual native input under the runner procedure; protected file edits retain their host-rule boundary. | `{permission_flags}`; [routing](prompt-routing.md#member-side-reconsider-then-route) |
 
 Evidence: Claude Code 2.1.296, checked 2026-10-22; [host continuation](https://code.claude.com/docs/en/goal) and [block cap](https://code.claude.com/docs/en/hooks-guide#stop-hook-hits-the-block-cap). Local probes establish only exercised behavior.
 

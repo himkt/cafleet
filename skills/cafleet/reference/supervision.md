@@ -53,7 +53,7 @@ When an ordinary-recipient `cafleet message send` prints `Message N was persiste
 
 ## Runner observations
 
-Use the [member runtime procedure](member-runtime.md) on a runtime event: verify its durable association and current episode, keep the pending action after ACK, obtain a human answer on the original native surface and inspect actual output and continued work. Consume/ACK available records, then explicitly invoke finite `message wait` to retry held member previews; repeat consumption/receive for a new batch. A live listener alone performs no preview retry.
+Use the [member runtime procedure](member-runtime.md) on a runtime event: verify its durable association and current episode, keep the pending action after ACK, establish risk/mode evidence, decide allow/deny in verified Director auto or obtain user permission otherwise, and submit the current bound response or use manual native input. Inspect actual output and continued work independently of key submission. Consume/ACK available records, then explicitly invoke finite `message wait` to retry held member previews; repeat consumption/receive for a new batch. A live listener alone performs no preview retry.
 
 Programmatic input remains held for observed/candidate interactions and unknown composer coverage. Preserve durable input uncertainty and ownership during receipt settlement or run recovery; event persistence, inbox consumption and operation continuation have separate evidence.
 

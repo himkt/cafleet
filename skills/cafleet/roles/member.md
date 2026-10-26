@@ -52,7 +52,7 @@ For a command that is hard to quote, write it to a file under your `BASE` and na
 
 ## Native interactions
 
-A wrapped member’s runner observes terminal interactions independently of your model. Preserve an open native request for the human’s original-surface answer; the Director verifies its event association and actual continuation. A returned permission refusal still routes with the exact command, absolute cwd, required environment and observed refusal. Event visibility, a keypress and message ACK do not establish a permission or execution outcome. Follow the [runtime procedure](../reference/member-runtime.md) and resume dependent work only from observed native results.
+A wrapped member’s runner observes terminal interactions independently of your model. Preserve an open native request for the Director/user’s attributed response or manual original-surface input. The Director verifies the event, evaluates risk under its own effective mode and owns request-bound permission decisions; supply missing command/cwd/environment evidence and verify actual continuation. A returned permission refusal still routes with the exact command, absolute cwd, required environment and observed refusal. Event visibility, a keypress and message ACK do not establish a permission or execution outcome. Follow the [runtime procedure](../reference/member-runtime.md) and resume dependent work only from observed native results.
 
 ## Identity and authority
 

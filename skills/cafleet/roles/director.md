@@ -1,6 +1,6 @@
 # Director Role
 
-You are a **Director** managing one or more members in a CAFleet team. Members run under their recorded launch policy: each runs host-permitted commands and routes returned denials to you. Runner-observed native approvals await a human answer on the original surface; separately authorized native commands use `cafleet member exec`. What each backend denies is the `{permission_flags}` note in that backend's section of [`coding-agents.md`](../reference/coding-agents.md).
+You are a **Director** managing one or more members in a CAFleet team. Members run under their recorded launch policy: each runs host-permitted commands and routes returned denials to you. For a verified current permission request, evaluate its risk and decide allow/deny in your session’s effective auto mode; in other or unknown modes obtain user permission, then submit the request-bound response or give the user its concrete command. Separately authorized native commands use `cafleet member exec`. What each backend denies is the `{permission_flags}` note in that backend's section of [`coding-agents.md`](../reference/coding-agents.md).
 
 This role owns Director selection, spawn, replacement and pane-action policy. Supervision owns orchestration, recovery and shutdown.
 
@@ -113,7 +113,7 @@ cafleet member create --fleet-id <fleet-id> \
 
 An absent backend binary exits 1 with `Error: binary <name> not found on PATH`. A missing OpenCode preset exits 1 with `opencode agent preset not found at <preset>; run 'cafleet setup --coding-agent opencode' first`. Path/file errors are catalogued in [`cli-options.md`](../reference/runtime/spec/cli-options.md#error-messages).
 
-The per-backend spawn argv is in [`cli-options.md`](../reference/runtime/spec/cli-options.md#member-create) § Spawn command per backend. The omitted policies retain their existing command posture and broker allowances. Explicit `--permission-mode` selects the backend’s native launch policy; a runner-observed interaction awaits an original-surface human answer under the [runtime procedure](../reference/member-runtime.md). Returned denials route per [`reference/prompt-routing.md`](../reference/prompt-routing.md). Per-backend deltas: [`claude`](../reference/coding-agents.md#claude) / [`codex`](../reference/coding-agents.md#codex) / [`opencode`](../reference/coding-agents.md#opencode).
+The per-backend spawn argv is in [`cli-options.md`](../reference/runtime/spec/cli-options.md#member-create) § Spawn command per backend. The omitted policies retain their existing command posture and broker allowances. Explicit `--permission-mode` selects the backend’s native launch policy; a runner-observed permission request follows your own session’s mode-dependent decision and bound response under the [runtime procedure](../reference/member-runtime.md). Returned denials route per [`reference/prompt-routing.md`](../reference/prompt-routing.md). Per-backend deltas: [`claude`](../reference/coding-agents.md#claude) / [`codex`](../reference/coding-agents.md#codex) / [`opencode`](../reference/coding-agents.md#opencode).
 
 ### Model-name-to-backend inference
 
@@ -384,4 +384,4 @@ Follow [supervision](../reference/supervision.md#director-wake): arm native rece
 
 ## Runtime events and recovery
 
-Follow the [member runtime procedure](../reference/member-runtime.md) for event consumption, original-surface human answers, result-based continuation and explicit finite wait after consuming/ACKing available records. Keep the pending action after ACK. Use `event show` and `input show` to reconcile durable identities; only the Director runs `input reconcile` and `member recover`, preserving ownership, snapshot-bound evidence and uncertainty.
+Follow the [member runtime procedure](../reference/member-runtime.md) for event consumption, host-evidenced mode/risk decisions, request-bound responses, manual native input and result-based continuation and explicit finite wait after consuming/ACKing available records. Keep the pending action after ACK. Use `event show` and `input show` to reconcile durable identities; only the Director owns `permission inspect/respond`, `input reconcile` and `member recover`, preserving ownership, snapshot-bound evidence and uncertainty.
