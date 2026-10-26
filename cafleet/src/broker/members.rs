@@ -440,6 +440,7 @@ mod tests {
                 status: MemberStatus::Active,
                 kind: MemberKind::Member,
                 placement: None,
+                runtime: None,
             },
             last_sent: sent.map(str::to_owned),
             last_recv: received.map(str::to_owned),

@@ -132,6 +132,7 @@ mod tests {
             kind: MemberKind::Member,
             registered_at: "registered".into(),
             placement: None,
+            runtime: None,
         };
         let mut row = MemberActivity {
             member,
