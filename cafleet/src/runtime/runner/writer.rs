@@ -11,6 +11,9 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
+#[cfg(test)]
+mod contract_tests;
+
 pub(super) struct EventWriter {
     sender: Option<mpsc::SyncSender<ObservedTransition>>,
     stop: Arc<AtomicBool>,

@@ -6,6 +6,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
+mod observation_contract;
 use super::*;
 use crate::error::CafleetError;
 use rusqlite::params;
@@ -60,6 +61,7 @@ impl HealthProbe for Probe {
                 start_identity: run.child_start_identity.clone().unwrap(),
             }),
             output_seq: 120,
+            observation: None,
         };
         match self.change {
             Some("run") => reply.identity.run_id += 1,

@@ -3,19 +3,24 @@ use std::io::{ErrorKind, Read, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
+mod observation_contract;
+mod observation_services;
 use nix::sys::signal::{Signal, kill};
 use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
 use nix::unistd::Pid;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
+use super::owned_child::OwnedChild;
 use super::*;
 use crate::config::Settings;
 
 const CHILD_TEST: &str = "runtime::runner_tests::control_service::runner_review_service_child";
 const DESCRIPTOR_ENV: &str = "CAFLEET_REVIEW_RUNNER_DESCRIPTOR";
+const SERVICES_ENV: &str = "CAFLEET_REVIEW_TEST_SERVICES";
 
 #[test]
 fn runner_review_service_child() {
@@ -27,7 +32,18 @@ fn runner_review_service_child() {
         max_text_len: 200,
         multiplexer: Some("tmux".into()),
     };
-    match run(&settings, Path::new(&descriptor)) {
+    let outcome = match std::env::var_os(SERVICES_ENV) {
+        Some(configured) => {
+            let configured = Path::new(&configured);
+            assert!(
+                configured.is_absolute(),
+                "explicit service configuration is absolute"
+            );
+            observation_services::run_configured(&settings, Path::new(&descriptor), configured)
+        }
+        None => run(&settings, Path::new(&descriptor)),
+    };
+    match outcome {
         Ok(status) => std::process::exit(status),
         Err(cause) => {
             eprintln!("owned review runner failed: {cause}");
@@ -94,7 +110,7 @@ fn assert_rejected(reply: &std::io::Result<Value>) {
 struct ServiceFixture {
     fixture: Fixture,
     _artifacts: RunArtifacts,
-    child: Child,
+    child: OwnedChild,
     process: Option<ProcessIdentity>,
     master: File,
     _slave: File,
@@ -105,6 +121,18 @@ struct ServiceFixture {
 }
 
 impl ServiceFixture {
+    fn assert_selected_config(&self, path: &Path) {
+        let selected: Value = serde_json::from_slice(
+            &std::fs::read(self.fixture._dir.path().join("config-selected.json"))
+                .expect("explicit configured service selection record"),
+        )
+        .unwrap();
+        assert_eq!(selected["configuration"], json!(path));
+        assert_eq!(
+            selected["sha256"],
+            format!("{:x}", Sha256::digest(std::fs::read(path).unwrap()))
+        );
+    }
     fn connection_diagnostic(&mut self, stage: &str) -> String {
         let status = self.child.try_wait();
         let socket = std::fs::symlink_metadata(&self._artifacts.paths.control_socket);
@@ -139,6 +167,25 @@ impl ServiceFixture {
     }
 
     fn new(missing_executable: bool) -> Self {
+        Self::configured(missing_executable, |_, _| {})
+    }
+
+    fn configured(
+        missing_executable: bool,
+        configure: impl FnOnce(&mut Fixture, &mut SpawnSpec),
+    ) -> Self {
+        Self::launch(missing_executable, configure, false)
+    }
+
+    fn startup_refusal(configure: impl FnOnce(&mut Fixture, &mut SpawnSpec)) -> Self {
+        Self::launch(false, configure, true)
+    }
+
+    fn launch(
+        missing_executable: bool,
+        configure: impl FnOnce(&mut Fixture, &mut SpawnSpec),
+        refusal: bool,
+    ) -> Self {
         let mut fixture = Fixture::new();
         fixture
             .conn
@@ -162,6 +209,7 @@ impl ServiceFixture {
         } else {
             vec!["/bin/sh".into(), "-c".into(), "printf 'review-native-ready\\n'; while IFS= read -r line; do case \"$line\" in finish) exit 0 ;; *) printf 'review-answer=%s\\n' \"$line\" ;; esac; done".into()]
         };
+        configure(&mut fixture, &mut spec);
         artifacts
             .write_descriptor(&LaunchDescriptor::new(&fixture.run, spec).unwrap())
             .unwrap();
@@ -192,18 +240,43 @@ impl ServiceFixture {
             nix::fcntl::FcntlArg::F_SETFL(flags | nix::fcntl::OFlag::O_NONBLOCK),
         )
         .unwrap();
-        let child = Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", CHILD_TEST, "--nocapture", "--test-threads=1"])
-            .env(DESCRIPTOR_ENV, &artifacts.paths.descriptor)
-            .env(
-                "CAFLEET_DATABASE_URL",
-                format!("sqlite:///{}", fixture.conn.path().unwrap()),
-            )
-            .stdin(Stdio::from(slave.try_clone().unwrap()))
-            .stdout(Stdio::from(slave.try_clone().unwrap()))
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
+        let capture_config = fixture._dir.path().join("capture-config.json");
+        let capture = capture_config.exists();
+        let services_config = fixture._dir.path().join("observation-services.json");
+        let services_selected = services_config.exists() && !capture;
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command.env_remove(SERVICES_ENV);
+        if services_selected {
+            command.env(SERVICES_ENV, &services_config);
+        }
+        command.args([
+            "--exact",
+            if capture {
+                "runtime::runner_tests::native_capture::native_capture_service_child"
+            } else {
+                CHILD_TEST
+            },
+            "--nocapture",
+            "--test-threads=1",
+        ]);
+        if capture {
+            command
+                .arg("--ignored")
+                .env("CAFLEET_NATIVE_CAPTURE_CONFIG", &capture_config);
+        }
+        let child = OwnedChild::new(
+            command
+                .env(DESCRIPTOR_ENV, &artifacts.paths.descriptor)
+                .env(
+                    "CAFLEET_DATABASE_URL",
+                    format!("sqlite:///{}", fixture.conn.path().unwrap()),
+                )
+                .stdin(Stdio::from(slave.try_clone().unwrap()))
+                .stdout(Stdio::from(slave.try_clone().unwrap()))
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
         let mut owned = Self {
             fixture,
             _artifacts: artifacts,
@@ -216,6 +289,13 @@ impl ServiceFixture {
             output: Vec::new(),
             stopped: false,
         };
+        if refusal {
+            assert!(!owned.wait().success(), "nonfresh startup is refused");
+            if services_selected {
+                owned.assert_selected_config(&services_config);
+            }
+            return owned;
+        }
         owned.process = Some(
             ProcessIdentity::read(i64::from(owned.child.id()))
                 .unwrap()
@@ -252,6 +332,9 @@ impl ServiceFixture {
             std::thread::sleep(
                 Duration::from_millis(5).min(until.saturating_duration_since(Instant::now())),
             );
+        }
+        if services_selected {
+            owned.assert_selected_config(&services_config);
         }
         owned
     }
@@ -430,9 +513,14 @@ impl ServiceFixture {
         };
         match owned.matches() {
             Ok(true) => {
-                if let Err(cause) =
-                    kill(Pid::from_raw(i32::try_from(pid).unwrap()), Signal::SIGKILL)
-                {
+                let raw = match i32::try_from(pid) {
+                    Ok(raw) => raw,
+                    Err(cause) => {
+                        eprintln!("owned native fixture PID conversion failed: {cause}");
+                        return;
+                    }
+                };
+                if let Err(cause) = kill(Pid::from_raw(raw), Signal::SIGKILL) {
                     eprintln!("owned native fixture termination failed: {cause}");
                 }
             }
@@ -445,7 +533,15 @@ impl ServiceFixture {
 impl Drop for ServiceFixture {
     fn drop(&mut self) {
         self.creator.take();
-        let pid = Pid::from_raw(i32::try_from(self.child.id()).unwrap());
+        let raw_pid = match i32::try_from(self.child.id()) {
+            Ok(pid) => pid,
+            Err(cause) => {
+                eprintln!("owned runner PID conversion failed: {cause}");
+                self.cleanup_recorded_native();
+                return;
+            }
+        };
+        let pid = Pid::from_raw(raw_pid);
         if self.stopped {
             if let Err(cause) = kill(pid, Signal::SIGCONT) {
                 eprintln!("owned runner resume failed during cleanup: {cause}");
@@ -458,30 +554,34 @@ impl Drop for ServiceFixture {
                 return;
             }
             Ok(None) => {}
-            Err(cause) => eprintln!("owned runner collection failed: {cause}"),
+            Err(cause) => {
+                eprintln!("owned runner collection failed: {cause}");
+                self.cleanup_recorded_native();
+                return;
+            }
         }
         if let Err(cause) = kill(pid, Signal::SIGTERM) {
             eprintln!("owned runner termination failed: {cause}");
         }
         let until = Instant::now() + Duration::from_secs(5);
-        while Instant::now() < until {
+        let graceful = until - Duration::from_secs(1);
+        while Instant::now() < graceful {
             match self.child.try_wait() {
                 Ok(Some(_)) => {
                     self.cleanup_recorded_native();
                     return;
                 }
                 Ok(None) => {}
-                Err(cause) => eprintln!("owned runner collection failed: {cause}"),
+                Err(cause) => {
+                    eprintln!("owned runner collection failed: {cause}");
+                    self.cleanup_recorded_native();
+                    return;
+                }
             }
             std::thread::sleep(Duration::from_millis(5));
         }
         self.cleanup_recorded_native();
-        if let Err(cause) = self.child.kill() {
-            eprintln!("owned runner forced termination failed: {cause}");
-        }
-        if let Err(cause) = self.child.wait() {
-            eprintln!("owned runner final collection failed: {cause}");
-        }
+        self.child.terminate_until(until);
     }
 }
 

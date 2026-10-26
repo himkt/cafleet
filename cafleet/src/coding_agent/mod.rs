@@ -1,6 +1,8 @@
 mod policy;
 pub use policy::LaunchPolicySelection;
 mod profiles;
+#[cfg(test)]
+pub(crate) use profiles::ScreenRegion;
 pub use profiles::{AnswerCapability, NativeCapabilities, ProfileCatalog};
 pub(crate) use profiles::{MatchEvidence, ObservationKind, ScreenObservation, SemanticFingerprint};
 

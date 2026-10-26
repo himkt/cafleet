@@ -7,10 +7,12 @@ mod health;
 mod launch_readiness;
 mod lifecycle;
 mod mechanisms;
+pub(crate) mod owned_child;
 mod shutdown;
 mod terminal;
 mod transport;
 
+mod native_capture;
 use rusqlite::Connection;
 use serde_json::json;
 use tempfile::TempDir;
@@ -19,14 +21,14 @@ use super::runner::*;
 use crate::broker::runtime::{self as storage, *};
 use crate::broker::tests as common;
 
-struct Fixture {
-    _dir: TempDir,
-    conn: Connection,
-    run: RunRecord,
+pub(super) struct Fixture {
+    pub(super) _dir: TempDir,
+    pub(super) conn: Connection,
+    pub(super) run: RunRecord,
 }
 
 impl Fixture {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let dir = tempfile::Builder::new()
             .prefix(".p194-")
             .tempdir_in("/tmp")
@@ -83,7 +85,7 @@ impl Fixture {
         }
     }
 
-    fn artifacts(&mut self) -> RunArtifacts {
+    pub(super) fn artifacts(&mut self) -> RunArtifacts {
         let artifacts = RunArtifacts::create(&mut self.conn, self.run.run_id).unwrap();
         self.run = storage::get_run(&self.conn, self.run.run_id).unwrap();
         artifacts
