@@ -4,6 +4,8 @@ use serde::de::{IgnoredAny, MapAccess, Visitor};
 use serde_json::{Value, json};
 use std::fmt;
 
+mod identity;
+
 struct Case {
     fixture: Fixture,
 }
