@@ -19,6 +19,7 @@ mod review_clock;
 mod review_completion;
 mod review_descriptor;
 mod review_history;
+mod review_relationships;
 mod terminal_tail;
 
 type TestResult<T> = std::result::Result<T, CafleetError>;
