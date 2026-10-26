@@ -1,3 +1,6 @@
+mod profiles;
+pub use profiles::AnswerCapability;
+
 use std::path::{Path, PathBuf};
 
 use clap::ValueEnum;

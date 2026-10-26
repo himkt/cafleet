@@ -68,7 +68,7 @@ runtime_enum!(NotificationState, "member_runtime_events.notification_state", { I
 runtime_enum!(ArchiveReason, "member_runtime_events.archive_reason", {
     MemberInactive => "member_inactive", FleetDeleted => "fleet_deleted", DirectorInactive => "director_inactive"
 });
-runtime_enum!(InputKind, "member_input_operations.kind", { Preview => "preview", Prompt => "prompt", Exec => "exec" });
+runtime_enum!(InputKind, "member_input_operations.kind", { Preview => "preview", Prompt => "prompt", Exec => "exec", PermissionResponse => "permission_response" });
 runtime_enum!(InputState, "member_input_operations.state", {
     Ready => "ready", InProgress => "in_progress", Accepted => "accepted",
     Uncertain => "uncertain", Settled => "settled"
@@ -253,4 +253,57 @@ pub struct InputOperation {
     pub message_id: Option<i64>,
     pub disposition: Option<InputDisposition>,
     pub evidence_ref: Option<String>,
+    pub permission_response: Option<PermissionResponseRecord>,
+}
+
+runtime_enum!(PermissionDecision, "member_permission_responses.decision", { Allow => "allow", Deny => "deny" });
+runtime_enum!(DirectorMode, "member_permission_responses.director_mode", { Auto => "auto", Manual => "manual", Unknown => "unknown" });
+runtime_enum!(DecisionSource, "member_permission_responses.decision_source", { DirectorAuto => "director-auto", User => "user" });
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PermissionResponseMetadata {
+    pub event_id: i64,
+    pub interaction_id: i64,
+    pub expected_owner_epoch: i64,
+    pub request_token: String,
+    pub decision: PermissionDecision,
+    pub director_member_id: i64,
+    pub director_mode: DirectorMode,
+    pub decision_source: DecisionSource,
+    pub mode_evidence_ref: String,
+    pub decision_evidence_ref: String,
+    pub answer_profile_version: String,
+    pub answer_rule_id: String,
+}
+#[derive(Debug, Clone, PartialEq)]
+pub struct PermissionResponseRecord {
+    pub input_id: i64,
+    pub metadata: PermissionResponseMetadata,
+    pub decided_at: String,
+}
+#[derive(Debug, Clone, PartialEq)]
+pub struct PermissionResponseClaim {
+    pub interaction_id: i64,
+    pub input_id: i64,
+}
+#[derive(Debug, Clone, PartialEq)]
+pub struct PermissionReceipt {
+    pub input: InputOperation,
+    pub response: PermissionResponseRecord,
+    pub claim: Option<PermissionResponseClaim>,
+}
+#[derive(Debug, Clone, PartialEq)]
+pub struct PermissionReceiptIdentity {
+    pub database_identity_json: Value,
+    pub run_id: i64,
+}
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewPermissionResponse {
+    pub operation_key: String,
+    pub metadata: PermissionResponseMetadata,
+}
+#[derive(Debug, Clone, PartialEq)]
+pub enum PermissionReservation {
+    Retained(PermissionReceipt),
+    Reserved(PermissionReceipt),
 }

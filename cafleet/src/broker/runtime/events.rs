@@ -91,7 +91,7 @@ pub fn get_event(conn: &Connection, event_id: i64) -> Result<RuntimeEventView, C
         )?;
     }
     let payload = &event.payload_json;
-    let fields = [
+    let mut fields = vec![
         "schema_version",
         "event_id",
         "run_id",
@@ -107,20 +107,34 @@ pub fn get_event(conn: &Connection, event_id: i64) -> Result<RuntimeEventView, C
         "native_request_id",
         "decision_outcome",
         "evidence",
-        "close_reason",
-        "cause",
     ];
+    let version = payload.get("schema_version").and_then(Value::as_u64);
+    require(
+        matches!(version, Some(1 | 2)),
+        "schema_version",
+        "unsupported event schema",
+    )?;
+    if event.kind == RuntimeEventKind::InteractionClosed {
+        fields.push("close_reason");
+    }
+    if source(event.kind) == "runner_lifecycle" {
+        fields.push("cause");
+    }
+    if version == Some(2) {
+        fields.push("director_action");
+    }
     require(
         payload
             .as_object()
             .expect("decoded event object")
             .keys()
-            .all(|key| fields.contains(&key.as_str())),
+            .all(|key| fields.contains(&key.as_str()))
+            && payload.as_object().expect("event object").len() == fields.len(),
         "payload_json",
         "unknown public event field",
     )?;
     require(
-        payload["schema_version"] == 1 && event.event_seq > 0,
+        event.event_seq > 0,
         "payload_json",
         "invalid schema or sequence",
     )?;
@@ -163,6 +177,20 @@ pub fn get_event(conn: &Connection, event_id: i64) -> Result<RuntimeEventView, C
         "payload_json.native_request_id",
         "native request identity must match post-policy evidence",
     )?;
+    if version == Some(2) {
+        require(
+            payload.get("director_action")
+                == Some(&director_action(
+                    &run.run,
+                    event.kind,
+                    interaction.as_ref().map(|episode| episode.classification),
+                    event.event_id,
+                    event.interaction_id,
+                )?),
+            "director_action",
+            "invalid bound review action",
+        )?;
+    }
     let serialized_payload = payload.to_string();
     require(
         serialized_payload.len() <= 16 * 1024,
@@ -443,9 +471,9 @@ fn payload(
     transition: &ObservedTransition,
     event_id: i64,
     interaction_id: Option<i64>,
-) -> Value {
+) -> Result<Value, CafleetError> {
     let mut payload = json!({
-        "schema_version":1,"event_id":event_id,"run_id":run.run_id,"event_seq":transition.event_seq,
+        "schema_version":2,"event_id":event_id,"run_id":run.run_id,"event_seq":transition.event_seq,
         "member_id":run.member_id,"fleet_id":run.fleet_id,"director_member_id":run.director_member_id,
         "kind":transition.kind.as_str(),"interaction_id":interaction_id,
         "classification":transition.classification.map(|class| class.as_str()),
@@ -459,7 +487,14 @@ fn payload(
     if let Some(cause) = &transition.cause_json {
         payload["cause"] = cause.clone();
     }
-    payload
+    payload["director_action"] = director_action(
+        run,
+        transition.kind,
+        transition.classification,
+        event_id,
+        interaction_id,
+    )?;
+    Ok(payload)
 }
 
 pub fn persist_transition(
@@ -550,7 +585,7 @@ pub fn persist_transition(
                 format_utc(now_utc()),notification_state.as_str(),message_id,archive_reason.map(|reason| reason.as_str())],
         ).map_err(db_err)?;
         let event_id = conn.last_insert_rowid();
-        let payload = payload(run, transition, event_id, interaction_id).to_string();
+        let payload = payload(run, transition, event_id, interaction_id)?.to_string();
         require(
             payload.len() <= 16 * 1024,
             "payload_json",
@@ -601,4 +636,34 @@ pub fn persist_transition(
         }
         get_event(conn, event_id).map(|view| view.event)
     })
+}
+
+const REVIEW_INSTRUCTION: &str = "Verify this event and the current request. Evaluate the operation and its risk. In the Director session's effective auto mode, decide allow or deny; otherwise obtain the user's permission. Submit the selected answer through the request-bound CAFleet response command, or give that complete command to the user. Inspect the native result and continuation afterward.";
+fn director_action(
+    run: &RunRecord,
+    kind: RuntimeEventKind,
+    classification: Option<InteractionClass>,
+    event_id: i64,
+    interaction_id: Option<i64>,
+) -> Result<Value, CafleetError> {
+    if kind != RuntimeEventKind::InteractionOpened
+        || classification != Some(InteractionClass::PermissionRequest)
+    {
+        return Ok(Value::Null);
+    }
+    let interaction_id = interaction_id.ok_or_else(|| {
+        invalid(
+            "interaction_id",
+            "permission opening requires an interaction",
+        )
+    })?;
+    require(
+        event_id > 0 && interaction_id > 0 && run.director_member_id > 0,
+        "director_action",
+        "allocated positive action identities required",
+    )?;
+    Ok(
+        json!({"kind":"review_permission_request","instruction":REVIEW_INSTRUCTION,
+        "inspect_argv":["cafleet","permission","inspect",interaction_id.to_string(),"--event-id",event_id.to_string(),"--from-member-id",run.director_member_id.to_string(),"--json"]}),
+    )
 }

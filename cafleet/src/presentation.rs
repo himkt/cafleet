@@ -42,7 +42,7 @@ pub fn input_operation(row: &crate::broker::runtime::InputOperation) -> Value {
     json!({"input":{"input_id":row.input_id,"run_id":row.run_id,"operation_key":row.operation_key,
         "kind":row.kind.as_str(),"payload_digest":row.payload_digest,"state":row.state.as_str(),
         "created_at":row.created_at,"updated_at":row.updated_at,"message_id":row.message_id,
-        "disposition":row.disposition.map(|disposition| disposition.as_str()),"evidence_ref":row.evidence_ref}})
+        "disposition":row.disposition.map(|disposition| disposition.as_str()),"evidence_ref":row.evidence_ref,"permission_response":row.permission_response.as_ref().map(permission_response)}})
 }
 
 pub fn member_activity(row: &MemberActivity) -> Value {
@@ -100,4 +100,14 @@ pub fn created_fleet(row: &CreatedFleet) -> Value {
 
 pub fn deleted_fleet(row: &DeletedFleet) -> Value {
     json!({"fleet_id":row.fleet_id, "deregistered_count":row.deregistered_count})
+}
+
+fn permission_response(row: &crate::broker::runtime::PermissionResponseRecord) -> Value {
+    let metadata = &row.metadata;
+    json!({"input_id":row.input_id,"event_id":metadata.event_id,"interaction_id":metadata.interaction_id,
+        "expected_owner_epoch":metadata.expected_owner_epoch,"request_token":metadata.request_token,
+        "decision":metadata.decision.as_str(),"director_member_id":metadata.director_member_id,
+        "director_mode":metadata.director_mode.as_str(),"decision_source":metadata.decision_source.as_str(),
+        "mode_evidence_ref":metadata.mode_evidence_ref,"decision_evidence_ref":metadata.decision_evidence_ref,
+        "answer_profile_version":metadata.answer_profile_version,"answer_rule_id":metadata.answer_rule_id,"decided_at":row.decided_at})
 }

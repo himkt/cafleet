@@ -1,11 +1,16 @@
 mod events;
 pub mod evidence;
 mod inputs;
+mod permissions;
 mod records;
 
 pub use events::{get_event, persist_transition};
 pub use inputs::{
     find_input, get_input, record_input_state, reserve_input, settle_input, settle_preview,
+};
+pub use permissions::{
+    ZeroByteRetirement, get_permission_response, lookup_permission_response,
+    permission_response_digest, release_permission_claim, reserve_permission_response,
 };
 pub use records::*;
 

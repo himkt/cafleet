@@ -16,12 +16,13 @@ fn map_input(row: &rusqlite::Row<'_>) -> rusqlite::Result<InputOperation> {
         message_id: row.get("message_id")?,
         disposition: row.get("disposition")?,
         evidence_ref: row.get("evidence_ref")?,
+        permission_response: None,
     })
 }
 
 fn validate_input(
     conn: &Connection,
-    input: InputOperation,
+    mut input: InputOperation,
 ) -> Result<InputOperation, CafleetError> {
     nonblank(
         &input.operation_key,
@@ -59,6 +60,7 @@ fn validate_input(
             "explicit input has no preview message",
         )?;
     }
+    input.permission_response = super::permissions::validate_input_response(conn, &run, &input)?;
     Ok(input)
 }
 
@@ -96,6 +98,11 @@ pub fn reserve_input(
     owner: &RunOwner,
     new: &NewInput,
 ) -> Result<InputOperation, CafleetError> {
+    require(
+        new.kind != InputKind::PermissionResponse,
+        "kind",
+        "permission responses require typed audit reservation",
+    )?;
     nonblank(&new.operation_key, "operation_key")?;
     hex(&new.payload_digest, 64, "payload_digest")?;
     owned_transaction(conn, owner, |conn, run| {
@@ -133,15 +140,7 @@ pub fn reserve_input(
                 "explicit input has no message",
             )?;
         }
-        let unresolved: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM member_input_operations WHERE run_id=?1 AND state IN ('in_progress','accepted','uncertain')",
-            [run.run_id], |row| row.get(0),
-        ).map_err(db_err)?;
-        require(
-            unresolved < 4096,
-            "member_input_operations",
-            "unresolved input limit reached",
-        )?;
+        require_capacity(conn, run.run_id)?;
         let now = format_utc(now_utc());
         conn.execute(
             "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id)
@@ -187,6 +186,11 @@ pub fn record_input_state(
     )?;
     owned_transaction(conn, owner, |conn, run| {
         let input = owned_input(conn, run, input_id)?;
+        require(
+            input.kind != InputKind::PermissionResponse || expected != InputState::Ready,
+            "state",
+            "permission response rearming requires serialized live validation",
+        )?;
         require(
             input.state == expected,
             "member_input_operations.state",
@@ -308,5 +312,18 @@ fn stamp_preview(
         params![format_utc(now_utc()), message_id],
     )
     .map_err(db_err)?;
+    Ok(())
+}
+
+pub(super) fn require_capacity(conn: &Connection, run_id: i64) -> Result<(), CafleetError> {
+    let unresolved: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM member_input_operations WHERE run_id=?1 AND state IN ('in_progress','accepted','uncertain')",
+        [run_id], |row| row.get(0),
+    ).map_err(db_err)?;
+    require(
+        unresolved < 4096,
+        "member_input_operations",
+        "unresolved input limit reached",
+    )?;
     Ok(())
 }

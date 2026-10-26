@@ -41,7 +41,7 @@ pub fn format_runtime_event(view: &RuntimeEventView) -> String {
 }
 
 pub fn format_input_operation(input: &InputOperation) -> String {
-    format!(
+    let mut text = format!(
         "Input: {} run={} kind={} state={} disposition={} message={}",
         input.input_id,
         input.run_id,
@@ -53,5 +53,11 @@ pub fn format_input_operation(input: &InputOperation) -> String {
         input
             .message_id
             .map_or_else(|| "-".into(), |id| id.to_string())
-    )
+    );
+    if let Some(response) = &input.permission_response {
+        let metadata = &response.metadata;
+        text.push_str(&format!("\nPermission decision: interaction={} event={} decision={} source={} mode={} director={} epoch={}",
+            metadata.interaction_id,metadata.event_id,metadata.decision.as_str(),metadata.decision_source.as_str(),metadata.director_mode.as_str(),metadata.director_member_id,metadata.expected_owner_epoch));
+    }
+    text
 }
