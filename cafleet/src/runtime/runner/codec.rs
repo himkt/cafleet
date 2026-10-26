@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(test)]
+mod input_frames_tests;
+
 pub(crate) const CONTROL_PROTOCOL_VERSION: u32 = 1;
 pub(crate) const MAX_CONTROL_FRAME: usize = 65536;
 

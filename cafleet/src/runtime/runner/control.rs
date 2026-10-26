@@ -1,4 +1,7 @@
 use super::*;
+
+#[cfg(test)]
+mod input_client_tests;
 use crate::broker::records::Placement;
 use crate::broker::runtime::{self as storage, CleanupState, RunRecord};
 use crate::multiplexer::{AnyMultiplexer, MultiplexerContext};

@@ -1,6 +1,9 @@
 pub(super) use super::control::request;
 use super::writer::EventWriter;
 use super::*;
+
+#[cfg(test)]
+mod input_admission_tests;
 use crate::broker::members::db_err;
 use crate::broker::{
     self,
