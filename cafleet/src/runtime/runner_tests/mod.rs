@@ -1,5 +1,8 @@
 mod artifacts;
+mod control_codec;
+mod control_service;
 mod creation;
+mod fleet_deletion;
 mod health;
 mod lifecycle;
 mod mechanisms;

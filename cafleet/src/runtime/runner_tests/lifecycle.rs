@@ -113,3 +113,187 @@ fn runner_database_deadline_preserves_an_already_expired_shared_budget() {
     assert!(result.is_err());
     assert!(!invoked);
 }
+
+#[derive(Debug, PartialEq)]
+struct DeadlinePanic(u32);
+
+fn progress_checked_sum(conn: &Connection) -> Result<i64, CafleetError> {
+    conn.query_row(
+        "WITH RECURSIVE counter(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM counter WHERE x<10000) SELECT sum(x) FROM counter",
+        [],
+        |row| row.get(0),
+    )
+    .map_err(|cause| CafleetError::App(cause.to_string()))
+}
+
+#[test]
+fn runner_database_deadline_review_unwind_preserves_the_panic_and_restores_connection_reuse() {
+    let mut fixture = Fixture::new();
+    fixture
+        .conn
+        .busy_timeout(Duration::from_millis(137))
+        .unwrap();
+    let until = Instant::now() + Duration::from_millis(40);
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        with_database_deadline(&mut fixture.conn, until, |_| -> Result<(), CafleetError> {
+            std::panic::panic_any(DeadlinePanic(194));
+        })
+    }));
+    let payload = match unwound {
+        Err(payload) => payload,
+        Ok(_) => panic!("the original operation panic must propagate"),
+    };
+    assert_eq!(
+        payload.downcast_ref::<DeadlinePanic>(),
+        Some(&DeadlinePanic(194))
+    );
+    std::thread::sleep(until.saturating_duration_since(Instant::now()) + Duration::from_millis(20));
+    assert_eq!(progress_checked_sum(&fixture.conn).unwrap(), 50005000);
+    assert_eq!(
+        fixture
+            .conn
+            .query_row("PRAGMA busy_timeout", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        137
+    );
+}
+
+#[test]
+fn runner_database_deadline_review_operation_error_stops_its_watchdog_and_restores_reuse() {
+    let mut fixture = Fixture::new();
+    fixture
+        .conn
+        .busy_timeout(Duration::from_millis(173))
+        .unwrap();
+    let until = Instant::now() + Duration::from_millis(100);
+    let started = Instant::now();
+    let error = with_database_deadline(&mut fixture.conn, until, |_| -> Result<(), CafleetError> {
+        Err(CafleetError::Usage(
+            "fixture deadline operation error".into(),
+        ))
+    })
+    .unwrap_err();
+    assert_eq!(error.exit_code(), 2);
+    assert_eq!(error.message(), "fixture deadline operation error");
+    assert!(started.elapsed() < Duration::from_millis(750));
+    std::thread::sleep(until.saturating_duration_since(Instant::now()) + Duration::from_millis(20));
+    assert_eq!(progress_checked_sum(&fixture.conn).unwrap(), 50005000);
+    assert_eq!(
+        fixture
+            .conn
+            .query_row("PRAGMA busy_timeout", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        173
+    );
+}
+
+#[test]
+fn runner_database_deadline_review_inner_unwind_restores_the_live_outer_cancellation_scope() {
+    let mut fixture = Fixture::new();
+    let started = Instant::now();
+    let outer_until = started + Duration::from_millis(400);
+    let result = with_database_deadline(&mut fixture.conn, outer_until, |conn| {
+        let inner_until = Instant::now() + Duration::from_millis(40);
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            with_database_deadline(conn, inner_until, |_| -> Result<(), CafleetError> {
+                std::panic::panic_any(DeadlinePanic(195));
+            })
+        }));
+        let payload = match unwound {
+            Err(payload) => payload,
+            Ok(_) => panic!("the inner operation panic must propagate"),
+        };
+        assert_eq!(
+            payload.downcast_ref::<DeadlinePanic>(),
+            Some(&DeadlinePanic(195))
+        );
+        std::thread::sleep(
+            inner_until.saturating_duration_since(Instant::now()) + Duration::from_millis(20),
+        );
+        assert_eq!(progress_checked_sum(conn)?, 50005000);
+        conn.query_row(
+            "WITH RECURSIVE counter(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM counter WHERE x<1000000000) SELECT sum(x) FROM counter",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|cause| CafleetError::App(cause.to_string()))
+    });
+    assert!(result.is_err());
+    assert!(
+        started.elapsed() >= Duration::from_millis(350),
+        "{result:?}"
+    );
+    assert!(started.elapsed() < Duration::from_millis(1250));
+    assert_eq!(progress_checked_sum(&fixture.conn).unwrap(), 50005000);
+}
+
+#[test]
+fn runner_database_deadline_review_nested_later_deadline_keeps_the_earliest_outer_budget() {
+    let mut fixture = Fixture::new();
+    let started = Instant::now();
+    let outer_until = started + Duration::from_millis(100);
+    let result = with_database_deadline(&mut fixture.conn, outer_until, |conn| {
+        with_database_deadline(conn, started + Duration::from_secs(1), |conn| {
+            conn.query_row(
+                "WITH RECURSIVE counter(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM counter WHERE x<1000000000) SELECT sum(x) FROM counter",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|cause| CafleetError::App(cause.to_string()))
+        })
+    });
+    assert!(result.is_err());
+    assert!(started.elapsed() >= Duration::from_millis(70));
+    assert!(started.elapsed() < Duration::from_millis(750));
+    assert_eq!(progress_checked_sum(&fixture.conn).unwrap(), 50005000);
+}
+
+fn assert_retired_inner_scope_preserves_outer(operation_fails: bool) {
+    let mut fixture = Fixture::new();
+    let started = Instant::now();
+    let outer_until = started + Duration::from_millis(400);
+    let result = with_database_deadline(&mut fixture.conn, outer_until, |conn| {
+        let inner_until = Instant::now() + Duration::from_millis(40);
+        let inner = with_database_deadline(conn, inner_until, |_| {
+            if operation_fails {
+                Err(CafleetError::Usage("fixture inner operation error".into()))
+            } else {
+                Ok(7)
+            }
+        });
+        if operation_fails {
+            let error = inner.unwrap_err();
+            assert_eq!(error.exit_code(), 2);
+            assert_eq!(error.message(), "fixture inner operation error");
+        } else {
+            assert_eq!(inner.unwrap(), 7);
+        }
+        std::thread::sleep(
+            inner_until.saturating_duration_since(Instant::now()) + Duration::from_millis(20),
+        );
+        assert_eq!(progress_checked_sum(conn)?, 50005000);
+        conn.query_row(
+            "WITH RECURSIVE counter(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM counter WHERE x<1000000000) SELECT sum(x) FROM counter",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|cause| CafleetError::App(cause.to_string()))
+    });
+    assert!(result.is_err());
+    assert!(
+        started.elapsed() >= Duration::from_millis(350),
+        "{result:?}"
+    );
+    assert!(started.elapsed() < Duration::from_millis(1250));
+    assert_eq!(progress_checked_sum(&fixture.conn).unwrap(), 50005000);
+}
+
+#[test]
+fn runner_database_deadline_review_inner_success_restores_the_live_outer_scope() {
+    assert_retired_inner_scope_preserves_outer(false);
+}
+
+#[test]
+fn runner_database_deadline_review_inner_error_restores_the_live_outer_scope() {
+    assert_retired_inner_scope_preserves_outer(true);
+}
