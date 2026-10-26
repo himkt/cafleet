@@ -1,8 +1,10 @@
 # Member Automatic Approval and Observed-Denial Routing
 
-**Status**: Approved
+**Status**: Aborted
 **Progress**: 2/8 tasks complete
 **Last Updated**: 2026-10-26
+
+Aborted at the user's request on 2026-10-26. [0000194 — Member PTY Permission Events](../0000194-member-pty-permission-events/design-doc.md) takes over the new direction: CAFleet-owned observation and Director notification with per-member permission-mode selection. Preserve this document and its 2/8 historical task ledger as the record of the earlier work; the six unchecked runtime tasks remain incomplete. Statements about `aa6b3724` and its validation below describe that historical work rather than the current source baseline, which 0000194 inspects independently.
 
 ## Overview
 
@@ -170,4 +172,5 @@ Hermes live acceptance additionally requires a separately reviewed lifecycle rev
 
 | Date | Changes |
 |---|---|
+| 2026-10-26 | Mark Aborted at the user's request and hand the new PTY-observation, notification and selectable-mode direction to 0000194. Preserve the historical 2/8 ledger and leave its remaining runtime tasks incomplete. |
 | 2026-10-26 | Extract the cross-backend member permission/routing specification, common prompt boundary, completed shared task and implementation-evidence summary from design 0000191. Preserve its Aborted status, Hermes smart/deny details, profile-lifecycle decision and independent completed tasks; recompute its remaining ledger to 3/20. Record `aa6b3724` as existing implementation and keep unobserved runtime acceptance pending. |
