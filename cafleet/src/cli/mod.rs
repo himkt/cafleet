@@ -1,4 +1,3 @@
-pub(crate) mod creation;
 mod doctor;
 pub(crate) mod fleet;
 pub(crate) mod helpers;
@@ -30,6 +29,11 @@ struct CliArgs {
 
 #[derive(Subcommand)]
 enum Command {
+    #[command(name = "__member-run", hide = true)]
+    MemberRun {
+        #[arg(long, value_name = "ABSOLUTE_PATH")]
+        descriptor: std::path::PathBuf,
+    },
     /// Migrate storage and install embedded coding-agent skills/presets.
     Setup(setup::SetupArgs),
     /// Report independent environment, database and backend checks.
@@ -87,6 +91,10 @@ fn dispatch(settings: &Settings, command: Command) -> Result<(), CafleetError> {
     match command {
         Command::Setup(cmd) => setup::run(settings, cmd),
         Command::Doctor(cmd) => doctor::run(settings, cmd),
+        Command::MemberRun { descriptor } => {
+            let code = crate::runtime::runner::run(settings, &descriptor)?;
+            std::process::exit(code)
+        }
         mut command => {
             let mut conn = invocation_connection(&settings.database_url)?;
             if let Command::Member(command) = &mut command {
@@ -99,7 +107,9 @@ fn dispatch(settings: &Settings, command: Command) -> Result<(), CafleetError> {
                 Command::Message(cmd) => message::run(&mut conn, settings, cmd),
                 Command::Event(cmd) => runtime::event(&conn, cmd),
                 Command::Input(cmd) => runtime::input(&conn, cmd),
-                Command::Setup(_) | Command::Doctor(_) => unreachable!("handled above"),
+                Command::Setup(_) | Command::Doctor(_) | Command::MemberRun { .. } => {
+                    unreachable!("handled above")
+                }
             }
         }
     }

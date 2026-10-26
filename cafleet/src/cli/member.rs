@@ -2,8 +2,6 @@ use clap::{Args, Subcommand};
 use rusqlite::Connection;
 use serde_json::{Value, json};
 
-use super::creation::RegistrationGuard;
-
 use super::helpers::{emit, resolve_body, resolve_command_body, resolve_mux};
 use crate::broker::records::MemberRecord;
 use crate::broker::{self, NewPlacement};
@@ -12,7 +10,7 @@ use crate::coding_agent::{CodingAgent, coding_agent};
 use crate::config::Settings;
 use crate::error::CafleetError;
 
-use crate::multiplexer::{AnyMultiplexer, Lead, PaneCleanup, PaneOwnership};
+use crate::multiplexer::{AnyMultiplexer, Lead};
 use crate::output::{format_member, format_member_detail, format_member_list};
 use crate::presentation;
 use crate::runtime::system::SystemProbe;
@@ -295,51 +293,116 @@ fn create(
         .context_discovery()
         .map_err(|e| CafleetError::App(e.to_string()))?;
 
-    let env: Vec<_> = std::env::var("CAFLEET_DATABASE_URL")
-        .ok()
-        .map(|value| ("CAFLEET_DATABASE_URL".to_string(), value))
-        .into_iter()
-        .collect();
-
-    let placement = NewPlacement {
-        backend: mux.name().to_string(),
-        mux_session: context.session.clone(),
-        mux_window_id: context.window_id.clone(),
-        mux_pane_id: None,
-        coding_agent: agent_name.into(),
-    };
-    let registered = broker::register_member(conn, fleet_id, name, description, Some(&placement))
-        .map_err(|error| match error {
-        CafleetError::App(_) | CafleetError::Usage(_) => error,
-        other => CafleetError::App(format!("register failed: {}", other.message())),
-    })?;
-    let member_id = registered.member_id;
-    let mut registration = RegistrationGuard::new(conn, member_id);
-    let prompt = match crate::spawn_prompt::substitute_spawn_placeholders(
+    use crate::broker::runtime::{Coverage, EventEvidence, ModeSource};
+    use crate::runtime::runner;
+    use std::io::{IsTerminal, Read};
+    use std::time::{Duration, Instant};
+    crate::spawn_prompt::substitute_spawn_placeholders(
         &prompt_body,
         fleet_id,
-        member_id,
+        1,
         director_id,
         agent_name,
-    ) {
-        Ok(prompt) => prompt,
-        Err(original) => return Err(registration.rollback(original)),
+    )?;
+    let identity = broker::runtime::database_identity(conn)?;
+    let next_run: i64 = conn
+        .query_row(
+            "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='member_runs'),0)+1",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(crate::broker::members::db_err)?;
+    runner::RuntimePaths::for_run(&identity, next_run)?;
+    let cwd = std::env::current_dir().map_err(|cause| CafleetError::App(cause.to_string()))?;
+    let size = if std::io::stdin().is_terminal() {
+        runner::terminal_size(&std::io::stdin())?
+    } else {
+        runner::TerminalSize { rows: 24, cols: 80 }
     };
-    let argv = backend.build_spawn_argv(&prompt, name, model, effort);
-    let span =
-        crate::signals::DeferTermination::begin().map_err(|error| registration.rollback(error))?;
-    let pane_id = match mux.split_window(&context, &env, &argv) {
-        Ok(pane_id) => pane_id,
-        Err(error) => {
-            return Err(registration.rollback(CafleetError::App(format!(
-                "tmux split-window failed: {error}"
-            ))));
-        }
+    let mut random = [0u8; 32];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut file| file.read_exact(&mut random))
+        .map_err(|cause| CafleetError::App(format!("launch nonce unavailable: {cause}")))?;
+    let launch_nonce = random
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let base = backend.build_spawn_argv("", name, None, None);
+    let (resolved_mode, permission_argv) = match backend {
+        CodingAgent::Claude => (base[2].clone(), base[1..3].to_vec()),
+        CodingAgent::Codex => (base[2].clone(), base[1..5].to_vec()),
+        CodingAgent::Opencode => (base[4].clone(), base[3..5].to_vec()),
     };
-    let placement_view = publish_pane(&mut registration, member_id, &pane_id, &mux)?;
-    drop(span);
-
-    let runtime = broker::runtime::member_runtime(registration.connection(), member_id)?;
+    let pending = runner::PendingMemberSpec {
+        fleet_id,
+        name: name.into(),
+        description: description.into(),
+        placement: NewPlacement {
+            backend: mux.name().into(),
+            mux_session: context.session.clone(),
+            mux_window_id: context.window_id.clone(),
+            mux_pane_id: None,
+            coding_agent: agent_name.into(),
+        },
+    };
+    let run_settings = runner::RunSettings {
+        database_identity_json: identity,
+        creator: runner::ProcessIdentity::current()?,
+        launch_nonce,
+        requested_mode: None,
+        resolved_mode,
+        mode_source: ModeSource::Default,
+        permission_argv_json: serde_json::to_value(permission_argv)
+            .expect("string argv serializes"),
+        event_evidence: EventEvidence::Metadata,
+        native_version: None,
+        profile_version: None,
+        coverage: Coverage::Unknown,
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut host = runner::NativeLaunchHost::new(&mux, &context);
+    let created = runner::create_registered(
+        conn,
+        &pending,
+        &run_settings,
+        |conn, pending| {
+            let artifacts =
+                runner::RunArtifacts::create_with_deadline(conn, pending.run.run_id, deadline)?;
+            let prompt = crate::spawn_prompt::substitute_spawn_placeholders(
+                &prompt_body,
+                fleet_id,
+                pending.member.member_id,
+                director_id,
+                agent_name,
+            )?;
+            let argv = backend.build_spawn_argv(&prompt, name, model, effort);
+            let spawn = runner::SpawnSpec {
+                argv,
+                cwd,
+                environment: vec![(
+                    "CAFLEET_DATABASE_URL".into(),
+                    format!(
+                        "sqlite:///{}",
+                        pending.run.database_identity_json["canonical_path"]
+                            .as_str()
+                            .expect("canonical database path")
+                    ),
+                )],
+                evidence_policy: json!({"mode":"metadata"}),
+                size,
+            };
+            Ok((artifacts, spawn))
+        },
+        &mut host,
+        deadline,
+    )?;
+    let registered = created.member;
+    let member_id = created.run.member_id;
+    let placement_view = created.placement;
+    let runtime = Some(broker::runtime::runtime_snapshot(
+        conn,
+        created.started.identity.run_id,
+    )?);
     let result = json!({
         "member_id": member_id,
         "name": name,
@@ -356,40 +419,6 @@ fn create(
         text
     });
     Ok(())
-}
-
-fn publish_pane(
-    registration: &mut RegistrationGuard<'_>,
-    member_id: i64,
-    pane_id: &str,
-    mux: &AnyMultiplexer,
-) -> Result<crate::broker::records::Placement, CafleetError> {
-    let mut pane = PaneOwnership::new(pane_id.to_owned(), |id| mux.kill_pane(id, true));
-
-    let patched = broker::update_placement_pane_id(registration.connection(), member_id, pane_id);
-    let placement_view = match patched {
-        Ok(Some(placement)) => placement,
-        outcome => {
-            let primary = match outcome {
-                Err(error) => {
-                    CafleetError::App(format!("placement update failed: {}", error.message()))
-                }
-                _ => CafleetError::App("placement row vanished before pane-id patch".into()),
-            };
-            let primary = match pane.rollback() {
-                PaneCleanup::Attempted {
-                    pane_id,
-                    error: Some(error),
-                } => primary.with_cleanup(format!("cleanup failed for pane {pane_id}: {error}")),
-                PaneCleanup::Attempted { error: None, .. } => primary,
-                PaneCleanup::Unknown => unreachable!("the CLI owns a concrete pane"),
-            };
-            return Err(registration.rollback(primary));
-        }
-    };
-    pane.finish();
-    registration.finish();
-    Ok(placement_view)
 }
 
 enum DeleteAction {
@@ -495,12 +524,25 @@ fn close_member(
     let DeleteAction::Close(pane_id) = &locked.value else {
         unreachable!("pane close requires a concrete input-locked placement");
     };
+    if let Some(runtime) = crate::broker::runtime::member_runtime(conn, member_id)?
+        && (!runtime.run.status.terminal()
+            || runtime.run.cleanup_state == crate::broker::runtime::CleanupState::Incomplete)
+    {
+        let outcome =
+            crate::runtime::runner::request_shutdown(conn, &runtime.run, deadline.instant())?;
+        if outcome.cleanup_state != crate::broker::runtime::CleanupState::Complete {
+            return Err(CafleetError::App(format!(
+                "member {member_id} child cleanup remains unconfirmed: {}; inspect with cafleet doctor",
+                outcome.diagnostics.join("; ")
+            )));
+        }
+    }
     let layout = mux.close_pane(pane_id, true).map_err(|error| {
         CafleetError::App(format!(
             "kill_pane failed for pane {pane_id}: {error}. Verify with 'cafleet doctor'."
         ))
     })?;
-    crate::input::complete_database_budget(conn, deadline, |conn| {
+    crate::input::finalize_deletion(conn, deadline, locked.snapshot.runtime.is_some(), |conn| {
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(crate::broker::members::db_err)?;
@@ -559,6 +601,18 @@ fn dispatch_input(
             "member {id}'s pane input remained busy; {label} was not dispatched."
         )));
     };
+    if let Some(runtime) = &locked.member.runtime {
+        let health = crate::runtime::runner::check_input_health(
+            conn,
+            runtime.run.run_id,
+            deadline.instant(),
+        )?;
+        return Err(CafleetError::App(if health.matched {
+            "runner-managed input is held until a verified native composer is available".into()
+        } else {
+            "runner-managed input is held because matching runtime health is unavailable".into()
+        }));
+    }
     let _span = crate::signals::DeferTermination::begin()?;
     let placement = locked.member.placement.as_ref().expect("locked placement");
     let pane = placement

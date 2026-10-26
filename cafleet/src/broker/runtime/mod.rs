@@ -286,7 +286,7 @@ pub(super) fn owned_transaction<T>(
     owner: &RunOwner,
     operation: impl FnOnce(&Connection, &RunRecord) -> Result<T, CafleetError>,
 ) -> Result<T, CafleetError> {
-    let deadline = Deadline::new();
+    let deadline = Deadline::inherited_or_new();
     with_database_budget(conn, deadline, |conn| {
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -300,6 +300,19 @@ pub(super) fn owned_transaction<T>(
 }
 
 pub fn create_run(conn: &mut Connection, new: &NewRun) -> Result<RunRecord, CafleetError> {
+    let deadline = Deadline::inherited_or_new();
+    with_database_budget(conn, deadline, |conn| {
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(db_err)?;
+        let run = insert_run(&tx, new)?;
+        deadline.remaining()?;
+        tx.commit().map_err(db_err)?;
+        Ok(run)
+    })
+}
+
+pub(crate) fn insert_run(conn: &Connection, new: &NewRun) -> Result<RunRecord, CafleetError> {
     validate_identity(&new.database_identity_json)?;
     nonblank(&new.owner_start_identity, "owner_start_identity")?;
     nonblank(&new.resolved_mode, "resolved_mode")?;
@@ -314,26 +327,21 @@ pub fn create_run(conn: &mut Connection, new: &NewRun) -> Result<RunRecord, Cafl
         "permission_argv_json",
         "array required",
     )?;
-    let deadline = Deadline::new();
-    with_database_budget(conn, deadline, |conn| {
-        let tx = conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(db_err)?;
-        require(
-            database_identity(&tx)? == new.database_identity_json,
-            "database_identity_json",
-            "database identity mismatch",
-        )?;
-        let fleet = super::fleets::require_live_fleet(&tx, new.fleet_id)?;
-        require(
-            fleet.director_member_id == Some(new.director_member_id)
-                && new.member_id != new.director_member_id
-                && super::members::active_member_fleet(&tx, new.member_id)? == Some(new.fleet_id),
-            "member_runs.ownership",
-            "member/fleet/Director mismatch",
-        )?;
-        let now = format_utc(now_utc());
-        tx.execute(
+    require(
+        database_identity(conn)? == new.database_identity_json,
+        "database_identity_json",
+        "database identity mismatch",
+    )?;
+    let fleet = super::fleets::require_live_fleet(conn, new.fleet_id)?;
+    require(
+        fleet.director_member_id == Some(new.director_member_id)
+            && new.member_id != new.director_member_id
+            && super::members::active_member_fleet(conn, new.member_id)? == Some(new.fleet_id),
+        "member_runs.ownership",
+        "member/fleet/Director mismatch",
+    )?;
+    let now = format_utc(now_utc());
+    conn.execute(
             "INSERT INTO member_runs(member_id,fleet_id,director_member_id,backend,database_identity_json,
              launch_nonce,runtime_path,requested_mode,resolved_mode,mode_source,permission_argv_json,
              event_evidence,coverage,status,created_at,native_version,profile_version,owner_epoch,
@@ -344,11 +352,8 @@ pub fn create_run(conn: &mut Connection, new: &NewRun) -> Result<RunRecord, Cafl
                 new.permission_argv_json.to_string(),new.event_evidence.as_str(),new.coverage.as_str(),now,
                 new.native_version,new.profile_version,new.owner_pid,new.owner_start_identity],
         ).map_err(db_err)?;
-        let run = get_run(&tx, tx.last_insert_rowid())?;
-        deadline.remaining()?;
-        tx.commit().map_err(db_err)?;
-        Ok(run)
-    })
+    let run = get_run(conn, conn.last_insert_rowid())?;
+    Ok(run)
 }
 
 pub fn reserve_event_sequences(

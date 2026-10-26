@@ -214,6 +214,10 @@ fn deliver_pending_scoped(
     if current.placement != member.placement {
         return ended(AttemptEnd::Held);
     }
+    if let Some(runtime) = &current.runtime {
+        crate::runtime::runner::check_input_health(conn, runtime.run.run_id, deadline.instant())?;
+        return ended(AttemptEnd::Held);
+    }
     let mux = match resolve().and_then(|mux| {
         mux.ensure_available()?;
         Ok(mux.bounded(deadline))

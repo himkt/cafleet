@@ -35,12 +35,24 @@ pub fn register_member(
     description: &str,
     placement: Option<&NewPlacement>,
 ) -> Result<RegisteredMember, CafleetError> {
-    let now = format_utc(now_utc());
     let tx = conn
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(db_err)?;
-    super::fleets::require_live_fleet(&tx, fleet_id)?;
-    let member = tx
+    let member = register_member_rows(&tx, fleet_id, name, description, placement)?;
+    tx.commit().map_err(db_err)?;
+    Ok(member)
+}
+
+pub(crate) fn register_member_rows(
+    conn: &Connection,
+    fleet_id: i64,
+    name: &str,
+    description: &str,
+    placement: Option<&NewPlacement>,
+) -> Result<RegisteredMember, CafleetError> {
+    let now = format_utc(now_utc());
+    super::fleets::require_live_fleet(conn, fleet_id)?;
+    let member = conn
         .query_row(
             "INSERT INTO members (fleet_id, name, description, status, registered_at)
          VALUES (?1, ?2, ?3, 'active', ?4) RETURNING member_id, name, registered_at",
@@ -56,7 +68,7 @@ pub fn register_member(
         .map_err(db_err)?;
     let member_id = member.member_id;
     if let Some(p) = placement {
-        tx.execute(
+        conn.execute(
             "INSERT INTO member_placements
              (member_id, mux_session, mux_window_id, mux_pane_id, backend, coding_agent, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -72,7 +84,6 @@ pub fn register_member(
         )
         .map_err(db_err)?;
     }
-    tx.commit().map_err(db_err)?;
     Ok(member)
 }
 
