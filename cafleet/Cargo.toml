@@ -13,7 +13,7 @@ nix = { version = "0.31", features = ["signal", "fs", "poll", "term", "process",
 portable-pty = "0.9"
 filedescriptor = "0.8"
 vt100 = "0.18.1"
-rustix = { version = "1", features = ["termios"] }
+rustix = { version = "1", features = ["termios", "time"] }
 signal-hook = "0.4"
 refinery = { version = "0.10", features = ["rusqlite"] }
 regex = "1"

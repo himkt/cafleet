@@ -7,6 +7,34 @@ use crate::input::{Deadline, PaneLock, with_database_budget};
 use rusqlite::{Connection, OptionalExtension};
 use std::time::Instant;
 
+#[expect(
+    dead_code,
+    reason = "the reviewed live input integration consumes the prepared request and expiration"
+)]
+pub(crate) struct PreparedSubmission<'a> {
+    pub request: &'a SubmitInput,
+    expiration: InputExpiration,
+}
+impl<'a> PreparedSubmission<'a> {
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the reviewed live input integration prepares fresh submissions"
+        )
+    )]
+    pub(crate) fn new(
+        request: &'a SubmitInput,
+        deadline: Instant,
+        clock: &mut impl InputDeadlineClock,
+    ) -> Result<Self> {
+        Ok(Self {
+            request,
+            expiration: InputExpiration::capture(deadline, clock)?,
+        })
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct InputFailure {
     pub(crate) source: CafleetError,
