@@ -7,6 +7,7 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 mod observation_contract;
+mod recovery_entry;
 use super::*;
 use crate::error::CafleetError;
 use rusqlite::params;

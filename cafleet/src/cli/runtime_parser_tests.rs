@@ -2,6 +2,8 @@ use clap::Parser;
 
 use super::CliArgs;
 
+mod recovery_entry;
+
 fn usage_error(args: &[&str]) -> clap::Error {
     match CliArgs::try_parse_from(std::iter::once("cafleet").chain(args.iter().copied())) {
         Ok(_) => panic!("expected usage failure for {args:?}"),
