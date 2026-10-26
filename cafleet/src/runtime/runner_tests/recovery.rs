@@ -15,6 +15,8 @@ mod history;
 mod identity;
 mod missing_paths;
 mod replay;
+mod review_clock;
+mod review_completion;
 mod terminal_tail;
 
 type TestResult<T> = std::result::Result<T, CafleetError>;
