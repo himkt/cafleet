@@ -1,12 +1,13 @@
 use clap::{Args, Subcommand};
 use rusqlite::Connection;
 use serde_json::{Value, json};
+use std::path::{Path, PathBuf};
 
 use super::helpers::{emit, resolve_body, resolve_command_body, resolve_mux};
 use crate::broker::records::MemberRecord;
 use crate::broker::{self, NewPlacement};
 use crate::capture::{CaptureSnapshot, MemberCapture, write_member_capture};
-use crate::coding_agent::{CodingAgent, coding_agent};
+use crate::coding_agent::{CodingAgent, ProfileCatalog, coding_agent};
 use crate::config::Settings;
 use crate::error::CafleetError;
 
@@ -61,6 +62,15 @@ pub enum MemberCommand {
         /// Reasoning-effort level (claude, codex only).
         #[arg(long)]
         effort: Option<String>,
+        /// Native permission policy for the selected backend.
+        #[arg(long)]
+        permission_mode: Option<String>,
+        /// Persist metadata or explicitly redacted screen evidence.
+        #[arg(long, default_value = "metadata", value_parser = ["metadata", "redacted"])]
+        event_evidence: String,
+        /// Absolute UTF-8 JSON redaction configuration for redacted evidence.
+        #[arg(long, value_name = "PATH")]
+        event_redaction_file: Option<PathBuf>,
         #[command(flatten)]
         body: PromptArgs,
         /// Output in JSON format.
@@ -215,6 +225,9 @@ pub fn run(
             coding_agent,
             model,
             effort,
+            permission_mode,
+            event_evidence,
+            event_redaction_file,
             body,
             json,
         } => create(
@@ -226,6 +239,9 @@ pub fn run(
             coding_agent,
             model.as_deref(),
             effort.as_deref(),
+            permission_mode.as_deref(),
+            &event_evidence,
+            event_redaction_file.as_deref(),
             &body,
             json,
         ),
@@ -253,6 +269,32 @@ pub fn run(
     }
 }
 
+fn launch_evidence(
+    mode: &str,
+    file: Option<&Path>,
+    catalog: &ProfileCatalog,
+) -> Result<(broker::runtime::EventEvidence, Value), CafleetError> {
+    use broker::runtime::{EventEvidence, evidence::EvidencePolicy};
+    match (mode, file) {
+        ("metadata", None) => Ok((EventEvidence::Metadata, json!({"mode":"metadata"}))),
+        ("redacted", Some(path)) if path.is_absolute() => {
+            let config = std::fs::read_to_string(path).map_err(|cause| {
+                CafleetError::Usage(format!("cannot read --event-redaction-file: {cause}"))
+            })?;
+            let config: Value = serde_json::from_str(&config).map_err(|cause| {
+                CafleetError::Usage(format!("invalid --event-redaction-file JSON: {cause}"))
+            })?;
+            let rules = catalog.rule_ids();
+            let rule_refs = rules.iter().map(String::as_str).collect::<Vec<_>>();
+            EvidencePolicy::redacted(&config, &rule_refs)?;
+            Ok((EventEvidence::Redacted, json!({"mode":"redacted","config":config})))
+        }
+        _ => Err(CafleetError::Usage(
+            "--event-evidence metadata requires no redaction file; redacted requires an absolute --event-redaction-file".into(),
+        )),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn create(
     conn: &mut Connection,
@@ -263,6 +305,9 @@ fn create(
     explicit_agent: Option<CodingAgent>,
     model: Option<&str>,
     effort: Option<&str>,
+    permission_mode: Option<&str>,
+    event_evidence: &str,
+    event_redaction_file: Option<&Path>,
     body: &PromptArgs,
     json: bool,
 ) -> Result<(), CafleetError> {
@@ -282,6 +327,10 @@ fn create(
 
     backend.validate_model(model)?;
     backend.validate_effort(effort)?;
+    let policy = backend.resolve_policy(None, permission_mode)?;
+    let catalog = ProfileCatalog::bundled()?;
+    let (event_evidence, evidence_policy) =
+        launch_evidence(event_evidence, event_redaction_file, &catalog)?;
 
     let prompt_body = resolve_body(body.prompt.as_deref(), body.file.as_deref(), "--file")?;
 
@@ -293,7 +342,7 @@ fn create(
         .context_discovery()
         .map_err(|e| CafleetError::App(e.to_string()))?;
 
-    use crate::broker::runtime::{Coverage, EventEvidence, ModeSource};
+    use crate::broker::runtime::Coverage;
     use crate::runtime::runner;
     use std::io::{IsTerminal, Read};
     use std::time::{Duration, Instant};
@@ -327,12 +376,6 @@ fn create(
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    let base = backend.build_spawn_argv("", name, None, None);
-    let (resolved_mode, permission_argv) = match backend {
-        CodingAgent::Claude => (base[2].clone(), base[1..3].to_vec()),
-        CodingAgent::Codex => (base[2].clone(), base[1..5].to_vec()),
-        CodingAgent::Opencode => (base[4].clone(), base[3..5].to_vec()),
-    };
     let pending = runner::PendingMemberSpec {
         fleet_id,
         name: name.into(),
@@ -349,12 +392,12 @@ fn create(
         database_identity_json: identity,
         creator: runner::ProcessIdentity::current()?,
         launch_nonce,
-        requested_mode: None,
-        resolved_mode,
-        mode_source: ModeSource::Default,
-        permission_argv_json: serde_json::to_value(permission_argv)
+        requested_mode: policy.requested_mode.clone(),
+        resolved_mode: policy.resolved_mode.clone(),
+        mode_source: policy.mode_source,
+        permission_argv_json: serde_json::to_value(&policy.permission_argv)
             .expect("string argv serializes"),
-        event_evidence: EventEvidence::Metadata,
+        event_evidence,
         native_version: None,
         profile_version: None,
         coverage: Coverage::Unknown,
@@ -375,7 +418,8 @@ fn create(
                 director_id,
                 agent_name,
             )?;
-            let argv = backend.build_spawn_argv(&prompt, name, model, effort);
+            let argv =
+                backend.build_spawn_argv_with_policy(&prompt, name, model, effort, &policy)?;
             let spawn = runner::SpawnSpec {
                 argv,
                 cwd,
@@ -388,7 +432,7 @@ fn create(
                             .expect("canonical database path")
                     ),
                 )],
-                evidence_policy: json!({"mode":"metadata"}),
+                evidence_policy,
                 size,
             };
             Ok((artifacts, spawn))

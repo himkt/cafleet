@@ -234,7 +234,7 @@ pub(super) fn digest(value: &Value) -> String {
         .collect()
 }
 
-pub(super) fn validate(value: &Value) -> Result<(), CafleetError> {
+pub(crate) fn validate(value: &Value) -> Result<(), CafleetError> {
     let object = value
         .as_object()
         .ok_or_else(|| invalid("evidence_json", "object required"))?;

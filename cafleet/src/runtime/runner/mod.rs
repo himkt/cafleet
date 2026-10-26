@@ -1,3 +1,16 @@
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "The approved Batch 2 service adapter consumes this component"
+    )
+)]
+mod episodes;
+pub(crate) use crate::coding_agent::{
+    MatchEvidence, ObservationKind, ScreenObservation, SemanticFingerprint,
+};
+#[cfg(test)]
+pub(crate) use episodes::*;
 mod artifacts;
 mod codec;
 mod control;

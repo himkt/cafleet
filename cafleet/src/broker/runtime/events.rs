@@ -17,7 +17,7 @@ fn map_interaction(row: &rusqlite::Row<'_>) -> rusqlite::Result<InteractionRecor
     })
 }
 
-fn interaction(conn: &Connection, id: i64) -> Result<InteractionRecord, CafleetError> {
+pub(super) fn interaction(conn: &Connection, id: i64) -> Result<InteractionRecord, CafleetError> {
     let interaction = conn
         .query_row(
             "SELECT * FROM member_interactions WHERE interaction_id=?1",
@@ -666,4 +666,78 @@ fn director_action(
         json!({"kind":"review_permission_request","instruction":REVIEW_INSTRUCTION,
         "inspect_argv":["cafleet","permission","inspect",interaction_id.to_string(),"--event-id",event_id.to_string(),"--from-member-id",run.director_member_id.to_string(),"--json"]}),
     )
+}
+
+pub fn update_interaction_evidence(
+    conn: &mut Connection,
+    owner: &RunOwner,
+    update: &InteractionEvidenceUpdate,
+    after_event_seq: i64,
+    deadline: std::time::Instant,
+) -> Result<InteractionRecord, CafleetError> {
+    crate::runtime::runner::with_database_deadline(conn, deadline, |conn| {
+        owned_transaction(conn, owner, |conn, run| {
+            require(
+                update.run_id == run.run_id && update.episode_seq > 0,
+                "episode_seq",
+                "matching run and positive episode required",
+            )?;
+            evidence::validate(&update.evidence_json)?;
+            let value = &update.evidence_json;
+            require(
+                value["screen_seq"].as_u64() == Some(update.output_seq)
+                    && value["backend"] == run.backend
+                    && value["profile_version"] == json!(run.profile_version)
+                    && value["native_version"] == json!(run.native_version)
+                    && (run.event_evidence == EventEvidence::Redacted
+                        || value["evidence_policy"] == "metadata"),
+                "evidence_json",
+                "refresh evidence does not match current run/profile/policy/sequence",
+            )?;
+            let maximum: Option<i64> = conn
+                .query_row(
+                    "SELECT MAX(event_seq) FROM member_runtime_events WHERE run_id=?1",
+                    [run.run_id],
+                    |row| row.get(0),
+                )
+                .map_err(db_err)?;
+            require(
+                after_event_seq > 0 && maximum == Some(after_event_seq),
+                "after_event_seq",
+                "refresh barrier must match committed run maximum",
+            )?;
+            let id: i64 = conn.query_row("SELECT interaction_id FROM member_interactions WHERE run_id=?1 AND episode_seq=?2",params![run.run_id,update.episode_seq],|row| row.get(0)).map_err(db_err)?;
+            let current = interaction(conn, id)?;
+            require(
+                current.closed_at.is_none(),
+                "interaction_id",
+                "refresh requires an open current episode",
+            )?;
+            let opening_id:i64 = conn.query_row("SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND interaction_id=?2 AND kind='interaction_opened' AND event_seq<=?3",params![run.run_id,id,after_event_seq],|row| row.get(0)).map_err(db_err)?;
+            get_event(conn, opening_id)?;
+            let previous = current.evidence_json["screen_seq"]
+                .as_u64()
+                .expect("validated interaction sequence");
+            require(
+                update.output_seq >= previous,
+                "screen_seq",
+                "refresh output sequence regressed",
+            )?;
+            if update.output_seq == previous {
+                require(
+                    value == &current.evidence_json,
+                    "screen_seq",
+                    "conflicting refresh at the same output sequence",
+                )?;
+                return Ok(current);
+            }
+            let changed = conn.execute("UPDATE member_interactions SET evidence_json=?1,evidence_digest=?2 WHERE interaction_id=?3 AND closed_at IS NULL",params![value.to_string(),value["evidence_digest"].as_str().expect("validated digest"),id]).map_err(db_err)?;
+            require(
+                changed == 1,
+                "interaction_id",
+                "refresh lost its active episode",
+            )?;
+            interaction(conn, id)
+        })
+    })
 }

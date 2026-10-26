@@ -4,7 +4,7 @@ mod inputs;
 mod permissions;
 mod records;
 
-pub use events::{get_event, persist_transition};
+pub use events::{get_event, persist_transition, update_interaction_evidence};
 pub use inputs::{
     find_input, get_input, record_input_state, reserve_input, settle_input, settle_preview,
 };

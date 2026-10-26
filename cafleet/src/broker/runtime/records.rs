@@ -307,3 +307,11 @@ pub enum PermissionReservation {
     Retained(PermissionReceipt),
     Reserved(PermissionReceipt),
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InteractionEvidenceUpdate {
+    pub run_id: i64,
+    pub episode_seq: i64,
+    pub output_seq: u64,
+    pub evidence_json: Value,
+}

@@ -1,5 +1,8 @@
+mod policy;
+pub use policy::LaunchPolicySelection;
 mod profiles;
-pub use profiles::AnswerCapability;
+pub use profiles::{AnswerCapability, NativeCapabilities, ProfileCatalog};
+pub(crate) use profiles::{MatchEvidence, ObservationKind, ScreenObservation, SemanticFingerprint};
 
 #[cfg(test)]
 mod policy_contract_tests;
@@ -121,47 +124,11 @@ impl CodingAgent {
         model: Option<&str>,
         effort: Option<&str>,
     ) -> Vec<String> {
-        let base: &[&str] = match self {
-            // Claude's variadic --allowedTools ends at --name, keeping the prompt positional.
-            Self::Claude => &[
-                "claude",
-                "--permission-mode",
-                "dontAsk",
-                "--prompt-suggestions",
-                "false",
-                "--allowedTools",
-                "Bash(cafleet message *)",
-                "--name",
-                display_name,
-            ],
-            Self::Codex => &[
-                "codex",
-                "--ask-for-approval",
-                "never",
-                "--sandbox",
-                "workspace-write",
-            ],
-            Self::Opencode => &["opencode", "mini", "--standalone", "--agent", "cafleet"],
-        };
-        let mut argv = base
-            .iter()
-            .map(|value| (*value).to_owned())
-            .collect::<Vec<_>>();
-        if let Some(model) = model {
-            argv.extend(["--model".into(), model.into()]);
-        }
-        if let Some(effort) = effort {
-            match self {
-                Self::Claude => argv.extend(["--effort".into(), effort.into()]),
-                Self::Codex => argv.push(format!("--config=model_reasoning_effort={effort}")),
-                Self::Opencode => panic!("OpenCode spawn has no reasoning effort"),
-            }
-        }
-        if self == Self::Opencode {
-            argv.push("--prompt".into());
-        }
-        argv.push(prompt.into());
-        argv
+        let policy = self
+            .resolve_policy(None, None)
+            .expect("registered backend has a valid default policy");
+        self.build_spawn_argv_with_policy(prompt, display_name, model, effort, &policy)
+            .expect("spawn inputs satisfy backend validation")
     }
 }
 
