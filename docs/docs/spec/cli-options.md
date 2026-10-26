@@ -17,6 +17,9 @@ The unified `cafleet` CLI uses literal subject IDs, synchronous SQLite access an
 | `member show` / `member list` | Read detail / active roster | `MEMBER_ID` / `FLEET_ID` | yes |
 | `member prompt` / `member exec` | Submit authorized native input | `MEMBER_ID` | yes |
 | `member capture` | Read a pane tail | `MEMBER_ID` | yes |
+| `member recover` | Reconcile the recorded run without restarting an agent | `MEMBER_ID` | yes |
+| `event show` | Read a durable runtime event and current state | `EVENT_ID` | yes |
+| `input show` / `input reconcile` | Read / settle a durable input receipt | `INPUT_ID` | yes |
 | `message send` | Persist a point-to-point message and preview it for an ordinary recipient | Sender/recipient flags | yes |
 | `message poll` / `message wait` | Read incoming deliveries / block until deliveries arrive | `MEMBER_ID` | yes |
 | `message listen` | Stream pending inbox records through stdout | `MEMBER_ID` | JSONL only |
@@ -50,12 +53,15 @@ The default expands HOME once. An explicit URL has the form `sqlite:///<path>`; 
 | `message show` | Envelope | `{message}` |
 | `message wait` | Availability/timeout line and any messages | `{member_id, outcome, messages, notification_errors}` |
 | `message listen` | — | Tagged `ready`, `message`, `closed` JSONL records; no `--json` flag |
-| `member create` | `ID NAME backend=AGENT pane=PANE` | Member with placement |
+| `member create` | `ID NAME backend=AGENT pane=PANE` plus runtime line | Member with placement and runtime |
 | `member delete` | `Member deleted.` with member/pane lines | `{member_id, pane_status}` |
-| `member show` | `ID NAME STATUS` | Detail including kind and placement |
+| `member show` | `ID NAME STATUS` plus wrapped runtime line | Detail including kind, placement and runtime |
+| `member recover` | Recovery counts/state and cleanup lines | Ordered recovery result |
+| `event show` | Event, runtime and optional interaction lines | Event and current state |
+| `input show` / `input reconcile` | Input receipt line | `{input}` |
 | `member list` | Roster rows or `0 members.` | Roster array |
-| `member prompt` | `Sent prompt TEXT_REPR to member NAME (PANE).` | `{member_id, pane_id, text}` |
-| `member exec` | `Dispatched native command to member ID (PANE). Inspect the pane for its result.` | `{member_id, pane_id, coding_agent, command, dispatched}` |
+| `member prompt` | `Sent prompt TEXT_REPR to member NAME (PANE).` plus wrapped input line | `{member_id, pane_id, text, input_id}` |
+| `member exec` | `Dispatched native command to member ID (PANE). Inspect the pane for its result.` plus wrapped input line | `{member_id, pane_id, coding_agent, command, dispatched, input_id}` |
 | `member capture` | Exact selected content | `{member_id, pane_id, lines, content, captured_at, content_sha256}` |
 | `fleet capture` | One annotated section per entry | Ordered capture-entry array |
 | `doctor` | Complete diagnosis and issue footer | Diagnosis object |
@@ -70,7 +76,7 @@ Use a trailing per-subcommand `--json`. It emits compact single-line JSON with U
 
 ## Positional subject ids {#positional-subject-ids}
 
-Place `FLEET_ID`, `MEMBER_ID` or `MESSAGE_ID` immediately after the subcommand. The subject row supplies related fleet/recipient state. IDs are complete DB-assigned integers, without prefix resolution or environment defaults. A missing or malformed subject uses the parser's native error, exit 2.
+Place the command’s subject ID immediately after its subcommand; event and input subjects use their positive durable record IDs. The subject row supplies related fleet/recipient state. IDs are complete DB-assigned integers, without prefix resolution or environment defaults. A missing or malformed subject uses the parser's native error, exit 2.
 
 Spawned members read literal `FLEET ID:`, `YOUR MEMBER ID:`, `DIRECTOR MEMBER ID:` and `CODING AGENT:` lines. Pass these literal IDs on each invocation.
 
@@ -629,6 +635,9 @@ one root Director by construction, so no override flag exists.
 | `--description` | yes | One-sentence purpose. |
 | `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; when omitted, the member — every role — inherits the spawning Director's placement backend. Exits 1 with `Error: binary <name> not found on PATH` when the binary is missing. The opencode backend additionally requires its agent preset at the resolved preset path (via `OPENCODE_CONFIG_DIR` — see [Config-dir resolution](#config-dir-resolution)); a missing preset or an invalid variable exits 1 per [Error Messages](#error-messages). |
 | `--model` | no | Model forwarded to the backend binary's own `--model` flag. The opencode backend additionally requires `<provider-id>/<model-id>`; per-backend formats and create-time validation are in [Model selection](coding-agent-backends.md#model-selection). |
+| `--permission-mode MODE` | no | Launch-only selection from the resolved backend’s [policy catalog](member-runtime.md#launch-policy-and-capability-registry); omission preserves its default. |
+| `--event-evidence POLICY` | no | `metadata` by default, or explicit `redacted` evidence under the [privacy contract](member-runtime.md#persistence-notification-and-read-interfaces). |
+| `--event-redaction-file PATH` | for redacted | Absolute readable UTF-8 redaction configuration; invalid combinations/configuration fail with usage exit 2 before registration. |
 | `--effort` | no | Reasoning-effort level forwarded to the backend binary, validated per backend before any side effect. Accepted levels, forwarding forms, and rejection strings are in [Reasoning effort](coding-agent-backends.md#reasoning-effort). |
 | positional `PROMPT` | one of | Inline spawn prompt (backend-neutral template). Exactly one of `PROMPT` / `--file`. |
 | `--file PATH` | one of | Path to a UTF-8 file whose contents are the spawn prompt (`-` = stdin). Follow the shared [body-input and transport contract](#text-body-input). |
@@ -638,7 +647,7 @@ one root Director by construction, so no override flag exists.
 
 #### Spawn command per backend
 
-The per-backend spawn argv and auto-approval flags live in
+The per-backend child argv and omitted permission defaults live in
 [Coding-agent backends](coding-agent-backends.md#spawn-argv).
 
 #### Spawn-prompt substitution
@@ -669,8 +678,7 @@ the placement.
 
 #### Creation failure compensation {#creation-failure-compensation}
 
-Member creation registers a pending placement, renders the prompt, creates a
-pane, and patches its id. The CLI owns a registration guard after successful
+Member creation validates policy, evidence configuration and assignment, then registers a pending placement and run. The multiplexer starts a runner from a private descriptor; a `prepared` handshake precedes placement publication and `start`, and creation returns only after child spawn produces `started` within one handshake deadline. The [runner creation contract](member-runtime.md#runner-boundary-and-creation-transaction) owns descriptor cleanup and uncertain-launch compensation. The CLI owns a registration guard after successful
 registration and acquires a pane guard only when `split_window` succeeds.
 The backend owns the pane before that return; see
 [pane ownership](multiplexer-backends.md#pane-creation-ownership).
@@ -702,17 +710,14 @@ Report transaction rollback failures explicitly. Existing rollback-success
 suffixes may describe confirmed compensation; they must not claim success or
 complete rollback when cleanup failed or pane compensation is unconfirmed.
 Guards disarm through explicit `finish`/`rollback`, preventing repeated kill
-or deregistration; `Drop` handles only remaining unhandled ownership. Once a
-member placement is confirmed , disarm all creation
-guards before the existing `emit` call. Successful text/JSON output keeps its
-shape, ordering, and nulls. No new stdout-failure exit or diagnostic contract
+or deregistration; `Drop` handles only remaining unhandled ownership. Once the runner reports `started` under the matching identity, disarm creation guards before emitting the result. Placement publication alone keeps registration and pane guards armed; a post-start timeout reconciles and cleans up the already-started child. Existing output keys retain their order and nullability; runtime fields append under the [runtime presentation contract](#runtime-presentation). No new stdout-failure exit or diagnostic contract
 is introduced.
 
 
 
 ### `member delete` {#member-delete}
 
-Lock the concrete placement before kill/deregistration. A member without a concrete pane needs no lock. Retry contention every 50 milliseconds against one five-second deadline; expiry exits 1 with `member ID's pane input remained busy for 5 seconds; member was not deleted.` and leaves state unchanged. Preserve pane/registry errors and layout cleanup ownership.
+For wrapped members, request owned runner shutdown under the recorded identity before pane/registry cleanup, retaining explicit unconfirmed-child diagnostics and recoverable runtime records. Attempt remaining event replay before deregistration only within the remaining operation deadline. Lock the concrete placement before kill/deregistration. A member without a concrete pane needs no lock. Retry contention every 50 milliseconds against one five-second deadline; expiry exits 1 with `member ID's pane input remained busy for 5 seconds; member was not deleted.` and leaves state unchanged. Preserve pane/registry errors and layout cleanup ownership.
 
 Revalidate pending or absent placement and deregister atomically. For a concrete pane, retain input ownership while closing it outside a SQLite write transaction, then revalidate and finalize the registry. After successful close, mandatory registry finalization uses the later of the original deadline and one second after finalization begins, allowing short reader/writer contention to clear; actual database failures report that the pane was closed and preserve the database cause. Optional layout work follows mandatory finalization within the original deadline. A failed or expired restoration emits a stderr diagnostic while preserving successful deregistration.
 
@@ -723,8 +728,8 @@ any active registry entry — placed or placementless (root Director included).
 
 Registry read — no multiplexer requirement. Text is the compact one-line row;
 the detailed view — including `kind` ([`director` / `member`](data-model.md#members)) and the
-placement sub-dict — is the `--json` payload (see
-[Output shapes](#output-shapes)).
+placement sub-dict and appended runtime summary — is the `--json` payload (see
+[Runtime presentation](#runtime-presentation)). A wrapped result appends the runtime text line; an unwrapped result retains its existing row.
 
 
 ### `member list` {#member-list}
@@ -747,7 +752,7 @@ Per-member detail such as `description` and `registered_at` lives on
 
 `cafleet member prompt MEMBER_ID TEXT [--json]` validates a nonblank line without CR/LF or C0/DEL controls, otherwise exits 2 with `text must be one non-empty line without control characters.`
 
-A root Director target exits 1 with `cannot prompt the Director's own pane` before any pane I/O, because Escape would interrupt the Director's own running turn. Otherwise acquire the shared input lock within its [bounded wait](multiplexer-backends.md#pane-input-lock) and revalidate activity/placement. Submit the Director-authored text unchanged with the Escape lead: Escape, settle, literal text, settle and Enter. Escape can interrupt a working turn or dismiss an open prompt in the member pane. Exit 0 means submission only, with `{member_id, pane_id, text}`.
+A root Director target exits 1 with `cannot prompt the Director's own pane` before any pane I/O, because Escape would interrupt the Director's own running turn. Otherwise acquire the shared input lock within its [bounded wait](multiplexer-backends.md#pane-input-lock) and revalidate activity/placement. For a wrapped member, submit literal text and the native submit key through the verified runner composer profile, gated by the [input arbitration contract](member-runtime.md#input-arbitration-and-the-original-native-answer). Explicitly unwrapped members retain Escape, settle, literal text, settle and Enter; that legacy path can interrupt work or dismiss a prompt. Exit 0 means submission only, with ordered `{member_id, pane_id, text, input_id}`; unwrapped input has a null ID.
 
 A lock still busy when the wait ends uses `member ID's pane input remained busy; prompt was not dispatched.` Pre-write error, including an Escape failure: `prompt was not dispatched to member ID: CAUSE`. Partial uncertainty: `prompt delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` These exit 1 without a success record.
 
@@ -757,12 +762,12 @@ A lock still busy when the wait ends uses `member ID's pane input remained busy;
 
 Require a nonblank line without CR/LF, NUL or other C0/DEL controls, including tabs. Invalid input exits 2 before pane I/O with `command must be one non-empty line without control characters.` A multiline task supplies a one-line explicit script invocation.
 
-Resolve an active ordinary member and concrete placement, reject the root Director, lock input within its [bounded wait](multiplexer-backends.md#pane-input-lock) and reload. With the Escape lead, send Escape, settle, type native shell input `! ` followed by the actual command once, settle and Enter. The backend owns working directory, environment, permissions, output and exit rendering.
+Resolve an active ordinary member and concrete placement, reject the root Director, lock input within its [bounded wait](multiplexer-backends.md#pane-input-lock) and reload. Wrapped input uses the tested native-shell composer profile, literal `! ` plus the command, and the native submit key through the runner. Explicitly unwrapped input retains Escape, settle, literal native shell input, settle and Enter. The backend owns working directory, environment, permissions, output and exit rendering.
 
 Successful exit 0 establishes complete submission/dispatch only. Ordered JSON is:
 
 ```json
-{"member_id":42,"pane_id":"w1:p2","coding_agent":"codex","command":"printf example","dispatched":true}
+{"member_id":42,"pane_id":"w1:p2","coding_agent":"codex","command":"printf example","dispatched":true,"input_id":null}
 ```
 
 Text: `Dispatched native command to member ID (PANE). Inspect the pane for its result.`
@@ -775,7 +780,7 @@ Text: `Dispatched native command to member ID (PANE). Inspect the pane for its r
 | Escape or transport failure before typing | `native command was not dispatched to member ID: CAUSE` |
 | Typing may have begun | `native command delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` |
 
-The first text-writing call can partially type even if it fails. Failure after Enter may mean execution began. Inspect native pane output before any newly authorized retry. The command writes no execution ledger, helper script or wrapper and returns only dispatch metadata. The Director authorizes native input under its host rules; visibility establishes no second member-tool permission check.
+The first text-writing call can partially type even if it fails. Failure after Enter may mean execution began. Inspect native pane output before any newly authorized retry. A wrapped operation durably records its operation key, payload digest and submission state; the receipt contains no command text. The result describes dispatch, independently of native execution. The Director authorizes native input under its host rules; visibility establishes no second member-tool permission check.
 
 After native completion, inspect the pane and send an explicit prompt to use the output and continue when the host has not resumed the member.
 
@@ -807,6 +812,30 @@ Unicode and empty captures. Existing line validation/windowing and timestamp
 format stay unchanged. Text member capture prints content without adding a
 newline; JSON retains its existing fields and ordering.
 
+
+## Runtime presentation {#runtime-presentation}
+
+Member create preserves ordered `member_id,name,registered_at,placement` and appends `runtime`; member show preserves ordered `member_id,name,description,status,registered_at,kind,placement` and appends `runtime`. An explicitly unwrapped member has `runtime: null`. The runtime object has ordered keys `run_id,resolved_mode,status,reachability,owner_epoch,last_health_at,coverage,current_interaction_id,unresolved_input_ids,owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity`, preserving stored nullability. These are registry reads and make no live-health claim.
+
+Wrapped create/show preserves its existing text row and appends `Runtime: run=RUN_ID mode=MODE status=STATUS coverage=COVERAGE`. Wrapped prompt/exec preserves its existing success line and appends `Input: INPUT_ID` when a durable ID exists; JSON appends nullable `input_id` after existing keys. An uncertain error retains its existing exit category and includes known receipt identity in the cause as `input_id=INPUT_ID`; run/interaction context accompanies held/rejected input.
+
+## Runtime event and input commands
+
+`cafleet event show EVENT_ID [--json]` returns ordered `event,notification_state,message_id,archive_reason,run,interaction`. The event is the complete [versioned runtime payload](member-runtime.md#persistence-notification-and-read-interfaces), run is the current runtime summary, and nullable interaction contains stored fields in schema order. Text is `Event: EVENT_ID run=RUN_ID seq=EVENT_SEQ kind=KIND notification=STATE message=MESSAGE_ID` followed by the runtime summary line and `Interaction: INTERACTION_ID classification=CLASS closed_at=TIMESTAMP close_reason=REASON` when linked. Unavailable optional text values render `-`.
+
+`cafleet input show INPUT_ID [--json]` and `cafleet input reconcile INPUT_ID --disposition DISPOSITION --evidence-ref REFERENCE [--json]` return `{input}` with the durable row ordered `input_id,run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,disposition,evidence_ref`. Text is `Input: INPUT_ID run=RUN_ID kind=KIND state=STATE disposition=DISPOSITION message=MESSAGE_ID`, with `-` for absent optional fields.
+
+Reconciliation is Director-owned. CLI disposition tokens are `submitted`, `not-submitted` and `abandoned-uncertain`, persisted with underscores as defined by the [receipt contract](member-runtime.md#input-arbitration-and-the-original-native-answer). Require a nonempty evidence reference, synchronize with the current owner before CAS settlement and preserve uncertainty while an active writer cannot be ruled out. Settlement sends no input and establishes no native command result.
+
+All event/input IDs are positive database-assigned integers; malformed IDs/options fail with usage exit 2. Missing rows and invalid stored state fail explicitly. Interaction fields are ordered `interaction_id,run_id,episode_seq,classification,evidence_digest,opened_at,evidence_json,closed_at,close_reason`.
+
+### `member recover` {#member-recover}
+
+`cafleet member recover MEMBER_ID [--json]` is Director-owned and reconciles a recorded run of an active or deregistered member. A member without a run fails explicitly before mutation. The [recovery contract](member-runtime.md#storage-pressure-and-durability-boundary) owns identity, ownership, replay, archival and its bounded pass.
+
+The exceptional form is `cafleet member recover MEMBER_ID --owner-terminated --expected-run-id RUN_ID --expected-owner-epoch EPOCH --evidence-ref REFERENCE [--json]`. Require all four options together, positive snapshot IDs/epoch and a nonempty operator evidence reference; incomplete or invalid input exits 2. A changed owner rejects the attestation, and positive live evidence preserves the live owner.
+
+Ordered JSON keys are `member_id,run_id,outcome,replayed_count,inbox_count,archived_count,status,cleanup_diagnostics`. Outcome is `recovered`, `recovering`, `live_or_unreachable` or `operator_reconciliation_required`; counts describe this pass and diagnostics retain cleanup/attestation provenance. Text is `Recovery: member=MEMBER_ID run=RUN_ID outcome=OUTCOME status=STATUS replayed=COUNT inbox=COUNT archived=COUNT`, followed by each bounded diagnostic as `Cleanup: DIAGNOSTIC`. Incomplete or unreachable outcomes remain distinct from confirmed recovery.
 
 ## Error Messages
 

@@ -12,9 +12,11 @@ CAFleet multiplexes independent coding-agent sessions in tmux or herdr. Use its 
 | placement | The association between a member and its multiplexer session, window, pane and backend | [Data model](../spec/data-model.md) |
 | broker | The synchronous SQLite data-access layer used by the CLI | [Storage](storage.md) |
 | message | One point-to-point delivery, consumed through `input_required → completed` | [Message envelope](../spec/message-envelope.md) |
-| inline preview | A literal one-line notification submitted Escape-first into an ordinary recipient's pane, carrying the full body or a show pointer | [Notifications](../spec/multiplexer-backends.md#push-notifications) |
+| inline preview | A literal one-line notification submitted through the member’s recorded transport when input is eligible, carrying the full body or a show pointer | [Notifications](../spec/multiplexer-backends.md#push-notifications) |
 | receive | A finite inbox wait for scripts and manual use that also retries ordinary-member previews | [Message wait](../spec/cli-options.md#message-wait) |
 | inbox stream | A persistent read-only JSONL observer of pending messages with explicit ACK consumption | [Message listen](../spec/cli-options.md#message-listen) |
+| runner | The owned PTY observer and input arbiter for a member run | [Member permission events](member-permission-events.md) |
+| runtime event | A durable typed terminal/lifecycle observation linked to the Director’s inbox | [Member runtime](../spec/member-runtime.md) |
 | coding-agent backend | The selected agent binary recorded in a placement | [Coding agents](coding-agents.md) |
 
 ## Fleet isolation

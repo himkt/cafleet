@@ -49,3 +49,22 @@ Follow the [design document workflow](how-to/design-doc-development.md#prompts).
 ## Documentation style
 
 Write human/operator behavior in the site and agent instructions in skills. State intended behavior directly. Link each shared enumeration to its owner; describe growing groups through their selecting property or registry. Use tables when parallel entries carry multiple shared attributes, with at least two data rows and at most two sentences per cell. Keep literal commands, flags, paths and errors in code spans.
+
+## Extend a coding-agent backend
+
+Implement a typed permission adapter as the single source of truth for launch-policy choices/default, literal argv mapping, native-version eligibility and versioned detector/composer profiles. Preserve omitted defaults, native/managed restrictions and sandbox boundaries. A launchable mode and a tested permission detector or composer are separate capabilities; unknown coverage supports manual terminal work and holds generated input.
+
+The following herdr references are pinned to commit `5608de0608918aba2f9d501e7793b984a0ca9cfa`. They provide implementation patterns; each CAFleet profile still requires its own native contract and acceptance evidence.
+
+| Pinned reference | Purpose |
+|---|---|
+| [Backend manifests](https://github.com/herdrdev/herdr/tree/5608de0608918aba2f9d501e7793b984a0ca9cfa/src/detect/manifests) | Backend-specific live-screen/title rules and controls that distinguish current forms from old transcript text. |
+| [Manifest evaluator](https://github.com/herdrdev/herdr/blob/5608de0608918aba2f9d501e7793b984a0ca9cfa/src/detect/manifest.rs) | Region extraction, priority and combined matching conditions for adapting rules with explicit conflicts. |
+| [Pane processing](https://github.com/herdrdev/herdr/blob/5608de0608918aba2f9d501e7793b984a0ca9cfa/src/pane.rs) | Ordered PTY-byte processing into terminal state and detector observations. |
+| [Terminal snapshots](https://github.com/herdrdev/herdr/blob/5608de0608918aba2f9d501e7793b984a0ca9cfa/src/pane/terminal.rs) | Live screen and title evidence without treating scrollback as a current request. |
+
+Map herdr’s broad `blocked` state into CAFleet’s typed interaction classes, returned-result observations and input-eligibility states. Questions, trust and update screens retain their own classes; a permission request needs the live operation and choice/input region together. Conflicting strongest rules produce an unknown interaction and preserve the native surface. CAFleet owns its runner, profiles, classification, persistence and notification; herdr APIs remain diagnostic rather than runtime detection dependencies.
+
+Use safe PTY/terminal APIs behind deterministic transport traits, retaining `unsafe_code = "forbid"`. The selected PTY and terminal-screen crates are `portable-pty` and `vt100`; resolve compatible versions through Cargo and retain the lockfile. Separate terminal transport, classification and event storage, and preserve bounded shutdown independently of SQLite waits.
+
+Every claimed detector/composer profile requires CAFleet-owned positive and adversarial replay fixtures, including redraw, wrapping, fragmented ANSI/UTF-8, alternate screens, competing forms and quoted transcript false positives. Acceptance also requires exact-version real native PTY evidence for the claimed capability on each registered multiplexer, including concurrent output/input and the observed-state race boundary. [Native acceptance and coverage](spec/member-runtime.md#native-acceptance-and-coverage) owns the minimum policies, evidence fields and fault cases. A launch-help probe supplies no tested detector/composer claim; missing minimum native evidence fails feature acceptance.

@@ -54,7 +54,7 @@ Used only when your backend's section omits a token or your backend is unknown. 
 | `{reviewer_effort}` | omit `--effort` to use the backend default |
 | `{other_model}` | the spawning Director's own model (inherit the parent) |
 | `{other_effort}` | omit `--effort` to use the backend default |
-| `{permission_flags}` | describe the mode neutrally as "workspace-scoped auto-approval" — for prose uses only; spawn-flag construction never falls here |
+| `{permission_flags}` | describe the mode neutrally as "host-scoped native permission policy" — for prose uses only; spawn-flag construction never falls here |
 | `{pane_title}` | no `--name` analog |
 | `{skill_loader}` | reading the skill's `SKILL.md` + your overlay by absolute path |
 | `{effort_levels}` | unsupported — omit `--effort` |
@@ -118,7 +118,7 @@ cafleet message send --from-member-id <my-member-id> --to-member-id <target-memb
 
 Supply exactly one positional text body or `--file <path>`; `--file -` reads stdin. Use file input for long/multiline bodies. Text previews truncate by `CAFLEET_MAX_TEXT_LEN`; use `--json` for full payloads. [JSON](reference/runtime/spec/cli-options.md#json-output) returns the full record.
 
-[Push notifications](reference/runtime/spec/multiplexer-backends.md#push-notifications) deliver ordinary-member messages Escape-first into the recipient's pane as one `[cafleet msg ID from SENDER TIMESTAMP]` line carrying the full body or a `cafleet message show ID --json` pointer. The root Director receives through native `message listen` or explicit manual broker reads, with no automatic pane input. Sends to the root Director report `notification_sent: false` without a pane-delivery diagnostic or multiplexer requirement. The recipient records deferred actions and ACKs consumption. Holds and post-commit ordinary-member delivery errors preserve the committed ID and successful stdout record; the next send to that ordinary recipient retries a pending notification. [Send outcomes](reference/runtime/spec/cli-options.md#message-send) define exact diagnostics.
+[Push notifications](reference/runtime/spec/multiplexer-backends.md#push-notifications) deliver ordinary-member messages through the recorded transport as one `[cafleet msg ID from SENDER TIMESTAMP]` line carrying the full body or a `cafleet message show ID --json` pointer. Wrapped previews require eligible runner input and omit Escape; explicitly unwrapped previews retain their legacy path and conditional dismissal clause. The root Director receives through native `message listen` or explicit manual broker reads, with no automatic pane input. Sends to the root Director report `notification_sent: false` without a pane-delivery diagnostic or multiplexer requirement. The recipient records deferred actions and ACKs consumption. Holds and post-commit ordinary-member delivery errors preserve the committed ID and successful stdout record; the next send to that ordinary recipient retries a pending notification. [Send outcomes](reference/runtime/spec/cli-options.md#message-send) define exact diagnostics.
 
 Fan out with an individual send per selected recipient. Retain each committed ID and report a failed recipient explicitly.
 
@@ -162,6 +162,7 @@ Use the runtime owner for exact flags, outputs and errors. Ordinary members reta
 | Persistent native reception | [Message listen](reference/runtime/spec/cli-options.md#message-listen), [Director lifecycle](reference/supervision.md#director-wake) |
 | Fleet/member creation and compensation | [Lifecycle contracts](reference/runtime/spec/cli-options.md#member-create) |
 | Read-only roster pane snapshot | [Fleet capture](reference/runtime/spec/cli-options.md#fleet-capture) |
+| Runtime events, input receipts and recovery | [Member runtime procedure](reference/member-runtime.md) and [runtime contract](reference/runtime/spec/member-runtime.md) |
 | Explicit native shell input | [Member exec](reference/runtime/spec/cli-options.md#member-exec), [routing](reference/prompt-routing.md) |
 | Pane input, exclusion and previews | [Multiplexer contracts](reference/runtime/spec/multiplexer-backends.md) |
 | Host continuation, native waiting and evidence boundaries | Selected backend's bound notes in [coding-agents.md](reference/coding-agents.md) |

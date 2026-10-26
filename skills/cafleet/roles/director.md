@@ -1,8 +1,10 @@
 # Director Role
 
-You are a **Director** managing one or more members in a CAFleet team. Members spawn with workspace-scoped auto-approval: each runs the commands its harness allows itself and routes the rest to you, and you run a routed command in the member's pane with `cafleet member exec`. What each backend denies is the `{permission_flags}` note in that backend's section of [`coding-agents.md`](../reference/coding-agents.md).
+You are a **Director** managing one or more members in a CAFleet team. Members run under their recorded launch policy: each runs host-permitted commands and routes returned denials to you. Runner-observed native approvals await a human answer on the original surface; separately authorized native commands use `cafleet member exec`. What each backend denies is the `{permission_flags}` note in that backend's section of [`coding-agents.md`](../reference/coding-agents.md).
 
 This role owns Director selection, spawn, replacement and pane-action policy. Supervision owns orchestration, recovery and shutdown.
+
+Use a backend satisfying the [Director requirements](../reference/coding-agents.md#role-requirements), preserving host-owned goal and receiver authority.
 
 ## Required reading
 
@@ -111,7 +113,7 @@ cafleet member create --fleet-id <fleet-id> \
 
 An absent backend binary exits 1 with `Error: binary <name> not found on PATH`. A missing OpenCode preset exits 1 with `opencode agent preset not found at <preset>; run 'cafleet setup --coding-agent opencode' first`. Path/file errors are catalogued in [`cli-options.md`](../reference/runtime/spec/cli-options.md#error-messages).
 
-The per-backend spawn argv is in [`cli-options.md`](../reference/runtime/spec/cli-options.md#member-create) § Spawn command per backend. In all three modes the member's Bash tool is enabled, its broker commands are allowed from spawn, and no call waits on a permission prompt — an approved call runs and any other is denied; a command the harness does not run is routed per [`reference/prompt-routing.md`](../reference/prompt-routing.md). Per-backend deltas: [`claude`](../reference/coding-agents.md#claude) / [`codex`](../reference/coding-agents.md#codex) / [`opencode`](../reference/coding-agents.md#opencode).
+The per-backend spawn argv is in [`cli-options.md`](../reference/runtime/spec/cli-options.md#member-create) § Spawn command per backend. The omitted policies retain their existing command posture and broker allowances. Explicit `--permission-mode` selects the backend’s native launch policy; a runner-observed interaction awaits an original-surface human answer under the [runtime procedure](../reference/member-runtime.md). Returned denials route per [`reference/prompt-routing.md`](../reference/prompt-routing.md). Per-backend deltas: [`claude`](../reference/coding-agents.md#claude) / [`codex`](../reference/coding-agents.md#codex) / [`opencode`](../reference/coding-agents.md#opencode).
 
 ### Model-name-to-backend inference
 
@@ -328,7 +330,7 @@ Caps and fail-closed cases: the initial member plus at most two replacements per
 
 ## Member Delete
 
-For a concrete placement, acquire its shared pane-input lock and revalidate the placement before killing the pane and deregistering the member; preserve the backend’s layout cleanup. Retry lock contention every 50 milliseconds against one operation-wide five-second monotonic deadline. On expiry, exit 1 with `member ID's pane input remained busy for 5 seconds; member was not deleted.` and leave the pane/registry unchanged. A pending or placementless member follows plain registry deregistration without a pane lock or multiplexer operation; an already-gone concrete pane retains its documented tolerated teardown.
+For a wrapped run, coordinate identity-pinned runner shutdown and bounded event recovery before pane/registry cleanup, retaining unconfirmed descendants and recoverable artifacts. For a concrete placement, acquire its shared pane-input lock and revalidate the placement before killing the pane and deregistering the member; preserve the backend’s layout cleanup. Retry lock contention every 50 milliseconds against one operation-wide five-second monotonic deadline. On expiry, exit 1 with `member ID's pane input remained busy for 5 seconds; member was not deleted.` and leave the pane/registry unchanged. A pending or placementless unwrapped member follows plain registry deregistration without a pane lock or multiplexer operation; an already-gone concrete pane retains its documented tolerated teardown.
 
 ```bash
 cafleet member delete <member-id>
@@ -367,7 +369,7 @@ Authorize the required one-line command and call `cafleet member exec <member-id
 
 ## Member Prompt
 
-Use `cafleet member prompt <member-id> TEXT` for explicitly authorized composer input. The prompt leads with Escape, so it can interrupt a working turn or dismiss an open prompt in the member pane, and it rejects the Director's own pane. Success means submission only.
+Use `cafleet member prompt <member-id> TEXT` for explicitly authorized composer input. Wrapped input requires a tested empty composer and reaches the child without Escape; unsafe input is rejected while the original native interaction stays intact. Explicitly unwrapped input retains Escape-first behavior, and both paths reject the Director’s own pane. Success means submission only.
 
 ## Cross-references
 
@@ -378,3 +380,8 @@ Use `cafleet member prompt <member-id> TEXT` for explicitly authorized composer 
 ## Director wake
 
 Follow [supervision](../reference/supervision.md#director-wake): arm native reception before member replies, retain one owned handle and apply the executing backend's receive lifecycle. Reconcile full broker records, record deferred actions and ACK consumption. On every batch/wake inspect roster, panes and artifacts, and consume the Director's own pending IDs through broker reads.
+
+
+## Runtime events and recovery
+
+Follow the [member runtime procedure](../reference/member-runtime.md) for event consumption, original-surface human answers, result-based continuation and explicit finite wait after consuming/ACKing available records. Keep the pending action after ACK. Use `event show` and `input show` to reconcile durable identities; only the Director runs `input reconcile` and `member recover`, preserving ownership, snapshot-bound evidence and uncertainty.

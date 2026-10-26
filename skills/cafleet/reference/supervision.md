@@ -17,7 +17,7 @@ Read every delivery, record any deferred action with its ID/artifact pointer in 
 1. Read [Director policy](../roles/director.md), the executing backend in [coding-agents.md](coding-agents.md), BASE and supplied host rules. Resolve selected member backend/model/effort before writing its prompt.
 2. Run `cafleet doctor --json` and resolve actual environment/asset/permission issues. Preserve the user's host continuation controls as supplied.
 3. Register the current Director: `cafleet fleet create --name <name> --coding-agent <backend> --json`. Capture literal fleet and Director IDs. This performs one atomic registration without starting another process.
-4. Arm one native `message listen` receiver using the executing backend's [runtime recipe](coding-agents.md). Retain its handle and require `ready` before depending on replies; initial replay recovers messages racing with startup. When a verified native adapter is unavailable, state the limitation and use explicit manual `poll`/finite `wait` within host permissions.
+4. Arm one native `message listen` receiver using the executing backend's [runtime recipe](coding-agents.md). Retain its handle and require `ready` before depending on replies; initial replay recovers messages racing with startup. On a host satisfying both [Director requirements](coding-agents.md#role-requirements), state an unavailable native adapter’s reception limit and use explicit manual `poll`/finite `wait` within host permissions.
 5. Write scoped role-by-path prompts under the supplied BASE, retaining host prerequisites and literal identity placeholders. Create each member with `cafleet member create --fleet-id <fleet-id> ... --file <absolute-path>`.
 6. Receive each member's ready and ACK it. Dispatch that member's assignment as soon as its inputs exist; other members' readiness does not delay it.
 7. Keep native reception active and follow [Director wake](#director-wake) until work resolves or an explicit user handoff occurs.
@@ -43,13 +43,19 @@ Receive Director messages through broker reads and stdout only. Automatic recept
 | Fatal database/schema/assets error | Surface the cause and follow the existing repair/authorization procedure before restarting |
 | Truncated output or incomplete JSONL | Preserve complete records, leave incomplete messages unACKed and retrieve full output or reconcile/replay through the broker |
 | Old receiver liveness unknown | Preserve its handle and diagnose or use explicit manual reads; establish termination before replacing it |
-| Native stream tool unavailable or denied | State the limitation and use manual `poll`/finite `wait` within host permissions |
+| Native stream tool unavailable or denied | On a host satisfying both [Director requirements](coding-agents.md#role-requirements), state the reception limit and use manual `poll`/finite `wait` within host permissions |
 
 Retain pending messages across recovery. Repeated receiver failures require diagnosis; each replacement requires observed termination and a fresh successful health/inbox check. Preserve the host's goal activation, pause, completion and budget authority: reception never calls a goal lifecycle tool, starts a goal, resumes a paused goal or changes its budget. Follow the backend's native receive lifecycle independently of whether a host goal was supplied.
 
 #### Sender follow-up
 
 When an ordinary-recipient `cafleet message send` prints `Message N was persisted. …` on stderr, send exactly one follow-up to the same recipient with the body `message N was not delivered to your pane; poll your inbox`. Its drain retries `N` first. When the follow-up also prints a persisted diagnostic, send no further follow-up: a later send or `message wait` retries both, and the overdue-reply check in Director wake covers a recipient that stays silent.
+
+## Runner observations
+
+Use the [member runtime procedure](member-runtime.md) on a runtime event: verify its durable association and current episode, keep the pending action after ACK, obtain a human answer on the original native surface and inspect actual output and continued work. Consume/ACK available records, then explicitly invoke finite `message wait` to retry held member previews; repeat consumption/receive for a new batch. A live listener alone performs no preview retry.
+
+Programmatic input remains held for observed/candidate interactions and unknown composer coverage. Preserve durable input uncertainty and ownership during receipt settlement or run recovery; event persistence, inbox consumption and operation continuation have separate evidence.
 
 ## Reading captures
 

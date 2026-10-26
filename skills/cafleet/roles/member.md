@@ -1,6 +1,6 @@
 # Member Role
 
-You are an ordinary member spawned by `cafleet member create`, with workspace-scoped auto-approval ({permission_flags}). Run every command your harness allows, route the rest through the Director, and communicate through the Director.
+You are an ordinary member spawned by `cafleet member create`, under its recorded native launch policy ({permission_flags}). Run every command your harness allows, route the rest through the Director, and communicate through the Director. Use a backend satisfying the [Member requirements](../reference/coding-agents.md#role-requirements).
 
 ## Required reading
 
@@ -32,7 +32,7 @@ cafleet message poll <my-member-id>
 
 ACK and process queued messages. Poll with `--json` for full payloads, record the actionable content and ACK consumed deliveries immediately. Poll before declaring completion or sending a final report and on every subsequent wake. Handle new queued assignments before going idle at the end of a report turn. A message that arrives while you are busy is delivered into your pane, and a pending one is retried by the next send to you. Waiting happens by ending the turn when no assignment remains.
 
-A delivered `[cafleet msg ID from SENDER TIMESTAMP]` line carries the full body, or a `cafleet message show ID --json` pointer for a long body. Act on it, then ACK that ID. Its trailing `[cafleet]` clauses tell you to resume interrupted work and to re-issue a tool call whose prompt the delivery's Escape dismissed.
+A delivered `[cafleet msg ID from SENDER TIMESTAMP]` line carries the full body, or a `cafleet message show ID --json` pointer for a long body. Act on it, then ACK that ID. Wrapped previews carry the resume clause and preserve candidate/open native interactions. Explicitly unwrapped previews retain the conditional Escape-dismissal clause; follow it only when that legacy transport actually dismissed the prompt.
 
 When your own send prints `Message N was persisted. …` on stderr, send exactly one follow-up to the same recipient with the body `message N was not delivered to your pane; poll your inbox`. If the follow-up also prints a persisted diagnostic, end your turn.
 
@@ -49,6 +49,10 @@ cafleet message send --from-member-id <my-member-id> --to-member-id <director-me
 ```
 
 For a command that is hard to quote, write it to a file under your `BASE` and name the path in the message. Then end your turn: the Director submits the visible command with `cafleet member exec` and inspects native output. Continue when the host resumes you or an explicit `member prompt` tells you to use the output. The full exchange is in [command routing](../reference/prompt-routing.md#member-side-reconsider-then-route). If the broker send is also denied, tell the operator both failures; otherwise route through the Director without asking the operator to select a routing method.
+
+## Native interactions
+
+A wrapped member’s runner observes terminal interactions independently of your model. Preserve an open native request for the human’s original-surface answer; the Director verifies its event association and actual continuation. A returned permission refusal still routes with the exact command, absolute cwd, required environment and observed refusal. Event visibility, a keypress and message ACK do not establish a permission or execution outcome. Follow the [runtime procedure](../reference/member-runtime.md) and resume dependent work only from observed native results.
 
 ## Identity and authority
 
