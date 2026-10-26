@@ -1490,3 +1490,362 @@ fn missing_database_instance_identity_fails_at_the_identity_read_boundary() {
         .unwrap();
     assert!(storage::database_identity(&fixture.conn).is_err());
 }
+
+fn native_exit(run_id: i64, event_seq: i64) -> ObservedTransition {
+    ObservedTransition {
+        run_id,
+        event_seq,
+        episode_seq: None,
+        kind: RuntimeEventKind::RunnerExited,
+        classification: None,
+        observed_at: NOW.into(),
+        evidence_json: metadata(),
+        close_reason: None,
+        cause_json: Some(json!({"kind":"native_exit","exit_code":7,"exit_signal":null})),
+    }
+}
+
+fn replace_public_payload(conn: &mut Connection, event: &RuntimeEventRecord, payload: Value) {
+    let tx = conn.transaction().unwrap();
+    tx.execute(
+        "UPDATE member_runtime_events SET payload_json=?1 WHERE event_id=?2",
+        params![payload.to_string(), event.event_id],
+    )
+    .unwrap();
+    if let Some(message_id) = event.message_id {
+        tx.execute(
+            "UPDATE messages SET text=?1 WHERE message_id=?2",
+            params![payload.to_string(), message_id],
+        )
+        .unwrap();
+    }
+    tx.commit().unwrap();
+}
+
+#[test]
+fn terminal_live_write_regression_keeps_committed_retries_and_rejects_new_observations() {
+    for status in ["exited", "failed", "lost"] {
+        let mut fixture = Fixture::new();
+        let owner = fixture.activate();
+        fixture.reserve(&owner);
+        let exit = native_exit(owner.run_id, 1);
+        let first =
+            storage::persist_transition(&mut fixture.conn, &owner, &exit, PersistenceMode::Live)
+                .unwrap();
+        assert_eq!(
+            storage::get_run(&fixture.conn, owner.run_id)
+                .unwrap()
+                .status,
+            RunStatus::Exited
+        );
+        fixture
+            .conn
+            .execute(
+                "UPDATE member_runs SET status=?1 WHERE run_id=?2",
+                params![status, owner.run_id],
+            )
+            .unwrap();
+        let retry =
+            storage::persist_transition(&mut fixture.conn, &owner, &exit, PersistenceMode::Live)
+                .unwrap();
+        assert_eq!(
+            (retry.event_id, retry.message_id),
+            (first.event_id, first.message_id)
+        );
+        let next = ObservedTransition {
+            event_seq: 2,
+            kind: RuntimeEventKind::PermissionDeniedObserved,
+            cause_json: None,
+            ..exit
+        };
+        let before = durable_state(&fixture.conn);
+        assert!(
+            storage::persist_transition(&mut fixture.conn, &owner, &next, PersistenceMode::Live)
+                .is_err(),
+            "{status}"
+        );
+        assert_eq!(durable_state(&fixture.reopen()), before, "{status}");
+    }
+}
+
+#[test]
+fn terminal_live_write_regression_preserves_explicitly_owned_historical_recovery() {
+    let mut fixture = Fixture::new();
+    fixture.activate();
+    let owner = fixture.recoverer();
+    fixture.reserve(&owner);
+    fixture
+        .conn
+        .execute(
+            "UPDATE member_runs SET recovery_origin_status='exited' WHERE run_id=?1",
+            [owner.run_id],
+        )
+        .unwrap();
+    super::deregister_member(&mut fixture.conn, fixture.member).unwrap();
+    let opened = storage::persist_transition(
+        &mut fixture.conn,
+        &owner,
+        &opening(owner.run_id, 1, 1, metadata()),
+        PersistenceMode::Recovery,
+    )
+    .unwrap();
+    let mut closed = closure(owner.run_id, 2, 1);
+    closed.close_reason = Some(InteractionCloseReason::ProcessExited);
+    storage::persist_transition(
+        &mut fixture.conn,
+        &owner,
+        &closed,
+        PersistenceMode::Recovery,
+    )
+    .unwrap();
+    let exited = storage::persist_transition(
+        &mut fixture.conn,
+        &owner,
+        &native_exit(owner.run_id, 3),
+        PersistenceMode::Recovery,
+    )
+    .unwrap();
+    assert_eq!(opened.notification_state, NotificationState::Archived);
+    assert_eq!(exited.notification_state, NotificationState::Archived);
+    assert_eq!(exited.message_id, None);
+    assert_eq!(
+        storage::get_run(&fixture.conn, owner.run_id)
+            .unwrap()
+            .status,
+        RunStatus::Exited
+    );
+    assert!(rows(&fixture.conn, "messages").is_empty());
+}
+
+#[test]
+fn event_shape_regression_rejects_lifecycle_transitions_linked_to_an_episode() {
+    let mut fixture = Fixture::new();
+    let owner = fixture.activate();
+    fixture.open(&owner);
+    let transition = ObservedTransition {
+        episode_seq: Some(1),
+        classification: Some(InteractionClass::PermissionRequest),
+        ..native_exit(owner.run_id, 2)
+    };
+    let before = durable_state(&fixture.conn);
+    assert!(
+        storage::persist_transition(
+            &mut fixture.conn,
+            &owner,
+            &transition,
+            PersistenceMode::Live
+        )
+        .is_err()
+    );
+    assert_eq!(durable_state(&fixture.reopen()), before);
+}
+
+#[test]
+fn event_shape_regression_requires_a_typed_lifecycle_cause_before_commit() {
+    for kind in [
+        RuntimeEventKind::CoverageUnknown,
+        RuntimeEventKind::RunnerDegraded,
+        RuntimeEventKind::RunnerLost,
+        RuntimeEventKind::RunnerExited,
+    ] {
+        for cause in [
+            None,
+            Some(json!({})),
+            Some(json!({"kind":"invented-cause"})),
+            Some(json!([])),
+        ] {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            fixture.reserve(&owner);
+            let transition = ObservedTransition {
+                kind,
+                cause_json: cause,
+                ..native_exit(owner.run_id, 1)
+            };
+            let before = durable_state(&fixture.conn);
+            assert!(
+                storage::persist_transition(
+                    &mut fixture.conn,
+                    &owner,
+                    &transition,
+                    PersistenceMode::Live
+                )
+                .is_err(),
+                "{kind:?}: {:?}",
+                transition.cause_json
+            );
+            assert_eq!(durable_state(&fixture.reopen()), before);
+        }
+    }
+}
+
+#[test]
+fn event_shape_regression_rejects_lifecycle_causes_on_screen_transitions() {
+    for kind in [
+        RuntimeEventKind::InteractionOpened,
+        RuntimeEventKind::InteractionObscured,
+        RuntimeEventKind::InteractionClosed,
+        RuntimeEventKind::PermissionDeniedObserved,
+    ] {
+        let mut fixture = Fixture::new();
+        let owner = fixture.activate();
+        let mut transition = if matches!(
+            kind,
+            RuntimeEventKind::InteractionObscured | RuntimeEventKind::InteractionClosed
+        ) {
+            fixture.open(&owner);
+            closure(owner.run_id, 2, 1)
+        } else {
+            fixture.reserve(&owner);
+            opening(owner.run_id, 1, 1, metadata())
+        };
+        transition.kind = kind;
+        transition.close_reason = if kind == RuntimeEventKind::InteractionClosed {
+            Some(InteractionCloseReason::NotVisible)
+        } else {
+            None
+        };
+        if kind == RuntimeEventKind::PermissionDeniedObserved {
+            transition.episode_seq = None;
+            transition.classification = None;
+        }
+        transition.cause_json =
+            Some(json!({"kind":"native_exit","exit_code":7,"exit_signal":null}));
+        let before = durable_state(&fixture.conn);
+        assert!(
+            storage::persist_transition(
+                &mut fixture.conn,
+                &owner,
+                &transition,
+                PersistenceMode::Live
+            )
+            .is_err(),
+            "{kind:?}"
+        );
+        assert_eq!(durable_state(&fixture.reopen()), before);
+    }
+}
+
+#[test]
+fn event_shape_regression_rejects_a_persisted_lifecycle_episode_even_with_a_matching_message() {
+    let mut fixture = Fixture::new();
+    let owner = fixture.activate();
+    let opened = fixture.open(&owner);
+    storage::persist_transition(
+        &mut fixture.conn,
+        &owner,
+        &closure(owner.run_id, 2, 1),
+        PersistenceMode::Live,
+    )
+    .unwrap();
+    let event = storage::persist_transition(
+        &mut fixture.conn,
+        &owner,
+        &native_exit(owner.run_id, 3),
+        PersistenceMode::Live,
+    )
+    .unwrap();
+    let mut payload = event.payload_json.clone();
+    payload["interaction_id"] = json!(opened.interaction_id.unwrap());
+    payload["classification"] = json!("permission_request");
+    fixture
+        .conn
+        .execute(
+            "UPDATE member_runtime_events SET interaction_id=?1 WHERE event_id=?2",
+            params![opened.interaction_id, event.event_id],
+        )
+        .unwrap();
+    replace_public_payload(&mut fixture.conn, &event, payload);
+    assert!(storage::get_event(&fixture.conn, event.event_id).is_err());
+}
+
+#[test]
+fn event_shape_regression_rejects_missing_or_malformed_persisted_exit_causes() {
+    for cause in [
+        None,
+        Some(json!({})),
+        Some(json!({"kind":"invented-cause","exit_code":7})),
+        Some(json!({"kind":"native_exit","exit_code":"7","exit_signal":null})),
+    ] {
+        let mut fixture = Fixture::new();
+        let owner = fixture.activate();
+        fixture.reserve(&owner);
+        let event = storage::persist_transition(
+            &mut fixture.conn,
+            &owner,
+            &native_exit(owner.run_id, 1),
+            PersistenceMode::Live,
+        )
+        .unwrap();
+        let mut payload = event.payload_json.clone();
+        match cause {
+            Some(cause) => {
+                payload["cause"] = cause;
+            }
+            None => {
+                payload.as_object_mut().unwrap().remove("cause");
+            }
+        }
+        replace_public_payload(&mut fixture.conn, &event, payload);
+        assert!(storage::get_event(&fixture.conn, event.event_id).is_err());
+    }
+}
+
+#[test]
+fn event_shape_regression_rejects_a_persisted_screen_cause_even_with_a_matching_message() {
+    let mut fixture = Fixture::new();
+    let owner = fixture.activate();
+    let event = fixture.open(&owner);
+    let mut payload = event.payload_json.clone();
+    payload["cause"] = json!({"kind":"native_exit","exit_code":7,"exit_signal":null});
+    replace_public_payload(&mut fixture.conn, &event, payload);
+    assert!(storage::get_event(&fixture.conn, event.event_id).is_err());
+}
+
+#[test]
+fn event_shape_regression_binds_public_native_request_id_to_post_policy_evidence() {
+    for redacted in [false, true] {
+        let mut fixture = Fixture::new();
+        if redacted {
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_runs SET event_evidence='redacted' WHERE run_id=?1",
+                    [fixture.run.run_id],
+                )
+                .unwrap();
+        }
+        let owner = fixture.activate();
+        fixture.reserve(&owner);
+        let evidence = if redacted {
+            evidence::EvidencePolicy::redacted(
+                &json!({"schema_version":1,"patterns":["unmatched"],"sensitive_rules":[]}),
+                &["native-tool-permission"],
+            )
+            .unwrap()
+            .apply(&raw_evidence("ordinary-request"))
+            .unwrap()
+        } else {
+            metadata()
+        };
+        let event = storage::persist_transition(
+            &mut fixture.conn,
+            &owner,
+            &opening(owner.run_id, 1, 1, evidence),
+            PersistenceMode::Live,
+        )
+        .unwrap();
+        assert_eq!(
+            event.payload_json["native_request_id"],
+            event.payload_json["evidence"]["native_request_id"]
+        );
+        storage::get_event(&fixture.conn, event.event_id).unwrap();
+        let mut payload = event.payload_json.clone();
+        payload["native_request_id"] = json!("unrelated-public-request");
+        replace_public_payload(&mut fixture.conn, &event, payload);
+        assert!(
+            storage::get_event(&fixture.conn, event.event_id).is_err(),
+            "redacted={redacted}"
+        );
+    }
+}
