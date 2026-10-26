@@ -1,7 +1,7 @@
 use super::observation_services::{count, health, private_write, synthetic, wait_until};
 use super::*;
 use crate::error::CafleetError;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 const CANARY: &str = "private-observation-fault-canary-194";
 
@@ -9,8 +9,87 @@ struct Hooks {
     site: ObservationSite,
     operation: ObservationOperation,
     directory: std::path::PathBuf,
+    buffered_tail: Option<BufferedTail>,
+}
+
+struct BufferedTail {
+    database_url: String,
+    run_id: i64,
+    deadline: OnceLock<Instant>,
+}
+
+impl BufferedTail {
+    fn synchronize(&self, directory: &Path) -> Result<(), CafleetError> {
+        let deadline = *self
+            .deadline
+            .get()
+            .expect("original service child deadline precedes the actual Parser operation");
+        check_deadline(Instant::now(), deadline)?;
+        ensure(
+            directory.join("buffered-tail-written").exists(),
+            "successful real native write precedes exit-before-read Parser operation",
+        )?;
+        private_write(
+            &directory.join("buffered-tail-parser-entered"),
+            b"actual nonempty PTY read under original child deadline",
+        );
+        let mut conn = crate::db::connect(&self.database_url)?;
+        let run = with_database_deadline(&mut conn, deadline, |conn| {
+            storage::get_run(conn, self.run_id)
+        })?;
+        let child = ProcessIdentity {
+            pid: run
+                .child_pid
+                .ok_or_else(|| error("original native child PID required"))?,
+            start_identity: run
+                .child_start_identity
+                .ok_or_else(|| error("original native child generation required"))?,
+        };
+        let current = ProcessIdentity::read(child.pid)?;
+        ensure(
+            current.is_none(),
+            "PtySession reaps the actual native child before selected Parser entry",
+        )?;
+        private_write(
+            &directory.join("buffered-tail-native-terminated"),
+            &serde_json::to_vec(&child).map_err(io_error)?,
+        );
+        private_write(
+            &directory.join("buffered-tail-parser-native.json"),
+            &serde_json::to_vec(&json!({"pinned":child,"current":current})).map_err(io_error)?,
+        );
+        loop {
+            let count = with_database_deadline(&mut conn, deadline, |conn| {
+                conn.query_row("SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='runner_exited'", [self.run_id], |row| row.get::<_, i64>(0)).map_err(io_error)
+            })?;
+            if count == 1 {
+                break;
+            }
+            ensure(count == 0, "one original terminal event required")?;
+            check_deadline(Instant::now(), deadline)?;
+            std::thread::sleep(
+                Duration::from_millis(2).min(deadline.saturating_duration_since(Instant::now())),
+            );
+        }
+        private_write(
+            &directory.join("buffered-tail-post-fence-parser"),
+            b"actual nonempty Parser operation after durable runner_exited under original deadline",
+        );
+        Ok(())
+    }
 }
 impl ObservationHooks for Hooks {
+    fn order_shutdown_reads_after_native_exit(&self, deadline: Instant) -> bool {
+        let Some(tail) = &self.buffered_tail else {
+            return false;
+        };
+        check_deadline(Instant::now(), deadline).expect("live original service child deadline");
+        tail.deadline
+            .set(deadline)
+            .expect("one original shutdown child deadline");
+        private_write(&self.directory.join("buffered-tail-order-selected.json"), &serde_json::to_vec(&json!({"run_id":tail.run_id,"remaining_ns":deadline.saturating_duration_since(Instant::now()).as_nanos()})).unwrap());
+        true
+    }
     fn before(
         &self,
         site: ObservationSite,
@@ -22,6 +101,15 @@ impl ObservationHooks for Hooks {
         let arm = self.directory.join("observation-fault-armed");
         if !arm.try_exists().map_err(io_error)? {
             return Ok(());
+        }
+        if let Some(tail) = &self.buffered_tail {
+            if let Err(cause) = tail.synchronize(&self.directory) {
+                private_write(
+                    &self.directory.join("buffered-tail-gate-error"),
+                    cause.message().as_bytes(),
+                );
+                panic!("owned buffered-tail prerequisite failed: {cause}");
+            }
         }
         std::fs::remove_file(arm).map_err(io_error)?;
         private_write(
@@ -54,6 +142,14 @@ pub(super) fn hooks(
         site,
         operation,
         directory: directory.to_path_buf(),
+        buffered_tail: value.get("buffered_tail").map(|tail| BufferedTail {
+            database_url: tail["database_url"]
+                .as_str()
+                .expect("owned buffered-tail database")
+                .into(),
+            run_id: tail["run_id"].as_i64().expect("owned buffered-tail run"),
+            deadline: OnceLock::new(),
+        }),
     })))
 }
 fn configure(fixture: &mut Fixture, spec: &mut SpawnSpec, site: &str, operation: &str) {
@@ -252,39 +348,127 @@ fn runner_review_r3_shutdown_parser_loss_after_terminal_fence_remains_unsaved_wi
 {
     let mut fixture = ServiceFixture::configured(false, |fixture, spec| {
         configure(fixture, spec, "shutdown_drain", "parser");
+        let config_path = fixture._dir.path().join("observation-services.json");
+        let mut config: Value =
+            serde_json::from_slice(&std::fs::read(&config_path).unwrap()).unwrap();
+        config["buffered_tail"] = json!({"database_url":format!("sqlite:///{}",fixture.conn.path().unwrap()),"run_id":fixture.run.run_id});
+        std::fs::write(config_path, serde_json::to_vec(&config).unwrap()).unwrap();
         spec.environment.push((
-            "CAFLEET_REVIEW_TERMINAL_TAIL_RELEASE".into(),
+            "CAFLEET_REVIEW_BUFFERED_TAIL_WRITTEN".into(),
             fixture
                 ._dir
                 .path()
-                .join("release-terminal-tail")
+                .join("buffered-tail-written")
                 .to_str()
                 .unwrap()
                 .into(),
         ));
         install_trap(
             spec,
-            "(trap \"\" HUP INT TERM; index=0; while [ ! -e \"$CAFLEET_REVIEW_TERMINAL_TAIL_RELEASE\" ]; do index=$((index + 1)); [ \"$index\" -lt 150 ] || exit 7; sleep 0.01; done; printf \"review-after-terminal-tail\\n\") & exit 0",
+            "umask 077; if printf \"review-after-terminal-tail\\n\"; then /usr/bin/touch \"$CAFLEET_REVIEW_BUFFERED_TAIL_WRITTEN\" || exit 9; else exit 8; fi; exit 0",
         );
     });
     fixture.start_running();
     arm(&fixture);
     let mut wire = fixture.connect("post-terminal observation loss");
+    wire.0
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
     let request = fixture.request("shutdown", fixture.prepared.as_ref().unwrap());
     let begin = Instant::now();
-    let reply = std::thread::scope(|scope| {
-        let response = scope.spawn(move || wire.exchange(&request));
-        wait_until(|| count(&fixture, "runner_exited") == 1);
-        private_write(
-            &fixture.fixture._dir.path().join("release-terminal-tail"),
-            b"owned descendant tail release",
-        );
-        response.join().unwrap().unwrap()
+    let reply = wire.exchange(&request).unwrap_or_else(|cause| {
+        panic!(
+            "bounded shutdown reply failed: {cause}; {}; buffered markers={:?}",
+            fixture.connection_diagnostic("buffered tail shutdown"),
+            std::fs::read_dir(fixture.fixture._dir.path())
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .collect::<Vec<_>>()
+        )
     });
     assert!(begin.elapsed() < Duration::from_secs(5));
     assert!(reply.get("error").is_none(), "{reply}");
     let outcome: ShutdownOutcome = serde_json::from_value(reply["result"].clone()).unwrap();
+    let written = fixture
+        .fixture
+        ._dir
+        .path()
+        .join("buffered-tail-written")
+        .exists();
+    let fired = fixture
+        .fixture
+        ._dir
+        .path()
+        .join("observation-fault-fired")
+        .exists();
+    let stages: Vec<_> = [
+        "buffered-tail-order-selected.json",
+        "buffered-tail-native-terminated",
+        "buffered-tail-parser-entered",
+        "buffered-tail-post-fence-parser",
+    ]
+    .into_iter()
+    .map(|file| (file, fixture.fixture._dir.path().join(file).exists()))
+    .collect();
+    let gate_error =
+        std::fs::read_to_string(fixture.fixture._dir.path().join("buffered-tail-gate-error"));
+    let native_at_parser = std::fs::read_to_string(
+        fixture
+            .fixture
+            ._dir
+            .path()
+            .join("buffered-tail-parser-native.json"),
+    );
+    let final_kinds: Vec<String> = fixture
+        .fixture
+        .conn
+        .prepare("SELECT kind FROM member_runtime_events WHERE run_id=?1 ORDER BY event_seq")
+        .unwrap()
+        .query_map([fixture.fixture.run.run_id], |row| row.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    let final_run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+    assert!(
+        written && fired,
+        "post-terminal tail: written={written}, fired={fired}, stages={stages:?}, gate_error={gate_error:?}, native_at_parser={native_at_parser:?}, final_kinds={final_kinds:?}, final_run_status={:?}, outcome={outcome:?}; {}",
+        final_run.status,
+        fixture.connection_diagnostic("post-terminal tail write and parser hook")
+    );
     assert_fired(&fixture, "ShutdownDrain/Parser");
+    let selected: Value = serde_json::from_slice(
+        &std::fs::read(
+            fixture
+                .fixture
+                ._dir
+                .path()
+                .join("buffered-tail-order-selected.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(selected["run_id"], fixture.fixture.run.run_id);
+    let remaining_ns = selected["remaining_ns"].as_u64().unwrap();
+    assert!(
+        remaining_ns > 0 && remaining_ns <= 2_000_000_000,
+        "actual original child budget: {selected}"
+    );
+    assert!(
+        fixture
+            .fixture
+            ._dir
+            .path()
+            .join("buffered-tail-native-terminated")
+            .exists()
+    );
+    assert!(
+        fixture
+            .fixture
+            ._dir
+            .path()
+            .join("buffered-tail-post-fence-parser")
+            .exists()
+    );
     assert_eq!(outcome.native_exit, Some(ChildExit::Code(0)));
     assert_eq!(outcome.pending_event_frames, 0);
     assert!(outcome.unsaved_observation_gap > 0);
