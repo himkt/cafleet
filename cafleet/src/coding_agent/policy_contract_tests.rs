@@ -143,8 +143,7 @@ fn runtime_policy_invalid_explicit_selection_reports_backend_and_catalog_choices
         for invalid in ["", " ", "unsupported-fixture-mode"] {
             let failure = backend
                 .resolve_policy(version(backend), Some(invalid))
-                .err()
-                .expect("invalid explicit policy must fail");
+                .expect_err("invalid explicit policy must fail");
             assert!(matches!(failure, CafleetError::Usage(_)));
             let text = failure.message();
             assert!(text.contains(backend.name()), "{text}");

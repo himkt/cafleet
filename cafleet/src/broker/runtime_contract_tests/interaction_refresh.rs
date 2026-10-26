@@ -333,7 +333,11 @@ fn runtime_refresh_update_and_commit_failures_roll_back_for_exact_retry() {
     for commit in [false, true] {
         let mut fixture = RefreshFixture::new();
         if commit {
-            fixture.fixture.conn.commit_hook(Some(|| true));
+            fixture
+                .fixture
+                .conn
+                .commit_hook(Some(|| true))
+                .expect("register rejecting commit hook");
         } else {
             fixture.fixture.conn.execute_batch("CREATE TRIGGER block_refresh BEFORE UPDATE ON member_interactions BEGIN SELECT RAISE(ABORT,'fixture refresh update failed'); END").unwrap();
         }
@@ -341,7 +345,11 @@ fn runtime_refresh_update_and_commit_failures_roll_back_for_exact_retry() {
         assert!(fixture.refresh(1).is_err());
         assert_eq!(state(&fixture.fixture.reopen()), before);
         if commit {
-            fixture.fixture.conn.commit_hook(None::<fn() -> bool>);
+            fixture
+                .fixture
+                .conn
+                .commit_hook(None::<fn() -> bool>)
+                .expect("remove rejecting commit hook");
         } else {
             fixture
                 .fixture

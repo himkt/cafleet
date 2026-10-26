@@ -29,7 +29,10 @@ fn registry_state(conn: &Connection) -> Vec<(String, Vec<Vec<rusqlite::types::Va
 }
 
 fn invalid_creation(backend: CodingAgent, extra: &[String]) -> CafleetError {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::Builder::new()
+        .prefix(".p194-")
+        .tempdir_in("/tmp")
+        .unwrap();
     let mut conn = crate::broker::tests::migrated_conn(&dir);
     let (fleet, _) = crate::broker::tests::create_fleet(&mut conn, "invalid-launch-fixture");
     let mut arguments = create_arguments()
@@ -52,8 +55,7 @@ fn invalid_creation(backend: CodingAgent, extra: &[String]) -> CafleetError {
         multiplexer: Some("unavailable-test-multiplexer".into()),
     };
     let failure = member::run(&mut conn, &settings, command, crate::input::Deadline::new())
-        .err()
-        .expect("invalid launch must fail");
+        .expect_err("invalid launch must fail");
     assert!(
         matches!(failure, CafleetError::Usage(_)),
         "{}",
