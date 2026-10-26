@@ -237,6 +237,9 @@ pub(crate) fn schema_matches_version(
 }
 
 #[cfg(test)]
+mod runtime_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

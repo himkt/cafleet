@@ -11,6 +11,9 @@ pub use members::*;
 pub use messaging::*;
 
 #[cfg(test)]
+mod runtime_contract_tests;
+
+#[cfg(test)]
 pub(crate) mod tests {
     use rusqlite::Connection;
     use tempfile::TempDir;

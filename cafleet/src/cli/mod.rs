@@ -6,6 +6,9 @@ pub(crate) mod member;
 mod message;
 mod setup;
 
+#[cfg(test)]
+mod runtime_parser_tests;
+
 use clap::{Parser, Subcommand};
 
 use crate::config::Settings;
