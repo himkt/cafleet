@@ -39,7 +39,7 @@ fn runner_batch2_capture_arm_validates_schema_identity_duration_and_safe_capture
     let now = Instant::now();
     let limits = NativeCaptureLimits::default();
     let valid = arm(&identity);
-    let request = valid.into_request(&identity, now, &limits).unwrap();
+    let request = valid.to_request(&identity, now, &limits).unwrap();
     assert_eq!(request.deadline, now + Duration::from_millis(1000));
     assert_eq!(request.minimum_interval, Duration::from_millis(100));
     for field in [
@@ -72,7 +72,7 @@ fn runner_batch2_capture_arm_validates_schema_identity_duration_and_safe_capture
             _ => invalid.timeout_ms = u64::MAX,
         }
         assert!(
-            invalid.into_request(&identity, now, &limits).is_err(),
+            invalid.to_request(&identity, now, &limits).is_err(),
             "{field}"
         );
     }
