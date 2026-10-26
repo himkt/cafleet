@@ -3,6 +3,8 @@ use serde_json::Value;
 
 mod collection;
 mod files;
+mod review_existing;
+mod review_policy;
 mod support;
 
 #[test]

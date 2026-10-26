@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 
 mod observation_contract;
 mod observation_services;
+mod review_collector;
+mod review_export;
 mod review_failures;
 use nix::sys::signal::{Signal, kill};
 use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
@@ -242,6 +244,26 @@ impl ServiceFixture {
         .unwrap();
         let capture_config = fixture._dir.path().join("capture-config.json");
         let capture = capture_config.exists();
+        let collector_entry = fixture._dir.path().join("collector-review-entry");
+        let capture_review = if collector_entry.exists() {
+            assert!(
+                capture,
+                "collector review requires its private capture configuration"
+            );
+            Some(
+                match std::fs::read_to_string(collector_entry).unwrap().as_str() {
+                    "resize" => {
+                        "runtime::runner::native_capture::review_service_tests::runner_collector_resize_child"
+                    }
+                    "export" => {
+                        "runtime::runner_tests::control_service::review_export::runner_collector_export_child"
+                    }
+                    other => panic!("unknown owned collector entry: {other}"),
+                },
+            )
+        } else {
+            None
+        };
         let services_config = fixture._dir.path().join("observation-services.json");
         let services_selected = services_config.exists() && !capture;
         let mut command = Command::new(std::env::current_exe().unwrap());
@@ -251,7 +273,9 @@ impl ServiceFixture {
         }
         command.args([
             "--exact",
-            if capture {
+            if let Some(entry) = capture_review {
+                entry
+            } else if capture {
                 "runtime::runner_tests::native_capture::native_capture_service_child"
             } else {
                 CHILD_TEST
