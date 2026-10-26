@@ -113,6 +113,21 @@ fn runner_real_pty_retains_the_numeric_native_signal_exit() {
     assert_eq!(status, ChildExit::Signal(15));
 }
 
+fn assert_terminal_settings_restored(terminal: &File, expected: &nix::sys::termios::Termios) {
+    let actual = nix::sys::termios::tcgetattr(terminal).unwrap();
+    #[cfg(target_os = "macos")]
+    {
+        // macOS sets PENDIN when TCSANOW restores canonical input.
+        let mut actual: nix::libc::termios = actual.into();
+        let mut expected: nix::libc::termios = expected.clone().into();
+        actual.c_lflag &= !nix::libc::PENDIN;
+        expected.c_lflag &= !nix::libc::PENDIN;
+        assert_eq!(actual, expected);
+    }
+    #[cfg(not(target_os = "macos"))]
+    assert_eq!(&actual, expected);
+}
+
 #[test]
 fn runner_real_raw_terminal_guard_restores_only_its_owned_fixture_terminal() {
     let pty = nix::pty::openpty(None, None).unwrap();
@@ -129,18 +144,19 @@ fn runner_real_raw_terminal_guard_restores_only_its_owned_fixture_terminal() {
             .contains(nix::sys::termios::LocalFlags::ECHO)
     );
     guard.restore().unwrap();
+    assert_terminal_settings_restored(&terminal, &before);
     guard.restore().unwrap();
-    assert_eq!(nix::sys::termios::tcgetattr(&terminal).unwrap(), before);
+    assert_terminal_settings_restored(&terminal, &before);
     {
         let _guard = RawTerminalGuard::enter(&terminal).unwrap();
     }
-    assert_eq!(nix::sys::termios::tcgetattr(&terminal).unwrap(), before);
+    assert_terminal_settings_restored(&terminal, &before);
     let unwound = std::panic::catch_unwind(|| {
         let _guard = RawTerminalGuard::enter(&terminal).unwrap();
         panic!("fixture unwind");
     });
     assert!(unwound.is_err());
-    assert_eq!(nix::sys::termios::tcgetattr(&terminal).unwrap(), before);
+    assert_terminal_settings_restored(&terminal, &before);
     drop(pty.master);
 }
 
