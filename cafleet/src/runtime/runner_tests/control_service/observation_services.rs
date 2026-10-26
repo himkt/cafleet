@@ -132,6 +132,17 @@ pub(super) fn health(fixture: &mut ServiceFixture) -> Value {
 }
 
 pub(super) fn capture(fixture: &mut Fixture, spec: &mut SpawnSpec) {
+    let arm_path = fixture._dir.path().join("capture-arm.json");
+    let arm_parent = arm_path.parent().expect("owned capture arm parent");
+    std::fs::set_permissions(arm_parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(
+        std::fs::symlink_metadata(arm_parent)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
     synthetic(fixture, spec);
     fixture
         .conn
@@ -165,7 +176,7 @@ pub(super) fn capture(fixture: &mut Fixture, spec: &mut SpawnSpec) {
         descriptor_path: paths.descriptor,
         expected_run_id: fixture.run.run_id,
         expected_launch_nonce: fixture.run.launch_nonce.clone(),
-        arm_path: fixture._dir.path().join("capture-arm.json"),
+        arm_path,
         output_directory: output,
         producer_manifest_path: producer_path,
         capture_policy_path: policy,
