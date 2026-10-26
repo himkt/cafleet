@@ -17,6 +17,7 @@ mod missing_paths;
 mod replay;
 mod review_clock;
 mod review_completion;
+mod review_descriptor;
 mod review_history;
 mod terminal_tail;
 
