@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 mod observation_contract;
 mod observation_services;
+mod review_failures;
 use nix::sys::signal::{Signal, kill};
 use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
 use nix::unistd::Pid;

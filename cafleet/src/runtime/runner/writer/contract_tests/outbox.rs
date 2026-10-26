@@ -1,6 +1,8 @@
 use super::*;
 use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
 
+mod review;
+
 #[derive(Default)]
 struct FaultState {
     data: Cursor<Vec<u8>>,
@@ -389,7 +391,7 @@ fn runner_batch2_outbox_compaction_retains_committed_prefix_until_every_frame_is
     .unwrap();
     outbox
         .compact_committed(
-            &fixture.fixture.conn,
+            &mut fixture.fixture.conn,
             &fixture.fixture.run.owner(),
             deadline(),
         )
@@ -404,7 +406,7 @@ fn runner_batch2_outbox_compaction_retains_committed_prefix_until_every_frame_is
     .unwrap();
     outbox
         .compact_committed(
-            &fixture.fixture.conn,
+            &mut fixture.fixture.conn,
             &fixture.fixture.run.owner(),
             deadline(),
         )
@@ -435,7 +437,7 @@ fn runner_batch2_outbox_compaction_checks_event_message_association_before_remov
     assert!(
         outbox
             .compact_committed(
-                &fixture.fixture.conn,
+                &mut fixture.fixture.conn,
                 &fixture.fixture.run.owner(),
                 deadline()
             )
@@ -462,7 +464,7 @@ fn runner_batch2_outbox_truncate_failure_preserves_committed_originals_for_retry
     assert!(
         outbox
             .compact_committed(
-                &fixture.fixture.conn,
+                &mut fixture.fixture.conn,
                 &fixture.fixture.run.owner(),
                 deadline()
             )
@@ -472,7 +474,7 @@ fn runner_batch2_outbox_truncate_failure_preserves_committed_originals_for_retry
     io.0.lock().unwrap().fail_truncate = false;
     outbox
         .compact_committed(
-            &fixture.fixture.conn,
+            &mut fixture.fixture.conn,
             &fixture.fixture.run.owner(),
             deadline(),
         )

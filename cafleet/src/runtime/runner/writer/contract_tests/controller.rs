@@ -4,6 +4,8 @@ use super::*;
 use crate::coding_agent::ProfileCatalog;
 use std::os::unix::process::ExitStatusExt;
 
+mod review;
+
 fn assert_retained_pressure<T>(attempt: Result<T>, status: ObservationStatus) {
     if let Err(cause) = attempt {
         assert!(

@@ -61,6 +61,7 @@ pub(super) fn run_configured(
             directory: config.parent().unwrap().to_path_buf(),
         }),
         capture: None,
+        observation_hooks: super::review_failures::hooks(&value, config.parent().unwrap())?,
     };
     run_with_test_services(settings, descriptor, services)
 }
