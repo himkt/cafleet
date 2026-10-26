@@ -13,7 +13,7 @@ fn independently_framed(body: &[u8]) -> Vec<u8> {
     bytes
 }
 
-fn read_fixture_bytes(stream: &mut UnixStream, mut bytes: &mut [u8], deadline: Instant) {
+pub(super) fn read_fixture_bytes(stream: &mut UnixStream, mut bytes: &mut [u8], deadline: Instant) {
     while !bytes.is_empty() {
         assert!(Instant::now() < deadline, "fixture request read timed out");
         match stream.read(bytes) {
@@ -35,7 +35,7 @@ fn read_fixture_bytes(stream: &mut UnixStream, mut bytes: &mut [u8], deadline: I
     }
 }
 
-fn write_fixture_bytes(stream: &mut UnixStream, mut bytes: &[u8], deadline: Instant) {
+pub(super) fn write_fixture_bytes(stream: &mut UnixStream, mut bytes: &[u8], deadline: Instant) {
     while !bytes.is_empty() {
         assert!(Instant::now() < deadline, "fixture reply write timed out");
         match stream.write(bytes) {
