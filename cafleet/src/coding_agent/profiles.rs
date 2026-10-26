@@ -3,6 +3,9 @@ use crate::broker::runtime::PermissionDecision;
 #[cfg(test)]
 use crate::error::CafleetError;
 
+#[cfg(test)]
+mod contract_tests;
+
 #[derive(Debug, Clone)]
 pub struct AnswerCapability {
     backend: CodingAgent,

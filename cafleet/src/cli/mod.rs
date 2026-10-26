@@ -7,6 +7,8 @@ mod runtime;
 mod setup;
 
 #[cfg(test)]
+mod launch_policy_parser_tests;
+#[cfg(test)]
 mod runtime_parser_tests;
 
 use clap::{Parser, Subcommand};

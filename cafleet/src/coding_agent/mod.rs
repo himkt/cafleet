@@ -1,6 +1,9 @@
 mod profiles;
 pub use profiles::AnswerCapability;
 
+#[cfg(test)]
+mod policy_contract_tests;
+
 use std::path::{Path, PathBuf};
 
 use clap::ValueEnum;

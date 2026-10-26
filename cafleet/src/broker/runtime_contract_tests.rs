@@ -8,6 +8,7 @@ use super::runtime::{self as storage, *};
 use super::tests as common;
 use crate::output::format_json;
 
+mod interaction_refresh;
 mod permission_responses;
 mod versioned_events;
 
