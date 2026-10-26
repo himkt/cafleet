@@ -1,7 +1,9 @@
 mod formatters;
 mod render;
 mod runtime;
-pub(crate) use runtime::format_runtime_recovery;
+pub(crate) use runtime::{
+    format_permission_inspection, format_permission_response_result, format_runtime_recovery,
+};
 
 pub use runtime::{format_input_operation, format_runtime_event, format_runtime_snapshot};
 

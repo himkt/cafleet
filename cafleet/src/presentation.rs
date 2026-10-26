@@ -118,3 +118,22 @@ fn permission_response(row: &crate::broker::runtime::PermissionResponseRecord) -
         "mode_evidence_ref":metadata.mode_evidence_ref,"decision_evidence_ref":metadata.decision_evidence_ref,
         "answer_profile_version":metadata.answer_profile_version,"answer_rule_id":metadata.answer_rule_id,"decided_at":row.decided_at})
 }
+
+pub(crate) fn permission_response_result(
+    row: &crate::runtime::runner::PermissionResponseResult,
+) -> Value {
+    json!({"response":{"status":row.submission.status.as_str(),"input_id":row.submission.input_id,"member_id":row.member_id,
+        "run_id":row.run_id,"owner_epoch":row.owner_epoch,"interaction_id":row.interaction_id,"event_id":row.event_id,
+        "decision":row.decision.as_str(),"decision_source":row.decision_source.as_str(),"stage":row.submission.stage.as_str(),
+        "output_seq":row.submission.output_seq,"reason":row.submission.reason}})
+}
+
+pub(crate) fn permission_inspection(row: &crate::runtime::runner::PermissionInspection) -> Value {
+    json!({"request":{"event_id":row.event_id,"message_id":row.message_id,"member_id":row.member_id,"fleet_id":row.fleet_id,
+        "director_member_id":row.director_member_id,"run_id":row.run_id,"owner_epoch":row.owner_epoch,
+        "interaction_id":row.interaction_id,"episode_seq":row.episode_seq,"classification":row.classification,
+        "visibility":row.visibility,"backend":row.backend,"native_version":row.native_version,"profile_version":row.profile_version,
+        "answer_profile_version":row.answer_profile_version,"answer_rule_id":row.answer_rule_id,"answer_capability":row.answer_capability,
+        "capability_reason":row.capability_reason,"supported_decisions":row.supported_decisions,"request_token":row.request_token,
+        "output_seq":row.output_seq,"evidence":row.evidence,"missing_evidence":row.missing_evidence}})
+}

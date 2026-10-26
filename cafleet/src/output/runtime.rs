@@ -82,3 +82,76 @@ pub fn format_input_operation(input: &InputOperation) -> String {
     }
     text
 }
+
+pub(crate) fn format_permission_response_result(
+    row: &crate::runtime::runner::PermissionResponseResult,
+) -> String {
+    let mut text = format!(
+        "Permission response: interaction={} run={} decision={} source={} status={} input={} stage={} output_seq={}",
+        row.interaction_id,
+        row.run_id,
+        row.decision.as_str(),
+        row.decision_source.as_str(),
+        row.submission.status.as_str(),
+        row.submission
+            .input_id
+            .map_or_else(|| "-".into(), |value| value.to_string()),
+        row.submission.stage.as_str(),
+        row.submission
+            .output_seq
+            .map_or_else(|| "-".into(), |value| value.to_string())
+    );
+    if let Some(reason) = &row.submission.reason {
+        text.push_str(&format!("\nReason: {reason}"));
+    }
+    text
+}
+
+pub(crate) fn format_permission_inspection(
+    row: &crate::runtime::runner::PermissionInspection,
+) -> String {
+    let decisions = row
+        .supported_decisions
+        .iter()
+        .map(|value| value.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
+    let visibility = match row.visibility {
+        crate::runtime::runner::Visibility::Visible => "visible",
+        crate::runtime::runner::Visibility::Obscured => "obscured",
+        crate::runtime::runner::Visibility::NotVisible => "not_visible",
+        crate::runtime::runner::Visibility::Unknown => "unknown",
+    };
+    let mut text = format!(
+        "Permission: interaction={} event={} member={} run={} epoch={} visibility={} answers={}\nRequest: token={} output_seq={} profile={} rule={}",
+        row.interaction_id,
+        row.event_id,
+        row.member_id,
+        row.run_id,
+        row.owner_epoch,
+        visibility,
+        if decisions.is_empty() {
+            "-"
+        } else {
+            &decisions
+        },
+        row.request_token.as_deref().unwrap_or("-"),
+        row.output_seq,
+        row.answer_profile_version.as_deref().unwrap_or("-"),
+        row.answer_rule_id.as_deref().unwrap_or("-")
+    );
+    if let Some(reason) = &row.capability_reason {
+        text.push_str(&format!("\nCapability: {reason}"));
+    }
+    if !row.missing_evidence.is_empty() {
+        text.push_str(&format!(
+            "\nMissing evidence: {}",
+            row.missing_evidence
+                .iter()
+                .map(|value| value.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
+    }
+    text
+}

@@ -1,3 +1,7 @@
+mod input_protocol;
+pub(crate) use input_protocol::*;
+mod input_client;
+pub(crate) use input_client::*;
 #[cfg(test)]
 mod native_capture;
 #[cfg(test)]

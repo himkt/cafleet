@@ -53,6 +53,8 @@ enum Command {
     Event(runtime::EventCommand),
     #[command(subcommand)]
     Input(runtime::InputCommand),
+    #[command(subcommand)]
+    Permission(runtime::PermissionCommand),
 }
 
 pub fn run() -> Result<(), CafleetError> {
@@ -62,6 +64,13 @@ pub fn run() -> Result<(), CafleetError> {
 }
 
 fn invocation_connection(database_url: &str) -> Result<rusqlite::Connection, CafleetError> {
+    invocation_connection_with_deadline(database_url, crate::input::Deadline::new())
+}
+
+fn invocation_connection_with_deadline(
+    database_url: &str,
+    deadline: crate::input::Deadline,
+) -> Result<rusqlite::Connection, CafleetError> {
     let path = crate::db::database_path(database_url)?;
     if !std::path::Path::new(path).try_exists().map_err(|cause| {
         CafleetError::App(format!("cannot inspect database at '{path}': {cause}"))
@@ -70,7 +79,6 @@ fn invocation_connection(database_url: &str) -> Result<rusqlite::Connection, Caf
             "no cafleet database; run 'cafleet setup'".into(),
         ));
     }
-    let deadline = crate::input::Deadline::new();
     let validate = |conn: &mut rusqlite::Connection| {
         crate::input::with_database_budget(conn, deadline, |conn| {
             crate::diagnosis::classify_selected_schema(
@@ -97,6 +105,14 @@ fn dispatch(settings: &Settings, command: Command) -> Result<(), CafleetError> {
             let code = crate::runtime::runner::run(settings, &descriptor)?;
             std::process::exit(code)
         }
+        Command::Permission(command) => {
+            let deadline = crate::input::Deadline::new();
+            runtime::permission_preflight(&command)
+                .map_err(|source| runtime::permission_error(&command, source))?;
+            let mut conn = invocation_connection_with_deadline(&settings.database_url, deadline)
+                .map_err(|source| runtime::permission_error(&command, source))?;
+            runtime::permission(&mut conn, settings, command, deadline)
+        }
         mut command => {
             let mut conn = invocation_connection(&settings.database_url)?;
             if let Command::Member(command) = &mut command {
@@ -109,7 +125,10 @@ fn dispatch(settings: &Settings, command: Command) -> Result<(), CafleetError> {
                 Command::Message(cmd) => message::run(&mut conn, settings, cmd),
                 Command::Event(cmd) => runtime::event(&conn, cmd),
                 Command::Input(cmd) => runtime::input(&conn, cmd),
-                Command::Setup(_) | Command::Doctor(_) | Command::MemberRun { .. } => {
+                Command::Setup(_)
+                | Command::Doctor(_)
+                | Command::MemberRun { .. }
+                | Command::Permission(_) => {
                     unreachable!("handled above")
                 }
             }
