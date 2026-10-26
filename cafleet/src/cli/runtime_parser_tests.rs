@@ -146,3 +146,52 @@ fn runtime_read_dispatch_preserves_refused_database_bytes() {
         }
     }
 }
+
+#[test]
+fn member_runner_internal_command_accepts_an_absolute_descriptor_and_stays_hidden() {
+    use clap::CommandFactory;
+
+    CliArgs::try_parse_from([
+        "cafleet",
+        "__member-run",
+        "--descriptor",
+        "/private/tmp/allocated-run/descriptor.json",
+    ])
+    .unwrap();
+    let help = CliArgs::command().render_long_help().to_string();
+    assert!(!help.contains("__member-run"));
+}
+
+#[test]
+fn member_runner_internal_command_requires_its_descriptor_argument() {
+    assert_eq!(usage_error(&["__member-run"]).exit_code(), 2);
+    assert_eq!(
+        usage_error(&["__member-run", "--descriptor"]).exit_code(),
+        2
+    );
+}
+
+#[test]
+fn member_runner_dispatch_rejects_an_unallocated_descriptor_before_runtime_mutation() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("registry.db");
+    let descriptor = dir.path().join("unallocated.json");
+    std::fs::write(&descriptor, b"{\"schema_version\":1}").unwrap();
+    let settings = crate::config::Settings::from_lookup(|name| {
+        (name == "CAFLEET_DATABASE_URL").then(|| format!("sqlite:///{}", path.display()))
+    })
+    .unwrap();
+    let mut conn = crate::db::connect(&settings.database_url).unwrap();
+    crate::db::migrate_to_head(&mut conn).unwrap();
+    drop(conn);
+    let before = std::fs::read(&path).unwrap();
+    let args = CliArgs::try_parse_from([
+        "cafleet",
+        "__member-run",
+        "--descriptor",
+        descriptor.to_str().unwrap(),
+    ])
+    .unwrap();
+    assert!(super::dispatch(&settings, args.command).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+}

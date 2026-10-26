@@ -1,5 +1,8 @@
 pub mod system;
 
+#[cfg(test)]
+mod runner_tests;
+
 use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::multiplexer::{AnyMultiplexer, MultiplexerError, resolve_multiplexer};
