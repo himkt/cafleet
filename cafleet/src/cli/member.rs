@@ -42,6 +42,21 @@ pub(crate) struct ExecBodyArgs {
 
 #[derive(Subcommand)]
 pub enum MemberCommand {
+    /// Reconcile a recorded member run under exclusive ownership.
+    Recover {
+        #[arg(index = 1, value_name = "MEMBER_ID", value_parser = clap::value_parser!(i64).range(1..))]
+        member_id: i64,
+        #[arg(long, requires_all = ["expected_run_id", "expected_owner_epoch", "evidence_ref"])]
+        owner_terminated: bool,
+        #[arg(long, requires = "owner_terminated", value_parser = clap::value_parser!(i64).range(1..))]
+        expected_run_id: Option<i64>,
+        #[arg(long, requires = "owner_terminated", value_parser = clap::value_parser!(i64).range(1..))]
+        expected_owner_epoch: Option<i64>,
+        #[arg(long, requires = "owner_terminated", value_parser = recovery_reference)]
+        evidence_ref: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Register a member and spawn its coding-agent pane.
     Create {
         /// The fleet the new member joins.
@@ -160,6 +175,14 @@ fn require_pane(
         })
 }
 
+fn recovery_reference(value: &str) -> Result<String, String> {
+    if value.trim().is_empty() {
+        Err("nonblank termination evidence reference required".into())
+    } else {
+        Ok(value.to_owned())
+    }
+}
+
 fn load_member(
     conn: &Connection,
     member_id: i64,
@@ -218,6 +241,33 @@ pub fn run(
     deadline: crate::input::Deadline,
 ) -> Result<(), CafleetError> {
     match command {
+        MemberCommand::Recover {
+            member_id,
+            owner_terminated,
+            expected_run_id,
+            expected_owner_epoch,
+            evidence_ref,
+            json,
+        } => {
+            let attestation =
+                owner_terminated.then(|| crate::runtime::runner::OwnerTerminationAttestation {
+                    expected_run_id: expected_run_id.expect("complete attestation options"),
+                    expected_owner_epoch: expected_owner_epoch
+                        .expect("complete attestation options"),
+                    evidence_ref: evidence_ref.expect("complete attestation options"),
+                });
+            let report = crate::runtime::runner::recover_member(
+                conn,
+                settings,
+                member_id,
+                attestation.as_ref(),
+                deadline.instant(),
+            )?;
+            emit(json, &presentation::runtime_recovery(&report), || {
+                crate::output::format_runtime_recovery(&report)
+            });
+            Ok(())
+        }
         MemberCommand::Create {
             fleet_id,
             name,
@@ -470,6 +520,21 @@ enum DeleteAction {
     Close(String),
 }
 
+fn member_deletion_matches(expected: &MemberRecord, current: &MemberRecord) -> bool {
+    expected.member_id == current.member_id
+        && expected.fleet_id == current.fleet_id
+        && expected.kind == current.kind
+        && expected.placement == current.placement
+        && expected
+            .runtime
+            .as_ref()
+            .map(|runtime| crate::runtime::runner::stable_run_identity(&runtime.run))
+            == current
+                .runtime
+                .as_ref()
+                .map(|runtime| crate::runtime::runner::stable_run_identity(&runtime.run))
+}
+
 fn lock_member_deletion(
     conn: &mut Connection,
     settings: &Settings,
@@ -490,12 +555,12 @@ fn lock_member_deletion(
                 .unwrap_or_default();
             Ok((member, targets))
         },
-        |conn, snapshot| {
+        |conn, snapshot, _guards| {
             let tx = conn
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                 .map_err(crate::broker::members::db_err)?;
             let current = load_member(&tx, member_id, true)?;
-            if current.placement != snapshot.placement {
+            if !member_deletion_matches(snapshot, &current) {
                 return Ok(None);
             }
             if current.kind == crate::broker::records::MemberKind::Director {
@@ -537,7 +602,7 @@ fn delete(
     json: bool,
     deadline: crate::input::Deadline,
 ) -> Result<(), CafleetError> {
-    let locked = lock_member_deletion(conn, settings, member_id, deadline)?;
+    let mut locked = lock_member_deletion(conn, settings, member_id, deadline)?;
     let pane_status = match &locked.value {
         DeleteAction::Deregistered(status) => status.to_string(),
         DeleteAction::Close(_) => {
@@ -546,7 +611,7 @@ fn delete(
                 .bounded(deadline);
             mux.ensure_available()
                 .map_err(|error| CafleetError::App(error.to_string()))?;
-            close_member(conn, member_id, &locked, &mux, deadline)?
+            close_member(conn, settings, member_id, &mut locked, &mux, deadline)?
         }
     };
     drop(locked);
@@ -560,14 +625,24 @@ fn delete(
 
 fn close_member(
     conn: &mut Connection,
+    settings: &Settings,
     member_id: i64,
-    locked: &crate::input::LockedDeletion<MemberRecord, DeleteAction>,
+    locked: &mut crate::input::LockedDeletion<MemberRecord, DeleteAction>,
     mux: &AnyMultiplexer,
     deadline: crate::input::Deadline,
 ) -> Result<String, CafleetError> {
     let DeleteAction::Close(pane_id) = &locked.value else {
         unreachable!("pane close requires a concrete input-locked placement");
     };
+    crate::runtime::runner::with_database_deadline(conn, deadline.instant(), |conn| {
+        let current = load_member(conn, member_id, true)?;
+        if !member_deletion_matches(&locked.snapshot, &current) {
+            return Err(CafleetError::App(
+                "member placement or runtime ownership changed before cleanup".into(),
+            ));
+        }
+        Ok(())
+    })?;
     if let Some(runtime) = crate::broker::runtime::member_runtime(conn, member_id)?
         && (!runtime.run.status.terminal()
             || runtime.run.cleanup_state == crate::broker::runtime::CleanupState::Incomplete)
@@ -581,6 +656,59 @@ fn close_member(
             )));
         }
     }
+    if let Some(expected) = locked
+        .snapshot
+        .runtime
+        .as_ref()
+        .map(|runtime| runtime.run.clone())
+    {
+        let current = crate::broker::runtime::get_run(conn, expected.run_id)?;
+        if crate::runtime::runner::stable_run_identity(&current)
+            != crate::runtime::runner::stable_run_identity(&expected)
+        {
+            return Err(CafleetError::App(
+                "member runtime ownership changed during cleanup".into(),
+            ));
+        }
+        let placement = locked
+            .snapshot
+            .placement
+            .as_ref()
+            .expect("input-locked member placement");
+        let completion = crate::runtime::runner::recover_member_under_pane_lock(
+            conn,
+            settings,
+            member_id,
+            &current,
+            placement,
+            deadline.instant(),
+            locked.pane_lock(&settings.database_url, placement)?,
+        )?;
+        crate::runtime::runner::validate_recovery_completion(&expected, &completion)?;
+        if !matches!(
+            completion.report.outcome,
+            crate::runtime::runner::RecoveryOutcome::Recovered
+        ) {
+            return Err(CafleetError::App(
+                "member recovery remains incomplete; inspect with cafleet doctor".into(),
+            ));
+        }
+        locked
+            .snapshot
+            .runtime
+            .as_mut()
+            .expect("captured runtime")
+            .run = completion.run;
+    }
+    crate::runtime::runner::with_database_deadline(conn, deadline.instant(), |conn| {
+        let current = load_member(conn, member_id, true)?;
+        if !member_deletion_matches(&locked.snapshot, &current) {
+            return Err(CafleetError::App(
+                "member placement or runtime ownership changed before pane close".into(),
+            ));
+        }
+        Ok(())
+    })?;
     let layout = mux.close_pane(pane_id, true).map_err(|error| {
         CafleetError::App(format!(
             "kill_pane failed for pane {pane_id}: {error}. Verify with 'cafleet doctor'."
@@ -591,9 +719,9 @@ fn close_member(
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(crate::broker::members::db_err)?;
         let current = load_member(&tx, member_id, true)?;
-        if current.placement != locked.snapshot.placement {
+        if !member_deletion_matches(&locked.snapshot, &current) {
             return Err(CafleetError::App(
-                "member placement changed after pane close".into(),
+                "member placement or runtime ownership changed after pane close".into(),
             ));
         }
         let changed = crate::broker::members::deregister_member_rows(&tx, member_id)?;

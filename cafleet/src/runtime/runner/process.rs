@@ -113,6 +113,109 @@ fn stopped(pid: i64) -> Result<bool> {
     }
 }
 
+pub(super) fn recover_descendants(
+    run: &crate::broker::runtime::RunRecord,
+    clock: ShutdownClock,
+) -> Result<ShutdownOutcome> {
+    let mut outcome = ShutdownOutcome {
+        native_exit: None,
+        cleanup_state: CleanupState::Complete,
+        diagnostics: Vec::new(),
+        dropped_display_bytes: 0,
+        pending_event_frames: 0,
+        unsaved_observation_gap: 0,
+    };
+    let child = match (run.child_pid, run.child_start_identity.as_ref()) {
+        (None, None) => return Ok(outcome),
+        (Some(pid), Some(start)) => ProcessIdentity {
+            pid,
+            start_identity: start.clone(),
+        },
+        _ => return Err(error("recorded child generation is incomplete")),
+    };
+    if !child.matches()? || stopped(child.pid)? {
+        if !group_members(i32::try_from(child.pid).map_err(io_error)?)?.is_empty() {
+            outcome.cleanup_state = CleanupState::Incomplete;
+            outcome.diagnostics.push(
+                "descendant ownership cannot be anchored to the recorded child generation".into(),
+            );
+        }
+        return Ok(outcome);
+    }
+    let mut owned = BTreeMap::new();
+    owned.insert(child.pid, child.clone());
+    for signal in [
+        nix::sys::signal::Signal::SIGTERM,
+        nix::sys::signal::Signal::SIGKILL,
+    ] {
+        let anchored = owned
+            .values()
+            .try_fold(false, |found, process| -> Result<bool> {
+                Ok(found || process.matches()?)
+            })?;
+        if !anchored {
+            if !group_members(i32::try_from(child.pid).map_err(io_error)?)?.is_empty() {
+                outcome.cleanup_state = CleanupState::Incomplete;
+                outcome
+                    .diagnostics
+                    .push("descendant ownership lost its recorded process generation".into());
+            }
+            break;
+        }
+        for pid in group_members(i32::try_from(child.pid).map_err(io_error)?)? {
+            if let Some(process) = ProcessIdentity::read(pid)? {
+                if let Some(previous) = owned.get(&pid) {
+                    ensure(
+                        previous == &process,
+                        "recovery descendant PID generation changed",
+                    )?;
+                } else {
+                    owned.insert(pid, process);
+                }
+            }
+        }
+        for process in owned.values() {
+            if process.matches()? && !stopped(process.pid)? {
+                match nix::sys::signal::kill(
+                    nix::unistd::Pid::from_raw(i32::try_from(process.pid).map_err(io_error)?),
+                    signal,
+                ) {
+                    Ok(()) | Err(nix::errno::Errno::ESRCH) => {}
+                    Err(cause) => return Err(io_error(cause)),
+                }
+            }
+        }
+        let until = if signal == nix::sys::signal::Signal::SIGTERM {
+            clock.child_deadline()
+        } else {
+            clock.storage_deadline()
+        };
+        while Instant::now() < until {
+            let alive = owned
+                .values()
+                .try_fold(false, |alive, process| -> Result<bool> {
+                    Ok(alive || (process.matches()? && !stopped(process.pid)?))
+                })?;
+            if !alive {
+                break;
+            }
+            std::thread::sleep(
+                Duration::from_millis(2).min(until.saturating_duration_since(Instant::now())),
+            );
+        }
+    }
+    for process in owned.values() {
+        if process.matches()? && !stopped(process.pid)? {
+            outcome.cleanup_state = CleanupState::Incomplete;
+            outcome
+                .diagnostics
+                .push("verified descendants remain after the original cleanup deadline".into());
+            break;
+        }
+    }
+    Ok(outcome)
+}
+
 struct MasterFd<'a>(&'a dyn MasterPty);
 impl AsRawFd for MasterFd<'_> {
     fn as_raw_fd(&self) -> RawFd {

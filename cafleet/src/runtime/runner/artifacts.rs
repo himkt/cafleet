@@ -13,6 +13,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::time::Instant;
 
+mod recovery_descriptor;
+pub(crate) use recovery_descriptor::RecoveryDescriptor;
+
 pub(crate) fn canonical_json(value: &Value) -> String {
     match value {
         Value::Object(map) => {
@@ -391,6 +394,50 @@ pub(crate) struct RunLock {
     file: File,
 }
 impl RunLock {
+    #[cfg(test)]
+    pub(crate) fn transfer_to_reconciler_with_deadline(
+        &self,
+        conn: &mut Connection,
+        expected: &RunRecord,
+        process: ProcessIdentity,
+        deadline: Instant,
+    ) -> Result<RunOwner> {
+        self.transfer_to_reconciler_checked(conn, expected, process, deadline, |_| Ok(()))
+            .map(|run| run.owner())
+    }
+    pub(super) fn transfer_to_reconciler_checked(
+        &self,
+        conn: &mut Connection,
+        expected: &RunRecord,
+        process: ProcessIdentity,
+        deadline: Instant,
+        check: impl FnOnce(&Connection) -> Result<()>,
+    ) -> Result<RunRecord> {
+        with_database_deadline(conn, deadline, |conn| {
+            let tx = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .map_err(db_err)?;
+            check(&tx)?;
+            let current = storage::get_run(&tx, expected.run_id)?;
+            validate_database(&tx, &expected.database_identity_json)?;
+            ensure(
+                super::recovery::stable_run_identity(&current)
+                    == super::recovery::stable_run_identity(expected),
+                "recovery ownership changed before CAS",
+            )?;
+            let next = if current.status.terminal()
+                && current.cleanup_state == storage::CleanupState::Complete
+            {
+                current
+            } else {
+                self.validate(&tx, &expected.owner())?;
+                super::recovery::advance_recovery_owner(&tx, expected, &process)?
+            };
+            check_deadline(Instant::now(), deadline)?;
+            tx.commit().map_err(db_err)?;
+            Ok(next)
+        })
+    }
     pub(crate) fn acquire(conn: &Connection, owner: &RunOwner) -> Result<Option<Self>> {
         let run = storage::get_run(conn, owner.run_id)?;
         ensure(run.owner() == *owner, "stale runtime owner")?;

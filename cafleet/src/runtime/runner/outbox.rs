@@ -38,7 +38,7 @@ pub(crate) struct OutboxScan {
 }
 pub(crate) struct Outbox<S: OutboxIo> {
     io: S,
-    conn: Connection,
+    conn: Option<Connection>,
     run: RunRecord,
     lock: Arc<RunLock>,
     known: BTreeMap<i64, [u8; 32]>,
@@ -48,6 +48,33 @@ pub(crate) struct Outbox<S: OutboxIo> {
     hooks: Arc<dyn WriterHooks>,
 }
 impl Outbox<File> {
+    pub(crate) fn open_recovery(
+        conn: &mut Connection,
+        run: &RunRecord,
+        lock: Arc<RunLock>,
+        until: Instant,
+    ) -> Result<Self> {
+        check_deadline(Instant::now(), until)?;
+        lock.validate(conn, &run.owner())?;
+        let paths = validate_run_paths(conn, run)?;
+        validate_private_file(&paths.outbox, nix::unistd::geteuid().as_raw(), 0o600)?;
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(nix::libc::O_NOFOLLOW)
+            .open(&paths.outbox)
+            .map_err(io_error)?;
+        let meta = file.metadata().map_err(io_error)?;
+        let named = std::fs::symlink_metadata(&paths.outbox).map_err(io_error)?;
+        ensure(
+            (meta.dev(), meta.ino()) == (named.dev(), named.ino()),
+            "outbox pathname changed during open",
+        )?;
+        let mut value = Self::state(run, lock, file, None);
+        value.path_identity = Some((meta.dev(), meta.ino()));
+        value.scan_recovery(conn, until)?;
+        Ok(value)
+    }
     pub(crate) fn open_owned(
         conn: &Connection,
         run: &RunRecord,
@@ -76,6 +103,19 @@ impl Outbox<File> {
     }
 }
 impl<S: OutboxIo> Outbox<S> {
+    fn state(run: &RunRecord, lock: Arc<RunLock>, io: S, conn: Option<Connection>) -> Self {
+        Self {
+            io,
+            conn,
+            run: run.clone(),
+            lock,
+            known: BTreeMap::new(),
+            end: 0,
+            dirty: true,
+            path_identity: None,
+            hooks: Arc::new(InertWriterHooks),
+        }
+    }
     fn initialize(
         conn: &Connection,
         run: &RunRecord,
@@ -89,17 +129,7 @@ impl<S: OutboxIo> Outbox<S> {
             .path()
             .ok_or_else(|| error("outbox requires a file-backed registry"))?;
         let validation = crate::db::connect_read_only(&format!("sqlite:///{path}"))?;
-        let mut value = Self {
-            io,
-            conn: validation,
-            run: run.clone(),
-            lock,
-            known: BTreeMap::new(),
-            end: 0,
-            dirty: true,
-            path_identity: None,
-            hooks: Arc::new(InertWriterHooks),
-        };
+        let mut value = Self::state(run, lock, io, Some(validation));
         value.scan(until)?;
         Ok(value)
     }
@@ -120,10 +150,26 @@ impl<S: OutboxIo> Outbox<S> {
         check_deadline(Instant::now(), until)?;
         let owner = self.run.owner();
         let lock = &self.lock;
-        let run = with_database_deadline(&mut self.conn, until, |conn| {
-            lock.validate(conn, &owner)?;
-            storage::get_run(conn, owner.run_id)
+        let run = with_database_deadline(
+            self.conn.as_mut().expect("worker validation connection"),
+            until,
+            |conn| {
+                lock.validate(conn, &owner)?;
+                storage::get_run(conn, owner.run_id)
+            },
+        )?;
+        self.validate_named(&run)?;
+        Ok(run)
+    }
+    fn validate_on(&self, conn: &mut Connection, until: Instant) -> Result<RunRecord> {
+        let run = with_database_deadline(conn, until, |conn| {
+            self.lock.validate(conn, &self.run.owner())?;
+            storage::get_run(conn, self.run.run_id)
         })?;
+        self.validate_named(&run)?;
+        Ok(run)
+    }
+    fn validate_named(&self, run: &RunRecord) -> Result<()> {
         if let Some((dev, ino)) = self.path_identity {
             let meta =
                 std::fs::symlink_metadata(PathBuf::from(&run.runtime_path).join("events.outbox"))
@@ -138,10 +184,21 @@ impl<S: OutboxIo> Outbox<S> {
                 "owned outbox inode changed",
             )?;
         }
-        Ok(run)
+        Ok(())
     }
     pub(crate) fn scan(&mut self, until: Instant) -> Result<OutboxScan> {
         let run = self.validate(until)?;
+        self.scan_validated(run, until)
+    }
+    pub(crate) fn scan_recovery(
+        &mut self,
+        conn: &mut Connection,
+        until: Instant,
+    ) -> Result<OutboxScan> {
+        let run = self.validate_on(conn, until)?;
+        self.scan_validated(run, until)
+    }
+    fn scan_validated(&mut self, run: RunRecord, until: Instant) -> Result<OutboxScan> {
         let length = self.io.byte_len().map_err(io_error)?;
         ensure(length <= OUTBOX_LIMIT, "runtime outbox exceeds capacity")?;
         self.io.seek(SeekFrom::Start(0)).map_err(io_error)?;
@@ -211,9 +268,26 @@ impl<S: OutboxIo> Outbox<S> {
         until: Instant,
     ) -> Result<()> {
         let run = self.validate(until)?;
+        self.append_validated(value, run, until)
+    }
+    pub(crate) fn append_recovery(
+        &mut self,
+        conn: &mut Connection,
+        value: &ObservedTransition,
+        until: Instant,
+    ) -> Result<()> {
+        let run = self.validate_on(conn, until)?;
+        self.append_validated(value, run, until)
+    }
+    fn append_validated(
+        &mut self,
+        value: &ObservedTransition,
+        run: RunRecord,
+        until: Instant,
+    ) -> Result<()> {
         storage::validate_observed_transition(&run, value)?;
         if self.dirty || self.io.byte_len().map_err(io_error)? != self.end {
-            let scan = self.scan(until)?;
+            let scan = self.scan_validated(run.clone(), until)?;
             if scan.incomplete_tail.is_some() {
                 self.io.set_len(self.end).map_err(io_error)?;
                 self.io.sync_all().map_err(io_error)?;
@@ -264,18 +338,17 @@ impl<S: OutboxIo> Outbox<S> {
         owner: &RunOwner,
         until: Instant,
     ) -> Result<()> {
-        self.validate(until)?;
+        let run = self.validate_on(conn, until)?;
         ensure(*owner == self.run.owner(), "compaction owner mismatch")?;
-        let scan = self.scan(until)?;
-        if scan.maximum_event_seq.is_none() {
-            return Ok(());
-        }
-        let all = with_database_deadline(conn, until, |conn| {
-            self.lock.validate(conn, owner)?;
-            let mut all = true;
-            for frame in &scan.frames {
-                check_deadline(Instant::now(), until)?;
-                let id: Option<i64> = conn
+        let length = self.io.byte_len().map_err(io_error)?;
+        let scan = self.scan_validated(run, until)?;
+        let all = if scan.maximum_event_seq.is_some() {
+            with_database_deadline(conn, until, |conn| {
+                self.lock.validate(conn, owner)?;
+                let mut all = true;
+                for frame in &scan.frames {
+                    check_deadline(Instant::now(), until)?;
+                    let id: Option<i64> = conn
                 .query_row(
                     "SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND event_seq=?2",
                     rusqlite::params![owner.run_id, frame.transition.event_seq],
@@ -283,29 +356,35 @@ impl<S: OutboxIo> Outbox<S> {
                 )
                 .optional()
                 .map_err(crate::broker::members::db_err)?;
-                if let Some(id) = id {
-                    let view = storage::get_event(conn, id)?;
-                    ensure(
-                        storage::original_transition(&view)? == frame.transition,
-                        &format!(
-                            "committed outbox frame {}..{} original mismatch",
-                            frame.start, frame.end
-                        ),
-                    )?;
-                } else {
-                    all = false;
+                    if let Some(id) = id {
+                        let view = storage::get_event(conn, id)?;
+                        ensure(
+                            storage::original_transition(&view)? == frame.transition,
+                            &format!(
+                                "committed outbox frame {}..{} original mismatch",
+                                frame.start, frame.end
+                            ),
+                        )?;
+                    } else {
+                        all = false;
+                    }
                 }
-            }
-            Ok(all)
-        })?;
-        if all && scan.incomplete_tail.is_none() && self.end > 0 {
+                Ok(all)
+            })?
+        } else {
+            true
+        };
+        if all {
+            self.hooks.before(WriterBoundary::Compact, until)?;
+            self.validate_on(conn, until)?;
             ensure(
-                scan.frames.last().expect("complete nonempty outbox").end
-                    == self.io.byte_len().map_err(io_error)?,
+                length == self.io.byte_len().map_err(io_error)?,
                 "outbox size changed before compaction",
             )?;
-            self.hooks.before(WriterBoundary::Compact, until)?;
+            check_deadline(Instant::now(), until)?;
+            self.dirty = true;
             self.io.set_len(0).map_err(io_error)?;
+            check_deadline(Instant::now(), until)?;
             self.io.sync_all().map_err(io_error)?;
             self.end = 0;
             self.known.clear();

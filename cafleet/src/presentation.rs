@@ -1,6 +1,13 @@
 use crate::broker::records::*;
 use serde_json::{Value, json};
 
+pub(crate) fn runtime_recovery(report: &crate::runtime::runner::RecoveryReport) -> Value {
+    json!({"member_id":report.member_id,"run_id":report.run_id,"outcome":report.outcome.as_str(),
+        "replayed_count":report.replayed_count,"inbox_count":report.inbox_count,
+        "archived_count":report.archived_count,"status":report.status.as_str(),
+        "cleanup_diagnostics":report.cleanup_diagnostics})
+}
+
 pub fn placement(row: &Placement) -> Value {
     json!({"backend":row.backend,"mux_session":row.mux_session,
         "mux_window_id":row.mux_window_id,"mux_pane_id":row.mux_pane_id,

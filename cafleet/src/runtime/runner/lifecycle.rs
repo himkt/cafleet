@@ -11,20 +11,33 @@ pub(crate) enum ChildExit {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ShutdownClock(Instant);
+pub(crate) struct ShutdownClock {
+    start: Instant,
+    limit: Option<Instant>,
+}
 
 impl ShutdownClock {
     pub(crate) fn new(start: Instant) -> Self {
-        Self(start)
+        Self { start, limit: None }
+    }
+    pub(crate) fn clipped(self, deadline: Instant) -> Self {
+        Self {
+            start: self.start,
+            limit: Some(self.limit.map_or(deadline, |prior| prior.min(deadline))),
+        }
+    }
+    fn boundary(&self, seconds: u64) -> Instant {
+        let original = self.start + Duration::from_secs(seconds);
+        self.limit.map_or(original, |limit| original.min(limit))
     }
     pub(crate) fn child_deadline(&self) -> Instant {
-        self.0 + Duration::from_secs(2)
+        self.boundary(2)
     }
     pub(crate) fn display_deadline(&self) -> Instant {
-        self.0 + Duration::from_secs(3)
+        self.boundary(3)
     }
     pub(crate) fn storage_deadline(&self) -> Instant {
-        self.0 + Duration::from_secs(4)
+        self.boundary(4)
     }
     pub(crate) fn remaining_storage_at(&self, now: Instant) -> Duration {
         self.storage_deadline().saturating_duration_since(now)

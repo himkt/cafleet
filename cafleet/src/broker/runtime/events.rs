@@ -503,139 +503,157 @@ pub fn persist_transition(
     transition: &ObservedTransition,
     mode: PersistenceMode,
 ) -> Result<RuntimeEventRecord, CafleetError> {
+    persist_transition_counted(conn, owner, transition, mode).map(|(event, _)| event)
+}
+
+pub(crate) fn persist_transition_counted(
+    conn: &mut Connection,
+    owner: &RunOwner,
+    transition: &ObservedTransition,
+    mode: PersistenceMode,
+) -> Result<(RuntimeEventRecord, bool), CafleetError> {
     owned_transaction(conn, owner, |conn, run| {
-        validate_transition(run, transition)?;
+        persist_transition_in_transaction(conn, run, transition, mode)
+    })
+}
+
+pub(crate) fn persist_transition_in_transaction(
+    conn: &Connection,
+    run: &RunRecord,
+    transition: &ObservedTransition,
+    mode: PersistenceMode,
+) -> Result<(RuntimeEventRecord, bool), CafleetError> {
+    validate_transition(run, transition)?;
+    require(
+        mode != PersistenceMode::Recovery || run.owner_kind == OwnerKind::Reconciler,
+        "owner_kind",
+        "recovery requires reconciler ownership",
+    )?;
+    let previous: Option<i64> = conn
+        .query_row(
+            "SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND event_seq=?2",
+            params![run.run_id, transition.event_seq],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(db_err)?;
+    if let Some(id) = previous {
+        let existing = get_event(conn, id)?;
         require(
-            mode != PersistenceMode::Recovery || run.owner_kind == OwnerKind::Reconciler,
-            "owner_kind",
-            "recovery requires reconciler ownership",
-        )?;
-        let previous: Option<i64> = conn
-            .query_row(
-                "SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND event_seq=?2",
-                params![run.run_id, transition.event_seq],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(db_err)?;
-        if let Some(id) = previous {
-            let existing = get_event(conn, id)?;
-            require(
-                original(&existing)? == *transition,
-                "event_seq",
-                "conflicting original transition",
-            )?;
-            return Ok(existing.event);
-        }
-        require(
-            mode == PersistenceMode::Recovery || !run.status.terminal(),
-            "member_runs.status",
-            "terminal runs accept only committed retries or owned recovery",
-        )?;
-        require(
-            transition.kind != RuntimeEventKind::RunnerLost || mode == PersistenceMode::Recovery,
-            "kind",
-            "observer loss requires explicit recovery ownership",
-        )?;
-        let archive_reason = historical_ownership(conn, run)?;
-        require(
-            mode == PersistenceMode::Recovery
-                || (archive_reason.is_none() && run.owner_kind == OwnerKind::Runner),
-            "notification_state",
-            "live notification requires active runner ownership",
-        )?;
-        if archive_reason.is_none() {
-            super::super::fleets::require_live_fleet(conn, run.fleet_id)?;
-        }
-        let latest: Option<i64> = conn
-            .query_row(
-                "SELECT MAX(event_seq) FROM member_runtime_events WHERE run_id=?1",
-                [run.run_id],
-                |row| row.get(0),
-            )
-            .map_err(db_err)?;
-        require(
-            latest.is_none_or(|latest| transition.event_seq > latest),
+            original(&existing)? == *transition,
             "event_seq",
-            "event sequence is not increasing",
+            "conflicting original transition",
         )?;
-        let interaction_id = apply_interaction(conn, transition)?;
-        let message_id = if archive_reason.is_none() {
-            Some(
-                super::super::messaging::insert_message_validated(
-                    conn,
-                    run.member_id,
-                    run.director_member_id,
-                    "{}",
-                )?
-                .message_id,
-            )
-        } else {
-            None
-        };
-        let notification_state = if archive_reason.is_some() {
-            NotificationState::Archived
-        } else {
-            NotificationState::Inbox
-        };
-        conn.execute(
+        return Ok((existing.event, false));
+    }
+    require(
+        mode == PersistenceMode::Recovery || !run.status.terminal(),
+        "member_runs.status",
+        "terminal runs accept only committed retries or owned recovery",
+    )?;
+    require(
+        transition.kind != RuntimeEventKind::RunnerLost || mode == PersistenceMode::Recovery,
+        "kind",
+        "observer loss requires explicit recovery ownership",
+    )?;
+    let archive_reason = historical_ownership(conn, run)?;
+    require(
+        mode == PersistenceMode::Recovery
+            || (archive_reason.is_none() && run.owner_kind == OwnerKind::Runner),
+        "notification_state",
+        "live notification requires active runner ownership",
+    )?;
+    if archive_reason.is_none() {
+        super::super::fleets::require_live_fleet(conn, run.fleet_id)?;
+    }
+    let latest: Option<i64> = conn
+        .query_row(
+            "SELECT MAX(event_seq) FROM member_runtime_events WHERE run_id=?1",
+            [run.run_id],
+            |row| row.get(0),
+        )
+        .map_err(db_err)?;
+    require(
+        latest.is_none_or(|latest| transition.event_seq > latest),
+        "event_seq",
+        "event sequence is not increasing",
+    )?;
+    let interaction_id = apply_interaction(conn, transition)?;
+    let message_id = if archive_reason.is_none() {
+        Some(
+            super::super::messaging::insert_message_validated(
+                conn,
+                run.member_id,
+                run.director_member_id,
+                "{}",
+            )?
+            .message_id,
+        )
+    } else {
+        None
+    };
+    let notification_state = if archive_reason.is_some() {
+        NotificationState::Archived
+    } else {
+        NotificationState::Inbox
+    };
+    conn.execute(
             "INSERT INTO member_runtime_events(run_id,event_seq,interaction_id,kind,observed_at,committed_at,payload_json,notification_state,message_id,archive_reason)
              VALUES(?1,?2,?3,?4,?5,?6,'{}',?7,?8,?9)",
             params![run.run_id,transition.event_seq,interaction_id,transition.kind.as_str(),transition.observed_at,
                 format_utc(now_utc()),notification_state.as_str(),message_id,archive_reason.map(|reason| reason.as_str())],
         ).map_err(db_err)?;
-        let event_id = conn.last_insert_rowid();
-        let payload = payload(run, transition, event_id, interaction_id)?.to_string();
-        require(
-            payload.len() <= 16 * 1024,
-            "payload_json",
-            "complete payload exceeds bound",
-        )?;
+    let event_id = conn.last_insert_rowid();
+    let payload = payload(run, transition, event_id, interaction_id)?.to_string();
+    require(
+        payload.len() <= 16 * 1024,
+        "payload_json",
+        "complete payload exceeds bound",
+    )?;
+    conn.execute(
+        "UPDATE member_runtime_events SET payload_json=?1 WHERE event_id=?2",
+        params![payload, event_id],
+    )
+    .map_err(db_err)?;
+    if let Some(message_id) = message_id {
         conn.execute(
-            "UPDATE member_runtime_events SET payload_json=?1 WHERE event_id=?2",
-            params![payload, event_id],
+            "UPDATE messages SET text=?1 WHERE message_id=?2",
+            params![payload, message_id],
         )
         .map_err(db_err)?;
-        if let Some(message_id) = message_id {
-            conn.execute(
-                "UPDATE messages SET text=?1 WHERE message_id=?2",
-                params![payload, message_id],
-            )
-            .map_err(db_err)?;
-        }
-        if transition.kind == RuntimeEventKind::RunnerExited {
-            let cause = transition
-                .cause_json
-                .as_ref()
-                .ok_or_else(|| invalid("cause_json", "native exit evidence required"))?;
-            let exit_code = cause
-                .get("exit_code")
-                .filter(|value| !value.is_null())
-                .map(|value| {
-                    value
-                        .as_i64()
-                        .ok_or_else(|| invalid("exit_code", "integer required"))
-                })
-                .transpose()?;
-            let exit_signal = cause
-                .get("exit_signal")
-                .filter(|value| !value.is_null())
-                .map(|value| {
-                    value
-                        .as_i64()
-                        .ok_or_else(|| invalid("exit_signal", "integer required"))
-                })
-                .transpose()?;
-            require(
-                exit_code.is_some() || exit_signal.is_some(),
-                "cause_json",
-                "actual native status required",
-            )?;
-            conn.execute("UPDATE member_runs SET status='exited',ended_at=?1,exit_code=?2,exit_signal=?3 WHERE run_id=?4",
+    }
+    if transition.kind == RuntimeEventKind::RunnerExited {
+        let cause = transition
+            .cause_json
+            .as_ref()
+            .ok_or_else(|| invalid("cause_json", "native exit evidence required"))?;
+        let exit_code = cause
+            .get("exit_code")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                value
+                    .as_i64()
+                    .ok_or_else(|| invalid("exit_code", "integer required"))
+            })
+            .transpose()?;
+        let exit_signal = cause
+            .get("exit_signal")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                value
+                    .as_i64()
+                    .ok_or_else(|| invalid("exit_signal", "integer required"))
+            })
+            .transpose()?;
+        require(
+            exit_code.is_some() || exit_signal.is_some(),
+            "cause_json",
+            "actual native status required",
+        )?;
+        conn.execute("UPDATE member_runs SET status='exited',ended_at=?1,exit_code=?2,exit_signal=?3 WHERE run_id=?4",
                 params![transition.observed_at,exit_code,exit_signal,run.run_id]).map_err(db_err)?;
-        }
-        get_event(conn, event_id).map(|view| view.event)
-    })
+    }
+    get_event(conn, event_id).map(|view| (view.event, true))
 }
 
 const REVIEW_INSTRUCTION: &str = "Verify this event and the current request. Evaluate the operation and its risk. In the Director session's effective auto mode, decide allow or deny; otherwise obtain the user's permission. Submit the selected answer through the request-bound CAFleet response command, or give that complete command to the user. Inspect the native result and continuation afterward.";

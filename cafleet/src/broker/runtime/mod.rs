@@ -8,6 +8,7 @@ mod permissions;
 mod records;
 
 pub use events::{get_event, persist_transition, update_interaction_evidence};
+pub(crate) use events::{persist_transition_counted, persist_transition_in_transaction};
 pub use inputs::{
     find_input, get_input, record_input_state, reserve_input, settle_input, settle_preview,
 };
@@ -270,7 +271,7 @@ pub(super) fn historical_ownership(
     })
 }
 
-pub(super) fn validate_owner(
+pub(crate) fn validate_owner(
     conn: &Connection,
     owner: &RunOwner,
 ) -> Result<RunRecord, CafleetError> {

@@ -6,6 +6,8 @@ mod observation;
 pub(crate) use observation::*;
 mod outbox;
 pub(crate) use outbox::*;
+mod recovery;
+pub(crate) use recovery::*;
 pub(crate) use writer::{EventWriter, InertWriterHooks, WriterBoundary, WriterHooks};
 mod episodes;
 pub(crate) use crate::coding_agent::{
