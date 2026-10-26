@@ -27,7 +27,7 @@ impl BufferedTail {
         check_deadline(Instant::now(), deadline)?;
         ensure(
             directory.join("buffered-tail-written").exists(),
-            "successful real native write precedes exit-before-read Parser operation",
+            "successful real native write precedes parse-after-exit Parser operation",
         )?;
         private_write(
             &directory.join("buffered-tail-parser-entered"),
@@ -79,7 +79,7 @@ impl BufferedTail {
     }
 }
 impl ObservationHooks for Hooks {
-    fn order_shutdown_reads_after_native_exit(&self, deadline: Instant) -> bool {
+    fn order_shutdown_parsing_after_native_exit(&self, deadline: Instant) -> bool {
         let Some(tail) = &self.buffered_tail else {
             return false;
         };
