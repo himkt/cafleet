@@ -10,10 +10,20 @@ pub(crate) struct HealthSnapshot {
     pub runner: ProcessIdentity,
     pub child: Option<ProcessIdentity>,
     pub output_seq: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation: Option<ObservationHealth>,
 }
 impl HealthSnapshot {
-    fn validate(&self, run: &RunRecord) -> Result<()> {
+    pub(crate) fn decode(value: Value, run: &RunRecord) -> Result<Self> {
+        let result: Self = serde_json::from_value(value).map_err(io_error)?;
+        result.validate(run)?;
+        Ok(result)
+    }
+    pub(crate) fn validate(&self, run: &RunRecord) -> Result<()> {
         self.identity.validate(run)?;
+        if let Some(observation) = &self.observation {
+            observation.validate()?;
+        }
         ensure(
             run.runner_pid == Some(self.runner.pid)
                 && run.runner_start_identity.as_deref()
@@ -51,9 +61,7 @@ impl HealthProbe for SocketProbe {
 }
 pub(crate) fn probe_health(run: &RunRecord, deadline: Instant) -> Result<HealthSnapshot> {
     let reply = super::service::request(run, "health", deadline)?;
-    let health: HealthSnapshot = serde_json::from_value(reply).map_err(io_error)?;
-    health.validate(run)?;
-    Ok(health)
+    HealthSnapshot::decode(reply, run)
 }
 pub(crate) fn check_input_health(
     conn: &mut Connection,
@@ -139,4 +147,53 @@ fn diagnose_runtime_observed(
         Err(cause) => diagnostics.push(format!("{cause}; explicit member recover required")),
     }
     Ok(RuntimeDiagnosis { diagnostics })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ObservationHealth {
+    pub visibility: Visibility,
+    pub eligibility: InputEligibility,
+    pub pending_count: u64,
+    pub pending_evidence: bool,
+    pub gap_count: u64,
+    pub degraded: bool,
+    pub diagnostic: Option<String>,
+}
+impl ObservationHealth {
+    pub(crate) fn validate(&self) -> Result<()> {
+        ensure(
+            self.pending_count <= 130,
+            "health pending count exceeds capacity",
+        )?;
+        ensure(
+            serde_json::to_vec(self).map_err(io_error)?.len() <= 1024,
+            "health observation exceeds encoded limit",
+        )?;
+        if let Some(code) = &self.diagnostic {
+            ensure(
+                code.len() <= 128
+                    && code.is_ascii()
+                    && [
+                        "parser_unavailable",
+                        "detector_unavailable",
+                        "sequence_unavailable",
+                        "sink_unavailable",
+                        "observation_gap",
+                    ]
+                    .contains(&code.as_str()),
+                "invalid health diagnostic",
+            )?;
+        }
+        if self.eligibility == InputEligibility::ComposerEmpty {
+            ensure(
+                self.visibility == Visibility::NotVisible
+                    && !self.degraded
+                    && self.pending_count == 0
+                    && !self.pending_evidence,
+                "health composer proof conflicts with held state",
+            )?;
+        }
+        Ok(())
+    }
 }

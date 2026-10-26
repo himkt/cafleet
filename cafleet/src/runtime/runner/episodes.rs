@@ -5,14 +5,16 @@ use crate::broker::runtime::{
 };
 use std::ops::RangeInclusive;
 use std::time::{Duration, Instant};
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum Visibility {
     Visible,
     Obscured,
     NotVisible,
     Unknown,
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum GateReason {
     Candidate,
     Interaction,
@@ -22,7 +24,13 @@ pub(crate) enum GateReason {
     ObserverUnavailable,
     Gap,
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "state",
+    content = "reason",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub(crate) enum InputEligibility {
     ComposerEmpty,
     Hold(GateReason),
@@ -434,6 +442,9 @@ pub(crate) struct EventSequencePool {
     high_water: i64,
 }
 impl EventSequencePool {
+    pub(crate) fn exhausted(&self) -> bool {
+        self.range.as_ref().is_none_or(|range| range.is_empty())
+    }
     pub(crate) fn new() -> Self {
         Self {
             range: None,

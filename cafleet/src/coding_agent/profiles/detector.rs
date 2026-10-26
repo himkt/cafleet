@@ -53,7 +53,8 @@ pub(crate) struct SemanticFingerprint {
     parts: Vec<SemanticPart>,
 }
 type SemanticPart = (String, String, String, Option<String>, Vec<String>);
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ScreenRegion {
     pub top: u16,
     pub left: u16,

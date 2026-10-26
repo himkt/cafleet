@@ -74,51 +74,23 @@ pub(super) struct Fixture {
     pub version: String,
 }
 #[derive(Clone)]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "The approved Batch 2 service adapter consumes this component"
-    )
-)]
 pub(super) struct Capture {
     pub matcher: String,
     pub name: String,
 }
 #[derive(Clone)]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "The approved Batch 2 service adapter consumes this component"
-    )
-)]
 pub(super) struct Choice {
     pub id: String,
     pub label: Capture,
     pub scope: String,
 }
 #[derive(Clone)]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "The approved Batch 2 service adapter consumes this component"
-    )
-)]
 pub(super) struct Matcher {
     pub id: String,
     pub scope: String,
     pub regex: Regex,
 }
 #[derive(Clone)]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "The approved Batch 2 service adapter consumes this component"
-    )
-)]
 pub(super) struct Region {
     pub screen: String,
     pub start: Regex,
@@ -127,13 +99,6 @@ pub(super) struct Region {
     pub cursor: String,
 }
 #[derive(Clone)]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "The approved Batch 2 service adapter consumes this component"
-    )
-)]
 pub(super) struct Rule {
     pub id: String,
     pub priority: i64,
@@ -147,13 +112,6 @@ pub(super) struct Rule {
     pub sensitive: bool,
 }
 #[derive(Clone)]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "The approved Batch 2 service adapter consumes this component"
-    )
-)]
 pub(super) struct Capability {
     pub rules: Vec<String>,
     pub fixtures: Vec<String>,
@@ -178,6 +136,8 @@ pub(super) struct Profile {
 #[derive(Clone)]
 pub struct ProfileCatalog {
     profiles: Vec<Profile>,
+    #[cfg(test)]
+    capture_origin: &'static str,
 }
 pub struct NativeCapabilities {
     pub backend: CodingAgent,
@@ -359,7 +319,18 @@ fn capability(
 }
 impl ProfileCatalog {
     pub fn bundled() -> Result<Self> {
-        Self::from_definitions(&json!({"schema_version":1,"fixtures":[],"profiles":[]}))
+        let catalog =
+            Self::from_definitions(&json!({"schema_version":1,"fixtures":[],"profiles":[]}))?;
+        #[cfg(test)]
+        let catalog = Self {
+            capture_origin: "bundled_unknown",
+            ..catalog
+        };
+        Ok(catalog)
+    }
+    #[cfg(test)]
+    pub(crate) fn capture_origin(&self) -> &'static str {
+        self.capture_origin
     }
     pub fn from_definitions(value: &Value) -> Result<Self> {
         let root = object(value, &["schema_version", "fixtures", "profiles"])?;
@@ -520,7 +491,11 @@ impl ProfileCatalog {
                 answers,
             });
         }
-        Ok(Self { profiles })
+        Ok(Self {
+            profiles,
+            #[cfg(test)]
+            capture_origin: "synthetic",
+        })
     }
     pub(super) fn matching(&self, backend: CodingAgent, version: Option<&str>) -> Option<&Profile> {
         version.and_then(|v| {

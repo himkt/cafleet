@@ -129,4 +129,72 @@ impl CodingAgent {
         argv.push(prompt.into());
         Ok(argv)
     }
+    #[cfg(test)]
+    pub(crate) fn validate_spawn_policy_argv(
+        self,
+        argv: &[String],
+        policy: &LaunchPolicySelection,
+    ) -> Result<(), CafleetError> {
+        let invalid = || CafleetError::Value("capture emitted permission argv mismatch".into());
+        let baseline = self.build_spawn_argv_with_policy("", "", None, None, policy)?;
+        let name_index = (self == Self::Claude).then(|| {
+            baseline
+                .iter()
+                .position(|value| value == "--name")
+                .expect("Claude name option")
+                + 1
+        });
+        let display_name = match name_index {
+            Some(index) => argv.get(index).ok_or_else(invalid)?.as_str(),
+            None => "",
+        };
+        let mut cursor = baseline.len() - 1 - usize::from(self == Self::Opencode);
+        let model = if argv.len() > cursor + 1 && argv[cursor] == "--model" {
+            let value = argv.get(cursor + 1).ok_or_else(invalid)?;
+            cursor += 2;
+            Some(value.as_str())
+        } else {
+            None
+        };
+        let effort = if argv.len() > cursor + 1 {
+            match self {
+                Self::Claude if argv[cursor] == "--effort" => {
+                    let value = argv.get(cursor + 1).ok_or_else(invalid)?;
+                    cursor += 2;
+                    Some(value.as_str())
+                }
+                Self::Codex => {
+                    let value = argv[cursor].strip_prefix("--config=model_reasoning_effort=");
+                    if value.is_some() {
+                        cursor += 1;
+                    }
+                    value
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        let tail = argv.get(cursor..).ok_or_else(invalid)?;
+        let prompt = match (self, tail) {
+            (_, []) => None,
+            (Self::Opencode, [flag, prompt]) if flag == "--prompt" => Some(prompt.as_str()),
+            (Self::Claude | Self::Codex, [prompt]) => Some(prompt.as_str()),
+            _ => return Err(invalid()),
+        };
+        let mut expected = self.build_spawn_argv_with_policy(
+            prompt.unwrap_or(""),
+            display_name,
+            model,
+            effort,
+            policy,
+        )?;
+        if prompt.is_none() {
+            expected.truncate(expected.len() - 1 - usize::from(self == Self::Opencode));
+        }
+        if argv.len() != expected.len() || argv.get(1..) != expected.get(1..) {
+            return Err(invalid());
+        }
+        Ok(())
+    }
 }

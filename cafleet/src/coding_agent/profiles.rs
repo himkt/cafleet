@@ -1,11 +1,4 @@
 mod catalog;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "The approved Batch 2 service adapter consumes this component"
-    )
-)]
 mod detector;
 use super::CodingAgent;
 use crate::broker::runtime::PermissionDecision;

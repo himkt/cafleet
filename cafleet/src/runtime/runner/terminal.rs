@@ -30,6 +30,10 @@ pub(crate) struct TerminalState {
     parser: vt100::Parser<Callbacks>,
     sequence: u64,
 }
+pub(crate) enum TerminalObservationError {
+    Parser(CafleetError),
+    Observer(CafleetError),
+}
 
 impl TerminalState {
     pub(crate) fn new(size: TerminalSize) -> Result<Self> {
@@ -52,36 +56,60 @@ impl TerminalState {
         self.parser.process(bytes);
         Ok(())
     }
+    #[cfg(test)]
     pub(crate) fn feed_observed(
         &mut self,
         bytes: &[u8],
         observer: &mut impl ScreenObserver,
     ) -> Result<()> {
+        self.feed_observed_classified(bytes, observer)
+            .map_err(|failure| match failure {
+                TerminalObservationError::Parser(cause)
+                | TerminalObservationError::Observer(cause) => cause,
+            })
+    }
+    pub(crate) fn feed_observed_classified(
+        &mut self,
+        bytes: &[u8],
+        observer: &mut impl ScreenObserver,
+    ) -> std::result::Result<(), TerminalObservationError> {
         let mut failure = None;
         let mut start = 0;
         for (index, byte) in bytes.iter().enumerate() {
             if byte.is_ascii_control() {
                 if index > start {
-                    self.feed(&bytes[start..index])?;
+                    self.feed(&bytes[start..index])
+                        .map_err(TerminalObservationError::Parser)?;
                     if let Err(cause) = observer.observe(&self.snapshot()) {
+                        if observer.failures_are_fatal() {
+                            return Err(TerminalObservationError::Observer(cause));
+                        }
                         failure.get_or_insert(cause);
                     }
                 }
-                self.feed(&[*byte])?;
+                self.feed(&[*byte])
+                    .map_err(TerminalObservationError::Parser)?;
                 if let Err(cause) = observer.observe(&self.snapshot()) {
+                    if observer.failures_are_fatal() {
+                        return Err(TerminalObservationError::Observer(cause));
+                    }
                     failure.get_or_insert(cause);
                 }
                 start = index + 1;
             }
         }
         if start < bytes.len() {
-            self.feed(&bytes[start..])?;
+            self.feed(&bytes[start..])
+                .map_err(TerminalObservationError::Parser)?;
             if let Err(cause) = observer.observe(&self.snapshot()) {
+                if observer.failures_are_fatal() {
+                    return Err(TerminalObservationError::Observer(cause));
+                }
                 failure.get_or_insert(cause);
             }
         }
         match failure {
-            Some(cause) => Err(cause),
+            Some(cause) => Err(TerminalObservationError::Observer(cause)),
             None => Ok(()),
         }
     }

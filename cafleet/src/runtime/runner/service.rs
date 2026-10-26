@@ -78,12 +78,6 @@ impl Display for NonblockingFile {
         self.file.flush()
     }
 }
-struct OrderedObserver;
-impl ScreenObserver for OrderedObserver {
-    fn observe(&mut self, _: &ScreenSnapshot) -> Result<()> {
-        Ok(())
-    }
-}
 struct SignalGuards {
     ids: Vec<signal_hook::SigId>,
 }
@@ -163,34 +157,6 @@ impl Client {
         Ok(())
     }
 }
-fn lifecycle_event(
-    run: &RunRecord,
-    sequence: i64,
-    kind: RuntimeEventKind,
-    cause: Value,
-    screen_seq: u64,
-) -> Result<ObservedTransition> {
-    let evidence=storage::evidence::EvidencePolicy::metadata().apply(&json!({"backend":run.backend,"native_version":run.native_version,"profile_version":run.profile_version,"rule_id":"runner-lifecycle","screen_seq":screen_seq,"operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false}))?;
-    Ok(ObservedTransition {
-        run_id: run.run_id,
-        event_seq: sequence,
-        episode_seq: None,
-        kind,
-        classification: None,
-        observed_at: crate::time::format_utc(crate::time::now_utc()),
-        evidence_json: evidence,
-        close_reason: None,
-        cause_json: Some(cause),
-    })
-}
-fn exit_cause(exit: ChildExit) -> Value {
-    match exit {
-        ChildExit::Code(code) => json!({"kind":"native_exit","exit_code":code,"exit_signal":null}),
-        ChildExit::Signal(signal) => {
-            json!({"kind":"native_exit","exit_code":null,"exit_signal":signal})
-        }
-    }
-}
 struct LiveShutdown<'a> {
     pty: &'a mut PtySession,
     transport: &'a mut Transport,
@@ -199,25 +165,54 @@ struct LiveShutdown<'a> {
     raw: &'a mut RawTerminalGuard,
     writer: &'a mut EventWriter,
     clock: ShutdownClock,
-    run: &'a RunRecord,
-    sequence: &'a mut i64,
-    exit_sent: &'a mut bool,
+    controller: &'a mut ObservationController,
+    observation_clock: &'a dyn ObservationClock,
+}
+fn record_observation_failure(
+    controller: &mut ObservationController,
+    progress: &TransportProgress,
+    clock: &dyn ObservationClock,
+) -> Result<()> {
+    ensure(
+        progress.observation_error.is_some() == progress.observation_failure.is_some(),
+        "transport observation failure requires typed provenance",
+    )?;
+    if let Some(failure) = progress.observation_failure {
+        controller.observer_failed(failure, clock)?;
+    }
+    Ok(())
 }
 impl LiveShutdown<'_> {
-    fn send_exit(&mut self) -> Result<()> {
-        if !*self.exit_sent
-            && let Some(exit) = self.pty.try_wait()?
+    #[cfg(test)]
+    fn await_native_exit_before_parsing(&mut self, deadline: Instant) -> Result<()> {
+        if !self
+            .transport
+            .order_shutdown_parsing_after_native_exit(deadline)
         {
-            let event = lifecycle_event(
-                self.run,
-                *self.sequence,
-                RuntimeEventKind::RunnerExited,
-                exit_cause(exit),
-                self.transport.snapshot().screen_seq,
+            return Ok(());
+        }
+        while Instant::now() < deadline {
+            self.transport.prefetch_child_bytes(self.pty)?;
+            if self.pty.try_wait()?.is_some() {
+                self.send_exit()?;
+                if !self.controller.has_pending() {
+                    return Ok(());
+                }
+            }
+            std::thread::sleep(
+                Duration::from_millis(2).min(deadline.saturating_duration_since(Instant::now())),
+            );
+        }
+        Err(CafleetError::DeadlineExceeded)
+    }
+    fn send_exit(&mut self) -> Result<()> {
+        if let Some(exit) = self.pty.try_wait()? {
+            self.controller.child_exited(
+                exit,
+                &self.transport.snapshot(),
+                self.writer,
+                self.observation_clock,
             )?;
-            self.writer.submit(event)?;
-            *self.sequence += 1;
-            *self.exit_sent = true;
         }
         Ok(())
     }
@@ -228,16 +223,37 @@ impl ShutdownHost for LiveShutdown<'_> {
     }
     fn gate_programmatic_input(&mut self) {
         self.writer.set_deadline(self.clock.storage_deadline());
+        #[cfg(test)]
+        self.controller
+            .begin_capture_shutdown(self.clock.storage_deadline());
     }
     fn term_verified_descendants(&mut self) -> Result<()> {
         self.pty.signal_verified(nix::sys::signal::Signal::SIGTERM)
     }
     fn drain_and_reap_until(&mut self, deadline: Instant) -> Result<Option<ChildExit>> {
-        let mut observer = OrderedObserver;
+        #[cfg(test)]
+        self.transport
+            .set_observation_phase(ObservationPhase::ShutdownDrain);
+        #[cfg(test)]
+        self.await_native_exit_before_parsing(deadline)?;
         while Instant::now() < deadline {
-            let progress = self
-                .transport
-                .tick(self.input, self.pty, self.output, &mut observer)?;
+            let progress = self.transport.tick(
+                self.input,
+                self.pty,
+                self.output,
+                &mut self.controller.observer_for(
+                    self.writer,
+                    self.observation_clock,
+                    ObservationPhase::ShutdownDrain,
+                ),
+            )?;
+            record_observation_failure(self.controller, &progress, self.observation_clock)?;
+            self.controller.poll_for(
+                &self.transport.snapshot(),
+                self.writer,
+                self.observation_clock,
+                ObservationPhase::ShutdownDrain,
+            )?;
             self.send_exit()?;
             if !self.pty.survivors()? && progress.child_eof {
                 break;
@@ -295,7 +311,23 @@ impl ShutdownHost for LiveShutdown<'_> {
         if self.clock.remaining_storage_at(Instant::now()).is_zero() {
             return Err(crate::error::CafleetError::DeadlineExceeded);
         }
-        Ok(self.writer.finish(deadline))
+        while self.controller.has_pending() && Instant::now() < deadline {
+            self.controller.poll_for(
+                &self.transport.snapshot(),
+                self.writer,
+                self.observation_clock,
+                ObservationPhase::ShutdownDrain,
+            )?;
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        let (pending, gap) = self.writer.finish(deadline);
+        Ok((
+            pending
+                .checked_add(self.controller.pending_transition_count())
+                .ok_or_else(|| error("pending event count overflow"))?,
+            gap.checked_add(self.controller.unsaved_gap_count())
+                .ok_or_else(|| error("unsaved observation count overflow"))?,
+        ))
     }
     fn restore_terminal(&mut self) -> Result<()> {
         let mut errors = Vec::new();
@@ -316,7 +348,61 @@ impl ShutdownHost for LiveShutdown<'_> {
     }
 }
 
+struct RunnerDependencies {
+    catalog: crate::coding_agent::ProfileCatalog,
+    clock: Arc<dyn ObservationClock>,
+    writer_hooks: Option<Arc<dyn WriterHooks>>,
+    #[cfg(test)]
+    capture: Option<NativeCapturePort>,
+    #[cfg(test)]
+    observation_hooks: Option<Arc<dyn ObservationHooks>>,
+}
+#[cfg(test)]
+pub(crate) struct RunnerTestServices {
+    pub catalog: crate::coding_agent::ProfileCatalog,
+    pub clock: Arc<dyn ObservationClock>,
+    pub writer_hooks: Arc<dyn WriterHooks>,
+    pub capture: Option<NativeCapturePort>,
+    pub observation_hooks: Option<Arc<dyn ObservationHooks>>,
+}
+#[cfg(test)]
+pub(crate) fn run_with_test_services(
+    settings: &Settings,
+    descriptor: &Path,
+    services: RunnerTestServices,
+) -> Result<i32> {
+    run_service(
+        settings,
+        descriptor,
+        RunnerDependencies {
+            catalog: services.catalog,
+            clock: services.clock,
+            writer_hooks: Some(services.writer_hooks),
+            capture: services.capture,
+            observation_hooks: services.observation_hooks,
+        },
+    )
+}
 pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
+    run_service(
+        settings,
+        descriptor_path,
+        RunnerDependencies {
+            catalog: crate::coding_agent::ProfileCatalog::bundled()?,
+            clock: Arc::new(RealObservationClock),
+            writer_hooks: None,
+            #[cfg(test)]
+            capture: None,
+            #[cfg(test)]
+            observation_hooks: None,
+        },
+    )
+}
+fn run_service(
+    settings: &Settings,
+    descriptor_path: &Path,
+    mut services: RunnerDependencies,
+) -> Result<i32> {
     let mut conn = crate::db::connect(&settings.database_url)?;
     crate::diagnosis::classify_selected_schema(
         &conn,
@@ -347,6 +433,21 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
         handshake_deadline,
     )?;
     let mut run = storage::get_run(&conn, owner.run_id)?;
+    with_database_deadline(&mut conn, handshake_deadline, |conn| {
+        lock.validate(conn, &owner)?;
+        ensure(
+            run.status == RunStatus::Starting
+                && run.child_pid.is_none()
+                && run.child_start_identity.is_none()
+                && run.started_at.is_none()
+                && run.ended_at.is_none()
+                && run.recovery_origin_status.is_none()
+                && run.event_seq_reserved_through == 0,
+            "live startup requires fresh run",
+        )?;
+        let history:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM member_interactions WHERE run_id=?1) OR EXISTS(SELECT 1 FROM member_runtime_events WHERE run_id=?1)",[run.run_id],|row|row.get(0)).map_err(db_err)?;
+        ensure(!history, "live startup refuses durable history")
+    })?;
     let artifacts = RunArtifacts::from_run(&conn, &run)?;
     let terminal = FileDescriptor::dup(&std::io::stdin())
         .map_err(io_error)?
@@ -379,13 +480,42 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
     let range = with_database_deadline(&mut conn, handshake_deadline, |conn| {
         storage::reserve_event_sequences(conn, &owner)
     })?;
-    let mut sequence = *range.start();
-    let mut writer = EventWriter::start(
-        settings.database_url.clone(),
-        run.clone(),
-        lock.clone(),
-        artifacts.paths.outbox.clone(),
-    )?;
+    run = storage::get_run(&conn, owner.run_id)?;
+    let evidence_policy = match descriptor.spawn.evidence_policy["mode"].as_str() {
+        Some("metadata") => storage::evidence::EvidencePolicy::metadata(),
+        Some("redacted") => {
+            let ids = services.catalog.rule_ids();
+            let refs = ids.iter().map(String::as_str).collect::<Vec<_>>();
+            storage::evidence::EvidencePolicy::redacted(
+                &descriptor.spawn.evidence_policy["config"],
+                &refs,
+            )?
+        }
+        _ => return Err(error("invalid launch evidence policy")),
+    };
+    let mut controller =
+        ObservationController::new(&run, &services.catalog, evidence_policy, range)?;
+    #[cfg(test)]
+    if let Some(hooks) = services.observation_hooks.take() {
+        controller.set_observation_hooks(hooks.clone())?;
+        transport.set_observation_hooks(hooks)?;
+    }
+    let mut writer = if let Some(hooks) = services.writer_hooks.take() {
+        EventWriter::start_with_hooks(
+            settings.database_url.clone(),
+            run.clone(),
+            lock.clone(),
+            artifacts.paths.outbox.clone(),
+            hooks,
+        )?
+    } else {
+        EventWriter::start(
+            settings.database_url.clone(),
+            run.clone(),
+            lock.clone(),
+            artifacts.paths.outbox.clone(),
+        )?
+    };
     let terminate = Arc::new(AtomicBool::new(false));
     let resize = Arc::new(AtomicBool::new(false));
     let _signals = SignalGuards::new(terminate.clone(), resize.clone())?;
@@ -393,7 +523,6 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
     let mut next_client = 1u64;
     let mut creator_connection = None;
     let mut started = false;
-    let mut exit_sent = false;
     let mut shutdown_client = None;
     let mut failure = None;
     let mut native_exit = None;
@@ -521,6 +650,32 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
                                             )
                                         },
                                     )?;
+                                    #[cfg(test)]
+                                    if let Some(port) = &mut services.capture {
+                                        let (prepared, placement) = with_database_deadline(
+                                            &mut conn,
+                                            handshake_deadline,
+                                            |conn| {
+                                                let prepared = storage::get_run(conn, run.run_id)?;
+                                                let placement = broker::get_member(
+                                                    conn,
+                                                    run.member_id,
+                                                    run.fleet_id,
+                                                )?
+                                                .and_then(|member| member.placement)
+                                                .ok_or_else(|| {
+                                                    error("capture prepared placement missing")
+                                                })?;
+                                                Ok((prepared, placement))
+                                            },
+                                        )?;
+                                        port.bind_service_prepared(
+                                            &prepared,
+                                            &placement,
+                                            &descriptor.spawn,
+                                            services.clock.as_ref(),
+                                        )?;
+                                    }
                                     let child = pty.spawn(&descriptor.spawn)?;
                                     with_database_deadline(
                                         &mut conn,
@@ -536,16 +691,23 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
                                     )?;
                                     run = storage::get_run(&conn, run.run_id)?;
                                     started = true;
-                                    if run.coverage == Coverage::Unknown {
-                                        writer.submit(lifecycle_event(
-                                            &run,
-                                            sequence,
-                                            RuntimeEventKind::CoverageUnknown,
-                                            json!({"kind":"coverage_unknown"}),
-                                            transport.snapshot().screen_seq,
-                                        )?)?;
-                                        sequence += 1;
+                                    #[cfg(test)]
+                                    if let Some(mut port) = services.capture.take() {
+                                        let placement =
+                                            broker::get_member(&conn, run.member_id, run.fleet_id)?
+                                                .and_then(|member| member.placement)
+                                                .ok_or_else(|| {
+                                                    error("capture running placement missing")
+                                                })?;
+                                        port.finalize_source(&run, &placement, &child)?;
+                                        controller.attach_capture(port)?;
                                     }
+                                    controller.started(
+                                        &run,
+                                        &transport.snapshot(),
+                                        &writer,
+                                        services.clock.as_ref(),
+                                    )?;
                                     serde_json::to_value(Started {
                                         identity: ControlIdentity::from_run(&run),
                                         runner: process.clone(),
@@ -553,26 +715,23 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
                                     })
                                     .map_err(io_error)
                                 }
-                                "health" => {
-                                    with_database_deadline(
-                                        &mut conn,
-                                        Instant::now() + Duration::from_millis(10),
-                                        |conn| lock.validate(conn, &owner),
-                                    )?;
-                                    serde_json::to_value(HealthSnapshot {
-                                        identity: ControlIdentity::from_run(&run),
-                                        runner: process.clone(),
-                                        child: run
-                                            .child_pid
-                                            .zip(run.child_start_identity.clone())
-                                            .map(|(pid, start_identity)| ProcessIdentity {
-                                                pid,
-                                                start_identity,
-                                            }),
-                                        output_seq: transport.snapshot().screen_seq,
-                                    })
-                                    .map_err(io_error)
-                                }
+                                "health" => serde_json::to_value(HealthSnapshot {
+                                    identity: ControlIdentity::from_run(&run),
+                                    runner: process.clone(),
+                                    child: run.child_pid.zip(run.child_start_identity.clone()).map(
+                                        |(pid, start_identity)| ProcessIdentity {
+                                            pid,
+                                            start_identity,
+                                        },
+                                    ),
+                                    output_seq: transport.snapshot().screen_seq,
+                                    observation: if started {
+                                        Some(controller.health(&writer))
+                                    } else {
+                                        None
+                                    },
+                                })
+                                .map_err(io_error),
                                 "shutdown" => {
                                     shutdown_client = Some(client.id);
                                     Ok(Value::Null)
@@ -620,27 +779,47 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
                     )?;
                     if resize.swap(false, Ordering::AcqRel) {
                         transport.resize(&mut pty, terminal_size(&terminal)?)?;
+                        controller
+                            .observer_for(
+                                &writer,
+                                services.clock.as_ref(),
+                                ObservationPhase::Resize,
+                            )
+                            .observe(&transport.snapshot())?;
                     }
-                    let progress =
-                        transport.tick(&mut input, &mut pty, &mut output, &mut OrderedObserver)?;
+                    let progress = transport.tick(
+                        &mut input,
+                        &mut pty,
+                        &mut output,
+                        &mut controller.observer(&writer, services.clock.as_ref()),
+                    )?;
+                    record_observation_failure(
+                        &mut controller,
+                        &progress,
+                        services.clock.as_ref(),
+                    )?;
+                    controller.poll(&transport.snapshot(), &writer, services.clock.as_ref())?;
                     if progress.outer_eof {
                         return Ok(ShutdownClock::new(Instant::now()));
                     }
                     if let Some(exit) = pty.try_wait()? {
                         native_exit = Some(exit);
-                        writer.submit(lifecycle_event(
-                            &run,
-                            sequence,
-                            RuntimeEventKind::RunnerExited,
-                            exit_cause(exit),
-                            transport.snapshot().screen_seq,
-                        )?)?;
-                        sequence += 1;
-                        exit_sent = true;
+                        controller.child_exited(
+                            exit,
+                            &transport.snapshot(),
+                            &writer,
+                            services.clock.as_ref(),
+                        )?;
                         return Ok(ShutdownClock::new(Instant::now()));
                     }
                 }
-                std::thread::sleep(Duration::from_millis(2));
+                let sleep = controller
+                    .status()
+                    .next_deadline
+                    .map_or(Duration::from_millis(2), |at| {
+                        Duration::from_millis(2).min(at.saturating_duration_since(Instant::now()))
+                    });
+                std::thread::sleep(sleep);
             }
         },
     ));
@@ -664,13 +843,16 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
         raw: &mut raw,
         writer: &mut writer,
         clock,
-        run: &run,
-        sequence: &mut sequence,
-        exit_sent: &mut exit_sent,
+        controller: &mut controller,
+        observation_clock: services.clock.as_ref(),
     };
     let mut outcome = shutdown(&mut live, clock, native_exit);
     if let Some(cause) = failure {
         outcome.diagnostics.push(cause);
+        outcome.cleanup_state = CleanupState::Incomplete;
+    }
+    if let Some(cause) = controller.pending_error() {
+        outcome.diagnostics.push(cause.message().into_owned());
         outcome.cleanup_state = CleanupState::Incomplete;
     }
     if let Some(cause) = writer.diagnostic() {

@@ -231,7 +231,7 @@ pub fn get_event(conn: &Connection, event_id: i64) -> Result<RuntimeEventView, C
     Ok(view)
 }
 
-fn original(view: &RuntimeEventView) -> Result<ObservedTransition, CafleetError> {
+pub(crate) fn original(view: &RuntimeEventView) -> Result<ObservedTransition, CafleetError> {
     let payload = &view.event.payload_json;
     let close_reason = payload
         .get("close_reason")
@@ -266,7 +266,7 @@ fn original(view: &RuntimeEventView) -> Result<ObservedTransition, CafleetError>
     })
 }
 
-fn validate_transition(
+pub(crate) fn validate_transition(
     run: &RunRecord,
     transition: &ObservedTransition,
 ) -> Result<(), CafleetError> {

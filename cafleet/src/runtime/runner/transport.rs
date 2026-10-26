@@ -16,6 +16,12 @@ pub(crate) trait Display {
 }
 pub(crate) trait ScreenObserver {
     fn observe(&mut self, screen: &ScreenSnapshot) -> Result<()>;
+    fn failures_are_fatal(&self) -> bool {
+        false
+    }
+    fn parser_failure(&mut self) -> Result<()> {
+        Ok(())
+    }
 }
 #[derive(Default)]
 pub(crate) struct TransportProgress {
@@ -25,6 +31,7 @@ pub(crate) struct TransportProgress {
     pub human_bytes: usize,
     pub display_bytes: usize,
     pub observation_error: Option<String>,
+    pub observation_failure: Option<ObservationFailure>,
 }
 pub(crate) struct TransportLimits {
     pub input_bytes: usize,
@@ -38,6 +45,12 @@ pub(crate) struct Transport {
     display: VecDeque<u8>,
     outer_eof: bool,
     child_eof: bool,
+    #[cfg(test)]
+    observation_hooks: Option<std::sync::Arc<dyn ObservationHooks>>,
+    #[cfg(test)]
+    observation_phase: ObservationPhase,
+    #[cfg(test)]
+    deferred_child_bytes: Option<Vec<u8>>,
 }
 fn read_available(input: &mut impl ByteInput, capacity: usize) -> io::Result<Option<Vec<u8>>> {
     if capacity == 0 {
@@ -91,6 +104,12 @@ impl Transport {
             display: VecDeque::new(),
             outer_eof: false,
             child_eof: false,
+            #[cfg(test)]
+            observation_hooks: None,
+            #[cfg(test)]
+            observation_phase: ObservationPhase::ChildOutput,
+            #[cfg(test)]
+            deferred_child_bytes: None,
         })
     }
     pub(crate) fn tick(
@@ -115,17 +134,33 @@ impl Transport {
         write_pending(&mut self.input, self.limits.bytes_per_tick, |bytes| {
             pty.try_write(bytes)
         })?;
-        if !self.child_eof
-            && let Some(bytes) = read_available(
-                pty,
-                (self.limits.display_bytes - self.display.len()).min(self.limits.bytes_per_tick),
-            )
-            .map_err(io_error)?
-        {
+        if let Some(bytes) = self.read_child(pty)? {
             self.child_eof = bytes.is_empty();
             progress.child_bytes = bytes.len();
-            if let Err(cause) = self.terminal.feed_observed(&bytes, observer) {
+            #[cfg(test)]
+            if !bytes.is_empty()
+                && let Some(hooks) = &self.observation_hooks
+                && let Err(cause) =
+                    hooks.before(self.observation_phase, ObservationOperation::Parser)
+            {
                 progress.observation_error = Some(cause.message().into_owned());
+                progress.observation_failure = Some(ObservationFailure::Parser);
+            }
+            if progress.observation_failure.is_none() {
+                match self.terminal.feed_observed_classified(&bytes, observer) {
+                    Ok(()) => {}
+                    Err(TerminalObservationError::Parser(cause)) => {
+                        observer.parser_failure()?;
+                        return Err(cause);
+                    }
+                    Err(TerminalObservationError::Observer(cause)) => {
+                        if observer.failures_are_fatal() {
+                            return Err(cause);
+                        }
+                        progress.observation_error = Some(cause.message().into_owned());
+                        progress.observation_failure = Some(ObservationFailure::Sink);
+                    }
+                }
             }
             self.display.extend(bytes);
         }
@@ -133,6 +168,36 @@ impl Transport {
         progress.outer_eof = self.outer_eof;
         progress.child_eof = self.child_eof;
         Ok(progress)
+    }
+    fn read_child(&mut self, pty: &mut impl PtyIo) -> Result<Option<Vec<u8>>> {
+        #[cfg(test)]
+        if let Some(bytes) = self.deferred_child_bytes.take() {
+            return Ok(Some(bytes));
+        }
+        if self.child_eof {
+            return Ok(None);
+        }
+        read_available(
+            pty,
+            (self.limits.display_bytes - self.display.len()).min(self.limits.bytes_per_tick),
+        )
+        .map_err(io_error)
+    }
+    #[cfg(test)]
+    pub(super) fn prefetch_child_bytes(&mut self, pty: &mut impl PtyIo) -> Result<usize> {
+        if self.deferred_child_bytes.is_some() {
+            return Ok(0);
+        }
+        if let Some(bytes) = self.read_child(pty)? {
+            if bytes.is_empty() {
+                self.child_eof = true;
+            } else {
+                let count = bytes.len();
+                self.deferred_child_bytes = Some(bytes);
+                return Ok(count);
+            }
+        }
+        Ok(0)
     }
     pub(crate) fn flush_display(&mut self, display: &mut impl Display) -> Result<usize> {
         let count = write_pending(&mut self.display, self.limits.bytes_per_tick, |bytes| {
@@ -153,6 +218,31 @@ impl Transport {
     pub(crate) fn snapshot(&self) -> ScreenSnapshot {
         self.terminal.snapshot()
     }
+    #[cfg(test)]
+    pub(super) fn set_observation_hooks(
+        &mut self,
+        hooks: std::sync::Arc<dyn ObservationHooks>,
+    ) -> Result<()> {
+        ensure(
+            self.observation_hooks.is_none(),
+            "transport observation hooks install once",
+        )?;
+        self.observation_hooks = Some(hooks);
+        Ok(())
+    }
+    #[cfg(test)]
+    pub(super) fn set_observation_phase(&mut self, phase: ObservationPhase) {
+        self.observation_phase = phase;
+    }
+    #[cfg(test)]
+    pub(super) fn order_shutdown_parsing_after_native_exit(
+        &self,
+        deadline: std::time::Instant,
+    ) -> bool {
+        self.observation_hooks
+            .as_ref()
+            .is_some_and(|hooks| hooks.order_shutdown_parsing_after_native_exit(deadline))
+    }
     pub(crate) fn pending_input_bytes(&self) -> usize {
         self.input.len()
     }
@@ -160,6 +250,10 @@ impl Transport {
         self.display.len()
     }
     pub(crate) fn discard_display_tail(&mut self) -> usize {
+        #[cfg(test)]
+        if let Some(bytes) = self.deferred_child_bytes.take() {
+            self.display.extend(bytes);
+        }
         let count = self.display.len();
         self.display.clear();
         count

@@ -1,15 +1,16 @@
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "The approved Batch 2 service adapter consumes this component"
-    )
-)]
+#[cfg(test)]
+mod native_capture;
+#[cfg(test)]
+pub(crate) use native_capture::*;
+mod observation;
+pub(crate) use observation::*;
+mod outbox;
+pub(crate) use outbox::*;
+pub(crate) use writer::{EventWriter, InertWriterHooks, WriterBoundary, WriterHooks};
 mod episodes;
 pub(crate) use crate::coding_agent::{
     MatchEvidence, ObservationKind, ScreenObservation, SemanticFingerprint,
 };
-#[cfg(test)]
 pub(crate) use episodes::*;
 mod artifacts;
 mod codec;
@@ -30,6 +31,8 @@ pub(crate) use creation::*;
 pub(crate) use health::*;
 pub(crate) use lifecycle::*;
 pub(crate) use process::*;
+#[cfg(test)]
+pub(crate) use service::{RunnerTestServices, run_with_test_services};
 pub(crate) use service::{run, terminal_size};
 pub(crate) use terminal::*;
 pub(crate) use transport::*;

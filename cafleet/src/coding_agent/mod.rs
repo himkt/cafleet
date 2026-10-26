@@ -4,7 +4,9 @@ mod profiles;
 #[cfg(test)]
 pub(crate) use profiles::ScreenRegion;
 pub use profiles::{AnswerCapability, NativeCapabilities, ProfileCatalog};
-pub(crate) use profiles::{MatchEvidence, ObservationKind, ScreenObservation, SemanticFingerprint};
+pub(crate) use profiles::{
+    Detector, MatchEvidence, ObservationKind, ScreenObservation, SemanticFingerprint,
+};
 
 #[cfg(test)]
 mod policy_contract_tests;

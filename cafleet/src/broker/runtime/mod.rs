@@ -1,3 +1,6 @@
+pub(crate) use events::{
+    original as original_transition, validate_transition as validate_observed_transition,
+};
 mod events;
 pub mod evidence;
 mod inputs;
