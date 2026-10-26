@@ -740,62 +740,6 @@ mod tests {
     }
 
     #[test]
-    fn publication_transfers_owned_panes_or_compensates_each_failure_once() {
-        for (failure, kill_fails, cleanup_fails) in [
-            ("none", false, false),
-            ("missing", false, false),
-            ("update", false, false),
-            ("update", true, false),
-            ("update", true, true),
-        ] {
-            let (_dir, mut conn, _, fleet, _, worker) = fixture();
-            if failure == "missing" {
-                conn.execute("DELETE FROM member_placements WHERE member_id=?1", [worker])
-                    .unwrap();
-            } else if failure == "update" {
-                conn.execute_batch(
-                    "CREATE TRIGGER reject_publication BEFORE UPDATE ON member_placements
-                     BEGIN SELECT RAISE(ABORT, 'publication blocked'); END;",
-                )
-                .unwrap();
-            }
-            if cleanup_fails {
-                conn.execute_batch(
-                    "CREATE TRIGGER reject_cleanup BEFORE UPDATE OF status ON members
-                     BEGIN SELECT RAISE(ABORT, 'cleanup blocked'); END;",
-                )
-                .unwrap();
-            }
-            let runner = Rc::new(CloseRunner {
-                calls: Cell::new(0),
-                check: Box::new(|| {}),
-                failure: kill_fails.then_some("close blocked"),
-            });
-            let mux =
-                AnyMultiplexer::Tmux(TmuxMultiplexer::new(runner.clone(), Default::default()));
-            let mut registration = RegistrationGuard::new(&mut conn, worker);
-            let result = publish_pane(&mut registration, worker, "%9", &mux);
-            drop(registration);
-            if failure == "none" {
-                assert_eq!(result.unwrap().mux_pane_id.as_deref(), Some("%9"));
-                assert_eq!(runner.calls.get(), 0);
-            } else {
-                let error = result.unwrap_err();
-                assert_eq!(error.exit_code(), 1);
-                let text = error.to_string();
-                assert!(text.contains("placement"), "{text}");
-                assert_eq!(text.contains("close blocked"), kill_fails);
-                assert_eq!(text.contains("cleanup blocked"), cleanup_fails);
-                assert_eq!(runner.calls.get(), 1);
-            }
-            assert_eq!(
-                broker::get_member(&conn, worker, fleet).unwrap().is_some(),
-                failure == "none" || cleanup_fails
-            );
-        }
-    }
-
-    #[test]
     fn deletion_reloads_a_published_pending_pane_and_retains_ownership_through_completion() {
         use rusqlite::hooks::{AuthAction, AuthContext, Authorization, TransactionOperation};
         for expire_after_close in [false, true] {

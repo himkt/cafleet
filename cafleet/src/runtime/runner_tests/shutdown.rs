@@ -55,7 +55,7 @@ impl ShutdownHost for Host {
         self.deadlines.push(("drain", deadline));
         self.now = self.now.max(deadline);
         self.call("drain")?;
-        Ok(self.native.clone())
+        Ok(self.native)
     }
     fn kill_verified_survivors(&mut self) -> Result<(), CafleetError> {
         self.call("kill")

@@ -19,10 +19,9 @@ impl OwnedPty {
         }
     }
     fn stop(&mut self) -> ShutdownOutcome {
-        let clock = self
+        let clock = *self
             .clock
-            .get_or_insert_with(|| ShutdownClock::new(Instant::now()))
-            .clone();
+            .get_or_insert_with(|| ShutdownClock::new(Instant::now()));
         let outcome = self.session.shutdown(clock);
         self.cleaned = outcome.cleanup_state == CleanupState::Complete;
         outcome
@@ -43,19 +42,19 @@ fn collect(session: &mut PtySession) -> (Vec<u8>, ChildExit) {
     let mut status = None;
     loop {
         let mut bytes = [0u8; 4096];
-        match session.try_read(&mut bytes) {
-            Ok(0) if status.is_some() => return (output, status.unwrap()),
-            Ok(count) => output.extend_from_slice(&bytes[..count]),
-            Err(error) if error.kind() == ErrorKind::WouldBlock => {}
-            Err(error) => panic!("fixture PTY read failed: {error}"),
+        match (session.try_read(&mut bytes), status) {
+            (Ok(0), Some(exit)) => return (output, exit),
+            (Ok(count), _) => output.extend_from_slice(&bytes[..count]),
+            (Err(error), _) if error.kind() == ErrorKind::WouldBlock => {}
+            (Err(error), _) => panic!("fixture PTY read failed: {error}"),
         }
         if status.is_none() {
             status = session.try_wait().unwrap();
         }
-        if status.is_some() {
+        if let Some(exit) = status {
             let mut tail = [0u8; 4096];
             match session.try_read(&mut tail) {
-                Ok(0) => return (output, status.unwrap()),
+                Ok(0) => return (output, exit),
                 Ok(count) => output.extend_from_slice(&tail[..count]),
                 Err(error) if error.kind() == ErrorKind::WouldBlock => {}
                 Err(error) => panic!("fixture PTY tail failed: {error}"),
@@ -197,7 +196,7 @@ fn runner_real_shutdown_kills_and_reaps_a_term_ignoring_owned_child_within_the_s
     let start = Instant::now();
     let outcome = owned.stop();
     assert!(start.elapsed() < Duration::from_millis(4750));
-    assert_eq!(outcome.cleanup_state, CleanupState::Complete);
+    assert_eq!(outcome.cleanup_state, CleanupState::Complete, "{outcome:?}");
     assert_eq!(outcome.native_exit, Some(ChildExit::Signal(9)));
     assert_eq!(
         nix::sys::wait::waitpid(
@@ -237,7 +236,7 @@ fn runner_real_shutdown_closes_a_slave_retaining_descendant_and_preserves_the_na
     let outcome = owned.stop();
     assert!(start.elapsed() < Duration::from_millis(4750));
     assert_eq!(outcome.native_exit, Some(ChildExit::Code(0)));
-    assert_eq!(outcome.cleanup_state, CleanupState::Complete);
+    assert_eq!(outcome.cleanup_state, CleanupState::Complete, "{outcome:?}");
     let observation = std::process::Command::new("/bin/ps")
         .args(["-o", "stat=", "-p", &pid.to_string()])
         .output()
