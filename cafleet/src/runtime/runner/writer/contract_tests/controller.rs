@@ -17,6 +17,19 @@ fn assert_retained_pressure<T>(attempt: Result<T>, status: ObservationStatus) {
     }
 }
 
+fn event_at(fixture: &WriterFixture, sequence: i64) -> storage::RuntimeEventView {
+    let id = fixture
+        .fixture
+        .conn
+        .query_row(
+            "SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND event_seq=?2",
+            rusqlite::params![fixture.fixture.run.run_id, sequence],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap();
+    storage::get_event(&fixture.fixture.conn, id).unwrap()
+}
+
 #[test]
 fn runner_batch2_controller_accepts_only_the_exact_fresh_initial_committed_grant() {
     let mut fixture = WriterFixture::new();
@@ -484,32 +497,39 @@ fn runner_batch2_controller_retains_both_superseded_originals_when_the_first_sub
     for index in 0..32 {
         clock.set(index * 200);
         terminal
-            .feed_observed(
-                &form(&format!("write fixture-{index:02}.txt")),
-                &mut controller.observer(&writer, &clock),
-            )
+            .feed(&form(&format!("write fixture-{index:02}.txt")))
+            .unwrap();
+        controller
+            .observer(&writer, &clock)
+            .observe(&terminal.snapshot())
             .unwrap();
         clock.set(index * 200 + 100);
         controller
             .poll(&terminal.snapshot(), &writer, &clock)
             .unwrap();
+        assert_eq!(writer.status().pending_count, index * 2 + 1);
+        assert!(!writer.status().pending_evidence);
+        assert!(!controller.has_pending());
     }
     assert_eq!(writer.status().pending_count, 63);
     let refusal = String::from_utf8(form("write fixture-31.txt"))
         .unwrap()
         .replace("Synthetic permission request", "Synthetic refusal result");
     clock.set(6400);
-    terminal
-        .feed_observed(
-            refusal.as_bytes(),
-            &mut controller.observer(&writer, &clock),
-        )
+    terminal.feed(refusal.as_bytes()).unwrap();
+    controller
+        .observer(&writer, &clock)
+        .observe(&terminal.snapshot())
         .unwrap();
     clock.set(6500);
     controller
         .poll(&terminal.snapshot(), &writer, &clock)
         .unwrap();
     assert_eq!(writer.status().pending_count, 64);
+    assert!(!writer.status().pending_evidence);
+    assert!(!writer.status().degraded);
+    assert!(!controller.has_pending());
+    assert_eq!(committed(&fixture), 0);
     clock.set(6550);
     terminal
         .feed_observed(
@@ -518,17 +538,22 @@ fn runner_batch2_controller_retains_both_superseded_originals_when_the_first_sub
         )
         .unwrap();
     clock.set(6600);
+    let replacement = form("write final-original.txt");
+    assert_eq!(replacement[0], 0x1b);
     terminal
-        .feed_observed(
-            &form("write final-original.txt"),
-            &mut controller.observer(&writer, &clock),
-        )
+        .feed_observed(&replacement[..1], &mut controller.observer(&writer, &clock))
+        .unwrap();
+    let closing_sequence = terminal.snapshot().screen_seq;
+    terminal
+        .feed_observed(&replacement[1..], &mut controller.observer(&writer, &clock))
         .unwrap();
     clock.set(6700);
     let attempt = controller.poll(&terminal.snapshot(), &writer, &clock);
     assert_retained_pressure(attempt, controller.status());
     let original_sequence = terminal.snapshot().screen_seq;
     assert!(controller.status().retained_transition);
+    assert!(controller.status().retained_draft);
+    assert_eq!(writer.status().pending_count, 64);
     assert!(matches!(
         controller.status().eligibility,
         InputEligibility::Hold(_)
@@ -538,28 +563,159 @@ fn runner_batch2_controller_retains_both_superseded_originals_when_the_first_sub
         &mut controller.observer(&writer, &clock),
     );
     assert_retained_pressure(attempt, controller.status());
+    assert!(terminal.snapshot().screen_seq > original_sequence);
+    assert!(controller.status().retained_transition);
+    assert!(controller.status().retained_draft);
     drop(release);
     wait_until(|| {
         let attempt = controller.poll(&terminal.snapshot(), &writer, &clock);
         assert_retained_pressure(attempt, controller.status());
         committed(&fixture) >= 66
     });
-    let event = fixture
+    let closed = event_at(&fixture, 65);
+    let opened = event_at(&fixture, 66);
+    assert_eq!(closed.event.kind, RuntimeEventKind::InteractionClosed);
+    assert_eq!(closed.event.payload_json["close_reason"], "superseded");
+    for (view, sequence, episode, screen) in [
+        (&closed, 65, 32, closing_sequence),
+        (&opened, 66, 33, original_sequence),
+    ] {
+        let interaction = view.interaction.as_ref().unwrap();
+        assert_eq!(view.event.run_id, fixture.fixture.run.run_id);
+        assert_eq!(view.event.event_seq, sequence);
+        assert_eq!(view.event.interaction_id, Some(interaction.interaction_id));
+        assert_eq!(interaction.episode_seq, episode);
+        assert_eq!(view.event.observed_at, NOW);
+        assert_eq!(view.event.payload_json["evidence"]["screen_seq"], screen);
+    }
+    assert_eq!(opened.event.kind, RuntimeEventKind::InteractionOpened);
+    assert_eq!(writer.finish(deadline()), (0, 0));
+    assert_eq!(event_at(&fixture, 65).event, closed.event);
+    assert_eq!(event_at(&fixture, 66).event, opened.event);
+}
+
+#[test]
+fn runner_batch2_controller_actual_adapter_retains_foreign_episode_refresh_and_holds_until_drain() {
+    let mut fixture = WriterFixture::new();
+    configure(&mut fixture);
+    let hooks = Arc::new(Hooks::default());
+    hooks.pause(WriterBoundary::Receive);
+    let mut writer = start(&fixture, hooks.clone());
+    let release = Release(hooks.clone());
+    hooks.wait(WriterBoundary::Receive, 1);
+    let clock = Clock::new();
+    let mut controller = ObservationController::new(
+        &fixture.fixture.run,
+        &catalog(),
+        storage::evidence::EvidencePolicy::metadata(),
+        1..=256,
+    )
+    .unwrap();
+    let child = ChildGuard::spawn(std::path::Path::new("/bin/cat"), &[]);
+    running(&mut fixture, &child.identity);
+    let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
+    controller
+        .started(&fixture.fixture.run, &terminal.snapshot(), &writer, &clock)
+        .unwrap();
+    let mut opening_sequences = Vec::new();
+    for index in 0..2 {
+        clock.set(index * 200);
+        terminal
+            .feed_observed(
+                &form(&format!("write collision-{index}.txt")),
+                &mut controller.observer(&writer, &clock),
+            )
+            .unwrap();
+        opening_sequences.push(terminal.snapshot().screen_seq);
+        clock.set(index * 200 + 100);
+        controller
+            .poll(&terminal.snapshot(), &writer, &clock)
+            .unwrap();
+    }
+    assert_eq!(writer.status().pending_count, 3);
+    assert!(writer.status().pending_evidence);
+    assert!(!writer.status().degraded);
+    assert!(!controller.has_pending());
+    clock.set(400);
+    terminal
+        .feed_observed(b"\x1b", &mut controller.observer(&writer, &clock))
+        .unwrap();
+    let retained_sequence = terminal.snapshot().screen_seq;
+    let status = controller.status();
+    assert!(status.retained_evidence);
+    assert!(!status.retained_transition);
+    assert!(!status.retained_draft);
+    assert!(status.gap_count > 0);
+    assert_eq!(status.eligibility, InputEligibility::Hold(GateReason::Gap));
+    assert!(writer.status().pending_evidence);
+    assert!(writer.status().degraded);
+    assert!(
+        writer
+            .status()
+            .diagnostic
+            .as_deref()
+            .unwrap()
+            .contains("refresh episode collision")
+    );
+    terminal
+        .feed_observed(
+            &form("write later-unclassified.txt"),
+            &mut controller.observer(&writer, &clock),
+        )
+        .unwrap();
+    assert!(terminal.snapshot().screen_seq > retained_sequence);
+    assert!(controller.status().retained_evidence);
+    assert_eq!(
+        controller.status().eligibility,
+        InputEligibility::Hold(GateReason::Gap)
+    );
+    assert_eq!(writer.status().pending_count, 3);
+    assert_eq!(committed(&fixture), 0);
+    drop(release);
+    wait_until(|| {
+        controller
+            .poll(&terminal.snapshot(), &writer, &clock)
+            .unwrap();
+        !controller.has_pending()
+            && !writer.status().pending_evidence
+            && writer.status().pending_count == 0
+            && !writer.status().degraded
+    });
+    let first = event_at(&fixture, 1);
+    let closed = event_at(&fixture, 2);
+    let second = event_at(&fixture, 3);
+    assert_eq!(first.event.kind, RuntimeEventKind::InteractionOpened);
+    assert_eq!(closed.event.kind, RuntimeEventKind::InteractionClosed);
+    assert_eq!(closed.event.payload_json["close_reason"], "superseded");
+    assert_eq!(second.event.kind, RuntimeEventKind::InteractionOpened);
+    assert_eq!(first.interaction.as_ref().unwrap().episode_seq, 1);
+    assert_eq!(closed.interaction.as_ref().unwrap().episode_seq, 1);
+    assert_eq!(second.interaction.as_ref().unwrap().episode_seq, 2);
+    assert_eq!(
+        first.event.payload_json["evidence"]["screen_seq"],
+        opening_sequences[0]
+    );
+    assert_eq!(
+        closed.event.payload_json["evidence"]["screen_seq"],
+        opening_sequences[0] + 1
+    );
+    assert_eq!(
+        second.event.payload_json["evidence"]["screen_seq"],
+        opening_sequences[1]
+    );
+    assert_eq!(
+        second.interaction.as_ref().unwrap().evidence_json["screen_seq"],
+        retained_sequence
+    );
+    let episodes: i64 = fixture
         .fixture
         .conn
         .query_row(
-            "SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND event_seq=66",
+            "SELECT COUNT(*) FROM member_interactions WHERE run_id=?1",
             [fixture.fixture.run.run_id],
-            |row| row.get::<_, i64>(0),
+            |row| row.get(0),
         )
         .unwrap();
-    let original = storage::get_event(&fixture.fixture.conn, event)
-        .unwrap()
-        .event;
-    assert_eq!(original.kind, RuntimeEventKind::InteractionOpened);
-    assert_eq!(
-        original.payload_json["evidence"]["screen_seq"],
-        original_sequence
-    );
-    writer.finish(deadline());
+    assert_eq!(episodes, 2);
+    assert_eq!(writer.finish(deadline()), (0, 0));
 }
