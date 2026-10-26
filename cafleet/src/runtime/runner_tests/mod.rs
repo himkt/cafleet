@@ -8,6 +8,7 @@ mod launch_readiness;
 mod lifecycle;
 mod mechanisms;
 pub(crate) mod owned_child;
+mod recovery;
 mod shutdown;
 mod terminal;
 mod transport;
