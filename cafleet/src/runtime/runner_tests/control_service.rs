@@ -47,15 +47,11 @@ fn wire_frame(value: &Value) -> Vec<u8> {
 struct Wire(UnixStream);
 
 impl Wire {
-    fn connect(path: &Path) -> Self {
-        let stream = UnixStream::connect(path).unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(1)))
-            .unwrap();
-        stream
-            .set_write_timeout(Some(Duration::from_secs(1)))
-            .unwrap();
-        Self(stream)
+    fn connect(path: &Path) -> std::io::Result<Self> {
+        let stream = UnixStream::connect(path)?;
+        stream.set_read_timeout(Some(Duration::from_secs(1)))?;
+        stream.set_write_timeout(Some(Duration::from_secs(1)))?;
+        Ok(Self(stream))
     }
 
     fn exchange(&mut self, value: &Value) -> std::io::Result<Value> {
@@ -109,6 +105,39 @@ struct ServiceFixture {
 }
 
 impl ServiceFixture {
+    fn connection_diagnostic(&mut self, stage: &str) -> String {
+        let status = self.child.try_wait();
+        let socket = std::fs::symlink_metadata(&self._artifacts.paths.control_socket);
+        let stderr = self.child.stderr.as_mut().unwrap();
+        let flags = nix::fcntl::OFlag::from_bits_retain(
+            nix::fcntl::fcntl(&*stderr, nix::fcntl::FcntlArg::F_GETFL).unwrap(),
+        );
+        nix::fcntl::fcntl(
+            &*stderr,
+            nix::fcntl::FcntlArg::F_SETFL(flags | nix::fcntl::OFlag::O_NONBLOCK),
+        )
+        .unwrap();
+        let mut bytes = Vec::new();
+        let read = stderr.take(64 * 1024).read_to_end(&mut bytes);
+        format!(
+            "stage={stage}; runner_pid={}; prepared={}; exit={status:?}; socket={socket:?}; stderr_read={read:?}; stderr={:?}",
+            self.child.id(),
+            self.prepared.is_some(),
+            String::from_utf8_lossy(&bytes),
+        )
+    }
+
+    fn connect(&mut self, stage: &str) -> Wire {
+        match Wire::connect(&self._artifacts.paths.control_socket) {
+            Ok(wire) => wire,
+            Err(cause) => panic!(
+                "owned runner connection failed: {cause}; {}; backtrace={}",
+                self.connection_diagnostic(stage),
+                std::backtrace::Backtrace::force_capture(),
+            ),
+        }
+    }
+
     fn new(missing_executable: bool) -> Self {
         let mut fixture = Fixture::new();
         fixture
@@ -193,23 +222,36 @@ impl ServiceFixture {
                 .unwrap(),
         );
         let until = Instant::now() + Duration::from_secs(3);
-        while !owned._artifacts.paths.control_socket.exists() {
+        loop {
             if let Some(status) = owned.child.try_wait().unwrap() {
-                let mut diagnostic = String::new();
-                owned
-                    .child
-                    .stderr
-                    .as_mut()
-                    .unwrap()
-                    .read_to_string(&mut diagnostic)
-                    .unwrap();
-                panic!("owned runner stopped before socket creation: {status}; {diagnostic}");
+                panic!(
+                    "owned runner stopped before initial connection: {status}; {}",
+                    owned.connection_diagnostic("startup"),
+                );
             }
             assert!(
                 Instant::now() < until,
-                "owned runner did not bind its private socket"
+                "owned runner did not accept its initial connection: {}",
+                owned.connection_diagnostic("startup timeout"),
             );
-            std::thread::sleep(Duration::from_millis(5));
+            match Wire::connect(&owned._artifacts.paths.control_socket) {
+                Ok(wire) => {
+                    owned.creator = Some(wire);
+                    break;
+                }
+                Err(cause)
+                    if matches!(
+                        cause.kind(),
+                        ErrorKind::NotFound | ErrorKind::ConnectionRefused
+                    ) => {}
+                Err(cause) => panic!(
+                    "owned runner initial connection failed: {cause}; {}",
+                    owned.connection_diagnostic("startup"),
+                ),
+            }
+            std::thread::sleep(
+                Duration::from_millis(5).min(until.saturating_duration_since(Instant::now())),
+            );
         }
         owned
     }
@@ -219,7 +261,10 @@ impl ServiceFixture {
     }
 
     fn prepare(&mut self) {
-        let mut creator = Wire::connect(&self._artifacts.paths.control_socket);
+        let mut creator = self
+            .creator
+            .take()
+            .expect("connected initial creator stream");
         let mut request = self.request("prepare", &ControlIdentity::from_run(&self.fixture.run));
         request["remaining_ms"] = json!(9000);
         let reply = creator
@@ -271,8 +316,8 @@ impl ServiceFixture {
         started
     }
 
-    fn health(&self) -> HealthSnapshot {
-        let mut client = Wire::connect(&self._artifacts.paths.control_socket);
+    fn health(&mut self) -> HealthSnapshot {
+        let mut client = self.connect("health");
         let reply = client
             .exchange(&self.request("health", self.prepared.as_ref().unwrap()))
             .unwrap();
@@ -453,7 +498,7 @@ fn runner_review_control_stale_start_preserves_running_child_health_and_manual_i
         }
         let mut request = fixture.request("start", &identity);
         request["pane_id"] = json!("%9");
-        let mut client = Wire::connect(&fixture._artifacts.paths.control_socket);
+        let mut client = fixture.connect("stale start");
         assert_rejected(&client.exchange(&request));
         assert_eq!(fixture.health().child, Some(started.child));
         fixture.assert_manual_io();
@@ -472,7 +517,7 @@ fn runner_review_control_invalid_protocol_versions_leave_the_running_child_avail
         } else {
             request.as_object_mut().unwrap().remove("protocol_version");
         }
-        let mut client = Wire::connect(&fixture._artifacts.paths.control_socket);
+        let mut client = fixture.connect("invalid protocol");
         assert_rejected(&client.exchange(&request));
         assert_eq!(fixture.health().child, Some(started.child.clone()));
     }
@@ -487,14 +532,14 @@ fn runner_review_control_noncreator_start_is_isolated_before_and_after_spawn() {
     fixture.publish();
     let mut request = fixture.request("start", fixture.prepared.as_ref().unwrap());
     request["pane_id"] = json!("%9");
-    let mut noncreator = Wire::connect(&fixture._artifacts.paths.control_socket);
+    let mut noncreator = fixture.connect("noncreator before start");
     assert_rejected(&noncreator.exchange(&request));
     assert_eq!(fixture.health().child, None);
     let reply = fixture.start().unwrap();
     assert!(reply.get("error").is_none(), "{reply}");
     let started: Started = serde_json::from_value(reply["result"].clone()).unwrap();
     fixture.read_until("review-native-ready");
-    let mut second = Wire::connect(&fixture._artifacts.paths.control_socket);
+    let mut second = fixture.connect("noncreator after start");
     assert_rejected(&second.exchange(&request));
     assert_eq!(fixture.health().child, Some(started.child));
     fixture.assert_manual_io();
@@ -516,7 +561,7 @@ fn runner_review_control_disconnected_reply_preserves_health_and_manual_io() {
     let mut fixture = ServiceFixture::new(false);
     let started = fixture.start_running();
     fixture.stop_for_disconnect();
-    let mut disconnected = Wire::connect(&fixture._artifacts.paths.control_socket);
+    let mut disconnected = fixture.connect("disconnected health peer");
     disconnected
         .0
         .write_all(&wire_frame(
