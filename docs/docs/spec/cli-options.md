@@ -828,7 +828,7 @@ Wrapped create/show preserves its existing text row and appends `Runtime: run=RU
 
 `cafleet input show INPUT_ID [--json]` and `cafleet input reconcile INPUT_ID --disposition DISPOSITION --evidence-ref REFERENCE [--json]` return `{input}` with the durable row ordered `input_id,run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,disposition,evidence_ref,permission_response`. The nullable audit object and additional text line follow the [permission contract](#permission-response-audit-output). Text is `Input: INPUT_ID run=RUN_ID kind=KIND state=STATE disposition=DISPOSITION message=MESSAGE_ID`, with `-` for absent optional fields.
 
-Reconciliation is Director-owned. CLI disposition tokens are `submitted`, `not-submitted` and `abandoned-uncertain`, persisted with underscores as defined by the [receipt contract](member-runtime.md#input-arbitration-and-the-original-native-answer). Require a nonempty evidence reference, synchronize with the current owner before CAS settlement and preserve uncertainty while an active writer cannot be ruled out. Settlement sends no input and establishes no native command result.
+Reconciliation is Director-owned. CLI disposition tokens are `submitted`, `not-submitted` and `abandoned-uncertain`, persisted with underscores as defined by the [receipt contract](member-runtime.md#input-arbitration-and-the-original-native-answer). Require a nonempty evidence reference, synchronize with the current owner before CAS settlement and preserve uncertainty while an active writer cannot be ruled out. Settlement sends no input and establishes no native command result. One original five-second budget covers the pane wait, current-owner synchronization, supplied-connection SQL and socket exchange. If the writer is unreachable, use the [receipt-only exclusive ownership contract](member-runtime.md#input-arbitration-and-the-original-native-answer), retaining the original identity-matching run lock and preserving lifecycle history; unavailable proof retains uncertainty. Ordinary member recovery keeps its completed-terminal no-work behavior.
 
 All event/input IDs are positive database-assigned integers; malformed IDs/options fail with usage exit 2. Missing rows and invalid stored state fail explicitly. Interaction fields are ordered `interaction_id,run_id,episode_seq,classification,evidence_digest,opened_at,evidence_json,closed_at,close_reason`.
 
@@ -850,9 +850,9 @@ The inspection JSON is `{request}`. Its object has ordered keys:
 event_id,message_id,member_id,fleet_id,director_member_id,run_id,owner_epoch,interaction_id,episode_seq,classification,visibility,backend,native_version,profile_version,answer_profile_version,answer_rule_id,answer_capability,capability_reason,supported_decisions,request_token,output_seq,evidence,missing_evidence
 ```
 
-IDs/epoch/episode are positive integers; `output_seq` is an unsigned integer. `message_id` is the verified inbox message ID. `classification` is the current interactive class or null, and `visibility` is `visible`, `obscured`, `not_visible` or `unknown`. Native/detector/answer-profile identifiers are nullable when unavailable. `answer_capability` is `tested` or `unknown`; `capability_reason` is null when the current request is answerable and otherwise a bounded explanation. `supported_decisions` contains the currently tested subset of `allow,deny`, in that order; a blocked or unsupported request returns an empty array and null token.
+IDs/epoch/episode are positive integers; `output_seq` is an unsigned integer. `message_id` is the verified inbox message ID. `classification` is the current interactive class or null, and `visibility` is `visible`, `obscured`, `not_visible` or `unknown`. Native/detector/answer-profile identifiers are nullable when unavailable. `answer_profile_version` is shared by the currently supported decision plans. `answer_rule_id` is their common rule when unique, including the actual rule for one supported decision; differing supported rules yield null. Respond derives its chosen nonnullable rule internally for the immutable audit. `answer_capability` is `tested` or `unknown`; `capability_reason` is null when the current request is answerable and otherwise a bounded explanation. `supported_decisions` contains the currently tested subset of `allow,deny`, in that order; a blocked or unsupported request returns an empty array and null token.
 
-`request_token` is a nullable random lowercase 64-hex value issued by the current runner, bound to the request and invalidated under the [response contract](member-runtime.md#request-bound-permission-responses). `evidence` is the complete post-policy evidence object. `missing_evidence` is an array drawn in order from `operation,arguments,cwd,environment,targets,effects,choice_scope`, identifying facts unavailable from this policy-filtered inspection; the Director obtains necessary facts through authorized current capture/routed evidence before deciding. The token is an identity fence, independently of risk evidence and authorization.
+`request_token` is a nullable random lowercase 64-hex value issued by the current runner, bound to the request and invalidated under the [response contract](member-runtime.md#request-bound-permission-responses). `evidence` is the complete post-policy evidence object. `missing_evidence` is an array drawn in order from `operation,arguments,cwd,environment,targets,effects,choice_scope`, identifying facts unavailable from this policy-filtered inspection; the Director obtains necessary facts through authorized current capture/routed evidence before deciding. The token is an identity fence, independently of risk evidence and authorization. Its binding includes the full immutable decision-to-plan set, with each profile, rule and stage identity; a null common-rule field supplies no permission to select a replacement plan.
 
 Inspection text is:
 
@@ -880,6 +880,18 @@ status,input_id,member_id,run_id,owner_epoch,interaction_id,event_id,decision,de
 ```
 
 `status` is `accepted`, `held`, `rejected` or `uncertain`; `input_id` is nullable until a durable row exists. Decision/source retain their command enums. `stage` is `zero_bytes`, `partial`, `submitted` or `unknown`; accepted has submitted stage, held/rejected has zero-byte stage, and uncertainty reports the observed partial/submitted stage or unknown. `output_seq` is a nullable unsigned integer when no current sequence can be established. `reason` is a nullable bounded explanation. A matching settled/submitted receipt returns accepted without typing; another settled disposition returns rejected without typing and explains that the key is consumed.
+
+Historical response projection uses only the durable row and immutable audit. Return the original input identity, decision/source and audit `expected_owner_epoch` as `owner_epoch`, with `output_seq=null`; current owner/screen evidence supplies no replacement value. It performs no lock, live probe, control exchange or database mutation.
+
+| Durable receipt | Retry status and stage |
+|---|---|
+| `accepted`, or `settled/submitted` | `accepted/submitted`. |
+| `in_progress` or `uncertain` | `uncertain/unknown`; retain original transmission uncertainty and claim. |
+| `settled/not_submitted` or `settled/abandoned_uncertain` | `rejected/zero_bytes` with a consumed-key reason; preserve the original disposition and claim. |
+| `ready` | The separate exact-metadata live-validation path; retain its original epoch/token binding. |
+
+For a consumed key, `zero_bytes` describes this retry only and supplies no zero-byte evidence about the original attempt. A prior abandoned-uncertain claim remains possibly transmitted. This projection reads retained history even after current owner/interaction eligibility is lost.
+
 
 Response text is:
 

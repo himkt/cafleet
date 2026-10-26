@@ -1,6 +1,6 @@
 # Member runtime procedure
 
-New members run inside a CAFleet-owned PTY runner. Native launch policy, detector coverage, composer-input coverage and request-bound answer coverage are separate. Omitted launch policy retains backend defaults; explicit `member create --permission-mode MODE` selects only that member launch. Unknown coverage preserves manual terminal operation. The bundled [runtime contract](runtime/spec/member-runtime.md) owns identity, privacy, capabilities and durable receipts.
+New members run inside a CAFleet-owned PTY runner. Native launch policy, detector coverage, empty-composer observation, prompt submission, native-exec submission and request-bound answer coverage are separate. Omitted launch policy retains backend defaults; explicit `member create --permission-mode MODE` selects only that member launch. Unknown coverage preserves manual terminal operation. The bundled [runtime contract](runtime/spec/member-runtime.md) owns identity, privacy, capabilities and durable receipts.
 
 ## Consume observed interactions
 
@@ -17,11 +17,11 @@ Native and managed policy remain authoritative. A response selects a tested sing
 
 ## Reconcile generated input
 
-Wrapped preview, prompt and native-exec input uses the pinned runner. Candidate/open interactions, drafts, work, unknown profiles and suspect/degraded observers hold previews and reject explicit composer input before bytes. A tested empty composer permits literal text and its native submit key without Escape. Existing unwrapped members retain their narrower legacy behavior.
+Wrapped preview, prompt and native-exec input uses the pinned runner. Candidate/open interactions, drafts, work, unknown profiles and suspect/degraded observers hold previews and reject explicit composer input before bytes. A verified empty composer plus the exact-version executable submission plan permits literal text and its measured native submit key without Escape. Native exec requires its independent tested shell plan. Existing unwrapped members retain their narrower legacy behavior.
 
 Permission response is a separate input kind with an independently tested exact-version answer profile. The runner validates the current visible permission request and random token, resolves available manual input/output and atomically reserves its audit/episode claim/receipt before sending native answer keys. Human input or a request/ownership/visibility change invalidates the token. The CLI accepts semantic decisions rather than arbitrary keys.
 
-Preserve known `input_id` from stdout or uncertainty errors and inspect `cafleet input show INPUT_ID --json`. Durable operation keys and episode claims prevent a possibly submitted answer from being repeated through another invocation/key. Only the Director records an evidence-based `input reconcile` disposition after synchronizing with the live writer or establishing exclusive recovery. Settlement sends zero bytes; a claim is released only with synchronized zero-byte/no-writer proof, independently of its disposition label.
+Preserve known `input_id` from stdout or uncertainty errors and inspect `cafleet input show INPUT_ID --json`. Durable operation keys and episode claims prevent a possibly submitted answer from being repeated through another invocation/key. Only the Director records an evidence-based `input reconcile` disposition after synchronizing with the live writer or establishing exclusive recovery. Settlement sends zero bytes; a claim is released only with synchronized zero-byte/no-writer proof, independently of its disposition label. Unreachable-owner reconciliation retains the original pane/run locks and positive termination evidence while preserving lifecycle history under the [receipt ownership contract](runtime/spec/member-runtime.md#input-arbitration-and-the-original-native-answer); missing proof keeps uncertainty.
 
 A returned member-tool denial still includes the exact attempted command, absolute cwd, necessary environment overrides and actual refusal. A screen event supplements that route. A separately authorized native command is a new action rather than proof that the pending request was answered.
 
