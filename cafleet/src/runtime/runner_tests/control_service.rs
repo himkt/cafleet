@@ -12,7 +12,6 @@ use nix::sys::signal::{Signal, kill};
 use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
 use nix::unistd::Pid;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
 use super::owned_child::OwnedChild;
 use super::*;
@@ -130,7 +129,7 @@ impl ServiceFixture {
         assert_eq!(selected["configuration"], json!(path));
         assert_eq!(
             selected["sha256"],
-            format!("{:x}", Sha256::digest(std::fs::read(path).unwrap()))
+            sha256_hex(&std::fs::read(path).unwrap())
         );
     }
     fn connection_diagnostic(&mut self, stage: &str) -> String {

@@ -115,9 +115,16 @@ fn runner_batch2_controller_quiet_poll_opens_one_episode_with_the_unchanged_pars
         .poll(&terminal.snapshot(), &writer, &clock)
         .unwrap();
     wait_until(|| committed(&fixture) == 1);
-    let event = storage::get_event(&fixture.fixture.conn, 1).unwrap().event;
+    let view = storage::get_event(&fixture.fixture.conn, 1).unwrap();
+    let interaction = view
+        .interaction
+        .as_ref()
+        .expect("opening links its persisted episode");
+    assert_eq!(interaction.run_id, fixture.fixture.run.run_id);
+    assert_eq!(interaction.episode_seq, 1);
+    let event = &view.event;
     assert_eq!(event.kind, RuntimeEventKind::InteractionOpened);
-    assert_eq!(event.episode_seq, Some(1));
+    assert_eq!(event.interaction_id, Some(interaction.interaction_id));
     assert_eq!(event.payload_json["evidence"]["screen_seq"], sequence);
     assert_eq!(terminal.snapshot().screen_seq, sequence);
     writer.finish(deadline());

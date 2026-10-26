@@ -1,7 +1,6 @@
 use super::*;
 use crate::coding_agent::ProfileCatalog;
 use crate::error::CafleetError;
-use sha2::{Digest, Sha256};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::sync::Arc;
 
@@ -54,7 +53,7 @@ pub(super) fn run_configured(
     let value: Value =
         serde_json::from_slice(&std::fs::read(config).map_err(io_error)?).map_err(io_error)?;
     let catalog = ProfileCatalog::from_definitions(&value["catalog"])?;
-    private_write(&config.parent().unwrap().join("config-selected.json"),&serde_json::to_vec(&json!({"configuration":config,"sha256":format!("{:x}",Sha256::digest(std::fs::read(config).map_err(io_error)?))})).map_err(io_error)?);
+    private_write(&config.parent().unwrap().join("config-selected.json"),&serde_json::to_vec(&json!({"configuration":config,"sha256":sha256_hex(&std::fs::read(config).map_err(io_error)?)})).map_err(io_error)?);
     let services = RunnerTestServices {
         catalog,
         clock: Arc::new(Clock),
@@ -147,7 +146,7 @@ pub(super) fn capture(fixture: &mut Fixture, spec: &mut SpawnSpec) {
         &evidence,
         b"{\"kind\":\"synthetic\",\"version\":\"synthetic-0.0.1\"}",
     );
-    let hash = |path: &Path| format!("{:x}", Sha256::digest(std::fs::read(path).unwrap()));
+    let hash = |path: &Path| sha256_hex(&std::fs::read(path).unwrap());
     let current = std::env::current_exe().unwrap();
     let executable = Path::new(&spec.argv[0]);
     let producer = json!({"schema_version":1,"kind":"synthetic","source_manifest_ref":evidence,"source_manifest_sha256":hash(&evidence),"libtest_executable_path":current,"libtest_executable_sha256":hash(&current),"parser_version":"0.18.1","collector_version":"1","catalog_origin":"bundled_unknown","native_executable":{"path":executable,"sha256":hash(executable),"version":"synthetic-0.0.1","version_evidence_ref":evidence},"launch_evidence_ref":evidence,"environment_evidence_ref":evidence});

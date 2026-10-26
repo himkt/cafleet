@@ -2,7 +2,6 @@ use super::*;
 use crate::broker::records::Placement;
 use crate::coding_agent::{ProfileCatalog, ScreenRegion};
 use crate::runtime::runner_tests::owned_child::OwnedChild;
-use sha2::{Digest, Sha256};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -22,7 +21,7 @@ pub(super) fn private_write(path: &Path, bytes: &[u8]) {
     file.sync_all().unwrap();
 }
 pub(super) fn digest(path: &Path) -> String {
-    format!("{:x}", Sha256::digest(std::fs::read(path).unwrap()))
+    sha256_hex(&std::fs::read(path).unwrap())
 }
 pub(super) fn catalog() -> ProfileCatalog {
     ProfileCatalog::from_definitions(

@@ -27,10 +27,6 @@ impl Hooks {
     pub(super) fn pause(&self, boundary: WriterBoundary) {
         self.state.lock().unwrap().paused[index(boundary)] = true;
     }
-    pub(super) fn release(&self, boundary: WriterBoundary) {
-        self.state.lock().unwrap().paused[index(boundary)] = false;
-        self.changed.notify_all();
-    }
     fn release_for_cleanup(&self) {
         let mut state = match self.state.lock() {
             Ok(state) => state,

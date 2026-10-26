@@ -1,6 +1,5 @@
 use super::observation_services::{count, health, private_write, synthetic, wait_until};
 use super::*;
-use sha2::{Digest, Sha256};
 
 #[test]
 fn runner_batch2_service_private_capture_publishes_manifest_last_and_keeps_native_work_running() {
@@ -27,10 +26,7 @@ fn runner_batch2_service_private_capture_publishes_manifest_last_and_keeps_nativ
     let artifact = std::fs::read(output.join("service-pair.complete.json"))
         .expect("manifest publication follows complete synced artifact");
     assert_eq!(manifest["artifact_bytes"], artifact.len() as u64);
-    assert_eq!(
-        manifest["artifact_sha256"],
-        format!("{:x}", Sha256::digest(&artifact))
-    );
+    assert_eq!(manifest["artifact_sha256"], sha256_hex(&artifact));
     let result: Value = serde_json::from_slice(&artifact).unwrap();
     assert_eq!(result["status"], "complete");
     assert_eq!(result["samples"].as_array().unwrap().len(), 2);

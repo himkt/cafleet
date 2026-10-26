@@ -15,7 +15,7 @@ struct FaultState {
 #[derive(Clone, Default)]
 struct FaultIo(Arc<Mutex<FaultState>>);
 impl FaultIo {
-    fn bytes(&self) -> Vec<u8> {
+    fn snapshot_bytes(&self) -> Vec<u8> {
         self.0.lock().unwrap().data.get_ref().clone()
     }
     fn from_bytes(bytes: Vec<u8>) -> Self {
@@ -107,13 +107,13 @@ fn runner_batch2_outbox_frames_pin_big_endian_length_checksum_and_original_ident
     let value = transition(&fixture, 1);
     let syncs = io.0.lock().unwrap().syncs;
     outbox.append_synced(&value, deadline()).unwrap();
-    assert_eq!(io.bytes(), frame(&value));
+    assert_eq!(io.snapshot_bytes(), frame(&value));
     assert!(io.0.lock().unwrap().syncs > syncs);
     let scan = outbox.scan(deadline()).unwrap();
     assert_eq!(scan.frames.len(), 1);
     assert_eq!(scan.frames[0].transition, value);
     assert_eq!(scan.frames[0].start, 0);
-    assert_eq!(scan.frames[0].end, io.bytes().len() as u64);
+    assert_eq!(scan.frames[0].end, io.snapshot_bytes().len() as u64);
     assert!(scan.incomplete_tail.is_none());
     assert_eq!(scan.maximum_event_seq, Some(1));
 }
@@ -141,7 +141,7 @@ fn runner_batch2_outbox_matching_duplicates_reconcile_but_conflicting_sequence_b
     )
     .and_then(|mut outbox| outbox.scan(deadline()));
     assert!(result.is_err());
-    assert_eq!(io.bytes(), bytes);
+    assert_eq!(io.snapshot_bytes(), bytes);
 }
 
 #[test]
@@ -180,9 +180,9 @@ fn runner_batch2_outbox_total_capacity_includes_frame_overhead_and_rejects_befor
         value.cause_json = None;
         let size = frame(&value).len();
         if used + size > 16 * 1024 * 1024 {
-            let before = io.bytes();
+            let before = io.snapshot_bytes();
             assert!(outbox.append_synced(&value, until).is_err());
-            assert_eq!(io.bytes(), before);
+            assert_eq!(io.snapshot_bytes(), before);
             assert!(used <= 16 * 1024 * 1024);
             return;
         }
@@ -201,7 +201,7 @@ fn runner_batch2_outbox_short_writes_preserve_the_complete_frame() {
     let mut outbox = open(&fixture, io.clone());
     let value = transition(&fixture, 1);
     outbox.append_synced(&value, deadline()).unwrap();
-    assert_eq!(independent_frames(&io.bytes()), vec![value]);
+    assert_eq!(independent_frames(&io.snapshot_bytes()), vec![value]);
 }
 
 #[test]
@@ -225,7 +225,7 @@ fn runner_batch2_outbox_reopen_recovers_complete_original_frames_in_order() {
     );
     assert_eq!(scan.maximum_event_seq, Some(3));
     assert!(scan.incomplete_tail.is_none());
-    assert_eq!(independent_frames(&io.bytes()), values);
+    assert_eq!(independent_frames(&io.snapshot_bytes()), values);
 }
 
 #[test]
@@ -242,7 +242,7 @@ fn runner_batch2_outbox_each_incomplete_final_component_retains_the_valid_prefix
         assert_eq!(scan.frames.len(), 1, "cut={cut}");
         assert_eq!(scan.frames[0].transition, transition(&fixture, 1));
         assert!(scan.incomplete_tail.is_some(), "cut={cut}");
-        assert_eq!(io.bytes(), bytes);
+        assert_eq!(io.snapshot_bytes(), bytes);
     }
 }
 
@@ -259,7 +259,7 @@ fn runner_batch2_outbox_append_diagnoses_and_truncates_only_an_incomplete_tail()
         .append_synced(&transition(&fixture, 2), deadline())
         .unwrap();
     assert_eq!(
-        independent_frames(&io.bytes()),
+        independent_frames(&io.snapshot_bytes()),
         vec![transition(&fixture, 1), transition(&fixture, 2)]
     );
     assert!(
@@ -305,7 +305,7 @@ fn runner_batch2_outbox_completed_corruption_preserves_all_original_bytes() {
         )
         .and_then(|mut outbox| outbox.scan(deadline()));
         assert!(result.is_err(), "{corrupt}");
-        assert_eq!(io.bytes(), bytes);
+        assert_eq!(io.snapshot_bytes(), bytes);
     }
 }
 
@@ -323,7 +323,7 @@ fn runner_batch2_outbox_oversized_declared_length_fails_before_large_reads() {
     .and_then(|mut outbox| outbox.scan(deadline()));
     assert!(result.is_err());
     assert!(io.0.lock().unwrap().largest_read <= 36);
-    assert_eq!(io.bytes(), u32::MAX.to_be_bytes());
+    assert_eq!(io.snapshot_bytes(), u32::MAX.to_be_bytes());
 }
 
 #[test]
@@ -338,7 +338,7 @@ fn runner_batch2_outbox_sync_failure_leaves_a_complete_recoverable_pending_frame
             .is_err()
     );
     assert_eq!(
-        independent_frames(&io.bytes()),
+        independent_frames(&io.snapshot_bytes()),
         vec![transition(&fixture, 1)]
     );
     io.0.lock().unwrap().fail_sync = false;
@@ -370,7 +370,7 @@ fn runner_batch2_outbox_partial_write_failure_is_an_explicit_tail_without_a_comm
     let scan = outbox.scan(deadline()).unwrap();
     assert!(scan.frames.is_empty());
     assert!(scan.incomplete_tail.is_some());
-    assert_eq!(io.bytes().len(), 40);
+    assert_eq!(io.snapshot_bytes().len(), 40);
 }
 
 #[test]
@@ -379,7 +379,7 @@ fn runner_batch2_outbox_compaction_retains_committed_prefix_until_every_frame_is
     let values = [transition(&fixture, 1), transition(&fixture, 2)];
     let io = FaultIo::from_bytes(values.iter().flat_map(frame).collect());
     let mut outbox = open(&fixture, io.clone());
-    let original = io.bytes();
+    let original = io.snapshot_bytes();
     storage::persist_transition(
         &mut fixture.fixture.conn,
         &fixture.fixture.run.owner(),
@@ -394,7 +394,7 @@ fn runner_batch2_outbox_compaction_retains_committed_prefix_until_every_frame_is
             deadline(),
         )
         .unwrap();
-    assert_eq!(io.bytes(), original);
+    assert_eq!(io.snapshot_bytes(), original);
     storage::persist_transition(
         &mut fixture.fixture.conn,
         &fixture.fixture.run.owner(),
@@ -409,7 +409,7 @@ fn runner_batch2_outbox_compaction_retains_committed_prefix_until_every_frame_is
             deadline(),
         )
         .unwrap();
-    assert!(io.bytes().is_empty());
+    assert!(io.snapshot_bytes().is_empty());
     assert!(io.0.lock().unwrap().syncs > 0);
 }
 
@@ -431,7 +431,7 @@ fn runner_batch2_outbox_compaction_checks_event_message_association_before_remov
         .conn
         .execute("UPDATE messages SET text='corrupt durable association'", [])
         .unwrap();
-    let before = io.bytes();
+    let before = io.snapshot_bytes();
     assert!(
         outbox
             .compact_committed(
@@ -441,7 +441,7 @@ fn runner_batch2_outbox_compaction_checks_event_message_association_before_remov
             )
             .is_err()
     );
-    assert_eq!(io.bytes(), before);
+    assert_eq!(io.snapshot_bytes(), before);
 }
 
 #[test]
@@ -458,7 +458,7 @@ fn runner_batch2_outbox_truncate_failure_preserves_committed_originals_for_retry
     let io = FaultIo::from_bytes(frame(&value));
     let mut outbox = open(&fixture, io.clone());
     io.0.lock().unwrap().fail_truncate = true;
-    let before = io.bytes();
+    let before = io.snapshot_bytes();
     assert!(
         outbox
             .compact_committed(
@@ -468,7 +468,7 @@ fn runner_batch2_outbox_truncate_failure_preserves_committed_originals_for_retry
             )
             .is_err()
     );
-    assert_eq!(io.bytes(), before);
+    assert_eq!(io.snapshot_bytes(), before);
     io.0.lock().unwrap().fail_truncate = false;
     outbox
         .compact_committed(
@@ -477,7 +477,7 @@ fn runner_batch2_outbox_truncate_failure_preserves_committed_originals_for_retry
             deadline(),
         )
         .unwrap();
-    assert!(io.bytes().is_empty());
+    assert!(io.snapshot_bytes().is_empty());
 }
 
 #[test]
@@ -493,7 +493,7 @@ fn runner_batch2_outbox_expired_deadline_and_stale_epoch_have_zero_content_effec
             )
             .is_err()
     );
-    assert!(io.bytes().is_empty());
+    assert!(io.snapshot_bytes().is_empty());
     fixture
         .fixture
         .conn
@@ -507,7 +507,7 @@ fn runner_batch2_outbox_expired_deadline_and_stale_epoch_have_zero_content_effec
             .append_synced(&transition(&fixture, 1), deadline())
             .is_err()
     );
-    assert!(io.bytes().is_empty());
+    assert!(io.snapshot_bytes().is_empty());
 }
 
 #[test]

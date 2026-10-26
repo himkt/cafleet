@@ -15,11 +15,22 @@ mod transport;
 mod native_capture;
 use rusqlite::Connection;
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
 use super::runner::*;
 use crate::broker::runtime::{self as storage, *};
 use crate::broker::tests as common;
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut encoded = String::with_capacity(64);
+    for byte in Sha256::digest(bytes) {
+        for nibble in [byte >> 4, byte & 0x0f] {
+            encoded.push(char::from(b"0123456789abcdef"[usize::from(nibble)]));
+        }
+    }
+    encoded
+}
 
 pub(super) struct Fixture {
     pub(super) _dir: TempDir,
