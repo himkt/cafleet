@@ -4,6 +4,8 @@ use tempfile::TempDir;
 
 use crate::broker::tests as common;
 
+mod permission_migration;
+
 const NOW: &str = "2026-10-26T10:00:00.000000+00:00";
 
 struct Fixture {

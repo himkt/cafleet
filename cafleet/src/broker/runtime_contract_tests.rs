@@ -8,6 +8,9 @@ use super::runtime::{self as storage, *};
 use super::tests as common;
 use crate::output::format_json;
 
+mod permission_responses;
+mod versioned_events;
+
 const NOW: &str = "2026-10-26T10:00:00.000000+00:00";
 const SECRET: &str = "fixture-secret-194-unique";
 
@@ -437,7 +440,7 @@ fn opening_commits_one_complete_event_interaction_and_director_message() {
     ] {
         assert_eq!(payload[key], id, "{key}");
     }
-    assert_eq!(payload["schema_version"], 1);
+    assert_eq!(payload["schema_version"], 2);
     assert_eq!(payload["decision_outcome"], "unknown");
     assert_eq!(payload["native_request_id"], Value::Null);
     assert_eq!(payload["source"], "runner_screen");
@@ -1375,8 +1378,10 @@ fn event_and_input_read_wrappers_follow_the_approved_order_and_compact_text() {
             "message_id",
             "disposition",
             "evidence_ref",
+            "permission_response",
         ],
     );
+    assert_eq!(output["input"]["permission_response"], Value::Null);
     assert_eq!(
         crate::output::format_input_operation(&input),
         format!(
