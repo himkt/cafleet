@@ -339,14 +339,21 @@ fn create(
     let placement_view = publish_pane(&mut registration, member_id, &pane_id, &mux)?;
     drop(span);
 
+    let runtime = broker::runtime::member_runtime(registration.connection(), member_id)?;
     let result = json!({
         "member_id": member_id,
         "name": name,
         "registered_at": registered.registered_at,
         "placement": presentation::placement(&placement_view),
+        "runtime": runtime.as_ref().map(presentation::runtime_snapshot),
     });
     emit(json, &result, || {
-        format_member(&registered, &placement_view)
+        let mut text = format_member(&registered, &placement_view);
+        if let Some(runtime) = &runtime {
+            text.push('\n');
+            text.push_str(&crate::output::format_runtime_snapshot(runtime));
+        }
+        text
     });
     Ok(())
 }

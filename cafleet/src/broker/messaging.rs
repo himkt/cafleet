@@ -64,9 +64,20 @@ pub fn send_message(
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(db_err)?;
-    let fleet_id = sender_fleet(&tx, from_member_id)?;
-    super::fleets::require_live_fleet(&tx, fleet_id)?;
-    let recipient: Option<(i64, MemberStatus)> = tx
+    let message = insert_message_validated(&tx, from_member_id, to_member_id, text)?;
+    tx.commit().map_err(db_err)?;
+    Ok(message)
+}
+
+pub(crate) fn insert_message_validated(
+    conn: &Connection,
+    from_member_id: i64,
+    to_member_id: i64,
+    text: &str,
+) -> Result<MessageRecord, CafleetError> {
+    let fleet_id = sender_fleet(conn, from_member_id)?;
+    super::fleets::require_live_fleet(conn, fleet_id)?;
+    let recipient: Option<(i64, MemberStatus)> = conn
         .query_row(
             "SELECT fleet_id, status FROM members WHERE member_id=?1",
             [to_member_id],
@@ -93,13 +104,12 @@ pub fn send_message(
     let now = format_utc(now_utc());
     // A self-send owes no keystroke, so it is settled at insert.
     let notified_at = (to_member_id == from_member_id).then_some(&now);
-    let message = tx.query_row(
+    let message = conn.query_row(
         &format!("INSERT INTO messages (from_member_id, to_member_id, created_at, status_state, status_timestamp, text, notified_at)
          VALUES (?1, ?2, ?3, 'input_required', ?3, ?4, ?5) RETURNING {MESSAGE_COLUMNS}"),
         params![from_member_id, to_member_id, now, text, notified_at],
         map_message_row,
     ).map_err(db_err)?;
-    tx.commit().map_err(db_err)?;
     Ok(message)
 }
 

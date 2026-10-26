@@ -1,5 +1,8 @@
 mod formatters;
 mod render;
+mod runtime;
+
+pub use runtime::{format_input_operation, format_runtime_event, format_runtime_snapshot};
 
 pub use formatters::{
     format_fleet_create, format_member, format_member_detail, format_member_list, format_message,

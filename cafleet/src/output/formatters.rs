@@ -29,12 +29,17 @@ pub fn format_messages(messages: &[MessageRecord], limit: usize) -> String {
 }
 
 pub fn format_member_detail(member: &MemberRecord) -> String {
-    format!(
+    let mut text = format!(
         "{} {} {}",
         member.member_id,
         member.name,
         member.status.as_str()
-    )
+    );
+    if let Some(runtime) = &member.runtime {
+        text.push('\n');
+        text.push_str(&super::format_runtime_snapshot(runtime));
+    }
+    text
 }
 
 pub fn format_fleet_create(fleet: &CreatedFleet) -> String {

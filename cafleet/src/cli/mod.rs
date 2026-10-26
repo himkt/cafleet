@@ -4,6 +4,7 @@ pub(crate) mod fleet;
 pub(crate) mod helpers;
 pub(crate) mod member;
 mod message;
+mod runtime;
 mod setup;
 
 #[cfg(test)]
@@ -42,6 +43,10 @@ enum Command {
     /// Durable point-to-point messages.
     #[command(subcommand)]
     Message(message::MessageCommand),
+    #[command(subcommand)]
+    Event(runtime::EventCommand),
+    #[command(subcommand)]
+    Input(runtime::InputCommand),
 }
 
 pub fn run() -> Result<(), CafleetError> {
@@ -92,6 +97,8 @@ fn dispatch(settings: &Settings, command: Command) -> Result<(), CafleetError> {
                 Command::Fleet(cmd) => fleet::run(&mut conn, settings, cmd, deadline),
                 Command::Member(cmd) => member::run(&mut conn, settings, cmd, deadline),
                 Command::Message(cmd) => message::run(&mut conn, settings, cmd),
+                Command::Event(cmd) => runtime::event(&conn, cmd),
+                Command::Input(cmd) => runtime::input(&conn, cmd),
                 Command::Setup(_) | Command::Doctor(_) => unreachable!("handled above"),
             }
         }

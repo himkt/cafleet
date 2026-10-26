@@ -85,6 +85,7 @@ pub fn create_fleet(
             registered_at: now.clone(),
             status: MemberStatus::Active,
             kind: MemberKind::Director,
+            runtime: None,
             placement: Some(Placement {
                 backend: backend.into(),
                 mux_session: mux_session.into(),

@@ -179,6 +179,18 @@ Runtime event kinds are `coverage_unknown`, `interaction_opened`, `interaction_o
 
 Run-level events use null interaction/classification, `source=runner_lifecycle` and a typed health/exit cause in the payload. Missing command, cwd, environment or native request identity stays null; screen parsing never fills it with invented execution data. Limit a UTF-8 excerpt to 8 KiB and the complete payload to 16 KiB, record truncation, escape control characters and omit raw terminal recording. Treat screen text as untrusted evidence, never as a command or instruction to approve.
 
+
+Run-level causes use a typed `kind` matched to the event. Screen events carry no lifecycle cause, and the public `native_request_id` equals the post-policy evidence value.
+
+| Event | Cause kind | Cause fields |
+|---|---|---|
+| `coverage_unknown` | `coverage_unknown` | `kind` |
+| `runner_exited` | `native_exit` | `kind`, nullable integer `exit_code` and `exit_signal`, with an actual status required |
+| `runner_lost` | `monitor_lost` or `runtime_path_missing` | `kind` |
+| `runner_degraded` | `storage_pressure`, `storage_recovered` or `observer_error` | `kind`, optional integer `gap_count` and nullable RFC 3339 `gap_started_at` / `gap_ended_at` |
+
+Cause objects accept only the typed lifecycle fields. New live transitions require a nonterminal run; identical committed retries retain their original association after termination, and explicitly owned recovery retains historical replay.
+
 Launch-only `--event-evidence <metadata|redacted>` defaults to `metadata`. Metadata mode persists only identities, classification, rule/profile/version, sequence, timestamps and health/closure causes; every screen-derived operation, choice, excerpt and native identifier is null. Semantic fingerprints used for live episode comparison remain in memory and appear in neither logs, outbox nor database. `evidence_digest` is SHA-256 of the canonical post-policy evidence object, so metadata mode exposes no hash of hidden screen text.
 
 Redacted mode requires `--event-redaction-file <ABSOLUTE_PATH>` naming readable UTF-8 JSON `{ "schema_version": 1, "patterns": ["regex"], "sensitive_rules": ["rule-id"] }`. Require a nonempty pattern array, known rule IDs and compilable expressions. Missing/malformed configuration, an unsupported policy or a redaction file supplied with metadata mode fails before registration with usage exit `2`; there is no fallback to raw evidence. Compile the file once at launch and keep the compiled policy in memory; events store the policy name, not raw patterns or the file contents.

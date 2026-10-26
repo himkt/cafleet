@@ -68,6 +68,7 @@ pub struct MemberRecord {
     pub status: MemberStatus,
     pub kind: MemberKind,
     pub placement: Option<Placement>,
+    pub runtime: Option<super::runtime::RuntimeSnapshot>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
