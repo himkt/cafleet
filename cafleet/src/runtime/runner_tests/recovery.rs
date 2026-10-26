@@ -15,6 +15,7 @@ mod history;
 mod identity;
 mod missing_paths;
 mod replay;
+mod terminal_tail;
 
 type TestResult<T> = std::result::Result<T, CafleetError>;
 const NOW: &str = "2026-10-26T20:00:00.000000+00:00";

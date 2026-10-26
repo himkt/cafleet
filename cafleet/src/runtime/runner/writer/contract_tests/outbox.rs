@@ -2,6 +2,7 @@ use super::*;
 use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
 
 mod review;
+mod terminal_tail;
 
 #[derive(Default)]
 struct FaultState {
