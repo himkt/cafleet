@@ -141,8 +141,10 @@ fn runner_collector_f2_channel_selected_compiled_cap_remains_bounded_after_valid
     let policy =
         NativeCapturePolicy::from_launch_with_compiler(&fixture.spec, &[], &catalog(), &compiler)
             .unwrap();
-    let mut limits = NativeCaptureLimits::default();
-    limits.max_compiled_regex_bytes = 128;
+    let limits = NativeCaptureLimits {
+        max_compiled_regex_bytes: 128,
+        ..NativeCaptureLimits::default()
+    };
     assert!(native_capture_channel(&fixture.fixture.run, policy, limits).is_err());
     assert_eq!(compiler.calls.lock().unwrap().len(), 1);
 }
