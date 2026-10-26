@@ -786,6 +786,8 @@ fn capture(
 
 #[cfg(test)]
 mod tests {
+    mod recovery_deletion;
+
     use super::*;
     use crate::broker::tests as common;
     use crate::input::{Deadline, PaneLock};

@@ -3,6 +3,8 @@ pub mod system;
 
 #[cfg(test)]
 mod runner_tests;
+#[cfg(test)]
+pub(crate) use runner_tests::owned_child::OwnedChild;
 
 use crate::config::Settings;
 use crate::error::CafleetError;
