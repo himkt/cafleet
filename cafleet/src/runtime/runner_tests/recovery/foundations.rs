@@ -184,14 +184,14 @@ fn runner_recovery_lock_transfer_commit_failure_returns_no_uncommitted_owner() {
     let lock = RunLock::acquire(&fixture.conn, &fixture.run.owner())
         .unwrap()
         .unwrap();
-    fixture.conn.commit_hook(Some(|| true));
+    fixture.conn.commit_hook(Some(|| true)).unwrap();
     let result = lock.transfer_to_reconciler_with_deadline(
         &mut fixture.conn,
         &fixture.run,
         ProcessIdentity::current().unwrap(),
         Instant::now() + Duration::from_secs(1),
     );
-    fixture.conn.commit_hook(None::<fn() -> bool>);
+    fixture.conn.commit_hook(None::<fn() -> bool>).unwrap();
     assert!(result.is_err());
     assert_eq!(
         storage::get_run(&fixture.conn, fixture.run.run_id).unwrap(),

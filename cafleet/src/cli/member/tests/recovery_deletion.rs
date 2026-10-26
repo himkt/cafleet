@@ -114,7 +114,7 @@ fn runner_recovery_member_deletion_child() {
     conn.execute("UPDATE member_runs SET status='exited',cleanup_state='complete',exit_code=0,ended_at='2026-10-26T20:00:00Z' WHERE run_id=?1",[run.run_id]).unwrap();
     drop(runtime_lock);
     let deadline = Deadline::until(Instant::now() + Duration::from_secs(2));
-    let locked = lock_member_deletion(&mut conn, &settings, worker, deadline).unwrap();
+    let mut locked = lock_member_deletion(&mut conn, &settings, worker, deadline).unwrap();
     let placement = locked.snapshot.placement.clone().unwrap();
     let database_url = settings.database_url.clone();
     let run_id = run.run_id;
@@ -164,7 +164,7 @@ fn runner_recovery_member_deletion_child() {
     });
     let mux = AnyMultiplexer::Tmux(TmuxMultiplexer::new(runner.clone(), Default::default()))
         .bounded(deadline);
-    let result = close_member(&mut conn, worker, &locked, &mux, deadline);
+    let result = close_member(&mut conn, &settings, worker, &mut locked, &mux, deadline);
     assert_eq!(runner.calls.get(), 1);
     if scenario == "terminal" {
         assert_eq!(result.unwrap(), "%9 (killed)");

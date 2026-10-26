@@ -452,13 +452,13 @@ fn runner_recovery_missing_path_faults_rollback_owner_provenance_counters_episod
         }
         let before = rows(&case.fixture.conn);
         if fault == "commit" {
-            case.fixture.conn.commit_hook(Some(|| true));
+            case.fixture.conn.commit_hook(Some(|| true)).unwrap();
         }
         let mut host = new_host();
         host.process = Evidence::Unknown;
         let attestation = claim(&case.fixture.run);
         let result = recover_claim(&mut case, &mut host, &attestation);
-        case.fixture.conn.commit_hook(None::<fn() -> bool>);
+        case.fixture.conn.commit_hook(None::<fn() -> bool>).unwrap();
         assert!(result.is_err(), "{fault}");
         assert_eq!(rows(&case.fixture.conn), before, "{fault}");
         assert!(!host.calls.iter().any(|name| name == "before_replay"));

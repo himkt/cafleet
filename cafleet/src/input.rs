@@ -1008,7 +1008,7 @@ mod pane_lock_wait_tests {
                     vec![(member, placement.clone()), (member + 1, placement.clone())],
                 ))
             },
-            |_, _| {
+            |_, _, _| {
                 assert!(
                     PaneLock::try_acquire(&fixture.settings.database_url, &placement)
                         .unwrap()
@@ -1063,7 +1063,7 @@ mod pane_lock_wait_tests {
                             .collect(),
                     ))
                 },
-                |_, _| Ok(Some(())),
+                |_, _, _| Ok(Some(())),
                 |_| CafleetError::App("sorted lock wait expired".into()),
             )
             .unwrap();

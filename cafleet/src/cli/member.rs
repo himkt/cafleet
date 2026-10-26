@@ -868,7 +868,7 @@ mod tests {
             }))
             .unwrap();
             let deadline = Deadline::until(Instant::now() + Duration::from_millis(100));
-            let locked = lock_member_deletion(&mut conn, &settings, worker, deadline).unwrap();
+            let mut locked = lock_member_deletion(&mut conn, &settings, worker, deadline).unwrap();
             let placement = locked.snapshot.placement.clone().unwrap();
             assert_eq!(placement.mux_pane_id.as_deref(), Some("%9"));
             let url = settings.database_url.clone();
@@ -890,7 +890,7 @@ mod tests {
                 AnyMultiplexer::Tmux(TmuxMultiplexer::new(runner.clone(), Default::default()))
                     .bounded(deadline);
             assert_eq!(
-                close_member(&mut conn, worker, &locked, &mux, deadline).unwrap(),
+                close_member(&mut conn, &settings, worker, &mut locked, &mux, deadline).unwrap(),
                 "%9 (killed)"
             );
             assert_eq!(runner.calls.get(), 1);
@@ -925,7 +925,7 @@ mod tests {
         )
         .unwrap();
         let deadline = Deadline::new();
-        let locked = lock_member_deletion(&mut conn, &settings, worker, deadline).unwrap();
+        let mut locked = lock_member_deletion(&mut conn, &settings, worker, deadline).unwrap();
         let runner = Rc::new(CloseRunner {
             calls: Cell::new(0),
             failure: None,
@@ -933,7 +933,7 @@ mod tests {
         });
         let mux = AnyMultiplexer::Tmux(TmuxMultiplexer::new(runner.clone(), Default::default()))
             .bounded(deadline);
-        let error = close_member(&mut conn, worker, &locked, &mux, deadline)
+        let error = close_member(&mut conn, &settings, worker, &mut locked, &mux, deadline)
             .unwrap_err()
             .to_string();
         assert!(

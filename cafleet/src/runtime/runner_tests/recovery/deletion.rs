@@ -217,11 +217,17 @@ fn runner_recovery_deletion_uses_real_shared_outbox_open_scan_append_and_compact
             .deleted_at
             .is_some()
     );
-    assert!(
-        crate::broker::get_member(&case.fixture.conn, original.member_id, original.fleet_id)
-            .unwrap()
-            .is_none()
-    );
+    let (status, deregistered_at): (String, Option<String>) = case
+        .fixture
+        .conn
+        .query_row(
+            "SELECT status,deregistered_at FROM members WHERE member_id=?1 AND fleet_id=?2",
+            rusqlite::params![original.member_id, original.fleet_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(status, "deregistered");
+    assert!(deregistered_at.is_some());
     assert_eq!(
         case.fixture
             .conn
@@ -485,16 +491,19 @@ fn runner_recovery_deletion_actual_replay_sql_is_cancelled_within_the_supplied_r
     case.fixture.conn.execute_batch(&format!("CREATE TABLE recovery_sql_probe (entered INTEGER NOT NULL); CREATE TRIGGER slow_replay BEFORE INSERT ON member_runtime_events BEGIN INSERT INTO recovery_sql_probe VALUES (1); SELECT ({LONG_SQL}); END")).unwrap();
     let entered = Arc::new(Mutex::new(None));
     let observed = entered.clone();
-    case.fixture.conn.update_hook(Some(
-        move |_: rusqlite::hooks::Action, _: &str, table: &str, _: i64| {
-            if table == "recovery_sql_probe" {
-                observed
-                    .lock()
-                    .expect("owned replay SQL entry observation")
-                    .get_or_insert_with(Instant::now);
-            }
-        },
-    ));
+    case.fixture
+        .conn
+        .update_hook(Some(
+            move |_: rusqlite::hooks::Action, _: &str, table: &str, _: i64| {
+                if table == "recovery_sql_probe" {
+                    observed
+                        .lock()
+                        .expect("owned replay SQL entry observation")
+                        .get_or_insert_with(Instant::now);
+                }
+            },
+        ))
+        .unwrap();
     let bytes = case.spool_bytes().unwrap();
     case.release();
     case.fixture
@@ -516,7 +525,8 @@ fn runner_recovery_deletion_actual_replay_sql_is_cancelled_within_the_supplied_r
     let emergency_fired = emergency.finish();
     case.fixture
         .conn
-        .update_hook(None::<fn(rusqlite::hooks::Action, &str, &str, i64)>);
+        .update_hook(None::<fn(rusqlite::hooks::Action, &str, &str, i64)>)
+        .unwrap();
     let entered = *entered.lock().expect("owned replay SQL entry observation");
     eprintln!(
         "recovery replay SQL: entered={:?}, returned={:?}, emergency_fired={emergency_fired}",

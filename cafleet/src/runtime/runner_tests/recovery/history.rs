@@ -202,14 +202,7 @@ fn runner_recovery_preserves_latest_evidence_receipts_response_audits_and_episod
         },
     )
     .unwrap();
-    storage::record_input_state(
-        &mut case.fixture.conn,
-        &owner,
-        input.input_id,
-        InputState::Ready,
-        InputState::InProgress,
-    )
-    .unwrap();
+    assert_eq!(input.state, InputState::InProgress);
     storage::record_input_state(
         &mut case.fixture.conn,
         &owner,
@@ -222,7 +215,7 @@ fn runner_recovery_preserves_latest_evidence_receipts_response_audits_and_episod
         CodingAgent::Codex,
         "0.163.0",
         "answer-fixture-v1",
-        "native-tool-permission",
+        "recovery-fixture",
         "single-request-choice",
         PermissionDecision::Allow,
         &["synthetic-storage-fixture".into()],

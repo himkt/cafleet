@@ -235,7 +235,7 @@ fn runner_recovery_concurrent_owned_processes_contend_on_the_actual_original_loc
 
 #[test]
 fn runner_recovery_owned_hard_kill_inside_exceptional_transaction_rolls_back_every_record() {
-    let mut case = Case::new();
+    let mut case = exceptional_case_with_concurrent_reads();
     let value = opening(&case.fixture.run, 1, 1);
     storage::persist_transition(
         &mut case.fixture.conn,
@@ -252,9 +252,28 @@ fn runner_recovery_owned_hard_kill_inside_exceptional_transaction_rolls_back_eve
     let result = case.fixture._dir.path().join("transaction-result.json");
     let mut task = Task::spawn(&case, "transaction", &marker, &release, &result);
     let pending = task.await_json(&marker);
+    eprintln!("exceptional parent commit marker: {pending}");
+    assert_eq!(pending["journal_mode"], "wal");
     assert_eq!(pending["event_rows"], 2);
     assert_eq!(pending["run_rows"], 1);
     assert_eq!(pending["interaction_rows"], 1);
+    let read_started = Instant::now();
+    let read = with_database_deadline(
+        &mut case.fixture.conn,
+        task.deadline - Duration::from_millis(500),
+        |conn| {
+            conn.query_row("SELECT COUNT(*) FROM member_runtime_events", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .map_err(crate::broker::members::db_err)
+        },
+    );
+    eprintln!(
+        "exceptional parent read elapsed={:?}, result={read:?}, child_log={}",
+        read_started.elapsed(),
+        std::fs::read_to_string(&task.log).unwrap()
+    );
+    assert_eq!(read.unwrap(), 1);
     assert_eq!(
         rows(&case.fixture.conn),
         before,
@@ -288,7 +307,7 @@ fn runner_recovery_owned_hard_kill_inside_exceptional_transaction_rolls_back_eve
 
 #[test]
 fn runner_recovery_concurrent_exceptional_processes_commit_one_gap_and_reject_the_original_epoch() {
-    let mut case = Case::new();
+    let mut case = exceptional_case_with_concurrent_reads();
     let value = opening(&case.fixture.run, 1, 1);
     storage::persist_transition(
         &mut case.fixture.conn,
@@ -311,6 +330,8 @@ fn runner_recovery_concurrent_exceptional_processes_commit_one_gap_and_reject_th
     let mut first = Task::spawn(&case, "exceptional_first", &marker, &release, &first_result);
     let gate = Release(release.clone());
     let pending = first.await_json(&marker);
+    eprintln!("exceptional first commit marker: {pending}");
+    assert_eq!(pending["journal_mode"], "wal");
     assert_eq!(pending["event_rows"], 2);
     let second_marker = case
         .fixture
@@ -325,11 +346,23 @@ fn runner_recovery_concurrent_exceptional_processes_commit_one_gap_and_reject_th
         &case.fixture._dir.path().join("unused-exceptional-release"),
         &second_result,
     );
+    let second_read_started = Instant::now();
     let captured = second.await_json(&second_marker);
+    eprintln!(
+        "exceptional second snapshot wait={:?}, snapshot={captured}, first_log={}, second_log={}",
+        second_read_started.elapsed(),
+        std::fs::read_to_string(&first.log).unwrap(),
+        std::fs::read_to_string(&second.log).unwrap()
+    );
     assert_eq!(captured["epoch"], old_epoch);
+    assert_eq!(captured["journal_mode"], "wal");
     gate.release();
     let accepted = first.await_json(&first_result);
     first.finish();
+    eprintln!(
+        "exceptional first completion: {}",
+        std::fs::read_to_string(&first.log).unwrap()
+    );
     let rejected = second.await_json(&second_result);
     second.finish();
     assert_eq!(accepted["report"]["replayed_count"], 0);
@@ -342,6 +375,17 @@ fn runner_recovery_concurrent_exceptional_processes_commit_one_gap_and_reject_th
     assert_eq!(current.owner_epoch, old_epoch + 1);
     assert_eq!(current.observation_gap_count, old_gap + 1);
     assert_eq!(events(&case).len(), 3);
+}
+
+fn exceptional_case_with_concurrent_reads() -> Case {
+    let case = Case::new();
+    let mode: String = case
+        .fixture
+        .conn
+        .query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(mode, "wal");
+    case
 }
 
 struct PersistGate {
@@ -397,7 +441,15 @@ fn runner_recovery_owned_process_child() {
     let release = PathBuf::from(config["release"].as_str().unwrap());
     let result = PathBuf::from(config["result"].as_str().unwrap());
     let mut conn = crate::db::connect(database_url).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let started = Instant::now();
+    let deadline = started + Duration::from_secs(4);
+    let journal_mode: String = conn
+        .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+        .unwrap();
+    eprintln!(
+        "owned recovery helper mode={mode}, journal_mode={journal_mode}, elapsed={:?}",
+        started.elapsed()
+    );
     if matches!(mode, "writer" | "unsynced") {
         let original = storage::get_run(&conn, run_id).unwrap();
         let lock = Arc::new(RunLock::acquire(&conn, &original.owner()).unwrap().unwrap());
@@ -469,16 +521,22 @@ fn runner_recovery_owned_process_child() {
                         .or_default()
                         .insert(rowid);
                 },
-            ));
+            ))
+            .unwrap();
+            let scenario = mode.to_owned();
+            let hook_journal_mode = journal_mode.clone();
             conn.commit_hook(Some(move || {
             let trace=changed.lock().expect("owned transaction commit trace");
             let count=|table:&str|trace.get(table).map_or(0,std::collections::BTreeSet::len);
-            let state=json!({"transaction":"before-exceptional-commit","event_rows":count("member_runtime_events"),"run_rows":count("member_runs"),"interaction_rows":count("member_interactions")});
+            let state=json!({"transaction":"before-exceptional-commit","event_rows":count("member_runtime_events"),"run_rows":count("member_runs"),"interaction_rows":count("member_interactions"),"journal_mode":hook_journal_mode,"helper_elapsed_ms":started.elapsed().as_millis(),"remaining_ms":deadline.saturating_duration_since(Instant::now()).as_millis()});
             drop(trace);
+            eprintln!("owned recovery commit hook mode={scenario}, entry={state}");
             write_json(&marker,&state);
             while Instant::now()<deadline && !release.exists(){std::thread::sleep(Duration::from_millis(1));}
-            !release.exists()
-        }));
+            let released=release.exists();
+            eprintln!("owned recovery commit hook mode={scenario}, released={released}, expired={}, elapsed={:?}", Instant::now()>=deadline, started.elapsed());
+            !released
+        })).unwrap();
         }
         claim = OwnerTerminationAttestation {
             expected_run_id: run_id,
@@ -508,7 +566,10 @@ fn runner_recovery_owned_process_child() {
         let mut written = false;
         host.action = Some(Box::new(move |boundary, run, _| {
             if boundary == "after_snapshot" && !written {
-                write_json(&marker, &json!({"epoch":run.owner_epoch}));
+                write_json(
+                    &marker,
+                    &json!({"epoch":run.owner_epoch,"journal_mode":journal_mode,"helper_elapsed_ms":started.elapsed().as_millis()}),
+                );
                 written = true;
             }
             Ok(())
