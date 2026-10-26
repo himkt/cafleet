@@ -102,14 +102,14 @@ impl ObservationHooks for Hooks {
         if !arm.try_exists().map_err(io_error)? {
             return Ok(());
         }
-        if let Some(tail) = &self.buffered_tail {
-            if let Err(cause) = tail.synchronize(&self.directory) {
-                private_write(
-                    &self.directory.join("buffered-tail-gate-error"),
-                    cause.message().as_bytes(),
-                );
-                panic!("owned buffered-tail prerequisite failed: {cause}");
-            }
+        if let Some(tail) = &self.buffered_tail
+            && let Err(cause) = tail.synchronize(&self.directory)
+        {
+            private_write(
+                &self.directory.join("buffered-tail-gate-error"),
+                cause.message().as_bytes(),
+            );
+            panic!("owned buffered-tail prerequisite failed: {cause}");
         }
         std::fs::remove_file(arm).map_err(io_error)?;
         private_write(
