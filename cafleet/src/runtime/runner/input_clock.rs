@@ -16,7 +16,7 @@ pub(crate) trait InputDeadlineClock {
     fn sample(&mut self) -> Result<InputClockSample>;
 }
 
-pub(super) struct RealInputDeadlineClock;
+pub(crate) struct RealInputDeadlineClock;
 impl InputDeadlineClock for RealInputDeadlineClock {
     fn sample(&mut self) -> Result<InputClockSample> {
         let before = Instant::now();

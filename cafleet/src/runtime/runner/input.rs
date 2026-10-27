@@ -289,6 +289,78 @@ impl InputCoordinator {
         self.lock.validate(conn, &current.owner())
     }
 
+    fn retire_received(
+        &mut self,
+        conn: &mut Connection,
+        run: &RunRecord,
+        input_id: i64,
+        deadline: Instant,
+    ) -> Result<InputControlReply> {
+        let deadline = inherited_database_deadline(conn)
+            .map_or(deadline, |inherited| deadline.min(inherited.instant()));
+        check_deadline(Instant::now(), deadline)?;
+        let mut operation_key = None;
+        let result = (|| {
+            ensure(input_id > 0, "positive retirement input ID required")?;
+            ensure(
+                stable_run_identity(run) == stable_run_identity(&self.run),
+                "retirement caller run identity changed",
+            )?;
+            with_database_deadline(conn, deadline, |conn| {
+                let tx = conn.transaction().map_err(db_err)?;
+                let current = storage::validate_owner(&tx, &self.run.owner())?;
+                ensure(
+                    stable_run_identity(&current) == stable_run_identity(&self.run),
+                    "retirement current run identity changed",
+                )?;
+                self.lock.validate(&tx, &current.owner())?;
+                let input = storage::get_input(&tx, input_id)?;
+                operation_key = Some(input.operation_key.clone());
+                ensure(
+                    input.run_id == self.run.run_id
+                        && input.kind == storage::InputKind::Preview
+                        && input.state == storage::InputState::Settled
+                        && input.disposition == Some(storage::InputDisposition::Submitted),
+                    "retirement requires this run's settled/submitted Preview",
+                )?;
+                ensure(
+                    self.pending.is_none(),
+                    "retirement requires no active input writer",
+                )?;
+                if let Some(retained) = self.operations.get(&input_id) {
+                    ensure(
+                        !retained.leased && !retained.attempt_available,
+                        "retirement requires an unleased consumed attempt",
+                    )?;
+                    ensure(
+                        retained.operation.run_id == input.run_id
+                            && retained.operation.operation_key == input.operation_key
+                            && retained.operation.kind == input.kind
+                            && retained.operation.payload_digest == input.payload_digest
+                            && retained.operation.message_id == input.message_id,
+                        "retirement cache identity changed",
+                    )?;
+                }
+                check_deadline(Instant::now(), deadline)?;
+                tx.commit().map_err(db_err)
+            })?;
+            check_deadline(Instant::now(), deadline)?;
+            self.operations.remove(&input_id);
+            Ok(InputControlReply::Receipt(super::ReceiptReply::Retired {
+                input_id,
+            }))
+        })();
+        result.map_err(|source| {
+            CafleetError::from(InputFailure {
+                source,
+                run_id: Some(self.run.run_id),
+                interaction_id: None,
+                input_id: Some(input_id),
+                operation_key,
+            })
+        })
+    }
+
     fn composer_eligible(observation: &ObservationController) -> bool {
         let status = observation.status();
         status.eligibility == InputEligibility::ComposerEmpty
@@ -402,6 +474,15 @@ impl InputCoordinator {
                 request.identity == expected && run.run_id == self.run.run_id,
                 "input request fixed identity mismatch",
             )?;
+            if let InputControlOperation::Receipt(super::ReceiptAction::Retire { input_id }) =
+                &request.operation
+            {
+                known_input_id = Some(*input_id);
+                request.identity.validate(&self.run)?;
+                return self
+                    .retire_received(conn, run, *input_id, deadline)
+                    .map(Some);
+            }
             let (input, composer_operation) = match request.operation {
                 InputControlOperation::SubmitPrompt(input) => (input, ComposerOperation::Prompt),
                 InputControlOperation::SubmitExec(input) => (input, ComposerOperation::Exec),

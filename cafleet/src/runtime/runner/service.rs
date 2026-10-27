@@ -633,6 +633,9 @@ fn run_service(
                                     request.operation,
                                     InputControlOperation::SubmitPrompt(_)
                                         | InputControlOperation::SubmitExec(_)
+                                        | InputControlOperation::Receipt(
+                                            ReceiptAction::Retire { .. }
+                                        )
                                 ) =>
                             {
                                 let result = (|| -> Result<Option<InputControlReply>> {

@@ -1,7 +1,6 @@
 use super::*;
-use crate::broker::members::db_err;
-use crate::broker::runtime::{self as storage, OwnerKind, RunRecord, RunStatus};
-use rusqlite::{Connection, params};
+use crate::broker::runtime::{self as storage, RunRecord};
+use rusqlite::Connection;
 use std::time::Instant;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,63 +46,9 @@ impl HealthSnapshot {
         }
     }
 }
-pub(crate) trait HealthProbe {
-    fn probe(&mut self, run: &RunRecord, deadline: Instant) -> Result<HealthSnapshot>;
-}
-pub(crate) struct HealthCheck {
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "wrapped delivery integration consumes the matching health result"
-        )
-    )]
-    pub matched: bool,
-}
-struct SocketProbe;
-impl HealthProbe for SocketProbe {
-    fn probe(&mut self, run: &RunRecord, deadline: Instant) -> Result<HealthSnapshot> {
-        probe_health(run, deadline)
-    }
-}
 pub(crate) fn probe_health(run: &RunRecord, deadline: Instant) -> Result<HealthSnapshot> {
     let reply = super::service::request(run, "health", deadline)?;
     HealthSnapshot::decode(reply, run)
-}
-pub(crate) fn check_input_health(
-    conn: &mut Connection,
-    run_id: i64,
-    deadline: Instant,
-) -> Result<HealthCheck> {
-    check_input_health_with_probe(conn, run_id, deadline, &mut SocketProbe)
-}
-pub(crate) fn check_input_health_with_probe(
-    conn: &mut Connection,
-    run_id: i64,
-    deadline: Instant,
-    probe: &mut impl HealthProbe,
-) -> Result<HealthCheck> {
-    check_deadline(Instant::now(), deadline)?;
-    let run = with_database_deadline(conn, deadline, |conn| storage::get_run(conn, run_id))?;
-    let probed = probe.probe(&run, deadline);
-    let matched = probed
-        .and_then(|health| {
-            health.validate(&run)?;
-            validate_run_paths(conn, &run)?;
-            ensure(
-                run.owner_kind == OwnerKind::Runner
-                    && matches!(run.status, RunStatus::Running | RunStatus::Degraded),
-                "runtime is not accepting input health checks",
-            )?;
-            Ok(())
-        })
-        .is_ok();
-    with_database_deadline(conn, deadline, |conn| {
-        validate_database(conn, &run.database_identity_json)?;
-        let changed=conn.execute("UPDATE member_runs SET reachability=?1,last_health_at=?2 WHERE run_id=?3 AND owner_epoch=?4 AND owner_kind=?5 AND owner_pid=?6 AND owner_start_identity=?7",params![if matched{"reachable"}else{"suspect"},crate::time::format_utc(crate::time::now_utc()),run_id,run.owner_epoch,run.owner_kind.as_str(),run.owner_pid,run.owner_start_identity]).map_err(db_err)?;
-        ensure(changed == 1, "input health owner changed during probe")
-    })?;
-    Ok(HealthCheck { matched })
 }
 pub(crate) struct RuntimeDiagnosis {
     pub diagnostics: Vec<String>,

@@ -25,6 +25,20 @@ impl<'a> PreparedSubmission<'a> {
             deadline,
         })
     }
+
+    pub(crate) fn retirement_request(
+        &self,
+        run: &RunRecord,
+        input_id: i64,
+    ) -> Result<InputControlRequest> {
+        ensure(input_id > 0, "positive retirement input ID required")?;
+        Ok(InputControlRequest {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            identity: ControlIdentity::from_run(run),
+            expires_at_mono_ns: self.expiration.monotonic_ns(),
+            operation: InputControlOperation::Receipt(ReceiptAction::Retire { input_id }),
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -101,7 +115,7 @@ pub(crate) trait InputCommandHost {
     ) -> std::result::Result<InputControlReply, InputFailure>;
 }
 
-struct NativeInputHost;
+pub(crate) struct NativeInputHost;
 impl InputCommandHost for NativeInputHost {
     fn lock(
         &mut self,
@@ -254,7 +268,7 @@ fn submission_deadline(conn: &Connection, deadline: Deadline) -> Result<Deadline
     Ok(deadline)
 }
 
-fn validate_submission_target(
+pub(crate) fn validate_submission_target(
     conn: &Connection,
     settings: &Settings,
     expected: &RunRecord,
@@ -438,7 +452,7 @@ pub(crate) fn submit_wrapped_input_under_pane_lock(
     clippy::too_many_arguments,
     reason = "the approved borrowed submission entry adds its host to the same fixed arguments"
 )]
-fn submit_wrapped_input_under_pane_lock_with_host(
+pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
     conn: &mut Connection,
     settings: &Settings,
     expected_run: &RunRecord,
@@ -919,6 +933,7 @@ mod tests {
         requests: Vec<Value>,
         reply: ReplyMode,
         after_health: Option<Box<dyn FnMut()>>,
+        health_reply: Option<HealthSnapshot>,
     }
 
     fn service_target(fixture: &InputServiceFixture) -> (Settings, RunRecord, Placement) {
@@ -951,6 +966,7 @@ mod tests {
                 requests: Vec::new(),
                 reply: ReplyMode::Live,
                 after_health: None,
+                health_reply: None,
             }
         }
 
@@ -991,7 +1007,10 @@ mod tests {
                     .unwrap()
                     .is_none()
             );
-            let health = super::super::probe_health(run, deadline).map_err(Self::failure)?;
+            let health = match self.health_reply.take() {
+                Some(health) => health,
+                None => super::super::probe_health(run, deadline).map_err(Self::failure)?,
+            };
             if let Some(callback) = &mut self.after_health {
                 callback();
             }
@@ -1094,6 +1113,24 @@ mod tests {
             message_id: None,
             literal: format!("external {key} λ"),
         }
+    }
+
+    fn health_records(conn: &Connection) -> [Vec<Vec<rusqlite::types::Value>>; 3] {
+        ["member_interactions", "member_runtime_events", "messages"].map(|table| {
+            let mut statement = conn
+                .prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))
+                .unwrap();
+            let columns = statement.column_count();
+            statement
+                .query_map([], |row| {
+                    (0..columns)
+                        .map(|column| row.get(column))
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        })
     }
 
     impl History {
@@ -1298,6 +1335,8 @@ mod tests {
             .unwrap();
         let changes = case.fixture.conn.total_changes();
         let control_deadline = Instant::now() + Duration::from_secs(2);
+        let run_before = storage::get_run(&case.fixture.conn, case.fixture.run.run_id).unwrap();
+        let records_before = health_records(&case.fixture.conn);
         let control = PreparedSubmission::new(
             &case.request,
             control_deadline,
@@ -1404,6 +1443,11 @@ mod tests {
         );
         removed.unwrap();
         case.assert_unchanged(changes);
+        assert_eq!(
+            storage::get_run(&case.fixture.conn, case.fixture.run.run_id).unwrap(),
+            run_before
+        );
+        assert_eq!(health_records(&case.fixture.conn), records_before);
         assert!(
             PaneLock::try_acquire(&case.settings.database_url, &case.placement)
                 .unwrap()
@@ -1719,8 +1763,35 @@ mod tests {
 
     #[test]
     fn external_input_typed_success_requires_the_actual_supplied_connection_receipt() {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+
         with_input_service(|fixture, outer| {
             let (settings, run, placement) = service_target(fixture);
+            fixture.fixture.conn.execute("UPDATE member_runs SET reachability='suspect',last_health_at='2000-01-01T00:00:00Z' WHERE run_id=?1", [run.run_id]).unwrap();
+            let before = storage::get_run(&fixture.fixture.conn, run.run_id).unwrap();
+            let records = health_records(&fixture.fixture.conn);
+            let update = Arc::new(AtomicBool::new(false));
+            let observed = update.clone();
+            fixture
+                .fixture
+                .conn
+                .authorizer(Some(move |context: AuthContext<'_>| {
+                    if matches!(
+                        context.action,
+                        AuthAction::Update {
+                            table_name: "member_runs",
+                            ..
+                        }
+                    ) {
+                        observed.store(true, Ordering::SeqCst);
+                    }
+                    Authorization::Allow
+                }))
+                .unwrap();
             let request = ordinary(&run, "unverified-reply");
             let until = outer.min(Instant::now() + Duration::from_secs(2));
             let mut host = SocketHost::new(&settings, &placement, until);
@@ -1734,6 +1805,15 @@ mod tests {
                 Deadline::until(until),
                 &mut host,
             );
+            let removed = fixture
+                .fixture
+                .conn
+                .authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+            assert!(
+                result.is_err(),
+                "unverified reply rejects; authorizer_cleanup={removed:?}"
+            );
+            removed.unwrap();
             let failure = result
                 .err()
                 .expect("a typed success alone proves no durable identity");
@@ -1744,6 +1824,25 @@ mod tests {
                 Some(request.operation_key.as_str())
             );
             assert!(!failure.source.to_string().contains(&request.literal));
+            assert!(
+                update.load(Ordering::SeqCst),
+                "genuine successful health updates the supplied connection"
+            );
+            let refreshed = storage::get_run(&fixture.fixture.conn, run.run_id).unwrap();
+            assert_eq!(refreshed.reachability, Reachability::Reachable);
+            assert!(refreshed.last_health_at.is_some());
+            assert_ne!(
+                refreshed.last_health_at.as_deref(),
+                Some("2000-01-01T00:00:00Z")
+            );
+            let mut expected = before;
+            expected.reachability = refreshed.reachability;
+            expected.last_health_at = refreshed.last_health_at.clone();
+            assert_eq!(
+                refreshed, expected,
+                "health preserves lifecycle, coverage and event reservation"
+            );
+            assert_eq!(health_records(&fixture.fixture.conn), records);
             assert!(
                 storage::find_input(&fixture.fixture.conn, run.run_id, &request.operation_key)
                     .unwrap()
@@ -1756,6 +1855,89 @@ mod tests {
                     .all(|record| record["line"] != request.literal)
             );
         });
+    }
+
+    #[test]
+    fn external_input_stale_or_unreachable_health_refuses_before_exchange_and_preserves_open_history()
+     {
+        for stale in [false, true] {
+            let mut case = History::new(InputState::Ready, None);
+            let run = case.fixture.run.clone();
+            storage::reserve_event_sequences(&mut case.fixture.conn, &run.owner()).unwrap();
+            let evidence = storage::evidence::EvidencePolicy::metadata().apply(&serde_json::json!({"backend":"codex","native_version":"0.163.0","profile_version":null,"rule_id":"native-tool-permission","screen_seq":1,"operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false})).unwrap();
+            storage::persist_transition(
+                &mut case.fixture.conn,
+                &run.owner(),
+                &ObservedTransition {
+                    run_id: run.run_id,
+                    event_seq: 1,
+                    episode_seq: Some(1),
+                    kind: RuntimeEventKind::InteractionOpened,
+                    classification: Some(InteractionClass::Question),
+                    observed_at: "2026-10-27T16:44:00Z".into(),
+                    evidence_json: evidence,
+                    close_reason: None,
+                    cause_json: None,
+                },
+                PersistenceMode::Live,
+            )
+            .unwrap();
+            let before = storage::get_run(&case.fixture.conn, run.run_id).unwrap();
+            let records = health_records(&case.fixture.conn);
+            assert_eq!(records[0].len(), 1, "meaningful open interaction control");
+            let until = Instant::now() + Duration::from_secs(1);
+            let mut host = SocketHost::new(&case.settings, &case.placement, until);
+            if stale {
+                let mut runner = ProcessIdentity::current().unwrap();
+                runner.start_identity.push_str(":stale-health-reply");
+                host.health_reply = Some(HealthSnapshot {
+                    identity: ControlIdentity::from_run(&run),
+                    runner,
+                    child: None,
+                    output_seq: 120,
+                    observation: None,
+                });
+            } else {
+                assert!(
+                    !RuntimePaths::for_run(&run.database_identity_json, run.run_id)
+                        .unwrap()
+                        .control_socket
+                        .exists(),
+                    "owned unreachable endpoint is absent"
+                );
+            }
+            let result = submit_wrapped_input_with_host(
+                &mut case.fixture.conn,
+                &case.settings,
+                &run,
+                &case.placement,
+                &case.request,
+                Deadline::until(until),
+                &mut host,
+            );
+            let Err(failure) = result else {
+                panic!("stale or unreachable health refuses ordinary input")
+            };
+            assert_eq!(host.calls, [1, 1, 0]);
+            assert_eq!(failure.run_id, Some(run.run_id));
+            assert_eq!(
+                failure.operation_key.as_deref(),
+                Some(case.request.operation_key.as_str())
+            );
+            assert!(!failure.source.to_string().contains(&case.request.literal));
+            let mut after = storage::get_run(&case.fixture.conn, run.run_id).unwrap();
+            after.reachability = before.reachability;
+            after.last_health_at = before.last_health_at.clone();
+            assert_eq!(
+                after, before,
+                "refusal preserves lifecycle, owner, coverage and event reservation"
+            );
+            assert_eq!(health_records(&case.fixture.conn), records);
+            assert_eq!(
+                storage::get_input(&case.fixture.conn, case.row.input_id).unwrap(),
+                case.row
+            );
+        }
     }
 
     #[test]
