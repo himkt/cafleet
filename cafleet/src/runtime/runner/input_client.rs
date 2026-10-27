@@ -934,6 +934,10 @@ mod tests {
         reply: ReplyMode,
         after_health: Option<Box<dyn FnMut()>>,
         health_reply: Option<HealthSnapshot>,
+        exchange_limit: usize,
+        expire_retirement: bool,
+        wrong_query_id: Option<i64>,
+        skip_reconcile: bool,
     }
 
     fn service_target(fixture: &InputServiceFixture) -> (Settings, RunRecord, Placement) {
@@ -967,6 +971,10 @@ mod tests {
                 reply: ReplyMode::Live,
                 after_health: None,
                 health_reply: None,
+                exchange_limit: 1,
+                expire_retirement: false,
+                wrong_query_id: None,
+                skip_reconcile: false,
             }
         }
 
@@ -1024,14 +1032,25 @@ mod tests {
             deadline: Instant,
         ) -> std::result::Result<InputControlReply, InputFailure> {
             self.calls[2] += 1;
-            assert_eq!(self.calls[2], 1, "an explicit attempt exchanges once");
+            assert!(
+                self.calls[2] <= self.exchange_limit,
+                "an explicit attempt uses only its declared exchanges"
+            );
             assert_eq!(deadline, self.until);
+            assert!(
+                PaneLock::try_acquire(&self.settings.database_url, &self.placement)
+                    .unwrap()
+                    .is_none(),
+                "the actual guard spans every exchange"
+            );
             assert_eq!(
                 serde_json::to_value(&request.identity).unwrap(),
                 serde_json::to_value(ControlIdentity::from_run(run)).unwrap()
             );
             if let Some(expiration) = self.expiration {
                 assert_eq!(request.expires_at_mono_ns, expiration);
+            } else {
+                self.expiration = Some(request.expires_at_mono_ns);
             }
             self.requests.push(
                 serde_json::from_slice(
@@ -1039,6 +1058,31 @@ mod tests {
                 )
                 .unwrap(),
             );
+            if self.skip_reconcile
+                && let InputControlOperation::Receipt(ReceiptAction::Reconcile { input_id, .. }) =
+                    request.operation
+            {
+                return Ok(InputControlReply::Receipt(ReceiptReply::Settled {
+                    input_id,
+                }));
+            }
+            if let InputControlOperation::Receipt(ReceiptAction::Retire { input_id }) =
+                request.operation
+            {
+                let independent = crate::db::connect(&self.settings.database_url).unwrap();
+                assert_eq!(
+                    storage::get_input(&independent, input_id).unwrap().state,
+                    InputState::Settled,
+                    "Retire follows the committed durable reread"
+                );
+                if self.expire_retirement {
+                    std::thread::sleep(
+                        deadline.saturating_duration_since(Instant::now())
+                            + Duration::from_millis(1),
+                    );
+                    assert!(Instant::now() >= deadline);
+                }
+            }
             if matches!(self.reply, ReplyMode::UnknownId) {
                 return Ok(InputControlReply::Submission(SubmissionResult {
                     status: SubmissionStatus::Accepted,
@@ -1100,9 +1144,21 @@ mod tests {
                     "owned reply consumer closed".into(),
                 )));
             }
-            client
+            let mut reply = client
                 .exchange_input(request, deadline)
-                .map_err(Self::failure)
+                .map_err(Self::failure)?;
+            if let Some(wrong) = self.wrong_query_id {
+                let InputControlReply::Receipt(ReceiptReply::Present {
+                    input_id,
+                    submission,
+                }) = &mut reply
+                else {
+                    panic!("owned Query returns a real Present receipt")
+                };
+                *input_id = wrong;
+                submission.input_id = Some(wrong);
+            }
+            Ok(reply)
         }
     }
 
@@ -1131,6 +1187,410 @@ mod tests {
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .unwrap()
         })
+    }
+
+    fn accepted_service_receipt(
+        fixture: &mut InputServiceFixture,
+        outer: Instant,
+        key: &str,
+    ) -> (Settings, RunRecord, Placement, SubmitInput, InputOperation) {
+        let (settings, run, placement) = service_target(fixture);
+        let request = ordinary(&run, key);
+        let result = submit_wrapped_input(
+            &mut fixture.fixture.conn,
+            &settings,
+            &run,
+            &placement,
+            &request,
+            Deadline::until(outer.min(Instant::now() + Duration::from_secs(2))),
+        )
+        .unwrap();
+        assert_eq!(result.status, SubmissionStatus::Accepted);
+        let row = storage::get_input(&fixture.fixture.conn, result.input_id.unwrap()).unwrap();
+        assert_eq!(row.state, InputState::Accepted);
+        wait_input_service_record(fixture, &request.literal, outer);
+        input_service_barrier(fixture, outer);
+        (settings, run, placement, request, row)
+    }
+
+    #[test]
+    fn live_receipt_settled_history_is_immutable_before_live_calls_and_the_original_sql_deadline() {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+        use std::sync::{Arc, Mutex};
+
+        let mut case = History::new(InputState::Settled, Some(InputDisposition::Submitted));
+        case.fixture.conn.execute("UPDATE members SET status='deregistered',deregistered_at='2026-10-27T17:26:00Z' WHERE member_id=?1", [case.fixture.run.member_id]).unwrap();
+        let held = PaneLock::try_acquire(&case.settings.database_url, &case.placement)
+            .unwrap()
+            .unwrap();
+        let changes = case.fixture.conn.total_changes();
+        let before_run = storage::get_run(&case.fixture.conn, case.row.run_id).unwrap();
+        let records = health_records(&case.fixture.conn);
+        let budgets = Arc::new(Mutex::new(Vec::new()));
+        let observed = budgets.clone();
+        case.fixture
+            .conn
+            .authorizer(Some(move |context: AuthContext<'_>| {
+                if matches!(
+                    context.action,
+                    AuthAction::Read {
+                        table_name: "member_input_operations",
+                        ..
+                    }
+                ) {
+                    observed
+                        .lock()
+                        .unwrap()
+                        .push(Deadline::inherited_or_new().instant());
+                }
+                Authorization::Allow
+            }))
+            .unwrap();
+        let expired = reconcile_ordinary_with_host(
+            &mut case.fixture.conn,
+            &case.settings,
+            case.row.input_id,
+            InputDisposition::Submitted,
+            "fixture:replacement-evidence",
+            Deadline::until(Instant::now()),
+            &mut NoLiveHost,
+        );
+        let expired_reads = budgets.lock().unwrap().len();
+        budgets.lock().unwrap().clear();
+        let original = Instant::now() + Duration::from_secs(2);
+        let result =
+            with_database_budget(&mut case.fixture.conn, Deadline::until(original), |conn| {
+                Ok(reconcile_ordinary_with_host(
+                    conn,
+                    &case.settings,
+                    case.row.input_id,
+                    InputDisposition::Submitted,
+                    "fixture:replacement-evidence",
+                    Deadline::until(original + Duration::from_secs(2)),
+                    &mut NoLiveHost,
+                ))
+            });
+        let removed = case
+            .fixture
+            .conn
+            .authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+        assert!(
+            removed.is_ok(),
+            "expired_error={:?}; history_error={:?}; authorizer_cleanup={removed:?}",
+            expired.as_ref().err(),
+            result.as_ref().map(|value| value.as_ref().err())
+        );
+        let failure = expired.unwrap_err();
+        assert!(matches!(failure.source, CafleetError::DeadlineExceeded));
+        assert_eq!(expired_reads, 0);
+        assert_eq!(
+            result.unwrap().unwrap(),
+            case.row,
+            "same disposition preserves the actual original row and evidence"
+        );
+        let observed = budgets.lock().unwrap();
+        assert!(!observed.is_empty());
+        assert!(observed.iter().all(|deadline| *deadline <= original));
+        drop(observed);
+        assert!(
+            reconcile_ordinary_with_host(
+                &mut case.fixture.conn,
+                &case.settings,
+                case.row.input_id,
+                InputDisposition::AbandonedUncertain,
+                "fixture:conflicting-disposition",
+                Deadline::until(original),
+                &mut NoLiveHost
+            )
+            .is_err()
+        );
+        let foreign = Fixture::new();
+        let foreign_settings = Settings {
+            database_url: format!("sqlite:///{}", foreign.conn.path().unwrap()),
+            ..case.settings.clone()
+        };
+        assert!(
+            reconcile_ordinary_with_host(
+                &mut case.fixture.conn,
+                &foreign_settings,
+                case.row.input_id,
+                InputDisposition::Submitted,
+                "fixture:foreign-database",
+                Deadline::until(original),
+                &mut NoLiveHost
+            )
+            .is_err()
+        );
+        case.assert_unchanged(changes);
+        assert_eq!(
+            storage::get_run(&case.fixture.conn, case.row.run_id).unwrap(),
+            before_run
+        );
+        assert_eq!(health_records(&case.fixture.conn), records);
+        held.validate_binding(&case.settings.database_url, &case.placement)
+            .unwrap();
+
+        for (input_id, evidence) in [(0, "fixture:invalid-id"), (case.row.input_id, " ")] {
+            assert!(
+                reconcile_ordinary_with_host(
+                    &mut case.fixture.conn,
+                    &case.settings,
+                    input_id,
+                    InputDisposition::Submitted,
+                    evidence,
+                    Deadline::until(original),
+                    &mut NoLiveHost
+                )
+                .is_err()
+            );
+        }
+        case.assert_unchanged(changes);
+
+        use crate::runtime::runner_tests::permission_history::{Case, Retained};
+        let mut permission = Case::new(Retained::Accepted);
+        let audit = storage::get_permission_response(&permission.fixture.conn, permission.input_id)
+            .unwrap();
+        let changes = permission.fixture.conn.total_changes();
+        assert!(
+            reconcile_ordinary_with_host(
+                &mut permission.fixture.conn,
+                &permission.settings,
+                permission.input_id,
+                InputDisposition::Submitted,
+                "fixture:ordinary-cannot-settle-permission",
+                Deadline::until(Instant::now() + Duration::from_secs(1)),
+                &mut NoLiveHost
+            )
+            .is_err()
+        );
+        assert_eq!(permission.fixture.conn.total_changes(), changes);
+        assert_eq!(
+            storage::get_permission_response(&permission.fixture.conn, permission.input_id)
+                .unwrap(),
+            audit
+        );
+    }
+
+    #[test]
+    fn live_receipt_client_binds_query_and_commit_ack_before_one_real_retirement() {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+        use std::sync::{Arc, Mutex};
+
+        with_input_service(|fixture, outer| {
+            let (settings, run, placement, request, original) =
+                accepted_service_receipt(fixture, outer, "receipt-live");
+            let other = storage::reserve_input(
+                &mut fixture.fixture.conn,
+                &run.owner(),
+                &NewInput {
+                    operation_key: "prompt:other-live-receipt".into(),
+                    kind: InputKind::Prompt,
+                    payload_digest: "c".repeat(64),
+                    message_id: None,
+                },
+            )
+            .unwrap();
+            let until = outer.min(Instant::now() + Duration::from_secs(5));
+            let mut wrong = SocketHost::new(&settings, &placement, until);
+            wrong.wrong_query_id = Some(other.input_id);
+            let failure = reconcile_ordinary_with_host(
+                &mut fixture.fixture.conn,
+                &settings,
+                original.input_id,
+                InputDisposition::Submitted,
+                "fixture:live-reconcile",
+                Deadline::until(until),
+                &mut wrong,
+            )
+            .unwrap_err();
+            assert_eq!(wrong.calls, [1, 1, 1]);
+            assert_eq!(failure.input_id, Some(original.input_id));
+            assert_eq!(
+                failure.operation_key.as_deref(),
+                Some(request.operation_key.as_str())
+            );
+            assert_eq!(
+                storage::get_input(&fixture.fixture.conn, original.input_id).unwrap(),
+                original
+            );
+            let mut unverified = SocketHost::new(&settings, &placement, until);
+            unverified.exchange_limit = 2;
+            unverified.skip_reconcile = true;
+            assert!(
+                reconcile_ordinary_with_host(
+                    &mut fixture.fixture.conn,
+                    &settings,
+                    original.input_id,
+                    InputDisposition::Submitted,
+                    "fixture:live-reconcile",
+                    Deadline::until(until),
+                    &mut unverified
+                )
+                .is_err(),
+                "a typed Settled acknowledgment supplies no durable settlement"
+            );
+            assert_eq!(unverified.calls, [1, 1, 2]);
+            assert_eq!(
+                storage::get_input(&fixture.fixture.conn, original.input_id).unwrap(),
+                original
+            );
+            let budgets = Arc::new(Mutex::new(Vec::new()));
+            let observed = budgets.clone();
+            fixture
+                .fixture
+                .conn
+                .authorizer(Some(move |context: AuthContext<'_>| {
+                    if matches!(
+                        context.action,
+                        AuthAction::Read {
+                            table_name: "member_input_operations",
+                            ..
+                        }
+                    ) {
+                        observed
+                            .lock()
+                            .unwrap()
+                            .push(Deadline::inherited_or_new().instant());
+                    }
+                    Authorization::Allow
+                }))
+                .unwrap();
+            let mut host = SocketHost::new(&settings, &placement, until);
+            host.exchange_limit = 3;
+            let settled =
+                with_database_budget(&mut fixture.fixture.conn, Deadline::until(until), |conn| {
+                    Ok(reconcile_ordinary_with_host(
+                        conn,
+                        &settings,
+                        original.input_id,
+                        InputDisposition::Submitted,
+                        "fixture:live-reconcile",
+                        Deadline::until(outer),
+                        &mut host,
+                    ))
+                });
+            let removed = fixture
+                .fixture
+                .conn
+                .authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+            assert!(
+                removed.is_ok(),
+                "settlement_error={:?}; authorizer_cleanup={removed:?}",
+                settled.as_ref().map(|value| value.as_ref().err())
+            );
+            let settled = settled.unwrap().unwrap();
+            assert_eq!(settled.input_id, original.input_id);
+            assert_eq!(settled.state, InputState::Settled);
+            assert_eq!(settled.disposition, Some(InputDisposition::Submitted));
+            assert_eq!(
+                settled.evidence_ref.as_deref(),
+                Some("fixture:live-reconcile")
+            );
+            assert_eq!(host.calls, [1, 1, 3]);
+            assert_eq!(
+                host.requests
+                    .iter()
+                    .map(|value| value["action"].as_str().unwrap())
+                    .collect::<Vec<_>>(),
+                ["query", "reconcile", "retire"]
+            );
+            assert!(
+                host.requests
+                    .iter()
+                    .all(|value| value["kind"] == "receipt" && value.get("literal").is_none())
+            );
+            assert_eq!(host.requests[1]["expected_state"], "accepted");
+            assert_eq!(host.requests[1]["evidence_ref"], "fixture:live-reconcile");
+            assert_eq!(host.requests[2]["input_id"], original.input_id);
+            let observed = budgets.lock().unwrap();
+            assert!(
+                !observed.is_empty(),
+                "actual client receipt reads use the supplied connection"
+            );
+            assert!(observed.iter().all(|deadline| *deadline <= until));
+            drop(observed);
+            assert_eq!(
+                storage::get_input(&fixture.fixture.conn, other.input_id).unwrap(),
+                other
+            );
+            let repeated = submit_wrapped_input_with_host(
+                &mut fixture.fixture.conn,
+                &settings,
+                &run,
+                &placement,
+                &request,
+                Deadline::until(outer),
+                &mut NoLiveHost,
+            )
+            .unwrap();
+            assert_eq!(repeated.input_id, Some(original.input_id));
+            assert_eq!(repeated.status, SubmissionStatus::Accepted);
+            input_service_barrier(fixture, outer);
+            assert_eq!(
+                input_service_records(fixture)
+                    .iter()
+                    .filter(|record| record["line"] == request.literal)
+                    .count(),
+                1
+            );
+        });
+    }
+
+    #[test]
+    fn live_receipt_client_postcommit_expiry_retains_settlement_context_and_no_live_retry() {
+        with_input_service(|fixture, outer| {
+            let (settings, run, placement, request, original) =
+                accepted_service_receipt(fixture, outer, "receipt-expiry");
+            let until = outer.min(Instant::now() + Duration::from_secs(2));
+            let mut host = SocketHost::new(&settings, &placement, until);
+            host.exchange_limit = 3;
+            host.expire_retirement = true;
+            let failure = reconcile_ordinary_with_host(
+                &mut fixture.fixture.conn,
+                &settings,
+                original.input_id,
+                InputDisposition::Submitted,
+                "fixture:committed-before-expiry",
+                Deadline::until(until),
+                &mut host,
+            )
+            .unwrap_err();
+            assert!(matches!(failure.source, CafleetError::DeadlineExceeded));
+            assert_eq!(failure.run_id, Some(run.run_id));
+            assert_eq!(failure.input_id, Some(original.input_id));
+            assert_eq!(
+                failure.operation_key.as_deref(),
+                Some(request.operation_key.as_str())
+            );
+            assert!(!failure.source.to_string().contains(&request.literal));
+            assert_eq!(host.calls, [1, 1, 3]);
+            let settled = storage::get_input(&fixture.fixture.conn, original.input_id).unwrap();
+            assert_eq!(settled.state, InputState::Settled);
+            assert_eq!(settled.disposition, Some(InputDisposition::Submitted));
+            assert_eq!(
+                settled.evidence_ref.as_deref(),
+                Some("fixture:committed-before-expiry")
+            );
+            let repeated = reconcile_ordinary_with_host(
+                &mut fixture.fixture.conn,
+                &settings,
+                original.input_id,
+                InputDisposition::Submitted,
+                "fixture:preserve-original-evidence",
+                Deadline::until(outer),
+                &mut NoLiveHost,
+            )
+            .unwrap();
+            assert_eq!(repeated, settled);
+            input_service_barrier(fixture, outer);
+            assert_eq!(
+                input_service_records(fixture)
+                    .iter()
+                    .filter(|record| record["line"] == request.literal)
+                    .count(),
+                1
+            );
+        });
     }
 
     impl History {

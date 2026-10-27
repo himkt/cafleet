@@ -295,3 +295,119 @@ pub(crate) fn permission_error(command: &PermissionCommand, source: CafleetError
     }
     .into()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::broker::runtime as storage;
+    use crate::config::Settings;
+    use crate::input::{Deadline, PaneLock};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn live_receipt_cli_reconciles_real_exec_history_and_preserves_repeat_evidence() {
+        crate::runtime::with_input_service(|fixture, outer| {
+            let run = fixture.fixture.run.clone();
+            let settings = Settings::from_lookup(|name| {
+                (name == "CAFLEET_DATABASE_URL")
+                    .then(|| format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()))
+            })
+            .unwrap();
+            let original = storage::reserve_input(
+                &mut fixture.fixture.conn,
+                &run.owner(),
+                &storage::NewInput {
+                    operation_key: "exec:cli-receipt-history".into(),
+                    kind: storage::InputKind::Exec,
+                    payload_digest: "d".repeat(64),
+                    message_id: None,
+                },
+            )
+            .unwrap();
+            storage::record_input_state(
+                &mut fixture.fixture.conn,
+                &run.owner(),
+                original.input_id,
+                storage::InputState::InProgress,
+                storage::InputState::Uncertain,
+            )
+            .unwrap();
+            let until = outer.min(Instant::now() + Duration::from_secs(2));
+            let command = |disposition, evidence: &str| InputCommand::Reconcile {
+                input_id: original.input_id,
+                disposition,
+                evidence_ref: evidence.into(),
+                json: true,
+            };
+            input(
+                &mut fixture.fixture.conn,
+                &settings,
+                command(
+                    Disposition::AbandonedUncertain,
+                    "fixture:cli-owned-resolution",
+                ),
+                Deadline::until(until),
+            )
+            .unwrap();
+            let settled = storage::get_input(&fixture.fixture.conn, original.input_id).unwrap();
+            assert_eq!(settled.state, storage::InputState::Settled);
+            assert_eq!(
+                settled.disposition,
+                Some(storage::InputDisposition::AbandonedUncertain)
+            );
+            assert_eq!(
+                settled.evidence_ref.as_deref(),
+                Some("fixture:cli-owned-resolution")
+            );
+            let placement =
+                crate::broker::get_member(&fixture.fixture.conn, run.member_id, run.fleet_id)
+                    .unwrap()
+                    .unwrap()
+                    .placement
+                    .unwrap();
+            let held = PaneLock::try_acquire(&settings.database_url, &placement)
+                .unwrap()
+                .unwrap();
+            let changes = fixture.fixture.conn.total_changes();
+            input(
+                &mut fixture.fixture.conn,
+                &settings,
+                command(
+                    Disposition::AbandonedUncertain,
+                    "fixture:replacement-evidence",
+                ),
+                Deadline::until(until),
+            )
+            .unwrap();
+            assert!(
+                input(
+                    &mut fixture.fixture.conn,
+                    &settings,
+                    command(
+                        Disposition::Submitted,
+                        "fixture:conflicting-cli-disposition"
+                    ),
+                    Deadline::until(until)
+                )
+                .is_err()
+            );
+            assert_eq!(fixture.fixture.conn.total_changes(), changes);
+            assert_eq!(
+                storage::get_input(&fixture.fixture.conn, original.input_id).unwrap(),
+                settled
+            );
+            held.validate_binding(&settings.database_url, &placement)
+                .unwrap();
+            drop(held);
+            crate::runtime::input_service_barrier(fixture, outer);
+            assert_eq!(
+                crate::runtime::input_service_records(fixture)
+                    .iter()
+                    .map(|record| record["line"].as_str().unwrap().to_owned())
+                    .collect::<Vec<_>>(),
+                ["barrier"],
+                "receipt-only CLI work sends no native input"
+            );
+        });
+    }
+}

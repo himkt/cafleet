@@ -9,7 +9,7 @@ mod launch_readiness;
 mod lifecycle;
 mod mechanisms;
 pub(crate) mod owned_child;
-mod permission_history;
+pub(in crate::runtime) mod permission_history;
 mod recovery;
 mod shutdown;
 mod terminal;

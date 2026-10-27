@@ -10,7 +10,7 @@ mod entry;
 const NOW: &str = "2026-10-26T22:00:00.000000+00:00";
 
 #[derive(Clone, Copy, Debug)]
-enum Retained {
+pub(in crate::runtime) enum Retained {
     InProgress,
     Accepted,
     Uncertain,
@@ -18,19 +18,19 @@ enum Retained {
     NotSubmitted,
     Abandoned,
 }
-struct Case {
-    fixture: Fixture,
+pub(in crate::runtime) struct Case {
+    pub(in crate::runtime) fixture: Fixture,
     owner: RunOwner,
     event: RuntimeEventRecord,
     request: NewPermissionResponse,
-    input_id: i64,
-    settings: Settings,
+    pub(in crate::runtime) input_id: i64,
+    pub(in crate::runtime) settings: Settings,
     placement: crate::broker::records::Placement,
     _artifacts: RunArtifacts,
     _lock: Arc<RunLock>,
 }
 impl Case {
-    fn new(state: Retained) -> Self {
+    pub(in crate::runtime) fn new(state: Retained) -> Self {
         Self::decision(
             state,
             PermissionDecision::Allow,

@@ -1130,6 +1130,329 @@ mod retirement_contracts {
         );
     }
 
+    fn receipt(
+        h: &mut Host,
+        action: ReceiptAction,
+    ) -> std::result::Result<InputControlReply, InputFailure> {
+        let mut request = h.request("unused-receipt-key");
+        request.operation = InputControlOperation::Receipt(action);
+        h.coordinator
+            .handle(
+                &mut h.fixture.conn,
+                &h.fixture.run,
+                request,
+                &h.controller,
+                h.until,
+            )
+            .map(|reply| reply.expect("receipt actions reply immediately"))
+    }
+
+    fn pending(h: &Host) -> (String, String, Vec<u8>, Instant, InputPhase, Option<i64>) {
+        let pending = h
+            .coordinator
+            .pending
+            .as_ref()
+            .expect("actual pending writer");
+        (
+            pending.request.operation_key.clone(),
+            pending.request.payload_digest.clone(),
+            pending.bytes.to_vec(),
+            pending.deadline,
+            pending.phase,
+            pending.input_id,
+        )
+    }
+
+    #[test]
+    fn live_receipt_query_preserves_the_real_zero_byte_checkpoint_and_pending_writer() {
+        with_host(|h| {
+            let key = "prompt:live-receipt-query";
+            let id = h.arm(key);
+            let point = cached(h, id);
+            assert!(matches!(point.1, SubmissionStage::ZeroBytes));
+            assert!(point.4 && !point.5);
+            h.pty
+                .child
+                .bytes
+                .extend(b"\x1b[2J\x1b[HLater unclassified output");
+            h.drain();
+            assert!(h.transport.snapshot().screen_seq > point.3);
+            let writer = pending(h);
+            let changes = h.fixture.conn.total_changes();
+            let hooks = h.hooks.points.lock().unwrap().len();
+            let reply = receipt(
+                h,
+                ReceiptAction::Query {
+                    operation_key: key.into(),
+                },
+            )
+            .expect("Query projects actual retained facts even while a writer is Armed");
+            let InputControlReply::Receipt(ReceiptReply::Present {
+                input_id,
+                submission,
+            }) = reply
+            else {
+                panic!("actual retained input is Present")
+            };
+            assert_eq!(input_id, id);
+            assert_eq!(submission.input_id, Some(id));
+            assert_eq!(submission.status, SubmissionStatus::Uncertain);
+            assert_eq!(submission.stage, SubmissionStage::ZeroBytes);
+            assert_eq!(submission.output_seq, Some(point.3));
+            assert!(matches!(
+                receipt(
+                    h,
+                    ReceiptAction::Query {
+                        operation_key: "prompt:absent-receipt".into()
+                    }
+                )
+                .unwrap(),
+                InputControlReply::Receipt(ReceiptReply::Missing)
+            ));
+            let mut stale = h.request("unused-receipt-key");
+            stale.operation = InputControlOperation::Receipt(ReceiptAction::Query {
+                operation_key: key.into(),
+            });
+            stale.identity.owner_epoch += 1;
+            assert!(
+                h.coordinator
+                    .handle(
+                        &mut h.fixture.conn,
+                        &h.fixture.run,
+                        stale,
+                        &h.controller,
+                        h.until
+                    )
+                    .is_err()
+            );
+            assert!(
+                receipt(
+                    h,
+                    ReceiptAction::Reconcile {
+                        input_id: id,
+                        expected: storage::InputState::InProgress,
+                        disposition: storage::InputDisposition::NotSubmitted,
+                        evidence_ref: "fixture:active-writer-is-not-zero-proof".into(),
+                    }
+                )
+                .is_err(),
+                "reconciliation preserves the actual Armed writer and its available permit"
+            );
+            assert!(
+                pending(h) == writer,
+                "Query preserves exact request, bytes, phase and original deadline"
+            );
+            assert_eq!(cached(h, id), point);
+            assert_eq!(storage::get_input(&h.fixture.conn, id).unwrap(), point.0);
+            assert_eq!(h.fixture.conn.total_changes(), changes);
+            assert_eq!(h.hooks.points.lock().unwrap().len(), hooks);
+            assert!(h.pty.offers.is_empty());
+            h.fixture
+                .conn
+                .execute(
+                    "UPDATE member_input_operations SET payload_digest=?1 WHERE input_id=?2",
+                    rusqlite::params!["f".repeat(64), id],
+                )
+                .unwrap();
+            assert!(
+                receipt(
+                    h,
+                    ReceiptAction::Query {
+                        operation_key: key.into()
+                    }
+                )
+                .is_err(),
+                "cached immutable identity must match its actual durable reservation"
+            );
+            h.fixture
+                .conn
+                .execute(
+                    "UPDATE member_input_operations SET payload_digest=?1 WHERE input_id=?2",
+                    rusqlite::params![point.0.payload_digest, id],
+                )
+                .unwrap();
+            assert_eq!(
+                h.fixture
+                    .conn
+                    .execute(
+                        "DELETE FROM member_input_operations WHERE input_id=?1",
+                        [id]
+                    )
+                    .unwrap(),
+                1
+            );
+            let changes = h.fixture.conn.total_changes();
+            assert!(
+                receipt(
+                    h,
+                    ReceiptAction::Query {
+                        operation_key: key.into()
+                    }
+                )
+                .is_err(),
+                "a retained attempt without its actual reservation is an invariant error"
+            );
+            assert!(pending(h) == writer);
+            assert_eq!(cached(h, id), point);
+            assert_eq!(h.fixture.conn.total_changes(), changes);
+            assert!(h.pty.offers.is_empty());
+        });
+    }
+
+    #[test]
+    fn live_receipt_reconciliation_uses_cas_rolls_back_and_keeps_real_stage_until_retirement() {
+        with_host(|h| {
+            let key = "prompt:live-receipt-partial";
+            let id = h.arm(key);
+            h.pty.short = Some(3);
+            h.drain();
+            let InputControlReply::Submission(partial) = h.advance().expect("actual partial write")
+            else {
+                panic!("actual partial result")
+            };
+            assert_eq!(partial.status, SubmissionStatus::Uncertain);
+            assert_eq!(partial.stage, SubmissionStage::Partial);
+            let original = storage::get_input(&h.fixture.conn, id).unwrap();
+            let point = cached(h, id);
+            assert_eq!(point.2, 3);
+            let offers = h.pty.offers.clone();
+            let action = |expected| ReceiptAction::Reconcile {
+                input_id: id,
+                expected,
+                disposition: storage::InputDisposition::AbandonedUncertain,
+                evidence_ref: "fixture:observed-partial".into(),
+            };
+            let Err(stale) = receipt(h, action(storage::InputState::Accepted)) else {
+                panic!("actual state CAS rejects stale expected state")
+            };
+            assert!(
+                stale.source.to_string().contains("state"),
+                "{}",
+                stale.source
+            );
+            assert_eq!(storage::get_input(&h.fixture.conn, id).unwrap(), original);
+            assert_eq!(cached(h, id), point);
+            h.fixture.conn.execute_batch("CREATE TRIGGER receipt_settlement_failure BEFORE UPDATE OF state ON member_input_operations WHEN NEW.state='settled' BEGIN SELECT RAISE(ABORT,'owned receipt settlement failure'); END").unwrap();
+            let failed = receipt(h, action(storage::InputState::Uncertain));
+            let removed = h
+                .fixture
+                .conn
+                .execute_batch("DROP TRIGGER receipt_settlement_failure");
+            assert!(
+                failed.as_ref().is_err_and(|failure| failure
+                    .source
+                    .to_string()
+                    .contains("owned receipt settlement failure")),
+                "settlement_error={:?}; trigger_cleanup={removed:?}",
+                failed.as_ref().err()
+            );
+            removed.unwrap();
+            assert_eq!(storage::get_input(&h.fixture.conn, id).unwrap(), original);
+            assert_eq!(cached(h, id), point);
+            assert!(
+                matches!(receipt(h, action(storage::InputState::Uncertain)).unwrap(), InputControlReply::Receipt(ReceiptReply::Settled { input_id }) if input_id == id)
+            );
+            let settled = storage::get_input(&h.fixture.conn, id).unwrap();
+            assert_eq!(settled.state, storage::InputState::Settled);
+            assert_eq!(
+                settled.disposition,
+                Some(storage::InputDisposition::AbandonedUncertain)
+            );
+            assert_eq!(
+                settled.evidence_ref.as_deref(),
+                Some("fixture:observed-partial")
+            );
+            let changes = h.fixture.conn.total_changes();
+            assert!(
+                matches!(receipt(h, ReceiptAction::Reconcile { input_id: id, expected: storage::InputState::Settled, disposition: storage::InputDisposition::AbandonedUncertain, evidence_ref: "fixture:preserve-first-evidence".into() }).unwrap(), InputControlReply::Receipt(ReceiptReply::Settled { input_id }) if input_id == id)
+            );
+            assert!(
+                receipt(
+                    h,
+                    ReceiptAction::Reconcile {
+                        input_id: id,
+                        expected: storage::InputState::Settled,
+                        disposition: storage::InputDisposition::Submitted,
+                        evidence_ref: "fixture:conflicting-wire-disposition".into()
+                    }
+                )
+                .is_err()
+            );
+            assert_eq!(h.fixture.conn.total_changes(), changes);
+            assert_eq!(storage::get_input(&h.fixture.conn, id).unwrap(), settled);
+            let retained = cached(h, id);
+            assert_eq!(
+                (retained.1, retained.2, retained.3),
+                (point.1, point.2, point.3)
+            );
+            let hooks = h.hooks.points.lock().unwrap().len();
+            let InputControlReply::Receipt(ReceiptReply::Present {
+                input_id,
+                submission,
+            }) = receipt(
+                h,
+                ReceiptAction::Query {
+                    operation_key: key.into(),
+                },
+            )
+            .unwrap()
+            else {
+                panic!("settled cache retains its actual prior facts")
+            };
+            assert_eq!(input_id, id);
+            assert_eq!(submission.status, SubmissionStatus::Rejected);
+            assert_eq!(submission.stage, SubmissionStage::Partial);
+            assert_eq!(submission.output_seq, Some(point.3));
+            assert_eq!(h.hooks.points.lock().unwrap().len(), hooks);
+            assert_retired(
+                receipt(h, ReceiptAction::Retire { input_id: id }).unwrap(),
+                id,
+            );
+            assert!(!h.coordinator.operations.contains_key(&id));
+            let InputControlReply::Receipt(ReceiptReply::Present {
+                input_id,
+                submission,
+            }) = receipt(
+                h,
+                ReceiptAction::Query {
+                    operation_key: key.into(),
+                },
+            )
+            .unwrap()
+            else {
+                panic!("retired cache preserves durable Present history")
+            };
+            assert_eq!(input_id, id);
+            assert_eq!(submission.input_id, Some(id));
+            assert_eq!(submission.status, SubmissionStatus::Rejected);
+            assert_eq!(submission.stage, SubmissionStage::Unknown);
+            assert_eq!(submission.output_seq, None);
+            let repeat = h.request(key);
+            let InputControlReply::Submission(repeat) = h
+                .coordinator
+                .handle(
+                    &mut h.fixture.conn,
+                    &h.fixture.run,
+                    repeat,
+                    &h.controller,
+                    h.until,
+                )
+                .unwrap()
+                .unwrap()
+            else {
+                panic!("consumed key returns its submission retry projection")
+            };
+            assert_eq!(repeat.status, SubmissionStatus::Rejected);
+            assert_eq!(repeat.stage, SubmissionStage::ZeroBytes);
+            assert!(h.coordinator.pending.is_none());
+            assert_eq!(h.pty.offers, offers);
+            assert_eq!(storage::get_input(&h.fixture.conn, id).unwrap(), settled);
+            assert_eq!(h.hooks.count("reserved"), 1);
+            assert_eq!(h.hooks.count("before"), 1);
+            assert_eq!(h.hooks.count("after"), 1);
+        });
+    }
+
     fn cached(
         h: &Host,
         id: i64,
@@ -1396,14 +1719,14 @@ mod retirement_contracts {
     }
 
     #[test]
-    fn retirement_checks_durable_kind_and_disposition_even_without_a_cached_attempt() {
+    fn live_receipt_retirement_preserves_settled_ordinary_history_without_a_cached_attempt() {
         with_host(|h| {
             let run = h.fixture.run.clone();
             let prompt = storage::reserve_input(
                 &mut h.fixture.conn,
                 &run.owner(),
                 &storage::NewInput {
-                    operation_key: "prompt:retirement-is-preview-only".into(),
+                    operation_key: "prompt:retirement-history".into(),
                     kind: storage::InputKind::Prompt,
                     payload_digest: "a".repeat(64),
                     message_id: None,
@@ -1462,17 +1785,35 @@ mod retirement_contracts {
                 "owned abandoned Preview",
             )
             .unwrap();
+            let exec = storage::reserve_input(
+                &mut h.fixture.conn,
+                &run.owner(),
+                &storage::NewInput {
+                    operation_key: "exec:retirement-history".into(),
+                    kind: storage::InputKind::Exec,
+                    payload_digest: "c".repeat(64),
+                    message_id: None,
+                },
+            )
+            .unwrap();
+            let exec = storage::settle_input(
+                &mut h.fixture.conn,
+                &run.owner(),
+                exec.input_id,
+                storage::InputState::InProgress,
+                storage::InputDisposition::NotSubmitted,
+                "owned no-write Exec history",
+            )
+            .unwrap();
             assert!(h.coordinator.operations.is_empty());
             let changes = h.fixture.conn.total_changes();
-            for row in [prompt, preview] {
-                let Err(failure) =
+            for row in [prompt, preview, exec] {
+                assert_retired(
                     h.coordinator
                         .retire_received(&mut h.fixture.conn, &run, row.input_id, h.until)
-                else {
-                    panic!("retirement requires a Settled Submitted Preview")
-                };
-                assert!(failure.to_string().contains(&row.input_id.to_string()));
-                assert!(failure.to_string().contains(&row.operation_key));
+                        .unwrap(),
+                    row.input_id,
+                );
                 assert_eq!(
                     storage::get_input(&h.fixture.conn, row.input_id).unwrap(),
                     row
