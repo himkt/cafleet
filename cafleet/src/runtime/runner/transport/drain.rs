@@ -41,13 +41,6 @@ impl<O: ScreenObserver> ScreenObserver for DeadlineObserver<'_, O> {
 }
 
 impl Transport {
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the reviewed service integration drives actual input draining"
-        )
-    )]
     pub(crate) fn quiesce_for_input(
         &mut self,
         human: &mut impl ByteInput,

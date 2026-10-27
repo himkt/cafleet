@@ -1,7 +1,8 @@
 use super::codec::AdmittedControlFrame;
 pub(super) use super::control::request;
+use super::input::{InertInputHooks, InputCoordinator, InputServices, RequestTokenSource};
 use super::input_clock::{RealInputDeadlineClock, receive_input_expiration};
-use super::input_protocol::{ServiceControlRequest, decode_service_request};
+use super::input_protocol::{ServiceControlRequest, decode_service_request, encode_input_reply};
 use super::writer::EventWriter;
 use super::*;
 
@@ -115,6 +116,20 @@ struct Client {
     output: VecDeque<u8>,
     closed: bool,
 }
+struct SystemRequestTokens;
+impl RequestTokenSource for SystemRequestTokens {
+    fn fill(&mut self, bytes: &mut [u8; 32]) -> Result<()> {
+        std::fs::File::open("/dev/urandom")
+            .and_then(|mut file| file.read_exact(bytes))
+            .map_err(io_error)
+    }
+}
+
+struct PendingInputClient {
+    id: u64,
+    deadline: Instant,
+}
+
 impl Client {
     fn poll(&mut self) -> Result<Vec<AdmittedControlFrame>> {
         let mut requests = Vec::new();
@@ -144,6 +159,15 @@ impl Client {
             }
         };
         let bytes = encode_control_frame(&value)?;
+        self.queue_reply(bytes)
+    }
+    fn reply_input(
+        &mut self,
+        reply: std::result::Result<&InputControlReply, &CafleetError>,
+    ) -> Result<()> {
+        self.queue_reply(encode_input_reply(reply)?)
+    }
+    fn queue_reply(&mut self, bytes: Vec<u8>) -> Result<()> {
         ensure(
             self.output.len() + bytes.len() <= MAX_CONTROL_FRAME + 4,
             "control reply buffer is full",
@@ -189,6 +213,7 @@ struct LiveShutdown<'a> {
     clock: ShutdownClock,
     controller: &'a mut ObservationController,
     observation_clock: &'a dyn ObservationClock,
+    coordinator: Option<&'a mut InputCoordinator>,
 }
 fn record_observation_failure(
     controller: &mut ObservationController,
@@ -259,16 +284,24 @@ impl ShutdownHost for LiveShutdown<'_> {
         #[cfg(test)]
         self.await_native_exit_before_parsing(deadline)?;
         while Instant::now() < deadline {
-            let progress = self.transport.tick(
-                self.input,
-                self.pty,
-                self.output,
-                &mut self.controller.observer_for(
-                    self.writer,
-                    self.observation_clock,
-                    ObservationPhase::ShutdownDrain,
-                ),
-            )?;
+            let mut tick = |transport: &mut Transport| {
+                transport.tick(
+                    self.input,
+                    self.pty,
+                    self.output,
+                    &mut self.controller.observer_for(
+                        self.writer,
+                        self.observation_clock,
+                        ObservationPhase::ShutdownDrain,
+                    ),
+                )
+            };
+            let progress = match self.coordinator.as_mut() {
+                Some(coordinator) => coordinator
+                    .progress_with_manual(self.transport, tick)
+                    .map_err(CafleetError::from)?,
+                None => tick(self.transport)?,
+            };
             record_observation_failure(self.controller, &progress, self.observation_clock)?;
             self.controller.poll_for(
                 &self.transport.snapshot(),
@@ -545,6 +578,8 @@ fn run_service(
     let mut next_client = 1u64;
     let mut creator_connection = None;
     let mut started = false;
+    let mut coordinator = None::<InputCoordinator>;
+    let mut pending_input_client = None::<PendingInputClient>;
     let mut shutdown_client = None;
     let mut failure = None;
     let mut native_exit = None;
@@ -592,20 +627,81 @@ fn run_service(
                         return Err(error("creator control disconnected before start"));
                     }
                     for frame in requests {
-                        let mut accepted_startup = false;
-                        let result = (|| -> Result<Value> {
-                            let frame = match decode_service_request(frame.body())? {
-                                ServiceControlRequest::Legacy(frame) => frame,
-                                ServiceControlRequest::Input(request) => {
-                                    return unavailable_input_request(
-                                        &run,
-                                        &request,
+                        let frame = match decode_service_request(frame.body()) {
+                            Ok(ServiceControlRequest::Input(request))
+                                if matches!(
+                                    request.operation,
+                                    InputControlOperation::SubmitPrompt(_)
+                                        | InputControlOperation::SubmitExec(_)
+                                ) =>
+                            {
+                                let result = (|| -> Result<Option<InputControlReply>> {
+                                    let deadline = receive_input_expiration(
+                                        request.expires_at_mono_ns,
                                         frame.admitted_at(),
                                         None,
                                         &mut RealInputDeadlineClock,
-                                    );
+                                    )?;
+                                    let coordinator = coordinator
+                                        .as_mut()
+                                        .ok_or_else(|| error("native input has not started"))?;
+                                    let reply = coordinator
+                                        .handle_received(
+                                            &mut conn,
+                                            &run,
+                                            *request,
+                                            &controller,
+                                            deadline,
+                                        )
+                                        .map_err(CafleetError::from)?;
+                                    if reply.is_none() {
+                                        ensure(
+                                            pending_input_client.is_none(),
+                                            "accepted pending input already has a client",
+                                        )?;
+                                        pending_input_client = Some(PendingInputClient {
+                                            id: client.id,
+                                            deadline,
+                                        });
+                                    }
+                                    Ok(reply)
+                                })();
+                                let replied = match &result {
+                                    Ok(Some(reply)) => client.reply_input(Ok(reply)),
+                                    Err(cause) => client.reply_input(Err(cause)),
+                                    Ok(None) => Ok(()),
+                                };
+                                if replied.is_err() {
+                                    client.closed = true;
+                                    break;
                                 }
-                            };
+                                continue;
+                            }
+                            Ok(ServiceControlRequest::Input(request)) => {
+                                let result = unavailable_input_request(
+                                    &run,
+                                    &request,
+                                    frame.admitted_at(),
+                                    None,
+                                    &mut RealInputDeadlineClock,
+                                );
+                                if client.reply(result).is_err() {
+                                    client.closed = true;
+                                    break;
+                                }
+                                continue;
+                            }
+                            Ok(ServiceControlRequest::Legacy(frame)) => frame,
+                            Err(cause) => {
+                                if client.reply(Err(cause)).is_err() {
+                                    client.closed = true;
+                                    break;
+                                }
+                                continue;
+                            }
+                        };
+                        let mut accepted_startup = false;
+                        let result = (|| -> Result<Value> {
                             let kind = frame
                                 .get("kind")
                                 .and_then(Value::as_str)
@@ -742,6 +838,17 @@ fn run_service(
                                         &writer,
                                         services.clock.as_ref(),
                                     )?;
+                                    coordinator = Some(InputCoordinator::new(
+                                        &mut conn,
+                                        &run,
+                                        lock.clone(),
+                                        InputServices {
+                                            catalog: services.catalog.clone(),
+                                            token_source: Box::new(SystemRequestTokens),
+                                            hooks: Arc::new(InertInputHooks),
+                                        },
+                                        handshake_deadline,
+                                    )?);
                                     serde_json::to_value(Started {
                                         identity: ControlIdentity::from_run(&run),
                                         runner: process.clone(),
@@ -821,12 +928,19 @@ fn run_service(
                             )
                             .observe(&transport.snapshot())?;
                     }
-                    let progress = transport.tick(
-                        &mut input,
-                        &mut pty,
-                        &mut output,
-                        &mut controller.observer(&writer, services.clock.as_ref()),
-                    )?;
+                    let coordinator = coordinator
+                        .as_mut()
+                        .ok_or_else(|| error("running service requires input coordinator"))?;
+                    let progress = coordinator
+                        .progress_with_manual(&mut transport, |transport| {
+                            transport.tick(
+                                &mut input,
+                                &mut pty,
+                                &mut output,
+                                &mut controller.observer(&writer, services.clock.as_ref()),
+                            )
+                        })
+                        .map_err(CafleetError::from)?;
                     record_observation_failure(
                         &mut controller,
                         &progress,
@@ -845,6 +959,71 @@ fn run_service(
                             services.clock.as_ref(),
                         )?;
                         return Ok(ShutdownClock::new(Instant::now()));
+                    }
+                    if let Some(pending) = &pending_input_client {
+                        let deadline = pending.deadline;
+                        let drained =
+                            coordinator.progress_with_manual(&mut transport, |transport| {
+                                transport.quiesce_for_input(
+                                    &mut input,
+                                    &mut pty,
+                                    &mut output,
+                                    &mut controller.observer(&writer, services.clock.as_ref()),
+                                    deadline,
+                                )
+                            });
+                        let result = match drained {
+                            Err(failure) => Err(CafleetError::from(failure)),
+                            Ok(InputDrain::Pending) => Ok(None),
+                            Ok(InputDrain::Quiescent { .. }) => {
+                                if terminate.load(Ordering::Acquire) {
+                                    return Ok(ShutdownClock::new(Instant::now()));
+                                }
+                                if let Some(exit) = pty.try_wait()? {
+                                    native_exit = Some(exit);
+                                    controller.child_exited(
+                                        exit,
+                                        &transport.snapshot(),
+                                        &writer,
+                                        services.clock.as_ref(),
+                                    )?;
+                                    return Ok(ShutdownClock::new(Instant::now()));
+                                }
+                                if resize.load(Ordering::Acquire) {
+                                    Ok(None)
+                                } else {
+                                    coordinator
+                                        .advance(
+                                            &mut conn,
+                                            &run,
+                                            &mut transport,
+                                            &mut pty,
+                                            &controller,
+                                            deadline,
+                                        )
+                                        .map_err(CafleetError::from)
+                                }
+                            }
+                        };
+                        if !matches!(result, Ok(None)) {
+                            coordinator.finish_pending_attempt();
+                            let pending = pending_input_client
+                                .take()
+                                .expect("completed input retains its original client");
+                            if let Some(client) = clients
+                                .iter_mut()
+                                .find(|client| client.id == pending.id && !client.closed)
+                            {
+                                let replied = match &result {
+                                    Ok(Some(reply)) => client.reply_input(Ok(reply)),
+                                    Err(cause) => client.reply_input(Err(cause)),
+                                    Ok(None) => unreachable!("completed input has a reply"),
+                                };
+                                if replied.is_err() {
+                                    client.closed = true;
+                                }
+                            }
+                        }
                     }
                 }
                 let sleep = controller
@@ -868,6 +1047,9 @@ fn run_service(
             ShutdownClock::new(Instant::now())
         }
     };
+    if let Some(coordinator) = coordinator.as_mut() {
+        coordinator.finish_pending_attempt();
+    }
     let clock = pty.begin_shutdown(clock);
     let mut live = LiveShutdown {
         pty: &mut pty,
@@ -879,6 +1061,7 @@ fn run_service(
         clock,
         controller: &mut controller,
         observation_clock: services.clock.as_ref(),
+        coordinator: coordinator.as_mut(),
     };
     let mut outcome = shutdown(&mut live, clock, native_exit);
     if let Some(cause) = failure {

@@ -167,13 +167,6 @@ pub(crate) enum ReceiptAction {
         evidence_ref: String,
     },
 }
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed input coordinator and host supply this production consumer"
-    )
-)]
 pub(crate) struct InputControlRequest {
     pub protocol_version: u32,
     pub identity: ControlIdentity,
@@ -194,13 +187,6 @@ pub(crate) enum InputControlOperation {
     PermissionRespond(PermissionRespondInput),
     Receipt(ReceiptAction),
 }
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed input coordinator and host supply this production consumer"
-    )
-)]
 pub(crate) enum ReceiptReply {
     Missing,
     Present {
@@ -214,13 +200,6 @@ pub(crate) enum ReceiptReply {
         input_id: i64,
     },
 }
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed input coordinator and host supply this production consumer"
-    )
-)]
 pub(crate) enum InputControlReply {
     Submission(SubmissionResult),
     Inspection(Box<PermissionInspection>),

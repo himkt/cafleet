@@ -1,20 +1,6 @@
 use super::*;
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed input coordinator and host supply this production consumer"
-    )
-)]
 const SUBMISSION_FIELDS: &[&str] = &["status", "input_id", "stage", "output_seq", "reason"];
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed input coordinator and host supply this production consumer"
-    )
-)]
 const RESPONSE_FIELDS: &[&str] = &[
     "status",
     "input_id",
@@ -29,13 +15,6 @@ const RESPONSE_FIELDS: &[&str] = &[
     "output_seq",
     "reason",
 ];
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed input coordinator and host supply this production consumer"
-    )
-)]
 const INSPECTION_FIELDS: &[&str] = &[
     "event_id",
     "message_id",
@@ -62,13 +41,6 @@ const INSPECTION_FIELDS: &[&str] = &[
     "missing_evidence",
 ];
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed input coordinator and host supply this production consumer"
-    )
-)]
 fn submission(value: &Value) -> Result<SubmissionResult> {
     Object::new(value, SUBMISSION_FIELDS)?;
     let result: SubmissionResult = serde_json::from_value(value.clone())
@@ -79,13 +51,6 @@ fn submission(value: &Value) -> Result<SubmissionResult> {
     Ok(result)
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed input coordinator and host supply this production consumer"
-    )
-)]
 fn response(value: &Value) -> Result<PermissionResponseResult> {
     let object = Object::new(value, RESPONSE_FIELDS)?;
     let submission_value = Value::Object(
@@ -106,13 +71,6 @@ fn response(value: &Value) -> Result<PermissionResponseResult> {
     })
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed input coordinator and host supply this production consumer"
-    )
-)]
 fn inspection(value: &Value) -> Result<Box<PermissionInspection>> {
     let object = Object::new(value, INSPECTION_FIELDS)?;
     for field in [
@@ -157,13 +115,6 @@ fn inspection(value: &Value) -> Result<Box<PermissionInspection>> {
     Ok(Box::new(result))
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed input coordinator and host supply this production consumer"
-    )
-)]
 fn validate_order<'a>(values: impl Iterator<Item = &'a str>, domain: &[&str]) -> Result<()> {
     let mut previous = None;
     for value in values {
@@ -180,13 +131,6 @@ fn validate_order<'a>(values: impl Iterator<Item = &'a str>, domain: &[&str]) ->
     Ok(())
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed input coordinator and host supply this production consumer"
-    )
-)]
 fn receipt(value: &Value) -> Result<ReceiptReply> {
     let object = Object::new(value, &["status", "input_id", "submission"])?;
     match object.get::<String>("status")?.as_str() {
@@ -225,13 +169,6 @@ fn receipt(value: &Value) -> Result<ReceiptReply> {
     }
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed input coordinator and host supply this production consumer"
-    )
-)]
 fn result(value: &Value) -> Result<InputControlReply> {
     let kind = value
         .get("kind")
@@ -342,13 +279,6 @@ pub(super) fn decode(body: &[u8], request: &InputControlRequest) -> Result<Input
     Ok(result)
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed input coordinator and host supply this production consumer"
-    )
-)]
 fn encode_result(reply: &InputControlReply) -> Value {
     match reply {
         InputControlReply::Submission(submission) => {
@@ -371,13 +301,6 @@ fn encode_result(reply: &InputControlReply) -> Value {
     }
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed input coordinator and host supply this production consumer"
-    )
-)]
 pub(super) fn encode(
     reply: std::result::Result<&InputControlReply, &CafleetError>,
 ) -> Result<Vec<u8>> {

@@ -1,13 +1,14 @@
 use super::{
     ControlIdentity, DrainedInput, InputControlOperation, InputControlReply, InputControlRequest,
     InputDrain, InputEligibility, ObservationController, ProgrammaticWrite, PtyIo,
-    RealInputDeadlineClock, SubmissionResult, SubmissionStatus, Visibility, canonical_json,
-    receive_input_expiration, validate_operation_key,
+    SubmissionResult, SubmissionStatus, Visibility, canonical_json, validate_operation_key,
 };
 use super::{
     InputFailure, ProcessIdentity, Result, RunLock, SubmissionStage, Transport, check_deadline,
     ensure, error, stable_run_identity, with_database_deadline,
 };
+#[cfg(test)]
+use super::{RealInputDeadlineClock, receive_input_expiration};
 use crate::broker::members::db_err;
 use crate::broker::records::{MemberKind, Placement};
 use crate::broker::runtime::{self as storage, OwnerKind, RunRecord, RunStatus};
@@ -62,13 +63,6 @@ pub(crate) trait InputHooks: Send + Sync {
     ) -> Result<()>;
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed service integration selects inert production hooks"
-    )
-)]
 pub(crate) struct InertInputHooks;
 
 impl InputHooks for InertInputHooks {
@@ -350,14 +344,39 @@ impl InputCoordinator {
         }
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the reviewed external service integration invokes the ordinary input coordinator"
-        )
-    )]
+    #[cfg(test)]
     pub(crate) fn handle(
+        &mut self,
+        conn: &mut Connection,
+        run: &RunRecord,
+        request: InputControlRequest,
+        observation: &ObservationController,
+        deadline: Instant,
+    ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
+        let deadline = check_deadline(Instant::now(), deadline)
+            .and_then(|()| {
+                receive_input_expiration(
+                    request.expires_at_mono_ns,
+                    Instant::now(),
+                    Some(deadline),
+                    &mut RealInputDeadlineClock,
+                )
+            })
+            .map_err(|source| InputFailure {
+                source,
+                run_id: Some(self.run.run_id),
+                interaction_id: None,
+                input_id: None,
+                operation_key: match &request.operation {
+                    InputControlOperation::SubmitPrompt(input)
+                    | InputControlOperation::SubmitExec(input) => Some(input.operation_key.clone()),
+                    _ => None,
+                },
+            })?;
+        self.handle_received(conn, run, request, observation, deadline)
+    }
+
+    pub(super) fn handle_received(
         &mut self,
         conn: &mut Connection,
         run: &RunRecord,
@@ -486,12 +505,6 @@ impl InputCoordinator {
                 "composer plan provenance changed",
             )?;
             let bytes = Arc::from(plan.encode(&input.literal)?);
-            let expiration = receive_input_expiration(
-                request.expires_at_mono_ns,
-                Instant::now(),
-                Some(deadline),
-                &mut RealInputDeadlineClock,
-            )?;
             self.pending = Some(PendingInput {
                 request: storage::NewInput {
                     operation_key: input.operation_key,
@@ -500,7 +513,7 @@ impl InputCoordinator {
                     message_id: input.message_id,
                 },
                 bytes,
-                deadline: expiration.min(deadline),
+                deadline,
                 phase: InputPhase::AwaitReservation,
                 input_id: None,
             });
@@ -708,13 +721,6 @@ impl InputCoordinator {
         }))
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the reviewed external service integration invokes the ordinary input coordinator"
-        )
-    )]
     pub(crate) fn advance(
         &mut self,
         conn: &mut Connection,
@@ -898,13 +904,21 @@ impl InputCoordinator {
         result.map_err(|source| self.failure(source))
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the reviewed service integration constructs the coordinator"
-        )
-    )]
+    pub(super) fn finish_pending_attempt(&mut self) {
+        if let Some(id) = self.pending.as_ref().and_then(|pending| pending.input_id) {
+            let retained = self
+                .operations
+                .get_mut(&id)
+                .expect("pending input reservation remains retained");
+            assert!(
+                !retained.leased,
+                "completed input has no active guard lease"
+            );
+            retained.attempt_available = false;
+        }
+        self.pending = None;
+    }
+
     pub(crate) fn new(
         conn: &mut Connection,
         run: &RunRecord,
@@ -962,13 +976,6 @@ impl InputCoordinator {
         })
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the reviewed service integration accounts manual progress"
-        )
-    )]
     pub(super) fn progress_with_manual<T>(
         &mut self,
         transport: &mut Transport,
@@ -993,13 +1000,7 @@ impl InputCoordinator {
         if accounting.is_err() {
             self.manual_accounting_failed = true;
         }
-        combine_manual_progress(progress, accounting).map_err(|source| InputFailure {
-            source,
-            run_id: Some(self.run.run_id),
-            interaction_id: None,
-            input_id: None,
-            operation_key: None,
-        })
+        combine_manual_progress(progress, accounting).map_err(|source| self.failure(source))
     }
 
     pub(crate) fn observe_manual(&mut self, count: usize) -> Result<()> {

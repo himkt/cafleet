@@ -318,13 +318,6 @@ pub(in crate::runtime::runner) fn decode_input_reply(
 ) -> Result<InputControlReply> {
     replies::decode(body, request)
 }
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed input coordinator and host supply this production consumer"
-    )
-)]
 pub(in crate::runtime::runner) fn encode_input_reply(
     reply: std::result::Result<&InputControlReply, &CafleetError>,
 ) -> Result<Vec<u8>> {
