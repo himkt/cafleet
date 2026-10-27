@@ -3,6 +3,7 @@ use crate::coding_agent::AnswerCapability;
 use crate::runtime::runner::with_database_deadline;
 use sha2::{Digest, Sha256};
 use std::marker::PhantomData;
+use std::rc::Rc;
 use std::time::Instant;
 
 #[derive(Debug)]
@@ -10,9 +11,36 @@ pub struct ZeroByteRetirement<'guard> {
     owner: RunOwner,
     input_id: i64,
     interaction_id: i64,
-    guard: PhantomData<&'guard mut ()>,
+    input: Option<InputOperation>,
+    rearm: Option<(NewPermissionResponse, AnswerCapability)>,
+    guard: PhantomData<(&'guard mut (), Rc<()>)>,
 }
 impl<'guard> ZeroByteRetirement<'guard> {
+    pub(crate) fn from_live_guard(
+        guard: &'guard crate::runtime::runner::InputGuard<'_>,
+        owner: &RunOwner,
+        input_id: i64,
+        interaction_id: i64,
+    ) -> Result<Self, CafleetError> {
+        let (receipt, capability) = guard.retirement_binding(owner, input_id, interaction_id)?;
+        Ok(Self {
+            owner: owner.clone(),
+            input_id,
+            interaction_id,
+            input: Some(receipt.input.clone()),
+            rearm: capability.map(|cap| {
+                (
+                    NewPermissionResponse {
+                        operation_key: receipt.input.operation_key.clone(),
+                        metadata: receipt.response.metadata.clone(),
+                    },
+                    cap.clone(),
+                )
+            }),
+            guard: PhantomData,
+        })
+    }
+
     #[cfg(test)]
     pub(crate) fn fixture(
         owner: &RunOwner,
@@ -29,6 +57,8 @@ impl<'guard> ZeroByteRetirement<'guard> {
             owner: owner.clone(),
             input_id,
             interaction_id,
+            input: None,
+            rearm: None,
             guard: PhantomData,
         })
     }
@@ -320,22 +350,7 @@ pub fn reserve_permission_response(
             "permission_response",
             "current open inbox permission event required",
         )?;
-        let cap = capability
-            .ok_or_else(|| invalid("answer_capability", "verified answer capability required"))?;
-        require(
-            cap.backend().name() == run.backend
-                && Some(cap.native_version()) == run.native_version.as_deref()
-                && cap.profile_version() == metadata.answer_profile_version
-                && cap.answer_rule_id() == metadata.answer_rule_id
-                && cap.request_rule_id()
-                    == event.event.payload_json["evidence"]["rule_id"]
-                        .as_str()
-                        .ok_or_else(|| invalid("rule_id", "event request rule required"))?
-                && cap.decision() == metadata.decision
-                && !cap.fixture_ids().is_empty(),
-            "answer_capability",
-            "answer capability does not match this request",
-        )?;
+        validate_current_capability(&tx, &run, metadata, capability)?;
         inputs::require_capacity(&tx, run.run_id)?;
         let digest = permission_response_digest(run.run_id, metadata)?;
         let now = format_utc(now_utc());
@@ -366,26 +381,221 @@ pub fn release_permission_claim(
     deadline: Instant,
 ) -> Result<PermissionReceipt, CafleetError> {
     with_database_deadline(conn, deadline, |conn| {
-        owned_transaction(conn, owner, |conn, run| {
-            let receipt = get_permission_response(conn, input_id)?;
-            require(
-                proof.owner == *owner
-                    && proof.input_id == input_id
-                    && proof.interaction_id == receipt.response.metadata.interaction_id
-                    && receipt.input.run_id == run.run_id,
-                "retirement",
-                "retirement proof does not match current owner/input/interaction",
-            )?;
-            require(
-                zero_byte_state(&receipt.input),
-                "retirement",
-                "serialized zero-byte state required",
-            )?;
-            if receipt.claim.is_some() {
-                let changed = conn.execute("DELETE FROM member_permission_response_claims WHERE interaction_id=?1 AND input_id=?2",params![proof.interaction_id,input_id]).map_err(db_err)?;
-                require(changed == 1, "permission_claim", "claim release lost CAS")?;
-            }
-            get_permission_response(conn, input_id)
+        owned_transaction(conn, owner, |conn, _| {
+            release_permission_claim_in_transaction(conn, owner, input_id, proof, deadline)
         })
     })
+}
+
+fn same_input_identity(a: &InputOperation, b: &InputOperation) -> bool {
+    a.input_id == b.input_id
+        && a.run_id == b.run_id
+        && a.operation_key == b.operation_key
+        && a.kind == b.kind
+        && a.payload_digest == b.payload_digest
+        && a.message_id == b.message_id
+        && a.created_at == b.created_at
+        && a.permission_response == b.permission_response
+}
+
+fn validate_proof(
+    owner: &RunOwner,
+    receipt: &PermissionReceipt,
+    proof: &ZeroByteRetirement<'_>,
+) -> Result<(), CafleetError> {
+    require(
+        proof.owner == *owner
+            && proof.input_id == receipt.input.input_id
+            && proof.interaction_id == receipt.response.metadata.interaction_id
+            && receipt.input.run_id == owner.run_id,
+        "retirement",
+        "retirement proof does not match current owner/input/interaction",
+    )?;
+    if let Some(input) = &proof.input {
+        require(
+            same_input_identity(input, &receipt.input),
+            "retirement",
+            "retirement immutable receipt changed",
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_current_capability(
+    conn: &Connection,
+    run: &RunRecord,
+    metadata: &PermissionResponseMetadata,
+    capability: Option<&AnswerCapability>,
+) -> Result<(), CafleetError> {
+    let event = get_event(conn, metadata.event_id)?;
+    require(
+        run.owner_kind == OwnerKind::Runner
+            && run.status == RunStatus::Running
+            && historical_ownership(conn, run)?.is_none()
+            && metadata.expected_owner_epoch == run.owner_epoch
+            && metadata.director_member_id == run.director_member_id
+            && event.event.run_id == run.run_id
+            && event.event.interaction_id == Some(metadata.interaction_id)
+            && event.event.kind == RuntimeEventKind::InteractionOpened
+            && event.event.notification_state == NotificationState::Inbox
+            && event.interaction.as_ref().is_some_and(|i| {
+                i.classification == InteractionClass::PermissionRequest && i.closed_at.is_none()
+            }),
+        "permission_response",
+        "current open runner permission association required",
+    )?;
+    let cap = capability
+        .ok_or_else(|| invalid("answer_capability", "verified answer capability required"))?;
+    require(
+        cap.backend().name() == run.backend
+            && Some(cap.native_version()) == run.native_version.as_deref()
+            && cap.profile_version() == metadata.answer_profile_version
+            && cap.answer_rule_id() == metadata.answer_rule_id
+            && cap.request_rule_id()
+                == event.event.payload_json["evidence"]["rule_id"]
+                    .as_str()
+                    .ok_or_else(|| invalid("rule_id", "event request rule required"))?
+            && cap.decision() == metadata.decision
+            && !cap.fixture_ids().is_empty(),
+        "answer_capability",
+        "answer capability does not match this request",
+    )?;
+    Ok(())
+}
+
+pub(crate) fn rearm_permission_response(
+    conn: &mut Connection,
+    owner: &RunOwner,
+    request: &NewPermissionResponse,
+    proof: &ZeroByteRetirement<'_>,
+    deadline: Instant,
+) -> Result<PermissionReceipt, CafleetError> {
+    let (bound, capability) = proof
+        .rearm
+        .as_ref()
+        .ok_or_else(|| invalid("retirement", "current-plan rearm authority required"))?;
+    require(
+        bound == request,
+        "permission_response",
+        "rearm request changed",
+    )?;
+    require(
+        conn.is_autocommit(),
+        "transaction",
+        "rearm requires its own immediate transaction",
+    )?;
+    with_database_deadline(conn, deadline, |conn| {
+        conn.busy_handler(Some(|_| false)).map_err(db_err)?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(db_err)?;
+        let run = validate_owner(&tx, owner)?;
+        let receipt = get_permission_response(&tx, proof.input_id)?;
+        validate_proof(owner, &receipt, proof)?;
+        require(
+            receipt.input.state == InputState::Ready
+                && receipt.input.operation_key == request.operation_key
+                && receipt.response.metadata == request.metadata,
+            "permission_response",
+            "exact ready response required",
+        )?;
+        validate_current_capability(&tx, &run, &request.metadata, Some(capability))?;
+        if receipt.claim.is_none() {
+            tx.execute("INSERT INTO member_permission_response_claims(interaction_id,input_id) VALUES(?1,?2)", params![request.metadata.interaction_id, receipt.input.input_id]).map_err(db_err)?;
+        }
+        let changed = tx.execute("UPDATE member_input_operations SET state='in_progress',updated_at=?1 WHERE input_id=?2 AND state='ready'", params![format_utc(now_utc()), receipt.input.input_id]).map_err(db_err)?;
+        require(changed == 1, "state", "permission rearm lost CAS")?;
+        let rearmed = get_permission_response(&tx, receipt.input.input_id)?;
+        require(
+            Instant::now() < deadline,
+            "deadline",
+            "permission rearm deadline expired",
+        )?;
+        tx.commit().map_err(db_err)?;
+        Ok(rearmed)
+    })
+}
+
+pub(crate) fn release_permission_claim_in_transaction(
+    conn: &Connection,
+    owner: &RunOwner,
+    input_id: i64,
+    proof: &ZeroByteRetirement<'_>,
+    deadline: Instant,
+) -> Result<PermissionReceipt, CafleetError> {
+    require(
+        !conn.is_autocommit(),
+        "transaction",
+        "claim release requires an active ownership transaction",
+    )?;
+    validate_owner(conn, owner)?;
+    let receipt = get_permission_response(conn, input_id)?;
+    validate_proof(owner, &receipt, proof)?;
+    require(
+        zero_byte_state(&receipt.input),
+        "retirement",
+        "serialized zero-byte state required",
+    )?;
+    if receipt.claim.is_some() {
+        let changed = conn.execute("DELETE FROM member_permission_response_claims WHERE interaction_id=?1 AND input_id=?2", params![proof.interaction_id, input_id]).map_err(db_err)?;
+        require(changed == 1, "permission_claim", "claim release lost CAS")?;
+    }
+    require(
+        Instant::now() < deadline,
+        "deadline",
+        "claim release deadline expired",
+    )?;
+    get_permission_response(conn, input_id)
+}
+
+pub(crate) fn settle_permission_response_in_transaction(
+    conn: &Connection,
+    owner: &RunOwner,
+    expected_input: &InputOperation,
+    disposition: InputDisposition,
+    evidence_ref: &str,
+    proof: Option<&ZeroByteRetirement<'_>>,
+    deadline: Instant,
+) -> Result<PermissionReceipt, CafleetError> {
+    require(
+        !conn.is_autocommit(),
+        "transaction",
+        "permission settlement requires an active ownership transaction",
+    )?;
+    validate_owner(conn, owner)?;
+    let receipt = get_permission_response(conn, expected_input.input_id)?;
+    require(
+        same_input_identity(&receipt.input, expected_input)
+            && receipt.input.state == expected_input.state,
+        "permission_response",
+        "permission settlement snapshot changed",
+    )?;
+    if let Some(proof) = proof {
+        validate_proof(owner, &receipt, proof)?;
+    }
+    inputs::settle_input_in_transaction(
+        conn,
+        owner,
+        expected_input.input_id,
+        expected_input.state,
+        disposition,
+        evidence_ref,
+    )?;
+    if disposition == InputDisposition::NotSubmitted
+        && let Some(proof) = proof
+    {
+        return release_permission_claim_in_transaction(
+            conn,
+            owner,
+            expected_input.input_id,
+            proof,
+            deadline,
+        );
+    }
+    require(
+        Instant::now() < deadline,
+        "deadline",
+        "permission settlement deadline expired",
+    )?;
+    get_permission_response(conn, expected_input.input_id)
 }

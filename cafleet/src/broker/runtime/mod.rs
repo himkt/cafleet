@@ -19,6 +19,9 @@ pub use permissions::{
     ZeroByteRetirement, get_permission_response, lookup_permission_response,
     permission_response_digest, release_permission_claim, reserve_permission_response,
 };
+pub(crate) use permissions::{
+    rearm_permission_response, settle_permission_response_in_transaction,
+};
 pub use records::*;
 
 use std::ops::RangeInclusive;

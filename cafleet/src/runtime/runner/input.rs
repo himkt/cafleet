@@ -1421,7 +1421,23 @@ mod permission_response_contracts {
                 storage::get_permission_response(&h.fixture.conn, id).unwrap(),
                 original
             );
-            h.fixture.conn.execute_batch("CREATE TRIGGER reject_live_claim_delete BEFORE DELETE ON member_permission_response_claims BEGIN SELECT RAISE(ABORT,'owned live claim delete failure'); END").unwrap();
+            h.fixture
+                .conn
+                .execute_batch(&format!(
+                    "CREATE TRIGGER reject_live_claim_delete
+                 BEFORE DELETE ON member_permission_response_claims
+                 WHEN OLD.input_id={id}
+                 BEGIN
+                   SELECT CASE WHEN EXISTS(
+                     SELECT 1 FROM member_input_operations
+                     WHERE input_id=OLD.input_id AND state='settled'
+                       AND disposition='not_submitted'
+                       AND evidence_ref='fixture:live-zero-byte'
+                   ) THEN RAISE(ABORT,'owned live claim delete failure')
+                     ELSE RAISE(ABORT,'owned claim delete missing prior settlement') END;
+                 END"
+                ))
+                .unwrap();
             let failed = receipt(h, reconcile());
             let removed = h
                 .fixture
@@ -1553,7 +1569,7 @@ mod permission_response_contracts {
         }
         impl<T: ?Sized> AmbiguousIfClone<()> for T {}
         struct CloneType;
-        impl<T: ?Sized + Clone> AmbiguousIfClone<CloneType> for T {}
+        impl<T: Clone> AmbiguousIfClone<CloneType> for T {}
         trait AmbiguousIfSerialize<A> {
             fn check() {}
         }
@@ -1802,6 +1818,94 @@ mod permission_response_contracts {
                 original
             );
             assert!(h.pty.offers.is_empty());
+            h.coordinator.finish_pending_attempt();
+            let id = original.input.input_id;
+            storage::record_input_state(
+                &mut h.fixture.conn,
+                &h.fixture.run.owner(),
+                id,
+                storage::InputState::InProgress,
+                storage::InputState::Ready,
+            )
+            .unwrap();
+            let ready = storage::get_permission_response(&h.fixture.conn, id).unwrap();
+            assert_eq!(ready.response, original.response);
+            assert_eq!(ready.claim, original.claim);
+            assert!(h.coordinator.operations.is_empty());
+            let expired = Instant::now() + Duration::from_millis(100);
+            assert!(expired < h.until);
+            let mut request = h.request("unused-cacheless-ready-expiry");
+            request.operation = InputControlOperation::PermissionRespond(copy(&input));
+            assert!(
+                h.coordinator
+                    .handle_received(
+                        &mut h.fixture.conn,
+                        &h.fixture.run,
+                        request,
+                        &h.controller,
+                        expired,
+                    )
+                    .unwrap()
+                    .is_none()
+            );
+            let pending = h.coordinator.pending.as_ref().unwrap();
+            assert_eq!((pending.input_id, pending.deadline), (Some(id), expired));
+            assert_eq!(pending.ready.as_ref().unwrap(), &ready);
+            assert!(h.coordinator.operations.is_empty());
+            assert!(h.pty.offers.is_empty());
+            std::thread::sleep(expired.saturating_duration_since(Instant::now()));
+            assert!(Instant::now() >= expired);
+            let failure = advance(h)
+                .err()
+                .expect("original pending expiration returns its primary failure");
+            assert!(matches!(failure.source, CafleetError::DeadlineExceeded));
+            assert_eq!(
+                (failure.run_id, failure.interaction_id, failure.input_id),
+                (
+                    Some(h.fixture.run.run_id),
+                    Some(input.interaction_id),
+                    Some(id)
+                )
+            );
+            assert_eq!(
+                failure.operation_key.as_deref(),
+                Some(input.operation_key.as_str())
+            );
+            assert_eq!(
+                storage::get_permission_response(&h.fixture.conn, id).unwrap(),
+                ready
+            );
+            assert!(h.coordinator.operations.is_empty());
+            assert!(h.pty.offers.is_empty());
+            h.coordinator.finish_pending_attempt();
+            assert!(h.coordinator.pending.is_none());
+            assert!(handle(h, &input).unwrap().is_none());
+            assert_eq!(h.coordinator.pending.as_ref().unwrap().input_id, Some(id));
+            h.coordinator.finish_pending_attempt();
+            assert!(h.coordinator.pending.is_none());
+            assert!(h.coordinator.operations.is_empty());
+            assert_eq!(
+                storage::get_permission_response(&h.fixture.conn, id).unwrap(),
+                ready
+            );
+            assert!(h.pty.offers.is_empty());
+            assert_eq!(h.hooks.count("reserved"), 0);
+            assert!(handle(h, &input).unwrap().is_none());
+            assert_eq!(arm_stage(h, 1), id);
+            h.drain();
+            assert!(h.advance().is_none());
+            assert_eq!(arm_stage(h, 2), id);
+            h.drain();
+            let accepted = response(h.advance().expect("fresh explicit rearm remains usable"));
+            assert_eq!(
+                (accepted.submission.input_id, accepted.submission.status),
+                (Some(id), SubmissionStatus::Accepted)
+            );
+            let completed = storage::get_permission_response(&h.fixture.conn, id).unwrap();
+            assert_eq!(completed.response, ready.response);
+            assert_eq!(completed.claim, ready.claim);
+            assert_eq!(completed.input.state, storage::InputState::Accepted);
+            assert_eq!(h.pty.offers, vec![b"y".to_vec(), b"\r".to_vec()]);
         });
     }
 
@@ -2237,13 +2341,53 @@ enum RetainedSelection {
     },
 }
 
+#[derive(Clone, Copy)]
+enum PendingReservation {
+    Unreserved,
+    HistoricalReady,
+    Installed,
+}
+
 struct PendingInput {
+    reservation: PendingReservation,
+    ready: Option<storage::PermissionReceipt>,
     request: storage::NewInput,
     bytes: Arc<[u8]>,
     permission: Option<Arc<PermissionSelection>>,
     deadline: Instant,
     phase: InputPhase,
     input_id: Option<i64>,
+}
+
+impl PendingInput {
+    fn installed_input_id(&self) -> Option<i64> {
+        match self.reservation {
+            PendingReservation::Unreserved => {
+                assert!(
+                    self.input_id.is_none(),
+                    "unreserved input has no installed ID"
+                );
+                assert!(
+                    self.ready.is_none(),
+                    "unreserved input has no Ready history"
+                );
+                None
+            }
+            PendingReservation::HistoricalReady => {
+                let ready = self
+                    .ready
+                    .as_ref()
+                    .expect("historical Ready snapshot retained");
+                assert_eq!(self.input_id, Some(ready.input.input_id));
+                assert_eq!(ready.input.state, storage::InputState::Ready);
+                None
+            }
+            PendingReservation::Installed => Some(
+                self.input_id
+                    .expect("installed input reservation has an ID"),
+            ),
+        }
+    }
 }
 
 struct RetainedInput {
@@ -2272,20 +2416,76 @@ enum GuardPermit {
     ResultRecorded,
 }
 
-pub(super) struct InputGuard<'a> {
-    retained: &'a mut RetainedInput,
-    proof: DrainedInput,
+struct ReceiptGuardBinding {
+    owner: storage::RunOwner,
+    receipt: storage::PermissionReceipt,
+    zero_known: bool,
+    rearm: Option<Arc<PermissionSelection>>,
+}
+
+pub(crate) struct InputGuard<'a> {
+    retained: Option<&'a mut RetainedInput>,
+    proof: Option<DrainedInput>,
+    binding: Option<ReceiptGuardBinding>,
     deadline: Instant,
     permit: GuardPermit,
+    exclusion: std::marker::PhantomData<(&'a mut InputCoordinator, std::rc::Rc<()>)>,
 }
 
 impl InputGuard<'_> {
+    pub(crate) fn zero_byte_retirement(
+        &self,
+        owner: &storage::RunOwner,
+        input_id: i64,
+        interaction_id: i64,
+    ) -> Result<storage::ZeroByteRetirement<'_>> {
+        storage::ZeroByteRetirement::from_live_guard(self, owner, input_id, interaction_id)
+    }
+
+    pub(crate) fn retirement_binding(
+        &self,
+        owner: &storage::RunOwner,
+        input_id: i64,
+        interaction_id: i64,
+    ) -> Result<(
+        &storage::PermissionReceipt,
+        Option<&crate::coding_agent::AnswerCapability>,
+    )> {
+        check_deadline(Instant::now(), self.deadline)?;
+        let binding = self
+            .binding
+            .as_ref()
+            .ok_or_else(|| error("native writer has no receipt-exclusion proof"))?;
+        ensure(
+            binding.owner == *owner
+                && binding.receipt.input.input_id == input_id
+                && binding.receipt.response.metadata.interaction_id == interaction_id
+                && binding.zero_known,
+            "matching actual zero-byte exclusion required",
+        )?;
+        Ok((
+            &binding.receipt,
+            binding
+                .rearm
+                .as_ref()
+                .map(|selection| selection.plan.capability()),
+        ))
+    }
+
     pub(super) fn begin_write(
         &mut self,
         transport: &Transport,
         bytes: &[u8],
         deadline: Instant,
     ) -> Result<Instant> {
+        ensure(
+            self.binding.is_none(),
+            "receipt exclusion grants no native-write permit",
+        )?;
+        let retained = self
+            .retained
+            .as_mut()
+            .ok_or_else(|| error("native writer is absent"))?;
         ensure(
             self.permit == GuardPermit::Fresh,
             "input write permit is consumed",
@@ -2294,25 +2494,32 @@ impl InputGuard<'_> {
         self.deadline = self.deadline.min(deadline);
         check_deadline(Instant::now(), self.deadline)?;
         ensure(
-            bytes == self.retained.bytes.as_ref(),
+            bytes == retained.bytes.as_ref(),
             "input bytes do not match the selected stage",
         )?;
         ensure(
-            self.retained.operation.state == storage::InputState::InProgress
-                && self.retained.leased,
+            retained.operation.state == storage::InputState::InProgress && retained.leased,
             "input write requires its retained reservation",
         )?;
-        match &self.retained.selection {
-            RetainedSelection::Composer => {
-                transport.validate_input_drain(&self.proof, self.deadline)?
-            }
+        match &retained.selection {
+            RetainedSelection::Composer => transport.validate_input_drain(
+                self.proof
+                    .as_ref()
+                    .ok_or_else(|| error("native drain is absent"))?,
+                self.deadline,
+            )?,
             RetainedSelection::Permission {
                 selection,
                 next_stage,
             } => {
                 let stage = selected_answer_stage(&selection.plan, *next_stage)?;
                 ensure(stage.bytes() == bytes, "permission stage selection changed")?;
-                transport.validate_observation_drain(&self.proof, self.deadline)?;
+                transport.validate_observation_drain(
+                    self.proof
+                        .as_ref()
+                        .ok_or_else(|| error("native drain is absent"))?,
+                    self.deadline,
+                )?;
             }
         }
         self.permit = GuardPermit::ConsumedPreIo;
@@ -2332,19 +2539,22 @@ impl InputGuard<'_> {
         result: &io::Result<usize>,
         offered: usize,
     ) -> Result<()> {
+        let retained = self
+            .retained
+            .as_mut()
+            .ok_or_else(|| error("native writer is absent"))?;
         ensure(
             self.permit == GuardPermit::IoPossible,
             "input result requires its possible-I/O attempt",
         )?;
         ensure(
-            offered == self.retained.bytes.len(),
+            offered == retained.bytes.len(),
             "input offered count does not match its selected stage",
         )?;
         match result {
             Ok(count) => {
                 ensure(*count <= offered, "native input count exceeds its offer")?;
-                self.retained.written_bytes = self
-                    .retained
+                retained.written_bytes = retained
                     .written_bytes
                     .checked_add(
                         u64::try_from(*count)
@@ -2352,7 +2562,7 @@ impl InputGuard<'_> {
                     )
                     .ok_or_else(|| error("native input count exhausted"))?;
                 if *count == offered {
-                    self.retained.stage = match &mut self.retained.selection {
+                    retained.stage = match &mut retained.selection {
                         RetainedSelection::Composer => SubmissionStage::Submitted,
                         RetainedSelection::Permission {
                             selection,
@@ -2365,7 +2575,7 @@ impl InputGuard<'_> {
                             if *next_stage == selection.plan.stages().len() {
                                 SubmissionStage::Submitted
                             } else {
-                                self.retained.bytes = Arc::from(
+                                retained.bytes = Arc::from(
                                     selected_answer_stage(&selection.plan, *next_stage)?.bytes(),
                                 );
                                 SubmissionStage::Partial
@@ -2373,14 +2583,14 @@ impl InputGuard<'_> {
                         }
                     };
                 } else if *count > 0 {
-                    self.retained.stage = SubmissionStage::Partial;
+                    retained.stage = SubmissionStage::Partial;
                 }
             }
             Err(cause)
                 if matches!(cause.kind(), ErrorKind::WouldBlock | ErrorKind::Interrupted) => {}
             Err(_) => {
-                if self.retained.stage == SubmissionStage::ZeroBytes {
-                    self.retained.stage = SubmissionStage::Unknown;
+                if retained.stage == SubmissionStage::ZeroBytes {
+                    retained.stage = SubmissionStage::Unknown;
                 }
             }
         }
@@ -2391,12 +2601,14 @@ impl InputGuard<'_> {
 
 impl Drop for InputGuard<'_> {
     fn drop(&mut self) {
-        if self.permit == GuardPermit::IoPossible
-            && self.retained.stage == SubmissionStage::ZeroBytes
-        {
-            self.retained.stage = SubmissionStage::Unknown;
+        if let Some(retained) = self.retained.as_mut() {
+            if self.permit == GuardPermit::IoPossible
+                && retained.stage == SubmissionStage::ZeroBytes
+            {
+                retained.stage = SubmissionStage::Unknown;
+            }
+            retained.leased = false;
         }
-        self.retained.leased = false;
     }
 }
 
@@ -2699,8 +2911,10 @@ impl InputCoordinator {
                 tx.commit().map_err(db_err)?;
                 Ok(retained)
             })?;
-            if let Some(receipt) = history {
-                return super::input_client::projection(&self.run, receipt)
+            if let Some(receipt) = &history
+                && receipt.input.state != storage::InputState::Ready
+            {
+                return super::input_client::projection(&self.run, receipt.clone())
                     .map(|result| Some(InputControlReply::PermissionResponse(result)));
             }
             request.identity.validate(&self.run)?;
@@ -2744,6 +2958,12 @@ impl InputCoordinator {
                 binding: binding.clone(),
                 plan,
             });
+            if let Some(receipt) = &history {
+                ensure(
+                    receipt.response.metadata == selection.request.metadata,
+                    "ready permission metadata changed",
+                )?;
+            }
             self.validate_permission_binding(&selection, observation)?;
             with_database_deadline(conn, deadline, |conn| {
                 let tx = conn.transaction().map_err(db_err)?;
@@ -2767,13 +2987,21 @@ impl InputCoordinator {
                 )));
             }
             ensure(
-                self.operations.len() < 4096,
+                history
+                    .as_ref()
+                    .is_some_and(|r| self.operations.contains_key(&r.input.input_id))
+                    || self.operations.len() < 4096,
                 "input receipt cache is at capacity",
             )?;
             let bytes = Arc::from(selected_answer_stage(&selection.plan, 0)?.bytes());
             let digest =
                 storage::permission_response_digest(self.run.run_id, &selection.request.metadata)?;
             self.pending = Some(PendingInput {
+                reservation: if history.is_some() {
+                    PendingReservation::HistoricalReady
+                } else {
+                    PendingReservation::Unreserved
+                },
                 request: storage::NewInput {
                     operation_key: input.operation_key.clone(),
                     kind: storage::InputKind::PermissionResponse,
@@ -2782,9 +3010,10 @@ impl InputCoordinator {
                 },
                 bytes,
                 permission: Some(selection),
+                ready: history,
                 deadline,
                 phase: InputPhase::AwaitReservation,
-                input_id: None,
+                input_id: known_id,
             });
             Ok(None)
         })();
@@ -2890,10 +3119,115 @@ impl InputCoordinator {
         self.lock.validate(conn, &current.owner())
     }
 
+    fn receipt_guard_snapshot(
+        &self,
+        conn: &Connection,
+        run: &RunRecord,
+        expected: &storage::PermissionReceipt,
+        deadline: Instant,
+    ) -> Result<ReceiptGuardBinding> {
+        check_deadline(Instant::now(), deadline)?;
+        self.validate_receipt_owner(conn, run)?;
+        let receipt = storage::get_permission_response(conn, expected.input.input_id)?;
+        ensure(receipt == *expected, "permission receipt snapshot changed")?;
+        self.validate_receipt_cache(&receipt.input)?;
+        let zero_known = if let Some(retained) = self.operations.get(&receipt.input.input_id) {
+            ensure(
+                !retained.leased && !retained.attempt_available,
+                "receipt requires an unleased consumed attempt",
+            )?;
+            retained.stage == SubmissionStage::ZeroBytes && retained.written_bytes == 0
+        } else {
+            receipt.input.state == storage::InputState::Ready
+        };
+        Ok(ReceiptGuardBinding {
+            owner: self.run.owner(),
+            receipt,
+            zero_known,
+            rearm: None,
+        })
+    }
+
+    fn acquire_receipt_guard<'a>(
+        &'a mut self,
+        conn: &Connection,
+        run: &RunRecord,
+        expected: &storage::PermissionReceipt,
+        deadline: Instant,
+    ) -> Result<InputGuard<'a>> {
+        ensure(
+            !conn.is_autocommit(),
+            "receipt exclusion requires its ownership transaction",
+        )?;
+        ensure(
+            self.pending.is_none(),
+            "receipt exclusion requires no active writer",
+        )?;
+        let deadline = inherited_database_deadline(conn)
+            .map_or(deadline, |bound| deadline.min(bound.instant()));
+        let binding = self.receipt_guard_snapshot(conn, run, expected, deadline)?;
+        Ok(InputGuard {
+            retained: None,
+            proof: None,
+            binding: Some(binding),
+            deadline,
+            permit: GuardPermit::Rejected,
+            exclusion: std::marker::PhantomData,
+        })
+    }
+
+    fn acquire_rearm_guard<'a>(
+        &'a mut self,
+        conn: &Connection,
+        run: &RunRecord,
+        expected: &storage::PermissionReceipt,
+        selection: &Arc<PermissionSelection>,
+        live: (&mut Transport, &ObservationController),
+        deadline: Instant,
+    ) -> Result<Option<InputGuard<'a>>> {
+        let (transport, observation) = live;
+        self.validate_live(conn, run)?;
+        self.validate_permission_binding(selection, observation)?;
+        self.validate_permission_association(conn, selection)?;
+        ensure(
+            self.pending.as_ref().is_some_and(|p| {
+                p.phase == InputPhase::AwaitReservation
+                    && p.input_id == Some(expected.input.input_id)
+            }) && expected.input.state == storage::InputState::Ready
+                && expected.response.metadata == selection.request.metadata,
+            "exact pending ready rearm required",
+        )?;
+        let mut binding = self.receipt_guard_snapshot(conn, run, expected, deadline)?;
+        ensure(binding.zero_known, "ready rearm requires actual zero bytes")?;
+        let Some(proof) = transport.take_input_drain() else {
+            return Ok(None);
+        };
+        transport.validate_observation_drain(&proof, deadline)?;
+        let InputDrain::Quiescent {
+            human_generation, ..
+        } = proof.evidence()
+        else {
+            unreachable!("opaque drain is quiescent")
+        };
+        ensure(
+            human_generation == self.manual_generation && !self.manual_accounting_failed,
+            "permission manual generation changed",
+        )?;
+        binding.rearm = Some(selection.clone());
+        Ok(Some(InputGuard {
+            retained: None,
+            proof: Some(proof),
+            binding: Some(binding),
+            deadline,
+            permit: GuardPermit::Rejected,
+            exclusion: std::marker::PhantomData,
+        }))
+    }
+
     fn validate_receipt_cache(&self, input: &storage::InputOperation) -> Result<()> {
         ensure(
-            input.run_id == self.run.run_id && input.kind != storage::InputKind::PermissionResponse,
-            "ordinary receipt for this run required",
+            input.run_id == self.run.run_id,
+            "receipt for this run required",
         )?;
         if let Some(retained) = self.operations.get(&input.input_id) {
             ensure(
@@ -2901,7 +3235,8 @@ impl InputCoordinator {
                     && retained.operation.operation_key == input.operation_key
                     && retained.operation.kind == input.kind
                     && retained.operation.payload_digest == input.payload_digest
-                    && retained.operation.message_id == input.message_id,
+                    && retained.operation.message_id == input.message_id
+                    && retained.operation.permission_response == input.permission_response,
                 "receipt cache identity changed",
             )?;
         }
@@ -3006,14 +3341,45 @@ impl InputCoordinator {
                         )?;
                         input
                     } else {
-                        storage::settle_input_in_transaction(
-                            &tx,
-                            &self.run.owner(),
-                            *id,
-                            *expected,
-                            *disposition,
-                            evidence_ref,
-                        )?
+                        if input.kind == storage::InputKind::PermissionResponse {
+                            let owner = self.run.owner();
+                            let receipt = storage::get_permission_response(&tx, *id)?;
+                            let guard = self.acquire_receipt_guard(&tx, run, &receipt, deadline)?;
+                            let proof = if *disposition == storage::InputDisposition::NotSubmitted
+                                && guard
+                                    .binding
+                                    .as_ref()
+                                    .expect("receipt guard has its binding")
+                                    .zero_known
+                            {
+                                Some(guard.zero_byte_retirement(
+                                    &owner,
+                                    *id,
+                                    receipt.response.metadata.interaction_id,
+                                )?)
+                            } else {
+                                None
+                            };
+                            storage::settle_permission_response_in_transaction(
+                                &tx,
+                                &owner,
+                                &input,
+                                *disposition,
+                                evidence_ref,
+                                proof.as_ref(),
+                                deadline,
+                            )?
+                            .input
+                        } else {
+                            storage::settle_input_in_transaction(
+                                &tx,
+                                &self.run.owner(),
+                                *id,
+                                *expected,
+                                *disposition,
+                                evidence_ref,
+                            )?
+                        }
                     };
                     check_deadline(Instant::now(), deadline)?;
                     tx.commit().map_err(db_err)?;
@@ -3069,11 +3435,10 @@ impl InputCoordinator {
                 self.lock.validate(&tx, &current.owner())?;
                 let input = storage::get_input(&tx, input_id)?;
                 operation_key = Some(input.operation_key.clone());
+                self.validate_receipt_cache(&input)?;
                 ensure(
-                    input.run_id == self.run.run_id
-                        && input.kind != storage::InputKind::PermissionResponse
-                        && input.state == storage::InputState::Settled,
-                    "retirement requires this run's settled ordinary input",
+                    input.run_id == self.run.run_id && input.state == storage::InputState::Settled,
+                    "retirement requires this run's settled input",
                 )?;
                 ensure(
                     self.pending.is_none(),
@@ -3089,7 +3454,8 @@ impl InputCoordinator {
                             && retained.operation.operation_key == input.operation_key
                             && retained.operation.kind == input.kind
                             && retained.operation.payload_digest == input.payload_digest
-                            && retained.operation.message_id == input.message_id,
+                            && retained.operation.message_id == input.message_id
+                            && retained.operation.permission_response == input.permission_response,
                         "retirement cache identity changed",
                     )?;
                 }
@@ -3349,6 +3715,7 @@ impl InputCoordinator {
             )?;
             let bytes = Arc::from(plan.encode(&input.literal)?);
             self.pending = Some(PendingInput {
+                reservation: PendingReservation::Unreserved,
                 request: storage::NewInput {
                     operation_key: input.operation_key,
                     kind: input.input_kind,
@@ -3357,6 +3724,7 @@ impl InputCoordinator {
                 },
                 bytes,
                 permission: None,
+                ready: None,
                 deadline,
                 phase: InputPhase::AwaitReservation,
                 input_id: None,
@@ -3609,10 +3977,12 @@ impl InputCoordinator {
         retained.attempt_available = false;
         retained.leased = true;
         Ok(Some(InputGuard {
-            retained,
-            proof,
+            retained: Some(retained),
+            proof: Some(proof),
+            binding: None,
             deadline,
             permit: GuardPermit::Fresh,
+            exclusion: std::marker::PhantomData,
         }))
     }
 
@@ -3636,55 +4006,100 @@ impl InputCoordinator {
                 return Ok(None);
             }
             if phase == InputPhase::AwaitReservation {
-                let Some(output_seq) = self.fresh_drain(transport, observation, effective)? else {
-                    return Ok(None);
-                };
-                let pending = self.pending.as_ref().expect("retained pending input");
-                let operation = if let Some(selection) = &pending.permission {
-                    let reservation = with_database_deadline(conn, effective, |conn| {
-                        self.validate_live(conn, run)?;
-                        self.validate_permission_association(conn, selection)?;
-                        storage::reserve_permission_response(
+                let ready = self
+                    .pending
+                    .as_ref()
+                    .and_then(|p| p.ready.clone().zip(p.permission.clone()));
+                let (operation, output_seq) = if let Some((ready, selection)) = ready {
+                    let owner = self.run.owner();
+                    let Some(guard) = with_database_deadline(conn, effective, |conn| {
+                        self.acquire_rearm_guard(
                             conn,
-                            &self.run.owner(),
-                            &selection.request,
-                            Some(selection.plan.capability()),
+                            run,
+                            &ready,
+                            &selection,
+                            (transport, observation),
                             effective,
                         )
-                    })?;
-                    match reservation {
-                        storage::PermissionReservation::Reserved(receipt) => receipt.input,
-                        storage::PermissionReservation::Retained(receipt) => {
-                            let reply = InputControlReply::PermissionResponse(
-                                super::input_client::projection(&self.run, receipt)?,
-                            );
-                            self.pending = None;
-                            return Ok(Some(reply));
-                        }
-                    }
+                    })?
+                    else {
+                        return Ok(None);
+                    };
+                    let InputDrain::Quiescent { output_seq, .. } = guard
+                        .proof
+                        .as_ref()
+                        .expect("rearm guard retains its drain")
+                        .evidence()
+                    else {
+                        unreachable!("opaque drain is quiescent")
+                    };
+                    let proof = guard.zero_byte_retirement(
+                        &owner,
+                        ready.input.input_id,
+                        ready.response.metadata.interaction_id,
+                    )?;
+                    let rearmed = storage::rearm_permission_response(
+                        conn,
+                        &owner,
+                        &selection.request,
+                        &proof,
+                        effective,
+                    )?;
+                    (rearmed.input, output_seq)
                 } else {
-                    let reservation = with_database_deadline(conn, effective, |conn| {
-                        self.validate_live(conn, run)?;
-                        storage::reserve_input_with_provenance(
-                            conn,
-                            &self.run.owner(),
-                            &pending.request,
-                        )
-                    })?;
-                    match reservation {
-                        storage::InputReservation::Inserted(operation) => operation,
-                        storage::InputReservation::Existing(operation) => {
-                            let reply = InputControlReply::Submission(self.result(&operation));
-                            self.pending = None;
-                            return Ok(Some(reply));
+                    let Some(output_seq) = self.fresh_drain(transport, observation, effective)?
+                    else {
+                        return Ok(None);
+                    };
+                    let pending = self.pending.as_ref().expect("retained pending input");
+                    let operation = if let Some(selection) = &pending.permission {
+                        let reservation = with_database_deadline(conn, effective, |conn| {
+                            self.validate_live(conn, run)?;
+                            self.validate_permission_association(conn, selection)?;
+                            storage::reserve_permission_response(
+                                conn,
+                                &self.run.owner(),
+                                &selection.request,
+                                Some(selection.plan.capability()),
+                                effective,
+                            )
+                        })?;
+                        match reservation {
+                            storage::PermissionReservation::Reserved(receipt) => receipt.input,
+                            storage::PermissionReservation::Retained(receipt) => {
+                                let reply = InputControlReply::PermissionResponse(
+                                    super::input_client::projection(&self.run, receipt)?,
+                                );
+                                self.pending = None;
+                                return Ok(Some(reply));
+                            }
                         }
-                    }
+                    } else {
+                        let reservation = with_database_deadline(conn, effective, |conn| {
+                            self.validate_live(conn, run)?;
+                            storage::reserve_input_with_provenance(
+                                conn,
+                                &self.run.owner(),
+                                &pending.request,
+                            )
+                        })?;
+                        match reservation {
+                            storage::InputReservation::Inserted(operation) => operation,
+                            storage::InputReservation::Existing(operation) => {
+                                let reply = InputControlReply::Submission(self.result(&operation));
+                                self.pending = None;
+                                return Ok(Some(reply));
+                            }
+                        }
+                    };
+                    (operation, output_seq)
                 };
                 ensure(
                     operation.state == storage::InputState::InProgress,
                     "ordinary input reservation is not writable",
                 )?;
                 let id = operation.input_id;
+                let pending = self.pending.as_ref().expect("reserved pending input");
                 self.operations.insert(
                     id,
                     RetainedInput {
@@ -3706,6 +4121,7 @@ impl InputCoordinator {
                 );
                 let pending = self.pending.as_mut().expect("reserved pending input");
                 pending.input_id = Some(id);
+                pending.reservation = PendingReservation::Installed;
                 pending.phase = InputPhase::AwaitBeforeWrite;
                 self.checkpoint(id, InputBoundary::Reserved, effective)?;
                 return Ok(None);
@@ -3741,8 +4157,16 @@ impl InputCoordinator {
             else {
                 return Ok(None);
             };
-            let before_stage = guard.retained.stage;
-            let before_count = guard.retained.written_bytes;
+            let before_stage = guard
+                .retained
+                .as_ref()
+                .expect("write guard retains its input")
+                .stage;
+            let before_count = guard
+                .retained
+                .as_ref()
+                .expect("write guard retains its input")
+                .written_bytes;
             let write = transport.write_programmatic(pty, &bytes, &mut guard, effective);
             let attempted = matches!(
                 guard.permit,
@@ -3894,7 +4318,7 @@ impl InputCoordinator {
             return source;
         }
         pending.phase = InputPhase::Blocked;
-        let Some(id) = pending.input_id else {
+        let Some(id) = pending.installed_input_id() else {
             return source;
         };
         let retained = self
@@ -3940,7 +4364,11 @@ impl InputCoordinator {
     }
 
     pub(super) fn finish_pending_attempt(&mut self) {
-        if let Some(id) = self.pending.as_ref().and_then(|pending| pending.input_id) {
+        if let Some(id) = self
+            .pending
+            .as_ref()
+            .and_then(PendingInput::installed_input_id)
+        {
             let retained = self
                 .operations
                 .get_mut(&id)

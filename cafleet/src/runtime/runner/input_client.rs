@@ -634,7 +634,7 @@ fn reconcile_ordinary_with_host(
     deadline: Deadline,
     host: &mut impl InputCommandHost,
 ) -> std::result::Result<InputOperation, InputFailure> {
-    reconcile_ordinary_with_hosts(
+    reconcile_receipt_with_hosts(
         conn,
         settings,
         input_id,
@@ -645,7 +645,7 @@ fn reconcile_ordinary_with_host(
     )
 }
 
-fn reconcile_ordinary_with_hosts(
+fn reconcile_receipt_with_hosts(
     conn: &mut Connection,
     settings: &Settings,
     input_id: i64,
@@ -674,10 +674,10 @@ fn reconcile_ordinary_with_hosts(
             let input = storage::get_input(&tx, input_id)?;
             context.run_id = Some(input.run_id);
             context.operation_key = Some(input.operation_key.clone());
-            ensure(
-                input.kind != InputKind::PermissionResponse,
-                "ordinary receipt reconciliation required",
-            )?;
+            context.interaction_id = input
+                .permission_response
+                .as_ref()
+                .map(|r| r.metadata.interaction_id);
             let recorded_run = storage::get_run(&tx, input.run_id)?;
             let run = storage::validate_owner(&tx, &recorded_run.owner())?;
             let placement = if input.state == InputState::Settled {
@@ -697,6 +697,10 @@ fn reconcile_ordinary_with_hosts(
             return Ok(original);
         }
         let Some(placement) = placement else {
+            ensure(
+                original.kind != InputKind::PermissionResponse,
+                "live permission receipt owner unavailable",
+            )?;
             return super::input_recovery::reconcile_input_with_host(
                 conn,
                 settings,
@@ -728,7 +732,8 @@ fn reconcile_ordinary_with_hosts(
                             && input.operation_key == original.operation_key
                             && input.kind == original.kind
                             && input.payload_digest == original.payload_digest
-                            && input.message_id == original.message_id,
+                            && input.message_id == original.message_id
+                            && input.permission_response == original.permission_response,
                         "receipt immutable input identity changed",
                     )?;
                     deadline.remaining()?;
@@ -799,6 +804,9 @@ fn reconcile_ordinary_with_hosts(
         match live {
             Ok(settled) => Ok(settled),
             Err(original_failure) => {
+                if original.kind == InputKind::PermissionResponse {
+                    return Err(original_failure);
+                }
                 let guard = match super::input_recovery::ExclusiveReceiptGuard::acquire(
                     conn,
                     settings,
@@ -956,7 +964,11 @@ pub(super) fn projection(
                 Some("operation key is consumed".into()),
             ),
         },
-        InputState::Ready => return Err(error("live permission coordination is not implemented")),
+        InputState::Ready => (
+            SubmissionStatus::Held,
+            SubmissionStage::ZeroBytes,
+            Some("input requires live proven-zero revalidation".into()),
+        ),
     };
     Ok(PermissionResponseResult {
         submission: SubmissionResult {
@@ -1009,7 +1021,7 @@ pub(super) fn response_lookup(
 
 enum ResponsePreparation {
     History(PermissionResponseResult),
-    Fresh(Box<(RunRecord, RuntimeEventView)>),
+    Live(Box<(RunRecord, RuntimeEventView, Option<PermissionReceipt>)>),
 }
 fn prepare_response(
     conn: &mut Connection,
@@ -1025,33 +1037,34 @@ fn prepare_response(
     let result = with_database_budget(conn, deadline, |conn| {
         let tx = conn.transaction().map_err(db_err)?;
         let run = selected_run(&tx, input.expected_run_id)?;
-        let prepared =
-            if let Some(receipt) = response_lookup(&tx, &run, input, &mut context.input_id)? {
-                context.input_id = Some(receipt.input.input_id);
-                ResponsePreparation::History(projection(&run, receipt)?)
-            } else {
-                association(
-                    &tx,
-                    &run,
-                    input.interaction_id,
-                    input.event_id,
-                    input.director_member_id,
-                )?;
-                ensure(
-                    input.expected_owner_epoch == run.owner_epoch,
-                    "permission owner epoch changed",
-                )?;
-                let original = super::input::inspection_association(
-                    &tx,
-                    &run,
-                    &PermissionInspectInput {
-                        interaction_id: input.interaction_id,
-                        event_id: input.event_id,
-                        director_member_id: input.director_member_id,
-                    },
-                )?;
-                ResponsePreparation::Fresh(Box::new((run, original)))
-            };
+        let retained = response_lookup(&tx, &run, input, &mut context.input_id)?;
+        let prepared = if let Some(receipt) = &retained
+            && receipt.input.state != InputState::Ready
+        {
+            ResponsePreparation::History(projection(&run, receipt.clone())?)
+        } else {
+            association(
+                &tx,
+                &run,
+                input.interaction_id,
+                input.event_id,
+                input.director_member_id,
+            )?;
+            ensure(
+                input.expected_owner_epoch == run.owner_epoch,
+                "permission owner epoch changed",
+            )?;
+            let original = super::input::inspection_association(
+                &tx,
+                &run,
+                &PermissionInspectInput {
+                    interaction_id: input.interaction_id,
+                    event_id: input.event_id,
+                    director_member_id: input.director_member_id,
+                },
+            )?;
+            ResponsePreparation::Live(Box::new((run, original, retained)))
+        };
         deadline.remaining()?;
         tx.commit().map_err(db_err)?;
         Ok(prepared)
@@ -1095,10 +1108,11 @@ pub(crate) fn respond_permission_with_host(
         Err(source) => return Err(context.failure(source)),
     };
     let prepared = prepare_response(conn, input, deadline)?;
-    let (run, original) = match prepared {
+    let (run, original, ready) = match prepared {
         ResponsePreparation::History(result) => return Ok(result),
-        ResponsePreparation::Fresh(snapshot) => *snapshot,
+        ResponsePreparation::Live(snapshot) => *snapshot,
     };
+    context.input_id = ready.as_ref().map(|r| r.input.input_id);
     let result = (|| {
         let placement = with_database_budget(conn, deadline, |conn| {
             crate::broker::get_member(conn, run.member_id, run.fleet_id)?
@@ -1135,6 +1149,12 @@ pub(crate) fn respond_permission_with_host(
                             }),
                         "permission response association changed",
                     )?;
+                    if let Some(ready) = &ready {
+                        ensure(
+                            storage::get_permission_response(&tx, ready.input.input_id)? == *ready,
+                            "ready response snapshot changed",
+                        )?;
+                    }
                     deadline.remaining()?;
                     tx.commit().map_err(db_err)
                 })
@@ -2755,7 +2775,7 @@ mod tests {
                 fixture.conn.execute_batch("CREATE TRIGGER routed_receipt_failure BEFORE UPDATE OF state ON member_input_operations WHEN NEW.state='settled' BEGIN SELECT RAISE(FAIL,'owned routed settlement failure'); END").unwrap();
             }
             let result = with_database_budget(&mut fixture.conn, Deadline::until(until), |conn| {
-                Ok(reconcile_ordinary_with_hosts(
+                Ok(reconcile_receipt_with_hosts(
                     conn,
                     &settings,
                     row.input_id,

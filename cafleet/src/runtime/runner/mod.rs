@@ -6,6 +6,7 @@ mod input_clock;
 mod input_recovery;
 pub(crate) use input_clock::*;
 mod input;
+pub(crate) use input::InputGuard;
 #[cfg(test)]
 mod native_capture;
 #[cfg(test)]
