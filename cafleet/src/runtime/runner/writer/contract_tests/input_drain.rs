@@ -1077,3 +1077,671 @@ fn step5_drain_d14_original_expiry_prevents_later_io_and_proof_while_retaining_c
         });
     }
 }
+
+#[derive(Clone, Copy)]
+enum CallbackFault {
+    None,
+    Expire,
+    Fail,
+    ExpireAndFail,
+}
+
+struct CallbackRecord {
+    sequence: u64,
+    contents: String,
+    entered: Instant,
+    returned: Instant,
+}
+
+struct ControlledObservation<O> {
+    inner: O,
+    records: Rc<RefCell<Vec<CallbackRecord>>>,
+    fault: CallbackFault,
+    deadline: Instant,
+    fatal: bool,
+}
+
+impl<O: ScreenObserver> ScreenObserver for ControlledObservation<O> {
+    fn observe(&mut self, screen: &ScreenSnapshot) -> Result<()> {
+        let entered = Instant::now();
+        let actual = self.inner.observe(screen);
+        let targeted = self.records.borrow().len() == 1;
+        if targeted
+            && matches!(
+                self.fault,
+                CallbackFault::Expire | CallbackFault::ExpireAndFail
+            )
+        {
+            std::thread::sleep(
+                self.deadline.saturating_duration_since(Instant::now()) + Duration::from_millis(1),
+            );
+        }
+        self.records.borrow_mut().push(CallbackRecord {
+            sequence: screen.screen_seq,
+            contents: screen.contents.clone(),
+            entered,
+            returned: Instant::now(),
+        });
+        actual?;
+        if targeted
+            && matches!(
+                self.fault,
+                CallbackFault::Fail | CallbackFault::ExpireAndFail
+            )
+        {
+            Err(CafleetError::Value("fixture observation stopped".into()))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn failures_are_fatal(&self) -> bool {
+        self.fatal
+    }
+
+    fn parser_failure(&mut self) -> Result<()> {
+        self.inner.parser_failure()
+    }
+
+    fn input_health(&self) -> Option<ObservationHealth> {
+        self.inner.input_health()
+    }
+}
+
+fn assert_healthy(h: &Harness) {
+    let actual = h.controller.health(&h.writer);
+    assert!(!actual.degraded, "{actual:?}");
+    assert_eq!(actual.pending_count, 0);
+    assert!(!actual.pending_evidence);
+    assert_eq!(
+        actual.eligibility,
+        InputEligibility::Hold(GateReason::Unknown)
+    );
+}
+
+fn assert_incomplete_observation_stays_fenced(
+    h: &mut Harness,
+    transport: &mut Transport,
+    endpoints: (&mut Reader, &mut Pty, &mut Output),
+    child_bytes: &[u8],
+    prefix_sequence: u64,
+) {
+    let (human, pty, output) = endpoints;
+    let generation = transport.human_generation();
+    let callbacks = h.observations.screens.borrow().len();
+    assert_healthy(h);
+    let first = h.drain(transport, human, pty, output, h.until);
+    let first_proof = transport.take_input_drain().is_some();
+    assert_eq!(transport.snapshot().screen_seq, prefix_sequence);
+    assert_eq!(h.observations.screens.borrow().len(), callbacks);
+    assert_eq!(output.bytes, child_bytes);
+    assert_eq!(transport.pending_display_bytes(), 0);
+
+    human.steps.push_back(Read::Data(b"manual\r".to_vec()));
+    pty.reader.steps.push_back(Read::Data(b"live\r\n".to_vec()));
+    let progress = transport
+        .tick(
+            human,
+            pty,
+            output,
+            &mut Measured {
+                inner: h.controller.observer(&h.writer, &h.clock),
+                trace: h.trace.clone(),
+                facts: h.observations.clone(),
+            },
+        )
+        .unwrap();
+    assert_eq!(progress.human_bytes, 7);
+    assert_eq!(progress.child_bytes, 6);
+    assert_eq!(progress.display_bytes, 6);
+    assert_eq!(transport.human_generation(), generation + 7);
+    assert_eq!(pty.bytes, b"typedmanual\r");
+    let mut displayed = child_bytes.to_vec();
+    displayed.extend_from_slice(b"live\r\n");
+    assert_eq!(output.bytes, displayed);
+    assert_eq!(transport.snapshot().screen_seq, prefix_sequence + 6);
+    assert_healthy(h);
+    let after_tick = h.drain(transport, human, pty, output, h.until);
+    let tick_proof = transport.take_input_drain().is_some();
+
+    transport
+        .resize(pty, TerminalSize { rows: 25, cols: 80 })
+        .unwrap();
+    assert_eq!(transport.snapshot().screen_seq, prefix_sequence + 7);
+    assert_healthy(h);
+    let after_resize = h.drain(transport, human, pty, output, h.until);
+    let resize_proof = transport.take_input_drain().is_some();
+    let outcomes = [
+        (first, first_proof),
+        (after_tick, tick_proof),
+        (after_resize, resize_proof),
+    ];
+    eprintln!("observation-incomplete later quiet/tick/resize outcomes: {outcomes:?}");
+    assert!(
+        outcomes
+            .iter()
+            .all(|(result, proof)| matches!(result, Ok(InputDrain::Pending)) && !proof),
+        "an incomplete observation stays fenced for this Transport lifetime: {outcomes:?}"
+    );
+}
+
+#[test]
+fn step5_drain_incomplete_delayed_positive_child_read_keeps_display_and_lifetime_fence() {
+    with_harness(|h| {
+        h.control();
+        let mut transport = transport(64, 64, 64);
+        h.seal(&mut transport);
+        h.reset_observations();
+        let child_bytes = b"unseen\r\nsuffix";
+        let mut human = Reader::data(Site::Human, &h.trace, b"typed", 5);
+        let mut pty = Pty::new(&h.trace);
+        pty.reader = Reader::data(Site::Child, &h.trace, child_bytes, child_bytes.len());
+        let until = Instant::now() + Duration::from_millis(100);
+        pty.reader.delay_until = Some(until);
+        let mut output = Output::new(&h.trace);
+        let result = h.drain(&mut transport, &mut human, &mut pty, &mut output, until);
+        assert_deadline(result, &mut transport);
+        assert_eq!(human.bytes, b"typed");
+        assert_eq!(transport.human_generation(), 5);
+        assert_eq!(pty.bytes, b"typed");
+        assert_eq!(pty.reader.calls.len(), 1);
+        let call = &pty.reader.calls[0];
+        assert!(call.entered < until && call.returned >= until);
+        assert_eq!(call.count, Some(child_bytes.len()));
+        assert_eq!(pty.reader.bytes, child_bytes);
+        assert_eq!(transport.pending_display_bytes(), child_bytes.len());
+        assert_eq!(transport.snapshot().screen_seq, 0);
+        assert_eq!(transport.snapshot().contents, "");
+        assert!(h.observations.screens.borrow().is_empty());
+        assert_eq!(
+            *h.trace.borrow(),
+            vec![Site::Human, Site::ManualWrite, Site::Child]
+        );
+        assert!(output.bytes.is_empty() && output.offered.is_empty());
+        assert_eq!(output.flushes, 0);
+        assert_eq!(h.observations.health_reads.get(), 0);
+        assert_incomplete_observation_stays_fenced(
+            h,
+            &mut transport,
+            (&mut human, &mut pty, &mut output),
+            child_bytes,
+            0,
+        );
+    });
+}
+
+const CONTROL_SEPARATED_CHILD: &[u8] = b"head\rTAIL\r\nsuffix";
+
+fn callback_drain(
+    h: &mut Harness,
+    transport: &mut Transport,
+    endpoints: (&mut Reader, &mut Pty, &mut Output),
+    fault: CallbackFault,
+    until: Instant,
+    records: &Rc<RefCell<Vec<CallbackRecord>>>,
+) -> Result<InputDrain> {
+    let (human, pty, output) = endpoints;
+    transport.quiesce_for_input(
+        human,
+        pty,
+        output,
+        &mut ControlledObservation {
+            inner: Measured {
+                inner: h.controller.observer(&h.writer, &h.clock),
+                trace: h.trace.clone(),
+                facts: h.observations.clone(),
+            },
+            records: records.clone(),
+            fault,
+            deadline: until,
+            fatal: true,
+        },
+        until,
+    )
+}
+
+#[test]
+fn step5_drain_incomplete_complete_control_observes_every_fragment_and_can_seal() {
+    with_harness(|h| {
+        h.control();
+        let mut transport = transport(64, 64, 64);
+        let mut human = Reader::data(Site::Human, &h.trace, b"typed", 5);
+        let mut pty = Pty::new(&h.trace);
+        pty.reader = Reader::data(
+            Site::Child,
+            &h.trace,
+            CONTROL_SEPARATED_CHILD,
+            CONTROL_SEPARATED_CHILD.len(),
+        );
+        let mut output = Output::new(&h.trace);
+        let records = Rc::default();
+        let until = h.until;
+        let result = callback_drain(
+            h,
+            &mut transport,
+            (&mut human, &mut pty, &mut output),
+            CallbackFault::None,
+            until,
+            &records,
+        );
+        assert_eq!(
+            result.unwrap(),
+            InputDrain::Quiescent {
+                human_generation: 5,
+                output_seq: 17
+            }
+        );
+        assert_eq!(output.bytes, CONTROL_SEPARATED_CHILD);
+        assert_eq!(transport.pending_display_bytes(), 0);
+        assert_eq!(transport.snapshot().contents, "TAIL\nsuffix");
+        assert_eq!(transport.snapshot().screen_seq, 17);
+        assert_eq!(*h.observations.screens.borrow(), vec![4, 5, 9, 10, 11, 17]);
+        let observed = records.borrow();
+        assert_eq!(
+            observed.iter().map(|r| r.sequence).collect::<Vec<_>>(),
+            vec![4, 5, 9, 10, 11, 17]
+        );
+        assert_eq!(observed[0].contents, "head");
+        assert_eq!(observed[1].contents, "head");
+        assert_eq!(observed.last().unwrap().contents, "TAIL\nsuffix");
+        assert!(
+            observed
+                .iter()
+                .all(|r| r.entered <= r.returned && r.returned < h.until)
+        );
+        assert_healthy(h);
+        assert!(transport.take_input_drain().is_some());
+    });
+}
+
+fn incomplete_callback_case(fault: CallbackFault) {
+    with_harness(|h| {
+        h.control();
+        let mut transport = transport(64, 64, 64);
+        h.seal(&mut transport);
+        h.reset_observations();
+        let mut human = Reader::data(Site::Human, &h.trace, b"typed", 5);
+        let mut pty = Pty::new(&h.trace);
+        pty.reader = Reader::data(
+            Site::Child,
+            &h.trace,
+            CONTROL_SEPARATED_CHILD,
+            CONTROL_SEPARATED_CHILD.len(),
+        );
+        let mut output = Output::new(&h.trace);
+        let until = Instant::now() + Duration::from_millis(100);
+        let records = Rc::default();
+        let result = callback_drain(
+            h,
+            &mut transport,
+            (&mut human, &mut pty, &mut output),
+            fault,
+            until,
+            &records,
+        );
+        if matches!(fault, CallbackFault::Expire) {
+            assert_deadline(result, &mut transport);
+        } else {
+            assert_eq!(
+                format!("{:?}", result.unwrap_err()),
+                "Value(\"fixture observation stopped\")"
+            );
+            assert!(transport.take_input_drain().is_none());
+        }
+        assert_eq!(transport.human_generation(), 5);
+        assert_eq!(pty.bytes, b"typed");
+        assert_eq!(pty.reader.calls.len(), 1);
+        assert_eq!(pty.reader.calls[0].count, Some(17));
+        assert_eq!(pty.reader.bytes, CONTROL_SEPARATED_CHILD);
+        assert_eq!(transport.pending_display_bytes(), 17);
+        assert!(output.bytes.is_empty() && output.offered.is_empty());
+        assert_eq!(output.flushes, 0);
+        assert_eq!(h.observations.health_reads.get(), 0);
+        assert_eq!(transport.snapshot().screen_seq, 5);
+        assert_eq!(transport.snapshot().contents, "head");
+        assert_eq!(transport.snapshot().cursor_row, 0);
+        assert_eq!(transport.snapshot().cursor_col, 0);
+        assert_eq!(*h.observations.screens.borrow(), vec![4, 5]);
+        assert_eq!(
+            *h.trace.borrow(),
+            vec![
+                Site::Human,
+                Site::ManualWrite,
+                Site::Child,
+                Site::Observe,
+                Site::Observe
+            ]
+        );
+        let observed = records.borrow();
+        assert_eq!(observed.len(), 2);
+        assert_eq!(
+            observed.iter().map(|r| r.sequence).collect::<Vec<_>>(),
+            vec![4, 5]
+        );
+        assert!(
+            observed
+                .iter()
+                .all(|r| r.contents == "head" && r.entered < until)
+        );
+        assert!(observed[0].returned <= observed[1].entered);
+        if matches!(fault, CallbackFault::Expire | CallbackFault::ExpireAndFail) {
+            assert!(observed[1].returned >= until);
+        } else {
+            assert!(observed[1].returned < until);
+        }
+        drop(observed);
+        assert_incomplete_observation_stays_fenced(
+            h,
+            &mut transport,
+            (&mut human, &mut pty, &mut output),
+            CONTROL_SEPARATED_CHILD,
+            5,
+        );
+    });
+}
+
+#[test]
+fn step5_drain_incomplete_mid_observer_expiry_preserves_prefix_and_lifetime_fence() {
+    incomplete_callback_case(CallbackFault::Expire);
+}
+
+#[test]
+fn step5_drain_incomplete_mid_observer_error_before_expiry_keeps_primary_and_fence() {
+    incomplete_callback_case(CallbackFault::Fail);
+}
+
+#[test]
+fn step5_drain_incomplete_mid_observer_error_after_expiry_keeps_primary_and_fence() {
+    incomplete_callback_case(CallbackFault::ExpireAndFail);
+}
+
+fn incomplete_tick_case(fatal: bool) {
+    with_harness(|h| {
+        h.control();
+        let mut transport = transport(64, 64, 64);
+        let mut human = Reader::data(Site::Human, &h.trace, b"typed", 5);
+        let mut pty = Pty::new(&h.trace);
+        pty.reader = Reader::data(Site::Child, &h.trace, CONTROL_SEPARATED_CHILD, 17);
+        let mut output = Output::new(&h.trace);
+        let records = Rc::new(RefCell::new(Vec::new()));
+        let result = transport.tick(
+            &mut human,
+            &mut pty,
+            &mut output,
+            &mut ControlledObservation {
+                inner: Measured {
+                    inner: h.controller.observer(&h.writer, &h.clock),
+                    trace: h.trace.clone(),
+                    facts: h.observations.clone(),
+                },
+                records: records.clone(),
+                fault: CallbackFault::Fail,
+                deadline: h.until,
+                fatal,
+            },
+        );
+        assert_eq!(transport.human_generation(), 5);
+        assert_eq!(pty.bytes, b"typed");
+        assert_eq!(pty.reader.bytes, CONTROL_SEPARATED_CHILD);
+        assert_eq!(pty.reader.calls.len(), 1);
+        assert_eq!(pty.reader.calls[0].count, Some(17));
+        assert!(transport.take_input_drain().is_none());
+        let prefix = if fatal {
+            let source = match result {
+                Err(source) => source,
+                Ok(_) => panic!("fatal ordered observation returns its actual error"),
+            };
+            assert_eq!(
+                format!("{source:?}"),
+                "Value(\"fixture observation stopped\")"
+            );
+            assert_eq!(*h.observations.screens.borrow(), vec![4, 5]);
+            assert_eq!(records.borrow().len(), 2);
+            assert_eq!(transport.snapshot().contents, "head");
+            assert!(output.bytes.is_empty() && output.offered.is_empty());
+            assert_eq!(
+                transport.pending_display_bytes(),
+                17,
+                "a completed child read remains queued after fatal observation"
+            );
+            5
+        } else {
+            let progress = result.unwrap();
+            assert_eq!(progress.human_bytes, 5);
+            assert_eq!(progress.child_bytes, 17);
+            assert_eq!(progress.display_bytes, 17);
+            assert_eq!(
+                progress.observation_error.as_deref(),
+                Some("fixture observation stopped")
+            );
+            assert!(matches!(
+                progress.observation_failure,
+                Some(ObservationFailure::Sink)
+            ));
+            assert_eq!(*h.observations.screens.borrow(), vec![4, 5, 9, 10, 11, 17]);
+            assert_eq!(records.borrow().len(), 6);
+            assert_eq!(transport.snapshot().contents, "TAIL\nsuffix");
+            assert_eq!(output.bytes, CONTROL_SEPARATED_CHILD);
+            assert_eq!(transport.pending_display_bytes(), 0);
+            17
+        };
+        assert_eq!(transport.snapshot().screen_seq, prefix);
+        assert_incomplete_observation_stays_fenced(
+            h,
+            &mut transport,
+            (&mut human, &mut pty, &mut output),
+            CONTROL_SEPARATED_CHILD,
+            prefix,
+        );
+    });
+}
+
+#[test]
+fn step5_drain_incomplete_ordinary_fatal_observer_error_retains_chunk_and_fence() {
+    incomplete_tick_case(true);
+}
+
+#[test]
+fn step5_drain_incomplete_ordinary_nonfatal_observer_error_retains_reporting_and_fence() {
+    incomplete_tick_case(false);
+}
+
+struct OneParserFailure(std::sync::atomic::AtomicBool);
+
+impl ObservationHooks for OneParserFailure {
+    fn before(&self, _: ObservationSite, operation: ObservationOperation) -> Result<()> {
+        if matches!(operation, ObservationOperation::Parser)
+            && self.0.swap(false, std::sync::atomic::Ordering::AcqRel)
+        {
+            Err(CafleetError::Value(
+                "fixture parser boundary stopped".into(),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[test]
+fn step5_drain_incomplete_ordinary_parser_fault_cannot_be_cleared_by_later_success() {
+    with_harness(|h| {
+        h.control();
+        let mut transport = transport(64, 64, 64);
+        transport
+            .set_observation_hooks(Arc::new(OneParserFailure(
+                std::sync::atomic::AtomicBool::new(true),
+            )))
+            .unwrap();
+        let mut human = Reader::data(Site::Human, &h.trace, b"typed", 5);
+        let mut pty = Pty::new(&h.trace);
+        pty.reader = Reader::data(Site::Child, &h.trace, CONTROL_SEPARATED_CHILD, 17);
+        let mut output = Output::new(&h.trace);
+        let progress = transport
+            .tick(
+                &mut human,
+                &mut pty,
+                &mut output,
+                &mut h.controller.observer(&h.writer, &h.clock),
+            )
+            .unwrap();
+        assert_eq!(progress.human_bytes, 5);
+        assert_eq!(progress.child_bytes, 17);
+        assert_eq!(progress.display_bytes, 17);
+        assert_eq!(
+            progress.observation_error.as_deref(),
+            Some("fixture parser boundary stopped")
+        );
+        assert!(matches!(
+            progress.observation_failure,
+            Some(ObservationFailure::Parser)
+        ));
+        assert_eq!(transport.snapshot().screen_seq, 0);
+        assert_eq!(transport.snapshot().contents, "");
+        assert_eq!(output.bytes, CONTROL_SEPARATED_CHILD);
+        assert_eq!(transport.human_generation(), 5);
+        assert_incomplete_observation_stays_fenced(
+            h,
+            &mut transport,
+            (&mut human, &mut pty, &mut output),
+            CONTROL_SEPARATED_CHILD,
+            0,
+        );
+    });
+}
+
+#[test]
+fn step5_drain_incomplete_complete_observation_then_display_error_preserves_eligibility() {
+    for quiesce in [false, true] {
+        for discard in [false, true] {
+            with_harness(|h| {
+                h.control();
+                let mut transport = transport(64, 64, 64);
+                let mut human = Reader::data(Site::Human, &h.trace, b"typed", 5);
+                let mut pty = Pty::new(&h.trace);
+                pty.reader = Reader::data(Site::Child, &h.trace, CONTROL_SEPARATED_CHILD, 17);
+                let mut output = Output::new(&h.trace);
+                output.write_error = Some(ErrorKind::BrokenPipe);
+                let result = if quiesce {
+                    h.drain(&mut transport, &mut human, &mut pty, &mut output, h.until)
+                        .map(|_| ())
+                } else {
+                    transport
+                        .tick(
+                            &mut human,
+                            &mut pty,
+                            &mut output,
+                            &mut Measured {
+                                inner: h.controller.observer(&h.writer, &h.clock),
+                                trace: h.trace.clone(),
+                                facts: h.observations.clone(),
+                            },
+                        )
+                        .map(|_| ())
+                };
+                assert!(
+                    result
+                        .unwrap_err()
+                        .message()
+                        .contains("fixture display write failure")
+                );
+                assert_eq!(transport.human_generation(), 5);
+                assert_eq!(transport.snapshot().screen_seq, 17);
+                assert_eq!(transport.snapshot().contents, "TAIL\nsuffix");
+                assert_eq!(*h.observations.screens.borrow(), vec![4, 5, 9, 10, 11, 17]);
+                assert_eq!(transport.pending_display_bytes(), 17);
+                assert!(output.bytes.is_empty());
+                assert!(transport.take_input_drain().is_none());
+                output.write_error = None;
+                if discard {
+                    assert_eq!(transport.discard_display_tail(), 17);
+                }
+                assert_healthy(h);
+                let result = h.drain(&mut transport, &mut human, &mut pty, &mut output, h.until);
+                assert_eq!(
+                    result.unwrap(),
+                    InputDrain::Quiescent {
+                        human_generation: 5,
+                        output_seq: 17
+                    }
+                );
+                assert_eq!(transport.pending_display_bytes(), 0);
+                assert_eq!(
+                    output.bytes,
+                    if discard {
+                        b"".as_slice()
+                    } else {
+                        CONTROL_SEPARATED_CHILD
+                    }
+                );
+                assert!(transport.take_input_drain().is_some());
+            });
+        }
+    }
+}
+
+#[test]
+fn step5_drain_incomplete_prefetch_consumption_control_observes_once_and_can_seal() {
+    with_harness(|h| {
+        h.control();
+        let mut transport = transport(64, 64, 64);
+        let mut human = Reader::data(Site::Human, &h.trace, b"typed", 5);
+        let mut pty = Pty::new(&h.trace);
+        pty.reader = Reader::data(Site::Child, &h.trace, CONTROL_SEPARATED_CHILD, 17);
+        let mut output = Output::new(&h.trace);
+        assert_eq!(transport.prefetch_child_bytes(&mut pty).unwrap(), 17);
+        assert_eq!(transport.snapshot().screen_seq, 0);
+        assert!(h.observations.screens.borrow().is_empty());
+        let result = h.drain(&mut transport, &mut human, &mut pty, &mut output, h.until);
+        assert_eq!(
+            result.unwrap(),
+            InputDrain::Quiescent {
+                human_generation: 5,
+                output_seq: 17
+            }
+        );
+        assert_eq!(*h.observations.screens.borrow(), vec![4, 5, 9, 10, 11, 17]);
+        assert_eq!(output.bytes, CONTROL_SEPARATED_CHILD);
+        assert_eq!(transport.pending_display_bytes(), 0);
+        assert!(transport.take_input_drain().is_some());
+    });
+}
+
+#[test]
+fn step5_drain_incomplete_discarding_unobserved_prefetch_keeps_lifetime_fence() {
+    with_harness(|h| {
+        h.control();
+        let mut transport = transport(64, 64, 64);
+        let mut human = Reader::data(Site::Human, &h.trace, b"typed", 5);
+        let mut pty = Pty::new(&h.trace);
+        let mut output = Output::new(&h.trace);
+        let progress = transport
+            .tick(
+                &mut human,
+                &mut pty,
+                &mut output,
+                &mut h.controller.observer(&h.writer, &h.clock),
+            )
+            .unwrap();
+        assert_eq!(progress.human_bytes, 5);
+        assert_eq!(progress.child_bytes, 0);
+        h.reset_observations();
+        pty.reader
+            .steps
+            .push_back(Read::Data(CONTROL_SEPARATED_CHILD.to_vec()));
+        assert_eq!(transport.prefetch_child_bytes(&mut pty).unwrap(), 17);
+        assert_eq!(pty.reader.calls.last().unwrap().count, Some(17));
+        assert_eq!(pty.reader.bytes, CONTROL_SEPARATED_CHILD);
+        assert_eq!(transport.discard_display_tail(), 17);
+        assert_eq!(transport.pending_display_bytes(), 0);
+        assert_eq!(transport.snapshot().screen_seq, 0);
+        assert!(h.observations.screens.borrow().is_empty());
+        assert!(output.bytes.is_empty());
+        assert_incomplete_observation_stays_fenced(
+            h,
+            &mut transport,
+            (&mut human, &mut pty, &mut output),
+            b"",
+            0,
+        );
+    });
+}
