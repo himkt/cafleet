@@ -51,7 +51,7 @@ pub(super) fn install_panic_record(directory: &Path, role: &'static str) {
     }));
 }
 
-fn panic_records(directory: &Path) -> std::io::Result<Vec<(String, String)>> {
+pub(super) fn panic_records(directory: &Path) -> std::io::Result<Vec<(String, String)>> {
     use std::os::unix::fs::PermissionsExt;
 
     let mut records = Vec::new();
@@ -304,9 +304,8 @@ fn failure_diagnostic(fixture: &mut ServiceFixture, stage: &str) -> String {
     let prior = String::from_utf8_lossy(&fixture.output[..fixture.output.len().min(64 * 1024)])
         .into_owned();
     let connection = fixture.connection_diagnostic(stage);
-    let panics = panic_records(fixture.fixture._dir.path());
     format!(
-        "{connection}; outer_read={outer_read:?}; outer_bytes={:?}; previous_outer_bytes={prior:?}; panic_records={panics:?}",
+        "{connection}; outer_read={outer_read:?}; outer_bytes={:?}; previous_outer_bytes={prior:?}",
         String::from_utf8_lossy(&bytes),
     )
 }

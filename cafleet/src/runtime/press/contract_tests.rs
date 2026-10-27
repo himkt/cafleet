@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum Mode {
     Success,
     ChangePlacement,
@@ -185,6 +185,50 @@ fn assert_zero_effect(cause: &CafleetError, member: i64) {
     );
 }
 
+fn post_refusal_lock_diagnostic(probe: &Probe) -> String {
+    use std::os::unix::fs::MetadataExt;
+
+    let path = crate::input::lock_path(&probe.database_url, &probe.placement);
+    let metadata = path.as_ref().map(|path| {
+        std::fs::symlink_metadata(path).map(|metadata| {
+            format!(
+                "mode={:o}; dev={}; inode={}; symlink={}",
+                metadata.mode(),
+                metadata.dev(),
+                metadata.ino(),
+                metadata.file_type().is_symlink(),
+            )
+        })
+    });
+    #[cfg(target_os = "macos")]
+    let open_processes = path.as_ref().map(|path| {
+        libproc::processes::pids_by_path(path, false, false).map(|mut pids| {
+            pids.sort_unstable();
+            let total = pids.len();
+            let sampled = pids
+                .into_iter()
+                .take(16)
+                .map(|pid| {
+                    let info = libproc::libproc::proc_pid::pidinfo::<
+                        libproc::libproc::bsd_info::BSDInfo,
+                    >(i32::try_from(pid).unwrap(), 0)
+                    .map(|info| (info.pbi_ppid, info.pbi_start_tvsec, info.pbi_start_tvusec));
+                    (pid, info)
+                })
+                .collect::<Vec<_>>();
+            (total, sampled)
+        })
+    });
+    #[cfg(not(target_os = "macos"))]
+    let open_processes = "path-filtered process observation is available on macOS";
+    format!(
+        "case={:?}; parent_pid={}; placement={:?}; lock_path={path:?}; named={metadata:?}; path_open_processes_total_and_pid_ppid_start={open_processes:?}; snapshot=after_refusal; open_file_observation_is_not_lock_ownership_proof",
+        probe.mode,
+        std::process::id(),
+        probe.placement,
+    )
+}
+
 #[test]
 fn step5_press_entry_uses_the_outer_wrapped_placement_and_held_lock_under_one_deadline() {
     let mut fixture = Fixture::new();
@@ -336,7 +380,9 @@ fn step5_press_entry_rechecks_full_placement_and_original_expiry_after_actual_me
         assert!(
             PaneLock::try_acquire(&settings.database_url, &probe.placement)
                 .unwrap()
-                .is_some()
+                .is_some(),
+            "post-refusal pane lock is released: {}",
+            post_refusal_lock_diagnostic(&probe),
         );
     }
 }

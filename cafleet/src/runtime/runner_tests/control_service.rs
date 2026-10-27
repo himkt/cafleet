@@ -161,8 +161,9 @@ impl ServiceFixture {
         .unwrap();
         let mut bytes = Vec::new();
         let read = stderr.take(64 * 1024).read_to_end(&mut bytes);
+        let panics = input_service::panic_records(self.fixture._dir.path());
         format!(
-            "stage={stage}; runner_pid={}; prepared={}; exit={status:?}; socket={socket:?}; stderr_read={read:?}; stderr={:?}",
+            "stage={stage}; runner_pid={}; prepared={}; exit={status:?}; socket={socket:?}; stderr_read={read:?}; stderr={:?}; panic_records={panics:?}",
             self.child.id(),
             self.prepared.is_some(),
             String::from_utf8_lossy(&bytes),
@@ -459,12 +460,14 @@ impl ServiceFixture {
             }
             assert!(
                 Instant::now() < until,
-                "missing native output {needle}: {:?}",
-                self.output
+                "missing native output {needle}: {}; outer_bytes={:?}",
+                self.connection_diagnostic("native output timeout"),
+                self.output,
             );
             assert!(
                 self.child.try_wait().unwrap().is_none(),
-                "runner stopped during manual I/O"
+                "runner stopped during manual I/O: {}",
+                self.connection_diagnostic("native output runner exit"),
             );
             std::thread::sleep(Duration::from_millis(5));
         }
