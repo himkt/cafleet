@@ -6,6 +6,7 @@ use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
+mod input_service;
 mod observation_contract;
 mod observation_services;
 mod review_collector;
@@ -26,6 +27,10 @@ const SERVICES_ENV: &str = "CAFLEET_REVIEW_TEST_SERVICES";
 
 #[test]
 fn runner_review_service_child() {
+    if let Some(config) = std::env::var_os(input_service::NATIVE_ENV) {
+        input_service::native(Path::new(&config));
+        std::process::exit(0);
+    }
     let Some(descriptor) = std::env::var_os(DESCRIPTOR_ENV) else {
         return;
     };
@@ -120,6 +125,7 @@ struct ServiceFixture {
     prepared: Option<ControlIdentity>,
     output: Vec<u8>,
     stopped: bool,
+    cleanup_deadline: Option<Instant>,
 }
 
 impl ServiceFixture {
@@ -312,6 +318,7 @@ impl ServiceFixture {
             prepared: None,
             output: Vec::new(),
             stopped: false,
+            cleanup_deadline: None,
         };
         if refusal {
             assert!(!owned.wait().success(), "nonfresh startup is refused");
@@ -587,7 +594,9 @@ impl Drop for ServiceFixture {
         if let Err(cause) = kill(pid, Signal::SIGTERM) {
             eprintln!("owned runner termination failed: {cause}");
         }
-        let until = Instant::now() + Duration::from_secs(5);
+        let until = self
+            .cleanup_deadline
+            .unwrap_or_else(|| Instant::now() + Duration::from_secs(5));
         let graceful = until - Duration::from_secs(1);
         while Instant::now() < graceful {
             match self.child.try_wait() {
