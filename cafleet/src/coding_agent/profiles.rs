@@ -1,10 +1,12 @@
 mod catalog;
+mod composer;
 mod detector;
 use super::CodingAgent;
 use crate::broker::runtime::PermissionDecision;
 #[cfg(test)]
 use crate::error::CafleetError;
 pub use catalog::{NativeCapabilities, ProfileCatalog};
+pub(crate) use composer::{ComposerOperation, ComposerPlan};
 pub(crate) use detector::*;
 
 #[cfg(test)]

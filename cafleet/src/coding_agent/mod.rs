@@ -4,6 +4,14 @@ mod profiles;
 #[cfg(test)]
 pub(crate) use profiles::ScreenRegion;
 pub use profiles::{AnswerCapability, NativeCapabilities, ProfileCatalog};
+#[cfg_attr(
+    not(test),
+    expect(
+        unused_imports,
+        reason = "the reviewed input coordinator consumes the canonical composer exports"
+    )
+)]
+pub(crate) use profiles::{ComposerOperation, ComposerPlan};
 pub(crate) use profiles::{
     Detector, MatchEvidence, ObservationKind, ScreenObservation, SemanticFingerprint,
 };

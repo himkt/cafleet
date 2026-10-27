@@ -1,3 +1,4 @@
+use super::composer::{ComposerOperation, ComposerSubmission};
 use super::detector::ObservationKind;
 use super::{AnswerCapability, CodingAgent, PermissionDecision};
 use crate::broker::runtime::Coverage;
@@ -70,6 +71,7 @@ fn lower_hex(value: &str) -> bool {
 #[derive(Clone)]
 pub(super) struct Fixture {
     pub id: String,
+    pub kind: String,
     pub backend: CodingAgent,
     pub version: String,
 }
@@ -131,6 +133,7 @@ pub(super) struct Profile {
     pub rules: Vec<Rule>,
     pub detection: Option<Capability>,
     pub composer: Option<Capability>,
+    pub submissions: [Option<ComposerSubmission>; 2],
     pub answers: Vec<Answer>,
 }
 #[derive(Clone)]
@@ -145,6 +148,8 @@ pub struct NativeCapabilities {
     pub profile_version: Option<String>,
     pub detection: Coverage,
     pub composer: Coverage,
+    pub prompt_submission: Coverage,
+    pub native_exec_submission: Coverage,
     pub answer_decisions: Vec<PermissionDecision>,
     pub capability_reason: Option<String>,
 }
@@ -294,7 +299,12 @@ fn capability(
     if value.is_null() {
         return Ok(None);
     }
-    let m = object(value, &["rule_ids", "fixture_ids"])?;
+    let fields: &[&str] = if composer && value.get("submission").is_some() {
+        &["rule_ids", "fixture_ids", "submission"]
+    } else {
+        &["rule_ids", "fixture_ids"]
+    };
+    let m = object(value, fields)?;
     let ids = texts(&m["rule_ids"])?;
     require(!ids.is_empty(), "capability rules required")?;
     for id in &ids {
@@ -317,10 +327,103 @@ fn capability(
         fixtures: fixture_ids,
     }))
 }
+
+fn decoded_hex(value: &str) -> Vec<u8> {
+    (0..value.len())
+        .step_by(2)
+        .map(|index| {
+            u8::from_str_radix(&value[index..index + 2], 16)
+                .expect("validated lowercase hexadecimal byte")
+        })
+        .collect()
+}
+
+fn composer_submission(
+    value: &Value,
+    operation: ComposerOperation,
+    backend: CodingAgent,
+    versions: &[String],
+    fixtures: &[Fixture],
+) -> Result<Option<ComposerSubmission>> {
+    if value.is_null() {
+        return Ok(None);
+    }
+    let m = object(value, &["prefix_hex", "submit_hex", "fixture_ids"])?;
+    let prefix = m["prefix_hex"]
+        .as_str()
+        .ok_or_else(|| invalid("composer prefix string required"))?;
+    require(
+        prefix == operation.prefix_hex(),
+        "composer prefix must match its operation",
+    )?;
+    let submit = m["submit_hex"]
+        .as_str()
+        .ok_or_else(|| invalid("composer submit string required"))?;
+    require(
+        (2..=64).contains(&submit.len()) && submit.len().is_multiple_of(2) && lower_hex(submit),
+        "composer submit requires 1–32 lowercase hexadecimal bytes",
+    )?;
+    let ids = texts(&m["fixture_ids"])?;
+    provenance(&ids, backend, versions, fixtures)?;
+    let fixtures = ids
+        .iter()
+        .map(|id| {
+            fixtures
+                .iter()
+                .find(|fixture| &fixture.id == id)
+                .expect("validated composer fixture reference")
+                .clone()
+        })
+        .collect();
+    Ok(Some(ComposerSubmission {
+        prefix: decoded_hex(prefix),
+        submit: decoded_hex(submit),
+        fixtures,
+    }))
+}
+
+fn composer_submissions(
+    value: &Value,
+    backend: CodingAgent,
+    versions: &[String],
+    fixtures: &[Fixture],
+) -> Result<[Option<ComposerSubmission>; 2]> {
+    let Some(submission) = value.get("submission") else {
+        return Ok([None, None]);
+    };
+    let m = object(submission, &["prompt", "exec"])?;
+    Ok([
+        composer_submission(
+            &m["prompt"],
+            ComposerOperation::Prompt,
+            backend,
+            versions,
+            fixtures,
+        )?,
+        composer_submission(
+            &m["exec"],
+            ComposerOperation::Exec,
+            backend,
+            versions,
+            fixtures,
+        )?,
+    ])
+}
+
 impl ProfileCatalog {
     pub fn bundled() -> Result<Self> {
         let catalog =
             Self::from_definitions(&json!({"schema_version":1,"fixtures":[],"profiles":[]}))?;
+        require(
+            catalog.profiles.iter().all(|profile| {
+                profile
+                    .submissions
+                    .iter()
+                    .flatten()
+                    .all(ComposerSubmission::native_provenance)
+            }),
+            "bundled executable composer plans require native provenance",
+        )?;
         #[cfg(test)]
         let catalog = Self {
             capture_origin: "bundled_unknown",
@@ -356,7 +459,7 @@ impl ProfileCatalog {
             )?;
             let id = text(&m["id"])?;
             unique(&mut ids, &id)?;
-            one_of(&m["kind"], &["synthetic", "native"])?;
+            let kind = one_of(&m["kind"], &["synthetic", "native"])?;
             positive(&m["rows"])?;
             positive(&m["cols"])?;
             text(&m["source_ref"])?;
@@ -367,6 +470,7 @@ impl ProfileCatalog {
             )?;
             fixtures.push(Fixture {
                 id,
+                kind,
                 backend: backend(&m["backend"])?,
                 version: text(&m["native_version"])?,
             });
@@ -409,6 +513,7 @@ impl ProfileCatalog {
                 &fixtures,
             )?;
             let composer = capability(&c["composer"], true, &rules, backend, &versions, &fixtures)?;
+            let submissions = composer_submissions(&c["composer"], backend, &versions, &fixtures)?;
             let mut answers = Vec::new();
             let mut decisions = BTreeSet::new();
             for v in array(&c["answers"])? {
@@ -488,6 +593,7 @@ impl ProfileCatalog {
                 rules,
                 detection,
                 composer,
+                submissions,
                 answers,
             });
         }
@@ -524,6 +630,20 @@ impl ProfileCatalog {
                 Coverage::Unknown
             },
             composer: if profile.is_some_and(|p| p.composer.is_some()) {
+                Coverage::Tested
+            } else {
+                Coverage::Unknown
+            },
+            prompt_submission: if profile
+                .is_some_and(|p| p.submissions[ComposerOperation::Prompt.index()].is_some())
+            {
+                Coverage::Tested
+            } else {
+                Coverage::Unknown
+            },
+            native_exec_submission: if profile
+                .is_some_and(|p| p.submissions[ComposerOperation::Exec.index()].is_some())
+            {
                 Coverage::Tested
             } else {
                 Coverage::Unknown
