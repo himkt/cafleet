@@ -1,13 +1,6 @@
 mod policy;
 pub use policy::LaunchPolicySelection;
 mod profiles;
-#[cfg_attr(
-    not(test),
-    expect(
-        unused_imports,
-        reason = "native permission response stages consume the canonical AnswerStage type"
-    )
-)]
 pub(crate) use profiles::AnswerStage;
 #[cfg(test)]
 pub(crate) use profiles::ScreenRegion;

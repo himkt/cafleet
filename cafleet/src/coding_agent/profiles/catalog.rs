@@ -319,33 +319,12 @@ pub(crate) struct AnswerStage {
     required_choice_id: String,
 }
 impl AnswerStage {
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "native permission response stages consume measured bytes"
-        )
-    )]
     pub(crate) fn bytes(&self) -> &[u8] {
         &self.bytes
     }
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "native permission response stages revalidate the required request rule"
-        )
-    )]
     pub(crate) fn required_rule_id(&self) -> &str {
         &self.required_rule_id
     }
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "native permission response stages revalidate the required choice"
-        )
-    )]
     pub(crate) fn required_choice_id(&self) -> &str {
         &self.required_choice_id
     }
@@ -369,13 +348,6 @@ impl AnswerPlan {
     pub(crate) fn focus_matcher_id(&self) -> &str {
         &self.focus_matcher_id
     }
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "native permission responses advance the measured ordered stages"
-        )
-    )]
     pub(crate) fn stages(&self) -> &[AnswerStage] {
         &self.stages
     }

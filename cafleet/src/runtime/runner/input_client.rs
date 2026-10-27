@@ -848,7 +848,7 @@ pub(crate) fn validate_operation_key(value: &str) -> Result<()> {
         "a nonblank operation key is required",
     )
 }
-fn validate_respond(input: &PermissionRespondInput) -> Result<()> {
+pub(super) fn validate_respond(input: &PermissionRespondInput) -> Result<()> {
     usage(
         [
             input.interaction_id,
@@ -930,7 +930,10 @@ fn metadata(
         answer_rule_id: audit.metadata.answer_rule_id.clone(),
     }
 }
-fn projection(run: &RunRecord, receipt: PermissionReceipt) -> Result<PermissionResponseResult> {
+pub(super) fn projection(
+    run: &RunRecord,
+    receipt: PermissionReceipt,
+) -> Result<PermissionResponseResult> {
     let input = receipt.input;
     let metadata = receipt.response.metadata;
     let (status, stage, reason) = match input.state {
@@ -972,37 +975,60 @@ fn projection(run: &RunRecord, receipt: PermissionReceipt) -> Result<PermissionR
         decision_source: metadata.decision_source,
     })
 }
-fn respond(
+pub(super) fn response_lookup(
+    conn: &Connection,
+    run: &RunRecord,
+    input: &PermissionRespondInput,
+    known_id: &mut Option<i64>,
+) -> Result<Option<PermissionReceipt>> {
+    let id = conn
+        .query_row(
+            "SELECT input_id FROM member_input_operations WHERE run_id=?1 AND operation_key=?2",
+            rusqlite::params![run.run_id, input.operation_key],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(db_err)?;
+    let Some(id) = id else {
+        return Ok(None);
+    };
+    *known_id = Some(id);
+    let retained = storage::get_permission_response(conn, id)?;
+    let request = NewPermissionResponse {
+        operation_key: input.operation_key.clone(),
+        metadata: metadata(input, &retained.response),
+    };
+    let identity = PermissionReceiptIdentity {
+        database_identity_json: run.database_identity_json.clone(),
+        run_id: run.run_id,
+    };
+    let receipt = storage::lookup_permission_response(conn, &identity, &request)?
+        .ok_or_else(|| error("retained permission response disappeared from its snapshot"))?;
+    Ok(Some(receipt))
+}
+
+enum ResponsePreparation {
+    History(PermissionResponseResult),
+    Fresh(Box<(RunRecord, RuntimeEventView)>),
+}
+fn prepare_response(
     conn: &mut Connection,
     input: &PermissionRespondInput,
     deadline: Deadline,
-) -> std::result::Result<PermissionResponseResult, InputFailure> {
+) -> std::result::Result<ResponsePreparation, InputFailure> {
     let mut context = InputContext {
         run_id: Some(input.expected_run_id),
         interaction_id: Some(input.interaction_id),
         input_id: None,
         operation_key: Some(input.operation_key.clone()),
     };
-    let result = (|| {
-        validate_respond(input)?;
-        with_database_budget(conn, deadline, |conn| {
-            let tx = conn.transaction().map_err(db_err)?;
-            let run = selected_run(&tx, input.expected_run_id)?;
-            let id = tx.query_row("SELECT input_id FROM member_input_operations WHERE run_id=?1 AND operation_key=?2", rusqlite::params![run.run_id, input.operation_key], |row| row.get::<_, i64>(0)).optional().map_err(db_err)?;
-            context.input_id = id;
-            let result = if let Some(id) = id {
-                let retained = storage::get_permission_response(&tx, id)?;
-                let request = NewPermissionResponse {
-                    operation_key: input.operation_key.clone(),
-                    metadata: metadata(input, &retained.response),
-                };
-                let identity = PermissionReceiptIdentity {
-                    database_identity_json: run.database_identity_json.clone(),
-                    run_id: run.run_id,
-                };
-                let receipt = storage::lookup_permission_response(&tx, &identity, &request)?
-                    .expect("the same read snapshot retains the selected input");
-                projection(&run, receipt)?
+    let result = with_database_budget(conn, deadline, |conn| {
+        let tx = conn.transaction().map_err(db_err)?;
+        let run = selected_run(&tx, input.expected_run_id)?;
+        let prepared =
+            if let Some(receipt) = response_lookup(&tx, &run, input, &mut context.input_id)? {
+                context.input_id = Some(receipt.input.input_id);
+                ResponsePreparation::History(projection(&run, receipt)?)
             } else {
                 association(
                     &tx,
@@ -1015,38 +1041,201 @@ fn respond(
                     input.expected_owner_epoch == run.owner_epoch,
                     "permission owner epoch changed",
                 )?;
-                return Err(error("live permission coordination is not implemented"));
+                let original = super::input::inspection_association(
+                    &tx,
+                    &run,
+                    &PermissionInspectInput {
+                        interaction_id: input.interaction_id,
+                        event_id: input.event_id,
+                        director_member_id: input.director_member_id,
+                    },
+                )?;
+                ResponsePreparation::Fresh(Box::new((run, original)))
             };
+        deadline.remaining()?;
+        tx.commit().map_err(db_err)?;
+        Ok(prepared)
+    });
+    result.map_err(|source| context.failure(source))
+}
+
+fn copy_response_input(input: &PermissionRespondInput) -> PermissionRespondInput {
+    PermissionRespondInput {
+        interaction_id: input.interaction_id,
+        event_id: input.event_id,
+        director_member_id: input.director_member_id,
+        expected_run_id: input.expected_run_id,
+        expected_owner_epoch: input.expected_owner_epoch,
+        request_token: input.request_token.clone(),
+        decision: input.decision,
+        decision_source: input.decision_source,
+        director_mode: input.director_mode,
+        mode_evidence_ref: input.mode_evidence_ref.clone(),
+        decision_evidence_ref: input.decision_evidence_ref.clone(),
+        operation_key: input.operation_key.clone(),
+    }
+}
+
+pub(crate) fn respond_permission_with_host(
+    conn: &mut Connection,
+    settings: &Settings,
+    input: &PermissionRespondInput,
+    deadline: Deadline,
+    host: &mut impl InputCommandHost,
+) -> std::result::Result<PermissionResponseResult, InputFailure> {
+    let mut context = InputContext {
+        run_id: Some(input.expected_run_id),
+        interaction_id: Some(input.interaction_id),
+        input_id: None,
+        operation_key: Some(input.operation_key.clone()),
+    };
+    let deadline = match validate_respond(input).and_then(|()| submission_deadline(conn, deadline))
+    {
+        Ok(deadline) => deadline,
+        Err(source) => return Err(context.failure(source)),
+    };
+    let prepared = prepare_response(conn, input, deadline)?;
+    let (run, original) = match prepared {
+        ResponsePreparation::History(result) => return Ok(result),
+        ResponsePreparation::Fresh(snapshot) => *snapshot,
+    };
+    let result = (|| {
+        let placement = with_database_budget(conn, deadline, |conn| {
+            crate::broker::get_member(conn, run.member_id, run.fleet_id)?
+                .and_then(|member| member.placement)
+                .ok_or_else(|| error("permission member placement unavailable"))
+        })?;
+        let expiration = InputExpiration::capture(deadline.instant(), &mut RealInputDeadlineClock)?;
+        let held = host
+            .lock(settings, &run, &placement, deadline)
+            .map_err(CafleetError::from)?
+            .ok_or_else(|| error("permission pane input lock is busy"))?;
+        let validate =
+            |conn: &mut Connection| -> Result<()> {
+                deadline.remaining()?;
+                held.validate_binding(&settings.database_url, &placement)?;
+                with_database_budget(conn, deadline, |conn| {
+                    let tx = conn.transaction().map_err(db_err)?;
+                    validate_submission_target(&tx, settings, &run, &placement)?;
+                    let view = super::input::inspection_association(
+                        &tx,
+                        &run,
+                        &PermissionInspectInput {
+                            interaction_id: input.interaction_id,
+                            event_id: input.event_id,
+                            director_member_id: input.director_member_id,
+                        },
+                    )?;
+                    ensure(
+                        view.event == original.event
+                            && view.interaction.as_ref().map(|i| {
+                                (i.interaction_id, i.run_id, i.episode_seq, i.classification)
+                            }) == original.interaction.as_ref().map(|i| {
+                                (i.interaction_id, i.run_id, i.episode_seq, i.classification)
+                            }),
+                        "permission response association changed",
+                    )?;
+                    deadline.remaining()?;
+                    tx.commit().map_err(db_err)
+                })
+            };
+        validate(conn)?;
+        host.health(&run, deadline.instant())
+            .map_err(CafleetError::from)?
+            .validate(&run)?;
+        validate(conn)?;
+        let request = InputControlRequest {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            identity: ControlIdentity::from_run(&run),
+            expires_at_mono_ns: expiration.monotonic_ns(),
+            operation: InputControlOperation::PermissionRespond(copy_response_input(input)),
+        };
+        let reply = host
+            .exchange(&run, &request, deadline.instant())
+            .map_err(CafleetError::from)?;
+        let InputControlReply::PermissionResponse(reply) = reply else {
+            return Err(error("permission response requires its typed reply"));
+        };
+        ensure(
+            reply.member_id == run.member_id
+                && reply.run_id == run.run_id
+                && reply.owner_epoch == input.expected_owner_epoch
+                && reply.interaction_id == input.interaction_id
+                && reply.event_id == input.event_id
+                && reply.decision == input.decision
+                && reply.decision_source == input.decision_source,
+            "permission response reply identity mismatch",
+        )?;
+        let receipt = with_database_budget(conn, deadline, |conn| {
+            let tx = conn.transaction().map_err(db_err)?;
+            held.validate_binding(&settings.database_url, &placement)?;
+            validate_submission_target(&tx, settings, &run, &placement)?;
+            association(
+                &tx,
+                &run,
+                input.interaction_id,
+                input.event_id,
+                input.director_member_id,
+            )?;
+            let receipt = response_lookup(&tx, &run, input, &mut context.input_id)?;
+            context.input_id = receipt.as_ref().map(|r| r.input.input_id);
             deadline.remaining()?;
             tx.commit().map_err(db_err)?;
-            Ok(result)
-        })
+            Ok(receipt)
+        })?;
+        match (reply.submission.input_id, receipt.as_ref()) {
+            (Some(id), Some(receipt)) => {
+                ensure(
+                    id == receipt.input.input_id,
+                    "permission response reply input identity mismatch",
+                )?;
+                let valid = match reply.submission.status {
+                    SubmissionStatus::Accepted => {
+                        reply.submission.stage == SubmissionStage::Submitted
+                            && (receipt.input.state == InputState::Accepted
+                                || receipt.input.state == InputState::Settled
+                                    && receipt.input.disposition
+                                        == Some(InputDisposition::Submitted))
+                    }
+                    SubmissionStatus::Uncertain => matches!(
+                        receipt.input.state,
+                        InputState::InProgress | InputState::Uncertain
+                    ),
+                    SubmissionStatus::Held | SubmissionStatus::Rejected => {
+                        reply.submission.stage == SubmissionStage::ZeroBytes
+                            && (receipt.input.state == InputState::Ready
+                                || receipt.input.state == InputState::Settled
+                                    && receipt.input.disposition
+                                        != Some(InputDisposition::Submitted))
+                    }
+                };
+                ensure(valid, "permission response reply contradicts durable state")?;
+            }
+            (None, None) => ensure(
+                matches!(
+                    reply.submission.status,
+                    SubmissionStatus::Held | SubmissionStatus::Rejected
+                ) && reply.submission.stage == SubmissionStage::ZeroBytes,
+                "permission response outcome requires its durable input",
+            )?,
+            _ => {
+                return Err(error(
+                    "permission response reply has no matching durable input",
+                ));
+            }
+        }
+        deadline.remaining()?;
+        Ok(reply)
     })();
     result.map_err(|source| context.failure(source))
 }
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the actual live host adapter follows the retained-history checkpoint"
-    )
-)]
-pub(crate) fn respond_permission_with_host(
-    conn: &mut Connection,
-    _settings: &Settings,
-    input: &PermissionRespondInput,
-    deadline: Deadline,
-    _host: &mut impl InputCommandHost,
-) -> std::result::Result<PermissionResponseResult, InputFailure> {
-    respond(conn, input, deadline)
-}
 pub(crate) fn respond_permission(
     conn: &mut Connection,
-    _settings: &Settings,
+    settings: &Settings,
     input: &PermissionRespondInput,
     deadline: Deadline,
 ) -> std::result::Result<PermissionResponseResult, InputFailure> {
-    respond(conn, input, deadline)
+    respond_permission_with_host(conn, settings, input, deadline, &mut NativeInputHost)
 }
 pub(crate) fn inspect_permission(
     conn: &mut Connection,
@@ -1669,6 +1858,142 @@ mod tests {
         fixture.finish();
     }
 
+    #[test]
+    fn permission_response_history_honors_expired_inherited_budget_before_sql_or_live_calls() {
+        use crate::runtime::runner_tests::permission_history::{Case, Retained};
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Mutex};
+
+        let mut case = Case::new(Retained::Accepted);
+        let receipt = storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
+        let metadata = &receipt.response.metadata;
+        let input = PermissionRespondInput {
+            interaction_id: metadata.interaction_id,
+            event_id: metadata.event_id,
+            director_member_id: metadata.director_member_id,
+            expected_run_id: receipt.input.run_id,
+            expected_owner_epoch: metadata.expected_owner_epoch,
+            request_token: metadata.request_token.clone(),
+            decision: metadata.decision,
+            decision_source: metadata.decision_source,
+            director_mode: metadata.director_mode,
+            mode_evidence_ref: metadata.mode_evidence_ref.clone(),
+            decision_evidence_ref: metadata.decision_evidence_ref.clone(),
+            operation_key: receipt.input.operation_key.clone(),
+        };
+        let run = storage::get_run(&case.fixture.conn, input.expected_run_id).unwrap();
+        let records = health_records(&case.fixture.conn);
+        let changes = case.fixture.conn.total_changes();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let budgets = Arc::new(Mutex::new(Vec::new()));
+        let observed_calls = calls.clone();
+        let observed_budgets = budgets.clone();
+        let original = Instant::now() + Duration::from_millis(100);
+        let supplied = Deadline::until(original + Duration::from_secs(2));
+        let mut active = None;
+        let mut expired = None;
+        let mut active_calls = None;
+        let mut expired_calls = None;
+        let scoped =
+            with_database_budget(&mut case.fixture.conn, Deadline::until(original), |conn| {
+                conn.authorizer(Some(move |context: AuthContext<'_>| {
+                    observed_calls.fetch_add(1, Ordering::SeqCst);
+                    if matches!(
+                        context.action,
+                        AuthAction::Read {
+                            table_name: "member_input_operations",
+                            ..
+                        }
+                    ) {
+                        observed_budgets
+                            .lock()
+                            .unwrap()
+                            .push(Deadline::inherited_or_new().instant());
+                    }
+                    Authorization::Allow
+                }))
+                .map_err(db_err)?;
+                active = Some(respond_permission_with_host(
+                    conn,
+                    &case.settings,
+                    &input,
+                    supplied,
+                    &mut NoLiveHost,
+                ));
+                active_calls = Some(calls.swap(0, Ordering::SeqCst));
+                std::thread::sleep(
+                    original.saturating_duration_since(Instant::now()) + Duration::from_millis(1),
+                );
+                assert!(
+                    Instant::now() >= original,
+                    "actual inherited frame has expired"
+                );
+                expired = Some(respond_permission_with_host(
+                    conn,
+                    &case.settings,
+                    &input,
+                    supplied,
+                    &mut NoLiveHost,
+                ));
+                expired_calls = Some(calls.load(Ordering::SeqCst));
+                conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+                    .map_err(db_err)
+            });
+        let expired = expired.expect("expired-frame invocation completed");
+        let expired_calls = expired_calls.expect("SQL count sampled after expired invocation");
+        eprintln!(
+            "permission inherited expiry: result={:?}; SQL={expired_calls}; scope_cleanup={scoped:?}",
+            expired.as_ref().map(|reply| (
+                reply.submission.status,
+                reply.submission.input_id,
+                reply.submission.stage
+            ))
+        );
+        scoped.unwrap();
+        let active = active
+            .expect("same history has a live-budget control")
+            .unwrap();
+        assert_eq!(active.submission.status, SubmissionStatus::Accepted);
+        assert_eq!(active.submission.input_id, Some(case.input_id));
+        assert!(active_calls.expect("active SQL count") > 0);
+        let budgets = budgets.lock().unwrap();
+        assert!(!budgets.is_empty(), "actual history SQL was authorized");
+        assert!(budgets.iter().all(|bound| *bound <= original));
+        drop(budgets);
+        assert_eq!(case.fixture.conn.total_changes(), changes);
+        assert_eq!(
+            storage::get_run(&case.fixture.conn, input.expected_run_id).unwrap(),
+            run
+        );
+        assert_eq!(health_records(&case.fixture.conn), records);
+        assert_eq!(
+            storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap(),
+            receipt
+        );
+        let failure = expired
+            .err()
+            .expect("expired inherited history refuses before lookup");
+        assert!(matches!(failure.source, CafleetError::DeadlineExceeded));
+        assert_eq!(
+            (failure.run_id, failure.interaction_id, failure.input_id),
+            (
+                Some(input.expected_run_id),
+                Some(input.interaction_id),
+                None
+            )
+        );
+        assert_eq!(
+            failure.operation_key.as_deref(),
+            Some(input.operation_key.as_str())
+        );
+        assert!(!failure.source.message().contains(&input.request_token));
+        assert_eq!(
+            expired_calls, 0,
+            "expired inherited authority starts no SQL"
+        );
+    }
+
     fn response_services(fixture: &mut Fixture, spec: &mut SpawnSpec) {
         crate::runtime::runner_tests::control_service::observation_services::synthetic(
             fixture, spec,
@@ -1810,15 +2135,122 @@ mod tests {
             response_command(&mut fixture, until, "response:actual-live");
         let output_start = fixture.output.len();
         let mut host = SocketHost::new(&settings, &placement, until);
+        let original = storage::get_event(&fixture.fixture.conn, input.event_id).unwrap();
+        let database = settings.database_url.clone();
+        let interaction_id = input.interaction_id;
+        let mut closed = SocketHost::new(&settings, &placement, until);
+        closed.after_health = Some(Box::new(move || {
+            let conn = crate::db::connect(&database).unwrap();
+            assert_eq!(conn.execute(
+                "UPDATE member_interactions SET closed_at=?1,close_reason='not_visible' WHERE interaction_id=?2 AND closed_at IS NULL",
+                rusqlite::params![crate::time::format_utc(crate::time::now_utc()), interaction_id],
+            ).unwrap(), 1);
+            let closed_at: Option<String> = conn
+                .query_row(
+                    "SELECT closed_at FROM member_interactions WHERE interaction_id=?1",
+                    [interaction_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(closed_at.is_some());
+        }));
+        let refused = respond_permission_with_host(
+            &mut fixture.fixture.conn,
+            &settings,
+            &input,
+            Deadline::until(until),
+            &mut closed,
+        );
+        let restored = fixture.fixture.conn.execute(
+            "UPDATE member_interactions SET closed_at=NULL,close_reason=NULL WHERE interaction_id=?1 AND closed_at IS NOT NULL",
+            [input.interaction_id],
+        );
+        assert_eq!(restored.unwrap(), 1);
+        assert_eq!(closed.calls, [1, 1, 0]);
+        let refused = refused
+            .err()
+            .expect("a genuinely closed association refuses before exchange");
+        assert_eq!(
+            (refused.run_id, refused.interaction_id, refused.input_id),
+            (Some(run.run_id), Some(input.interaction_id), None)
+        );
+        assert!(
+            storage::find_input(&fixture.fixture.conn, run.run_id, &input.operation_key)
+                .unwrap()
+                .is_none()
+        );
+        let previous = original.interaction.as_ref().unwrap().evidence_json["screen_seq"]
+            .as_u64()
+            .unwrap();
+        let master = fixture.master.try_clone().unwrap();
+        let process = ProcessIdentity::read(run.owner_pid).unwrap().unwrap();
+        assert_eq!(process.start_identity, run.owner_start_identity);
+        let database = settings.database_url.clone();
+        host.after_health = Some(Box::new(move || {
+            assert!(process.matches().unwrap(), "generation-bound owned runner");
+            rustix::termios::tcsetwinsize(
+                &master,
+                rustix::termios::Winsize {
+                    ws_row: 24,
+                    ws_col: 81,
+                    ws_xpixel: 0,
+                    ws_ypixel: 0,
+                },
+            )
+            .unwrap();
+            nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(i32::try_from(process.pid).unwrap()),
+                nix::sys::signal::Signal::SIGWINCH,
+            )
+            .unwrap();
+            let mut conn = crate::db::connect(&database).unwrap();
+            loop {
+                let current = with_database_budget(&mut conn, Deadline::until(until), |conn| {
+                    storage::get_event(conn, original.event.event_id)
+                })
+                .unwrap();
+                let after = current.interaction.as_ref().unwrap();
+                let sequence = after.evidence_json["screen_seq"].as_u64().unwrap();
+                if sequence > previous {
+                    assert_eq!(current.event, original.event);
+                    let mut expected = original.interaction.as_ref().unwrap().clone();
+                    expected.evidence_json = after.evidence_json.clone();
+                    expected.evidence_digest = after.evidence_digest.clone();
+                    assert_eq!(*after, expected);
+                    assert_ne!(
+                        after.evidence_digest,
+                        original.interaction.as_ref().unwrap().evidence_digest
+                    );
+                    assert!(after.closed_at.is_none());
+                    eprintln!(
+                        "response compatible refresh: interaction_id={}; screen_seq={previous}->{sequence}; opening unchanged",
+                        after.interaction_id
+                    );
+                    break;
+                }
+                assert!(
+                    Instant::now() < until,
+                    "actual writer commits resize evidence under the original command budget"
+                );
+                std::thread::sleep(
+                    Duration::from_millis(2).min(until.saturating_duration_since(Instant::now())),
+                );
+            }
+        }));
         let result = respond_permission_with_host(
             &mut fixture.fixture.conn,
             &settings,
             &input,
             Deadline::until(until),
             &mut host,
-        )
-        .unwrap();
-        assert_eq!(host.calls, [1, 1, 1]);
+        );
+        assert_eq!(
+            host.calls,
+            [1, 1, 1],
+            "compatible actual refresh permits one exchange: {:?}",
+            result.as_ref().err()
+        );
+        let result = result.unwrap();
         assert_eq!(host.requests[0]["kind"], "permission_respond");
         for field in [
             "answer_profile_version",

@@ -7,13 +7,17 @@ use super::{
     InputFailure, ProcessIdentity, Result, RunLock, SubmissionStage, Transport, check_deadline,
     ensure, error, stable_run_identity, with_database_deadline,
 };
-use super::{MissingEvidence, PermissionInspectInput, PermissionInspection};
+use super::{
+    MissingEvidence, PermissionInspectInput, PermissionInspection, PermissionResponseResult,
+};
 #[cfg(test)]
 use super::{RealInputDeadlineClock, receive_input_expiration};
 use crate::broker::members::db_err;
 use crate::broker::records::{MemberKind, Placement};
 use crate::broker::runtime::{self as storage, OwnerKind, RunRecord, RunStatus};
-use crate::coding_agent::{AnswerMatch, ProfileCatalog, SemanticFingerprint};
+use crate::coding_agent::{
+    AnswerMatch, AnswerPlan, AnswerStage, ProfileCatalog, SemanticFingerprint,
+};
 use crate::coding_agent::{ComposerOperation, coding_agent};
 use crate::error::CafleetError;
 use crate::input::{Deadline, inherited_database_deadline, with_database_budget};
@@ -592,6 +596,7 @@ mod permission_response_contracts {
         ByteInput, PermissionInspection, PermissionRespondInput, PermissionResponseResult,
         TerminalSize,
     };
+    use std::time::Duration;
 
     fn command(
         h: &Host,
@@ -740,9 +745,101 @@ mod permission_response_contracts {
             assert_eq!(counts(h), [0, 0, 0]);
             assert!(h.pty.program.is_empty());
             assert_eq!(h.pty.offers, vec![b"!".to_vec()]);
+            let before_gap = inspect(h, ids);
+            let before_gap = command(
+                h,
+                &before_gap,
+                "response:before-gap",
+                PermissionDecision::Allow,
+            );
+            h.fixture.conn.execute_batch("CREATE TRIGGER reject_response_refresh BEFORE UPDATE OF evidence_json ON member_interactions BEGIN SELECT RAISE(ABORT,'owned response refresh failure'); END").unwrap();
+            let generation = h.controller.request_generation();
+            h.pty.child.bytes.extend(b"\x1b[?25l");
+            h.coordinator
+                .progress_with_manual(&mut h.transport, |transport| {
+                    transport.quiesce_for_input(
+                        &mut h.human,
+                        &mut h.pty,
+                        &mut h.output,
+                        &mut h
+                            .controller
+                            .observer(&h.writer, &super::super::RealObservationClock),
+                        h.until,
+                    )
+                })
+                .unwrap();
+            loop {
+                let status = h.writer.status();
+                if status.degraded {
+                    assert!(status.pending_evidence);
+                    assert!(
+                        status
+                            .diagnostic
+                            .as_deref()
+                            .unwrap()
+                            .contains("owned response refresh failure")
+                    );
+                    break;
+                }
+                assert!(
+                    Instant::now() < h.until,
+                    "actual refresh failure is observed"
+                );
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            h.controller
+                .poll(
+                    &h.transport.snapshot(),
+                    &h.writer,
+                    &super::super::RealObservationClock,
+                )
+                .unwrap();
+            assert!(h.controller.status().gap_count > 0);
+            assert!(h.controller.current_request().is_none());
+            assert!(h.controller.request_generation() > generation);
+            h.fixture
+                .conn
+                .execute_batch("DROP TRIGGER reject_response_refresh")
+                .unwrap();
+            while h.writer.status().degraded {
+                assert!(
+                    Instant::now() < h.until,
+                    "original writer recovers in budget"
+                );
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            loop {
+                h.drain();
+                if h.controller.current_request().is_some() {
+                    break;
+                }
+                assert!(
+                    Instant::now() < h.until,
+                    "complete request is observed again"
+                );
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            let recovered = h.controller.health(&h.writer);
+            assert!(h.controller.status().gap_count > 0);
+            assert!(recovered.gap_count > 0);
+            assert!(!recovered.degraded);
+            assert_eq!(recovered.pending_count, 0);
+            assert!(!recovered.pending_evidence);
+            assert!(recovered.diagnostic.is_none());
+            let proof = h
+                .transport
+                .take_input_drain()
+                .expect("actual recovered transport installs a current quiet proof");
+            h.transport
+                .validate_observation_drain(&proof, h.until)
+                .unwrap();
+            assert!(handle(h, &before_gap).is_err());
+            assert_eq!(counts(h), [0, 0, 0]);
+            assert_eq!(h.pty.offers, vec![b"!".to_vec()]);
             let fresh = inspect(h, ids);
             let input = command(h, &fresh, "response:fresh-deny", PermissionDecision::Deny);
             assert_ne!(input.request_token, stale.request_token);
+            assert_ne!(input.request_token, before_gap.request_token);
             assert!(
                 handle(h, &input).unwrap().is_none(),
                 "fresh supported response enters the actual pending writer"
@@ -1304,6 +1401,7 @@ pub(crate) struct InputCoordinator {
     input_fenced: bool,
 }
 
+#[derive(Clone)]
 pub(crate) struct CurrentRequest {
     request_generation: u64,
     identity: ControlIdentity,
@@ -1416,9 +1514,24 @@ enum InputPhase {
     Blocked,
 }
 
+struct PermissionSelection {
+    request: storage::NewPermissionResponse,
+    binding: CurrentRequest,
+    plan: AnswerPlan,
+}
+
+enum RetainedSelection {
+    Composer,
+    Permission {
+        selection: Arc<PermissionSelection>,
+        next_stage: usize,
+    },
+}
+
 struct PendingInput {
     request: storage::NewInput,
     bytes: Arc<[u8]>,
+    permission: Option<Arc<PermissionSelection>>,
     deadline: Instant,
     phase: InputPhase,
     input_id: Option<i64>,
@@ -1427,11 +1540,18 @@ struct PendingInput {
 struct RetainedInput {
     operation: storage::InputOperation,
     bytes: Arc<[u8]>,
+    selection: RetainedSelection,
     stage: SubmissionStage,
     written_bytes: u64,
     output_seq: u64,
     attempt_available: bool,
     leased: bool,
+}
+
+fn selected_answer_stage(plan: &AnswerPlan, index: usize) -> Result<&AnswerStage> {
+    plan.stages()
+        .get(index)
+        .ok_or_else(|| error("selected answer stage is absent"))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1473,7 +1593,19 @@ impl InputGuard<'_> {
                 && self.retained.leased,
             "input write requires its retained reservation",
         )?;
-        transport.validate_input_drain(&self.proof, self.deadline)?;
+        match &self.retained.selection {
+            RetainedSelection::Composer => {
+                transport.validate_input_drain(&self.proof, self.deadline)?
+            }
+            RetainedSelection::Permission {
+                selection,
+                next_stage,
+            } => {
+                let stage = selected_answer_stage(&selection.plan, *next_stage)?;
+                ensure(stage.bytes() == bytes, "permission stage selection changed")?;
+                transport.validate_observation_drain(&self.proof, self.deadline)?;
+            }
+        }
         self.permit = GuardPermit::ConsumedPreIo;
         Ok(self.deadline)
     }
@@ -1511,7 +1643,26 @@ impl InputGuard<'_> {
                     )
                     .ok_or_else(|| error("native input count exhausted"))?;
                 if *count == offered {
-                    self.retained.stage = SubmissionStage::Submitted;
+                    self.retained.stage = match &mut self.retained.selection {
+                        RetainedSelection::Composer => SubmissionStage::Submitted,
+                        RetainedSelection::Permission {
+                            selection,
+                            next_stage,
+                        } => {
+                            let _ = selected_answer_stage(&selection.plan, *next_stage)?;
+                            *next_stage = next_stage
+                                .checked_add(1)
+                                .ok_or_else(|| error("answer stage index exhausted"))?;
+                            if *next_stage == selection.plan.stages().len() {
+                                SubmissionStage::Submitted
+                            } else {
+                                self.retained.bytes = Arc::from(
+                                    selected_answer_stage(&selection.plan, *next_stage)?.bytes(),
+                                );
+                                SubmissionStage::Partial
+                            }
+                        }
+                    };
                 } else if *count > 0 {
                     self.retained.stage = SubmissionStage::Partial;
                 }
@@ -1716,11 +1867,254 @@ impl InputCoordinator {
         self.input_fenced = true;
         check_deadline(Instant::now(), deadline)
     }
+    fn validate_permission_binding(
+        &self,
+        selection: &PermissionSelection,
+        observation: &ObservationController,
+    ) -> Result<()> {
+        let (current, token) = self
+            .current_request
+            .as_ref()
+            .ok_or_else(|| error("current permission token unavailable"))?;
+        let bound = &selection.binding;
+        let observed = observation
+            .current_request()
+            .ok_or_else(|| error("current permission request unavailable"))?;
+        let status = observation.status();
+        ensure(
+            token == &selection.request.metadata.request_token
+                && current.same_request(bound)
+                && !self.manual_accounting_failed
+                && !self.input_fenced
+                && self.manual_generation == bound.manual_generation
+                && observation.request_generation() == bound.request_generation
+                && observed.request_generation == bound.request_generation
+                && observed.episode_seq == bound.episode_seq
+                && observed.classification == storage::InteractionClass::PermissionRequest
+                && observed.native_version == bound.native_version
+                && observed.detector_profile_version == bound.detector_profile_version
+                && observed.request_rule_id == bound.request_rule_id
+                && observed.semantic == bound.semantic
+                && observed.choices == bound.choices
+                && observed.focus == bound.focus
+                && observed.native_correlation == bound.native_correlation
+                && observed.answer_matches.len() == bound.answer_matches.len()
+                && observed
+                    .answer_matches
+                    .iter()
+                    .zip(&bound.answer_matches)
+                    .all(|(a, b)| a.same_request(b))
+                && status.visibility == Visibility::Visible
+                && status.eligibility == InputEligibility::Hold(super::GateReason::Interaction)
+                && !status.retained_transition
+                && !status.retained_draft
+                && !status.retained_evidence
+                && status.diagnostic.is_none(),
+            "permission request token or current plan binding changed",
+        )?;
+        ensure(
+            bound
+                .answer_matches
+                .iter()
+                .any(|m| m.plan() == &selection.plan),
+            "selected permission plan changed",
+        )?;
+        Ok(())
+    }
+
+    fn validate_permission_association(
+        &self,
+        conn: &Connection,
+        selection: &PermissionSelection,
+    ) -> Result<()> {
+        let metadata = &selection.request.metadata;
+        let view = inspection_association(
+            conn,
+            &self.run,
+            &PermissionInspectInput {
+                interaction_id: metadata.interaction_id,
+                event_id: metadata.event_id,
+                director_member_id: metadata.director_member_id,
+            },
+        )?;
+        let interaction = view.interaction.expect("validated permission interaction");
+        ensure(
+            interaction.episode_seq == selection.binding.episode_seq
+                && view.event.message_id == Some(selection.binding.message_id)
+                && metadata.expected_owner_epoch == self.run.owner_epoch,
+            "permission response current association changed",
+        )
+    }
+
+    fn permission_received(
+        &mut self,
+        conn: &mut Connection,
+        run: &RunRecord,
+        request: InputControlRequest,
+        observation: &ObservationController,
+        deadline: Instant,
+    ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
+        let InputControlOperation::PermissionRespond(input) = request.operation else {
+            unreachable!("permission response route selects its semantic operation");
+        };
+        let mut known_id = None;
+        let result = (|| {
+            let deadline = inherited_database_deadline(conn)
+                .map_or(deadline, |bound| deadline.min(bound.instant()));
+            check_deadline(Instant::now(), deadline)?;
+            super::input_client::validate_respond(&input)?;
+            ensure(
+                request.protocol_version == super::CONTROL_PROTOCOL_VERSION,
+                "input protocol version mismatch",
+            )?;
+            let mut expected = ControlIdentity::from_run(&self.run);
+            expected.owner_epoch = input.expected_owner_epoch;
+            ensure(
+                request.identity == expected
+                    && input.expected_run_id == self.run.run_id
+                    && run.run_id == self.run.run_id,
+                "permission response fixed identity mismatch",
+            )?;
+            let history = with_database_deadline(conn, deadline, |conn| {
+                let tx = conn.transaction().map_err(db_err)?;
+                ensure(
+                    storage::database_identity(&tx)? == self.run.database_identity_json,
+                    "input database identity changed",
+                )?;
+                let retained =
+                    super::input_client::response_lookup(&tx, &self.run, &input, &mut known_id)?;
+                if let Some(receipt) = &retained {
+                    known_id = Some(receipt.input.input_id);
+                }
+                check_deadline(Instant::now(), deadline)?;
+                tx.commit().map_err(db_err)?;
+                Ok(retained)
+            })?;
+            if let Some(receipt) = history {
+                return super::input_client::projection(&self.run, receipt)
+                    .map(|result| Some(InputControlReply::PermissionResponse(result)));
+            }
+            request.identity.validate(&self.run)?;
+            let (binding, token) = self
+                .current_request
+                .as_ref()
+                .ok_or_else(|| error("current permission token unavailable"))?;
+            ensure(
+                token == &input.request_token
+                    && binding.interaction_id == input.interaction_id
+                    && binding.event_id == input.event_id
+                    && binding.identity == request.identity,
+                "permission response token identity changed",
+            )?;
+            let plan = binding
+                .answer_matches
+                .iter()
+                .find(|matched| matched.plan().capability().decision() == input.decision)
+                .ok_or_else(|| error("selected permission decision is unsupported"))?
+                .plan()
+                .clone();
+            let cap = plan.capability();
+            let selection = Arc::new(PermissionSelection {
+                request: storage::NewPermissionResponse {
+                    operation_key: input.operation_key.clone(),
+                    metadata: storage::PermissionResponseMetadata {
+                        event_id: input.event_id,
+                        interaction_id: input.interaction_id,
+                        expected_owner_epoch: input.expected_owner_epoch,
+                        request_token: input.request_token.clone(),
+                        decision: input.decision,
+                        director_member_id: input.director_member_id,
+                        director_mode: input.director_mode,
+                        decision_source: input.decision_source,
+                        mode_evidence_ref: input.mode_evidence_ref.clone(),
+                        decision_evidence_ref: input.decision_evidence_ref.clone(),
+                        answer_profile_version: cap.profile_version().into(),
+                        answer_rule_id: cap.answer_rule_id().into(),
+                    },
+                },
+                binding: binding.clone(),
+                plan,
+            });
+            self.validate_permission_binding(&selection, observation)?;
+            with_database_deadline(conn, deadline, |conn| {
+                let tx = conn.transaction().map_err(db_err)?;
+                self.validate_live(&tx, run)?;
+                self.validate_permission_association(&tx, &selection)?;
+                check_deadline(Instant::now(), deadline)?;
+                tx.commit().map_err(db_err)
+            })?;
+            if self.pending.is_some() {
+                return Ok(Some(InputControlReply::PermissionResponse(
+                    self.permission_result(
+                        &selection.request.metadata,
+                        SubmissionResult {
+                            status: SubmissionStatus::Held,
+                            input_id: None,
+                            stage: SubmissionStage::ZeroBytes,
+                            output_seq: None,
+                            reason: Some("another programmatic input is pending".into()),
+                        },
+                    ),
+                )));
+            }
+            ensure(
+                self.operations.len() < 4096,
+                "input receipt cache is at capacity",
+            )?;
+            let bytes = Arc::from(selected_answer_stage(&selection.plan, 0)?.bytes());
+            let digest =
+                storage::permission_response_digest(self.run.run_id, &selection.request.metadata)?;
+            self.pending = Some(PendingInput {
+                request: storage::NewInput {
+                    operation_key: input.operation_key.clone(),
+                    kind: storage::InputKind::PermissionResponse,
+                    payload_digest: digest,
+                    message_id: None,
+                },
+                bytes,
+                permission: Some(selection),
+                deadline,
+                phase: InputPhase::AwaitReservation,
+                input_id: None,
+            });
+            Ok(None)
+        })();
+        result.map_err(|source| InputFailure {
+            source,
+            run_id: Some(self.run.run_id),
+            interaction_id: Some(input.interaction_id),
+            input_id: known_id,
+            operation_key: Some(input.operation_key),
+        })
+    }
+
+    fn permission_result(
+        &self,
+        metadata: &storage::PermissionResponseMetadata,
+        submission: SubmissionResult,
+    ) -> PermissionResponseResult {
+        PermissionResponseResult {
+            submission,
+            member_id: self.run.member_id,
+            run_id: self.run.run_id,
+            owner_epoch: metadata.expected_owner_epoch,
+            interaction_id: metadata.interaction_id,
+            event_id: metadata.event_id,
+            decision: metadata.decision,
+            decision_source: metadata.decision_source,
+        }
+    }
+
     fn failure(&self, source: CafleetError) -> InputFailure {
         InputFailure {
             source,
             run_id: Some(self.run.run_id),
-            interaction_id: None,
+            interaction_id: self.pending.as_ref().and_then(|pending| {
+                pending
+                    .permission
+                    .as_ref()
+                    .map(|selection| selection.request.metadata.interaction_id)
+            }),
             input_id: self.pending.as_ref().and_then(|pending| pending.input_id),
             operation_key: self
                 .pending
@@ -2105,6 +2499,12 @@ impl InputCoordinator {
         observation: &ObservationController,
         deadline: Instant,
     ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
+        if matches!(
+            &request.operation,
+            InputControlOperation::PermissionRespond(_)
+        ) {
+            return self.permission_received(conn, run, request, observation, deadline);
+        }
         let mut known_input_id = None;
         let mut known_key = None;
         let result = (|| {
@@ -2247,6 +2647,7 @@ impl InputCoordinator {
                     message_id: input.message_id,
                 },
                 bytes,
+                permission: None,
                 deadline,
                 phase: InputPhase::AwaitReservation,
                 input_id: None,
@@ -2301,12 +2702,20 @@ impl InputCoordinator {
         observation: &ObservationController,
         deadline: Instant,
     ) -> Result<Option<u64>> {
+        if let Some(permission) = self.pending.as_ref().and_then(|p| p.permission.as_ref()) {
+            self.validate_permission_binding(permission, observation)?;
+        }
         let Some(proof) = transport.take_input_drain() else {
             return Ok(None);
         };
-        transport.validate_input_drain(&proof, deadline)?;
-        if !Self::composer_eligible(observation) {
-            return Ok(None);
+        if let Some(permission) = self.pending.as_ref().and_then(|p| p.permission.as_ref()) {
+            self.validate_permission_binding(permission, observation)?;
+            transport.validate_observation_drain(&proof, deadline)?;
+        } else {
+            transport.validate_input_drain(&proof, deadline)?;
+            if !Self::composer_eligible(observation) {
+                return Ok(None);
+            }
         }
         let InputDrain::Quiescent {
             human_generation,
@@ -2359,6 +2768,19 @@ impl InputCoordinator {
                         && current.message_id == operation.request.message_id,
                     "input reservation changed before write",
                 )?;
+                if let Some(selection) = &operation.permission {
+                    self.validate_permission_association(&tx, selection)?;
+                    let receipt = storage::get_permission_response(&tx, id)?;
+                    ensure(
+                        receipt.input == current
+                            && receipt.response.metadata == selection.request.metadata
+                            && receipt.claim.as_ref().is_some_and(|claim| {
+                                claim.input_id == id
+                                    && claim.interaction_id == selection.binding.interaction_id
+                            }),
+                        "permission audit or claim changed before write",
+                    )?;
+                }
                 check_deadline(Instant::now(), effective)?;
                 tx.rollback().map_err(db_err)
             });
@@ -2398,9 +2820,39 @@ impl InputCoordinator {
             let Some(proof) = transport.take_input_drain() else {
                 return Ok(None);
             };
-            transport.validate_input_drain(&proof, effective)?;
-            if !Self::composer_eligible(observation) {
-                return Ok(None);
+            if let Some(permission) = &pending.permission {
+                self.validate_permission_binding(permission, observation)?;
+                transport.validate_observation_drain(&proof, effective)?;
+                let retained = self
+                    .operations
+                    .get(
+                        &pending
+                            .input_id
+                            .ok_or_else(|| error("permission reservation absent"))?,
+                    )
+                    .ok_or_else(|| error("retained permission selection absent"))?;
+                let RetainedSelection::Permission {
+                    selection,
+                    next_stage,
+                } = &retained.selection
+                else {
+                    return Err(error("permission stage target changed"));
+                };
+                ensure(
+                    Arc::ptr_eq(selection, permission),
+                    "permission retained selection changed",
+                )?;
+                let stage = selected_answer_stage(&selection.plan, *next_stage)?;
+                ensure(
+                    stage.required_rule_id() == selection.binding.request_rule_id
+                        && stage.required_choice_id() == selection.plan.choice_id(),
+                    "permission stage rule or choice changed",
+                )?;
+            } else {
+                transport.validate_input_drain(&proof, effective)?;
+                if !Self::composer_eligible(observation) {
+                    return Ok(None);
+                }
             }
             let InputDrain::Quiescent {
                 human_generation,
@@ -2464,6 +2916,7 @@ impl InputCoordinator {
         observation: &ObservationController,
         deadline: Instant,
     ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
+        let mut terminal_bookkeeping = false;
         let result = (|| {
             let Some(pending) = self.pending.as_ref() else {
                 return Ok(None);
@@ -2478,20 +2931,44 @@ impl InputCoordinator {
                     return Ok(None);
                 };
                 let pending = self.pending.as_ref().expect("retained pending input");
-                let reservation = with_database_deadline(conn, effective, |conn| {
-                    self.validate_live(conn, run)?;
-                    storage::reserve_input_with_provenance(
-                        conn,
-                        &self.run.owner(),
-                        &pending.request,
-                    )
-                })?;
-                let operation = match reservation {
-                    storage::InputReservation::Inserted(operation) => operation,
-                    storage::InputReservation::Existing(operation) => {
-                        let reply = InputControlReply::Submission(self.result(&operation));
-                        self.pending = None;
-                        return Ok(Some(reply));
+                let operation = if let Some(selection) = &pending.permission {
+                    let reservation = with_database_deadline(conn, effective, |conn| {
+                        self.validate_live(conn, run)?;
+                        self.validate_permission_association(conn, selection)?;
+                        storage::reserve_permission_response(
+                            conn,
+                            &self.run.owner(),
+                            &selection.request,
+                            Some(selection.plan.capability()),
+                            effective,
+                        )
+                    })?;
+                    match reservation {
+                        storage::PermissionReservation::Reserved(receipt) => receipt.input,
+                        storage::PermissionReservation::Retained(receipt) => {
+                            let reply = InputControlReply::PermissionResponse(
+                                super::input_client::projection(&self.run, receipt)?,
+                            );
+                            self.pending = None;
+                            return Ok(Some(reply));
+                        }
+                    }
+                } else {
+                    let reservation = with_database_deadline(conn, effective, |conn| {
+                        self.validate_live(conn, run)?;
+                        storage::reserve_input_with_provenance(
+                            conn,
+                            &self.run.owner(),
+                            &pending.request,
+                        )
+                    })?;
+                    match reservation {
+                        storage::InputReservation::Inserted(operation) => operation,
+                        storage::InputReservation::Existing(operation) => {
+                            let reply = InputControlReply::Submission(self.result(&operation));
+                            self.pending = None;
+                            return Ok(Some(reply));
+                        }
                     }
                 };
                 ensure(
@@ -2504,6 +2981,13 @@ impl InputCoordinator {
                     RetainedInput {
                         operation,
                         bytes: pending.bytes.clone(),
+                        selection: match &pending.permission {
+                            Some(selection) => RetainedSelection::Permission {
+                                selection: selection.clone(),
+                                next_stage: 0,
+                            },
+                            None => RetainedSelection::Composer,
+                        },
                         stage: SubmissionStage::ZeroBytes,
                         written_bytes: 0,
                         output_seq,
@@ -2548,6 +3032,8 @@ impl InputCoordinator {
             else {
                 return Ok(None);
             };
+            let before_stage = guard.retained.stage;
+            let before_count = guard.retained.written_bytes;
             let write = transport.write_programmatic(pty, &bytes, &mut guard, effective);
             let attempted = matches!(
                 guard.permit,
@@ -2559,33 +3045,66 @@ impl InputCoordinator {
             } else {
                 Ok(())
             };
-            let write = combine_manual_progress(write, after).and_then(|outcome| {
-                let point = self.retained_checkpoint(id)?;
-                match &outcome {
-                    ProgrammaticWrite::Complete { bytes: count } => ensure(
-                        *count == bytes.len()
-                            && point.stage == SubmissionStage::Submitted
-                            && point.written_bytes
-                                == u64::try_from(*count)
-                                    .map_err(|_| error("native input count exceeds range"))?,
-                        "complete native result conflicts with retained evidence",
-                    )?,
-                    ProgrammaticWrite::Partial { bytes: count } => ensure(
-                        *count > 0
-                            && *count < bytes.len()
-                            && point.stage == SubmissionStage::Partial
-                            && point.written_bytes
-                                == u64::try_from(*count)
-                                    .map_err(|_| error("native input count exceeds range"))?,
-                        "partial native result conflicts with retained evidence",
-                    )?,
-                    ProgrammaticWrite::Pending => ensure(
-                        point.stage == SubmissionStage::ZeroBytes && point.written_bytes == 0,
-                        "pending native result conflicts with retained evidence",
-                    )?,
-                }
-                Ok(outcome)
-            });
+            let write =
+                combine_manual_progress(write, after).and_then(|outcome| {
+                    let point = self.retained_checkpoint(id)?;
+                    match &outcome {
+                        ProgrammaticWrite::Complete { bytes: count } => ensure(
+                            *count == bytes.len()
+                                && matches!(
+                                    point.stage,
+                                    SubmissionStage::Partial | SubmissionStage::Submitted
+                                )
+                                && point.written_bytes
+                                    == before_count
+                                        .checked_add(u64::try_from(*count).map_err(|_| {
+                                            error("native input count exceeds range")
+                                        })?)
+                                        .ok_or_else(|| error("native input count exhausted"))?,
+                            "complete native result conflicts with retained evidence",
+                        )?,
+                        ProgrammaticWrite::Partial { bytes: count } => ensure(
+                            *count > 0
+                                && *count < bytes.len()
+                                && point.stage == SubmissionStage::Partial
+                                && point.written_bytes
+                                    == before_count
+                                        .checked_add(u64::try_from(*count).map_err(|_| {
+                                            error("native input count exceeds range")
+                                        })?)
+                                        .ok_or_else(|| error("native input count exhausted"))?,
+                            "partial native result conflicts with retained evidence",
+                        )?,
+                        ProgrammaticWrite::Pending => ensure(
+                            point.stage == before_stage && point.written_bytes == before_count,
+                            "pending native result conflicts with retained evidence",
+                        )?,
+                    }
+                    Ok(outcome)
+                });
+            if matches!(&write, Ok(ProgrammaticWrite::Complete { .. }))
+                && self
+                    .operations
+                    .get(&id)
+                    .expect("actual stage remains retained")
+                    .stage
+                    == SubmissionStage::Partial
+            {
+                let next_bytes = self
+                    .operations
+                    .get(&id)
+                    .expect("next stage retained")
+                    .bytes
+                    .clone();
+                let pending = self.pending.as_mut().expect("pending multistage response");
+                ensure(
+                    pending.permission.is_some(),
+                    "nonfinal stage requires a permission plan",
+                )?;
+                pending.bytes = next_bytes;
+                pending.phase = InputPhase::AwaitBeforeWrite;
+                return Ok(None);
+            }
             if matches!(&write, Ok(ProgrammaticWrite::Pending)) {
                 self.pending
                     .as_mut()
@@ -2604,6 +3123,7 @@ impl InputCoordinator {
                 }
                 SubmissionStage::ZeroBytes => storage::InputState::Ready,
             };
+            terminal_bookkeeping = true;
             let persisted = with_database_deadline(conn, effective, |conn| {
                 self.validate_live(conn, run)?;
                 storage::record_input_state(
@@ -2631,11 +3151,83 @@ impl InputCoordinator {
             self.pending.as_mut().expect("completed input").phase = InputPhase::Blocked;
             let operation = completed?;
             self.checkpoint(id, InputBoundary::TerminalState, effective)?;
-            let reply = InputControlReply::Submission(self.result(&operation));
+            let pending = self.pending.as_ref().expect("completed input retained");
+            let reply = match &pending.permission {
+                Some(selection) => InputControlReply::PermissionResponse(
+                    self.permission_result(&selection.request.metadata, self.result(&operation)),
+                ),
+                None => InputControlReply::Submission(self.result(&operation)),
+            };
             self.pending = None;
             Ok(Some(reply))
         })();
-        result.map_err(|source| self.failure(source))
+        result.map_err(|source| {
+            let source = if terminal_bookkeeping {
+                source
+            } else {
+                self.retain_permission_failure(conn, run, deadline, source)
+            };
+            self.failure(source)
+        })
+    }
+
+    fn retain_permission_failure(
+        &mut self,
+        conn: &mut Connection,
+        run: &RunRecord,
+        deadline: Instant,
+        source: CafleetError,
+    ) -> CafleetError {
+        let Some(pending) = self.pending.as_mut() else {
+            return source;
+        };
+        if pending.permission.is_none() {
+            return source;
+        }
+        pending.phase = InputPhase::Blocked;
+        let Some(id) = pending.input_id else {
+            return source;
+        };
+        let retained = self
+            .operations
+            .get_mut(&id)
+            .expect("pending permission receipt retained");
+        assert!(!retained.leased, "failed attempt has released its guard");
+        retained.attempt_available = false;
+        if retained.operation.state != storage::InputState::InProgress {
+            return source;
+        }
+        let next = if retained.stage == SubmissionStage::ZeroBytes {
+            storage::InputState::Ready
+        } else {
+            storage::InputState::Uncertain
+        };
+        let Ok(effective) = self.effective_deadline(conn, deadline) else {
+            return source;
+        };
+        let persisted = with_database_deadline(conn, effective, |conn| {
+            self.validate_live(conn, run)?;
+            storage::record_input_state(
+                conn,
+                &self.run.owner(),
+                id,
+                storage::InputState::InProgress,
+                next,
+            )
+        });
+        match persisted {
+            Ok(operation) => {
+                self.operations
+                    .get_mut(&id)
+                    .expect("failed receipt retained")
+                    .operation = operation;
+                source
+            }
+            Err(bookkeeping) => CafleetError::WithDiagnostics {
+                cause: Box::new(source),
+                diagnostics: vec![bookkeeping.message().into_owned()],
+            },
+        }
     }
 
     pub(super) fn finish_pending_attempt(&mut self) {

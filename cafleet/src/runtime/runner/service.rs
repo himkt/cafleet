@@ -190,19 +190,6 @@ impl Client {
         Ok(())
     }
 }
-fn unavailable_input_request(
-    run: &RunRecord,
-    request: &InputControlRequest,
-    admitted_at: Instant,
-    shutdown: Option<Instant>,
-    clock: &mut impl InputDeadlineClock,
-) -> Result<Value> {
-    let deadline =
-        receive_input_expiration(request.expires_at_mono_ns, admitted_at, shutdown, clock)?;
-    request.identity.validate(run)?;
-    check_deadline(Instant::now(), deadline)?;
-    Err(error("live input coordination is not implemented"))
-}
 struct LiveShutdown<'a> {
     pty: &'a mut PtySession,
     transport: &'a mut Transport,
@@ -692,14 +679,13 @@ fn run_service(
                                 }
                                 continue;
                             }
-                            Ok(ServiceControlRequest::Input(request))
-                                if matches!(
-                                    request.operation,
-                                    InputControlOperation::SubmitPrompt(_)
-                                        | InputControlOperation::SubmitExec(_)
-                                        | InputControlOperation::Receipt(_)
-                                ) =>
-                            {
+                            Ok(ServiceControlRequest::Input(request)) => {
+                                let response_context = match &request.operation {
+                                    InputControlOperation::PermissionRespond(input) => {
+                                        Some((input.interaction_id, input.operation_key.clone()))
+                                    }
+                                    _ => None,
+                                };
                                 let result = (|| -> Result<Option<InputControlReply>> {
                                     let deadline = receive_input_expiration(
                                         request.expires_at_mono_ns,
@@ -730,27 +716,25 @@ fn run_service(
                                         });
                                     }
                                     Ok(reply)
-                                })();
+                                })()
+                                .map_err(|source| match response_context {
+                                    Some((interaction_id, operation_key)) => {
+                                        CafleetError::from(InputFailure {
+                                            source,
+                                            run_id: Some(run.run_id),
+                                            interaction_id: Some(interaction_id),
+                                            input_id: None,
+                                            operation_key: Some(operation_key),
+                                        })
+                                    }
+                                    None => source,
+                                });
                                 let replied = match &result {
                                     Ok(Some(reply)) => client.reply_input(Ok(reply)),
                                     Err(cause) => client.reply_input(Err(cause)),
                                     Ok(None) => Ok(()),
                                 };
                                 if replied.is_err() {
-                                    client.closed = true;
-                                    break;
-                                }
-                                continue;
-                            }
-                            Ok(ServiceControlRequest::Input(request)) => {
-                                let result = unavailable_input_request(
-                                    &run,
-                                    &request,
-                                    frame.admitted_at(),
-                                    None,
-                                    &mut RealInputDeadlineClock,
-                                );
-                                if client.reply(result).is_err() {
                                     client.closed = true;
                                     break;
                                 }
