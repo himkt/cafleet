@@ -8,6 +8,11 @@ use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::process::ExitStatusExt;
 use std::time::{Duration, Instant};
 
+#[cfg(test)]
+mod ownership_diagnostics;
+#[cfg(test)]
+pub(crate) use ownership_diagnostics::*;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ProcessIdentity {
     pub pid: i64,
@@ -234,6 +239,10 @@ pub(crate) struct PtySession {
     owned: BTreeMap<i64, ProcessIdentity>,
     group_closed: bool,
     shutdown_clock: Option<ShutdownClock>,
+    #[cfg(test)]
+    ownership_diagnostics: Option<OwnershipDiagnosticBuffer>,
+    #[cfg(test)]
+    pending_ownership_refresh: Option<PendingOwnershipRefresh>,
 }
 impl PtySession {
     pub(crate) fn has_child(&self) -> bool {
@@ -266,6 +275,10 @@ impl PtySession {
             owned: BTreeMap::new(),
             group_closed: false,
             shutdown_clock: None,
+            #[cfg(test)]
+            ownership_diagnostics: None,
+            #[cfg(test)]
+            pending_ownership_refresh: None,
         })
     }
     pub(crate) fn spawn(&mut self, spec: &SpawnSpec) -> Result<ProcessIdentity> {
@@ -297,6 +310,9 @@ impl PtySession {
             .ok_or_else(|| error("native child start identity unavailable"))?;
         self.native = Some(native.clone());
         self.owned.insert(pid, native.clone());
+        #[cfg(test)]
+        self.refresh_owned_traced(OwnershipRefreshPhase::Spawn)?;
+        #[cfg(not(test))]
         self.refresh_owned()?;
         Ok(native)
     }
@@ -307,6 +323,9 @@ impl PtySession {
         if self.child.is_none() {
             return Ok(None);
         }
+        #[cfg(test)]
+        self.refresh_owned_traced(OwnershipRefreshPhase::TryWait)?;
+        #[cfg(not(test))]
         self.refresh_owned()?;
         let child = self
             .child
@@ -331,15 +350,25 @@ impl PtySession {
     }
     fn refresh_owned(&mut self) -> Result<()> {
         let Some(native) = &self.native else {
+            #[cfg(test)]
+            self.note_ownership_outcome(OwnershipRefreshOutcome::NoNative);
             return Ok(());
         };
         if self.group_closed {
+            #[cfg(test)]
+            self.note_ownership_outcome(OwnershipRefreshOutcome::AlreadyClosed);
             return Ok(());
         }
         let group = i32::try_from(native.pid).map_err(io_error)?;
         let members = group_members(group)?;
+        #[cfg(test)]
+        if let Some(record) = self.pending_ownership_refresh.as_mut() {
+            record.sampled_member_count = Some(members.len());
+        }
         if members.is_empty() {
             self.group_closed = true;
+            #[cfg(test)]
+            self.note_ownership_outcome(OwnershipRefreshOutcome::NoMembers);
             return Ok(());
         }
         let mut active = Vec::new();
@@ -352,12 +381,34 @@ impl PtySession {
         }
         if active.is_empty() {
             self.group_closed = true;
+            #[cfg(test)]
+            if let Some(record) = self.pending_ownership_refresh.as_mut() {
+                record.observe_decision(&active, &self.owned, None);
+                record.outcome = OwnershipRefreshOutcome::NoActive;
+            }
             return Ok(());
         }
         let anchored = self.owned.values().try_fold(
             self.child.is_some() && self.exit.is_none(),
-            |found, identity| identity.matches().map(|matching| found || matching),
-        )?;
+            |found, identity| {
+                let result = identity.matches();
+                #[cfg(test)]
+                if let Some(record) = self.pending_ownership_refresh.as_mut() {
+                    record.observe_match(identity.pid, &result);
+                }
+                result.map(|matching| found || matching)
+            },
+        );
+        #[cfg(test)]
+        if let Some(record) = self.pending_ownership_refresh.as_mut() {
+            record.observe_decision(&active, &self.owned, anchored.as_ref().ok().copied());
+            record.outcome = match &anchored {
+                Ok(true) => OwnershipRefreshOutcome::Anchored,
+                Ok(false) => OwnershipRefreshOutcome::Unanchored,
+                Err(_) => OwnershipRefreshOutcome::Error,
+            };
+        }
+        let anchored = anchored?;
         ensure(anchored, "owned process group lost its pinned generation")?;
         for process in active {
             if let Some(prior) = self.owned.get(&process.pid) {
@@ -389,6 +440,9 @@ impl PtySession {
                 Err(cause) => return Err(io_error(cause)),
             }
         }
+        #[cfg(test)]
+        self.refresh_owned_traced(OwnershipRefreshPhase::Signal(signal))?;
+        #[cfg(not(test))]
         self.refresh_owned()?;
         for process in self.owned.values() {
             if stopped(process.pid)? {
@@ -414,6 +468,9 @@ impl PtySession {
         Ok(())
     }
     pub(crate) fn survivors(&mut self) -> Result<bool> {
+        #[cfg(test)]
+        self.refresh_owned_traced(OwnershipRefreshPhase::Survivors)?;
+        #[cfg(not(test))]
         self.refresh_owned()?;
         for process in self.owned.values() {
             if stopped(process.pid)? {
