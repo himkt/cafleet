@@ -125,6 +125,7 @@ pub(crate) struct ServiceFixture {
     _artifacts: RunArtifacts,
     child: OwnedChild,
     process: Option<ProcessIdentity>,
+    started_child: Option<ProcessIdentity>,
     master: File,
     _slave: File,
     creator: Option<Wire>,
@@ -162,11 +163,49 @@ impl ServiceFixture {
         let mut bytes = Vec::new();
         let read = stderr.take(64 * 1024).read_to_end(&mut bytes);
         let panics = input_service::panic_records(self.fixture._dir.path());
+        let native = self
+            .started_child
+            .as_ref()
+            .map(|expected| (expected, ProcessIdentity::read(expected.pid)));
+        let native_record = (|| -> std::io::Result<String> {
+            use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+            let file = std::fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK)
+                .open(
+                    self.fixture
+                        ._dir
+                        .path()
+                        .join("service-input-native-identity.json"),
+                )?;
+            let metadata = file.metadata()?;
+            if !metadata.is_file()
+                || metadata.mode() & 0o777 != 0o600
+                || metadata.uid() != nix::unistd::geteuid().as_raw()
+            {
+                return Err(std::io::Error::new(
+                    ErrorKind::InvalidData,
+                    "native identity requires a private regular file",
+                ));
+            }
+            let mut bytes = Vec::new();
+            file.take(4097).read_to_end(&mut bytes)?;
+            if bytes.len() > 4096 {
+                return Err(std::io::Error::new(
+                    ErrorKind::InvalidData,
+                    "native identity exceeds its original byte bound",
+                ));
+            }
+            String::from_utf8(bytes)
+                .map_err(|cause| std::io::Error::new(ErrorKind::InvalidData, cause))
+        })();
         format!(
-            "stage={stage}; runner_pid={}; prepared={}; exit={status:?}; socket={socket:?}; stderr_read={read:?}; stderr={:?}; panic_records={panics:?}",
+            "stage={stage}; runner_pid={}; prepared={}; exit={status:?}; socket={socket:?}; stderr_read={read:?}; stderr={:?}; panic_records={panics:?}; started_native={native:?}; native_identity_record={native_record:?}; outer_remaining={:?}",
             self.child.id(),
             self.prepared.is_some(),
             String::from_utf8_lossy(&bytes),
+            self.cleanup_deadline
+                .map(|deadline| deadline.saturating_duration_since(Instant::now())),
         )
     }
 
@@ -332,6 +371,7 @@ impl ServiceFixture {
             _artifacts: artifacts,
             child,
             process: None,
+            started_child: None,
             master,
             _slave: slave,
             creator: None,
@@ -445,6 +485,7 @@ impl ServiceFixture {
         let reply = self.start().unwrap();
         assert!(reply.get("error").is_none(), "{reply}");
         let started: Started = serde_json::from_value(reply["result"].clone()).unwrap();
+        self.started_child = Some(started.child.clone());
         self.read_until("review-native-ready");
         started
     }
@@ -459,6 +500,7 @@ impl ServiceFixture {
     }
 
     fn read_until(&mut self, needle: &str) {
+        let read_started = Instant::now();
         let until = Instant::now() + Duration::from_secs(2);
         loop {
             let mut bytes = [0; 4096];
@@ -472,9 +514,11 @@ impl ServiceFixture {
             }
             assert!(
                 Instant::now() < until,
-                "missing native output {needle}: {}; outer_bytes={:?}",
+                "missing native output {needle}: {}; outer_bytes={:?}; read_elapsed={:?}; deadline_overshoot={:?}",
                 self.connection_diagnostic("native output timeout"),
                 self.output,
+                read_started.elapsed(),
+                Instant::now().saturating_duration_since(until),
             );
             assert!(
                 self.child.try_wait().unwrap().is_none(),

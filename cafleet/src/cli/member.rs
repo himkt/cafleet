@@ -990,13 +990,93 @@ mod tests {
         file.sync_all().unwrap();
     }
 
+    fn external_member_progress(
+        file: &mut std::fs::File,
+        identity: &Value,
+        stage: &str,
+        expiration: Option<u64>,
+        exit_code: Option<i32>,
+    ) {
+        use std::io::Write;
+        let mut bytes = serde_json::to_vec(&json!({
+            "identity":identity, "stage":stage, "monotonic_ns":external_member_monotonic_ns(),
+            "expiration":expiration, "exit_code":exit_code,
+        }))
+        .unwrap();
+        assert!(bytes.len() < 1024, "owned progress records stay bounded");
+        bytes.push(b'\n');
+        file.write_all(&bytes).unwrap();
+    }
+
+    fn external_member_private_record(path: &std::path::Path) -> std::io::Result<String> {
+        use std::io::Read;
+        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK)
+            .open(path)?;
+        let metadata = file.metadata()?;
+        if !metadata.is_file()
+            || metadata.mode() & 0o777 != 0o600
+            || metadata.uid() != nix::unistd::geteuid().as_raw()
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "owned progress requires a private regular file",
+            ));
+        }
+        let mut bytes = Vec::new();
+        file.take(4097).read_to_end(&mut bytes)?;
+        if bytes.len() > 4096 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "owned progress exceeds its original byte bound",
+            ));
+        }
+        String::from_utf8(bytes)
+            .map_err(|cause| std::io::Error::new(std::io::ErrorKind::InvalidData, cause))
+    }
+
+    fn external_member_pipe(
+        pipe: &mut (impl std::io::Read + std::os::fd::AsFd),
+    ) -> std::io::Result<String> {
+        use std::io::Read;
+        let flags = nix::fcntl::OFlag::from_bits_retain(nix::fcntl::fcntl(
+            &*pipe,
+            nix::fcntl::FcntlArg::F_GETFL,
+        )?);
+        nix::fcntl::fcntl(
+            &*pipe,
+            nix::fcntl::FcntlArg::F_SETFL(flags | nix::fcntl::OFlag::O_NONBLOCK),
+        )?;
+        let mut bytes = Vec::new();
+        let result = pipe.take(16385).read_to_end(&mut bytes);
+        Ok(format!(
+            "read={result:?}; truncated={}; bytes={:?}",
+            bytes.len() > 16384,
+            String::from_utf8_lossy(&bytes[..bytes.len().min(16384)])
+        ))
+    }
+
     #[test]
     #[ignore = "owned member command subprocess entry"]
     fn external_input_member_child() {
+        use std::os::unix::fs::OpenOptionsExt;
         let path = std::path::PathBuf::from(
             std::env::var_os(EXTERNAL_MEMBER_ENV)
                 .expect("explicit private member subprocess configuration"),
         );
+        let mut progress = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(path.with_extension("progress"))
+            .unwrap();
+        let identity = match crate::runtime::runner::ProcessIdentity::current() {
+            Ok(identity) => json!({"observed":identity}),
+            Err(cause) => json!({"unavailable":cause.to_string()}),
+        };
+        external_member_progress(&mut progress, &identity, "entered", None, None);
         let config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         let before = Instant::now();
         let remaining = config["expiration"]
@@ -1020,6 +1100,13 @@ mod tests {
         }
         let member_id = config["member_id"].as_i64().unwrap();
         let json = config["json"].as_bool().unwrap();
+        external_member_progress(
+            &mut progress,
+            &identity,
+            "command-begin",
+            Some(config["expiration"].as_u64().unwrap()),
+            None,
+        );
         let result = match config["action"].as_str().unwrap() {
             "prompt" => run(
                 &mut conn,
@@ -1059,6 +1146,17 @@ mod tests {
             ),
             other => panic!("unknown owned member subprocess action: {other}"),
         };
+        let exit_code = match &result {
+            Ok(()) => 0,
+            Err(cause) => cause.exit_code(),
+        };
+        external_member_progress(
+            &mut progress,
+            &identity,
+            "command-return",
+            Some(config["expiration"].as_u64().unwrap()),
+            Some(exit_code),
+        );
         match result {
             Ok(()) => std::process::exit(0),
             Err(cause) => {
@@ -1091,6 +1189,7 @@ mod tests {
         use std::process::{Command, Stdio};
         use std::sync::atomic::{AtomicU64, Ordering};
         static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+        let invoked_at = Instant::now();
         let path = fixture.fixture._dir.path().join(format!(
             "external-member-{}.json",
             SEQUENCE.fetch_add(1, Ordering::Relaxed)
@@ -1116,6 +1215,7 @@ mod tests {
                 "json":json,"lose_stdout":lose_stdout,"input_id":input_id,"expiration":expiration,
             }),
         );
+        let configured_at = Instant::now();
         let mut owned = ExternalMemberChild {
             child: crate::runtime::OwnedChild::new(
                 Command::new(std::env::current_exe().unwrap())
@@ -1138,6 +1238,11 @@ mod tests {
             ),
             until,
         };
+        let spawned_at = Instant::now();
+        let spawned_identity =
+            crate::runtime::runner::ProcessIdentity::read(i64::from(owned.child.id()));
+        let mut ready_at = None;
+        let mut continued_at = None;
         if lose_stdout {
             while !path.with_extension("ready").exists() {
                 assert!(
@@ -1146,6 +1251,7 @@ mod tests {
                 );
                 external_member_pause(until);
             }
+            ready_at = Some(Instant::now());
             drop(
                 owned
                     .child
@@ -1157,10 +1263,41 @@ mod tests {
                 &path.with_extension("continue"),
                 &json!({"continue":true}),
             );
+            continued_at = Some(Instant::now());
         }
         let status = owned.child.poll_until(until).unwrap();
         if status.is_none() {
+            let observed_at = Instant::now();
+            let before_cleanup = owned.child.try_wait();
+            let identity_before_cleanup =
+                crate::runtime::runner::ProcessIdentity::read(i64::from(owned.child.id()));
+            let stdout = match owned.child.stdout.as_mut() {
+                Some(pipe) => format!("{:?}", external_member_pipe(pipe)),
+                None => "unavailable: stdout consumer intentionally closed".into(),
+            };
+            let stderr = match owned.child.stderr.as_mut() {
+                Some(pipe) => format!("{:?}", external_member_pipe(pipe)),
+                None => "unavailable: stderr handle missing".into(),
+            };
+            let progress = external_member_private_record(&path.with_extension("progress"));
+            eprintln!(
+                "owned member deadline diagnostic: pid={}; spawned_identity={spawned_identity:?}; initial_poll={status:?}; status_before_cleanup={before_cleanup:?}; identity_before_cleanup={identity_before_cleanup:?}; action={action}; expiration_mono_ns={expiration}; original_bound={:?}; config_elapsed={:?}; spawn_elapsed={:?}; ready_elapsed={:?}; continue_elapsed={:?}; observed_elapsed={:?}; progress={progress:?}; stdout={stdout}; stderr={stderr}",
+                owned.child.id(),
+                until.saturating_duration_since(invoked_at),
+                configured_at.duration_since(invoked_at),
+                spawned_at.duration_since(invoked_at),
+                ready_at.map(|instant| instant.duration_since(invoked_at)),
+                continued_at.map(|instant| instant.duration_since(invoked_at)),
+                observed_at.duration_since(invoked_at)
+            );
             owned.child.terminate_until(until);
+            let after_cleanup = owned.child.try_wait();
+            let identity_after_cleanup =
+                crate::runtime::runner::ProcessIdentity::read(i64::from(owned.child.id()));
+            eprintln!(
+                "owned member original-cap cleanup: pid={}; status={after_cleanup:?}; identity={identity_after_cleanup:?}",
+                owned.child.id()
+            );
         }
         let status = status.expect("owned member reaped under the original deadline");
         let stdout = if lose_stdout {
