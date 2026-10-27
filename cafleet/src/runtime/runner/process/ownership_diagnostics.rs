@@ -18,9 +18,17 @@ pub(crate) enum OwnershipRefreshOutcome {
     NoNative,
     AlreadyClosed,
     NoMembers,
+    FreshEmpty,
     NoActive,
     Anchored,
     Unanchored,
+    Error,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OwnershipGroupRecheck {
+    Empty,
+    Nonempty { members: usize },
     Error,
 }
 
@@ -139,6 +147,7 @@ pub(crate) struct OwnershipRefreshRecord {
     pub matches: OwnershipMatchSnapshot,
     pub seeded_anchor: bool,
     pub anchored: Option<bool>,
+    pub group_recheck: Option<OwnershipGroupRecheck>,
     pub outcome: OwnershipRefreshOutcome,
 }
 
@@ -156,6 +165,7 @@ impl fmt::Debug for OwnershipRefreshRecord {
             .field("matches", &self.matches)
             .field("seeded_anchor", &self.seeded_anchor)
             .field("anchored", &self.anchored)
+            .field("group_recheck", &self.group_recheck)
             .field("outcome", &self.outcome)
             .finish()
     }
@@ -195,6 +205,7 @@ pub(super) struct PendingOwnershipRefresh {
     matches_attempted: usize,
     seeded_anchor: bool,
     anchored: Option<bool>,
+    pub group_recheck: Option<OwnershipGroupRecheck>,
     pub outcome: OwnershipRefreshOutcome,
 }
 
@@ -256,6 +267,7 @@ impl PendingOwnershipRefresh {
             },
             seeded_anchor: self.seeded_anchor,
             anchored: self.anchored,
+            group_recheck: self.group_recheck,
             outcome,
         }
     }
@@ -295,14 +307,13 @@ impl OwnershipDiagnosticBuffer {
             matches_attempted: 0,
             seeded_anchor: session.child.is_some() && session.exit.is_none(),
             anchored: None,
+            group_recheck: None,
             outcome: OwnershipRefreshOutcome::Error,
         }
     }
 
     fn retain(&mut self, record: OwnershipRefreshRecord) {
-        if record.outcome == OwnershipRefreshOutcome::Unanchored
-            && self.output.first_unanchored.is_none()
-        {
+        if record.anchored == Some(false) && self.output.first_unanchored.is_none() {
             self.output.first_unanchored = Some(Box::new(record.clone()));
         }
         if self.output.records.len() == RECORD_LIMIT {
@@ -336,12 +347,23 @@ impl PtySession {
     }
 
     pub(super) fn refresh_owned_traced(&mut self, phase: OwnershipRefreshPhase) -> Result<()> {
-        let Some(mut buffer) = self.ownership_diagnostics.take() else {
+        if self.ownership_diagnostics.is_none() {
             return self.refresh_owned();
+        }
+        self.refresh_owned_traced_with(phase, &mut NativeProcessObservations)
+    }
+
+    pub(super) fn refresh_owned_traced_with(
+        &mut self,
+        phase: OwnershipRefreshPhase,
+        observed: &mut impl ProcessObservations,
+    ) -> Result<()> {
+        let Some(mut buffer) = self.ownership_diagnostics.take() else {
+            return self.refresh_owned_with(observed);
         };
         assert!(self.pending_ownership_refresh.is_none());
         self.pending_ownership_refresh = Some(buffer.begin(phase, self));
-        let result = self.refresh_owned();
+        let result = self.refresh_owned_with(observed);
         let pending = self
             .pending_ownership_refresh
             .take()

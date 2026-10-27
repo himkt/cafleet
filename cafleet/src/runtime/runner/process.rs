@@ -120,6 +120,28 @@ fn stopped(pid: i64) -> Result<bool> {
     }
 }
 
+trait ProcessObservations {
+    fn members(&mut self, group: i32) -> Result<Vec<i64>>;
+    fn identity(&mut self, pid: i64) -> Result<Option<ProcessIdentity>>;
+    fn stopped(&mut self, pid: i64) -> Result<bool>;
+}
+
+struct NativeProcessObservations;
+
+impl ProcessObservations for NativeProcessObservations {
+    fn members(&mut self, group: i32) -> Result<Vec<i64>> {
+        group_members(group)
+    }
+
+    fn identity(&mut self, pid: i64) -> Result<Option<ProcessIdentity>> {
+        ProcessIdentity::read(pid)
+    }
+
+    fn stopped(&mut self, pid: i64) -> Result<bool> {
+        stopped(pid)
+    }
+}
+
 pub(super) fn recover_descendants(
     run: &crate::broker::runtime::RunRecord,
     clock: ShutdownClock,
@@ -351,6 +373,10 @@ impl PtySession {
         Ok(self.exit)
     }
     fn refresh_owned(&mut self) -> Result<()> {
+        self.refresh_owned_with(&mut NativeProcessObservations)
+    }
+
+    fn refresh_owned_with(&mut self, observed: &mut impl ProcessObservations) -> Result<()> {
         let Some(native) = &self.native else {
             #[cfg(test)]
             self.note_ownership_outcome(OwnershipRefreshOutcome::NoNative);
@@ -362,7 +388,7 @@ impl PtySession {
             return Ok(());
         }
         let group = i32::try_from(native.pid).map_err(io_error)?;
-        let members = group_members(group)?;
+        let members = observed.members(group)?;
         #[cfg(test)]
         if let Some(record) = self.pending_ownership_refresh.as_mut() {
             record.sampled_member_count = Some(members.len());
@@ -375,8 +401,8 @@ impl PtySession {
         }
         let mut active = Vec::new();
         for pid in members {
-            if let Some(process) = ProcessIdentity::read(pid)?
-                && !stopped(pid)?
+            if let Some(process) = observed.identity(pid)?
+                && !observed.stopped(pid)?
             {
                 active.push(process);
             }
@@ -393,7 +419,9 @@ impl PtySession {
         let anchored = self.owned.values().try_fold(
             self.child.is_some() && self.exit.is_none(),
             |found, identity| {
-                let result = identity.matches();
+                let result = observed
+                    .identity(identity.pid)
+                    .map(|current| current.as_ref() == Some(identity));
                 #[cfg(test)]
                 if let Some(record) = self.pending_ownership_refresh.as_mut() {
                     record.observe_match(identity.pid, &result);
@@ -411,6 +439,28 @@ impl PtySession {
             };
         }
         let anchored = anchored?;
+        if !anchored {
+            let recheck = observed.members(group);
+            #[cfg(test)]
+            if let Some(record) = self.pending_ownership_refresh.as_mut() {
+                record.group_recheck = Some(match &recheck {
+                    Ok(members) if members.is_empty() => OwnershipGroupRecheck::Empty,
+                    Ok(members) => OwnershipGroupRecheck::Nonempty {
+                        members: members.len(),
+                    },
+                    Err(_) => OwnershipGroupRecheck::Error,
+                });
+                if recheck.is_err() {
+                    record.outcome = OwnershipRefreshOutcome::Error;
+                }
+            }
+            if recheck?.is_empty() {
+                self.group_closed = true;
+                #[cfg(test)]
+                self.note_ownership_outcome(OwnershipRefreshOutcome::FreshEmpty);
+                return Ok(());
+            }
+        }
         ensure(anchored, "owned process group lost its pinned generation")?;
         for process in active {
             if let Some(prior) = self.owned.get(&process.pid) {
