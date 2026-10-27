@@ -797,10 +797,45 @@ mod permission_response_contracts {
             assert!(h.controller.status().gap_count > 0);
             assert!(h.controller.current_request().is_none());
             assert!(h.controller.request_generation() > generation);
-            h.fixture
+            let during_gap = h.controller.health(&h.writer);
+            let ordinary_key = "prompt:recovered-writer";
+            let ordinary = h.request(ordinary_key);
+            let InputControlOperation::SubmitPrompt(ordinary_input) = &ordinary.operation else {
+                panic!("existing ordinary fixture supplies a Prompt request")
+            };
+            let ordinary_literal = ordinary_input.literal.clone();
+            let held = h.coordinator.handle_received(
+                &mut h.fixture.conn,
+                &h.fixture.run,
+                ordinary,
+                &h.controller,
+                h.until,
+            );
+            let removed = h
+                .fixture
                 .conn
-                .execute_batch("DROP TRIGGER reject_response_refresh")
-                .unwrap();
+                .execute_batch("DROP TRIGGER reject_response_refresh");
+            assert!(
+                removed.is_ok(),
+                "primary={:?}; trigger_cleanup={removed:?}",
+                held.as_ref().err()
+            );
+            assert!(during_gap.degraded);
+            assert!(matches!(during_gap.eligibility, InputEligibility::Hold(_)));
+            let Some(InputControlReply::Submission(held)) = held.unwrap() else {
+                panic!("actual writer gap returns the ordinary Held reply")
+            };
+            assert_eq!(
+                (held.status, held.stage, held.input_id),
+                (SubmissionStatus::Held, SubmissionStage::ZeroBytes, None)
+            );
+            assert!(h.coordinator.pending.is_none());
+            assert!(
+                storage::find_input(&h.fixture.conn, h.fixture.run.run_id, ordinary_key)
+                    .unwrap()
+                    .is_none()
+            );
+            assert_eq!(h.pty.offers, vec![b"!".to_vec()]);
             while h.writer.status().degraded {
                 assert!(
                     Instant::now() < h.until,
@@ -908,6 +943,143 @@ mod permission_response_contracts {
                 )
                 .unwrap();
             assert!(notified.is_none());
+            let before_composer = h.transport.snapshot().screen_seq;
+            h.pty
+                .child
+                .bytes
+                .extend(b"\x1b[2J\x1b[23;1HSynthetic state\r\nState end");
+            loop {
+                h.drain();
+                let status = h.controller.status();
+                let health = h.controller.health(&h.writer);
+                if status.eligibility == InputEligibility::ComposerEmpty
+                    && status.visibility == Visibility::NotVisible
+                    && !status.retained_transition
+                    && !status.retained_draft
+                    && !status.retained_evidence
+                    && status.diagnostic.is_none()
+                    && !health.degraded
+                    && health.pending_count == 0
+                    && !health.pending_evidence
+                {
+                    break;
+                }
+                assert!(
+                    Instant::now() < h.until,
+                    "actual recovered writer observes complete ordinary composition"
+                );
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            assert!(h.transport.snapshot().screen_seq > before_composer);
+            assert!(h.controller.status().gap_count > 0);
+            let current = h.controller.health(&h.writer);
+            assert!(current.gap_count > 0);
+            assert_eq!(current.eligibility, InputEligibility::ComposerEmpty);
+            assert_eq!(current.visibility, Visibility::NotVisible);
+            assert!(current.diagnostic.is_none());
+            let proof = h
+                .transport
+                .take_input_drain()
+                .expect("real recovered composer supplies a complete quiet proof");
+            h.transport
+                .validate_observation_drain(&proof, h.until)
+                .unwrap();
+            assert!(
+                storage::find_input(&h.fixture.conn, h.fixture.run.run_id, ordinary_key)
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(h.coordinator.pending.is_none());
+            assert_eq!(
+                h.pty.offers,
+                vec![b"!".to_vec(), b"n".to_vec(), b"\r".to_vec()]
+            );
+            let ordinary = h.request(ordinary_key);
+            let resumed = h
+                .coordinator
+                .handle_received(
+                    &mut h.fixture.conn,
+                    &h.fixture.run,
+                    ordinary,
+                    &h.controller,
+                    h.until,
+                )
+                .unwrap();
+            let projection = match resumed.as_ref() {
+                None => None,
+                Some(InputControlReply::Submission(reply)) => Some((
+                    reply.status,
+                    reply.stage,
+                    reply.input_id,
+                    reply.reason.as_deref(),
+                )),
+                Some(_) => panic!("ordinary retry has its typed submission reply"),
+            };
+            assert!(
+                projection.is_none(),
+                "current complete composer accepts explicit retry after writer recovery: reply={projection:?}; status={:?}",
+                h.controller.status()
+            );
+            for _ in 0..16 {
+                h.drain();
+                assert!(h.advance().is_none());
+                assert_eq!(
+                    h.pty.offers.len(),
+                    3,
+                    "fresh guard precedes ordinary native input"
+                );
+                if h.hooks.count("before") == 3 {
+                    break;
+                }
+            }
+            assert_eq!(h.hooks.count("reserved"), 2);
+            assert_eq!(h.hooks.count("before"), 3);
+            let reserved = storage::find_input(&h.fixture.conn, h.fixture.run.run_id, ordinary_key)
+                .unwrap()
+                .unwrap();
+            assert_eq!(reserved.kind, storage::InputKind::Prompt);
+            assert_eq!(reserved.state, storage::InputState::InProgress);
+            assert_ne!(reserved.input_id, id);
+            h.drain();
+            let Some(InputControlReply::Submission(submitted)) = h.advance() else {
+                panic!("recovered ordinary writer returns its real completed submission")
+            };
+            assert_eq!(
+                (submitted.status, submitted.stage, submitted.input_id),
+                (
+                    SubmissionStatus::Accepted,
+                    SubmissionStage::Submitted,
+                    Some(reserved.input_id)
+                )
+            );
+            assert_eq!(
+                storage::get_input(&h.fixture.conn, reserved.input_id)
+                    .unwrap()
+                    .state,
+                storage::InputState::Accepted
+            );
+            let expected_bytes = [ordinary_literal.as_bytes(), b"~"].concat();
+            assert_eq!(
+                h.pty.offers,
+                vec![
+                    b"!".to_vec(),
+                    b"n".to_vec(),
+                    b"\r".to_vec(),
+                    expected_bytes.clone()
+                ]
+            );
+            let point = h
+                .coordinator
+                .retained_checkpoint(reserved.input_id)
+                .unwrap();
+            assert_eq!(
+                (point.stage, point.written_bytes),
+                (
+                    SubmissionStage::Submitted,
+                    u64::try_from(expected_bytes.len()).unwrap()
+                )
+            );
+            assert!(h.controller.status().gap_count > 0);
         });
     }
     fn admitted(h: &mut Host, key: &str) -> ((i64, i64, i64, i64), PermissionRespondInput, i64) {
