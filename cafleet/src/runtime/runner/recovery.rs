@@ -462,7 +462,7 @@ fn recover(
     replay::reconcile(conn, current, pinned, lock, host, clock, until)
 }
 
-struct NativeRecoveryHost;
+pub(super) struct NativeRecoveryHost;
 impl RecoveryHost for NativeRecoveryHost {
     fn current_process(&mut self) -> Result<ProcessIdentity> {
         ProcessIdentity::current()
