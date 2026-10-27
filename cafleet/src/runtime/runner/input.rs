@@ -1121,10 +1121,12 @@ mod retirement_contracts {
                 vec!["ordinary fixture λ~".as_bytes().to_vec()]
             );
 
-            let uncommitted = h
-                .coordinator
-                .retire_received(&mut h.fixture.conn, &run, id, h.until)
-                .unwrap_err();
+            let Err(uncommitted) =
+                h.coordinator
+                    .retire_received(&mut h.fixture.conn, &run, id, h.until)
+            else {
+                panic!("Accepted Preview requires committed settlement before retirement")
+            };
             assert!(uncommitted.to_string().contains(&id.to_string()));
             assert_eq!(cached(h, id), before);
             assert_eq!(
@@ -1143,10 +1145,12 @@ mod retirement_contracts {
                 .unwrap();
             assert!(stamp.is_some());
 
-            let expired = h
-                .coordinator
-                .retire_received(&mut h.fixture.conn, &run, id, Instant::now())
-                .unwrap_err();
+            let Err(expired) =
+                h.coordinator
+                    .retire_received(&mut h.fixture.conn, &run, id, Instant::now())
+            else {
+                panic!("retirement requires a live original deadline")
+            };
             assert!(matches!(expired, CafleetError::DeadlineExceeded));
             let mut foreign_owner = run.clone();
             foreign_owner.owner_epoch += 1;
@@ -1195,10 +1199,12 @@ mod retirement_contracts {
             let original_bytes = pending.bytes.clone();
             let unrelated_before = cached(h, unrelated_id);
             assert!(unrelated_before.4 && !unrelated_before.5);
-            let failure = h
-                .coordinator
-                .retire_received(&mut h.fixture.conn, &run, id, h.until)
-                .unwrap_err();
+            let Err(failure) =
+                h.coordinator
+                    .retire_received(&mut h.fixture.conn, &run, id, h.until)
+            else {
+                panic!("retirement excludes the actual Armed writer")
+            };
             assert!(failure.to_string().contains(&id.to_string()));
             let pending = h
                 .coordinator
@@ -1289,7 +1295,8 @@ mod retirement_contracts {
                 .authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
             assert!(
                 again.is_ok(),
-                "repeat={again:?}; authorizer_cleanup={removed:?}"
+                "repeat_error={:?}; authorizer_cleanup={removed:?}",
+                again.as_ref().err()
             );
             removed.unwrap();
             assert_retired(again.unwrap(), id);
@@ -1377,10 +1384,12 @@ mod retirement_contracts {
             assert!(h.coordinator.operations.is_empty());
             let changes = h.fixture.conn.total_changes();
             for row in [prompt, preview] {
-                let failure = h
-                    .coordinator
-                    .retire_received(&mut h.fixture.conn, &run, row.input_id, h.until)
-                    .unwrap_err();
+                let Err(failure) =
+                    h.coordinator
+                        .retire_received(&mut h.fixture.conn, &run, row.input_id, h.until)
+                else {
+                    panic!("retirement requires a Settled Submitted Preview")
+                };
                 assert!(failure.to_string().contains(&row.input_id.to_string()));
                 assert!(failure.to_string().contains(&row.operation_key));
                 assert_eq!(
