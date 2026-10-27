@@ -283,7 +283,8 @@ fn runner_real_shutdown_closes_a_slave_retaining_descendant_and_preserves_the_na
     let fixture = Fixture::new();
     let ready = fixture._dir.path().join("descendant-ready");
     let mut spec = fixture.spec();
-    spec.argv=vec!["/bin/sh".into(),"-c".into(),r#"/bin/sh -c 'trap "" TERM HUP; printf ready > "$1"; while :; do sleep 1; done' descendant "$1" & descendant=$!; while [ ! -f "$1" ]; do sleep 0.01; done; printf 'descendant=%s\n' "$descendant"; exit 0"#.into(),"parent".into(),ready.to_str().unwrap().into()];
+    // The descendant must not fork: a new group member appearing during KILL enumeration is unpinned.
+    spec.argv=vec!["/bin/sh".into(),"-c".into(),r#"/bin/sh -c 'trap "" TERM HUP; printf ready > "$1"; exec /bin/sleep 600' descendant "$1" & descendant=$!; while [ ! -f "$1" ]; do sleep 0.01; done; printf 'descendant=%s\n' "$descendant"; exit 0"#.into(),"parent".into(),ready.to_str().unwrap().into()];
     let mut owned = OwnedPty::prepare(spec.size);
     owned.session.enable_ownership_diagnostics().unwrap();
     let native = owned.session.spawn(&spec).unwrap();
