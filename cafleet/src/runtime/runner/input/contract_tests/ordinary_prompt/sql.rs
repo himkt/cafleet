@@ -47,14 +47,27 @@ fn observed_sql<T>(
             }
             false
         }),
-    );
+    )
+    .expect("install supplied-connection SQL progress observer");
     let result = catch_unwind(AssertUnwindSafe(|| body(conn)));
-    conn.progress_handler(0, None::<fn() -> bool>);
-    conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
-        .unwrap();
+    let progress = conn.progress_handler(0, None::<fn() -> bool>);
+    let authorization = conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
     match result {
-        Ok(result) => result,
-        Err(panic) => resume_unwind(panic),
+        Ok(result) => {
+            assert!(
+                progress.is_ok() && authorization.is_ok(),
+                "SQL observer cleanup failed: progress={progress:?}; authorizer={authorization:?}"
+            );
+            result
+        }
+        Err(primary) => {
+            if progress.is_err() || authorization.is_err() {
+                eprintln!(
+                    "SQL observer cleanup also failed: progress={progress:?}; authorizer={authorization:?}"
+                );
+            }
+            resume_unwind(primary)
+        }
     }
 }
 fn sql_state(delay: Option<Instant>) -> Arc<SqlObservation> {
