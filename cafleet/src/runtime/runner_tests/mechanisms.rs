@@ -207,6 +207,77 @@ fn runner_real_shutdown_kills_and_reaps_a_term_ignoring_owned_child_within_the_s
     );
 }
 
+fn report_fixture_process(stage: &str, pid: i64) {
+    let identity = ProcessIdentity::read(pid);
+    let pid32 = match i32::try_from(pid) {
+        Ok(pid) => pid,
+        Err(error) => {
+            eprintln!(
+                "shutdown fixture stage={stage}; pid={pid}; identity={identity:?}; PID conversion={error}"
+            );
+            return;
+        }
+    };
+    let group = nix::unistd::getpgid(Some(nix::unistd::Pid::from_raw(pid32)));
+    eprintln!("shutdown fixture stage={stage}; pid={pid}; identity={identity:?}; group={group:?}");
+    #[cfg(target_os = "macos")]
+    {
+        use libproc::libproc::{bsd_info::BSDInfo, proc_pid::pidinfo};
+        let status = pidinfo::<BSDInfo>(pid32, 0).map(|info| {
+            (
+                info.pbi_ppid,
+                info.pbi_pgid,
+                info.pbi_status,
+                info.pbi_start_tvsec,
+                info.pbi_start_tvusec,
+            )
+        });
+        eprintln!(
+            "shutdown fixture stage={stage}; pid={pid}; BSD parent/group/status/start_sec/start_usec={status:?}"
+        );
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        use std::io::Read;
+        let status = File::open(format!("/proc/{pid}/stat")).and_then(|file| {
+            let mut text = String::new();
+            file.take(4096).read_to_string(&mut text)?;
+            Ok(text)
+        });
+        eprintln!("shutdown fixture stage={stage}; pid={pid}; bounded process stat={status:?}");
+    }
+}
+
+fn report_fixture_group(stage: &str, native: &ProcessIdentity, descendant: i32) {
+    eprintln!(
+        "shutdown fixture stage={stage}; original native={native:?}; announced descendant={descendant}"
+    );
+    report_fixture_process(stage, native.pid);
+    report_fixture_process(stage, i64::from(descendant));
+    #[cfg(target_os = "macos")]
+    {
+        nix::errno::Errno::clear();
+        let members =
+            libproc::processes::pids_by_type(libproc::processes::ProcFilter::ByProgramGroup {
+                pgrpid: u32::try_from(native.pid).expect("spawned native PID is positive"),
+            });
+        match members {
+            Ok(members) => {
+                eprintln!(
+                    "shutdown fixture stage={stage}; observed original group members={}; diagnostic record limit=16",
+                    members.len()
+                );
+                for pid in members.into_iter().take(16) {
+                    report_fixture_process(stage, i64::from(pid));
+                }
+            }
+            Err(error) => {
+                eprintln!("shutdown fixture stage={stage}; original group enumeration={error}")
+            }
+        }
+    }
+}
+
 #[test]
 fn runner_real_shutdown_closes_a_slave_retaining_descendant_and_preserves_the_native_zero_exit() {
     let fixture = Fixture::new();
@@ -214,7 +285,9 @@ fn runner_real_shutdown_closes_a_slave_retaining_descendant_and_preserves_the_na
     let mut spec = fixture.spec();
     spec.argv=vec!["/bin/sh".into(),"-c".into(),r#"/bin/sh -c 'trap "" TERM HUP; printf ready > "$1"; while :; do sleep 1; done' descendant "$1" & descendant=$!; while [ ! -f "$1" ]; do sleep 0.01; done; printf 'descendant=%s\n' "$descendant"; exit 0"#.into(),"parent".into(),ready.to_str().unwrap().into()];
     let mut owned = OwnedPty::prepare(spec.size);
-    owned.session.spawn(&spec).unwrap();
+    owned.session.enable_ownership_diagnostics().unwrap();
+    let native = owned.session.spawn(&spec).unwrap();
+    eprintln!("shutdown fixture spawned native={native:?}");
     let output = read_until(&mut owned.session, "\n");
     let pid = output
         .lines()
@@ -223,9 +296,17 @@ fn runner_real_shutdown_closes_a_slave_retaining_descendant_and_preserves_the_na
         .trim()
         .parse::<i32>()
         .unwrap();
+    report_fixture_group("descendant announced before exit polling", &native, pid);
     let wait_deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        if let Some(exit) = owned.session.try_wait().unwrap() {
+        let waited = owned.session.try_wait();
+        if waited.is_err() {
+            eprintln!("shutdown fixture native wait error={waited:?}");
+            report_fixture_group("native wait error", &native, pid);
+        }
+        if let Some(exit) = waited.unwrap() {
+            eprintln!("shutdown fixture observed native exit={exit:?}");
+            report_fixture_group("native exit observed", &native, pid);
             assert_eq!(exit, ChildExit::Code(0));
             break;
         }
@@ -234,9 +315,19 @@ fn runner_real_shutdown_closes_a_slave_retaining_descendant_and_preserves_the_na
     }
     let start = Instant::now();
     let outcome = owned.stop();
-    assert!(start.elapsed() < Duration::from_millis(4750));
+    let elapsed = start.elapsed();
+    let ownership = owned.session.take_ownership_diagnostics();
+    eprintln!("shutdown fixture bounded ownership refresh trace={ownership:?}");
+    eprintln!("shutdown fixture cleanup elapsed={elapsed:?}; outcome={outcome:?}");
+    report_fixture_group("cleanup returned", &native, pid);
+    assert!(elapsed < Duration::from_millis(4750));
     assert_eq!(outcome.native_exit, Some(ChildExit::Code(0)));
     assert_eq!(outcome.cleanup_state, CleanupState::Complete, "{outcome:?}");
+    let ownership = ownership.expect("enabled ownership diagnostics are collected once");
+    assert!(
+        !ownership.records.is_empty(),
+        "actual refresh observations were recorded"
+    );
     let observation = std::process::Command::new("/bin/ps")
         .args(["-o", "stat=", "-p", &pid.to_string()])
         .output()
