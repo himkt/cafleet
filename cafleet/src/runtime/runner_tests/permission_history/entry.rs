@@ -12,10 +12,6 @@ struct NoLive {
     calls: Vec<&'static str>,
 }
 impl NoLive {
-    #[expect(
-        dead_code,
-        reason = "The staged live host methods await live integration."
-    )]
     fn failure(&mut self, operation: &'static str, run: &RunRecord) -> InputFailure {
         self.calls.push(operation);
         InputFailure {
