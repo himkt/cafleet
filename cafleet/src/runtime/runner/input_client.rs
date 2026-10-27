@@ -3,26 +3,17 @@ use crate::broker::members::db_err;
 use crate::broker::records::Placement;
 use crate::broker::runtime::{self as storage, *};
 use crate::config::Settings;
-use crate::input::{Deadline, PaneLock, with_database_budget};
+use crate::input::{Deadline, PaneLock, inherited_database_deadline, with_database_budget};
 use rusqlite::{Connection, OptionalExtension};
+use sha2::{Digest, Sha256};
 use std::time::Instant;
 
-#[expect(
-    dead_code,
-    reason = "the reviewed live input integration consumes the prepared request and expiration"
-)]
 pub(crate) struct PreparedSubmission<'a> {
     pub request: &'a SubmitInput,
     expiration: InputExpiration,
+    deadline: Instant,
 }
 impl<'a> PreparedSubmission<'a> {
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the reviewed live input integration prepares fresh submissions"
-        )
-    )]
     pub(crate) fn new(
         request: &'a SubmitInput,
         deadline: Instant,
@@ -31,6 +22,7 @@ impl<'a> PreparedSubmission<'a> {
         Ok(Self {
             request,
             expiration: InputExpiration::capture(deadline, clock)?,
+            deadline,
         })
     }
 }
@@ -88,10 +80,6 @@ impl InputContext {
         }
     }
 }
-#[expect(
-    dead_code,
-    reason = "the staged history path intentionally invokes no live host method"
-)]
 pub(crate) trait InputCommandHost {
     fn lock(
         &mut self,
@@ -111,6 +99,467 @@ pub(crate) trait InputCommandHost {
         request: &InputControlRequest,
         deadline: Instant,
     ) -> std::result::Result<InputControlReply, InputFailure>;
+}
+
+struct NativeInputHost;
+impl InputCommandHost for NativeInputHost {
+    fn lock(
+        &mut self,
+        settings: &Settings,
+        _: &RunRecord,
+        placement: &Placement,
+        deadline: Deadline,
+    ) -> std::result::Result<Option<PaneLock>, InputFailure> {
+        PaneLock::acquire_within(&settings.database_url, placement, deadline).map_err(host_failure)
+    }
+
+    fn health(
+        &mut self,
+        run: &RunRecord,
+        deadline: Instant,
+    ) -> std::result::Result<HealthSnapshot, InputFailure> {
+        probe_health(run, deadline).map_err(host_failure)
+    }
+
+    fn exchange(
+        &mut self,
+        run: &RunRecord,
+        request: &InputControlRequest,
+        deadline: Instant,
+    ) -> std::result::Result<InputControlReply, InputFailure> {
+        let result = (|| {
+            let paths = RuntimePaths::for_run(&run.database_identity_json, run.run_id)?;
+            let mut client =
+                super::control::ControlClient::connect(&paths.control_socket, deadline)?;
+            client.exchange_input(request, deadline)
+        })();
+        result.map_err(host_failure)
+    }
+}
+
+fn host_failure(source: CafleetError) -> InputFailure {
+    InputContext {
+        run_id: None,
+        interaction_id: None,
+        input_id: None,
+        operation_key: None,
+    }
+    .failure(source)
+}
+
+fn submission_context(run_id: i64, request: &SubmitInput) -> InputContext {
+    InputContext {
+        run_id: Some(run_id),
+        interaction_id: None,
+        input_id: None,
+        operation_key: Some(request.operation_key.clone()),
+    }
+}
+
+fn submission_digest(run_id: i64, request: &SubmitInput) -> Result<String> {
+    validate_operation_key(&request.operation_key)?;
+    usage(
+        run_id > 0 && crate::input::valid_input(&request.literal),
+        "ordinary submission requires a positive run and one nonblank line without control characters",
+    )?;
+    match request.input_kind {
+        InputKind::Preview => usage(
+            request.message_id.is_some_and(|id| {
+                id > 0 && request.operation_key == format!("preview:{run_id}:{id}")
+            }),
+            "preview requires its run-bound message key",
+        )?,
+        InputKind::Prompt | InputKind::Exec => usage(
+            request.message_id.is_none(),
+            "explicit input has no preview message",
+        )?,
+        InputKind::PermissionResponse => {
+            return Err(CafleetError::Usage("ordinary input kind required".into()));
+        }
+    }
+    let bytes = canonical_json(&serde_json::json!({
+        "run_id":run_id,"kind":request.input_kind.as_str(),
+        "message_id":request.message_id,"literal":request.literal,
+    }));
+    Ok(Sha256::digest(bytes.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
+pub(crate) fn find_submission(
+    conn: &mut Connection,
+    identity: &PermissionReceiptIdentity,
+    request: &SubmitInput,
+    deadline: Deadline,
+) -> std::result::Result<Option<InputOperation>, InputFailure> {
+    let mut context = submission_context(identity.run_id, request);
+    let result = (|| {
+        let digest = submission_digest(identity.run_id, request)?;
+        with_database_budget(conn, deadline, |conn| {
+            let tx = conn.transaction().map_err(db_err)?;
+            let run = selected_run(&tx, identity.run_id)?;
+            ensure(
+                run.database_identity_json == identity.database_identity_json,
+                "submission database identity mismatch",
+            )?;
+            let retained = storage::find_input(&tx, identity.run_id, &request.operation_key)?;
+            if let Some(input) = &retained {
+                context.input_id = Some(input.input_id);
+                ensure(
+                    input.kind == request.input_kind
+                        && input.payload_digest == digest
+                        && input.message_id == request.message_id,
+                    "conflicting input operation key reuse",
+                )?;
+            }
+            deadline.remaining()?;
+            tx.commit().map_err(db_err)?;
+            Ok(retained)
+        })
+    })();
+    result.map_err(|source| context.failure(source))
+}
+
+fn historical_submission(input: &InputOperation) -> Option<SubmissionResult> {
+    let (status, stage, reason) = match (input.state, input.disposition) {
+        (InputState::Ready, _) => return None,
+        (InputState::Accepted, _) | (InputState::Settled, Some(InputDisposition::Submitted)) => {
+            (SubmissionStatus::Accepted, SubmissionStage::Submitted, None)
+        }
+        (InputState::InProgress | InputState::Uncertain, _) => {
+            (SubmissionStatus::Uncertain, SubmissionStage::Unknown, None)
+        }
+        (InputState::Settled, _) => (
+            SubmissionStatus::Rejected,
+            SubmissionStage::ZeroBytes,
+            Some("input operation key is consumed".into()),
+        ),
+    };
+    Some(SubmissionResult {
+        status,
+        input_id: Some(input.input_id),
+        stage,
+        output_seq: None,
+        reason,
+    })
+}
+
+fn submission_deadline(conn: &Connection, deadline: Deadline) -> Result<Deadline> {
+    let effective = inherited_database_deadline(conn).map_or(deadline.instant(), |bound| {
+        bound.instant().min(deadline.instant())
+    });
+    let deadline = Deadline::until(effective);
+    deadline.remaining()?;
+    Ok(deadline)
+}
+
+fn validate_submission_target(
+    conn: &Connection,
+    settings: &Settings,
+    expected: &RunRecord,
+    placement: &Placement,
+) -> Result<()> {
+    let selected_path = conn
+        .path()
+        .ok_or_else(|| error("file-backed input database required"))?;
+    ensure(
+        std::fs::canonicalize(selected_path).map_err(io_error)?
+            == std::fs::canonicalize(crate::db::database_path(&settings.database_url)?)
+                .map_err(io_error)?,
+        "submission connection and configured database differ",
+    )?;
+    let current = storage::validate_owner(conn, &expected.owner())?;
+    ensure(
+        stable_run_identity(&current) == stable_run_identity(expected)
+            && current.status == RunStatus::Running
+            && current.owner_kind == OwnerKind::Runner
+            && current.native_version == expected.native_version
+            && current.profile_version == expected.profile_version,
+        "submission run identity changed",
+    )?;
+    ensure(
+        crate::broker::active_member_fleet(conn, expected.member_id)? == Some(expected.fleet_id),
+        "input member is inactive",
+    )?;
+    let member = crate::broker::get_member(conn, expected.member_id, expected.fleet_id)?
+        .ok_or_else(|| error("input member is absent"))?;
+    ensure(
+        member.kind == crate::broker::records::MemberKind::Member
+            && member.placement.as_ref() == Some(placement),
+        "submission member placement changed",
+    )?;
+    validate_run_paths(conn, &current)?;
+    Ok(())
+}
+
+enum SubmissionPreparation<'a> {
+    History(SubmissionResult),
+    Locked {
+        attempt: PreparedSubmission<'a>,
+        held: PaneLock,
+        deadline: Deadline,
+    },
+}
+
+pub(crate) fn submit_wrapped_input(
+    conn: &mut Connection,
+    settings: &Settings,
+    expected_run: &RunRecord,
+    expected_placement: &Placement,
+    request: &SubmitInput,
+    deadline: Deadline,
+) -> std::result::Result<SubmissionResult, InputFailure> {
+    match prepare_submission_with_host(
+        conn,
+        settings,
+        expected_run,
+        expected_placement,
+        request,
+        deadline,
+        &mut NativeInputHost,
+    )? {
+        SubmissionPreparation::History(result) => Ok(result),
+        SubmissionPreparation::Locked {
+            attempt,
+            held,
+            deadline,
+        } => submit_wrapped_input_under_pane_lock(
+            conn,
+            settings,
+            expected_run,
+            expected_placement,
+            &held,
+            &attempt,
+            deadline,
+        ),
+    }
+}
+
+#[cfg(test)]
+fn submit_wrapped_input_with_host(
+    conn: &mut Connection,
+    settings: &Settings,
+    expected_run: &RunRecord,
+    expected_placement: &Placement,
+    request: &SubmitInput,
+    deadline: Deadline,
+    host: &mut impl InputCommandHost,
+) -> std::result::Result<SubmissionResult, InputFailure> {
+    match prepare_submission_with_host(
+        conn,
+        settings,
+        expected_run,
+        expected_placement,
+        request,
+        deadline,
+        host,
+    )? {
+        SubmissionPreparation::History(result) => Ok(result),
+        SubmissionPreparation::Locked {
+            attempt,
+            held,
+            deadline,
+        } => submit_wrapped_input_under_pane_lock_with_host(
+            conn,
+            settings,
+            expected_run,
+            expected_placement,
+            &held,
+            &attempt,
+            deadline,
+            host,
+        ),
+    }
+}
+
+fn prepare_submission_with_host<'a>(
+    conn: &mut Connection,
+    settings: &Settings,
+    expected_run: &RunRecord,
+    expected_placement: &Placement,
+    request: &'a SubmitInput,
+    deadline: Deadline,
+    host: &mut impl InputCommandHost,
+) -> std::result::Result<SubmissionPreparation<'a>, InputFailure> {
+    let identity = PermissionReceiptIdentity {
+        database_identity_json: expected_run.database_identity_json.clone(),
+        run_id: expected_run.run_id,
+    };
+    let retained = find_submission(conn, &identity, request, deadline)?;
+    if let Some(result) = retained.as_ref().and_then(historical_submission) {
+        return Ok(SubmissionPreparation::History(result));
+    }
+    let mut context = submission_context(expected_run.run_id, request);
+    context.input_id = retained.as_ref().map(|input| input.input_id);
+    (|| {
+        let deadline = submission_deadline(conn, deadline)?;
+        with_database_budget(conn, deadline, |conn| {
+            validate_submission_target(conn, settings, expected_run, expected_placement)
+        })?;
+        let attempt =
+            PreparedSubmission::new(request, deadline.instant(), &mut RealInputDeadlineClock)?;
+        let held = host
+            .lock(settings, expected_run, expected_placement, deadline)
+            .map_err(CafleetError::from)?
+            .ok_or_else(|| error("pane input remained busy before submission"))?;
+        deadline.remaining()?;
+        Ok(SubmissionPreparation::Locked {
+            attempt,
+            held,
+            deadline,
+        })
+    })()
+    .map_err(|source| context.failure(source))
+}
+
+pub(crate) fn submit_wrapped_input_under_pane_lock(
+    conn: &mut Connection,
+    settings: &Settings,
+    expected_run: &RunRecord,
+    expected_placement: &Placement,
+    held: &PaneLock,
+    attempt: &PreparedSubmission<'_>,
+    deadline: Deadline,
+) -> std::result::Result<SubmissionResult, InputFailure> {
+    submit_wrapped_input_under_pane_lock_with_host(
+        conn,
+        settings,
+        expected_run,
+        expected_placement,
+        held,
+        attempt,
+        deadline,
+        &mut NativeInputHost,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the approved borrowed submission entry adds its host to the same fixed arguments"
+)]
+fn submit_wrapped_input_under_pane_lock_with_host(
+    conn: &mut Connection,
+    settings: &Settings,
+    expected_run: &RunRecord,
+    expected_placement: &Placement,
+    held: &PaneLock,
+    attempt: &PreparedSubmission<'_>,
+    deadline: Deadline,
+    host: &mut impl InputCommandHost,
+) -> std::result::Result<SubmissionResult, InputFailure> {
+    let deadline = submission_deadline(
+        conn,
+        Deadline::until(deadline.instant().min(attempt.deadline)),
+    )
+    .map_err(|source| submission_context(expected_run.run_id, attempt.request).failure(source))?;
+    let identity = PermissionReceiptIdentity {
+        database_identity_json: expected_run.database_identity_json.clone(),
+        run_id: expected_run.run_id,
+    };
+    let retained = find_submission(conn, &identity, attempt.request, deadline)?;
+    if let Some(result) = retained.as_ref().and_then(historical_submission) {
+        return Ok(result);
+    }
+    let mut context = submission_context(expected_run.run_id, attempt.request);
+    context.input_id = retained.as_ref().map(|input| input.input_id);
+    let result = (|| {
+        deadline.remaining()?;
+        held.validate_binding(&settings.database_url, expected_placement)?;
+        with_database_budget(conn, deadline, |conn| {
+            validate_submission_target(conn, settings, expected_run, expected_placement)
+        })?;
+        let health = host
+            .health(expected_run, deadline.instant())
+            .map_err(CafleetError::from)?;
+        health.validate(expected_run)?;
+        deadline.remaining()?;
+        with_database_budget(conn, deadline, |conn| {
+            let tx = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .map_err(db_err)?;
+            held.validate_binding(&settings.database_url, expected_placement)?;
+            validate_submission_target(&tx, settings, expected_run, expected_placement)?;
+            let changed = tx.execute(
+                "UPDATE member_runs SET reachability='reachable',last_health_at=?1 WHERE run_id=?2 AND owner_epoch=?3",
+                rusqlite::params![crate::time::format_utc(crate::time::now_utc()), expected_run.run_id, expected_run.owner_epoch],
+            ).map_err(db_err)?;
+            ensure(changed == 1, "submission health ownership changed")?;
+            deadline.remaining()?;
+            tx.commit().map_err(db_err)
+        })?;
+        let input = SubmitInput {
+            operation_key: attempt.request.operation_key.clone(),
+            input_kind: attempt.request.input_kind,
+            message_id: attempt.request.message_id,
+            literal: attempt.request.literal.clone(),
+        };
+        let operation = match input.input_kind {
+            InputKind::Preview | InputKind::Prompt => InputControlOperation::SubmitPrompt(input),
+            InputKind::Exec => InputControlOperation::SubmitExec(input),
+            InputKind::PermissionResponse => unreachable!("validated ordinary input kind"),
+        };
+        let request = InputControlRequest {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            identity: ControlIdentity::from_run(expected_run),
+            expires_at_mono_ns: attempt.expiration.monotonic_ns(),
+            operation,
+        };
+        held.validate_binding(&settings.database_url, expected_placement)?;
+        deadline.remaining()?;
+        let reply = host
+            .exchange(expected_run, &request, deadline.instant())
+            .map_err(CafleetError::from)?;
+        let InputControlReply::Submission(reply) = reply else {
+            return Err(error("ordinary submission requires a submission reply"));
+        };
+        let recorded = find_submission(conn, &identity, attempt.request, deadline)
+            .map_err(CafleetError::from)?;
+        context.input_id = recorded.as_ref().map(|input| input.input_id);
+        with_database_budget(conn, deadline, |conn| {
+            held.validate_binding(&settings.database_url, expected_placement)?;
+            validate_submission_target(conn, settings, expected_run, expected_placement)
+        })?;
+        match (reply.input_id, recorded.as_ref()) {
+            (Some(id), Some(input)) => {
+                ensure(
+                    id == input.input_id,
+                    "submission reply input identity mismatch",
+                )?;
+                let matches = match reply.status {
+                    SubmissionStatus::Accepted => {
+                        reply.stage == SubmissionStage::Submitted
+                            && matches!(
+                                (input.state, input.disposition),
+                                (InputState::Accepted, _)
+                                    | (InputState::Settled, Some(InputDisposition::Submitted))
+                            )
+                    }
+                    SubmissionStatus::Uncertain => {
+                        matches!(input.state, InputState::InProgress | InputState::Uncertain)
+                    }
+                    SubmissionStatus::Held | SubmissionStatus::Rejected => {
+                        reply.stage == SubmissionStage::ZeroBytes
+                            && (input.state == InputState::Ready
+                                || input.state == InputState::Settled
+                                    && input.disposition != Some(InputDisposition::Submitted))
+                    }
+                };
+                ensure(matches, "submission reply contradicts durable state")?;
+            }
+            (None, None) => ensure(
+                matches!(
+                    reply.status,
+                    SubmissionStatus::Held | SubmissionStatus::Rejected
+                ) && reply.stage == SubmissionStage::ZeroBytes,
+                "submission outcome requires a durable input identity",
+            )?,
+            _ => return Err(error("submission reply has no matching durable input")),
+        }
+        deadline.remaining()?;
+        Ok(reply)
+    })();
+    result.map_err(|source| context.failure(source))
 }
 fn usage(ok: bool, description: &str) -> Result<()> {
     if ok {

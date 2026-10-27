@@ -146,13 +146,6 @@ pub(crate) struct SubmitInput {
     pub message_id: Option<i64>,
     pub literal: String,
 }
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed input coordinator and host supply this production consumer"
-    )
-)]
 pub(crate) enum ReceiptAction {
     Query {
         operation_key: String,
@@ -173,13 +166,6 @@ pub(crate) struct InputControlRequest {
     pub expires_at_mono_ns: u64,
     pub operation: InputControlOperation,
 }
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed input coordinator and host supply this production consumer"
-    )
-)]
 pub(crate) enum InputControlOperation {
     SubmitPrompt(SubmitInput),
     SubmitExec(SubmitInput),

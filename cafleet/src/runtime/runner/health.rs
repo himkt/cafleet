@@ -51,6 +51,13 @@ pub(crate) trait HealthProbe {
     fn probe(&mut self, run: &RunRecord, deadline: Instant) -> Result<HealthSnapshot>;
 }
 pub(crate) struct HealthCheck {
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "wrapped delivery integration consumes the matching health result"
+        )
+    )]
     pub matched: bool,
 }
 struct SocketProbe;

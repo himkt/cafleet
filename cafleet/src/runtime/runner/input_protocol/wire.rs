@@ -242,13 +242,6 @@ pub(in crate::runtime::runner) fn decode_service_request(
     }
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed input coordinator and host supply this production consumer"
-    )
-)]
 pub(in crate::runtime::runner) fn encode_input_request(
     request: &InputControlRequest,
 ) -> Result<Vec<u8>> {
@@ -305,13 +298,6 @@ pub(in crate::runtime::runner) fn encode_input_request(
     frame_control_body(&serde_json::to_vec(&value).map_err(io_error)?)
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed input coordinator and host supply this production consumer"
-    )
-)]
 pub(in crate::runtime::runner) fn decode_input_reply(
     body: &[u8],
     request: &InputControlRequest,

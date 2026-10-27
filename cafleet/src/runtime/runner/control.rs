@@ -117,13 +117,6 @@ impl ControlClient {
             .expect("validated result envelope")
             .clone())
     }
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the reviewed input coordinator and host supply this production consumer"
-        )
-    )]
     pub(super) fn exchange_input(
         &mut self,
         request: &InputControlRequest,

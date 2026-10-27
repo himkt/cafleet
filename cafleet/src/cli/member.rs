@@ -789,26 +789,66 @@ fn dispatch_input(
     settings: &Settings,
     member: &MemberRecord,
     text: &str,
+    kind: crate::broker::runtime::InputKind,
     label: &str,
     deadline: crate::input::Deadline,
-) -> Result<(), CafleetError> {
+) -> Result<Option<i64>, CafleetError> {
     let id = member.member_id;
+    if let Some(runtime) = &member.runtime {
+        use crate::runtime::runner::{InputFailure, SubmissionStatus, SubmitInput};
+        use std::io::Read;
+
+        let run = &runtime.run;
+        let placement = member.placement.as_ref().expect("placed input member");
+        let mut random = [0; 32];
+        std::fs::File::open("/dev/urandom")
+            .and_then(|mut file| file.read_exact(&mut random))
+            .map_err(|cause| {
+                CafleetError::App(format!("cannot generate input operation key: {cause}"))
+            })?;
+        let random: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+        let request = SubmitInput {
+            operation_key: format!("{}:{}:{random}", kind.as_str(), run.run_id),
+            input_kind: kind,
+            message_id: None,
+            literal: text.into(),
+        };
+        let result = crate::runtime::runner::submit_wrapped_input(
+            conn, settings, run, placement, &request, deadline,
+        )
+        .map_err(CafleetError::from)?;
+        if result.status != SubmissionStatus::Accepted {
+            let description = match result.status {
+                SubmissionStatus::Held => "held",
+                SubmissionStatus::Rejected => "rejected",
+                SubmissionStatus::Uncertain => "uncertain",
+                SubmissionStatus::Accepted => unreachable!("accepted result returned below"),
+            };
+            let mut reason = format!("{label} delivery to member {id} is {description}");
+            if let Some(detail) = result.reason {
+                reason.push_str(": ");
+                reason.push_str(&detail);
+            }
+            return Err(InputFailure {
+                source: CafleetError::App(reason),
+                run_id: Some(run.run_id),
+                interaction_id: runtime.current_interaction_id,
+                input_id: result.input_id,
+                operation_key: Some(request.operation_key),
+            }
+            .into());
+        }
+        return Ok(result.input_id);
+    }
     let Some(locked) = crate::input::lock_member(conn, settings, member, deadline)? else {
         return Err(CafleetError::App(format!(
             "member {id}'s pane input remained busy; {label} was not dispatched."
         )));
     };
-    if let Some(runtime) = &locked.member.runtime {
-        let health = crate::runtime::runner::check_input_health(
-            conn,
-            runtime.run.run_id,
-            deadline.instant(),
-        )?;
-        return Err(CafleetError::App(if health.matched {
-            "runner-managed input is held until a verified native composer is available".into()
-        } else {
-            "runner-managed input is held because matching runtime health is unavailable".into()
-        }));
+    if locked.member.runtime.is_some() {
+        return Err(CafleetError::App(
+            "member runtime changed while acquiring pane input".into(),
+        ));
     }
     let _span = crate::signals::DeferTermination::begin()?;
     let placement = locked.member.placement.as_ref().expect("locked placement");
@@ -826,11 +866,16 @@ fn dispatch_input(
         .bounded(deadline);
     mux.ensure_available()
         .map_err(|e| prewrite(e.to_string()))?;
-    mux.send_prompt(pane, text, Lead::Escape).map_err(|error| {
+    let literal = match kind {
+        crate::broker::runtime::InputKind::Prompt => text.to_owned(),
+        crate::broker::runtime::InputKind::Exec => format!("! {text}"),
+        _ => unreachable!("member dispatch selects prompt or exec"),
+    };
+    mux.send_prompt(pane, &literal, Lead::Escape).map_err(|error| {
         if error.submission_started() { CafleetError::App(format!(
             "{label} delivery to member {id} is uncertain: {error}. Inspect the pane before retrying."
         )) } else { prewrite(error.to_string()) }
-    })
+    }).map(|()| None)
 }
 
 fn prompt(
@@ -855,11 +900,25 @@ fn prompt(
         ));
     }
     let pane = require_pane(&member, member_id, "prompt")?;
-    dispatch_input(conn, settings, &member, text, "prompt", deadline)?;
+    let input_id = dispatch_input(
+        conn,
+        settings,
+        &member,
+        text,
+        crate::broker::runtime::InputKind::Prompt,
+        "prompt",
+        deadline,
+    )?;
     emit(
         json,
-        &json!({"member_id":member_id,"pane_id":pane,"text":text}),
-        || format!("Sent prompt {text:?} to member {} ({pane}).", member.name),
+        &json!({"member_id":member_id,"pane_id":pane,"text":text,"input_id":input_id}),
+        || {
+            let mut output = format!("Sent prompt {text:?} to member {} ({pane}).", member.name);
+            if let Some(id) = input_id {
+                output.push_str(&format!("\nInput: {id}"));
+            }
+            output
+        },
     );
     Ok(())
 }
@@ -885,11 +944,12 @@ fn exec(
         ));
     }
     let pane = require_pane(&member, member_id, "exec")?;
-    dispatch_input(
+    let input_id = dispatch_input(
         conn,
         settings,
         &member,
-        &format!("! {command}"),
+        command,
+        crate::broker::runtime::InputKind::Exec,
         "native command",
         deadline,
     )?;
@@ -901,11 +961,15 @@ fn exec(
     emit(
         json,
         &json!({"member_id":member_id,"pane_id":pane,"coding_agent":agent,
-        "command":command,"dispatched":true}),
+        "command":command,"dispatched":true,"input_id":input_id}),
         || {
-            format!(
+            let mut output = format!(
                 "Dispatched native command to member {member_id} ({pane}). Inspect the pane for its result."
-            )
+            );
+            if let Some(id) = input_id {
+                output.push_str(&format!("\nInput: {id}"));
+            }
+            output
         },
     );
     Ok(())

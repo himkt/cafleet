@@ -195,13 +195,6 @@ fn result(value: &Value) -> Result<InputControlReply> {
     }
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed input coordinator and host supply this production consumer"
-    )
-)]
 fn validate_binding(reply: &InputControlReply, request: &InputControlRequest) -> Result<()> {
     let identity = &request.identity;
     let matches = match (&request.operation, reply) {
@@ -257,13 +250,6 @@ fn validate_binding(reply: &InputControlReply, request: &InputControlRequest) ->
     ensure(matches, "control reply kind or request identity mismatch")
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed input coordinator and host supply this production consumer"
-    )
-)]
 pub(super) fn decode(body: &[u8], request: &InputControlRequest) -> Result<InputControlReply> {
     let value = strict_json::decode(body)?;
     if value.get("error").is_some() {

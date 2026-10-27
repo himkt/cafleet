@@ -49,13 +49,6 @@ impl InputDeadlineClock for RealInputDeadlineClock {
 
 pub(crate) struct InputExpiration(u64);
 impl InputExpiration {
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the reviewed live input client captures the sender expiration"
-        )
-    )]
     pub(crate) fn capture(deadline: Instant, clock: &mut impl InputDeadlineClock) -> Result<Self> {
         let sample = clock.sample()?;
         sample.validate()?;
@@ -100,13 +93,6 @@ impl InputExpiration {
         Ok(deadline)
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the reviewed live input client copies the captured wire expiration"
-        )
-    )]
     pub(crate) fn monotonic_ns(&self) -> u64 {
         self.0
     }
