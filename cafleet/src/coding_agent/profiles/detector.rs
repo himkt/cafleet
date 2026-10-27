@@ -15,6 +15,102 @@ pub(crate) enum ObservationKind {
     ComposerDraft,
     Unknown,
 }
+
+#[cfg(test)]
+mod inspection_tests {
+    use super::*;
+    use crate::broker::runtime::PermissionDecision;
+    use crate::coding_agent::{inspection_fixture_definition, inspection_fixture_form};
+    use crate::runtime::runner::{TerminalSize, TerminalState};
+
+    #[test]
+    fn permission_inspection_answer_match_uses_complete_current_rule_choice_and_focus() {
+        let catalog = ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
+        let detector =
+            Detector::new(&catalog, CodingAgent::Codex, Some("synthetic-0.0.1")).unwrap();
+        let plan = catalog
+            .answer_plan(
+                CodingAgent::Codex,
+                "synthetic-0.0.1",
+                "synthetic-permission",
+                PermissionDecision::Allow,
+            )
+            .unwrap()
+            .unwrap();
+        let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
+        terminal
+            .feed(&inspection_fixture_form(
+                "private operation",
+                "synthetic-only",
+            ))
+            .unwrap();
+        let screen = terminal.snapshot();
+        let observation = detector.observe(&screen).unwrap();
+        let matched = detector.match_answer(&screen, &plan).unwrap().unwrap();
+        assert_eq!(
+            observation.kind,
+            ObservationKind::Interaction(InteractionClass::PermissionRequest)
+        );
+        assert!(Some(matched.semantic()) == observation.fingerprint.as_ref());
+        assert_eq!(
+            matched.choices(),
+            &["Allow once".to_owned(), "Deny once".to_owned()]
+        );
+        assert_eq!(matched.output_seq(), screen.screen_seq);
+        assert_eq!(matched.plan().choice_id(), "allow-once");
+        let focus = matched.focus().to_owned();
+        assert!(!focus.is_empty());
+        terminal
+            .feed(&inspection_fixture_form(
+                "private operation",
+                "synthetic-other",
+            ))
+            .unwrap();
+        let other = detector
+            .match_answer(&terminal.snapshot(), &plan)
+            .unwrap()
+            .unwrap();
+        assert!(other.semantic() == matched.semantic());
+        assert_ne!(other.focus(), focus);
+        for form in ["missing-focus", "synthetic-alt"] {
+            terminal
+                .feed(&inspection_fixture_form("private operation", form))
+                .unwrap();
+            assert!(
+                detector
+                    .match_answer(&terminal.snapshot(), &plan)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        terminal
+            .feed(&inspection_fixture_form(
+                "private operation",
+                "synthetic-only",
+            ))
+            .unwrap();
+        terminal.feed(b"\x1b[21;1H  Allow once").unwrap();
+        assert!(
+            detector
+                .match_answer(&terminal.snapshot(), &plan)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn permission_inspection_answer_matches_have_no_debug_or_serialized_representation() {
+        trait AmbiguousIfImplemented<Marker> {
+            fn check() {}
+        }
+        struct DebugImplemented;
+        struct SerializeImplemented;
+        impl<T: ?Sized> AmbiguousIfImplemented<()> for T {}
+        impl<T: ?Sized + std::fmt::Debug> AmbiguousIfImplemented<DebugImplemented> for T {}
+        impl<T: ?Sized + serde::Serialize> AmbiguousIfImplemented<SerializeImplemented> for T {}
+        let _ = <AnswerMatch as AmbiguousIfImplemented<_>>::check;
+    }
+}
 impl ObservationKind {
     pub(super) fn parse(value: &str) -> Result<Self> {
         Ok(match value {

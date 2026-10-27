@@ -1112,6 +1112,344 @@ mod tests {
     use std::net::Shutdown;
     use std::time::Duration;
 
+    #[test]
+    fn permission_inspection_actual_service_projects_current_unsupported_request_without_answering()
+    {
+        use crate::runtime::runner_tests::control_service::observation_services::synthetic;
+
+        let mut fixture = InputServiceFixture::configured(false, synthetic);
+        fixture.start_running();
+        let until = Instant::now() + Duration::from_secs(2);
+        fixture.master.write_all(b"form-inspection\r").unwrap();
+        fixture.read_until("Operation: write form-inspection.txt");
+        let (event_id, interaction_id, message_id) = loop {
+            let row = with_database_budget(&mut fixture.fixture.conn, Deadline::until(until), |conn| {
+                conn.query_row(
+                    "SELECT event_id,interaction_id,message_id FROM member_runtime_events WHERE run_id=?1 AND kind='interaction_opened'",
+                    [fixture.fixture.run.run_id], |row| Ok((row.get::<_, i64>(0)?,row.get::<_, i64>(1)?,row.get::<_, i64>(2)?)),
+                ).optional().map_err(db_err)
+            }).unwrap();
+            if let Some(row) = row {
+                break row;
+            }
+            assert!(Instant::now() < until, "original stable-request deadline");
+            std::thread::sleep(Duration::from_millis(2));
+        };
+        let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+        let settings = Settings {
+            database_url: format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()),
+            max_text_len: 200,
+            multiplexer: Some("tmux".into()),
+        };
+        let counts = |conn: &Connection| {
+            [
+                "member_input_operations",
+                "member_permission_responses",
+                "member_permission_response_claims",
+            ]
+            .map(|table| {
+                conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap()
+            })
+        };
+        let before = counts(&fixture.fixture.conn);
+        let inspected = inspect_permission(
+            &mut fixture.fixture.conn,
+            &settings,
+            &PermissionInspectInput {
+                interaction_id,
+                event_id,
+                director_member_id: run.director_member_id,
+            },
+            Deadline::until(until),
+        )
+        .unwrap();
+        assert_eq!(inspected.event_id, event_id);
+        assert_eq!(inspected.interaction_id, interaction_id);
+        assert_eq!(inspected.message_id, message_id);
+        assert_eq!(inspected.run_id, run.run_id);
+        assert_eq!(inspected.owner_epoch, run.owner_epoch);
+        assert_eq!(inspected.member_id, run.member_id);
+        assert_eq!(inspected.fleet_id, run.fleet_id);
+        assert_eq!(inspected.director_member_id, run.director_member_id);
+        assert_eq!(
+            inspected.classification,
+            Some(InteractionClass::PermissionRequest)
+        );
+        assert_eq!(inspected.visibility, Visibility::Visible);
+        assert_eq!(inspected.answer_capability, Coverage::Unknown);
+        assert!(inspected.capability_reason.is_some());
+        assert!(inspected.supported_decisions.is_empty());
+        assert!(inspected.request_token.is_none());
+        assert_eq!(inspected.evidence["operation"], serde_json::Value::Null);
+        assert_eq!(
+            inspected
+                .missing_evidence
+                .iter()
+                .map(MissingEvidence::as_str)
+                .collect::<Vec<_>>(),
+            [
+                "operation",
+                "arguments",
+                "cwd",
+                "environment",
+                "targets",
+                "effects",
+                "choice_scope"
+            ]
+        );
+        assert_eq!(counts(&fixture.fixture.conn), before);
+        let notified: Option<String> = fixture
+            .fixture
+            .conn
+            .query_row(
+                "SELECT notified_at FROM messages WHERE message_id=?1",
+                [message_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(notified.is_none());
+        fixture.master.write_all(b"inspection-barrier\r").unwrap();
+        fixture.read_until("review-answer=inspection-barrier");
+        fixture.finish();
+    }
+
+    struct InspectionHost {
+        socket: SocketHost,
+        wrong_event: bool,
+    }
+    impl InputCommandHost for InspectionHost {
+        fn lock(
+            &mut self,
+            settings: &Settings,
+            run: &RunRecord,
+            placement: &Placement,
+            deadline: Deadline,
+        ) -> std::result::Result<Option<PaneLock>, InputFailure> {
+            self.socket.lock(settings, run, placement, deadline)
+        }
+        fn health(
+            &mut self,
+            run: &RunRecord,
+            deadline: Instant,
+        ) -> std::result::Result<HealthSnapshot, InputFailure> {
+            self.socket.health(run, deadline)
+        }
+        fn exchange(
+            &mut self,
+            run: &RunRecord,
+            request: &InputControlRequest,
+            deadline: Instant,
+        ) -> std::result::Result<InputControlReply, InputFailure> {
+            assert!(matches!(
+                request.operation,
+                InputControlOperation::PermissionInspect(_)
+            ));
+            let mut reply = self.socket.exchange(run, request, deadline)?;
+            if self.wrong_event {
+                let InputControlReply::Inspection(value) = &mut reply else {
+                    panic!("actual typed permission inspection")
+                };
+                value.event_id += 1;
+            }
+            Ok(reply)
+        }
+    }
+
+    #[test]
+    fn permission_inspection_client_uses_real_guard_original_sql_bound_and_validates_live_reply() {
+        use crate::coding_agent::inspection_fixture_definition;
+        use crate::runtime::runner_tests::control_service::observation_services::synthetic;
+
+        let mut fixture = InputServiceFixture::configured(false, |fixture, spec| {
+            synthetic(fixture, spec);
+            let path = fixture._dir.path().join("observation-services.json");
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(path)
+                .unwrap();
+            file.write_all(
+                &serde_json::to_vec(
+                    &serde_json::json!({"catalog":inspection_fixture_definition()}),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            file.sync_all().unwrap();
+        });
+        fixture.start_running();
+        let outer = Instant::now() + Duration::from_secs(2);
+        fixture
+            .master
+            .write_all(b"form-executable-inspection\r")
+            .unwrap();
+        fixture.read_until("Operation: write form-executable-inspection.txt");
+        let (event_id, interaction_id, message_id) = loop {
+            let ids = with_database_budget(&mut fixture.fixture.conn,Deadline::until(outer),|conn| {
+                conn.query_row("SELECT event_id,interaction_id,message_id FROM member_runtime_events WHERE run_id=?1 AND kind='interaction_opened'",[fixture.fixture.run.run_id],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?))).optional().map_err(db_err)
+            }).unwrap();
+            if let Some(ids) = ids {
+                break ids;
+            }
+            assert!(
+                Instant::now() < outer,
+                "original request stabilization deadline"
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        };
+        let (settings, run, placement) = service_target(&fixture);
+        let request = PermissionInspectInput {
+            event_id,
+            interaction_id,
+            director_member_id: run.director_member_id,
+        };
+        let records = health_records(&fixture.fixture.conn);
+        let mut expired = SocketHost::new(&settings, &placement, Instant::now());
+        assert!(
+            inspect_permission_with_host(
+                &mut fixture.fixture.conn,
+                &settings,
+                &request,
+                Deadline::until(expired.until),
+                &mut expired
+            )
+            .is_err()
+        );
+        assert_eq!(expired.calls, [0, 0, 0]);
+        assert_eq!(health_records(&fixture.fixture.conn), records);
+
+        let inherited = outer - Duration::from_millis(100);
+        let mut host = InspectionHost {
+            socket: SocketHost::new(&settings, &placement, inherited),
+            wrong_event: false,
+        };
+        let value = with_database_budget(
+            &mut fixture.fixture.conn,
+            Deadline::until(inherited),
+            |conn| {
+                inspect_permission_with_host(
+                    conn,
+                    &settings,
+                    &request,
+                    Deadline::until(outer),
+                    &mut host,
+                )
+                .map_err(CafleetError::from)
+            },
+        )
+        .unwrap();
+        assert_eq!(host.socket.calls, [1, 1, 1]);
+        assert!(host.socket.expiration.is_some());
+        assert_eq!(
+            (value.event_id, value.interaction_id, value.message_id),
+            (event_id, interaction_id, message_id)
+        );
+        assert_eq!(value.answer_capability, Coverage::Tested);
+        assert_eq!(
+            value.supported_decisions,
+            vec![PermissionDecision::Allow, PermissionDecision::Deny]
+        );
+        assert!(value.answer_rule_id.is_none());
+        assert_eq!(value.request_token.as_ref().unwrap().len(), 64);
+        assert!(value.evidence["operation"].is_null());
+        assert!(
+            value
+                .missing_evidence
+                .iter()
+                .any(|v| matches!(v, MissingEvidence::ChoiceScope))
+        );
+
+        let mut wrong = InspectionHost {
+            socket: SocketHost::new(&settings, &placement, outer),
+            wrong_event: true,
+        };
+        let failure = match inspect_permission_with_host(
+            &mut fixture.fixture.conn,
+            &settings,
+            &request,
+            Deadline::until(outer),
+            &mut wrong,
+        ) {
+            Err(failure) => failure,
+            Ok(_) => panic!("a real typed reply still requires its pinned event identity"),
+        };
+        assert_eq!(wrong.socket.calls, [1, 1, 1]);
+        assert_eq!(failure.run_id, Some(run.run_id));
+        assert_eq!(failure.interaction_id, Some(interaction_id));
+        assert!(
+            !failure
+                .source
+                .message()
+                .contains("form-executable-inspection")
+        );
+        assert!(
+            !failure
+                .source
+                .message()
+                .contains(value.request_token.as_ref().unwrap())
+        );
+
+        let database = settings.database_url.clone();
+        let mut changed = SocketHost::new(&settings, &placement, outer);
+        changed.after_health = Some(Box::new(move || {
+            let conn = crate::db::connect(&database).unwrap();
+            assert_eq!(
+                conn.execute(
+                    "UPDATE messages SET from_member_id=?1 WHERE message_id=?2",
+                    rusqlite::params![run.member_id, message_id]
+                )
+                .unwrap(),
+                1
+            );
+        }));
+        assert!(
+            inspect_permission_with_host(
+                &mut fixture.fixture.conn,
+                &settings,
+                &request,
+                Deadline::until(outer),
+                &mut changed
+            )
+            .is_err()
+        );
+        assert_eq!(
+            changed.calls,
+            [1, 1, 0],
+            "durable association is reread after actual health wait"
+        );
+        for table in [
+            "member_input_operations",
+            "member_permission_responses",
+            "member_permission_response_claims",
+        ] {
+            let count: i64 = fixture
+                .fixture
+                .conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(count, 0);
+        }
+        let notified: Option<String> = fixture
+            .fixture
+            .conn
+            .query_row(
+                "SELECT notified_at FROM messages WHERE message_id=?1",
+                [message_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(notified.is_none());
+        fixture
+            .master
+            .write_all(b"inspection-client-barrier\r")
+            .unwrap();
+        fixture.read_until("review-answer=inspection-client-barrier");
+        fixture.finish();
+    }
+
     struct UnavailableReceiptHost {
         settings: Settings,
         placement: Placement,

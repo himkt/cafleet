@@ -7,6 +7,65 @@ use crate::coding_agent::{Detector, ProfileCatalog};
 use std::ops::RangeInclusive;
 use std::time::{Duration, Instant};
 
+#[cfg(test)]
+mod inspection_tests {
+    use super::*;
+    use crate::runtime::runner_tests::Fixture;
+
+    #[test]
+    fn permission_inspection_request_generation_exhaustion_invalidates_without_wrap() {
+        let mut fixture = Fixture::new();
+        let _artifacts = fixture.artifacts();
+        let lock = RunLock::acquire(&fixture.conn, &fixture.run.owner())
+            .unwrap()
+            .unwrap();
+        lock.transfer_to_runner(
+            &mut fixture.conn,
+            &fixture.run.owner(),
+            ProcessIdentity::current().unwrap(),
+        )
+        .unwrap();
+        fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+        storage::reserve_event_sequences(&mut fixture.conn, &fixture.run.owner()).unwrap();
+        fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+        let mut controller = ObservationController::new(
+            &fixture.run,
+            &ProfileCatalog::bundled().unwrap(),
+            EvidencePolicy::metadata(),
+            1..=256,
+        )
+        .unwrap();
+        controller.request_generation = u64::MAX;
+        assert!(
+            controller
+                .observer_failed(ObservationFailure::Parser, &RealObservationClock)
+                .is_err()
+        );
+        assert_eq!(controller.request_generation(), u64::MAX);
+        assert!(controller.current_request().is_none());
+        assert!(
+            controller
+                .observer_failed(ObservationFailure::Detector, &RealObservationClock)
+                .is_err()
+        );
+        assert_eq!(controller.request_generation(), u64::MAX);
+        assert!(controller.current_request().is_none());
+    }
+
+    #[test]
+    fn permission_inspection_observed_authority_has_no_debug_or_serialized_representation() {
+        trait AmbiguousIfImplemented<Marker> {
+            fn check() {}
+        }
+        struct DebugImplemented;
+        struct SerializeImplemented;
+        impl<T: ?Sized> AmbiguousIfImplemented<()> for T {}
+        impl<T: ?Sized + std::fmt::Debug> AmbiguousIfImplemented<DebugImplemented> for T {}
+        impl<T: ?Sized + serde::Serialize> AmbiguousIfImplemented<SerializeImplemented> for T {}
+        let _ = <ObservedRequest as AmbiguousIfImplemented<_>>::check;
+    }
+}
+
 pub(crate) struct ObservationMoment {
     pub monotonic: Instant,
     pub observed_at: String,

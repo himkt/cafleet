@@ -75,7 +75,7 @@ pub(super) fn private_write(path: &Path, bytes: &[u8]) {
     file.write_all(bytes).unwrap();
     file.sync_all().unwrap();
 }
-pub(super) fn synthetic(fixture: &mut Fixture, spec: &mut SpawnSpec) {
+pub(in crate::runtime) fn synthetic(fixture: &mut Fixture, spec: &mut SpawnSpec) {
     spec.environment.push((
         "CAFLEET_REVIEW_NATIVE_START".into(),
         fixture

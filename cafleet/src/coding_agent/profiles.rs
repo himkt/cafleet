@@ -5,6 +5,10 @@ use super::CodingAgent;
 use crate::broker::runtime::PermissionDecision;
 #[cfg(test)]
 use crate::error::CafleetError;
+#[cfg(test)]
+pub(crate) use catalog::inspection_tests::{
+    inspection_fixture_definition, inspection_fixture_form,
+};
 pub use catalog::{NativeCapabilities, ProfileCatalog};
 pub(crate) use composer::{ComposerOperation, ComposerPlan};
 pub(crate) use detector::*;

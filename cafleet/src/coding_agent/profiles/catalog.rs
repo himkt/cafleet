@@ -10,6 +10,188 @@ type Result<T> = std::result::Result<T, CafleetError>;
 fn invalid(message: impl Into<String>) -> CafleetError {
     CafleetError::Usage(format!("invalid native profile: {}", message.into()))
 }
+
+#[cfg(test)]
+pub(super) mod inspection_tests {
+    use super::*;
+
+    pub(crate) fn inspection_fixture_definition() -> Value {
+        let mut value: Value = serde_json::from_str(include_str!(
+            "../../runtime/runner_tests/fixtures/synthetic-profile.json"
+        ))
+        .unwrap();
+        value["profiles"][0]["rules"][0]["matchers"][3]["pattern"] =
+            json!("^Request form: (?P<focus>synthetic-only|synthetic-other)$");
+        let mut alternate = value["profiles"][0]["rules"][0].clone();
+        alternate["id"] = json!("inspection-alternate-request");
+        alternate["matchers"][3]["pattern"] = json!("^Request form: (?P<focus>synthetic-alt)$");
+        value["profiles"][0]["rules"]
+            .as_array_mut()
+            .unwrap()
+            .push(alternate);
+        value["profiles"][0]["capabilities"]["detection"]["rule_ids"] =
+            json!(["synthetic-permission", "inspection-alternate-request"]);
+        value["profiles"][0]["capabilities"]["answers"] = json!([
+            answer(
+                "allow",
+                "synthetic-permission",
+                "inspection-allow-plan",
+                "allow-once",
+                "79"
+            ),
+            answer(
+                "deny",
+                "synthetic-permission",
+                "inspection-deny-plan",
+                "deny-once",
+                "6e"
+            ),
+            answer(
+                "allow",
+                "inspection-alternate-request",
+                "inspection-alternate-allow",
+                "allow-once",
+                "61"
+            )
+        ]);
+        value
+    }
+
+    fn answer(decision: &str, request: &str, id: &str, choice: &str, byte: &str) -> Value {
+        json!({
+            "decision":decision,"request_rule_id":request,"answer_rule_id":id,
+            "choice_id":choice,"focus_matcher_id":"form","fixture_ids":["synthetic-permission-1"],
+            "stages":[
+                {"bytes_hex":byte,"required_rule_id":request,"required_choice_id":choice},
+                {"bytes_hex":"0d","required_rule_id":request,"required_choice_id":choice}
+            ]
+        })
+    }
+
+    pub(crate) fn inspection_fixture_form(operation: &str, focus: &str) -> Vec<u8> {
+        format!("\x1b[2J\x1b[19;1HSynthetic permission request\r\nOperation: {operation}\r\n> Allow once\r\n  Deny once\r\nRequest form: {focus}\r\nSelection: ").into_bytes()
+    }
+
+    #[test]
+    fn permission_inspection_catalog_retains_exact_executable_plans_and_provenance() {
+        let catalog = ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
+        for (decision, choice, rule, bytes) in [
+            (
+                PermissionDecision::Allow,
+                "allow-once",
+                "inspection-allow-plan",
+                b'y',
+            ),
+            (
+                PermissionDecision::Deny,
+                "deny-once",
+                "inspection-deny-plan",
+                b'n',
+            ),
+        ] {
+            let plan = catalog
+                .answer_plan(
+                    CodingAgent::Codex,
+                    "synthetic-0.0.1",
+                    "synthetic-permission",
+                    decision,
+                )
+                .unwrap()
+                .unwrap();
+            let capability = plan.capability();
+            assert_eq!(capability.backend(), CodingAgent::Codex);
+            assert_eq!(capability.native_version(), "synthetic-0.0.1");
+            assert_eq!(capability.profile_version(), "synthetic-profile-1");
+            assert_eq!(capability.request_rule_id(), "synthetic-permission");
+            assert_eq!(capability.answer_rule_id(), rule);
+            assert_eq!(capability.decision(), decision);
+            assert_eq!(
+                capability.fixture_ids(),
+                &["synthetic-permission-1".to_owned()]
+            );
+            assert_eq!(plan.choice_id(), choice);
+            assert_eq!(plan.focus_matcher_id(), "form");
+            assert_eq!(plan.stages().len(), 2);
+            assert_eq!(plan.stages()[0].bytes(), &[bytes]);
+            assert_eq!(plan.stages()[1].bytes(), b"\r");
+            for stage in plan.stages() {
+                assert_eq!(stage.required_rule_id(), "synthetic-permission");
+                assert_eq!(stage.required_choice_id(), choice);
+            }
+        }
+        for (version, rule, decision) in [
+            ("other", "synthetic-permission", PermissionDecision::Allow),
+            ("synthetic-0.0.1", "unknown", PermissionDecision::Allow),
+            (
+                "synthetic-0.0.1",
+                "inspection-alternate-request",
+                PermissionDecision::Deny,
+            ),
+        ] {
+            assert!(
+                catalog
+                    .answer_plan(CodingAgent::Codex, version, rule, decision)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        assert!(
+            ProfileCatalog::bundled()
+                .unwrap()
+                .answer_plan(
+                    CodingAgent::Codex,
+                    "synthetic-0.0.1",
+                    "synthetic-permission",
+                    PermissionDecision::Allow
+                )
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn permission_inspection_catalog_bounds_each_stage_and_complete_plan() {
+        let mut value = inspection_fixture_definition();
+        let mut stage = value["profiles"][0]["capabilities"]["answers"][0]["stages"][0].clone();
+        stage["bytes_hex"] = json!("79".repeat(256));
+        value["profiles"][0]["capabilities"]["answers"][0]["stages"] =
+            json!(vec![stage.clone(); 16]);
+        let catalog = ProfileCatalog::from_definitions(&value).unwrap();
+        let plan = catalog
+            .answer_plan(
+                CodingAgent::Codex,
+                "synthetic-0.0.1",
+                "synthetic-permission",
+                PermissionDecision::Allow,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            plan.stages().iter().map(|s| s.bytes().len()).sum::<usize>(),
+            4096
+        );
+        value["profiles"][0]["capabilities"]["answers"][0]["stages"] = json!(vec![stage; 17]);
+        assert!(ProfileCatalog::from_definitions(&value).is_err());
+        value["profiles"][0]["capabilities"]["answers"][0]["stages"] = json!([{
+            "bytes_hex":"79".repeat(257),"required_rule_id":"synthetic-permission","required_choice_id":"allow-once"
+        }]);
+        assert!(ProfileCatalog::from_definitions(&value).is_err());
+    }
+
+    #[test]
+    fn permission_inspection_executable_plans_have_no_debug_or_serialized_representation() {
+        trait AmbiguousIfImplemented<Marker> {
+            fn check() {}
+        }
+        struct DebugImplemented;
+        struct SerializeImplemented;
+        impl<T: ?Sized> AmbiguousIfImplemented<()> for T {}
+        impl<T: ?Sized + std::fmt::Debug> AmbiguousIfImplemented<DebugImplemented> for T {}
+        impl<T: ?Sized + serde::Serialize> AmbiguousIfImplemented<SerializeImplemented> for T {}
+        let _ = <crate::coding_agent::AnswerPlan as AmbiguousIfImplemented<_>>::check;
+        let _ = <crate::coding_agent::AnswerStage as AmbiguousIfImplemented<_>>::check;
+    }
+}
 fn require(ok: bool, message: &str) -> Result<()> {
     if ok { Ok(()) } else { Err(invalid(message)) }
 }

@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 pub(crate) mod input_service;
 mod observation_contract;
-mod observation_services;
+pub(in crate::runtime) mod observation_services;
 mod review_collector;
 mod review_export;
 mod review_failures;
@@ -125,7 +125,7 @@ pub(crate) struct ServiceFixture {
     _artifacts: RunArtifacts,
     child: OwnedChild,
     process: Option<ProcessIdentity>,
-    master: File,
+    pub(in crate::runtime) master: File,
     _slave: File,
     creator: Option<Wire>,
     prepared: Option<ControlIdentity>,
@@ -186,7 +186,7 @@ impl ServiceFixture {
         Self::configured(missing_executable, |_, _| {})
     }
 
-    fn configured(
+    pub(in crate::runtime) fn configured(
         missing_executable: bool,
         configure: impl FnOnce(&mut Fixture, &mut SpawnSpec),
     ) -> Self {
@@ -441,7 +441,7 @@ impl ServiceFixture {
         self.creator.as_mut().unwrap().exchange(&request)
     }
 
-    fn start_running(&mut self) -> Started {
+    pub(in crate::runtime) fn start_running(&mut self) -> Started {
         self.prepare();
         self.publish();
         let reply = self.start().unwrap();
@@ -460,7 +460,7 @@ impl ServiceFixture {
         serde_json::from_value(reply["result"].clone()).unwrap()
     }
 
-    fn read_until(&mut self, needle: &str) {
+    pub(in crate::runtime) fn read_until(&mut self, needle: &str) {
         let until = if needle == "review-native-ready" {
             self.startup_deadline
         } else {
@@ -510,7 +510,7 @@ impl ServiceFixture {
         }
     }
 
-    fn finish(&mut self) {
+    pub(in crate::runtime) fn finish(&mut self) {
         self.master.write_all(b"finish\r").unwrap();
         assert_eq!(self.wait().code(), Some(0));
         let run = storage::get_run(&self.fixture.conn, self.fixture.run.run_id).unwrap();

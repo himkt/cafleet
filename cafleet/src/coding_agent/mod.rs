@@ -15,6 +15,8 @@ pub(crate) use profiles::{ComposerOperation, ComposerPlan};
 pub(crate) use profiles::{
     Detector, MatchEvidence, ObservationKind, ScreenObservation, SemanticFingerprint,
 };
+#[cfg(test)]
+pub(crate) use profiles::{inspection_fixture_definition, inspection_fixture_form};
 
 #[cfg(test)]
 mod policy_contract_tests {

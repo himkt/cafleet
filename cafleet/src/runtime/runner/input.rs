@@ -26,6 +26,538 @@ use std::time::Instant;
 #[cfg(test)]
 mod contract_tests;
 
+#[cfg(test)]
+mod permission_inspection_contracts {
+    use super::contract_tests::ordinary_prompt::support::{
+        Host, catalog_definition, with_catalog_host,
+    };
+    use super::*;
+    use crate::broker::runtime::{Coverage, InteractionClass, PermissionDecision};
+    use crate::coding_agent::{inspection_fixture_definition, inspection_fixture_form};
+    use crate::runtime::runner::{
+        MissingEvidence, PermissionInspectInput, PermissionInspection, RuntimePaths,
+    };
+    use rusqlite::OptionalExtension;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    struct Tokens {
+        calls: Arc<AtomicUsize>,
+        fail: Arc<AtomicBool>,
+    }
+    impl RequestTokenSource for Tokens {
+        fn fill(&mut self, bytes: &mut [u8; 32]) -> Result<()> {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+            if self.fail.load(Ordering::SeqCst) {
+                return Err(error("owned inspection entropy failure"));
+            }
+            bytes.fill(u8::try_from(call).expect("bounded fixture token calls"));
+            Ok(())
+        }
+    }
+
+    fn with_inspection(body: impl FnOnce(&mut Host, Arc<AtomicUsize>, Arc<AtomicBool>)) {
+        let mut definition = inspection_fixture_definition();
+        let composer = catalog_definition();
+        definition["fixtures"]
+            .as_array_mut()
+            .unwrap()
+            .push(composer["fixtures"][1].clone());
+        definition["profiles"][0]["rules"]
+            .as_array_mut()
+            .unwrap()
+            .push(composer["profiles"][0]["rules"][0].clone());
+        definition["profiles"][0]["capabilities"]["composer"] =
+            composer["profiles"][0]["capabilities"]["composer"].clone();
+        with_catalog_host(
+            ProfileCatalog::from_definitions(&definition).unwrap(),
+            b"unused-program~".to_vec(),
+            |h| {
+                let calls = Arc::new(AtomicUsize::new(0));
+                let fail = Arc::new(AtomicBool::new(false));
+                h.coordinator.services.token_source = Box::new(Tokens {
+                    calls: calls.clone(),
+                    fail: fail.clone(),
+                });
+                body(h, calls, fail);
+            },
+        );
+    }
+
+    fn form(h: &mut Host, operation: &str, focus: &str) {
+        h.pty
+            .child
+            .bytes
+            .extend(inspection_fixture_form(operation, focus));
+        h.drain();
+    }
+
+    fn current_ids(h: &Host) -> Option<(i64, i64, i64, i64)> {
+        h.fixture.conn.query_row(
+            "SELECT e.event_id,e.interaction_id,e.message_id,i.episode_seq FROM member_runtime_events e JOIN member_interactions i ON i.interaction_id=e.interaction_id WHERE e.run_id=?1 AND e.kind='interaction_opened' AND i.closed_at IS NULL ORDER BY e.event_id DESC LIMIT 1",
+            [h.fixture.run.run_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))
+        ).optional().unwrap()
+    }
+
+    fn stable_form(h: &mut Host) -> (i64, i64, i64, i64) {
+        form(h, "PRIVATE_INSPECTION_OPERATION", "synthetic-only");
+        loop {
+            h.drain();
+            if h.controller.current_request().is_some()
+                && let Some(ids) = current_ids(h)
+            {
+                return ids;
+            }
+            assert!(
+                Instant::now() < h.until,
+                "stable actual request within original fixture deadline"
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    fn request(h: &Host, ids: (i64, i64, i64, i64)) -> InputControlRequest {
+        let mut request = h.request("unused-inspection-key");
+        request.operation = InputControlOperation::PermissionInspect(PermissionInspectInput {
+            event_id: ids.0,
+            interaction_id: ids.1,
+            director_member_id: h.fixture.run.director_member_id,
+        });
+        request
+    }
+
+    fn inspect_request(
+        h: &mut Host,
+        request: InputControlRequest,
+        until: Instant,
+    ) -> std::result::Result<PermissionInspection, InputFailure> {
+        h.coordinator
+            .inspect_received(
+                &mut h.fixture.conn,
+                &h.fixture.run,
+                request,
+                (&h.controller, &mut h.transport),
+                until,
+            )
+            .map(|reply| {
+                let InputControlReply::Inspection(value) = reply else {
+                    panic!("actual inspection typed reply")
+                };
+                *value
+            })
+    }
+    fn inspect(h: &mut Host, ids: (i64, i64, i64, i64)) -> PermissionInspection {
+        h.drain();
+        inspect_request(h, request(h, ids), h.until).unwrap()
+    }
+    fn token(value: &PermissionInspection) -> String {
+        let token = value
+            .request_token
+            .as_ref()
+            .expect("current matched request token");
+        assert_eq!(token.len(), 64);
+        assert!(
+            token
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        );
+        token.clone()
+    }
+    fn counts(h: &Host) -> [i64; 3] {
+        [
+            "member_input_operations",
+            "member_permission_responses",
+            "member_permission_response_claims",
+        ]
+        .map(|table| {
+            h.fixture
+                .conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap()
+        })
+    }
+    fn pending(h: &Host) -> (String, String, Vec<u8>, Instant, InputPhase, Option<i64>) {
+        let p = h
+            .coordinator
+            .pending
+            .as_ref()
+            .expect("genuine Armed writer");
+        (
+            p.request.operation_key.clone(),
+            p.request.payload_digest.clone(),
+            p.bytes.to_vec(),
+            p.deadline,
+            p.phase,
+            p.input_id,
+        )
+    }
+
+    #[test]
+    fn permission_inspection_matches_durable_current_request_and_preserves_the_armed_writer() {
+        with_inspection(|h, calls, _| {
+            let input_id = h.arm("prompt:inspection-pending");
+            let ids = stable_form(h);
+            let pending = pending(h);
+            let row = storage::get_input(&h.fixture.conn, input_id).unwrap();
+            let retained = h.coordinator.retained_checkpoint(input_id).unwrap();
+            let before = counts(h);
+            let hooks = h.hooks.points.lock().unwrap().len();
+            let value = inspect(h, ids);
+            assert_eq!(
+                (
+                    value.event_id,
+                    value.interaction_id,
+                    value.message_id,
+                    value.episode_seq
+                ),
+                ids
+            );
+            let run = &h.fixture.run;
+            assert_eq!(
+                (
+                    value.run_id,
+                    value.owner_epoch,
+                    value.fleet_id,
+                    value.member_id,
+                    value.director_member_id
+                ),
+                (
+                    run.run_id,
+                    run.owner_epoch,
+                    run.fleet_id,
+                    run.member_id,
+                    run.director_member_id
+                )
+            );
+            assert_eq!(
+                value.classification,
+                Some(InteractionClass::PermissionRequest)
+            );
+            assert_eq!(value.visibility, Visibility::Visible);
+            assert_eq!(value.answer_capability, Coverage::Tested);
+            assert_eq!(
+                value.answer_profile_version.as_deref(),
+                Some("synthetic-profile-1")
+            );
+            assert!(
+                value.answer_rule_id.is_none(),
+                "distinct Allow/Deny rules have no unique common rule"
+            );
+            assert_eq!(
+                value.supported_decisions,
+                vec![PermissionDecision::Allow, PermissionDecision::Deny]
+            );
+            assert!(value.capability_reason.is_none());
+            assert_eq!(
+                value.evidence,
+                h.controller.current_evidence().unwrap().clone()
+            );
+            assert!(value.evidence["operation"].is_null());
+            assert_eq!(
+                value
+                    .missing_evidence
+                    .iter()
+                    .map(MissingEvidence::as_str)
+                    .collect::<Vec<_>>(),
+                [
+                    "operation",
+                    "arguments",
+                    "cwd",
+                    "environment",
+                    "targets",
+                    "effects",
+                    "choice_scope"
+                ]
+            );
+            let first = token(&value);
+            let no_drain = inspect_request(h, request(h, ids), h.until).unwrap();
+            assert!(no_drain.request_token.is_none());
+            assert!(no_drain.supported_decisions.is_empty());
+            assert_eq!(no_drain.answer_capability, Coverage::Unknown);
+            assert_eq!(token(&inspect(h, ids)), first);
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+            assert!(pending == self::pending(h));
+            assert_eq!(storage::get_input(&h.fixture.conn, input_id).unwrap(), row);
+            let after = h.coordinator.retained_checkpoint(input_id).unwrap();
+            assert_eq!(
+                (after.stage, after.written_bytes, after.output_seq),
+                (retained.stage, retained.written_bytes, retained.output_seq)
+            );
+            assert_eq!(counts(h), before);
+            assert_eq!(h.hooks.points.lock().unwrap().len(), hooks);
+            assert!(h.pty.offers.is_empty());
+            let (evidence,body,notified):(String,String,Option<String>) = h.fixture.conn.query_row("SELECT i.evidence_json,m.text,m.notified_at FROM member_interactions i JOIN messages m ON m.message_id=?1 WHERE i.interaction_id=?2",rusqlite::params![ids.2,ids.1],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+            for stored in [evidence, body] {
+                assert!(!stored.contains(&first));
+                assert!(!stored.contains("PRIVATE_INSPECTION_OPERATION"));
+            }
+            let paths =
+                RuntimePaths::for_run(&h.fixture.run.database_identity_json, h.fixture.run.run_id)
+                    .unwrap();
+            let outbox = std::fs::read(paths.outbox).unwrap();
+            for secret in [first.as_bytes(), b"PRIVATE_INSPECTION_OPERATION".as_slice()] {
+                assert!(!outbox.windows(secret.len()).any(|window| window == secret));
+            }
+            assert!(notified.is_none());
+        });
+    }
+
+    #[test]
+    fn permission_inspection_token_binds_focus_plan_set_and_intermediate_invalidations() {
+        with_inspection(|h, calls, _| {
+            let ids = stable_form(h);
+            let original = inspect(h, ids);
+            let mut previous = token(&original);
+            form(h, "PRIVATE_INSPECTION_OPERATION", "synthetic-only");
+            let redraw = inspect(h, ids);
+            assert!(redraw.output_seq > original.output_seq);
+            assert_eq!(token(&redraw), previous);
+            h.transport
+                .resize(
+                    &mut h.pty,
+                    super::super::TerminalSize { rows: 24, cols: 81 },
+                )
+                .unwrap();
+            assert_eq!(token(&inspect(h, ids)), previous);
+            h.coordinator.observe_manual(0).unwrap();
+            assert_eq!(token(&inspect(h, ids)), previous);
+            h.human.bytes.push_back(b'!');
+            h.drain();
+            assert_eq!(h.pty.manual, b"!");
+            let manual = token(&inspect(h, ids));
+            assert_ne!(manual, previous);
+            previous = manual;
+            let revision = h.controller.request_generation();
+            form(h, "PRIVATE_INSPECTION_OPERATION", "missing-focus");
+            assert!(h.controller.current_request().is_none());
+            assert!(h.controller.request_generation() > revision);
+            form(h, "PRIVATE_INSPECTION_OPERATION", "synthetic-only");
+            let returned = token(&inspect(h, ids));
+            assert_ne!(
+                returned, previous,
+                "A-invalid-A cannot resurrect a token without an intervening inspect"
+            );
+            previous = returned;
+            assert_eq!(
+                current_ids(h),
+                Some(ids),
+                "invalidation precedes durable obscurity debounce"
+            );
+            form(h, "PRIVATE_INSPECTION_OPERATION", "synthetic-other");
+            let focused = token(&inspect(h, ids));
+            assert_ne!(focused, previous);
+            form(h, "PRIVATE_INSPECTION_OPERATION", "synthetic-alt");
+            let alternate = inspect(h, ids);
+            assert_ne!(token(&alternate), focused);
+            assert_eq!(
+                alternate.supported_decisions,
+                vec![PermissionDecision::Allow]
+            );
+            assert_eq!(
+                alternate.answer_rule_id.as_deref(),
+                Some("inspection-alternate-allow")
+            );
+            assert_eq!(
+                current_ids(h),
+                Some(ids),
+                "plan/focus changes are independent of semantic episode identity"
+            );
+            form(h, "different semantic request", "synthetic-only");
+            assert!(h.controller.current_request().is_none());
+            let candidate = inspect_request(h, request(h, ids), h.until).unwrap();
+            assert!(candidate.request_token.is_none());
+            assert!(candidate.supported_decisions.is_empty());
+            form(h, "PRIVATE_INSPECTION_OPERATION", "synthetic-alt");
+            assert_ne!(token(&inspect(h, ids)), token(&alternate));
+            assert_eq!(calls.load(Ordering::SeqCst), 6);
+            assert!(h.pty.program.is_empty());
+        });
+    }
+
+    #[test]
+    fn permission_inspection_refuses_stale_associations_identity_and_expired_budget_without_effects()
+     {
+        with_inspection(|h, calls, _| {
+            let ids = stable_form(h);
+            let original = token(&inspect(h, ids));
+            let before = counts(h);
+            h.drain();
+            let mut wrong = request(h, ids);
+            wrong.identity.launch_nonce = "f".repeat(64);
+            assert!(inspect_request(h, wrong, h.until).is_err());
+            h.drain();
+            assert!(inspect_request(h, request(h, ids), Instant::now()).is_err());
+            h.fixture.conn.execute("UPDATE member_interactions SET closed_at=?1,close_reason='not_visible' WHERE interaction_id=?2",rusqlite::params![crate::time::format_utc(crate::time::now_utc()),ids.1]).unwrap();
+            h.drain();
+            assert!(inspect_request(h, request(h, ids), h.until).is_err());
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+            assert_eq!(counts(h), before);
+            assert!(h.pty.offers.is_empty());
+            assert!(!original.is_empty());
+        });
+    }
+
+    #[test]
+    fn permission_inspection_entropy_failure_and_manual_overflow_supply_no_fallback_authority() {
+        with_inspection(|h, calls, fail| {
+            let ids = stable_form(h);
+            fail.store(true, Ordering::SeqCst);
+            h.drain();
+            let failure = match inspect_request(h, request(h, ids), h.until) {
+                Err(e) => e,
+                Ok(_) => panic!("entropy failure is explicit"),
+            };
+            assert!(
+                failure
+                    .source
+                    .message()
+                    .contains("owned inspection entropy failure")
+            );
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+            fail.store(false, Ordering::SeqCst);
+            let value = inspect(h, ids);
+            assert_eq!(token(&value), "02".repeat(32));
+            h.coordinator.manual_generation = u64::MAX;
+            assert!(h.coordinator.observe_manual(1).is_err());
+            assert!(h.coordinator.manual_accounting_failed);
+            h.drain();
+            let result = inspect_request(h, request(h, ids), h.until);
+            assert!(result.is_err() || result.is_ok_and(|v| v.request_token.is_none()));
+            assert_eq!(calls.load(Ordering::SeqCst), 2);
+            assert_eq!(counts(h), [0, 0, 0]);
+            assert!(h.pty.offers.is_empty());
+        });
+    }
+
+    #[test]
+    fn permission_inspection_owner_loss_and_shutdown_revoke_the_existing_token() {
+        with_inspection(|h, calls, _| {
+            let ids = stable_form(h);
+            let original = token(&inspect(h, ids));
+            let paths =
+                RuntimePaths::for_run(&h.fixture.run.database_identity_json, h.fixture.run.run_id)
+                    .unwrap();
+            let backup = paths.owner_lock.with_extension("inspection-owned-backup");
+            h.drain();
+            std::fs::rename(&paths.owner_lock, &backup).unwrap();
+            let lost = inspect_request(h, request(h, ids), h.until);
+            std::fs::rename(&backup, &paths.owner_lock).unwrap();
+            assert!(
+                lost.is_err(),
+                "actual lock inode no longer occupies its pinned path"
+            );
+            assert_ne!(token(&inspect(h, ids)), original);
+            assert_eq!(calls.load(Ordering::SeqCst), 2);
+            h.coordinator.fence(h.until).unwrap();
+            h.drain();
+            let fenced = inspect_request(h, request(h, ids), h.until);
+            assert!(fenced.is_err() || fenced.is_ok_and(|v| v.request_token.is_none()));
+            assert_eq!(calls.load(Ordering::SeqCst), 2);
+            assert!(h.pty.offers.is_empty());
+        });
+    }
+
+    #[test]
+    fn permission_inspection_observation_gap_revokes_authority_before_recovery() {
+        with_inspection(|h, _, _| {
+            let ids = stable_form(h);
+            let original = token(&inspect(h, ids));
+            let generation = h.controller.request_generation();
+            h.controller
+                .observer_failed(
+                    super::super::ObservationFailure::Parser,
+                    &super::super::RealObservationClock,
+                )
+                .unwrap();
+            assert!(h.controller.current_request().is_none());
+            assert!(h.controller.request_generation() > generation);
+            let unavailable = inspect_request(h, request(h, ids), h.until);
+            assert!(
+                unavailable.is_err()
+                    || unavailable.is_ok_and(|value| value.request_token.is_none())
+            );
+            let later_ids = stable_form(h);
+            assert_ne!(token(&inspect(h, later_ids)), original);
+            assert!(h.pty.offers.is_empty());
+        });
+    }
+
+    #[test]
+    fn permission_inspection_missing_facts_use_validated_post_policy_evidence_only() {
+        use super::super::{TerminalSize, TerminalState};
+        use crate::coding_agent::{CodingAgent, Detector};
+        let catalog = ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
+        let detector =
+            Detector::new(&catalog, CodingAgent::Codex, Some("synthetic-0.0.1")).unwrap();
+        let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
+        terminal
+            .feed(&inspection_fixture_form(
+                "write public.txt",
+                "synthetic-only",
+            ))
+            .unwrap();
+        let raw = detector.observe(&terminal.snapshot()).unwrap().raw_evidence;
+        let redacted = storage::evidence::EvidencePolicy::redacted(&serde_json::json!({"schema_version":1,"patterns":["OWNED_SECRET"],"sensitive_rules":[]}),&["synthetic-permission"]).unwrap();
+        let missing = |value: &serde_json::Value| {
+            inspection_missing_evidence(value)
+                .unwrap()
+                .iter()
+                .map(MissingEvidence::as_str)
+                .collect::<Vec<_>>()
+        };
+        let public = redacted.apply(&raw).unwrap();
+        let unavailable = [
+            "operation",
+            "arguments",
+            "cwd",
+            "environment",
+            "targets",
+            "effects",
+            "choice_scope",
+        ];
+        assert_eq!(missing(&public), unavailable[1..]);
+        assert_eq!(
+            missing(
+                &storage::evidence::EvidencePolicy::metadata()
+                    .apply(&raw)
+                    .unwrap()
+            ),
+            unavailable
+        );
+        for operation in [
+            serde_json::Value::Null,
+            serde_json::json!(" "),
+            serde_json::json!("OWNED_SECRET"),
+            serde_json::json!("[redacted]"),
+        ] {
+            let mut changed = raw.clone();
+            changed["operation"] = operation;
+            assert_eq!(missing(&redacted.apply(&changed).unwrap()), unavailable);
+        }
+        let mut truncated = raw.clone();
+        truncated["truncated"] = serde_json::json!(true);
+        assert_eq!(missing(&redacted.apply(&truncated).unwrap()), unavailable);
+        let mut corrupt = public;
+        corrupt["evidence_digest"] = serde_json::json!("f".repeat(64));
+        assert!(inspection_missing_evidence(&corrupt).is_err());
+        corrupt.as_object_mut().unwrap().remove("operation");
+        assert!(inspection_missing_evidence(&corrupt).is_err());
+    }
+
+    #[test]
+    fn permission_inspection_current_authority_has_no_debug_or_serialized_representation() {
+        trait AmbiguousIfImplemented<Marker> {
+            fn check() {}
+        }
+        struct DebugImplemented;
+        struct SerializeImplemented;
+        impl<T: ?Sized> AmbiguousIfImplemented<()> for T {}
+        impl<T: ?Sized + std::fmt::Debug> AmbiguousIfImplemented<DebugImplemented> for T {}
+        impl<T: ?Sized + serde::Serialize> AmbiguousIfImplemented<SerializeImplemented> for T {}
+        let _ = <CurrentRequest as AmbiguousIfImplemented<_>>::check;
+    }
+}
+
 pub(crate) trait RequestTokenSource: Send {
     #[expect(
         dead_code,

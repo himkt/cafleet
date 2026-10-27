@@ -1,5 +1,4 @@
 use super::*;
-use crate::runtime::runner::{PermissionInspectInput, inspect_permission};
 
 fn incomplete<T>(result: std::result::Result<T, InputFailure>) -> InputFailure {
     let failure = match result {
@@ -37,28 +36,6 @@ fn ready() -> Case {
     assert_eq!(receipt.response.metadata, case.request.metadata);
     assert!(receipt.claim.is_some());
     case
-}
-
-#[test]
-fn step5_checkpoint_inspect_returns_explicit_incomplete_error_with_exact_rows() {
-    let mut case = Case::new(Retained::Accepted);
-    let request = PermissionInspectInput {
-        interaction_id: case.request.metadata.interaction_id,
-        event_id: case.event.event_id,
-        director_member_id: case.fixture.run.director_member_id,
-    };
-    let before = Snapshot::take(&case.fixture.conn);
-    let failure = incomplete(inspect_permission(
-        &mut case.fixture.conn,
-        &case.settings,
-        &request,
-        Deadline::until(Instant::now() + Duration::from_secs(1)),
-    ));
-    assert_eq!(failure.run_id, Some(case.owner.run_id));
-    assert_eq!(failure.interaction_id, Some(request.interaction_id));
-    assert_eq!(failure.input_id, None);
-    assert_eq!(failure.operation_key, None);
-    before.unchanged(&case.fixture.conn);
 }
 
 #[test]

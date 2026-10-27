@@ -8,7 +8,7 @@ pub(super) const SCREEN: &[u8] = b"\x1b[2J\x1b[23;1HSynthetic state\r\nState end
 pub(super) const VERSION: &str = "synthetic-0.0.1";
 const PROFILE: &str = "synthetic-profile-1";
 
-pub(super) fn catalog_definition() -> serde_json::Value {
+pub(in crate::runtime::runner::input) fn catalog_definition() -> serde_json::Value {
     let mut value: serde_json::Value = serde_json::from_str(include_str!(
         "../../../../runner_tests/fixtures/synthetic-profile.json"
     ))
@@ -235,9 +235,12 @@ impl Host {
         .unwrap();
         fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
         storage::reserve_event_sequences(&mut fixture.conn, &fixture.run.owner()).unwrap();
-        fixture.conn.execute("UPDATE member_runs SET native_version=?1,profile_version=?2,coverage='unknown' WHERE run_id=?3",rusqlite::params![VERSION,PROFILE,fixture.run.run_id]).unwrap();
-        fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
         let catalog = catalog();
+        let coverage = catalog
+            .capabilities(crate::coding_agent::CodingAgent::Codex, Some(VERSION))
+            .detection;
+        fixture.conn.execute("UPDATE member_runs SET native_version=?1,profile_version=?2,coverage=?3 WHERE run_id=?4",rusqlite::params![VERSION,PROFILE,coverage.as_str(),fixture.run.run_id]).unwrap();
+        fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
         let mut controller = ObservationController::new(
             &fixture.run,
             &catalog,
@@ -460,7 +463,7 @@ impl Host {
 pub(in crate::runtime::runner::input) fn with_host(body: impl FnOnce(&mut Host)) {
     with_owned_host(Host::new(), body);
 }
-pub(super) fn with_catalog_host(
+pub(in crate::runtime::runner::input) fn with_catalog_host(
     catalog: ProfileCatalog,
     expected_program: Vec<u8>,
     body: impl FnOnce(&mut Host),
