@@ -4676,11 +4676,139 @@ fn combine_manual_progress<T>(progress: Result<T>, accounting: Result<()>) -> Re
 
 #[cfg(test)]
 mod retirement_contracts {
-    use super::contract_tests::ordinary_prompt::support::{Host, with_host};
+    use super::contract_tests::ordinary_prompt::support::{Host, with_host, with_host_until};
     use super::*;
     use crate::runtime::runner::{ReceiptAction, ReceiptReply, SubmitInput};
     use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    #[test]
+    fn completed_coordinator_settlement_and_retirement_exceeds_cache_capacity_without_replay() {
+        let until = Instant::now() + Duration::from_secs(120);
+        with_host_until(until, |h| {
+            let run = h.fixture.run.clone();
+            let first_key = "prompt:capacity:0";
+            let first_request = h.request(first_key);
+            let expected_program = "ordinary fixture λ~".as_bytes();
+            let evidence = "owned completed coordinator input";
+            let mut first_settled = None;
+            for index in 0..4097 {
+                assert!(
+                    Instant::now() < until,
+                    "original batch cap at cycle {index}"
+                );
+                assert_eq!(h.until, until);
+                assert!(h.coordinator.operations.is_empty());
+                assert!(h.coordinator.pending.is_none());
+                let request = h.request(&format!("prompt:capacity:{index}"));
+                assert_eq!(request.expires_at_mono_ns, first_request.expires_at_mono_ns);
+                assert!(
+                    h.coordinator
+                        .handle(&mut h.fixture.conn, &run, request, &h.controller, until)
+                        .unwrap()
+                        .is_none()
+                );
+                let reply = (0..8)
+                    .find_map(|_| {
+                        h.drain();
+                        h.advance()
+                    })
+                    .expect("actual completion within finite drained turns");
+                let InputControlReply::Submission(accepted) = reply else {
+                    panic!("actual Prompt submission reply")
+                };
+                assert_eq!(accepted.status, SubmissionStatus::Accepted);
+                assert_eq!(accepted.stage, SubmissionStage::Submitted);
+                let id = accepted.input_id.expect("actual completed input ID");
+                assert_eq!(h.coordinator.operations.len(), 1);
+                assert!(h.coordinator.pending.is_none());
+                let retained = cached(h, id);
+                assert_eq!(retained.0.state, storage::InputState::Accepted);
+                assert_eq!(retained.1, SubmissionStage::Submitted);
+                assert_eq!(retained.2, u64::try_from(expected_program.len()).unwrap());
+                assert!(!retained.4 && !retained.5);
+                assert_eq!(h.pty.offers.len(), index + 1);
+                assert_eq!(h.pty.program.len(), index + 1);
+                assert_eq!(h.pty.program.last().unwrap(), expected_program);
+                assert!(h.pty.manual.is_empty());
+                for boundary in ["reserved", "before", "after", "terminal"] {
+                    assert_eq!(h.hooks.count(boundary), 1, "cycle {index}: {boundary}");
+                }
+                let settled_reply = receipt(
+                    h,
+                    ReceiptAction::Reconcile {
+                        input_id: id,
+                        expected: storage::InputState::Accepted,
+                        disposition: storage::InputDisposition::Submitted,
+                        evidence_ref: evidence.into(),
+                    },
+                )
+                .unwrap();
+                assert!(
+                    matches!(settled_reply, InputControlReply::Receipt(ReceiptReply::Settled { input_id }) if input_id == id)
+                );
+                let settled = storage::get_input(&h.fixture.conn, id).unwrap();
+                assert_eq!(settled.run_id, run.run_id);
+                assert_eq!(settled.operation_key, format!("prompt:capacity:{index}"));
+                assert_eq!(settled.kind, storage::InputKind::Prompt);
+                assert_eq!(settled.state, storage::InputState::Settled);
+                assert_eq!(
+                    settled.disposition,
+                    Some(storage::InputDisposition::Submitted)
+                );
+                assert_eq!(settled.evidence_ref.as_deref(), Some(evidence));
+                assert_eq!(cached(h, id).0, settled);
+                assert_retired(
+                    receipt(h, ReceiptAction::Retire { input_id: id }).unwrap(),
+                    id,
+                );
+                assert!(h.coordinator.operations.is_empty());
+                assert!(h.coordinator.pending.is_none());
+                assert_eq!(storage::get_input(&h.fixture.conn, id).unwrap(), settled);
+                assert_eq!(h.pty.offers.len(), index + 1);
+                if index == 0 {
+                    first_settled = Some(settled);
+                }
+                h.hooks.points.lock().unwrap().clear();
+            }
+            let (completed, unresolved): (i64, i64) = h.fixture.conn.query_row(
+                "SELECT COUNT(*),COUNT(CASE WHEN state IN ('in_progress','accepted','uncertain') THEN 1 END) FROM member_input_operations WHERE run_id=?1",
+                [run.run_id], |row| Ok((row.get(0)?, row.get(1)?)),
+            ).unwrap();
+            assert_eq!((completed, unresolved), (4097, 0));
+            let first = first_settled.expect("first real completed operation retained as history");
+            let changes = h.fixture.conn.total_changes();
+            let reply = h
+                .coordinator
+                .handle(
+                    &mut h.fixture.conn,
+                    &run,
+                    first_request,
+                    &h.controller,
+                    until,
+                )
+                .unwrap()
+                .expect("settled key returns history immediately");
+            let InputControlReply::Submission(replayed) = reply else {
+                panic!("historical Prompt submission reply")
+            };
+            assert_eq!(replayed.status, SubmissionStatus::Accepted);
+            assert_eq!(replayed.stage, SubmissionStage::Submitted);
+            assert_eq!(replayed.input_id, Some(first.input_id));
+            assert!(h.coordinator.operations.is_empty());
+            assert!(h.coordinator.pending.is_none());
+            assert_eq!(h.fixture.conn.total_changes(), changes);
+            assert_eq!(
+                storage::get_input(&h.fixture.conn, first.input_id).unwrap(),
+                first
+            );
+            assert_eq!(h.pty.offers.len(), 4097);
+            assert_eq!(h.pty.program.len(), 4097);
+            assert!(h.pty.manual.is_empty());
+            assert!(h.hooks.points.lock().unwrap().is_empty());
+        });
+    }
 
     fn assert_retired(reply: InputControlReply, expected: i64) {
         assert!(

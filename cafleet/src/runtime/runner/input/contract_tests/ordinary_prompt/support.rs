@@ -210,13 +210,24 @@ pub(in crate::runtime::runner::input) struct Host {
 
 impl Host {
     pub fn new() -> Self {
-        Self::build(catalog, encoded())
+        Self::build(catalog, encoded(), Instant::now() + Duration::from_secs(5))
     }
     fn with_catalog(catalog: ProfileCatalog, expected_program: Vec<u8>) -> Self {
-        Self::build(|| catalog, expected_program)
+        Self::build(
+            || catalog,
+            expected_program,
+            Instant::now() + Duration::from_secs(5),
+        )
     }
-    fn build(catalog: impl FnOnce() -> ProfileCatalog, expected_program: Vec<u8>) -> Self {
-        let until = Instant::now() + Duration::from_secs(5);
+    fn build(
+        catalog: impl FnOnce() -> ProfileCatalog,
+        expected_program: Vec<u8>,
+        until: Instant,
+    ) -> Self {
+        assert!(
+            Instant::now() < until,
+            "original fixture construction deadline"
+        );
         let expires = InputExpiration::capture(until, &mut RealInputDeadlineClock)
             .unwrap()
             .monotonic_ns();
@@ -462,6 +473,12 @@ impl Host {
 }
 pub(in crate::runtime::runner::input) fn with_host(body: impl FnOnce(&mut Host)) {
     with_owned_host(Host::new(), body);
+}
+pub(in crate::runtime::runner::input) fn with_host_until(
+    until: Instant,
+    body: impl FnOnce(&mut Host),
+) {
+    with_owned_host(Host::build(catalog, encoded(), until), body);
 }
 pub(in crate::runtime::runner::input) fn with_catalog_host(
     catalog: ProfileCatalog,
