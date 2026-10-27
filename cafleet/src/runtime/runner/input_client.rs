@@ -839,6 +839,156 @@ mod tests {
     }
 
     #[test]
+    fn external_input_borrowed_history_keeps_the_prepared_deadline_before_first_sql() {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+        use std::sync::{Arc, Mutex};
+
+        let mut case = History::new(InputState::Accepted, None);
+        let held = PaneLock::try_acquire(&case.settings.database_url, &case.placement)
+            .unwrap()
+            .unwrap();
+        let changes = case.fixture.conn.total_changes();
+        let control_deadline = Instant::now() + Duration::from_secs(2);
+        let control = PreparedSubmission::new(
+            &case.request,
+            control_deadline,
+            &mut super::super::RealInputDeadlineClock,
+        )
+        .unwrap();
+        let result = submit_wrapped_input_under_pane_lock_with_host(
+            &mut case.fixture.conn,
+            &case.settings,
+            &case.fixture.run,
+            &case.placement,
+            &held,
+            &control,
+            Deadline::until(control_deadline),
+            &mut NoLiveHost,
+        )
+        .unwrap();
+        assert_eq!(result.status, SubmissionStatus::Accepted);
+        assert_eq!(result.input_id, Some(case.row.input_id));
+
+        let original = Instant::now() + Duration::from_millis(100);
+        let expired_attempt = PreparedSubmission::new(
+            &case.request,
+            original,
+            &mut super::super::RealInputDeadlineClock,
+        )
+        .unwrap();
+        std::thread::sleep(
+            original.saturating_duration_since(Instant::now()) + Duration::from_millis(1),
+        );
+        assert!(
+            Instant::now() >= original,
+            "the checked prepared attempt actually expired"
+        );
+        let budgets = Arc::new(Mutex::new(Vec::new()));
+        let observed = budgets.clone();
+        case.fixture
+            .conn
+            .authorizer(Some(move |context: AuthContext<'_>| {
+                if matches!(
+                    context.action,
+                    AuthAction::Read {
+                        table_name: "member_input_operations",
+                        ..
+                    }
+                ) {
+                    observed
+                        .lock()
+                        .unwrap()
+                        .push(Deadline::inherited_or_new().instant());
+                }
+                Authorization::Allow
+            }))
+            .unwrap();
+        let expired = submit_wrapped_input_under_pane_lock_with_host(
+            &mut case.fixture.conn,
+            &case.settings,
+            &case.fixture.run,
+            &case.placement,
+            &held,
+            &expired_attempt,
+            Deadline::until(Instant::now() + Duration::from_secs(3)),
+            &mut NoLiveHost,
+        );
+        let expired_reads = budgets.lock().unwrap().len();
+        budgets.lock().unwrap().clear();
+
+        let original_active = Instant::now() + Duration::from_secs(1);
+        let active_attempt = PreparedSubmission::new(
+            &case.request,
+            original_active,
+            &mut super::super::RealInputDeadlineClock,
+        )
+        .unwrap();
+        let inherited = Deadline::until(Instant::now() + Duration::from_secs(2));
+        let supplied = Deadline::until(Instant::now() + Duration::from_secs(3));
+        let active = with_database_budget(&mut case.fixture.conn, inherited, |conn| {
+            Ok(submit_wrapped_input_under_pane_lock_with_host(
+                conn,
+                &case.settings,
+                &case.fixture.run,
+                &case.placement,
+                &held,
+                &active_attempt,
+                supplied,
+                &mut NoLiveHost,
+            ))
+        });
+        let removed = case
+            .fixture
+            .conn
+            .authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+        eprintln!(
+            "prepared history: expired={:?}; expired_reads={expired_reads}; active_sql_budgets_past_original={:?}; authorizer_cleanup={removed:?}",
+            expired
+                .as_ref()
+                .map(|result| (result.status, result.input_id, result.stage)),
+            budgets
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|budget| budget.saturating_duration_since(original_active))
+                .collect::<Vec<_>>()
+        );
+        removed.unwrap();
+        case.assert_unchanged(changes);
+        assert!(
+            PaneLock::try_acquire(&case.settings.database_url, &case.placement)
+                .unwrap()
+                .is_none()
+        );
+        let failure = expired
+            .err()
+            .expect("expired prepared history rejects before lookup");
+        assert!(matches!(failure.source, CafleetError::DeadlineExceeded));
+        assert_eq!(failure.run_id, Some(case.fixture.run.run_id));
+        assert_eq!(
+            failure.operation_key.as_deref(),
+            Some(case.request.operation_key.as_str())
+        );
+        assert_eq!(failure.input_id, None);
+        assert_eq!(
+            expired_reads, 0,
+            "an expired original budget starts no receipt SQL"
+        );
+        let active = active.unwrap().unwrap();
+        assert_eq!(active.status, SubmissionStatus::Accepted);
+        assert_eq!(active.input_id, Some(case.row.input_id));
+        let budgets = budgets.lock().unwrap();
+        assert!(
+            !budgets.is_empty(),
+            "the valid original budget reaches actual receipt SQL"
+        );
+        assert!(
+            budgets.iter().all(|budget| *budget <= original_active),
+            "first history SQL inherits the prepared minimum, not a later caller or outer budget"
+        );
+    }
+
+    #[test]
     fn external_input_discovery_rejects_payload_association_and_database_conflicts() {
         use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
         use std::sync::{
