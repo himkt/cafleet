@@ -1,4 +1,5 @@
 use super::*;
+use std::time::Instant;
 
 #[cfg(test)]
 mod input_frames_tests;
@@ -18,6 +19,10 @@ fn validate_version(frame: &Value) -> Result<()> {
 pub(crate) fn encode_control_frame(frame: &Value) -> Result<Vec<u8>> {
     validate_version(frame)?;
     let body = serde_json::to_vec(frame).map_err(io_error)?;
+    frame_control_body(&body)
+}
+
+pub(super) fn frame_control_body(body: &[u8]) -> Result<Vec<u8>> {
     ensure(
         body.len() <= MAX_CONTROL_FRAME,
         "control frame exceeds size limit",
@@ -26,8 +31,27 @@ pub(crate) fn encode_control_frame(frame: &Value) -> Result<Vec<u8>> {
         .map_err(io_error)?
         .to_be_bytes()
         .to_vec();
-    bytes.extend(body);
+    bytes.extend_from_slice(body);
     Ok(bytes)
+}
+
+pub(super) fn decode_legacy_control_body(body: &[u8]) -> Result<Value> {
+    let frame = serde_json::from_slice(body).map_err(|_| error("malformed control JSON body"))?;
+    validate_version(&frame)?;
+    Ok(frame)
+}
+
+pub(super) struct AdmittedControlFrame {
+    body: Vec<u8>,
+    admitted_at: Instant,
+}
+impl AdmittedControlFrame {
+    pub(super) fn body(&self) -> &[u8] {
+        &self.body
+    }
+    pub(super) fn admitted_at(&self) -> Instant {
+        self.admitted_at
+    }
 }
 
 pub(crate) struct ControlDecoder {
@@ -35,6 +59,7 @@ pub(crate) struct ControlDecoder {
     header_len: usize,
     body: Vec<u8>,
     expected: Option<usize>,
+    admitted_at: Option<Instant>,
 }
 
 impl ControlDecoder {
@@ -44,13 +69,35 @@ impl ControlDecoder {
             header_len: 0,
             body: Vec::new(),
             expected: None,
+            admitted_at: None,
         }
     }
 
-    pub(crate) fn feed(&mut self, mut bytes: &[u8]) -> Result<Vec<Value>> {
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the compatible Value decoder remains available beside the shared admitted framer"
+        )
+    )]
+    pub(crate) fn feed(&mut self, bytes: &[u8]) -> Result<Vec<Value>> {
+        self.feed_admitted(bytes, Instant::now())?
+            .into_iter()
+            .map(|frame| decode_legacy_control_body(frame.body()))
+            .collect()
+    }
+
+    pub(super) fn feed_admitted(
+        &mut self,
+        mut bytes: &[u8],
+        observed_at: Instant,
+    ) -> Result<Vec<AdmittedControlFrame>> {
         let mut frames = Vec::new();
         while !bytes.is_empty() {
             if self.expected.is_none() {
+                if self.header_len == 0 {
+                    self.admitted_at = Some(observed_at);
+                }
                 let count = (4 - self.header_len).min(bytes.len());
                 self.header[self.header_len..self.header_len + count]
                     .copy_from_slice(&bytes[..count]);
@@ -73,11 +120,13 @@ impl ControlDecoder {
             self.body.extend_from_slice(&bytes[..count]);
             bytes = &bytes[count..];
             if self.body.len() == length {
-                let frame = serde_json::from_slice(&self.body)
-                    .map_err(|_| error("malformed control JSON body"))?;
-                validate_version(&frame)?;
-                frames.push(frame);
-                self.body.clear();
+                frames.push(AdmittedControlFrame {
+                    body: std::mem::take(&mut self.body),
+                    admitted_at: self
+                        .admitted_at
+                        .take()
+                        .expect("a complete frame consumed its first header byte"),
+                });
                 self.header_len = 0;
                 self.expected = None;
             }
@@ -87,7 +136,7 @@ impl ControlDecoder {
 
     pub(crate) fn finish(&self) -> Result<()> {
         ensure(
-            self.header_len == 0 && self.expected.is_none(),
+            self.header_len == 0 && self.expected.is_none() && self.admitted_at.is_none(),
             "truncated control frame",
         )
     }

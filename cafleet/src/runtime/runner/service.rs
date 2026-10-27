@@ -1,4 +1,7 @@
+use super::codec::AdmittedControlFrame;
 pub(super) use super::control::request;
+use super::input_clock::{RealInputDeadlineClock, receive_input_expiration};
+use super::input_protocol::{ServiceControlRequest, decode_service_request};
 use super::writer::EventWriter;
 use super::*;
 
@@ -113,7 +116,7 @@ struct Client {
     closed: bool,
 }
 impl Client {
-    fn poll(&mut self) -> Result<Vec<Value>> {
+    fn poll(&mut self) -> Result<Vec<AdmittedControlFrame>> {
         let mut requests = Vec::new();
         let mut bytes = [0; 4096];
         match self.stream.read(&mut bytes) {
@@ -121,7 +124,10 @@ impl Client {
                 self.decoder.finish()?;
                 self.closed = true;
             }
-            Ok(count) => requests = self.decoder.feed(&bytes[..count])?,
+            Ok(count) => {
+                let observed_at = Instant::now();
+                requests = self.decoder.feed_admitted(&bytes[..count], observed_at)?;
+            }
             Err(cause)
                 if matches!(cause.kind(), ErrorKind::WouldBlock | ErrorKind::Interrupted) => {}
             Err(cause) => return Err(io_error(cause)),
@@ -159,6 +165,19 @@ impl Client {
         }
         Ok(())
     }
+}
+fn unavailable_input_request(
+    run: &RunRecord,
+    request: &InputControlRequest,
+    admitted_at: Instant,
+    shutdown: Option<Instant>,
+    clock: &mut impl InputDeadlineClock,
+) -> Result<Value> {
+    let deadline =
+        receive_input_expiration(request.expires_at_mono_ns, admitted_at, shutdown, clock)?;
+    request.identity.validate(run)?;
+    check_deadline(Instant::now(), deadline)?;
+    Err(error("live input coordination is not implemented"))
 }
 struct LiveShutdown<'a> {
     pty: &'a mut PtySession,
@@ -575,6 +594,18 @@ fn run_service(
                     for frame in requests {
                         let mut accepted_startup = false;
                         let result = (|| -> Result<Value> {
+                            let frame = match decode_service_request(frame.body())? {
+                                ServiceControlRequest::Legacy(frame) => frame,
+                                ServiceControlRequest::Input(request) => {
+                                    return unavailable_input_request(
+                                        &run,
+                                        &request,
+                                        frame.admitted_at(),
+                                        None,
+                                        &mut RealInputDeadlineClock,
+                                    );
+                                }
+                            };
                             let kind = frame
                                 .get("kind")
                                 .and_then(Value::as_str)

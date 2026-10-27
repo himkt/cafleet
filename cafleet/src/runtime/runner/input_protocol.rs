@@ -1,4 +1,6 @@
 use super::*;
+mod wire;
+pub(super) use wire::*;
 
 #[cfg(test)]
 mod wire_tests;
@@ -111,6 +113,8 @@ impl MissingEvidence {
         }
     }
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct PermissionInspection {
     pub event_id: i64,
     pub message_id: i64,
@@ -136,19 +140,18 @@ pub(crate) struct PermissionInspection {
     pub evidence: Value,
     pub missing_evidence: Vec<MissingEvidence>,
 }
-#[expect(
-    dead_code,
-    reason = "the reviewed live control integration follows the retained-history checkpoint"
-)]
 pub(crate) struct SubmitInput {
     pub operation_key: String,
     pub input_kind: InputKind,
     pub message_id: Option<i64>,
     pub literal: String,
 }
-#[expect(
-    dead_code,
-    reason = "the reviewed live control integration follows the retained-history checkpoint"
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the reviewed input coordinator and host supply this production consumer"
+    )
 )]
 pub(crate) enum ReceiptAction {
     Query {
@@ -164,9 +167,12 @@ pub(crate) enum ReceiptAction {
         evidence_ref: String,
     },
 }
-#[expect(
-    dead_code,
-    reason = "the reviewed live control integration follows the retained-history checkpoint"
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the reviewed input coordinator and host supply this production consumer"
+    )
 )]
 pub(crate) struct InputControlRequest {
     pub protocol_version: u32,
@@ -174,9 +180,12 @@ pub(crate) struct InputControlRequest {
     pub expires_at_mono_ns: u64,
     pub operation: InputControlOperation,
 }
-#[expect(
-    dead_code,
-    reason = "the reviewed live control integration follows the retained-history checkpoint"
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the reviewed input coordinator and host supply this production consumer"
+    )
 )]
 pub(crate) enum InputControlOperation {
     SubmitPrompt(SubmitInput),
@@ -185,9 +194,12 @@ pub(crate) enum InputControlOperation {
     PermissionRespond(PermissionRespondInput),
     Receipt(ReceiptAction),
 }
-#[expect(
-    dead_code,
-    reason = "the reviewed live control integration follows the retained-history checkpoint"
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the reviewed input coordinator and host supply this production consumer"
+    )
 )]
 pub(crate) enum ReceiptReply {
     Missing,
@@ -202,9 +214,12 @@ pub(crate) enum ReceiptReply {
         input_id: i64,
     },
 }
-#[expect(
-    dead_code,
-    reason = "the reviewed live control integration follows the retained-history checkpoint"
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the reviewed input coordinator and host supply this production consumer"
+    )
 )]
 pub(crate) enum InputControlReply {
     Submission(SubmissionResult),

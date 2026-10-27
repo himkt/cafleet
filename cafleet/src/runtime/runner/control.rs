@@ -1,3 +1,5 @@
+use super::codec::{AdmittedControlFrame, decode_legacy_control_body};
+use super::input_protocol::{decode_input_reply, encode_input_request};
 use super::*;
 
 #[cfg(test)]
@@ -98,6 +100,43 @@ impl ControlClient {
     }
     pub(super) fn exchange(&mut self, request: &Value, deadline: Instant) -> Result<Value> {
         let bytes = encode_control_frame(request)?;
+        let frame = self.exchange_bytes(&bytes, deadline)?;
+        let value = decode_legacy_control_body(frame.body())?;
+        ensure(
+            value.get("result").is_some() ^ value.get("error").is_some(),
+            "control reply requires one result or error",
+        )?;
+        if let Some(cause) = value.get("error") {
+            let cause = cause
+                .as_str()
+                .ok_or_else(|| error("control error requires text"))?;
+            return Err(error(format!("runner control: {cause}")));
+        }
+        Ok(value
+            .get("result")
+            .expect("validated result envelope")
+            .clone())
+    }
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the reviewed input coordinator and host supply this production consumer"
+        )
+    )]
+    pub(super) fn exchange_input(
+        &mut self,
+        request: &InputControlRequest,
+        deadline: Instant,
+    ) -> Result<InputControlReply> {
+        check_deadline(Instant::now(), deadline)?;
+        let bytes = encode_input_request(request)?;
+        let frame = self.exchange_bytes(&bytes, deadline)?;
+        let reply = decode_input_reply(frame.body(), request)?;
+        check_deadline(Instant::now(), deadline)?;
+        Ok(reply)
+    }
+    fn exchange_bytes(&mut self, bytes: &[u8], deadline: Instant) -> Result<AdmittedControlFrame> {
         let mut offset = 0;
         while offset < bytes.len() {
             check_deadline(Instant::now(), deadline)?;
@@ -121,25 +160,12 @@ impl ControlClient {
                     return Err(error("control endpoint disconnected before reply"));
                 }
                 Ok(count) => {
-                    let frames = self.decoder.feed(&bytes[..count])?;
+                    let observed_at = Instant::now();
+                    let frames = self.decoder.feed_admitted(&bytes[..count], observed_at)?;
                     if !frames.is_empty() {
                         ensure(frames.len() == 1, "unexpected multiple control replies")?;
                         self.decoder.finish()?;
-                        let value = frames.into_iter().next().expect("one control reply");
-                        ensure(
-                            value.get("result").is_some() ^ value.get("error").is_some(),
-                            "control reply requires one result or error",
-                        )?;
-                        if let Some(cause) = value.get("error") {
-                            let cause = cause
-                                .as_str()
-                                .ok_or_else(|| error("control error requires text"))?;
-                            return Err(error(format!("runner control: {cause}")));
-                        }
-                        return Ok(value
-                            .get("result")
-                            .expect("validated result envelope")
-                            .clone());
+                        return Ok(frames.into_iter().next().expect("one control reply"));
                     }
                 }
                 Err(cause)

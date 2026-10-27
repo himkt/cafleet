@@ -1,46 +1,21 @@
 use super::*;
 use std::time::{Duration, Instant};
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed live input integration consumes paired clock samples"
-    )
-)]
 pub(crate) struct InputClockSample {
     pub before: Instant,
     pub monotonic_ns: u64,
     pub after: Instant,
 }
 impl InputClockSample {
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the reviewed live input integration validates clock samples"
-        )
-    )]
     fn validate(&self) -> Result<()> {
         ensure(self.before <= self.after, "input clock bracket is reversed")
     }
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed live input integration consumes the deadline clock"
-    )
-)]
 pub(crate) trait InputDeadlineClock {
     fn sample(&mut self) -> Result<InputClockSample>;
 }
 
-#[expect(
-    dead_code,
-    reason = "the reviewed live input integration consumes the native clock"
-)]
 pub(super) struct RealInputDeadlineClock;
 impl InputDeadlineClock for RealInputDeadlineClock {
     fn sample(&mut self) -> Result<InputClockSample> {
@@ -72,22 +47,15 @@ impl InputDeadlineClock for RealInputDeadlineClock {
     }
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed live input integration retains the captured expiration"
-    )
-)]
 pub(crate) struct InputExpiration(u64);
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed live input integration captures and receives expirations"
-    )
-)]
 impl InputExpiration {
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the reviewed live input client captures the sender expiration"
+        )
+    )]
     pub(crate) fn capture(deadline: Instant, clock: &mut impl InputDeadlineClock) -> Result<Self> {
         let sample = clock.sample()?;
         sample.validate()?;
@@ -132,7 +100,24 @@ impl InputExpiration {
         Ok(deadline)
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the reviewed live input client copies the captured wire expiration"
+        )
+    )]
     pub(crate) fn monotonic_ns(&self) -> u64 {
         self.0
     }
+}
+
+pub(super) fn receive_input_expiration(
+    expires_at_mono_ns: u64,
+    admitted_at: Instant,
+    shutdown: Option<Instant>,
+    clock: &mut impl InputDeadlineClock,
+) -> Result<Instant> {
+    ensure(expires_at_mono_ns > 0, "positive input expiration required")?;
+    InputExpiration(expires_at_mono_ns).receive(admitted_at, shutdown, clock)
 }

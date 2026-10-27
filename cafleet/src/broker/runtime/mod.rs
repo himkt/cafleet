@@ -49,7 +49,7 @@ pub(super) fn nonblank(value: &str, field: &str) -> Result<(), CafleetError> {
     require(!value.trim().is_empty(), field, "required nonempty value")
 }
 
-pub(super) fn hex(value: &str, length: usize, field: &str) -> Result<(), CafleetError> {
+pub(crate) fn hex(value: &str, length: usize, field: &str) -> Result<(), CafleetError> {
     require(
         value.len() == length && value.bytes().all(|byte| byte.is_ascii_hexdigit()),
         field,
@@ -204,7 +204,7 @@ pub fn get_run(conn: &Connection, run_id: i64) -> Result<RunRecord, CafleetError
     Ok(run)
 }
 
-fn validate_identity(identity: &Value) -> Result<(), CafleetError> {
+pub(crate) fn validate_identity(identity: &Value) -> Result<(), CafleetError> {
     let object = identity
         .as_object()
         .ok_or_else(|| invalid("database_identity_json", "object required"))?;
