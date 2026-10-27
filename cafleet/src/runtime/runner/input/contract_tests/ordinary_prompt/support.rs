@@ -53,14 +53,14 @@ impl RequestTokenSource for Tokens {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct Point {
+pub(in crate::runtime::runner::input) struct Point {
     pub boundary: &'static str,
     pub id: Option<i64>,
     pub count: u64,
     pub seq: u64,
 }
 
-pub(super) struct Hooks {
+pub(in crate::runtime::runner::input) struct Hooks {
     pub points: Mutex<Vec<Point>>,
     pub until: Instant,
 }
@@ -111,7 +111,7 @@ impl InputHooks for Hooks {
 }
 
 #[derive(Default)]
-pub(super) struct Reader {
+pub(in crate::runtime::runner::input) struct Reader {
     pub bytes: VecDeque<u8>,
     pub consumed: usize,
     pub calls: usize,
@@ -132,7 +132,7 @@ impl ByteInput for Reader {
     }
 }
 
-pub(super) struct Pty {
+pub(in crate::runtime::runner::input) struct Pty {
     pub child: Reader,
     pub offers: Vec<Vec<u8>>,
     pub program: Vec<Vec<u8>>,
@@ -171,7 +171,7 @@ impl PtyIo for Pty {
     }
 }
 #[derive(Default)]
-pub(super) struct Output(pub Vec<u8>);
+pub(in crate::runtime::runner::input) struct Output(pub Vec<u8>);
 impl Display for Output {
     fn try_write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         self.0.extend_from_slice(bytes);
@@ -192,7 +192,7 @@ impl Drop for Child {
     }
 }
 
-pub(super) struct Host {
+pub(in crate::runtime::runner::input) struct Host {
     pub fixture: Fixture,
     _artifacts: RunArtifacts,
     pub coordinator: InputCoordinator,
@@ -457,7 +457,7 @@ impl Host {
         assert!(child.unwrap().is_some(), "owned child reap confirmed");
     }
 }
-pub(super) fn with_host(body: impl FnOnce(&mut Host)) {
+pub(in crate::runtime::runner::input) fn with_host(body: impl FnOnce(&mut Host)) {
     with_owned_host(Host::new(), body);
 }
 pub(super) fn with_catalog_host(

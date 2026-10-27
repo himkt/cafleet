@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 mod guards;
 mod preview_exec;
 mod sql;
-mod support;
+pub(in crate::runtime::runner::input) mod support;
 use support::*;
 
 fn submitted(reply: InputControlReply) -> SubmissionResult {

@@ -1034,3 +1034,363 @@ fn combine_manual_progress<T>(progress: Result<T>, accounting: Result<()>) -> Re
         }),
     }
 }
+
+#[cfg(test)]
+mod retirement_contracts {
+    use super::contract_tests::ordinary_prompt::support::{Host, with_host};
+    use super::*;
+    use crate::runtime::runner::{ReceiptAction, ReceiptReply, SubmitInput};
+    use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn assert_retired(reply: InputControlReply, expected: i64) {
+        assert!(
+            matches!(reply, InputControlReply::Receipt(ReceiptReply::Retired { input_id }) if input_id == expected)
+        );
+    }
+
+    fn cached(
+        h: &Host,
+        id: i64,
+    ) -> (
+        storage::InputOperation,
+        SubmissionStage,
+        u64,
+        u64,
+        bool,
+        bool,
+    ) {
+        let retained = h
+            .coordinator
+            .operations
+            .get(&id)
+            .expect("actual retained reservation");
+        (
+            retained.operation.clone(),
+            retained.stage,
+            retained.written_bytes,
+            retained.output_seq,
+            retained.attempt_available,
+            retained.leased,
+        )
+    }
+
+    #[test]
+    fn retirement_requires_settlement_and_no_active_writer_then_removes_only_its_cache() {
+        with_host(|h| {
+            let run = h.fixture.run.clone();
+            let message = crate::broker::send_message(
+                &mut h.fixture.conn,
+                run.director_member_id,
+                run.member_id,
+                "retirement preview",
+            )
+            .unwrap();
+            let key = format!("preview:{}:{}", run.run_id, message.message_id);
+            let mut request = h.request(&key);
+            request.operation = InputControlOperation::SubmitPrompt(SubmitInput {
+                operation_key: key.clone(),
+                input_kind: storage::InputKind::Preview,
+                message_id: Some(message.message_id),
+                literal: "ordinary fixture λ".into(),
+            });
+            assert!(
+                h.coordinator
+                    .handle(&mut h.fixture.conn, &run, request, &h.controller, h.until)
+                    .unwrap()
+                    .is_none()
+            );
+            let accepted = (0..8)
+                .find_map(|_| {
+                    h.drain();
+                    h.advance()
+                })
+                .expect("actual Preview completes within finite drained turns");
+            let InputControlReply::Submission(accepted) = accepted else {
+                panic!("actual Preview submission reply")
+            };
+            assert!(matches!(accepted.status, SubmissionStatus::Accepted));
+            let id = accepted.input_id.expect("durable Preview ID");
+            let before = cached(h, id);
+            assert!(matches!(before.1, SubmissionStage::Submitted));
+            assert!(!before.4 && !before.5);
+            assert!(h.coordinator.pending.is_none());
+            let offers = h.pty.offers.clone();
+            assert_eq!(
+                h.pty.program,
+                vec!["ordinary fixture λ~".as_bytes().to_vec()]
+            );
+
+            let uncommitted = h
+                .coordinator
+                .retire_received(&mut h.fixture.conn, &run, id, h.until)
+                .unwrap_err();
+            assert!(uncommitted.to_string().contains(&id.to_string()));
+            assert_eq!(cached(h, id), before);
+            assert_eq!(
+                storage::get_input(&h.fixture.conn, id).unwrap().state,
+                storage::InputState::Accepted
+            );
+            let settled = storage::settle_preview(&mut h.fixture.conn, &run.owner(), id).unwrap();
+            let stamp: Option<String> = h
+                .fixture
+                .conn
+                .query_row(
+                    "SELECT notified_at FROM messages WHERE message_id=?1",
+                    [message.message_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(stamp.is_some());
+
+            let expired = h
+                .coordinator
+                .retire_received(&mut h.fixture.conn, &run, id, Instant::now())
+                .unwrap_err();
+            assert!(matches!(expired, CafleetError::DeadlineExceeded));
+            let mut foreign_owner = run.clone();
+            foreign_owner.owner_epoch += 1;
+            assert!(
+                h.coordinator
+                    .retire_received(&mut h.fixture.conn, &foreign_owner, id, h.until)
+                    .is_err()
+            );
+            let mut foreign_request = h.request("unused-retirement-key");
+            foreign_request.operation =
+                InputControlOperation::Receipt(ReceiptAction::Retire { input_id: id });
+            foreign_request.identity.member_id += 1;
+            assert!(
+                h.coordinator
+                    .handle(
+                        &mut h.fixture.conn,
+                        &run,
+                        foreign_request,
+                        &h.controller,
+                        h.until
+                    )
+                    .is_err()
+            );
+            assert_eq!(cached(h, id), before);
+            assert_eq!(storage::get_input(&h.fixture.conn, id).unwrap(), settled);
+
+            let unrelated_key = "prompt:retirement-active-writer";
+            let unrelated = h.request(unrelated_key);
+            assert!(
+                h.coordinator
+                    .handle(&mut h.fixture.conn, &run, unrelated, &h.controller, h.until)
+                    .unwrap()
+                    .is_none()
+            );
+            for _ in 0..8 {
+                h.drain();
+                assert!(h.advance().is_none());
+                if h.coordinator.pending.as_ref().unwrap().phase == InputPhase::Armed {
+                    break;
+                }
+            }
+            let pending = h.coordinator.pending.as_ref().unwrap();
+            assert!(pending.phase == InputPhase::Armed);
+            let unrelated_id = pending.input_id.expect("actual second reservation");
+            let original_deadline = pending.deadline;
+            let original_bytes = pending.bytes.clone();
+            let unrelated_before = cached(h, unrelated_id);
+            assert!(unrelated_before.4 && !unrelated_before.5);
+            let failure = h
+                .coordinator
+                .retire_received(&mut h.fixture.conn, &run, id, h.until)
+                .unwrap_err();
+            assert!(failure.to_string().contains(&id.to_string()));
+            let pending = h
+                .coordinator
+                .pending
+                .as_ref()
+                .expect("refusal preserves unrelated writer");
+            assert_eq!(pending.request.operation_key, unrelated_key);
+            assert_eq!(pending.input_id, Some(unrelated_id));
+            assert_eq!(pending.deadline, original_deadline);
+            assert_eq!(pending.bytes, original_bytes);
+            assert!(pending.phase == InputPhase::Armed);
+            assert_eq!(cached(h, unrelated_id), unrelated_before);
+            assert_eq!(cached(h, id), before);
+            assert_eq!(h.pty.offers, offers);
+
+            h.coordinator.finish_pending_attempt();
+            let other_cache = cached(h, unrelated_id);
+            let other_row = storage::get_input(&h.fixture.conn, unrelated_id).unwrap();
+            assert_eq!(other_row.state, storage::InputState::InProgress);
+            h.pty
+                .child
+                .bytes
+                .extend(b"\x1b[2J\x1b[HUnclassified screen");
+            h.drain();
+            assert!(!matches!(
+                h.controller.health(&h.writer).eligibility,
+                InputEligibility::ComposerEmpty
+            ));
+            let changes = h.fixture.conn.total_changes();
+            let mut retirement = h.request("unused-retirement-key");
+            retirement.operation =
+                InputControlOperation::Receipt(ReceiptAction::Retire { input_id: id });
+            let reply = h
+                .coordinator
+                .handle(
+                    &mut h.fixture.conn,
+                    &run,
+                    retirement,
+                    &h.controller,
+                    h.until,
+                )
+                .unwrap()
+                .expect("typed retirement dispatch");
+            assert_retired(reply, id);
+            assert!(!h.coordinator.operations.contains_key(&id));
+            assert_eq!(cached(h, unrelated_id), other_cache);
+            assert_eq!(h.fixture.conn.total_changes(), changes);
+            assert_eq!(storage::get_input(&h.fixture.conn, id).unwrap(), settled);
+            assert_eq!(
+                storage::get_input(&h.fixture.conn, unrelated_id).unwrap(),
+                other_row
+            );
+            let after_stamp: Option<String> = h
+                .fixture
+                .conn
+                .query_row(
+                    "SELECT notified_at FROM messages WHERE message_id=?1",
+                    [message.message_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(after_stamp, stamp);
+            assert_eq!(h.pty.offers, offers);
+
+            let reads = Arc::new(AtomicUsize::new(0));
+            let observed = reads.clone();
+            h.fixture
+                .conn
+                .authorizer(Some(move |context: AuthContext<'_>| {
+                    if matches!(
+                        context.action,
+                        AuthAction::Read {
+                            table_name: "member_input_operations",
+                            ..
+                        }
+                    ) {
+                        observed.fetch_add(1, Ordering::SeqCst);
+                    }
+                    Authorization::Allow
+                }))
+                .unwrap();
+            let again = h
+                .coordinator
+                .retire_received(&mut h.fixture.conn, &run, id, h.until);
+            let removed = h
+                .fixture
+                .conn
+                .authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+            assert!(
+                again.is_ok(),
+                "repeat={again:?}; authorizer_cleanup={removed:?}"
+            );
+            removed.unwrap();
+            assert_retired(again.unwrap(), id);
+            assert!(
+                reads.load(Ordering::SeqCst) > 0,
+                "cache absence still checks the durable row on the supplied connection"
+            );
+            assert!(
+                h.coordinator
+                    .retire_received(&mut h.fixture.conn, &run, i64::MAX, h.until)
+                    .is_err()
+            );
+            assert_eq!(cached(h, unrelated_id), other_cache);
+            assert_eq!(h.pty.offers, offers);
+        });
+    }
+
+    #[test]
+    fn retirement_checks_durable_kind_and_disposition_even_without_a_cached_attempt() {
+        with_host(|h| {
+            let run = h.fixture.run.clone();
+            let prompt = storage::reserve_input(
+                &mut h.fixture.conn,
+                &run.owner(),
+                &storage::NewInput {
+                    operation_key: "prompt:retirement-is-preview-only".into(),
+                    kind: storage::InputKind::Prompt,
+                    payload_digest: "a".repeat(64),
+                    message_id: None,
+                },
+            )
+            .unwrap();
+            storage::record_input_state(
+                &mut h.fixture.conn,
+                &run.owner(),
+                prompt.input_id,
+                storage::InputState::InProgress,
+                storage::InputState::Accepted,
+            )
+            .unwrap();
+            let prompt = storage::settle_input(
+                &mut h.fixture.conn,
+                &run.owner(),
+                prompt.input_id,
+                storage::InputState::Accepted,
+                storage::InputDisposition::Submitted,
+                "owned historical Prompt",
+            )
+            .unwrap();
+            let message = crate::broker::send_message(
+                &mut h.fixture.conn,
+                run.director_member_id,
+                run.member_id,
+                "abandoned preview",
+            )
+            .unwrap();
+            let preview = storage::reserve_input(
+                &mut h.fixture.conn,
+                &run.owner(),
+                &storage::NewInput {
+                    operation_key: format!("preview:{}:{}", run.run_id, message.message_id),
+                    kind: storage::InputKind::Preview,
+                    payload_digest: "b".repeat(64),
+                    message_id: Some(message.message_id),
+                },
+            )
+            .unwrap();
+            storage::record_input_state(
+                &mut h.fixture.conn,
+                &run.owner(),
+                preview.input_id,
+                storage::InputState::InProgress,
+                storage::InputState::Uncertain,
+            )
+            .unwrap();
+            let preview = storage::settle_input(
+                &mut h.fixture.conn,
+                &run.owner(),
+                preview.input_id,
+                storage::InputState::Uncertain,
+                storage::InputDisposition::AbandonedUncertain,
+                "owned abandoned Preview",
+            )
+            .unwrap();
+            assert!(h.coordinator.operations.is_empty());
+            let changes = h.fixture.conn.total_changes();
+            for row in [prompt, preview] {
+                let failure = h
+                    .coordinator
+                    .retire_received(&mut h.fixture.conn, &run, row.input_id, h.until)
+                    .unwrap_err();
+                assert!(failure.to_string().contains(&row.input_id.to_string()));
+                assert!(failure.to_string().contains(&row.operation_key));
+                assert_eq!(
+                    storage::get_input(&h.fixture.conn, row.input_id).unwrap(),
+                    row
+                );
+                assert_eq!(h.fixture.conn.total_changes(), changes);
+            }
+            assert!(h.coordinator.operations.is_empty());
+            assert!(h.pty.offers.is_empty());
+        });
+    }
+}

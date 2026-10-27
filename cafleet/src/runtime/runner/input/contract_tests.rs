@@ -1,2 +1,2 @@
 mod manual_progress;
-mod ordinary_prompt;
+pub(in crate::runtime::runner::input) mod ordinary_prompt;
