@@ -103,3 +103,74 @@ fn step5_prompt_positive_short_write_retains_partial_uncertainty_without_a_secon
         assert_eq!(after.seq, point.output_seq);
     });
 }
+
+#[test]
+fn step5_prompt_reservation_race_returns_existing_uncertainty_without_write_authority() {
+    use sha2::{Digest, Sha256};
+
+    with_host(|h| {
+        let key = "prompt:interleaved-reservation";
+        let request = h.request(key);
+        assert!(
+            h.coordinator
+                .handle(
+                    &mut h.fixture.conn,
+                    &h.fixture.run,
+                    request,
+                    &h.controller,
+                    h.until,
+                )
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            storage::find_input(&h.fixture.conn, h.fixture.run.run_id, key)
+                .unwrap()
+                .is_none()
+        );
+        let canonical = format!(
+            "{{\"kind\":\"prompt\",\"literal\":{},\"message_id\":null,\"run_id\":{}}}",
+            serde_json::to_string(LITERAL).unwrap(),
+            h.fixture.run.run_id,
+        );
+        let new = storage::NewInput {
+            operation_key: key.into(),
+            kind: storage::InputKind::Prompt,
+            payload_digest: Sha256::digest(canonical.as_bytes())
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect(),
+            message_id: None,
+        };
+        let mut independent =
+            crate::db::connect(&format!("sqlite:///{}", h.fixture.conn.path().unwrap())).unwrap();
+        let original =
+            storage::reserve_input(&mut independent, &h.fixture.run.owner(), &new).unwrap();
+        assert!(matches!(original.state, storage::InputState::InProgress));
+        assert_eq!(
+            storage::find_input(&h.fixture.conn, h.fixture.run.run_id, key).unwrap(),
+            Some(original.clone())
+        );
+        let reply = submitted(
+            (0..3)
+                .find_map(|_| {
+                    h.drain();
+                    h.advance()
+                })
+                .expect("retained reservation resolves within three real drained turns"),
+        );
+        let after = storage::get_input(&independent, original.input_id).unwrap();
+        assert!(
+            reply.input_id == Some(original.input_id)
+                && matches!(reply.status, SubmissionStatus::Uncertain)
+                && matches!(reply.stage, SubmissionStage::Unknown)
+                && h.pty.offers.is_empty()
+                && after == original,
+            "existing reservation retains its history without fresh write authority: status={}; input_id={:?}; stage={:?}; offers={:?}; before={original:?}; after={after:?}",
+            reply.status.as_str(),
+            reply.input_id,
+            reply.stage,
+            h.pty.offers,
+        );
+    });
+}
