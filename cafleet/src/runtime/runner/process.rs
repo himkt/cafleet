@@ -12,6 +12,8 @@ use std::time::{Duration, Instant};
 mod ownership_diagnostics;
 #[cfg(test)]
 pub(crate) use ownership_diagnostics::*;
+#[cfg(test)]
+mod ownership_refresh_tests;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ProcessIdentity {
