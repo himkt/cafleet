@@ -341,8 +341,9 @@ fn barrier(fixture: &mut ServiceFixture, until: Instant) {
 }
 fn with_service(body: impl FnOnce(&mut ServiceFixture, Instant)) {
     let until = Instant::now() + Duration::from_secs(10);
-    let mut fixture =
-        ServiceFixture::configured(false, |fixture, spec| configure(fixture, spec, until));
+    let mut fixture = ServiceFixture::configured_until(false, until, |fixture, spec| {
+        configure(fixture, spec, until)
+    });
     fixture.cleanup_deadline = Some(until);
     let primary = catch_unwind(AssertUnwindSafe(|| {
         fixture.start_running();

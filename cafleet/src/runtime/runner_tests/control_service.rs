@@ -189,18 +189,30 @@ impl ServiceFixture {
         missing_executable: bool,
         configure: impl FnOnce(&mut Fixture, &mut SpawnSpec),
     ) -> Self {
-        Self::launch(missing_executable, configure, false)
+        Self::launch(missing_executable, configure, false, None)
+    }
+
+    fn configured_until(
+        missing_executable: bool,
+        until: Instant,
+        configure: impl FnOnce(&mut Fixture, &mut SpawnSpec),
+    ) -> Self {
+        Self::launch(missing_executable, configure, false, Some(until))
     }
 
     fn startup_refusal(configure: impl FnOnce(&mut Fixture, &mut SpawnSpec)) -> Self {
-        Self::launch(false, configure, true)
+        Self::launch(false, configure, true, None)
     }
 
     fn launch(
         missing_executable: bool,
         configure: impl FnOnce(&mut Fixture, &mut SpawnSpec),
         refusal: bool,
+        caller_deadline: Option<Instant>,
     ) -> Self {
+        let startup_deadline = Instant::now() + Duration::from_secs(10);
+        let until = caller_deadline.map_or(startup_deadline, |caller| caller.min(startup_deadline));
+        assert!(Instant::now() < until, "original fixture startup deadline");
         let mut fixture = Fixture::new();
         fixture
             .conn
@@ -301,6 +313,7 @@ impl ServiceFixture {
                 .arg("--ignored")
                 .env("CAFLEET_NATIVE_CAPTURE_CONFIG", &capture_config);
         }
+        assert!(Instant::now() < until, "original fixture startup deadline");
         let child = OwnedChild::new(
             command
                 .env(DESCRIPTOR_ENV, &artifacts.paths.descriptor)
@@ -325,7 +338,7 @@ impl ServiceFixture {
             prepared: None,
             output: Vec::new(),
             stopped: false,
-            cleanup_deadline: None,
+            cleanup_deadline: caller_deadline,
         };
         if refusal {
             assert!(!owned.wait().success(), "nonfresh startup is refused");
@@ -339,7 +352,6 @@ impl ServiceFixture {
                 .unwrap()
                 .unwrap(),
         );
-        let until = Instant::now() + Duration::from_secs(3);
         loop {
             if let Some(status) = owned.child.try_wait().unwrap() {
                 panic!(
