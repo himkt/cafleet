@@ -276,7 +276,7 @@ fn manual(fixture: &mut ServiceFixture, line: &[u8], until: Instant) {
         }
     }
 }
-fn records(fixture: &ServiceFixture) -> Vec<Value> {
+pub(crate) fn records(fixture: &ServiceFixture) -> Vec<Value> {
     let bytes = std::fs::read(
         fixture
             .fixture
@@ -309,7 +309,7 @@ fn failure_diagnostic(fixture: &mut ServiceFixture, stage: &str) -> String {
         String::from_utf8_lossy(&bytes),
     )
 }
-fn wait_record(fixture: &mut ServiceFixture, line: &str, until: Instant) {
+pub(crate) fn wait_record(fixture: &mut ServiceFixture, line: &str, until: Instant) {
     while !records(fixture).iter().any(|record| record["line"] == line) {
         assert!(
             fixture.child.try_wait().unwrap().is_none(),
@@ -319,7 +319,7 @@ fn wait_record(fixture: &mut ServiceFixture, line: &str, until: Instant) {
         pause(until);
     }
 }
-fn composer(fixture: &mut ServiceFixture, until: Instant) -> HealthSnapshot {
+pub(crate) fn composer(fixture: &mut ServiceFixture, until: Instant) -> HealthSnapshot {
     loop {
         assert!(Instant::now() < until);
         let health = fixture.health();
@@ -331,7 +331,7 @@ fn composer(fixture: &mut ServiceFixture, until: Instant) -> HealthSnapshot {
         pause(until);
     }
 }
-fn barrier(fixture: &mut ServiceFixture, until: Instant) {
+pub(crate) fn barrier(fixture: &mut ServiceFixture, until: Instant) {
     let before = fixture.health().output_seq;
     manual(fixture, b"barrier\r", until);
     wait_record(fixture, "barrier", until);
@@ -339,7 +339,7 @@ fn barrier(fixture: &mut ServiceFixture, until: Instant) {
         pause(until);
     }
 }
-fn with_service(body: impl FnOnce(&mut ServiceFixture, Instant)) {
+pub(crate) fn with_service(body: impl FnOnce(&mut ServiceFixture, Instant)) {
     let until = Instant::now() + Duration::from_secs(10);
     let mut fixture = ServiceFixture::configured_until(false, until, |fixture, spec| {
         configure(fixture, spec, until)

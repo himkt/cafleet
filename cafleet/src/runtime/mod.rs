@@ -6,6 +6,15 @@ pub(crate) use press::{KeyAcknowledgment, press_member};
 #[cfg(test)]
 mod runner_tests;
 #[cfg(test)]
+pub(crate) use runner_tests::control_service::{
+    ServiceFixture as InputServiceFixture,
+    input_service::{
+        barrier as input_service_barrier, composer as input_service_composer,
+        records as input_service_records, wait_record as wait_input_service_record,
+        with_service as with_input_service,
+    },
+};
+#[cfg(test)]
 pub(crate) use runner_tests::owned_child::OwnedChild;
 
 use crate::config::Settings;

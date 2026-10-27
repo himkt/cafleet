@@ -1,6 +1,6 @@
 mod artifacts;
 mod control_codec;
-mod control_service;
+pub(crate) mod control_service;
 mod creation;
 mod fleet_deletion;
 mod health;
@@ -35,10 +35,10 @@ fn sha256_hex(bytes: &[u8]) -> String {
     encoded
 }
 
-pub(super) struct Fixture {
-    pub(super) _dir: TempDir,
-    pub(super) conn: Connection,
-    pub(super) run: RunRecord,
+pub(crate) struct Fixture {
+    pub(crate) _dir: TempDir,
+    pub(crate) conn: Connection,
+    pub(crate) run: RunRecord,
 }
 
 impl Fixture {

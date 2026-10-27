@@ -950,6 +950,494 @@ mod tests {
     use std::rc::Rc;
     use std::time::{Duration, Instant};
 
+    const EXTERNAL_MEMBER_ENV: &str = "CAFLEET_TEST_EXTERNAL_MEMBER_CONFIG";
+
+    fn external_member_monotonic_ns() -> u64 {
+        let time = rustix::time::clock_gettime_dynamic(rustix::time::DynamicClockId::Known(
+            rustix::time::ClockId::Monotonic,
+        ))
+        .unwrap();
+        let seconds = u64::try_from(time.tv_sec).unwrap();
+        let nanos = u64::try_from(time.tv_nsec).unwrap();
+        assert!(nanos < 1_000_000_000);
+        seconds
+            .checked_mul(1_000_000_000)
+            .unwrap()
+            .checked_add(nanos)
+            .unwrap()
+    }
+
+    fn external_member_pause(until: Instant) {
+        assert!(
+            Instant::now() < until,
+            "original external member fixture deadline"
+        );
+        std::thread::sleep(
+            Duration::from_millis(2).min(until.saturating_duration_since(Instant::now())),
+        );
+    }
+
+    fn external_member_private_json(path: &std::path::Path, value: &Value) {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(path)
+            .unwrap();
+        file.write_all(&serde_json::to_vec(value).unwrap()).unwrap();
+        file.sync_all().unwrap();
+    }
+
+    #[test]
+    #[ignore = "owned member command subprocess entry"]
+    fn external_input_member_child() {
+        let path = std::path::PathBuf::from(
+            std::env::var_os(EXTERNAL_MEMBER_ENV)
+                .expect("explicit private member subprocess configuration"),
+        );
+        let config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let before = Instant::now();
+        let remaining = config["expiration"]
+            .as_u64()
+            .unwrap()
+            .checked_sub(external_member_monotonic_ns())
+            .filter(|value| *value > 0)
+            .expect("the original parent expiration remains live");
+        let deadline = Deadline::until(before + Duration::from_nanos(remaining));
+        let settings = Settings {
+            database_url: config["database_url"].as_str().unwrap().into(),
+            max_text_len: 200,
+            multiplexer: Some("tmux".into()),
+        };
+        let mut conn = crate::db::connect(&settings.database_url).unwrap();
+        if config["lose_stdout"].as_bool().unwrap() {
+            external_member_private_json(&path.with_extension("ready"), &json!({"ready":true}));
+            while !path.with_extension("continue").exists() {
+                external_member_pause(deadline.instant());
+            }
+        }
+        let member_id = config["member_id"].as_i64().unwrap();
+        let json = config["json"].as_bool().unwrap();
+        let result = match config["action"].as_str().unwrap() {
+            "prompt" => run(
+                &mut conn,
+                &settings,
+                MemberCommand::Prompt {
+                    member_id,
+                    text: config["literal"].as_str().unwrap().into(),
+                    json,
+                },
+                deadline,
+            ),
+            "exec" => run(
+                &mut conn,
+                &settings,
+                MemberCommand::Exec {
+                    member_id,
+                    body: ExecBodyArgs {
+                        command: Some(config["literal"].as_str().unwrap().into()),
+                        file: None,
+                    },
+                    json,
+                },
+                deadline,
+            ),
+            "show" => run(
+                &mut conn,
+                &settings,
+                MemberCommand::Show { member_id, json },
+                deadline,
+            ),
+            "input_show" => crate::cli::runtime::input(
+                &conn,
+                crate::cli::runtime::InputCommand::Show {
+                    input_id: config["input_id"].as_i64().unwrap(),
+                    json,
+                },
+            ),
+            other => panic!("unknown owned member subprocess action: {other}"),
+        };
+        match result {
+            Ok(()) => std::process::exit(0),
+            Err(cause) => {
+                eprintln!("Error: {cause}");
+                std::process::exit(cause.exit_code());
+            }
+        }
+    }
+
+    struct ExternalMemberChild {
+        child: crate::runtime::OwnedChild,
+        until: Instant,
+    }
+    impl Drop for ExternalMemberChild {
+        fn drop(&mut self) {
+            self.child.terminate_until(self.until);
+        }
+    }
+
+    fn external_member_invoke(
+        fixture: &crate::runtime::InputServiceFixture,
+        action: &str,
+        literal: &str,
+        json: bool,
+        lose_stdout: bool,
+        input_id: Option<i64>,
+        until: Instant,
+    ) -> (std::process::ExitStatus, String, String) {
+        use std::io::Read;
+        use std::process::{Command, Stdio};
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+        let path = fixture.fixture._dir.path().join(format!(
+            "external-member-{}.json",
+            SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let mono = external_member_monotonic_ns();
+        let sampled = Instant::now();
+        let expiration = mono
+            .checked_add(
+                u64::try_from(
+                    until
+                        .checked_duration_since(sampled)
+                        .expect("original member invocation deadline")
+                        .as_nanos(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        external_member_private_json(
+            &path,
+            &json!({
+                "database_url":format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()),
+                "member_id":fixture.fixture.run.member_id,"literal":literal,"action":action,
+                "json":json,"lose_stdout":lose_stdout,"input_id":input_id,"expiration":expiration,
+            }),
+        );
+        let mut owned = ExternalMemberChild {
+            child: crate::runtime::OwnedChild::new(
+                Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        "--exact",
+                        "cli::member::tests::external_input_member_child",
+                        "--ignored",
+                        "--nocapture",
+                        "--test-threads=1",
+                        "--quiet",
+                    ])
+                    .env(EXTERNAL_MEMBER_ENV, &path)
+                    .env("RUST_BACKTRACE", "0")
+                    .env("PATH", fixture.fixture._dir.path())
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .unwrap(),
+            ),
+            until,
+        };
+        if lose_stdout {
+            while !path.with_extension("ready").exists() {
+                assert!(
+                    owned.child.try_wait().unwrap().is_none(),
+                    "owned member reaches its output-loss gate"
+                );
+                external_member_pause(until);
+            }
+            drop(
+                owned
+                    .child
+                    .stdout
+                    .take()
+                    .expect("owned stdout consumer closes after child entry"),
+            );
+            external_member_private_json(
+                &path.with_extension("continue"),
+                &json!({"continue":true}),
+            );
+        }
+        let status = owned.child.poll_until(until).unwrap();
+        if status.is_none() {
+            owned.child.terminate_until(until);
+        }
+        let status = status.expect("owned member reaped under the original deadline");
+        let stdout = if lose_stdout {
+            assert!(owned.child.stdout.is_none());
+            String::new()
+        } else {
+            let mut bytes = Vec::new();
+            owned
+                .child
+                .stdout
+                .as_mut()
+                .unwrap()
+                .take(16385)
+                .read_to_end(&mut bytes)
+                .unwrap();
+            assert!(bytes.len() <= 16384);
+            String::from_utf8(bytes).unwrap()
+        };
+        let mut stderr = Vec::new();
+        owned
+            .child
+            .stderr
+            .as_mut()
+            .unwrap()
+            .take(16385)
+            .read_to_end(&mut stderr)
+            .unwrap();
+        assert!(stderr.len() <= 16384);
+        (status, stdout, String::from_utf8(stderr).unwrap())
+    }
+
+    fn external_member_input_ids(conn: &Connection, run_id: i64) -> Vec<i64> {
+        conn.prepare(
+            "SELECT input_id FROM member_input_operations WHERE run_id=?1 ORDER BY input_id",
+        )
+        .unwrap()
+        .query_map([run_id], |row| row.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap()
+    }
+
+    fn external_member_json(stdout: &str) -> Value {
+        serde_json::from_str(
+            stdout
+                .lines()
+                .find(|line| line.starts_with('{'))
+                .expect("actual member JSON output"),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn external_input_member_prompt_exec_route_raw_commands_and_print_actual_durable_ids() {
+        use crate::broker::runtime as storage;
+        use sha2::{Digest, Sha256};
+        crate::runtime::with_input_service(|fixture, outer| {
+            let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+            let member =
+                crate::broker::get_member(&fixture.fixture.conn, run.member_id, run.fleet_id)
+                    .unwrap()
+                    .unwrap();
+            let placement = member.placement.as_ref().unwrap();
+            let pane = placement.mux_pane_id.as_deref().unwrap();
+            for (action, kind) in [
+                ("prompt", storage::InputKind::Prompt),
+                ("exec", storage::InputKind::Exec),
+            ] {
+                for json in [true, false] {
+                    crate::runtime::input_service_composer(fixture, outer);
+                    let before = external_member_input_ids(&fixture.fixture.conn, run.run_id);
+                    let literal = format!("member {action} λ json={json}");
+                    let (status, stdout, stderr) = external_member_invoke(
+                        fixture,
+                        action,
+                        &literal,
+                        json,
+                        false,
+                        None,
+                        outer.min(Instant::now() + Duration::from_secs(2)),
+                    );
+                    assert!(
+                        status.success(),
+                        "actual {action} failed: {status}; stdout={stdout:?}; stderr={stderr:?}"
+                    );
+                    assert!(stderr.is_empty(), "{stderr}");
+                    let after = external_member_input_ids(&fixture.fixture.conn, run.run_id);
+                    assert_eq!(after.len(), before.len() + 1);
+                    assert_eq!(&after[..before.len()], before);
+                    let row =
+                        storage::get_input(&fixture.fixture.conn, *after.last().unwrap()).unwrap();
+                    assert_eq!(row.kind, kind);
+                    assert_eq!(row.state, storage::InputState::Accepted);
+                    assert_eq!(row.message_id, None);
+                    let prefix = format!("{}:{}:", kind.as_str(), run.run_id);
+                    let random = row
+                        .operation_key
+                        .strip_prefix(&prefix)
+                        .expect("one explicit invocation key");
+                    assert_eq!(random.len(), 64);
+                    assert!(
+                        random
+                            .bytes()
+                            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                    );
+                    let payload = json!({"kind":kind.as_str(),"literal":literal,"message_id":null,"run_id":run.run_id});
+                    let digest: String = Sha256::digest(serde_json::to_vec(&payload).unwrap())
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect();
+                    assert_eq!(
+                        row.payload_digest, digest,
+                        "Exec binds the raw command before the native prefix"
+                    );
+                    if json {
+                        let expected = if action == "prompt" {
+                            format!(
+                                "{{\"member_id\":{},\"pane_id\":{},\"text\":{},\"input_id\":{}}}",
+                                run.member_id,
+                                serde_json::to_string(pane).unwrap(),
+                                serde_json::to_string(&literal).unwrap(),
+                                row.input_id
+                            )
+                        } else {
+                            format!(
+                                "{{\"member_id\":{},\"pane_id\":{},\"coding_agent\":{},\"command\":{},\"dispatched\":true,\"input_id\":{}}}",
+                                run.member_id,
+                                serde_json::to_string(pane).unwrap(),
+                                serde_json::to_string(&placement.coding_agent).unwrap(),
+                                serde_json::to_string(&literal).unwrap(),
+                                row.input_id
+                            )
+                        };
+                        assert_eq!(
+                            stdout.lines().find(|line| line.starts_with('{')).unwrap(),
+                            expected
+                        );
+                    } else {
+                        let original = if action == "prompt" {
+                            format!(
+                                "Sent prompt {literal:?} to member {} ({pane}).",
+                                member.name
+                            )
+                        } else {
+                            format!(
+                                "Dispatched native command to member {} ({pane}). Inspect the pane for its result.",
+                                run.member_id
+                            )
+                        };
+                        assert!(
+                            stdout.contains(&format!("{original}\nInput: {}\n", row.input_id)),
+                            "{stdout:?}"
+                        );
+                    }
+                    let line = if action == "exec" {
+                        format!("! {literal}")
+                    } else {
+                        literal.clone()
+                    };
+                    crate::runtime::wait_input_service_record(fixture, &line, outer);
+                    crate::runtime::input_service_barrier(fixture, outer);
+                    assert_eq!(
+                        crate::runtime::input_service_records(fixture)
+                            .iter()
+                            .filter(|record| record["line"] == line)
+                            .count(),
+                        1
+                    );
+                    assert_eq!(
+                        storage::get_input(&fixture.fixture.conn, row.input_id).unwrap(),
+                        row
+                    );
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn external_input_member_lost_stdout_keeps_discoverable_receipt_and_same_key_never_retypes() {
+        use crate::broker::runtime as storage;
+        use crate::runtime::runner::{SubmissionStatus, SubmitInput, submit_wrapped_input};
+        crate::runtime::with_input_service(|fixture, outer| {
+            let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+            let before = external_member_input_ids(&fixture.fixture.conn, run.run_id);
+            let literal = "member output loss λ";
+            let (status, stdout, stderr) = external_member_invoke(
+                fixture,
+                "prompt",
+                literal,
+                true,
+                true,
+                None,
+                outer.min(Instant::now() + Duration::from_secs(2)),
+            );
+            assert_eq!(status.code(), Some(101), "{status}; {stderr}");
+            assert!(stdout.is_empty());
+            assert!(
+                stderr.contains("stdout") && stderr.contains("Broken pipe"),
+                "{stderr}"
+            );
+            let ids = external_member_input_ids(&fixture.fixture.conn, run.run_id);
+            assert_eq!(ids.len(), before.len() + 1);
+            let row = storage::get_input(&fixture.fixture.conn, *ids.last().unwrap()).unwrap();
+            assert_eq!(row.state, storage::InputState::Accepted);
+            let (status, stdout, stderr) = external_member_invoke(
+                fixture,
+                "show",
+                "",
+                true,
+                false,
+                None,
+                outer.min(Instant::now() + Duration::from_secs(2)),
+            );
+            assert!(status.success(), "{status}; {stderr}");
+            assert!(
+                external_member_json(&stdout)["runtime"]["unresolved_input_ids"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&json!(row.input_id))
+            );
+            let (status, stdout, stderr) = external_member_invoke(
+                fixture,
+                "input_show",
+                "",
+                true,
+                false,
+                Some(row.input_id),
+                outer.min(Instant::now() + Duration::from_secs(2)),
+            );
+            assert!(status.success(), "{status}; {stderr}");
+            let discovered = external_member_json(&stdout);
+            assert_eq!(discovered["input"]["input_id"], row.input_id);
+            assert_eq!(discovered["input"]["operation_key"], row.operation_key);
+            assert_eq!(discovered["input"]["state"], "accepted");
+            let member =
+                crate::broker::get_member(&fixture.fixture.conn, run.member_id, run.fleet_id)
+                    .unwrap()
+                    .unwrap();
+            let placement = member.placement.unwrap();
+            let settings = Settings {
+                database_url: format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()),
+                max_text_len: 200,
+                multiplexer: Some("tmux".into()),
+            };
+            let request = SubmitInput {
+                operation_key: row.operation_key.clone(),
+                input_kind: row.kind,
+                message_id: row.message_id,
+                literal: literal.into(),
+            };
+            let result = submit_wrapped_input(
+                &mut fixture.fixture.conn,
+                &settings,
+                &run,
+                &placement,
+                &request,
+                Deadline::until(outer),
+            )
+            .unwrap();
+            assert_eq!(result.status, SubmissionStatus::Accepted);
+            assert_eq!(result.input_id, Some(row.input_id));
+            assert_eq!(
+                storage::get_input(&fixture.fixture.conn, row.input_id).unwrap(),
+                row
+            );
+            crate::runtime::wait_input_service_record(fixture, literal, outer);
+            crate::runtime::input_service_barrier(fixture, outer);
+            assert_eq!(
+                crate::runtime::input_service_records(fixture)
+                    .iter()
+                    .filter(|record| record["line"] == literal)
+                    .count(),
+                1
+            );
+        });
+    }
+
     fn fixture() -> (tempfile::TempDir, Connection, Settings, i64, i64, i64) {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = common::migrated_conn(&dir);

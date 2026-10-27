@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
-mod input_service;
+pub(crate) mod input_service;
 mod observation_contract;
 mod observation_services;
 mod review_collector;
@@ -120,8 +120,8 @@ fn assert_rejected(reply: &std::io::Result<Value>) {
     }
 }
 
-struct ServiceFixture {
-    fixture: Fixture,
+pub(crate) struct ServiceFixture {
+    pub(crate) fixture: Fixture,
     _artifacts: RunArtifacts,
     child: OwnedChild,
     process: Option<ProcessIdentity>,
