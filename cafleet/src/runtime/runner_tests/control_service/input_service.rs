@@ -441,7 +441,6 @@ fn step5_service_input_disconnected_preview_consumer_retains_outcome_without_aut
             assert!(fixture.child.try_wait().unwrap().is_none());
             pause(accepted_until);
         };
-        abandoned.stream.shutdown(Shutdown::Both).unwrap();
         drop(abandoned);
         wait_record(fixture, &message.text, until);
         let retained = submission(exchange(fixture, &value, until));
