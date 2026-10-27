@@ -594,7 +594,7 @@ mod permission_response_contracts {
     use crate::coding_agent::{CodingAgent, inspection_fixture_definition};
     use crate::runtime::runner::{
         ByteInput, PermissionInspection, PermissionRespondInput, PermissionResponseResult,
-        TerminalSize,
+        ReceiptAction, ReceiptReply, TerminalSize,
     };
     use std::time::Duration;
 
@@ -933,6 +933,113 @@ mod permission_response_contracts {
         );
         assert_eq!(h.pty.offers, vec![b"y".to_vec()]);
     }
+
+    fn terminal_zero(h: &mut Host, key: &str) -> (PermissionRespondInput, i64) {
+        let (_, input, id) = admitted(h, key);
+        h.pty.short = Some(0);
+        h.drain();
+        let failure = advance(h)
+            .err()
+            .expect("actual zero-length native write terminates its attempt");
+        assert!(
+            failure
+                .source
+                .message()
+                .contains("native input write returned zero bytes")
+        );
+        assert_eq!(failure.input_id, Some(id));
+        let point = h.coordinator.retained_checkpoint(id).unwrap();
+        assert_eq!(
+            (point.stage, point.written_bytes),
+            (SubmissionStage::ZeroBytes, 0)
+        );
+        assert_eq!(
+            audit(h, id, &input, "inspection-allow-plan").input.state,
+            storage::InputState::Ready
+        );
+        h.coordinator.finish_pending_attempt();
+        h.pty.short = None;
+        assert!(h.coordinator.pending.is_none());
+        assert_eq!(h.pty.offers, vec![b"y".to_vec()]);
+        (input, id)
+    }
+
+    #[test]
+    fn permission_ready_actual_zero_rearms_exact_binding_and_revoked_authority_preserves_ready() {
+        with_definition(inspection_fixture_definition(), b"y".to_vec(), |h, _, _| {
+            let (input, id) = terminal_zero(h, "response:ready-rearm");
+            let original = storage::get_permission_response(&h.fixture.conn, id).unwrap();
+            assert!(
+                handle(h, &input).unwrap().is_none(),
+                "exact current Ready request enters live revalidation"
+            );
+            assert_eq!(
+                storage::get_permission_response(&h.fixture.conn, id).unwrap(),
+                original
+            );
+            assert_eq!(arm_stage(h, 2), id);
+            let rearmed = audit(h, id, &input, "inspection-allow-plan");
+            assert_eq!(rearmed.input.state, storage::InputState::InProgress);
+            assert_eq!(rearmed.response, original.response);
+            assert_eq!(rearmed.input.created_at, original.input.created_at);
+            assert_eq!(rearmed.input.payload_digest, original.input.payload_digest);
+            assert_eq!(counts(h), [1, 1, 1]);
+            h.drain();
+            assert!(h.advance().is_none());
+            let point = h.coordinator.retained_checkpoint(id).unwrap();
+            assert_eq!(
+                (point.stage, point.written_bytes),
+                (SubmissionStage::Partial, 1)
+            );
+            assert_eq!(arm_stage(h, 3), id);
+            h.drain();
+            let completed = response(h.advance().expect("actual final rearmed stage"));
+            assert_eq!(
+                (
+                    completed.submission.status,
+                    completed.submission.stage,
+                    completed.submission.input_id
+                ),
+                (
+                    SubmissionStatus::Accepted,
+                    SubmissionStage::Submitted,
+                    Some(id)
+                )
+            );
+            let accepted = audit(h, id, &input, "inspection-allow-plan");
+            assert_eq!(accepted.input.state, storage::InputState::Accepted);
+            assert_eq!(accepted.response, original.response);
+            assert_eq!(
+                h.pty.offers,
+                vec![b"y".to_vec(), b"y".to_vec(), b"\r".to_vec()]
+            );
+        });
+        with_definition(inspection_fixture_definition(), b"y".to_vec(), |h, _, _| {
+            let (input, id) = terminal_zero(h, "response:ready-revoked");
+            let original = storage::get_permission_response(&h.fixture.conn, id).unwrap();
+            h.human.bytes.push_back(b'!');
+            h.drain();
+            let failure = handle(h, &input)
+                .err()
+                .expect("actual manual generation revokes Ready authority");
+            assert_eq!(
+                (failure.run_id, failure.interaction_id, failure.input_id),
+                (
+                    Some(h.fixture.run.run_id),
+                    Some(input.interaction_id),
+                    Some(id)
+                )
+            );
+            assert!(h.coordinator.pending.is_none());
+            assert_eq!(
+                storage::get_permission_response(&h.fixture.conn, id).unwrap(),
+                original
+            );
+            assert_eq!(counts(h), [1, 1, 1]);
+            assert_eq!(h.pty.offers, vec![b"y".to_vec(), b"!".to_vec()]);
+        });
+    }
+
     fn advance(h: &mut Host) -> std::result::Result<Option<InputControlReply>, InputFailure> {
         h.coordinator.advance(
             &mut h.fixture.conn,
@@ -942,6 +1049,605 @@ mod permission_response_contracts {
             &h.controller,
             h.until,
         )
+    }
+
+    fn receipt(
+        h: &mut Host,
+        action: ReceiptAction,
+    ) -> std::result::Result<ReceiptReply, InputFailure> {
+        let mut request = h.request("unused-permission-receipt-key");
+        request.operation = InputControlOperation::Receipt(action);
+        h.coordinator
+            .handle_received(
+                &mut h.fixture.conn,
+                &h.fixture.run,
+                request,
+                &h.controller,
+                h.until,
+            )
+            .map(|reply| {
+                let InputControlReply::Receipt(reply) =
+                    reply.expect("receipt completes without taking a pending client")
+                else {
+                    panic!("actual permission receipt has its typed reply")
+                };
+                reply
+            })
+    }
+
+    fn refuses_zero_proof(h: &mut Host, row: &storage::PermissionReceipt) {
+        let tx = h
+            .fixture
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .unwrap();
+        let guard = h
+            .coordinator
+            .acquire_receipt_guard(&tx, &h.fixture.run, row, h.until)
+            .unwrap();
+        assert!(
+            guard
+                .zero_byte_retirement(
+                    &h.fixture.run.owner(),
+                    row.input.input_id,
+                    row.response.metadata.interaction_id
+                )
+                .is_err(),
+            "actual retained uncertainty supplies exclusion but no zero-byte proof"
+        );
+        drop(guard);
+        tx.rollback().unwrap();
+        assert_eq!(
+            storage::get_permission_response(&h.fixture.conn, row.input.input_id).unwrap(),
+            *row
+        );
+    }
+
+    fn release_ready_claim(
+        h: &mut Host,
+        row: &storage::PermissionReceipt,
+    ) -> storage::PermissionReceipt {
+        let tx = h
+            .fixture
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .unwrap();
+        let guard = h
+            .coordinator
+            .acquire_receipt_guard(&tx, &h.fixture.run, row, h.until)
+            .unwrap();
+        let proof = guard
+            .zero_byte_retirement(
+                &h.fixture.run.owner(),
+                row.input.input_id,
+                row.response.metadata.interaction_id,
+            )
+            .unwrap();
+        tx.rollback().unwrap();
+        storage::release_permission_claim(
+            &mut h.fixture.conn,
+            &h.fixture.run.owner(),
+            row.input.input_id,
+            &proof,
+            h.until,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn permission_ready_rearm_restores_its_released_claim_and_refuses_a_competing_claim() {
+        with_definition(inspection_fixture_definition(), b"y".to_vec(), |h, _, _| {
+            let (input, id) = terminal_zero(h, "response:ready-claim-restore");
+            let original = storage::get_permission_response(&h.fixture.conn, id).unwrap();
+            let released = release_ready_claim(h, &original);
+            assert_eq!(released.input, original.input);
+            assert_eq!(released.response, original.response);
+            assert!(released.claim.is_none());
+            assert!(handle(h, &input).unwrap().is_none());
+            assert_eq!(arm_stage(h, 2), id);
+            let rearmed = audit(h, id, &input, "inspection-allow-plan");
+            assert_eq!(rearmed.input.state, storage::InputState::InProgress);
+            assert_eq!(rearmed.response, original.response);
+            assert_eq!(rearmed.claim, original.claim);
+            assert_eq!(counts(h), [1, 1, 1]);
+            assert_eq!(h.pty.offers, vec![b"y".to_vec()]);
+            h.coordinator.finish_pending_attempt();
+        });
+        with_definition(inspection_fixture_definition(), b"y".to_vec(), |h, _, _| {
+            let (input, id) = terminal_zero(h, "response:ready-foreign-claim");
+            let original = storage::get_permission_response(&h.fixture.conn, id).unwrap();
+            release_ready_claim(h, &original);
+            let request = storage::NewPermissionResponse {
+                operation_key: "response:competing-episode-owner".into(),
+                metadata: original.response.metadata.clone(),
+            };
+            let cap = h
+                .coordinator
+                .current_request
+                .as_ref()
+                .unwrap()
+                .0
+                .answer_matches
+                .iter()
+                .find(|matched| matched.plan().capability().decision() == PermissionDecision::Allow)
+                .unwrap()
+                .plan()
+                .capability();
+            let storage::PermissionReservation::Reserved(competing) =
+                storage::reserve_permission_response(
+                    &mut h.fixture.conn,
+                    &h.fixture.run.owner(),
+                    &request,
+                    Some(cap),
+                    h.until,
+                )
+                .unwrap()
+            else {
+                panic!("separate deliberate key acquires the released claim through actual storage")
+            };
+            assert_ne!(competing.input.input_id, id);
+            let outcome = handle(h, &input);
+            let refused = match outcome {
+                Err(_) => true,
+                Ok(None) => {
+                    let mut refused = false;
+                    for _ in 0..16 {
+                        h.drain();
+                        match advance(h) {
+                            Err(_) => {
+                                refused = true;
+                                break;
+                            }
+                            Ok(None) => {}
+                            Ok(Some(reply)) => {
+                                let reply = response(reply);
+                                assert!(matches!(
+                                    reply.submission.status,
+                                    SubmissionStatus::Held | SubmissionStatus::Rejected
+                                ));
+                                assert_eq!(
+                                    (reply.submission.input_id, reply.submission.stage),
+                                    (Some(id), SubmissionStage::ZeroBytes)
+                                );
+                                refused = true;
+                                break;
+                            }
+                        }
+                    }
+                    refused
+                }
+                Ok(Some(reply)) => {
+                    let reply = response(reply);
+                    assert!(matches!(
+                        reply.submission.status,
+                        SubmissionStatus::Held | SubmissionStatus::Rejected
+                    ));
+                    assert_eq!(
+                        (reply.submission.input_id, reply.submission.stage),
+                        (Some(id), SubmissionStage::ZeroBytes)
+                    );
+                    true
+                }
+            };
+            assert!(
+                refused,
+                "actual foreign-claim check refuses within finite turns"
+            );
+            assert_eq!(
+                storage::get_permission_response(&h.fixture.conn, competing.input.input_id)
+                    .unwrap(),
+                competing
+            );
+            let unchanged = storage::get_permission_response(&h.fixture.conn, id).unwrap();
+            assert_eq!(unchanged.input, original.input);
+            assert_eq!(unchanged.response, original.response);
+            assert!(unchanged.claim.is_none());
+            assert_eq!(h.pty.offers, vec![b"y".to_vec()]);
+            h.coordinator.finish_pending_attempt();
+        });
+    }
+
+    #[test]
+    fn permission_receipt_possible_initial_io_keeps_claim_through_attributed_settlement_and_retirement()
+     {
+        with_inspection(|h, _, _| {
+            let (_, input, id) = admitted(h, "response:possible-initial-io");
+            h.drain();
+            let mut guard = h
+                .coordinator
+                .acquire_write_guard(
+                    &mut h.fixture.conn,
+                    &h.fixture.run,
+                    &mut h.transport,
+                    &h.controller,
+                    h.until,
+                )
+                .unwrap()
+                .unwrap();
+            assert!(
+                guard
+                    .zero_byte_retirement(&h.fixture.run.owner(), id, input.interaction_id)
+                    .is_err(),
+                "an Armed writer lease is not a receipt-exclusion proof"
+            );
+            guard.begin_write(&h.transport, b"y", h.until).unwrap();
+            guard.mark_io_possible();
+            drop(guard);
+            h.coordinator.finish_pending_attempt();
+            let point = h.coordinator.retained_checkpoint(id).unwrap();
+            assert_eq!(
+                (point.stage, point.written_bytes),
+                (SubmissionStage::Unknown, 0)
+            );
+            let original = storage::get_permission_response(&h.fixture.conn, id).unwrap();
+            assert_eq!(original.input.state, storage::InputState::InProgress);
+            refuses_zero_proof(h, &original);
+            assert!(matches!(receipt(h, ReceiptAction::Reconcile {
+                input_id: id, expected: storage::InputState::InProgress,
+                disposition: storage::InputDisposition::NotSubmitted,
+                evidence_ref: "fixture:attributed-possible-io".into(),
+            }).unwrap(), ReceiptReply::Settled { input_id } if input_id == id));
+            let settled = storage::get_permission_response(&h.fixture.conn, id).unwrap();
+            assert_eq!(
+                settled.input.disposition,
+                Some(storage::InputDisposition::NotSubmitted)
+            );
+            assert_eq!(settled.response, original.response);
+            assert_eq!(settled.claim, original.claim);
+            refuses_zero_proof(h, &settled);
+            assert!(
+                matches!(receipt(h, ReceiptAction::Retire { input_id: id }).unwrap(), ReceiptReply::Retired { input_id } if input_id == id)
+            );
+            assert_eq!(
+                storage::get_permission_response(&h.fixture.conn, id).unwrap(),
+                settled
+            );
+            refuses_zero_proof(h, &settled);
+            let repeated = response(handle(h, &input).unwrap().unwrap());
+            assert_eq!(
+                (repeated.submission.status, repeated.submission.stage),
+                (SubmissionStatus::Rejected, SubmissionStage::ZeroBytes)
+            );
+            assert!(h.pty.offers.is_empty());
+        });
+    }
+
+    #[test]
+    fn permission_receipt_genuine_zero_exclusion_settlement_and_claim_release_are_atomic() {
+        with_definition(inspection_fixture_definition(), b"y".to_vec(), |h, _, _| {
+            let (input, id) = terminal_zero(h, "response:zero-settlement");
+            let original = storage::get_permission_response(&h.fixture.conn, id).unwrap();
+            let run = storage::get_run(&h.fixture.conn, h.fixture.run.run_id).unwrap();
+            let point = h.coordinator.retained_checkpoint(id).unwrap();
+            let mut other = copy(&input);
+            other.operation_key = "response:other-pending".into();
+            assert!(handle(h, &other).unwrap().is_none());
+            let pending = h.coordinator.pending.as_ref().unwrap();
+            let pending_before = (
+                pending.request.operation_key.clone(),
+                pending.phase,
+                pending.deadline,
+                pending.input_id,
+            );
+            let ReceiptReply::Present {
+                input_id,
+                submission,
+            } = receipt(
+                h,
+                ReceiptAction::Query {
+                    operation_key: input.operation_key.clone(),
+                },
+            )
+            .unwrap()
+            else {
+                panic!("durable Ready receipt remains present alongside another pending writer")
+            };
+            assert_eq!(input_id, id);
+            assert_eq!(
+                (submission.status, submission.stage, submission.output_seq),
+                (
+                    SubmissionStatus::Held,
+                    SubmissionStage::ZeroBytes,
+                    Some(point.output_seq)
+                )
+            );
+            let reconcile = || ReceiptAction::Reconcile {
+                input_id: id,
+                expected: storage::InputState::Ready,
+                disposition: storage::InputDisposition::NotSubmitted,
+                evidence_ref: "fixture:live-zero-byte".into(),
+            };
+            assert!(receipt(h, reconcile()).is_err());
+            let pending = h.coordinator.pending.as_ref().unwrap();
+            assert!(
+                (
+                    pending.request.operation_key.clone(),
+                    pending.phase,
+                    pending.deadline,
+                    pending.input_id
+                ) == pending_before
+            );
+            assert_eq!(
+                storage::get_permission_response(&h.fixture.conn, id).unwrap(),
+                original
+            );
+            h.coordinator.finish_pending_attempt();
+            let tx = h
+                .fixture
+                .conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .unwrap();
+            let mut guard = h
+                .coordinator
+                .acquire_receipt_guard(&tx, &h.fixture.run, &original, h.until)
+                .unwrap();
+            assert!(
+                guard.begin_write(&h.transport, b"y", h.until).is_err(),
+                "receipt exclusion grants no selected-stage write permit"
+            );
+            drop(guard);
+            tx.rollback().unwrap();
+            {
+                let tx = h
+                    .fixture
+                    .conn
+                    .transaction_with_behavior(TransactionBehavior::Immediate)
+                    .unwrap();
+                let guard = h
+                    .coordinator
+                    .acquire_receipt_guard(&tx, &h.fixture.run, &original, h.until)
+                    .unwrap();
+                let proof = guard
+                    .zero_byte_retirement(&h.fixture.run.owner(), id, input.interaction_id)
+                    .unwrap();
+                tx.rollback().unwrap();
+                let request = storage::NewPermissionResponse {
+                    operation_key: input.operation_key.clone(),
+                    metadata: original.response.metadata.clone(),
+                };
+                assert!(
+                    storage::rearm_permission_response(
+                        &mut h.fixture.conn,
+                        &h.fixture.run.owner(),
+                        &request,
+                        &proof,
+                        h.until
+                    )
+                    .is_err(),
+                    "exclusion-only proof cannot grant current-plan rearm authority"
+                );
+            }
+            assert_eq!(
+                storage::get_permission_response(&h.fixture.conn, id).unwrap(),
+                original
+            );
+            h.fixture.conn.execute_batch("CREATE TRIGGER reject_live_claim_delete BEFORE DELETE ON member_permission_response_claims BEGIN SELECT RAISE(ABORT,'owned live claim delete failure'); END").unwrap();
+            let failed = receipt(h, reconcile());
+            let removed = h
+                .fixture
+                .conn
+                .execute_batch("DROP TRIGGER reject_live_claim_delete");
+            assert!(
+                removed.is_ok(),
+                "primary={:?}; trigger_cleanup={removed:?}",
+                failed.as_ref().err()
+            );
+            let failed = failed
+                .err()
+                .expect("real claim deletion failure aborts settlement");
+            assert!(
+                failed
+                    .source
+                    .message()
+                    .contains("owned live claim delete failure")
+            );
+            assert_eq!(failed.input_id, Some(id));
+            assert_eq!(
+                storage::get_permission_response(&h.fixture.conn, id).unwrap(),
+                original
+            );
+            assert_eq!(storage::get_run(&h.fixture.conn, run.run_id).unwrap(), run);
+            let unchanged = h.coordinator.retained_checkpoint(id).unwrap();
+            assert_eq!(
+                (
+                    unchanged.stage,
+                    unchanged.written_bytes,
+                    unchanged.output_seq
+                ),
+                (point.stage, point.written_bytes, point.output_seq)
+            );
+            assert!(
+                matches!(receipt(h, reconcile()).unwrap(), ReceiptReply::Settled { input_id } if input_id == id)
+            );
+            let settled = storage::get_permission_response(&h.fixture.conn, id).unwrap();
+            assert_eq!(settled.input.state, storage::InputState::Settled);
+            assert_eq!(
+                settled.input.disposition,
+                Some(storage::InputDisposition::NotSubmitted)
+            );
+            assert_eq!(
+                settled.input.evidence_ref.as_deref(),
+                Some("fixture:live-zero-byte")
+            );
+            assert_eq!(settled.response, original.response);
+            assert_eq!(settled.claim, None);
+            assert!(
+                matches!(receipt(h, ReceiptAction::Retire { input_id: id }).unwrap(), ReceiptReply::Retired { input_id } if input_id == id)
+            );
+            assert!(!h.coordinator.operations.contains_key(&id));
+            let ReceiptReply::Present {
+                input_id,
+                submission,
+            } = receipt(
+                h,
+                ReceiptAction::Query {
+                    operation_key: input.operation_key.clone(),
+                },
+            )
+            .unwrap()
+            else {
+                panic!("retired cache retains its consumed durable operation")
+            };
+            assert_eq!(input_id, id);
+            assert_eq!(
+                (submission.status, submission.stage, submission.output_seq),
+                (SubmissionStatus::Rejected, SubmissionStage::Unknown, None)
+            );
+            let repeated = response(handle(h, &input).unwrap().unwrap());
+            assert_eq!(
+                (
+                    repeated.submission.status,
+                    repeated.submission.input_id,
+                    repeated.submission.stage
+                ),
+                (
+                    SubmissionStatus::Rejected,
+                    Some(id),
+                    SubmissionStage::ZeroBytes
+                )
+            );
+            let ids = stable_form(h);
+            let current = inspect(h, ids);
+            let fresh = command(
+                h,
+                &current,
+                "response:deliberate-after-zero-settlement",
+                PermissionDecision::Allow,
+            );
+            assert!(handle(h, &fresh).unwrap().is_none());
+            for _ in 0..16 {
+                h.drain();
+                assert!(advance(h).unwrap().is_none());
+                if h.hooks.count("reserved") == 2 {
+                    break;
+                }
+            }
+            assert_eq!(h.hooks.count("reserved"), 2);
+            let next =
+                storage::find_input(&h.fixture.conn, h.fixture.run.run_id, &fresh.operation_key)
+                    .unwrap()
+                    .expect("new deliberate key reserves after proven release");
+            assert_ne!(next.input_id, id);
+            let next_receipt =
+                storage::get_permission_response(&h.fixture.conn, next.input_id).unwrap();
+            assert_eq!(next_receipt.claim.as_ref().unwrap().input_id, next.input_id);
+            assert_eq!(
+                storage::get_permission_response(&h.fixture.conn, id).unwrap(),
+                settled
+            );
+            assert_eq!(h.pty.offers, vec![b"y".to_vec()]);
+            h.coordinator.finish_pending_attempt();
+        });
+    }
+
+    #[test]
+    fn permission_receipt_cacheless_ready_proof_is_borrowed_and_not_an_attributed_disposition() {
+        trait AmbiguousIfSend<A> {
+            fn check() {}
+        }
+        impl<T: ?Sized> AmbiguousIfSend<()> for T {}
+        struct SendType;
+        impl<T: ?Sized + Send> AmbiguousIfSend<SendType> for T {}
+        trait AmbiguousIfClone<A> {
+            fn check() {}
+        }
+        impl<T: ?Sized> AmbiguousIfClone<()> for T {}
+        struct CloneType;
+        impl<T: ?Sized + Clone> AmbiguousIfClone<CloneType> for T {}
+        trait AmbiguousIfSerialize<A> {
+            fn check() {}
+        }
+        impl<T: ?Sized> AmbiguousIfSerialize<()> for T {}
+        struct SerializeType;
+        impl<T: ?Sized + serde::Serialize> AmbiguousIfSerialize<SerializeType> for T {}
+        let _ = <InputGuard<'static> as AmbiguousIfSend<_>>::check;
+        let _ = <storage::ZeroByteRetirement<'static> as AmbiguousIfSend<_>>::check;
+        let _ = <InputGuard<'static> as AmbiguousIfClone<_>>::check;
+        let _ = <storage::ZeroByteRetirement<'static> as AmbiguousIfClone<_>>::check;
+        let _ = <InputGuard<'static> as AmbiguousIfSerialize<_>>::check;
+        let _ = <storage::ZeroByteRetirement<'static> as AmbiguousIfSerialize<_>>::check;
+        struct NoTokens;
+        impl RequestTokenSource for NoTokens {
+            fn fill(&mut self, _: &mut [u8; 32]) -> Result<()> {
+                panic!("receipt-only proof creates no request token")
+            }
+        }
+        with_definition(inspection_fixture_definition(), b"y".to_vec(), |h, _, _| {
+            let (input, id) = terminal_zero(h, "response:cacheless-zero");
+            let ready = storage::get_permission_response(&h.fixture.conn, id).unwrap();
+            h.coordinator.fence(h.until).unwrap();
+            let mut empty = InputCoordinator::new(
+                &mut h.fixture.conn,
+                &h.fixture.run,
+                h.coordinator.lock.clone(),
+                InputServices {
+                    catalog: ProfileCatalog::from_definitions(&inspection_fixture_definition())
+                        .unwrap(),
+                    token_source: Box::new(NoTokens),
+                    hooks: h.hooks.clone(),
+                },
+                h.until,
+            )
+            .unwrap();
+            assert!(empty.operations.is_empty());
+            {
+                let tx = h
+                    .fixture
+                    .conn
+                    .transaction_with_behavior(TransactionBehavior::Immediate)
+                    .unwrap();
+                let guard = empty
+                    .acquire_receipt_guard(&tx, &h.fixture.run, &ready, h.until)
+                    .unwrap();
+                assert!(
+                    guard
+                        .zero_byte_retirement(&h.fixture.run.owner(), id + 1, input.interaction_id)
+                        .is_err()
+                );
+                let _proof = guard
+                    .zero_byte_retirement(&h.fixture.run.owner(), id, input.interaction_id)
+                    .unwrap();
+                tx.rollback().unwrap();
+            }
+            storage::settle_input(
+                &mut h.fixture.conn,
+                &h.fixture.run.owner(),
+                id,
+                storage::InputState::Ready,
+                storage::InputDisposition::NotSubmitted,
+                "fixture:attributed-only",
+            )
+            .unwrap();
+            let attributed = storage::get_permission_response(&h.fixture.conn, id).unwrap();
+            assert!(attributed.claim.is_some());
+            let tx = h
+                .fixture
+                .conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .unwrap();
+            let guard = empty
+                .acquire_receipt_guard(&tx, &h.fixture.run, &attributed, h.until)
+                .unwrap();
+            assert!(
+                guard
+                    .zero_byte_retirement(&h.fixture.run.owner(), id, input.interaction_id)
+                    .is_err(),
+                "cache-less NotSubmitted label supplies no byte proof"
+            );
+            drop(guard);
+            tx.rollback().unwrap();
+            let mut request = h.request("unused-cacheless-retire");
+            request.operation =
+                InputControlOperation::Receipt(ReceiptAction::Retire { input_id: id });
+            assert!(
+                matches!(empty.handle_received(&mut h.fixture.conn, &h.fixture.run, request, &h.controller, h.until).unwrap(), Some(InputControlReply::Receipt(ReceiptReply::Retired { input_id })) if input_id == id)
+            );
+            assert_eq!(
+                storage::get_permission_response(&h.fixture.conn, id).unwrap(),
+                attributed
+            );
+            assert_eq!(h.pty.offers, vec![b"y".to_vec()]);
+        });
     }
     struct StageIo<'a> {
         inner: &'a mut Pty,
@@ -1233,6 +1939,8 @@ mod permission_response_contracts {
             );
             assert!(advance(h).unwrap().is_none());
             assert_eq!(h.pty.offers.len(), 2);
+            let row = storage::get_permission_response(&h.fixture.conn, id).unwrap();
+            refuses_zero_proof(h, &row);
         });
     }
 
@@ -1268,6 +1976,7 @@ mod permission_response_contracts {
                 storage::get_permission_response(&h.fixture.conn, id).unwrap(),
                 row
             );
+            refuses_zero_proof(h, &row);
             assert!(h.coordinator.pending.is_none());
             assert!(advance(h).unwrap().is_none());
             let repeated = response(

@@ -2341,6 +2341,39 @@ mod tests {
         assert_eq!(host.calls, [1, 1, 1]);
         assert_eq!(host.requests[0]["kind"], "permission_respond");
         let receipt = service_response_audit(&fixture, &input);
+        let mut receipts = SocketHost::new(&settings, &placement, until);
+        receipts.exchange_limit = 3;
+        let settled = reconcile_ordinary_with_host(
+            &mut fixture.fixture.conn,
+            &settings,
+            receipt.input.input_id,
+            InputDisposition::Submitted,
+            "fixture:permission-submitted",
+            Deadline::until(until),
+            &mut receipts,
+        )
+        .unwrap();
+        assert_eq!(receipts.calls, [1, 1, 3]);
+        assert_eq!(
+            receipts
+                .requests
+                .iter()
+                .map(|request| request["action"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["query", "reconcile", "retire"]
+        );
+        assert_eq!(settled.input_id, receipt.input.input_id);
+        assert_eq!(settled.state, InputState::Settled);
+        assert_eq!(settled.disposition, Some(InputDisposition::Submitted));
+        assert_eq!(
+            settled.evidence_ref.as_deref(),
+            Some("fixture:permission-submitted")
+        );
+        let settled_receipt =
+            storage::get_permission_response(&fixture.fixture.conn, receipt.input.input_id)
+                .unwrap();
+        assert_eq!(settled_receipt.response, receipt.response);
+        assert_eq!(settled_receipt.claim, receipt.claim);
         let changes = fixture.fixture.conn.total_changes();
         let held =
             PaneLock::acquire_within(&settings.database_url, &placement, Deadline::until(until))
@@ -2354,7 +2387,6 @@ mod tests {
             &mut NoLiveHost,
         )
         .unwrap();
-        drop(held);
         assert_eq!(
             (
                 repeated.submission.status,
@@ -2372,8 +2404,36 @@ mod tests {
             receipt.response.metadata.expected_owner_epoch
         );
         assert_eq!(repeated.submission.output_seq, None);
+        let repeated_settlement = reconcile_ordinary_with_host(
+            &mut fixture.fixture.conn,
+            &settings,
+            receipt.input.input_id,
+            InputDisposition::Submitted,
+            "fixture:replacement-reference",
+            Deadline::until(until),
+            &mut NoLiveHost,
+        )
+        .unwrap();
+        assert_eq!(repeated_settlement, settled);
+        assert!(
+            reconcile_ordinary_with_host(
+                &mut fixture.fixture.conn,
+                &settings,
+                receipt.input.input_id,
+                InputDisposition::AbandonedUncertain,
+                "fixture:conflicting-reference",
+                Deadline::until(until),
+                &mut NoLiveHost,
+            )
+            .is_err()
+        );
         assert_eq!(fixture.fixture.conn.total_changes(), changes);
-        assert_eq!(service_response_audit(&fixture, &input), receipt);
+        assert_eq!(
+            storage::get_permission_response(&fixture.fixture.conn, receipt.input.input_id)
+                .unwrap(),
+            settled_receipt
+        );
+        drop(held);
         native_answers_through_barrier(
             &mut fixture,
             output_start,
@@ -2381,6 +2441,179 @@ mod tests {
             &["review-answer=y"],
         );
         fixture.finish();
+    }
+
+    #[test]
+    fn permission_receipt_postcommit_expiry_preserves_claim_context_and_consumed_history() {
+        let mut fixture = InputServiceFixture::configured(false, response_services);
+        fixture.start_running();
+        let until = Instant::now() + Duration::from_secs(2);
+        let (settings, run, placement, input) =
+            response_command(&mut fixture, until, "response:receipt-postcommit-expiry");
+        let output_start = fixture.output.len();
+        respond_permission_with_host(
+            &mut fixture.fixture.conn,
+            &settings,
+            &input,
+            Deadline::until(until),
+            &mut SocketHost::new(&settings, &placement, until),
+        )
+        .unwrap();
+        let original = service_response_audit(&fixture, &input);
+        let original_expiry = until;
+        let mut host = SocketHost::new(&settings, &placement, original_expiry);
+        host.exchange_limit = 3;
+        host.expire_retirement = true;
+        let failure = reconcile_ordinary_with_host(
+            &mut fixture.fixture.conn,
+            &settings,
+            original.input.input_id,
+            InputDisposition::Submitted,
+            "fixture:permission-committed-before-expiry",
+            Deadline::until(original_expiry),
+            &mut host,
+        )
+        .unwrap_err();
+        assert!(matches!(failure.source, CafleetError::DeadlineExceeded));
+        assert_eq!(
+            (failure.run_id, failure.interaction_id, failure.input_id),
+            (
+                Some(run.run_id),
+                Some(input.interaction_id),
+                Some(original.input.input_id)
+            )
+        );
+        assert_eq!(
+            failure.operation_key.as_deref(),
+            Some(input.operation_key.as_str())
+        );
+        assert!(!failure.source.message().contains(&input.request_token));
+        assert!(Instant::now() >= original_expiry);
+        assert_eq!(host.calls, [1, 1, 3]);
+        let settled =
+            storage::get_permission_response(&fixture.fixture.conn, original.input.input_id)
+                .unwrap();
+        assert_eq!(settled.input.state, InputState::Settled);
+        assert_eq!(settled.input.disposition, Some(InputDisposition::Submitted));
+        assert_eq!(
+            settled.input.evidence_ref.as_deref(),
+            Some("fixture:permission-committed-before-expiry")
+        );
+        assert_eq!(settled.response, original.response);
+        assert_eq!(settled.claim, original.claim);
+        let history_until = Instant::now() + Duration::from_secs(1);
+        let held = PaneLock::acquire_within(
+            &settings.database_url,
+            &placement,
+            Deadline::until(history_until),
+        )
+        .unwrap()
+        .unwrap();
+        let changes = fixture.fixture.conn.total_changes();
+        let repeated = reconcile_ordinary_with_host(
+            &mut fixture.fixture.conn,
+            &settings,
+            original.input.input_id,
+            InputDisposition::Submitted,
+            "fixture:later-reference",
+            Deadline::until(history_until),
+            &mut NoLiveHost,
+        )
+        .unwrap();
+        assert_eq!(repeated, settled.input);
+        let history = respond_permission_with_host(
+            &mut fixture.fixture.conn,
+            &settings,
+            &input,
+            Deadline::until(history_until),
+            &mut NoLiveHost,
+        )
+        .unwrap();
+        assert_eq!(
+            (history.submission.status, history.submission.input_id),
+            (SubmissionStatus::Accepted, Some(original.input.input_id))
+        );
+        assert_eq!(fixture.fixture.conn.total_changes(), changes);
+        assert_eq!(
+            storage::get_permission_response(&fixture.fixture.conn, original.input.input_id)
+                .unwrap(),
+            settled
+        );
+        drop(held);
+        native_answers_through_barrier(
+            &mut fixture,
+            output_start,
+            "permission-receipt-expiry-barrier",
+            &["review-answer=y"],
+        );
+        fixture.finish();
+    }
+
+    #[test]
+    fn permission_receipt_live_failure_preserves_original_error_without_exclusive_effects() {
+        use super::super::input_recovery::tests::TypedHost;
+        use crate::runtime::runner_tests::permission_history::{Case, Retained};
+
+        let mut case = Case::new(Retained::Accepted);
+        let original = storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
+        let run = storage::get_run(&case.fixture.conn, original.input.run_id).unwrap();
+        let records = health_records(&case.fixture.conn);
+        let placement = crate::broker::get_member(&case.fixture.conn, run.member_id, run.fleet_id)
+            .unwrap()
+            .unwrap()
+            .placement
+            .unwrap();
+        let until = Instant::now() + Duration::from_secs(2);
+        let mut live = UnavailableReceiptHost {
+            settings: case.settings.clone(),
+            placement: placement.clone(),
+            until,
+            input_id: case.input_id,
+            change_digest: false,
+            calls: [0; 3],
+        };
+        let mut recovery = TypedHost::new(until);
+        let failure = reconcile_receipt_with_hosts(
+            &mut case.fixture.conn,
+            &case.settings,
+            case.input_id,
+            InputDisposition::Submitted,
+            "fixture:live-only-permission-receipt",
+            Deadline::until(until),
+            (&mut live, &mut recovery),
+        )
+        .unwrap_err();
+        assert_eq!(live.calls, [1, 1, 0]);
+        assert_eq!(failure.source.message(), "owned first live receipt failure");
+        assert_eq!(
+            (failure.run_id, failure.interaction_id, failure.input_id),
+            (
+                Some(run.run_id),
+                Some(original.response.metadata.interaction_id),
+                Some(case.input_id)
+            )
+        );
+        assert_eq!(
+            failure.operation_key.as_deref(),
+            Some(original.input.operation_key.as_str())
+        );
+        assert!(recovery.calls.is_empty());
+        assert!(recovery.processes.is_empty());
+        assert!(recovery.startups.is_empty());
+        assert_eq!(
+            storage::get_run(&case.fixture.conn, run.run_id).unwrap(),
+            run
+        );
+        assert_eq!(
+            storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap(),
+            original
+        );
+        assert_eq!(health_records(&case.fixture.conn), records);
+        PaneLock::try_acquire(&case.settings.database_url, &placement)
+            .unwrap()
+            .expect("failed live invocation releases its genuine pane guard")
+            .validate_binding(&case.settings.database_url, &placement)
+            .unwrap();
     }
 
     struct UnavailableReceiptHost {
@@ -3105,19 +3338,30 @@ mod tests {
         case.assert_unchanged(changes);
 
         use crate::runtime::runner_tests::permission_history::{Case, Retained};
-        let mut permission = Case::new(Retained::Accepted);
+        let mut permission = Case::new(Retained::Submitted);
         let audit = storage::get_permission_response(&permission.fixture.conn, permission.input_id)
             .unwrap();
         let changes = permission.fixture.conn.total_changes();
+        let retained = reconcile_ordinary_with_host(
+            &mut permission.fixture.conn,
+            &permission.settings,
+            permission.input_id,
+            InputDisposition::Submitted,
+            "fixture:replacement-permission-reference",
+            Deadline::until(Instant::now() + Duration::from_secs(1)),
+            &mut NoLiveHost,
+        )
+        .unwrap();
+        assert_eq!(retained, audit.input);
         assert!(
             reconcile_ordinary_with_host(
                 &mut permission.fixture.conn,
                 &permission.settings,
                 permission.input_id,
-                InputDisposition::Submitted,
-                "fixture:ordinary-cannot-settle-permission",
+                InputDisposition::NotSubmitted,
+                "fixture:conflicting-permission-reference",
                 Deadline::until(Instant::now() + Duration::from_secs(1)),
-                &mut NoLiveHost
+                &mut NoLiveHost,
             )
             .is_err()
         );

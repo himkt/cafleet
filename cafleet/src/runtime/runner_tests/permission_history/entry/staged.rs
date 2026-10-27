@@ -1,16 +1,5 @@
 use super::*;
 
-fn incomplete<T>(result: std::result::Result<T, InputFailure>) -> InputFailure {
-    let failure = match result {
-        Err(failure) => failure,
-        Ok(_) => panic!("the staged live path reports its incomplete implementation"),
-    };
-    assert!(matches!(&failure.source, CafleetError::App(message)
-        if message == "live permission coordination is not implemented"));
-    assert_eq!(failure.source.exit_code(), 1);
-    failure
-}
-
 fn response_context(case: &Case, failure: &InputFailure, key: &str, input_id: Option<i64>) {
     assert_eq!(failure.run_id, Some(case.owner.run_id));
     assert_eq!(
@@ -39,12 +28,22 @@ fn ready() -> Case {
 }
 
 #[test]
-fn step5_checkpoint_matching_ready_preserves_exact_old_metadata_and_claim() {
+fn permission_ready_history_reaches_live_lock_with_exact_old_metadata_and_claim() {
     let mut case = ready();
     let request = command(&case);
     let receipt = storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
     let before = Snapshot::take(&case.fixture.conn);
-    let failure = incomplete(attempt(&mut case, &request));
+    let mut host = NoLive::default();
+    let failure = respond_permission_with_host(
+        &mut case.fixture.conn,
+        &case.settings,
+        &request,
+        Deadline::until(Instant::now() + Duration::from_secs(1)),
+        &mut host,
+    )
+    .err()
+    .expect("the controlled lock failure preserves Ready history");
+    assert_eq!(host.calls, ["lock"]);
     response_context(&case, &failure, &request.operation_key, Some(case.input_id));
     before.unchanged(&case.fixture.conn);
     assert_eq!(
@@ -54,7 +53,7 @@ fn step5_checkpoint_matching_ready_preserves_exact_old_metadata_and_claim() {
 }
 
 #[test]
-fn step5_checkpoint_ready_conflict_precedes_incomplete_boundary_and_preserves_binding() {
+fn permission_ready_conflict_precedes_live_lock_and_preserves_binding() {
     for field in ["epoch", "token", "decision", "mode_ref", "decision_ref"] {
         let mut case = ready();
         let mut request = command(&case);
