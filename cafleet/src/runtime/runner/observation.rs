@@ -130,6 +130,9 @@ pub(crate) struct OrderedObservation<'a> {
     phase: ObservationPhase,
 }
 impl ScreenObserver for OrderedObservation<'_> {
+    fn input_health(&self) -> Option<ObservationHealth> {
+        Some(self.controller.health(self.writer))
+    }
     fn observe(&mut self, screen: &ScreenSnapshot) -> Result<()> {
         self.controller
             .observe_screen(screen, self.writer, self.clock, self.phase)

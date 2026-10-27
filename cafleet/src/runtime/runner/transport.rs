@@ -1,6 +1,45 @@
 use super::*;
 use std::collections::VecDeque;
 use std::io::{self, ErrorKind};
+use std::sync::Arc;
+
+mod drain;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InputDrain {
+    Pending,
+    Quiescent {
+        human_generation: u64,
+        output_seq: u64,
+    },
+}
+
+pub(super) struct DrainedInput {
+    #[expect(
+        dead_code,
+        reason = "the reviewed coordinator validates this opaque drain fact"
+    )]
+    instance: Arc<()>,
+    #[expect(
+        dead_code,
+        reason = "the reviewed coordinator validates this opaque drain fact"
+    )]
+    turn: u64,
+    #[expect(
+        dead_code,
+        reason = "the reviewed coordinator validates this opaque drain fact"
+    )]
+    human_generation: u64,
+    #[expect(
+        dead_code,
+        reason = "the reviewed coordinator validates this opaque drain fact"
+    )]
+    output_seq: u64,
+    #[expect(
+        dead_code,
+        reason = "the reviewed coordinator validates this opaque drain fact"
+    )]
+    health: ObservationHealth,
+}
 
 pub(crate) trait ByteInput {
     fn try_read(&mut self, bytes: &mut [u8]) -> io::Result<usize>;
@@ -16,6 +55,9 @@ pub(crate) trait Display {
 }
 pub(crate) trait ScreenObserver {
     fn observe(&mut self, screen: &ScreenSnapshot) -> Result<()>;
+    fn input_health(&self) -> Option<ObservationHealth> {
+        None
+    }
     fn failures_are_fatal(&self) -> bool {
         false
     }
@@ -45,6 +87,11 @@ pub(crate) struct Transport {
     display: VecDeque<u8>,
     outer_eof: bool,
     child_eof: bool,
+    human_generation: u64,
+    input_turn: u64,
+    input_instance: Arc<()>,
+    input_drain: Option<DrainedInput>,
+    observation_complete: bool,
     #[cfg(test)]
     observation_hooks: Option<std::sync::Arc<dyn ObservationHooks>>,
     #[cfg(test)]
@@ -52,22 +99,44 @@ pub(crate) struct Transport {
     #[cfg(test)]
     deferred_child_bytes: Option<Vec<u8>>,
 }
-fn read_available(input: &mut impl ByteInput, capacity: usize) -> io::Result<Option<Vec<u8>>> {
+enum AvailableRead {
+    Skipped,
+    WouldBlock,
+    Interrupted,
+    Eof,
+    Data(Vec<u8>),
+}
+impl AvailableRead {
+    fn available(self) -> Option<Vec<u8>> {
+        match self {
+            Self::Data(bytes) => Some(bytes),
+            Self::Eof => Some(Vec::new()),
+            Self::Skipped | Self::WouldBlock | Self::Interrupted => None,
+        }
+    }
+}
+fn read_classified(input: &mut impl ByteInput, capacity: usize) -> io::Result<AvailableRead> {
     if capacity == 0 {
-        return Ok(None);
+        return Ok(AvailableRead::Skipped);
     }
     let mut bytes = vec![0; capacity.min(16384)];
     match input.try_read(&mut bytes) {
         Ok(count) => {
             assert!(count <= bytes.len(), "reader respects supplied capacity");
             bytes.truncate(count);
-            Ok(Some(bytes))
+            Ok(if count == 0 {
+                AvailableRead::Eof
+            } else {
+                AvailableRead::Data(bytes)
+            })
         }
-        Err(cause) if matches!(cause.kind(), ErrorKind::WouldBlock | ErrorKind::Interrupted) => {
-            Ok(None)
-        }
+        Err(cause) if cause.kind() == ErrorKind::WouldBlock => Ok(AvailableRead::WouldBlock),
+        Err(cause) if cause.kind() == ErrorKind::Interrupted => Ok(AvailableRead::Interrupted),
         Err(cause) => Err(cause),
     }
+}
+fn read_available(input: &mut impl ByteInput, capacity: usize) -> io::Result<Option<Vec<u8>>> {
+    read_classified(input, capacity).map(AvailableRead::available)
 }
 fn write_pending(
     queue: &mut VecDeque<u8>,
@@ -104,6 +173,11 @@ impl Transport {
             display: VecDeque::new(),
             outer_eof: false,
             child_eof: false,
+            human_generation: 0,
+            input_turn: 0,
+            input_instance: Arc::new(()),
+            input_drain: None,
+            observation_complete: true,
             #[cfg(test)]
             observation_hooks: None,
             #[cfg(test)]
@@ -119,6 +193,7 @@ impl Transport {
         display: &mut impl Display,
         observer: &mut impl ScreenObserver,
     ) -> Result<TransportProgress> {
+        self.invalidate_input_drain();
         let mut progress = TransportProgress::default();
         if !self.outer_eof
             && let Some(bytes) = read_available(
@@ -129,7 +204,7 @@ impl Transport {
         {
             self.outer_eof = bytes.is_empty();
             progress.human_bytes = bytes.len();
-            self.input.extend(bytes);
+            self.retain_human(bytes);
         }
         write_pending(&mut self.input, self.limits.bytes_per_tick, |bytes| {
             pty.try_write(bytes)
@@ -137,6 +212,11 @@ impl Transport {
         if let Some(bytes) = self.read_child(pty)? {
             self.child_eof = bytes.is_empty();
             progress.child_bytes = bytes.len();
+            self.display.extend(bytes.iter().copied());
+            let observation_complete_before = self.observation_complete;
+            if !bytes.is_empty() {
+                self.observation_complete = false;
+            }
             #[cfg(test)]
             if !bytes.is_empty()
                 && let Some(hooks) = &self.observation_hooks
@@ -162,7 +242,9 @@ impl Transport {
                     }
                 }
             }
-            self.display.extend(bytes);
+            if progress.observation_failure.is_none() {
+                self.observation_complete = observation_complete_before;
+            }
         }
         progress.display_bytes = self.flush_display(display)?;
         progress.outer_eof = self.outer_eof;
@@ -185,6 +267,7 @@ impl Transport {
     }
     #[cfg(test)]
     pub(super) fn prefetch_child_bytes(&mut self, pty: &mut impl PtyIo) -> Result<usize> {
+        self.invalidate_input_drain();
         if self.deferred_child_bytes.is_some() {
             return Ok(0);
         }
@@ -200,6 +283,7 @@ impl Transport {
         Ok(0)
     }
     pub(crate) fn flush_display(&mut self, display: &mut impl Display) -> Result<usize> {
+        self.invalidate_input_drain();
         let count = write_pending(&mut self.display, self.limits.bytes_per_tick, |bytes| {
             display.try_write(bytes)
         })?;
@@ -211,9 +295,44 @@ impl Transport {
         Ok(count)
     }
     pub(crate) fn resize(&mut self, pty: &mut impl PtyIo, size: TerminalSize) -> Result<()> {
+        self.invalidate_input_drain();
         size.validate()?;
         pty.resize(size)?;
         self.terminal.resize(size)
+    }
+    fn invalidate_input_drain(&mut self) {
+        self.input_drain = None;
+        self.input_turn = self
+            .input_turn
+            .checked_add(1)
+            .expect("input drain turn fits u64");
+    }
+    fn retain_human(&mut self, bytes: Vec<u8>) {
+        self.human_generation = self
+            .human_generation
+            .checked_add(u64::try_from(bytes.len()).expect("human read count fits u64"))
+            .expect("human input generation fits u64");
+        self.input.extend(bytes);
+    }
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the reviewed service/coordinator integration consumes input drain state"
+        )
+    )]
+    pub(super) fn human_generation(&self) -> u64 {
+        self.human_generation
+    }
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the reviewed service/coordinator integration consumes input drain state"
+        )
+    )]
+    pub(super) fn take_input_drain(&mut self) -> Option<DrainedInput> {
+        self.input_drain.take()
     }
     pub(crate) fn snapshot(&self) -> ScreenSnapshot {
         self.terminal.snapshot()
@@ -250,8 +369,10 @@ impl Transport {
         self.display.len()
     }
     pub(crate) fn discard_display_tail(&mut self) -> usize {
+        self.invalidate_input_drain();
         #[cfg(test)]
         if let Some(bytes) = self.deferred_child_bytes.take() {
+            self.observation_complete = false;
             self.display.extend(bytes);
         }
         let count = self.display.len();
