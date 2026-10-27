@@ -5,10 +5,10 @@ use std::sync::Mutex;
 
 pub(super) const LITERAL: &str = "ordinary fixture λ";
 pub(super) const SCREEN: &[u8] = b"\x1b[2J\x1b[23;1HSynthetic state\r\nState end";
-const VERSION: &str = "synthetic-0.0.1";
+pub(super) const VERSION: &str = "synthetic-0.0.1";
 const PROFILE: &str = "synthetic-profile-1";
 
-fn catalog() -> ProfileCatalog {
+pub(super) fn catalog_definition() -> serde_json::Value {
     let mut value: serde_json::Value = serde_json::from_str(include_str!(
         "../../../../runner_tests/fixtures/synthetic-profile.json"
     ))
@@ -32,7 +32,11 @@ fn catalog() -> ProfileCatalog {
             "submission":{"prompt":{"prefix_hex":"","submit_hex":"7e","fixture_ids":["synthetic-prompt-plan"]},"exec":null}
         }
     });
-    ProfileCatalog::from_definitions(&value).unwrap()
+    value
+}
+
+pub(super) fn catalog() -> ProfileCatalog {
+    ProfileCatalog::from_definitions(&catalog_definition()).unwrap()
 }
 
 pub(super) fn encoded() -> Vec<u8> {
@@ -134,6 +138,7 @@ pub(super) struct Pty {
     pub program: Vec<Vec<u8>>,
     pub manual: Vec<u8>,
     pub short: Option<usize>,
+    expected_program: Vec<u8>,
     database_url: String,
     hooks: Arc<Hooks>,
 }
@@ -146,7 +151,7 @@ impl PtyIo for Pty {
     fn try_write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         assert!(!bytes.is_empty());
         self.offers.push(bytes.to_vec());
-        if bytes == encoded() {
+        if bytes == self.expected_program {
             let conn = crate::db::connect(&self.database_url).unwrap();
             let row = storage::get_input(&conn, self.hooks.input_id()).unwrap();
             assert!(matches!(row.state, storage::InputState::InProgress));
@@ -205,6 +210,12 @@ pub(super) struct Host {
 
 impl Host {
     pub fn new() -> Self {
+        Self::build(catalog, encoded())
+    }
+    fn with_catalog(catalog: ProfileCatalog, expected_program: Vec<u8>) -> Self {
+        Self::build(|| catalog, expected_program)
+    }
+    fn build(catalog: impl FnOnce() -> ProfileCatalog, expected_program: Vec<u8>) -> Self {
         let until = Instant::now() + Duration::from_secs(5);
         let expires = InputExpiration::capture(until, &mut RealInputDeadlineClock)
             .unwrap()
@@ -294,6 +305,7 @@ impl Host {
             program: Vec::new(),
             manual: Vec::new(),
             short: None,
+            expected_program,
             database_url: url,
             hooks: hooks.clone(),
         };
@@ -446,7 +458,16 @@ impl Host {
     }
 }
 pub(super) fn with_host(body: impl FnOnce(&mut Host)) {
-    let mut host = Host::new();
+    with_owned_host(Host::new(), body);
+}
+pub(super) fn with_catalog_host(
+    catalog: ProfileCatalog,
+    expected_program: Vec<u8>,
+    body: impl FnOnce(&mut Host),
+) {
+    with_owned_host(Host::with_catalog(catalog, expected_program), body);
+}
+fn with_owned_host(mut host: Host, body: impl FnOnce(&mut Host)) {
     let primary = catch_unwind(AssertUnwindSafe(|| body(&mut host)));
     let cleanup = catch_unwind(AssertUnwindSafe(|| host.finish()));
     if let Err(primary) = primary {

@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 mod guards;
+mod preview_exec;
 mod sql;
 mod support;
 use support::*;
