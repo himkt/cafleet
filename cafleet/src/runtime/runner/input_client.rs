@@ -1064,6 +1064,249 @@ mod tests {
     use std::net::Shutdown;
     use std::time::Duration;
 
+    struct UnavailableReceiptHost {
+        settings: Settings,
+        placement: Placement,
+        until: Instant,
+        input_id: i64,
+        change_digest: bool,
+        calls: [usize; 3],
+    }
+
+    impl UnavailableReceiptHost {
+        fn locked(&self, until: Instant) {
+            assert_eq!(until, self.until);
+            Deadline::until(until).remaining().unwrap();
+            assert!(
+                PaneLock::try_acquire(&self.settings.database_url, &self.placement)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+    }
+
+    impl InputCommandHost for UnavailableReceiptHost {
+        fn lock(
+            &mut self,
+            settings: &Settings,
+            _: &RunRecord,
+            placement: &Placement,
+            deadline: Deadline,
+        ) -> std::result::Result<Option<PaneLock>, InputFailure> {
+            assert_eq!(settings.database_url, self.settings.database_url);
+            assert_eq!(placement, &self.placement);
+            assert_eq!(deadline.instant(), self.until);
+            self.calls[0] += 1;
+            assert_eq!(
+                self.calls[0], 1,
+                "one genuine pane acquisition spans both routes"
+            );
+            PaneLock::acquire_within(&settings.database_url, placement, deadline)
+                .map_err(host_failure)
+        }
+
+        fn health(
+            &mut self,
+            _: &RunRecord,
+            until: Instant,
+        ) -> std::result::Result<HealthSnapshot, InputFailure> {
+            self.locked(until);
+            self.calls[1] += 1;
+            if self.change_digest {
+                let path = crate::db::database_path(&self.settings.database_url).unwrap();
+                let conn = Connection::open(path).unwrap();
+                assert_eq!(
+                    conn.execute(
+                        "UPDATE member_input_operations SET payload_digest=?1 WHERE input_id=?2",
+                        rusqlite::params!["e".repeat(64), self.input_id],
+                    )
+                    .unwrap(),
+                    1
+                );
+            }
+            Err(host_failure(error("owned first live receipt failure")))
+        }
+
+        fn exchange(
+            &mut self,
+            _: &RunRecord,
+            _: &InputControlRequest,
+            _: Instant,
+        ) -> std::result::Result<InputControlReply, InputFailure> {
+            self.calls[2] += 1;
+            panic!("an unavailable health endpoint grants no native or receipt exchange")
+        }
+    }
+
+    #[test]
+    fn exclusive_receipt_client_keeps_one_guard_original_row_and_error_across_live_fallback() {
+        use super::super::input_recovery::tests::{Termination, TypedHost};
+
+        for mode in [
+            "eligible",
+            "absent_placement",
+            "startup_unknown",
+            "changed_input",
+            "settlement_failure",
+        ] {
+            let History {
+                mut fixture,
+                settings,
+                placement,
+                row,
+                _artifacts,
+                _run_lock,
+                ..
+            } = History::new(InputState::Uncertain, None);
+            fixture.conn.execute(
+                "UPDATE member_runs SET status='exited',cleanup_state='complete',exit_code=7,ended_at='2026-10-27T18:13:00Z' WHERE run_id=?1",
+                [fixture.run.run_id],
+            ).unwrap();
+            fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+            drop(_run_lock);
+            let absent = mode == "absent_placement";
+            if absent {
+                assert!(
+                    crate::broker::deregister_member(&mut fixture.conn, fixture.run.member_id)
+                        .unwrap()
+                );
+            }
+            let original = fixture.run.clone();
+            let history = health_records(&fixture.conn);
+            let until = Instant::now() + Duration::from_secs(2);
+            let mut live = UnavailableReceiptHost {
+                settings: settings.clone(),
+                placement: placement.clone(),
+                until,
+                input_id: row.input_id,
+                change_digest: mode == "changed_input",
+                calls: [0; 3],
+            };
+            let mut recovery = TypedHost::new(until);
+            if mode == "startup_unknown" {
+                recovery.startup = Termination::Unknown;
+            }
+            let locked_settings = settings.clone();
+            let locked_placement = placement.clone();
+            recovery.action = Some(Box::new(move |_, _, actual| {
+                assert_eq!(actual, until);
+                if !absent {
+                    assert!(
+                        PaneLock::try_acquire(&locked_settings.database_url, &locked_placement)
+                            .unwrap()
+                            .is_none()
+                    );
+                }
+                Ok(())
+            }));
+            if mode == "settlement_failure" {
+                fixture.conn.execute_batch("CREATE TRIGGER routed_receipt_failure BEFORE UPDATE OF state ON member_input_operations WHEN NEW.state='settled' BEGIN SELECT RAISE(FAIL,'owned routed settlement failure'); END").unwrap();
+            }
+            let result = with_database_budget(&mut fixture.conn, Deadline::until(until), |conn| {
+                Ok(reconcile_ordinary_with_hosts(
+                    conn,
+                    &settings,
+                    row.input_id,
+                    InputDisposition::Submitted,
+                    "fixture:routed-receipt",
+                    Deadline::until(until + Duration::from_secs(1)),
+                    (&mut live, &mut recovery),
+                ))
+            });
+            let removed = if mode == "settlement_failure" {
+                fixture
+                    .conn
+                    .execute_batch("DROP TRIGGER routed_receipt_failure")
+            } else {
+                Ok(())
+            };
+            assert!(
+                removed.is_ok(),
+                "primary={:?}; trigger_cleanup={removed:?}",
+                result.as_ref().map(|value| value.as_ref().err())
+            );
+            let result = result.unwrap();
+            assert_eq!(
+                live.calls,
+                if absent { [0; 3] } else { [1, 1, 0] },
+                "{mode}"
+            );
+            let actual = storage::get_input(&fixture.conn, row.input_id).unwrap();
+            let current = storage::get_run(&fixture.conn, original.run_id).unwrap();
+            if matches!(mode, "eligible" | "absent_placement") {
+                assert_eq!(result.unwrap(), actual);
+                assert_eq!(actual.state, InputState::Settled);
+                assert_eq!(actual.disposition, Some(InputDisposition::Submitted));
+                assert_eq!(
+                    actual.evidence_ref.as_deref(),
+                    Some("fixture:routed-receipt")
+                );
+                let process = ProcessIdentity::current().unwrap();
+                let mut expected = original.clone();
+                expected.owner_epoch += 1;
+                expected.owner_kind = OwnerKind::Reconciler;
+                expected.owner_pid = process.pid;
+                expected.owner_start_identity = process.start_identity;
+                assert_eq!(current, expected);
+                assert!(recovery.calls.contains(&"after"));
+                assert!(recovery.processes.contains(&ProcessIdentity {
+                    pid: original.owner_pid,
+                    start_identity: original.owner_start_identity.clone()
+                }));
+                assert!(recovery.startups.iter().any(|(run, pinned)| {
+                    run == &original
+                        && pinned.as_ref() == if absent { None } else { Some(&placement) }
+                }));
+            } else {
+                let failure = result.unwrap_err();
+                assert_eq!(failure.input_id, Some(row.input_id));
+                assert_eq!(failure.run_id, Some(row.run_id));
+                assert_eq!(
+                    failure.operation_key.as_deref(),
+                    Some(row.operation_key.as_str())
+                );
+                if mode == "startup_unknown" {
+                    assert_eq!(
+                        failure.source.to_string(),
+                        "owned first live receipt failure"
+                    );
+                    assert!(recovery.calls.contains(&"startup"));
+                } else if mode == "settlement_failure" {
+                    assert!(
+                        failure
+                            .source
+                            .to_string()
+                            .contains("owned routed settlement failure")
+                    );
+                    assert!(recovery.calls.contains(&"after"));
+                }
+                let mut expected = row.clone();
+                if mode == "changed_input" {
+                    expected.payload_digest = "e".repeat(64);
+                    assert!(!recovery.calls.contains(&"after"));
+                }
+                assert_eq!(
+                    actual, expected,
+                    "{mode}: fallback retains the original input instead of recapturing it"
+                );
+                assert_eq!(current, original);
+            }
+            assert_eq!(health_records(&fixture.conn), history);
+            if !absent {
+                PaneLock::try_acquire(&settings.database_url, &placement)
+                    .unwrap()
+                    .expect("the acquired pane guard is released on every routed outcome")
+                    .validate_binding(&settings.database_url, &placement)
+                    .unwrap();
+            }
+            RunLock::acquire(&fixture.conn, &current.owner())
+                .unwrap()
+                .expect("the original namespace is released after settlement or refusal")
+                .validate(&fixture.conn, &current.owner())
+                .unwrap();
+        }
+    }
+
     struct History {
         fixture: Fixture,
         settings: Settings,

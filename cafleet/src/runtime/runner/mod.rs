@@ -3,6 +3,7 @@ pub(crate) use input_protocol::*;
 mod input_client;
 pub(crate) use input_client::*;
 mod input_clock;
+mod input_recovery;
 pub(crate) use input_clock::*;
 mod input;
 #[cfg(test)]
