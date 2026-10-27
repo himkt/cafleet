@@ -57,8 +57,18 @@ mod permission_inspection_contracts {
         }
     }
 
-    fn with_inspection(body: impl FnOnce(&mut Host, Arc<AtomicUsize>, Arc<AtomicBool>)) {
-        let mut definition = inspection_fixture_definition();
+    pub(super) fn with_inspection(body: impl FnOnce(&mut Host, Arc<AtomicUsize>, Arc<AtomicBool>)) {
+        with_definition(
+            inspection_fixture_definition(),
+            b"unused-program~".to_vec(),
+            body,
+        );
+    }
+    pub(super) fn with_definition(
+        mut definition: serde_json::Value,
+        expected_program: Vec<u8>,
+        body: impl FnOnce(&mut Host, Arc<AtomicUsize>, Arc<AtomicBool>),
+    ) {
         let composer = catalog_definition();
         definition["fixtures"]
             .as_array_mut()
@@ -72,7 +82,7 @@ mod permission_inspection_contracts {
             composer["profiles"][0]["capabilities"]["composer"].clone();
         with_catalog_host(
             ProfileCatalog::from_definitions(&definition).unwrap(),
-            b"unused-program~".to_vec(),
+            expected_program,
             |h| {
                 let calls = Arc::new(AtomicUsize::new(0));
                 let fail = Arc::new(AtomicBool::new(false));
@@ -85,7 +95,7 @@ mod permission_inspection_contracts {
         );
     }
 
-    fn form(h: &mut Host, operation: &str, focus: &str) {
+    pub(super) fn form(h: &mut Host, operation: &str, focus: &str) {
         h.pty
             .child
             .bytes
@@ -100,7 +110,7 @@ mod permission_inspection_contracts {
         ).optional().unwrap()
     }
 
-    fn stable_form(h: &mut Host) -> (i64, i64, i64, i64) {
+    pub(super) fn stable_form(h: &mut Host) -> (i64, i64, i64, i64) {
         form(h, "PRIVATE_INSPECTION_OPERATION", "synthetic-only");
         loop {
             h.drain();
@@ -147,7 +157,7 @@ mod permission_inspection_contracts {
                 *value
             })
     }
-    fn inspect(h: &mut Host, ids: (i64, i64, i64, i64)) -> PermissionInspection {
+    pub(super) fn inspect(h: &mut Host, ids: (i64, i64, i64, i64)) -> PermissionInspection {
         h.drain();
         inspect_request(h, request(h, ids), h.until).unwrap()
     }
@@ -164,7 +174,7 @@ mod permission_inspection_contracts {
         );
         token.clone()
     }
-    fn counts(h: &Host) -> [i64; 3] {
+    pub(super) fn counts(h: &Host) -> [i64; 3] {
         [
             "member_input_operations",
             "member_permission_responses",
@@ -566,6 +576,671 @@ mod permission_inspection_contracts {
         impl<T: ?Sized + std::fmt::Debug> AmbiguousIfImplemented<DebugImplemented> for T {}
         impl<T: ?Sized + serde::Serialize> AmbiguousIfImplemented<SerializeImplemented> for T {}
         let _ = <CurrentRequest as AmbiguousIfImplemented<_>>::check;
+    }
+}
+
+#[cfg(test)]
+mod permission_response_contracts {
+    use super::contract_tests::ordinary_prompt::support::{Host, Pty};
+    use super::permission_inspection_contracts::{
+        counts, form, inspect, stable_form, with_definition, with_inspection,
+    };
+    use super::*;
+    use crate::broker::runtime::{DecisionSource, DirectorMode, PermissionDecision};
+    use crate::coding_agent::{CodingAgent, inspection_fixture_definition};
+    use crate::runtime::runner::{
+        ByteInput, PermissionInspection, PermissionRespondInput, PermissionResponseResult,
+        TerminalSize,
+    };
+
+    fn command(
+        h: &Host,
+        inspection: &PermissionInspection,
+        key: &str,
+        decision: PermissionDecision,
+    ) -> PermissionRespondInput {
+        PermissionRespondInput {
+            event_id: inspection.event_id,
+            interaction_id: inspection.interaction_id,
+            director_member_id: h.fixture.run.director_member_id,
+            expected_run_id: h.fixture.run.run_id,
+            expected_owner_epoch: h.fixture.run.owner_epoch,
+            request_token: inspection
+                .request_token
+                .as_ref()
+                .expect("actual inspected token")
+                .clone(),
+            decision,
+            decision_source: DecisionSource::DirectorAuto,
+            director_mode: DirectorMode::Auto,
+            mode_evidence_ref: "fixture:response-mode".into(),
+            decision_evidence_ref: "fixture:response-decision".into(),
+            operation_key: key.into(),
+        }
+    }
+    fn copy(input: &PermissionRespondInput) -> PermissionRespondInput {
+        serde_json::from_value(serde_json::to_value(input).unwrap()).unwrap()
+    }
+    fn handle(
+        h: &mut Host,
+        input: &PermissionRespondInput,
+    ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
+        let mut request = h.request("unused-response-key");
+        request.operation = InputControlOperation::PermissionRespond(copy(input));
+        h.coordinator.handle_received(
+            &mut h.fixture.conn,
+            &h.fixture.run,
+            request,
+            &h.controller,
+            h.until,
+        )
+    }
+    fn response(reply: InputControlReply) -> PermissionResponseResult {
+        let InputControlReply::PermissionResponse(value) = reply else {
+            panic!("typed actual permission response")
+        };
+        value
+    }
+    fn arm_stage(h: &mut Host, before: usize) -> i64 {
+        let offers = h.pty.offers.len();
+        for _ in 0..16 {
+            h.drain();
+            assert!(
+                h.advance().is_none(),
+                "stage acquisition yields after its bounded hooks"
+            );
+            assert_eq!(
+                h.pty.offers.len(),
+                offers,
+                "fresh guard acquisition precedes its syscall"
+            );
+            if h.hooks.count("before") == before {
+                return h.hooks.input_id();
+            }
+        }
+        panic!("real selected stage reaches Armed within its finite turn budget");
+    }
+    fn audit(
+        h: &Host,
+        id: i64,
+        input: &PermissionRespondInput,
+        rule: &str,
+    ) -> storage::PermissionReceipt {
+        let receipt = storage::get_permission_response(&h.fixture.conn, id).unwrap();
+        assert_eq!(receipt.input.kind, storage::InputKind::PermissionResponse);
+        assert_eq!(receipt.input.operation_key, input.operation_key);
+        assert_eq!(receipt.input.message_id, None);
+        let m = &receipt.response.metadata;
+        assert_eq!(
+            (
+                m.event_id,
+                m.interaction_id,
+                m.expected_owner_epoch,
+                m.director_member_id
+            ),
+            (
+                input.event_id,
+                input.interaction_id,
+                input.expected_owner_epoch,
+                input.director_member_id
+            )
+        );
+        assert_eq!(
+            (
+                &m.request_token,
+                m.decision,
+                m.decision_source,
+                m.director_mode
+            ),
+            (
+                &input.request_token,
+                input.decision,
+                input.decision_source,
+                input.director_mode
+            )
+        );
+        assert_eq!(
+            (&m.mode_evidence_ref, &m.decision_evidence_ref),
+            (&input.mode_evidence_ref, &input.decision_evidence_ref)
+        );
+        assert_eq!(m.answer_profile_version, "synthetic-profile-1");
+        assert_eq!(m.answer_rule_id, rule);
+        assert_eq!(
+            receipt
+                .claim
+                .as_ref()
+                .map(|c| (c.interaction_id, c.input_id)),
+            Some((input.interaction_id, id))
+        );
+        receipt
+    }
+
+    #[test]
+    fn permission_response_fresh_admission_rejects_revoked_token_then_reserves_selected_deny_plan()
+    {
+        with_inspection(|h, _, _| {
+            let ids = stable_form(h);
+            let inspected = inspect(h, ids);
+            let stale = command(h, &inspected, "response:stale", PermissionDecision::Allow);
+            h.human.bytes.push_back(b'!');
+            h.drain();
+            let failure = match handle(h, &stale) {
+                Err(failure) => failure,
+                Ok(_) => panic!("revoked token refuses the fresh response"),
+            };
+            assert_eq!(
+                (failure.run_id, failure.interaction_id, failure.input_id),
+                (Some(h.fixture.run.run_id), Some(ids.1), None)
+            );
+            assert_eq!(
+                failure.operation_key.as_deref(),
+                Some(stale.operation_key.as_str())
+            );
+            assert!(!failure.source.message().contains(&stale.request_token));
+            assert_eq!(counts(h), [0, 0, 0]);
+            assert!(h.pty.program.is_empty());
+            assert_eq!(h.pty.offers, vec![b"!".to_vec()]);
+            let fresh = inspect(h, ids);
+            let input = command(h, &fresh, "response:fresh-deny", PermissionDecision::Deny);
+            assert_ne!(input.request_token, stale.request_token);
+            assert!(
+                handle(h, &input).unwrap().is_none(),
+                "fresh supported response enters the actual pending writer"
+            );
+            assert_eq!(counts(h), [0, 0, 0]);
+            let id = arm_stage(h, 1);
+            assert_eq!(counts(h), [1, 1, 1]);
+            assert_eq!(
+                audit(h, id, &input, "inspection-deny-plan").input.state,
+                storage::InputState::InProgress
+            );
+            h.drain();
+            assert!(
+                h.advance().is_none(),
+                "first complete answer stage is not complete submission"
+            );
+            let checkpoint = h.coordinator.retained_checkpoint(id).unwrap();
+            assert_eq!(
+                (checkpoint.stage, checkpoint.written_bytes),
+                (SubmissionStage::Partial, 1)
+            );
+            arm_stage(h, 2);
+            h.drain();
+            let result = response(h.advance().expect("actual final response stage"));
+            assert_eq!(
+                (
+                    result.submission.status,
+                    result.submission.stage,
+                    result.submission.input_id
+                ),
+                (
+                    SubmissionStatus::Accepted,
+                    SubmissionStage::Submitted,
+                    Some(id)
+                )
+            );
+            assert_eq!(
+                (
+                    result.interaction_id,
+                    result.event_id,
+                    result.decision,
+                    result.decision_source
+                ),
+                (
+                    input.interaction_id,
+                    input.event_id,
+                    input.decision,
+                    input.decision_source
+                )
+            );
+            assert_eq!(
+                h.pty.offers,
+                vec![b"!".to_vec(), b"n".to_vec(), b"\r".to_vec()]
+            );
+            assert_eq!(
+                audit(h, id, &input, "inspection-deny-plan").input.state,
+                storage::InputState::Accepted
+            );
+            let notified: Option<String> = h
+                .fixture
+                .conn
+                .query_row(
+                    "SELECT notified_at FROM messages WHERE message_id=?1",
+                    [ids.2],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert!(notified.is_none());
+        });
+    }
+    fn admitted(h: &mut Host, key: &str) -> ((i64, i64, i64, i64), PermissionRespondInput, i64) {
+        let ids = stable_form(h);
+        let current = inspect(h, ids);
+        let input = command(h, &current, key, PermissionDecision::Allow);
+        assert!(handle(h, &input).unwrap().is_none());
+        let id = arm_stage(h, 1);
+        audit(h, id, &input, "inspection-allow-plan");
+        (ids, input, id)
+    }
+    fn first_stage(h: &mut Host, id: i64) {
+        h.drain();
+        assert!(h.advance().is_none());
+        let point = h.coordinator.retained_checkpoint(id).unwrap();
+        assert_eq!(
+            (point.stage, point.written_bytes),
+            (SubmissionStage::Partial, 1)
+        );
+        assert_eq!(
+            storage::get_input(&h.fixture.conn, id).unwrap().state,
+            storage::InputState::InProgress
+        );
+        assert_eq!(h.pty.offers, vec![b"y".to_vec()]);
+    }
+    fn advance(h: &mut Host) -> std::result::Result<Option<InputControlReply>, InputFailure> {
+        h.coordinator.advance(
+            &mut h.fixture.conn,
+            &h.fixture.run,
+            &mut h.transport,
+            &mut h.pty,
+            &h.controller,
+            h.until,
+        )
+    }
+    struct StageIo<'a> {
+        inner: &'a mut Pty,
+        fault: Option<io::ErrorKind>,
+    }
+    impl ByteInput for StageIo<'_> {
+        fn try_read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+            self.inner.try_read(bytes)
+        }
+    }
+    impl PtyIo for StageIo<'_> {
+        fn try_write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if let Some(kind) = self.fault.take() {
+                assert!(!bytes.is_empty());
+                self.inner.offers.push(bytes.to_vec());
+                return Err(kind.into());
+            }
+            self.inner.try_write(bytes)
+        }
+        fn resize(&mut self, size: TerminalSize) -> Result<()> {
+            self.inner.resize(size)
+        }
+        fn close(&mut self) -> Result<()> {
+            self.inner.close()
+        }
+    }
+    fn pending_syscall(h: &mut Host, kind: io::ErrorKind) {
+        h.drain();
+        let mut io = StageIo {
+            inner: &mut h.pty,
+            fault: Some(kind),
+        };
+        let result = h.coordinator.advance(
+            &mut h.fixture.conn,
+            &h.fixture.run,
+            &mut h.transport,
+            &mut io,
+            &h.controller,
+            h.until,
+        );
+        assert!(
+            io.fault.is_none(),
+            "real selected-stage PtyIo call consumes this fault"
+        );
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn permission_response_raced_retained_reservation_and_claim_supply_no_write_authority() {
+        with_inspection(|h, _, _| {
+            let ids = stable_form(h);
+            let inspected = inspect(h, ids);
+            let input = command(
+                h,
+                &inspected,
+                "response:reservation-race",
+                PermissionDecision::Allow,
+            );
+            assert!(handle(h, &input).unwrap().is_none());
+            let plan = h
+                .coordinator
+                .services
+                .catalog
+                .answer_plan(
+                    CodingAgent::Codex,
+                    "synthetic-0.0.1",
+                    "synthetic-permission",
+                    input.decision,
+                )
+                .unwrap()
+                .unwrap();
+            let cap = plan.capability();
+            let request = storage::NewPermissionResponse {
+                operation_key: input.operation_key.clone(),
+                metadata: storage::PermissionResponseMetadata {
+                    event_id: input.event_id,
+                    interaction_id: input.interaction_id,
+                    expected_owner_epoch: input.expected_owner_epoch,
+                    request_token: input.request_token.clone(),
+                    decision: input.decision,
+                    director_member_id: input.director_member_id,
+                    director_mode: input.director_mode,
+                    decision_source: input.decision_source,
+                    mode_evidence_ref: input.mode_evidence_ref.clone(),
+                    decision_evidence_ref: input.decision_evidence_ref.clone(),
+                    answer_profile_version: cap.profile_version().into(),
+                    answer_rule_id: cap.answer_rule_id().into(),
+                },
+            };
+            let storage::PermissionReservation::Reserved(original) =
+                storage::reserve_permission_response(
+                    &mut h.fixture.conn,
+                    &h.fixture.run.owner(),
+                    &request,
+                    Some(cap),
+                    h.until,
+                )
+                .unwrap()
+            else {
+                panic!("independent storage wins actual fresh reservation")
+            };
+            h.drain();
+            let result = response(h.advance().expect("race returns existing receipt"));
+            assert_eq!(
+                (
+                    result.submission.input_id,
+                    result.submission.status,
+                    result.submission.stage
+                ),
+                (
+                    Some(original.input.input_id),
+                    SubmissionStatus::Uncertain,
+                    SubmissionStage::Unknown
+                )
+            );
+            assert_eq!(h.hooks.count("reserved"), 0);
+            assert!(h.coordinator.operations.is_empty());
+            assert!(h.coordinator.pending.is_none());
+            assert!(h.pty.offers.is_empty());
+            assert_eq!(
+                storage::get_permission_response(&h.fixture.conn, original.input.input_id).unwrap(),
+                original
+            );
+            let other = command(
+                h,
+                &inspected,
+                "response:different-claimed-key",
+                PermissionDecision::Deny,
+            );
+            let mut outcome = handle(h, &other);
+            for _ in 0..16 {
+                if !matches!(outcome, Ok(None)) {
+                    break;
+                }
+                h.drain();
+                outcome = advance(h);
+            }
+            match outcome {
+                Err(failure) => assert_eq!(
+                    failure.operation_key.as_deref(),
+                    Some(other.operation_key.as_str())
+                ),
+                Ok(Some(reply)) => assert_ne!(
+                    response(reply).submission.status,
+                    SubmissionStatus::Accepted
+                ),
+                Ok(None) => panic!("real competing claim completes refusal within finite turns"),
+            }
+            assert_eq!(counts(h), [1, 1, 1]);
+            assert_eq!(
+                storage::get_permission_response(&h.fixture.conn, original.input.input_id).unwrap(),
+                original
+            );
+            assert!(h.pty.offers.is_empty());
+        });
+    }
+
+    #[test]
+    fn permission_response_later_pending_preserves_partial_and_retries_only_untouched_stage() {
+        with_inspection(|h, _, _| {
+            let (_, input, id) = admitted(h, "response:later-pending");
+            first_stage(h, id);
+            let original = h.coordinator.pending.as_ref().unwrap().deadline;
+            for (index, kind) in [io::ErrorKind::WouldBlock, io::ErrorKind::Interrupted]
+                .into_iter()
+                .enumerate()
+            {
+                arm_stage(h, index + 2);
+                pending_syscall(h, kind);
+                let point = h.coordinator.retained_checkpoint(id).unwrap();
+                assert_eq!(
+                    (point.stage, point.written_bytes),
+                    (SubmissionStage::Partial, 1)
+                );
+                assert_eq!(h.coordinator.pending.as_ref().unwrap().deadline, original);
+                assert_eq!(
+                    audit(h, id, &input, "inspection-allow-plan").input.state,
+                    storage::InputState::InProgress
+                );
+                let offers = h.pty.offers.len();
+                assert!(advance(h).unwrap().is_none());
+                assert_eq!(
+                    h.pty.offers.len(),
+                    offers,
+                    "consumed guard requires a new real drain"
+                );
+            }
+            arm_stage(h, 4);
+            h.drain();
+            let result = response(h.advance().expect("last untouched stage completes"));
+            assert_eq!(
+                (result.submission.status, result.submission.stage),
+                (SubmissionStatus::Accepted, SubmissionStage::Submitted)
+            );
+            let point = h.coordinator.retained_checkpoint(id).unwrap();
+            assert_eq!(point.written_bytes, 2);
+            assert_eq!(
+                h.pty.offers,
+                vec![
+                    b"y".to_vec(),
+                    b"\r".to_vec(),
+                    b"\r".to_vec(),
+                    b"\r".to_vec()
+                ]
+            );
+            let after = h
+                .hooks
+                .points
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|p| p.boundary == "after")
+                .map(|p| p.count)
+                .collect::<Vec<_>>();
+            assert_eq!(after, vec![1, 1, 1, 2]);
+            assert_eq!(
+                audit(h, id, &input, "inspection-allow-plan").input.state,
+                storage::InputState::Accepted
+            );
+        });
+    }
+
+    #[test]
+    fn permission_response_changed_focus_after_positive_stage_stops_remaining_bytes() {
+        with_inspection(|h, _, _| {
+            let (_, input, id) = admitted(h, "response:changed-focus");
+            first_stage(h, id);
+            form(h, "PRIVATE_INSPECTION_OPERATION", "synthetic-other");
+            let outcome = advance(h);
+            match outcome {
+                Err(failure) => {
+                    assert_eq!(failure.input_id, Some(id));
+                    assert_eq!(failure.interaction_id, Some(input.interaction_id));
+                }
+                Ok(Some(reply)) => assert_eq!(
+                    response(reply).submission.status,
+                    SubmissionStatus::Uncertain
+                ),
+                Ok(None) => {
+                    panic!("incompatible positive attempt terminates without another stage")
+                }
+            }
+            let point = h.coordinator.retained_checkpoint(id).unwrap();
+            assert_eq!(
+                (point.stage, point.written_bytes),
+                (SubmissionStage::Partial, 1)
+            );
+            assert_eq!(h.pty.offers, vec![b"y".to_vec()]);
+            assert_eq!(
+                audit(h, id, &input, "inspection-allow-plan").input.state,
+                storage::InputState::Uncertain
+            );
+        });
+    }
+
+    #[test]
+    fn permission_response_positive_short_later_stage_keeps_cumulative_uncertainty_without_tail() {
+        let mut definition = inspection_fixture_definition();
+        definition["profiles"][0]["capabilities"]["answers"][0]["stages"][1]["bytes_hex"] =
+            serde_json::json!("6f6b");
+        with_definition(definition, b"ok".to_vec(), |h, _, _| {
+            let (_, input, id) = admitted(h, "response:short-later-stage");
+            first_stage(h, id);
+            arm_stage(h, 2);
+            h.pty.short = Some(1);
+            h.drain();
+            let result = response(h.advance().expect("positive short ends the answer plan"));
+            assert_eq!(
+                (
+                    result.submission.status,
+                    result.submission.stage,
+                    result.submission.input_id
+                ),
+                (
+                    SubmissionStatus::Uncertain,
+                    SubmissionStage::Partial,
+                    Some(id)
+                )
+            );
+            let point = h.coordinator.retained_checkpoint(id).unwrap();
+            assert_eq!(
+                (point.stage, point.written_bytes),
+                (SubmissionStage::Partial, 2)
+            );
+            assert_eq!(h.pty.offers, vec![b"y".to_vec(), b"ok".to_vec()]);
+            assert_eq!(
+                audit(h, id, &input, "inspection-allow-plan").input.state,
+                storage::InputState::Uncertain
+            );
+            assert!(advance(h).unwrap().is_none());
+            assert_eq!(h.pty.offers.len(), 2);
+        });
+    }
+
+    #[test]
+    fn permission_response_unrecorded_possible_later_io_and_abandonment_preserve_prior_evidence() {
+        with_inspection(|h, _, _| {
+            let (_, input, id) = admitted(h, "response:abandoned-later-io");
+            first_stage(h, id);
+            arm_stage(h, 2);
+            h.drain();
+            let row = audit(h, id, &input, "inspection-allow-plan");
+            let mut guard = h
+                .coordinator
+                .acquire_write_guard(
+                    &mut h.fixture.conn,
+                    &h.fixture.run,
+                    &mut h.transport,
+                    &h.controller,
+                    h.until,
+                )
+                .unwrap()
+                .expect("genuine later-stage guard");
+            guard.begin_write(&h.transport, b"\r", h.until).unwrap();
+            guard.mark_io_possible();
+            drop(guard);
+            h.coordinator.finish_pending_attempt();
+            let point = h.coordinator.retained_checkpoint(id).unwrap();
+            assert_eq!(
+                (point.stage, point.written_bytes),
+                (SubmissionStage::Partial, 1)
+            );
+            assert_eq!(
+                storage::get_permission_response(&h.fixture.conn, id).unwrap(),
+                row
+            );
+            assert!(h.coordinator.pending.is_none());
+            assert!(advance(h).unwrap().is_none());
+            let repeated = response(
+                handle(h, &input)
+                    .unwrap()
+                    .expect("durable InProgress returns uncertainty"),
+            );
+            assert_eq!(
+                (repeated.submission.input_id, repeated.submission.status),
+                (Some(id), SubmissionStatus::Uncertain)
+            );
+            assert_eq!(h.pty.offers, vec![b"y".to_vec()]);
+        });
+    }
+
+    #[test]
+    fn permission_response_accepted_bookkeeping_failure_keeps_known_context_claim_and_actual_counts()
+     {
+        with_inspection(|h, _, _| {
+            let (_, input, id) = admitted(h, "response:accepted-failure");
+            first_stage(h, id);
+            arm_stage(h, 2);
+            h.fixture.conn.execute_batch("CREATE TRIGGER owned_response_accept_failure BEFORE UPDATE OF state ON member_input_operations WHEN NEW.kind='permission_response' AND NEW.state='accepted' BEGIN SELECT RAISE(ABORT,'owned response accepted failure'); END;").unwrap();
+            h.drain();
+            let failure = match advance(h) {
+                Err(failure) => failure,
+                Ok(_) => panic!("real Accepted trigger failure remains an error"),
+            };
+            h.fixture
+                .conn
+                .execute_batch("DROP TRIGGER owned_response_accept_failure;")
+                .unwrap();
+            assert!(
+                failure
+                    .source
+                    .message()
+                    .contains("owned response accepted failure")
+            );
+            assert_eq!(
+                (failure.run_id, failure.interaction_id, failure.input_id),
+                (
+                    Some(h.fixture.run.run_id),
+                    Some(input.interaction_id),
+                    Some(id)
+                )
+            );
+            assert_eq!(
+                failure.operation_key.as_deref(),
+                Some(input.operation_key.as_str())
+            );
+            assert!(!failure.source.message().contains(&input.request_token));
+            let point = h.coordinator.retained_checkpoint(id).unwrap();
+            assert_eq!(
+                (point.stage, point.written_bytes),
+                (SubmissionStage::Submitted, 2)
+            );
+            assert_eq!(
+                audit(h, id, &input, "inspection-allow-plan").input.state,
+                storage::InputState::InProgress
+            );
+            h.coordinator.finish_pending_attempt();
+            assert_eq!(h.pty.offers, vec![b"y".to_vec(), b"\r".to_vec()]);
+            let repeated = response(
+                handle(h, &input)
+                    .unwrap()
+                    .expect("failed commit is retained uncertainty"),
+            );
+            assert_eq!(repeated.submission.status, SubmissionStatus::Uncertain);
+            assert_eq!(h.pty.offers.len(), 2);
+        });
     }
 }
 

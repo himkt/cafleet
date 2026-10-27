@@ -1240,6 +1240,14 @@ mod tests {
     use std::time::Duration;
 
     fn inspection_barrier(fixture: &mut InputServiceFixture, start: usize, barrier: &str) {
+        native_answers_through_barrier(fixture, start, barrier, &[]);
+    }
+    fn native_answers_through_barrier(
+        fixture: &mut InputServiceFixture,
+        start: usize,
+        barrier: &str,
+        prior: &[&str],
+    ) {
         use std::io::Read;
         let until = Instant::now() + Duration::from_secs(2);
         let expected = format!("review-answer={barrier}");
@@ -1259,9 +1267,10 @@ mod tests {
                             .map(|position| line[position..].trim_end_matches(['\r', '\n']))
                     })
                     .collect::<Vec<_>>();
+                let mut expected_answers = prior.to_vec();
+                expected_answers.push(expected.as_str());
                 assert_eq!(
-                    answers,
-                    vec![expected.as_str()],
+                    answers, expected_answers,
                     "complete retained native answer interval: {interval:?}"
                 );
                 return;
@@ -1657,6 +1666,288 @@ mod tests {
             .unwrap();
         assert!(notified.is_none());
         inspection_barrier(&mut fixture, output_start, "inspection-client-barrier");
+        fixture.finish();
+    }
+
+    fn response_services(fixture: &mut Fixture, spec: &mut SpawnSpec) {
+        crate::runtime::runner_tests::control_service::observation_services::synthetic(
+            fixture, spec,
+        );
+        let mut catalog = crate::coding_agent::inspection_fixture_definition();
+        catalog["profiles"][0]["capabilities"]["answers"][0]["stages"] = serde_json::json!([{
+            "bytes_hex":"790d","required_rule_id":"synthetic-permission","required_choice_id":"allow-once"
+        }]);
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(fixture._dir.path().join("observation-services.json"))
+            .unwrap();
+        file.write_all(&serde_json::to_vec(&serde_json::json!({"catalog":catalog})).unwrap())
+            .unwrap();
+        file.sync_all().unwrap();
+    }
+    fn response_command(
+        fixture: &mut InputServiceFixture,
+        until: Instant,
+        key: &str,
+    ) -> (Settings, RunRecord, Placement, PermissionRespondInput) {
+        fixture.master.write_all(b"form-response\r").unwrap();
+        fixture.read_until("Operation: write form-response.txt");
+        let (event_id, interaction_id) = loop {
+            let row=with_database_budget(&mut fixture.fixture.conn,Deadline::until(until),|conn| {
+                conn.query_row("SELECT event_id,interaction_id FROM member_runtime_events WHERE run_id=?1 AND kind='interaction_opened'",[fixture.fixture.run.run_id],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?))).optional().map_err(db_err)
+            }).unwrap();
+            if let Some(ids) = row {
+                break ids;
+            }
+            assert!(
+                Instant::now() < until,
+                "original response observation deadline"
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        };
+        let (settings, run, placement) = service_target(fixture);
+        let current = inspect_permission(
+            &mut fixture.fixture.conn,
+            &settings,
+            &PermissionInspectInput {
+                event_id,
+                interaction_id,
+                director_member_id: run.director_member_id,
+            },
+            Deadline::until(until),
+        )
+        .unwrap();
+        assert!(
+            current
+                .supported_decisions
+                .contains(&PermissionDecision::Allow)
+        );
+        let input = PermissionRespondInput {
+            event_id,
+            interaction_id,
+            director_member_id: run.director_member_id,
+            expected_run_id: run.run_id,
+            expected_owner_epoch: run.owner_epoch,
+            request_token: current.request_token.expect("actual current service token"),
+            decision: PermissionDecision::Allow,
+            decision_source: DecisionSource::DirectorAuto,
+            director_mode: DirectorMode::Auto,
+            mode_evidence_ref: "fixture:service-mode".into(),
+            decision_evidence_ref: "fixture:service-decision".into(),
+            operation_key: key.into(),
+        };
+        (settings, run, placement, input)
+    }
+    fn service_response_audit(
+        fixture: &InputServiceFixture,
+        input: &PermissionRespondInput,
+    ) -> PermissionReceipt {
+        let operation = storage::find_input(
+            &fixture.fixture.conn,
+            input.expected_run_id,
+            &input.operation_key,
+        )
+        .unwrap()
+        .expect("actual durable permission operation");
+        let receipt =
+            storage::get_permission_response(&fixture.fixture.conn, operation.input_id).unwrap();
+        assert_eq!(receipt.input.kind, InputKind::PermissionResponse);
+        assert_eq!(receipt.input.state, InputState::Accepted);
+        let m = &receipt.response.metadata;
+        assert_eq!(
+            (
+                m.event_id,
+                m.interaction_id,
+                m.expected_owner_epoch,
+                m.director_member_id
+            ),
+            (
+                input.event_id,
+                input.interaction_id,
+                input.expected_owner_epoch,
+                input.director_member_id
+            )
+        );
+        assert_eq!(
+            (
+                &m.request_token,
+                m.decision,
+                m.director_mode,
+                m.decision_source
+            ),
+            (
+                &input.request_token,
+                input.decision,
+                input.director_mode,
+                input.decision_source
+            )
+        );
+        assert_eq!(
+            (&m.mode_evidence_ref, &m.decision_evidence_ref),
+            (&input.mode_evidence_ref, &input.decision_evidence_ref)
+        );
+        assert_eq!(
+            (&*m.answer_profile_version, &*m.answer_rule_id),
+            ("synthetic-profile-1", "inspection-allow-plan")
+        );
+        assert_eq!(
+            receipt
+                .claim
+                .as_ref()
+                .map(|c| (c.interaction_id, c.input_id)),
+            Some((input.interaction_id, operation.input_id))
+        );
+        receipt
+    }
+
+    #[test]
+    fn permission_response_actual_service_returns_typed_durable_audit_and_one_selected_answer() {
+        let mut fixture = InputServiceFixture::configured(false, response_services);
+        fixture.start_running();
+        let until = Instant::now() + Duration::from_secs(2);
+        let (settings, run, placement, input) =
+            response_command(&mut fixture, until, "response:actual-live");
+        let output_start = fixture.output.len();
+        let mut host = SocketHost::new(&settings, &placement, until);
+        let result = respond_permission_with_host(
+            &mut fixture.fixture.conn,
+            &settings,
+            &input,
+            Deadline::until(until),
+            &mut host,
+        )
+        .unwrap();
+        assert_eq!(host.calls, [1, 1, 1]);
+        assert_eq!(host.requests[0]["kind"], "permission_respond");
+        for field in [
+            "answer_profile_version",
+            "answer_rule_id",
+            "bytes",
+            "stages",
+        ] {
+            assert!(host.requests[0].get(field).is_none());
+        }
+        let receipt = service_response_audit(&fixture, &input);
+        assert_eq!(
+            (
+                result.submission.status,
+                result.submission.stage,
+                result.submission.input_id
+            ),
+            (
+                SubmissionStatus::Accepted,
+                SubmissionStage::Submitted,
+                Some(receipt.input.input_id)
+            )
+        );
+        assert_eq!(
+            (
+                result.member_id,
+                result.run_id,
+                result.owner_epoch,
+                result.interaction_id,
+                result.event_id,
+                result.decision,
+                result.decision_source
+            ),
+            (
+                run.member_id,
+                run.run_id,
+                run.owner_epoch,
+                input.interaction_id,
+                input.event_id,
+                input.decision,
+                input.decision_source
+            )
+        );
+        assert!(result.submission.output_seq.is_some());
+        native_answers_through_barrier(
+            &mut fixture,
+            output_start,
+            "response-live-barrier",
+            &["review-answer=y"],
+        );
+        fixture.finish();
+    }
+
+    #[test]
+    fn permission_response_actual_service_lost_reply_retains_audit_and_same_key_never_retypes() {
+        let mut fixture = InputServiceFixture::configured(false, response_services);
+        fixture.start_running();
+        let until = Instant::now() + Duration::from_secs(2);
+        let (settings, run, placement, input) =
+            response_command(&mut fixture, until, "response:actual-lost-reply");
+        let output_start = fixture.output.len();
+        let mut host = SocketHost::new(&settings, &placement, until);
+        host.reply = ReplyMode::Disconnected;
+        let failure = match respond_permission_with_host(
+            &mut fixture.fixture.conn,
+            &settings,
+            &input,
+            Deadline::until(until),
+            &mut host,
+        ) {
+            Err(failure) => failure,
+            Ok(_) => panic!("owned disconnected consumer receives no fabricated success"),
+        };
+        assert!(
+            failure
+                .source
+                .message()
+                .contains("owned reply consumer closed")
+        );
+        assert_eq!(
+            (failure.run_id, failure.interaction_id),
+            (Some(run.run_id), Some(input.interaction_id))
+        );
+        assert_eq!(
+            failure.operation_key.as_deref(),
+            Some(input.operation_key.as_str())
+        );
+        assert!(!failure.source.message().contains(&input.request_token));
+        assert_eq!(host.calls, [1, 1, 1]);
+        assert_eq!(host.requests[0]["kind"], "permission_respond");
+        let receipt = service_response_audit(&fixture, &input);
+        let changes = fixture.fixture.conn.total_changes();
+        let held =
+            PaneLock::acquire_within(&settings.database_url, &placement, Deadline::until(until))
+                .unwrap()
+                .unwrap();
+        let repeated = respond_permission_with_host(
+            &mut fixture.fixture.conn,
+            &settings,
+            &input,
+            Deadline::until(until),
+            &mut NoLiveHost,
+        )
+        .unwrap();
+        drop(held);
+        assert_eq!(
+            (
+                repeated.submission.status,
+                repeated.submission.stage,
+                repeated.submission.input_id
+            ),
+            (
+                SubmissionStatus::Accepted,
+                SubmissionStage::Submitted,
+                Some(receipt.input.input_id)
+            )
+        );
+        assert_eq!(
+            repeated.owner_epoch,
+            receipt.response.metadata.expected_owner_epoch
+        );
+        assert_eq!(repeated.submission.output_seq, None);
+        assert_eq!(fixture.fixture.conn.total_changes(), changes);
+        assert_eq!(service_response_audit(&fixture, &input), receipt);
+        native_answers_through_barrier(
+            &mut fixture,
+            output_start,
+            "response-lost-barrier",
+            &["review-answer=y"],
+        );
         fixture.finish();
     }
 
@@ -2159,7 +2450,8 @@ mod tests {
                 let key = match &request.operation {
                     InputControlOperation::SubmitPrompt(input)
                     | InputControlOperation::SubmitExec(input) => &input.operation_key,
-                    _ => panic!("ordinary fixture sends an ordinary request"),
+                    InputControlOperation::PermissionRespond(input) => &input.operation_key,
+                    _ => panic!("disconnected fixture sends a durable input operation"),
                 };
                 let mut observed = crate::db::connect(&self.settings.database_url).unwrap();
                 loop {

@@ -39,28 +39,6 @@ fn ready() -> Case {
 }
 
 #[test]
-fn step5_checkpoint_absent_response_key_has_zero_host_calls_and_reservations() {
-    let mut case = Case::new(Retained::Accepted);
-    let mut request = command(&case);
-    request.operation_key = "fixture:fresh-staged-response".into();
-    assert_eq!(
-        case.fixture
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM member_input_operations WHERE run_id=?1 AND operation_key=?2",
-                rusqlite::params![case.owner.run_id, request.operation_key],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap(),
-        0
-    );
-    let before = Snapshot::take(&case.fixture.conn);
-    let failure = incomplete(attempt(&mut case, &request));
-    response_context(&case, &failure, &request.operation_key, None);
-    before.unchanged(&case.fixture.conn);
-}
-
-#[test]
 fn step5_checkpoint_matching_ready_preserves_exact_old_metadata_and_claim() {
     let mut case = ready();
     let request = command(&case);
