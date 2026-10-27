@@ -5,6 +5,7 @@ pub(crate) use input_client::*;
 mod input_clock;
 mod input_recovery;
 pub(crate) use input_clock::*;
+pub(crate) use input_recovery::ExclusiveReceiptGuard;
 mod input;
 pub(crate) use input::InputGuard;
 #[cfg(test)]

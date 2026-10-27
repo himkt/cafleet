@@ -41,6 +41,23 @@ impl<'guard> ZeroByteRetirement<'guard> {
         })
     }
 
+    pub(crate) fn from_exclusive_guard(
+        guard: &'guard crate::runtime::runner::ExclusiveReceiptGuard<'_>,
+        owner: &RunOwner,
+        input_id: i64,
+        interaction_id: i64,
+    ) -> Result<Self, CafleetError> {
+        let input = guard.retirement_binding(owner, input_id, interaction_id)?;
+        Ok(Self {
+            owner: owner.clone(),
+            input_id,
+            interaction_id,
+            input: Some(input.clone()),
+            rearm: None,
+            guard: PhantomData,
+        })
+    }
+
     #[cfg(test)]
     pub(crate) fn fixture(
         owner: &RunOwner,

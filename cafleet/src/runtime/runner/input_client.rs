@@ -697,10 +697,6 @@ fn reconcile_receipt_with_hosts(
             return Ok(original);
         }
         let Some(placement) = placement else {
-            ensure(
-                original.kind != InputKind::PermissionResponse,
-                "live permission receipt owner unavailable",
-            )?;
             return super::input_recovery::reconcile_input_with_host(
                 conn,
                 settings,
@@ -733,6 +729,7 @@ fn reconcile_receipt_with_hosts(
                             && input.kind == original.kind
                             && input.payload_digest == original.payload_digest
                             && input.message_id == original.message_id
+                            && input.created_at == original.created_at
                             && input.permission_response == original.permission_response,
                         "receipt immutable input identity changed",
                     )?;
@@ -804,9 +801,6 @@ fn reconcile_receipt_with_hosts(
         match live {
             Ok(settled) => Ok(settled),
             Err(original_failure) => {
-                if original.kind == InputKind::PermissionResponse {
-                    return Err(original_failure);
-                }
                 let guard = match super::input_recovery::ExclusiveReceiptGuard::acquire(
                     conn,
                     settings,

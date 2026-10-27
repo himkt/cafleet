@@ -60,11 +60,6 @@ fn validate_snapshot(
     )?;
     let input = storage::get_input(conn, expected_input.input_id)?;
     ensure(
-        input.kind != InputKind::PermissionResponse
-            && expected_input.kind != InputKind::PermissionResponse,
-        "ordinary exclusive receipt required",
-    )?;
-    ensure(
         input.input_id == expected_input.input_id
             && input.run_id == expected_input.run_id
             && input.run_id == expected_run.run_id
@@ -72,6 +67,8 @@ fn validate_snapshot(
             && input.kind == expected_input.kind
             && input.payload_digest == expected_input.payload_digest
             && input.message_id == expected_input.message_id
+            && input.created_at == expected_input.created_at
+            && input.permission_response == expected_input.permission_response
             && input.state == expected_input.state,
         "exclusive receipt input identity or expected state changed",
     )?;
@@ -119,7 +116,7 @@ fn exclude_previous_owner(
     check_deadline(Instant::now(), deadline)
 }
 
-pub(super) struct ExclusiveReceiptGuard<'a> {
+pub(crate) struct ExclusiveReceiptGuard<'a> {
     settings: &'a Settings,
     input: &'a InputOperation,
     run: &'a RunRecord,
@@ -183,6 +180,50 @@ impl<'a> ExclusiveReceiptGuard<'a> {
             deadline,
             local: PhantomData,
         })
+    }
+
+    pub(crate) fn zero_byte_retirement(
+        &self,
+        owner: &RunOwner,
+        input_id: i64,
+        interaction_id: i64,
+    ) -> Result<ZeroByteRetirement<'_>> {
+        ZeroByteRetirement::from_exclusive_guard(self, owner, input_id, interaction_id)
+    }
+
+    pub(crate) fn retirement_binding(
+        &self,
+        owner: &RunOwner,
+        input_id: i64,
+        interaction_id: i64,
+    ) -> Result<&InputOperation> {
+        check_deadline(Instant::now(), self.deadline)?;
+        let audit = self
+            .input
+            .permission_response
+            .as_ref()
+            .ok_or_else(|| error("exclusive permission response audit required"))?;
+        ensure(
+            self.input.kind == InputKind::PermissionResponse
+                && self.input.state == InputState::Ready
+                && self.input.input_id == input_id
+                && self.input.run_id == self.run.run_id
+                && audit.metadata.interaction_id == interaction_id,
+            "exclusive proof requires the exact durable Ready permission input",
+        )?;
+        let mut expected_owner = self.run.owner();
+        expected_owner.owner_epoch = expected_owner
+            .owner_epoch
+            .checked_add(1)
+            .ok_or_else(|| error("owner epoch exhausted"))?;
+        expected_owner.owner_kind = OwnerKind::Reconciler;
+        expected_owner.owner_pid = self.process.pid;
+        expected_owner.owner_start_identity = self.process.start_identity.clone();
+        ensure(
+            *owner == expected_owner,
+            "exclusive proof reconciler identity changed",
+        )?;
+        Ok(self.input)
     }
 
     fn validate_locked_snapshot(
@@ -259,14 +300,43 @@ impl<'a> ExclusiveReceiptGuard<'a> {
             exclude_previous_owner(self.run, self.placement, self.deadline, host)?;
             self.validate_locked_snapshot(&tx, self.input, &owned)?;
             check_deadline(Instant::now(), self.deadline)?;
-            let settled = storage::settle_input_in_transaction(
-                &tx,
-                &owned.owner(),
-                self.input.input_id,
-                self.input.state,
-                disposition,
-                evidence_ref,
-            )?;
+            let settled = if self.input.kind == InputKind::PermissionResponse {
+                let proof = if self.input.state == InputState::Ready
+                    && disposition == InputDisposition::NotSubmitted
+                {
+                    let audit = self
+                        .input
+                        .permission_response
+                        .as_ref()
+                        .expect("validated permission input retains its audit");
+                    Some(self.zero_byte_retirement(
+                        &owned.owner(),
+                        self.input.input_id,
+                        audit.metadata.interaction_id,
+                    )?)
+                } else {
+                    None
+                };
+                storage::settle_permission_response_in_transaction(
+                    &tx,
+                    &owned.owner(),
+                    self.input,
+                    disposition,
+                    evidence_ref,
+                    proof.as_ref(),
+                    self.deadline,
+                )?
+                .input
+            } else {
+                storage::settle_input_in_transaction(
+                    &tx,
+                    &owned.owner(),
+                    self.input.input_id,
+                    self.input.state,
+                    disposition,
+                    evidence_ref,
+                )?
+            };
             check_deadline(Instant::now(), self.deadline)?;
             self.validate_locked_snapshot(&tx, &settled, &owned)?;
             check_deadline(Instant::now(), self.deadline)?;
@@ -307,7 +377,10 @@ pub(crate) fn reconcile_input_with_host(
     result.map_err(|source| InputFailure {
         source,
         run_id: Some(expected_input.run_id),
-        interaction_id: None,
+        interaction_id: expected_input
+            .permission_response
+            .as_ref()
+            .map(|audit| audit.metadata.interaction_id),
         input_id: Some(expected_input.input_id),
         operation_key: Some(expected_input.operation_key.clone()),
     })
