@@ -3658,7 +3658,6 @@ impl InputCoordinator {
             && !status.retained_transition
             && !status.retained_draft
             && !status.retained_evidence
-            && status.gap_count == 0
             && status.diagnostic.is_none()
     }
 
