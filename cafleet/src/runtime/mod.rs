@@ -1,7 +1,7 @@
-#[cfg(test)]
 mod press;
 pub(crate) mod runner;
 pub mod system;
+pub(crate) use press::{KeyAcknowledgment, press_member};
 
 #[cfg(test)]
 mod runner_tests;

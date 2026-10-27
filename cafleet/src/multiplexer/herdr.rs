@@ -167,6 +167,110 @@ impl HerdrMultiplexer {
         Ok(())
     }
 
+    fn press_run(
+        &self,
+        argv: &[String],
+        deadline: crate::input::Deadline,
+        writing: bool,
+    ) -> Result<String, MultiplexerError> {
+        deadline
+            .remaining()
+            .map_err(|error| MultiplexerError::new(error.message()))?;
+        self.runner
+            .run_until(argv, deadline.instant())
+            .map_err(|error| {
+                let started =
+                    writing && matches!(&error.source, RunError::Failed { .. } | RunError::Timeout);
+                let mut mapped = map_run_error(argv, None, error.source);
+                for diagnostic in error.cleanup_diagnostics {
+                    mapped.message.push('\n');
+                    mapped.message.push_str(&diagnostic);
+                }
+                if started {
+                    mapped.after_write()
+                } else {
+                    mapped
+                }
+            })
+    }
+
+    pub(crate) fn validate_key_target(
+        &self,
+        placement: &crate::broker::records::Placement,
+        deadline: crate::input::Deadline,
+    ) -> Result<(), MultiplexerError> {
+        deadline
+            .remaining()
+            .map_err(|error| MultiplexerError::new(error.message()))?;
+        self.ensure_available()?;
+        deadline
+            .remaining()
+            .map_err(|error| MultiplexerError::new(error.message()))?;
+        let current = parse_envelope(&self.press_run(
+            &herdr_argv(&["herdr", "pane", "current"]),
+            deadline,
+            false,
+        )?)?;
+        let pane = &current["pane"];
+        let session = str_field(pane, "pane current", "workspace_id")?;
+        str_field(pane, "pane current", "tab_id")?;
+        str_field(pane, "pane current", "pane_id")?;
+        if session != placement.mux_session {
+            return Err(MultiplexerError::new(
+                "press target context does not match the recorded placement",
+            ));
+        }
+        let target = placement
+            .mux_pane_id
+            .as_deref()
+            .ok_or_else(|| MultiplexerError::new("press target has no pane"))?;
+        let result = parse_envelope(&self.press_run(
+            &herdr_argv(&["herdr", "pane", "list"]),
+            deadline,
+            false,
+        )?)?;
+        let panes = result["panes"]
+            .as_array()
+            .ok_or_else(|| MultiplexerError::new("herdr pane list missing 'panes' field"))?;
+        let mut matches = 0;
+        for pane in panes {
+            let pane_id = str_field(pane, "pane list", "pane_id")?;
+            let workspace = str_field(pane, "pane list", "workspace_id")?;
+            let tab = str_field(pane, "pane list", "tab_id")?;
+            if pane_id == target {
+                if workspace != placement.mux_session || tab != placement.mux_window_id {
+                    return Err(MultiplexerError::new(
+                        "press target context does not match the recorded placement",
+                    ));
+                }
+                matches += 1;
+            }
+        }
+        if matches != 1 {
+            return Err(MultiplexerError::new(
+                "press target context does not match the recorded placement",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn send_keys(
+        &self,
+        pane_id: &str,
+        keys: &super::PressKeys,
+        deadline: crate::input::Deadline,
+    ) -> Result<(), MultiplexerError> {
+        let mut argv = herdr_argv(&["herdr", "pane", "send-keys", pane_id]);
+        argv.extend(keys.herdr_arguments());
+        let output = self.press_run(&argv, deadline, true)?;
+        if !output.trim().is_empty() {
+            return Err(
+                MultiplexerError::new("herdr key acknowledgment was unreadable").after_write(),
+            );
+        }
+        Ok(())
+    }
+
     pub fn context_discovery(&self) -> Result<MultiplexerContext, MultiplexerError> {
         let result = self.run_json(&herdr_argv(&["herdr", "pane", "current"]), None)?;
         let pane = &result["pane"];

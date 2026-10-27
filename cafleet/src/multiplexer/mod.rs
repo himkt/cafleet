@@ -1,11 +1,13 @@
 pub mod herdr;
+mod keys;
 #[cfg(test)]
 mod press_tests;
 pub mod tmux;
+pub(crate) use keys::PressKeys;
 
 use std::fmt;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub use herdr::HerdrMultiplexer;
 pub use tmux::TmuxMultiplexer;
@@ -155,6 +157,21 @@ pub enum RunError {
     Failed { stderr: String },
 }
 
+#[derive(Debug, Clone)]
+pub struct TimedRunError {
+    pub source: RunError,
+    pub cleanup_diagnostics: Vec<String>,
+}
+
+impl TimedRunError {
+    pub(crate) fn before_launch() -> Self {
+        Self {
+            source: RunError::NotStarted("command deadline expired before launch".into()),
+            cleanup_diagnostics: Vec::new(),
+        }
+    }
+}
+
 pub trait CommandRunner {
     fn binary_exists(&self, name: &str) -> bool;
     fn run(&self, argv: &[String], timeout_secs: Option<u64>) -> Result<String, RunError>;
@@ -163,6 +180,17 @@ pub trait CommandRunner {
             argv,
             Some(timeout.as_secs() + u64::from(timeout.subsec_nanos() > 0)),
         )
+    }
+    fn run_until(&self, argv: &[String], deadline: Instant) -> Result<String, TimedRunError> {
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .filter(|left| !left.is_zero())
+            .ok_or_else(TimedRunError::before_launch)?;
+        self.run_for(argv, remaining)
+            .map_err(|source| TimedRunError {
+                source,
+                cleanup_diagnostics: Vec::new(),
+            })
     }
     fn sleep(&self, seconds: f64);
     fn remaining_budget(&self) -> Result<Option<Duration>, RunError> {
@@ -262,6 +290,14 @@ impl CommandRunner for DeadlineRunner {
             .remaining_budget()?
             .expect("deadline runner has a budget");
         self.runner.run_for(argv, timeout.min(remaining))
+    }
+
+    fn run_until(&self, argv: &[String], deadline: Instant) -> Result<String, TimedRunError> {
+        let deadline = deadline.min(self.deadline.instant());
+        if Instant::now() >= deadline {
+            return Err(TimedRunError::before_launch());
+        }
+        self.runner.run_until(argv, deadline)
     }
 
     fn sleep(&self, seconds: f64) {
@@ -373,6 +409,29 @@ impl AnyMultiplexer {
         match self {
             Self::Tmux(mux) => mux.ensure_available(),
             Self::Herdr(mux) => mux.ensure_available(),
+        }
+    }
+
+    pub(crate) fn validate_key_target(
+        &self,
+        placement: &crate::broker::records::Placement,
+        deadline: crate::input::Deadline,
+    ) -> Result<(), MultiplexerError> {
+        match self {
+            Self::Tmux(mux) => mux.validate_key_target(placement, deadline),
+            Self::Herdr(mux) => mux.validate_key_target(placement, deadline),
+        }
+    }
+
+    pub(crate) fn send_keys(
+        &self,
+        pane_id: &str,
+        keys: &PressKeys,
+        deadline: crate::input::Deadline,
+    ) -> Result<(), MultiplexerError> {
+        match self {
+            Self::Tmux(mux) => mux.send_keys(pane_id, keys, deadline),
+            Self::Herdr(mux) => mux.send_keys(pane_id, keys, deadline),
         }
     }
 

@@ -101,6 +101,115 @@ impl TmuxMultiplexer {
         Ok(())
     }
 
+    fn press_run(
+        &self,
+        argv: &[String],
+        deadline: crate::input::Deadline,
+        writing: bool,
+    ) -> Result<String, MultiplexerError> {
+        deadline
+            .remaining()
+            .map_err(|error| MultiplexerError::new(error.message()))?;
+        self.runner
+            .run_until(argv, deadline.instant())
+            .map_err(|error| {
+                let started =
+                    writing && matches!(&error.source, RunError::Failed { .. } | RunError::Timeout);
+                let mut mapped = map_run_error(argv, None, error.source);
+                for diagnostic in error.cleanup_diagnostics {
+                    mapped.message.push('\n');
+                    mapped.message.push_str(&diagnostic);
+                }
+                if started {
+                    mapped.after_write()
+                } else {
+                    mapped
+                }
+            })
+    }
+
+    pub(crate) fn validate_key_target(
+        &self,
+        placement: &crate::broker::records::Placement,
+        deadline: crate::input::Deadline,
+    ) -> Result<(), MultiplexerError> {
+        deadline
+            .remaining()
+            .map_err(|error| MultiplexerError::new(error.message()))?;
+        self.ensure_available()?;
+        deadline
+            .remaining()
+            .map_err(|error| MultiplexerError::new(error.message()))?;
+        let caller = self.env_var("TMUX_PANE").ok_or_else(|| {
+            MultiplexerError::new("TMUX_PANE is not set; not running inside a tmux pane")
+        })?;
+        let current = self.press_run(
+            &tmux_argv(&[
+                "tmux",
+                "display-message",
+                "-p",
+                "-t",
+                caller,
+                "#{session_name}|#{window_id}|#{pane_id}",
+            ]),
+            deadline,
+            false,
+        )?;
+        let parts: Vec<_> = current.trim().splitn(3, '|').collect();
+        if !matches!(parts.as_slice(), [session, window, pane] if !session.is_empty() && !window.is_empty() && !pane.is_empty() && *session == placement.mux_session)
+        {
+            return Err(MultiplexerError::new(
+                "press target context does not match the recorded placement",
+            ));
+        }
+        let pane = placement
+            .mux_pane_id
+            .as_deref()
+            .ok_or_else(|| MultiplexerError::new("press target has no pane"))?;
+        let target = self.press_run(
+            &tmux_argv(&[
+                "tmux",
+                "display-message",
+                "-p",
+                "-t",
+                pane,
+                "#{pane_id}|#{window_id}|#{session_name}",
+            ]),
+            deadline,
+            false,
+        )?;
+        let parts: Vec<_> = target.trim().splitn(3, '|').collect();
+        if parts
+            != [
+                pane,
+                placement.mux_window_id.as_str(),
+                placement.mux_session.as_str(),
+            ]
+        {
+            return Err(MultiplexerError::new(
+                "press target context does not match the recorded placement",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn send_keys(
+        &self,
+        pane_id: &str,
+        keys: &super::PressKeys,
+        deadline: crate::input::Deadline,
+    ) -> Result<(), MultiplexerError> {
+        let mut argv = tmux_argv(&["tmux", "send-keys", "-t", pane_id]);
+        argv.extend(keys.tmux_arguments());
+        let output = self.press_run(&argv, deadline, true)?;
+        if !output.trim().is_empty() {
+            return Err(
+                MultiplexerError::new("tmux key acknowledgment was unreadable").after_write(),
+            );
+        }
+        Ok(())
+    }
+
     pub fn context_discovery(&self) -> Result<MultiplexerContext, MultiplexerError> {
         let Some(tmux_pane) = self.env_var("TMUX_PANE") else {
             return Err(MultiplexerError::new(

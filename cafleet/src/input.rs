@@ -605,6 +605,18 @@ pub struct LockedMember {
     _guard: PaneLock,
 }
 
+impl LockedMember {
+    pub(crate) fn pane_lock(&self, database_url: &str) -> Result<&PaneLock, CafleetError> {
+        let placement = self
+            .member
+            .placement
+            .as_ref()
+            .expect("locked member has a placement");
+        self._guard.validate_binding(database_url, placement)?;
+        Ok(&self._guard)
+    }
+}
+
 pub(crate) struct LockedDeletion<S, T> {
     pub snapshot: S,
     pub value: T,
@@ -703,13 +715,29 @@ pub fn lock_member(
     member: &MemberRecord,
     deadline: Deadline,
 ) -> Result<Option<LockedMember>, CafleetError> {
+    lock_member_with_reservation(
+        conn,
+        settings,
+        member,
+        deadline,
+        crate::multiplexer::INPUT_RESERVATION,
+    )
+}
+
+pub(crate) fn lock_member_with_reservation(
+    conn: &mut Connection,
+    settings: &Settings,
+    member: &MemberRecord,
+    deadline: Deadline,
+    reservation: Duration,
+) -> Result<Option<LockedMember>, CafleetError> {
     let placement = member.placement.as_ref().ok_or_else(|| {
         CafleetError::App(format!("member {} has no placement row", member.member_id))
     })?;
     let Some(guard) = PaneLock::acquire_within(
         &settings.database_url,
         placement,
-        deadline.reserving(crate::multiplexer::INPUT_RESERVATION),
+        deadline.reserving(reservation),
     )
     .map_err(|error| {
         CafleetError::App(format!(

@@ -28,6 +28,15 @@ pub fn format_messages(messages: &[MessageRecord], limit: usize) -> String {
         .join("\n\n")
 }
 
+pub(crate) fn format_member_press(value: &crate::runtime::KeyAcknowledgment) -> String {
+    format!(
+        "Acknowledged keys {} for member {} ({}).",
+        serde_json::to_string(&value.keys).expect("key strings serialize"),
+        value.member_id,
+        value.pane_id
+    )
+}
+
 pub fn format_member_detail(member: &MemberRecord) -> String {
     let mut text = format!(
         "{} {} {}",

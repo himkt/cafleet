@@ -1,6 +1,10 @@
 use crate::broker::records::*;
 use serde_json::{Value, json};
 
+pub(crate) fn member_press(value: &crate::runtime::KeyAcknowledgment) -> Value {
+    json!({"member_id":value.member_id,"pane_id":value.pane_id,"keys":value.keys,"status":"acknowledged"})
+}
+
 pub(crate) fn runtime_recovery(report: &crate::runtime::runner::RecoveryReport) -> Value {
     json!({"member_id":report.member_id,"run_id":report.run_id,"outcome":report.outcome.as_str(),
         "replayed_count":report.replayed_count,"inbox_count":report.inbox_count,

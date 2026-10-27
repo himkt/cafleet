@@ -142,6 +142,15 @@ pub enum MemberCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Send an ordered vector of explicit native keys to a member pane.
+    Press {
+        #[arg(index = 1, value_name = "MEMBER_ID", value_parser = clap::value_parser!(i64).range(1..))]
+        member_id: i64,
+        #[arg(index = 2, value_name = "KEY", num_args = 1..=64, required = true)]
+        keys: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Capture the tail of a member's pane.
     Capture {
         /// The target member.
@@ -310,6 +319,7 @@ pub fn run(
             body,
             json,
         } => exec(conn, settings, member_id, &body, json, deadline),
+        MemberCommand::Press { .. } => unreachable!("press has a dedicated typed dispatch"),
         MemberCommand::Capture {
             member_id,
             lines,
@@ -756,6 +766,21 @@ fn list(conn: &mut Connection, fleet_id: i64, json: bool) -> Result<(), CafleetE
     let members = broker::list_members(conn, fleet_id)?;
     let payload = Value::Array(members.iter().map(presentation::member_activity).collect());
     emit(json, &payload, || format_member_list(&members));
+    Ok(())
+}
+
+pub(super) fn press(
+    conn: &mut Connection,
+    settings: &Settings,
+    member_id: i64,
+    keys: &crate::multiplexer::PressKeys,
+    json: bool,
+    deadline: crate::input::Deadline,
+) -> Result<(), CafleetError> {
+    let acknowledgment = crate::runtime::press_member(conn, settings, member_id, keys, deadline)?;
+    emit(json, &presentation::member_press(&acknowledgment), || {
+        crate::output::format_member_press(&acknowledgment)
+    });
     Ok(())
 }
 

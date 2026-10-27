@@ -107,6 +107,20 @@ fn dispatch(settings: &Settings, command: Command) -> Result<(), CafleetError> {
             let code = crate::runtime::runner::run(settings, &descriptor)?;
             std::process::exit(code)
         }
+        Command::Member(member::MemberCommand::Press {
+            member_id,
+            keys,
+            json,
+        }) => {
+            let deadline = crate::input::Deadline::inherited_or_new();
+            let keys = crate::multiplexer::PressKeys::parse(&keys)?;
+            let mut conn = invocation_connection_with_deadline(&settings.database_url, deadline)
+                .map_err(|cause| CafleetError::WithDiagnostics {
+                    cause: Box::new(cause),
+                    diagnostics: vec![format!("keys were not dispatched to member {member_id}.")],
+                })?;
+            member::press(&mut conn, settings, member_id, &keys, json, deadline)
+        }
         Command::Permission(command) => {
             let deadline = crate::input::Deadline::new();
             runtime::permission_preflight(&command)

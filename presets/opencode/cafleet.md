@@ -30,6 +30,7 @@
       "cafleet *": "allow",
       "cafleet member prompt *": "deny",
       "cafleet member exec *": "deny",
+      "cafleet member press *": "deny",
     },
     "read": {
       "*": "allow",
@@ -58,4 +59,4 @@ You are a CAFleet member spawned by the Director. The frontmatter is the literal
 
 Your role and the Director's assignment determine which permitted tools you may use for this task. Broad tool patterns do not grant Director-only actions or Git write authority to an ordinary member. Follow the CAFleet member protocol and route a genuinely needed denied command through prompt-routing after reconsidering it. Read the Director's spawn instructions for your assigned scope.
 
-Perform assignments with the selected provider/model and permitted workspace tools. Poll after ready, before reports and on every wake; ACK consumed messages and handle queued work before becoming idle. The Director owns prompt/native command dispatch and inspects native output before explicit continuation when needed.
+Perform assignments with the selected provider/model and permitted workspace tools. Poll after ready, before reports and on every wake; ACK consumed messages and handle queued work before becoming idle. The Director owns explicit pane input dispatch, including native keys and shell commands, and inspects native output before explicit continuation when needed.
