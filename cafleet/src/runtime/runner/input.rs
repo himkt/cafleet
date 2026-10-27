@@ -383,18 +383,42 @@ impl InputCoordinator {
                 request.identity == expected && run.run_id == self.run.run_id,
                 "input request fixed identity mismatch",
             )?;
-            let InputControlOperation::SubmitPrompt(input) = request.operation else {
-                return Err(error("ordinary Prompt input operation required"));
+            let (input, composer_operation) = match request.operation {
+                InputControlOperation::SubmitPrompt(input) => (input, ComposerOperation::Prompt),
+                InputControlOperation::SubmitExec(input) => (input, ComposerOperation::Exec),
+                _ => return Err(error("composer submission operation required")),
             };
             known_key = Some(input.operation_key.clone());
             ensure(
-                input.input_kind == storage::InputKind::Prompt && input.message_id.is_none(),
-                "ordinary Prompt metadata required",
+                matches!(
+                    (composer_operation, input.input_kind),
+                    (
+                        ComposerOperation::Prompt,
+                        storage::InputKind::Prompt | storage::InputKind::Preview
+                    ) | (ComposerOperation::Exec, storage::InputKind::Exec)
+                ),
+                "composer submission operation and kind mismatch",
             )?;
+            if input.input_kind == storage::InputKind::Preview {
+                let message_id = input
+                    .message_id
+                    .ok_or_else(|| error("preview message required"))?;
+                ensure(
+                    message_id > 0
+                        && input.operation_key
+                            == format!("preview:{}:{message_id}", self.run.run_id),
+                    "preview operation key must bind its run and message",
+                )?;
+            } else {
+                ensure(
+                    input.message_id.is_none(),
+                    "explicit input has no preview message",
+                )?;
+            }
             validate_operation_key(&input.operation_key)?;
             ensure(
                 crate::input::valid_input(&input.literal),
-                "ordinary Prompt requires one nonempty line without control characters",
+                "composer submission requires one nonempty line without control characters",
             )?;
             let digest = Sha256::digest(canonical_json(&serde_json::json!({"run_id":self.run.run_id,"kind":input.input_kind.as_str(),"message_id":input.message_id,"literal":input.literal})).as_bytes()).iter().map(|byte| format!("{byte:02x}")).collect::<String>();
             let retained = with_database_deadline(conn, deadline, |conn| {
@@ -443,7 +467,7 @@ impl InputCoordinator {
             let Some(plan) =
                 self.services
                     .catalog
-                    .composer_plan(backend, native, ComposerOperation::Prompt)?
+                    .composer_plan(backend, native, composer_operation)?
             else {
                 return Ok(Some(InputControlReply::Submission(SubmissionResult {
                     status: SubmissionStatus::Held,
