@@ -4,7 +4,6 @@ mod input_client;
 pub(crate) use input_client::*;
 mod input_clock;
 pub(crate) use input_clock::*;
-#[cfg(test)]
 mod input;
 #[cfg(test)]
 mod native_capture;

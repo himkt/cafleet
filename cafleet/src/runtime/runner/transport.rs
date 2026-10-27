@@ -314,13 +314,6 @@ impl Transport {
             .expect("human input generation fits u64");
         self.input.extend(bytes);
     }
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the reviewed service/coordinator integration consumes input drain state"
-        )
-    )]
     pub(super) fn human_generation(&self) -> u64 {
         self.human_generation
     }
