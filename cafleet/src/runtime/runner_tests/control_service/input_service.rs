@@ -470,3 +470,104 @@ fn step5_service_input_disconnected_preview_consumer_retains_outcome_without_aut
         assert!(notified.is_none());
     });
 }
+
+#[test]
+fn step5_service_input_expired_unreserved_attempt_releases_pending_work_for_a_fresh_key() {
+    const EXPIRATION_TOLERANCE: Duration = Duration::from_millis(100);
+
+    with_service(|fixture, until| {
+        composer(fixture, until);
+        let journal: String = fixture
+            .fixture
+            .conn
+            .query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(journal, "wal");
+        let blocker = crate::db::connect(&format!(
+            "sqlite:///{}",
+            fixture.fixture.conn.path().unwrap()
+        ))
+        .unwrap();
+        blocker.busy_timeout(Duration::ZERO).unwrap();
+        blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
+        assert!(!blocker.is_autocommit());
+        let expired_key = "prompt:service:reservation-expired";
+        let expires = Instant::now() + Duration::from_millis(400);
+        assert!(expires < until);
+        let expired = request(
+            fixture,
+            expired_key,
+            "expired reservation must stay unwritten",
+            InputKind::Prompt,
+            None,
+            expires,
+        );
+        let started = Instant::now();
+        let failure = exchange(fixture, &expired, until);
+        let returned = Instant::now();
+        let elapsed = returned.duration_since(started);
+        assert!(!blocker.is_autocommit());
+        assert!(
+            returned >= expires - EXPIRATION_TOLERANCE
+                && returned <= expires + EXPIRATION_TOLERANCE,
+            "original expiration bounds the SQL wait with conservative conversion and scheduling tolerance: elapsed={elapsed:?}; returned={returned:?}; expires={expires:?}"
+        );
+        assert!(
+            failure["error"]
+                .as_str()
+                .is_some_and(|message| message.contains("deadline")
+                    || message.contains("database is locked")),
+            "{failure}"
+        );
+        assert!(
+            storage::find_input(
+                &fixture.fixture.conn,
+                fixture.fixture.run.run_id,
+                expired_key
+            )
+            .unwrap()
+            .is_none()
+        );
+        assert!(records(fixture).is_empty());
+        blocker.execute_batch("ROLLBACK").unwrap();
+        assert!(blocker.is_autocommit());
+        composer(fixture, until);
+        let fresh_key = "prompt:service:after-expired-reservation";
+        let literal = "fresh after expired reservation";
+        let fresh = request(
+            fixture,
+            fresh_key,
+            literal,
+            InputKind::Prompt,
+            None,
+            until.min(Instant::now() + Duration::from_secs(3)),
+        );
+        let reply = exchange(fixture, &fresh, until);
+        eprintln!(
+            "reservation expiry under actual {journal} writer lock: elapsed={elapsed:?}; expired_reply={failure}; fresh_reply={reply}; native_records={:?}",
+            records(fixture)
+        );
+        let accepted = submission(reply);
+        let row = storage::get_input(&fixture.fixture.conn, accepted.input_id.unwrap()).unwrap();
+        assert_eq!(row.operation_key, fresh_key);
+        assert_eq!(row.state, InputState::Accepted);
+        wait_record(fixture, literal, until);
+        barrier(fixture, until);
+        assert_eq!(
+            records(fixture)
+                .iter()
+                .map(|record| record["line"].as_str().unwrap().to_owned())
+                .collect::<Vec<_>>(),
+            [literal, "barrier"]
+        );
+        assert!(
+            storage::find_input(
+                &fixture.fixture.conn,
+                fixture.fixture.run.run_id,
+                expired_key
+            )
+            .unwrap()
+            .is_none()
+        );
+    });
+}
