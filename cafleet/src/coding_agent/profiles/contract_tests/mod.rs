@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 mod catalog;
 mod detector;
 mod episodes;
+mod executable_composer;
 
 const VERSION: &str = "synthetic-0.0.1";
 const PROFILE: &str = "synthetic-profile-1";
