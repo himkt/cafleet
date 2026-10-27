@@ -401,6 +401,12 @@ Screen observation cannot create an atomic native request API: unread child outp
 
 Human keystrokes from the outer terminal pass to the child as native input, including the human's intentional approval, denial or cancellation. A Director may submit a request-bound allow or deny through the permission-response path below after applying its session decision policy; ordinary preview/prompt/exec input remains held during the request. Keep attributed decisions, key submission, native outcomes and actual continuation separately observable. Unknown answer capability or uncertain request identity preserves manual original-surface operation. Retain the legacy mux path only for explicitly unwrapped members and preserve its narrower existing semantics.
 
+### Explicit manual key input {#explicit-manual-key-input}
+
+An explicitly authorized `member press` sends only its requested ordered keys through the member's outer multiplexer pane under the shared pane lock and [selected-context/deadline contract](multiplexer-backends.md#explicit-key-dispatch). It appends no Escape or Enter. This manual path remains available during observer degradation or a programmatic composer hold and follows the [separate CLI acknowledgment/error contract](cli-options.md#member-press).
+
+The runner counts actual positive outer-terminal reads, retains their generation before any later I/O error and accounts each new delta once on both successful and failed transport steps before subsequent automatic advancement. Observed manual input invalidates automatic authority through the retained generation; a key argument or backend acknowledgment supplies no byte count, drain proof or permission receipt. Press changes no durable input/response row. Native approval/denial/cancellation and actual continuation remain independently observed outcomes under the existing Director/user policy.
+
 ## Request-bound permission responses
 
 The Director uses its own session's effective approval mode, independently of the member's launch mode. In verified auto mode, evaluate the requested command or operation and decide allow or deny. In other or unknown modes, obtain the user's request-specific permission before transmitting an answer. Resolve mode from current host/session evidence and record its provenance in host-owned pending state; member argv, event text and a CLI flag supply no proof of Director mode. Native and managed host policy remain authoritative. Mode/source fields are attributed audit claims in this same-user coordination tool, not authentication credentials.

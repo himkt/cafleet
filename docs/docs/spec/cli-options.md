@@ -16,6 +16,7 @@ The unified `cafleet` CLI uses literal subject IDs, synchronous SQLite access an
 | `member delete` | Kill its owned pane and deregister | `MEMBER_ID` | yes |
 | `member show` / `member list` | Read detail / active roster | `MEMBER_ID` / `FLEET_ID` | yes |
 | `member prompt` / `member exec` | Submit authorized native input | `MEMBER_ID` | yes |
+| `member press` | Request explicit ordered keys | `MEMBER_ID` | yes |
 | `member capture` | Read a pane tail | `MEMBER_ID` | yes |
 | `member recover` | Reconcile the recorded run without restarting an agent | `MEMBER_ID` | yes |
 | `event show` | Read a durable runtime event and current state | `EVENT_ID` | yes |
@@ -65,6 +66,7 @@ The default expands HOME once. An explicit URL has the form `sqlite:///<path>`; 
 | `member list` | Roster rows or `0 members.` | Roster array |
 | `member prompt` | `Sent prompt TEXT_REPR to member NAME (PANE).` plus wrapped input line | `{member_id, pane_id, text, input_id}` |
 | `member exec` | `Dispatched native command to member ID (PANE). Inspect the pane for its result.` plus wrapped input line | `{member_id, pane_id, coding_agent, command, dispatched, input_id}` |
+| `member press` | `Acknowledged keys KEYS_JSON for member ID (PANE).` | Ordered `member_id, pane_id, keys, status` |
 | `member capture` | Exact selected content | `{member_id, pane_id, lines, content, captured_at, content_sha256}` |
 | `fleet capture` | One annotated section per entry | Ordered capture-entry array |
 | `doctor` | Complete diagnosis and issue footer | Diagnosis object |
@@ -75,7 +77,7 @@ Roster records include `member_id`, `name`, `kind`, `placement`, `last_sent`, `l
 
 ## JSON output (`--json`) {#json-output}
 
-Use a trailing per-subcommand `--json`. It emits compact single-line JSON with UTF-8 and complete untruncated message text. Application errors remain stderr text, with the [structured permission-response exception](#permission-commands); parse errors exit 2. Commands marked no reject the flag, including the root group.
+Place `--json` among the subcommand options, before a `--` separator that introduces literal key arguments. It emits compact single-line JSON with UTF-8 and complete untruncated message text. Application errors remain stderr text, with the [structured permission-response exception](#permission-commands); parse errors exit 2. Commands marked no reject the flag, including the root group.
 
 ## Positional subject ids {#positional-subject-ids}
 
@@ -91,7 +93,7 @@ Send requires integer sender and recipient flags. Both must be active in the sam
 
 Use prefix rules such as `Bash(cafleet message *)` to cover broker operations, including `cafleet message listen ID --timeout 300` and finite `cafleet message wait`. Verify native Monitor authorization separately: a Bash-rule check establishes no Monitor permission. Director capture is covered by `Bash(cafleet fleet capture *)` or a broader authorized prefix. Literal IDs and trailing JSON flags preserve prefix matching.
 
-Keep `Bash(cafleet member prompt *)` and `Bash(cafleet member exec *)` under `permissions.ask`, because their bodies carry operator-controlled input. Ask rules outrank allow rules. Authorize `cafleet permission respond` under the Director host’s effective policy after its request-specific decision; mode/source flags bypass no ask, deny or managed rule. Ordinary member role authority covers broker reception and evidence routing, while the Director owns permission responses. The [permission profiles](coding-agent-backends.md#claude-profile-entries) describe each role's needs.
+Keep commands that send explicit native pane input under `permissions.ask`, including the `Bash(cafleet member prompt *)`, `Bash(cafleet member exec *)` and `Bash(cafleet member press *)` prefixes. Ask rules outrank allow rules. Authorize `cafleet permission respond` under the Director host’s effective policy after its request-specific decision; mode/source flags bypass no ask, deny or managed rule. Ordinary member role authority covers broker reception and evidence routing, while the Director owns permission responses. The [permission profiles](coding-agent-backends.md#claude-profile-entries) describe each role's needs.
 
 ## Message Body Truncation
 
@@ -786,6 +788,47 @@ Text: `Dispatched native command to member ID (PANE). Inspect the pane for its r
 The first text-writing call can partially type even if it fails. Failure after Enter may mean execution began. Inspect native pane output before any newly authorized retry. A wrapped operation durably records its operation key, payload digest and submission state; the receipt contains no command text. The result describes dispatch, independently of native execution. The Director authorizes native input under its host rules; visibility establishes no second member-tool permission check.
 
 After native completion, inspect the pane and send an explicit prompt to use the output and continue when the host has not resumed the member.
+
+### `member press` {#member-press}
+
+`cafleet member press MEMBER_ID KEY... [--json]` requests only the specified ordered keys. Require a positive signed 64-bit member ID and one through 64 keys, each at most 32 UTF-8 bytes, using the [common key grammar and backend mappings](multiplexer-backends.md#explicit-key-dispatch). Preserve literal character case and render named keys canonically. Validate the complete vector before any backend probe or writing invocation.
+
+Use the ordinary `--` option separator before literal punctuation that could be read as an option; put `--json` before that separator. For example, `cafleet member press 42 -- '-' '+' ';'` requests three keys. It supplies no Escape prelude, Enter suffix, prompt text or shell-command submission.
+
+Resolve an active ordinary member and its concrete placement, preserving the Director-target restriction and the [shared input lock, selected-context validation and original budget](multiplexer-backends.md#explicit-key-dispatch). Wrapped members receive the request through their outer pane as [manual native input](member-runtime.md#explicit-manual-key-input). Success means backend acknowledgment of this ordered request; actual PTY bytes, native approval and completion require their own observation.
+
+Exit 0 prints compact ordered JSON when `--json` is selected:
+
+```json
+{"member_id":42,"pane_id":"%5","keys":["Ctrl+a",";"],"status":"acknowledged"}
+```
+
+Otherwise print `Acknowledged keys KEYS_JSON for member ID (PANE).`, where `KEYS_JSON` is the compact JSON array of canonical keys. Both modes end with one newline. The result carries no native-byte count, delivered-prefix count or permission receipt.
+
+Missing/extra positional arguments and a nonpositive/malformed member ID use Clap's native usage diagnostics. Direct key validation uses these usage-error bodies, with one-based `N` and JSON-quoted invalid input:
+
+| Condition | Error body (exit 2) |
+|---|---|
+| Key count outside the domain | `press requires between 1 and 64 keys` |
+| A key exceeds its UTF-8 bound | `press key at position N exceeds 32 UTF-8 bytes` |
+| A key is outside the common grammar | `invalid press key at position N: JSON_QUOTED_TOKEN` |
+
+Operational failures exit 1 with empty stdout, including under `--json`. Retain the original typed cause and any cleanup diagnostics, then append the effect diagnostic below on its own stderr line; the executable prefixes the primary first line with `Error: `.
+
+| Observed boundary | Effect diagnostic |
+|---|---|
+| Before any writing process starts, including a failed metadata probe | `keys were not dispatched to member ID.` |
+| A writing process starts and fails, times out or returns an unreadable acknowledgment | `key delivery to member ID is uncertain; any prefix may have been handled. Inspect the pane before an explicit retry.` |
+
+| Local refusal | Primary error body |
+|---|---|
+| Root Director target | `cannot press keys in the Director's own pane` |
+| Input lock remains busy | `member ID's pane input remained busy` |
+| Revalidated target changes | `member ID placement changed before key dispatch` |
+| Selected adapter differs from placement | `press backend does not match the recorded placement` |
+| Selected live context differs from placement | `press target context does not match the recorded placement` |
+
+Missing member/placement and native process errors retain their existing primary diagnostics. A pending pane uses `member ID has no pane yet (pending placement) — nothing to press.` Binary-not-found, not-started and prelaunch expiration have zero writing invocations. Every started failure, including a pane-gone response, retains possible partial delivery; perform no automatic retry. Request-bound permission decisions retain the separate `permission respond` contract and host authorization.
 
 ### `member capture` {#member-capture}
 

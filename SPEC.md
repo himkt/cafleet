@@ -128,6 +128,7 @@ Preserve the validation boundary and explicit cause. Missing member/message, ina
 | `member delete` | Kill its owned pane and deregister | `MEMBER_ID` | yes |
 | `member show` / `member list` | Read detail / active roster | `MEMBER_ID` / `FLEET_ID` | yes |
 | `member prompt` / `member exec` | Submit authorized native input | `MEMBER_ID` | yes |
+| `member press` | Request explicit ordered keys | `MEMBER_ID` | yes |
 | `member capture` | Read a pane tail | `MEMBER_ID` | yes |
 | `member recover` | Reconcile the recorded run without restarting an agent | `MEMBER_ID` | yes |
 | `event show` | Read a durable runtime event and current state | `EVENT_ID` | yes |
@@ -177,6 +178,7 @@ The default expands HOME once. An explicit URL has the form `sqlite:///<path>`; 
 | `member list` | Roster rows or `0 members.` | Roster array |
 | `member prompt` | `Sent prompt TEXT_REPR to member NAME (PANE).` plus wrapped input line | `{member_id, pane_id, text, input_id}` |
 | `member exec` | `Dispatched native command to member ID (PANE). Inspect the pane for its result.` plus wrapped input line | `{member_id, pane_id, coding_agent, command, dispatched, input_id}` |
+| `member press` | `Acknowledged keys KEYS_JSON for member ID (PANE).` | Ordered `member_id, pane_id, keys, status` |
 | `member capture` | Exact selected content | `{member_id, pane_id, lines, content, captured_at, content_sha256}` |
 | `fleet capture` | One annotated section per entry | Ordered capture-entry array |
 | `doctor` | Complete diagnosis and issue footer | Diagnosis object |
@@ -187,7 +189,7 @@ Roster records include `member_id`, `name`, `kind`, `placement`, `last_sent`, `l
 
 #### JSON output (`--json`) {#json-output}
 
-Use a trailing per-subcommand `--json`. It emits compact single-line JSON with UTF-8 and complete untruncated message text. Application errors remain stderr text, with the [structured permission-response exception](#permission-commands); parse errors exit 2. Commands marked no reject the flag, including the root group.
+Place `--json` among the subcommand options, before a `--` separator that introduces literal key arguments. It emits compact single-line JSON with UTF-8 and complete untruncated message text. Application errors remain stderr text, with the [structured permission-response exception](#permission-commands); parse errors exit 2. Commands marked no reject the flag, including the root group.
 
 #### Positional subject ids {#positional-subject-ids}
 
@@ -203,7 +205,7 @@ Send requires integer sender and recipient flags. Both must be active in the sam
 
 Use prefix rules such as `Bash(cafleet message *)` to cover broker operations, including `cafleet message listen ID --timeout 300` and finite `cafleet message wait`. Verify native Monitor authorization separately: a Bash-rule check establishes no Monitor permission. Director capture is covered by `Bash(cafleet fleet capture *)` or a broader authorized prefix. Literal IDs and trailing JSON flags preserve prefix matching.
 
-Keep `Bash(cafleet member prompt *)` and `Bash(cafleet member exec *)` under `permissions.ask`, because their bodies carry operator-controlled input. Ask rules outrank allow rules. Authorize `cafleet permission respond` under the Director host’s effective policy after its request-specific decision; mode/source flags bypass no ask, deny or managed rule. Ordinary member role authority covers broker reception and evidence routing, while the Director owns permission responses. The [permission profiles](docs/docs/spec/coding-agent-backends.md#claude-profile-entries) describe each role's needs.
+Keep commands that send explicit native pane input under `permissions.ask`, including the `Bash(cafleet member prompt *)`, `Bash(cafleet member exec *)` and `Bash(cafleet member press *)` prefixes. Ask rules outrank allow rules. Authorize `cafleet permission respond` under the Director host’s effective policy after its request-specific decision; mode/source flags bypass no ask, deny or managed rule. Ordinary member role authority covers broker reception and evidence routing, while the Director owns permission responses. The [permission profiles](docs/docs/spec/coding-agent-backends.md#claude-profile-entries) describe each role's needs.
 
 #### Message Body Truncation
 
@@ -899,6 +901,47 @@ The first text-writing call can partially type even if it fails. Failure after E
 
 After native completion, inspect the pane and send an explicit prompt to use the output and continue when the host has not resumed the member.
 
+##### `member press` {#member-press}
+
+`cafleet member press MEMBER_ID KEY... [--json]` requests only the specified ordered keys. Require a positive signed 64-bit member ID and one through 64 keys, each at most 32 UTF-8 bytes, using the [common key grammar and backend mappings](docs/docs/spec/multiplexer-backends.md#explicit-key-dispatch). Preserve literal character case and render named keys canonically. Validate the complete vector before any backend probe or writing invocation.
+
+Use the ordinary `--` option separator before literal punctuation that could be read as an option; put `--json` before that separator. For example, `cafleet member press 42 -- '-' '+' ';'` requests three keys. It supplies no Escape prelude, Enter suffix, prompt text or shell-command submission.
+
+Resolve an active ordinary member and its concrete placement, preserving the Director-target restriction and the [shared input lock, selected-context validation and original budget](docs/docs/spec/multiplexer-backends.md#explicit-key-dispatch). Wrapped members receive the request through their outer pane as [manual native input](docs/docs/spec/member-runtime.md#explicit-manual-key-input). Success means backend acknowledgment of this ordered request; actual PTY bytes, native approval and completion require their own observation.
+
+Exit 0 prints compact ordered JSON when `--json` is selected:
+
+```json
+{"member_id":42,"pane_id":"%5","keys":["Ctrl+a",";"],"status":"acknowledged"}
+```
+
+Otherwise print `Acknowledged keys KEYS_JSON for member ID (PANE).`, where `KEYS_JSON` is the compact JSON array of canonical keys. Both modes end with one newline. The result carries no native-byte count, delivered-prefix count or permission receipt.
+
+Missing/extra positional arguments and a nonpositive/malformed member ID use Clap's native usage diagnostics. Direct key validation uses these usage-error bodies, with one-based `N` and JSON-quoted invalid input:
+
+| Condition | Error body (exit 2) |
+|---|---|
+| Key count outside the domain | `press requires between 1 and 64 keys` |
+| A key exceeds its UTF-8 bound | `press key at position N exceeds 32 UTF-8 bytes` |
+| A key is outside the common grammar | `invalid press key at position N: JSON_QUOTED_TOKEN` |
+
+Operational failures exit 1 with empty stdout, including under `--json`. Retain the original typed cause and any cleanup diagnostics, then append the effect diagnostic below on its own stderr line; the executable prefixes the primary first line with `Error: `.
+
+| Observed boundary | Effect diagnostic |
+|---|---|
+| Before any writing process starts, including a failed metadata probe | `keys were not dispatched to member ID.` |
+| A writing process starts and fails, times out or returns an unreadable acknowledgment | `key delivery to member ID is uncertain; any prefix may have been handled. Inspect the pane before an explicit retry.` |
+
+| Local refusal | Primary error body |
+|---|---|
+| Root Director target | `cannot press keys in the Director's own pane` |
+| Input lock remains busy | `member ID's pane input remained busy` |
+| Revalidated target changes | `member ID placement changed before key dispatch` |
+| Selected adapter differs from placement | `press backend does not match the recorded placement` |
+| Selected live context differs from placement | `press target context does not match the recorded placement` |
+
+Missing member/placement and native process errors retain their existing primary diagnostics. A pending pane uses `member ID has no pane yet (pending placement) — nothing to press.` Binary-not-found, not-started and prelaunch expiration have zero writing invocations. Every started failure, including a pane-gone response, retains possible partial delivery; perform no automatic retry. Request-bound permission decisions retain the separate `permission respond` contract and host authorization.
+
 ##### `member capture` {#member-capture}
 
 `cafleet member capture MEMBER_ID [--lines N] [--ansi] [--json]` — the
@@ -1297,7 +1340,7 @@ retains its successful close and deregistration result.
 
 #### Pane input lock {#pane-input-lock}
 
-Every notification, prompt and native command uses one process-shared OS file lock. Acquire the guard before placement revalidation; wrapped operations hold it through short database validation, bounded runner submission and durable receipt/stamp settlement, while explicitly unwrapped operations hold it through the Escape lead, literal text, settle, Enter and the notification stamp of the last drained message. Close the non-cloned owned handle on every path.
+Every operation that writes pane input uses one process-shared OS file lock. Acquire the guard before placement revalidation. Wrapped prompt/exec/preview submissions hold it through short database validation, bounded runner submission and durable receipt/stamp settlement; explicitly unwrapped submissions hold it through the Escape lead, literal text, settle, Enter and the notification stamp of the last drained message. Explicit key requests hold it through their outer-pane dispatch and bounded cleanup. Close the non-cloned owned handle on every path.
 
 | Property | Contract |
 |---|---|
@@ -1306,7 +1349,7 @@ Every notification, prompt and native command uses one process-shared OS file lo
 | File | `<key>.lock`, read/write create without truncation, owner-only creation permissions |
 | Acquisition | Exclusive `std::fs::File::try_lock`, retried every 50 milliseconds while another writer holds it; preserve unexpected errors with path/member context |
 | Identity | Keep lockfiles stable while processes may use the database; unlinking a held file would let another process lock a different inode for the same pane |
-| Contention | A pane writer waits until its five-second budget minus the 3.5-second input reservation, at most 1.5 seconds. A lock still busy then fails that writer with its lock-busy error |
+| Contention | Prompt/exec/preview submission reserves 3.5 seconds, leaving at most 1.5 seconds to wait. Explicit keys use their [dispatch reservation](#explicit-key-dispatch); a lock still busy at its wait bound fails that writer |
 
 The 3.5-second input reservation covers a 0.5-second revalidation margin, the 0.5-second Escape settle, a 0.5-second minimum literal budget, the one-second submit settle and one second for Enter. A writer that acquires the lock within its wait therefore still submits; a lock released just before the wait ends still leads to a successful submission. No database statement runs while a writer waits for the lock.
 
@@ -1315,6 +1358,7 @@ The 3.5-second input reservation covers a 0.5-second revalidation margin, the 0.
 | `message send` / `message wait` delivery | `message MESSAGE_ID was not notified to member MEMBER_ID: pane input remained busy; the next send to member MEMBER_ID or the next message wait retries it.` |
 | `member prompt` | Exit 1: `member ID's pane input remained busy; prompt was not dispatched.` |
 | `member exec` | Exit 1: `member ID's pane input remained busy; native command was not dispatched.` |
+| `member press` | Exit 1 with the [primary and zero-dispatch diagnostics](docs/docs/spec/cli-options.md#member-press) |
 
 When a delivery's lock wait ends, one short read selects the oldest pending message this invocation has not attempted for the recipient. When none remains, the attempt reports nothing. Otherwise the lock-busy diagnostic names that message.
 
@@ -1332,6 +1376,7 @@ Interrupting a host turn can also end the turn's in-flight shell tool, including
 |---|---|
 | `message send`, each `message wait` attempt | From lock acquisition through the last `notified_at` stamp |
 | `member prompt`, `member exec` | From lock acquisition through Enter |
+| `member press` | Begin before acquiring the lock; retain it through the writing process and bounded cleanup, releasing the lock before restoring signals |
 | `member create` | From the pane spawn through the registry commit or its compensation |
 | `member delete`, `fleet delete` | From lock acquisition through deregistration and layout cleanup |
 
@@ -1343,8 +1388,38 @@ Every span is bounded by its existing deadline, so a deferred signal waits at mo
 |---|---|---|
 | `message send` / `message wait` between first keystroke and stamp | `notified_at` stays NULL; the line may or may not have reached the pane | The next send or `message wait` retries it; a duplicate line is possible |
 | `member prompt` / `member exec` after typing began | Partial or complete input | `member capture`; re-dispatch only after inspecting the pane |
+| `member press` after its writing process starts | Any prefix, including empty or complete, may have been handled | Inspect the pane before an explicitly authorized new action |
 | `member create` | A pane without a registry row, or a row whose placement stays pending | `member list` and `fleet capture`; `member delete` the row, and close an unregistered pane with the multiplexer's own kill command |
 | `member delete` / `fleet delete` | A closed pane whose row remains, or the reverse | `member list`; rerun the delete |
+
+#### Explicit key dispatch {#explicit-key-dispatch}
+
+`member press` maps the complete validated ordered vector from the [CLI contract](docs/docs/spec/cli-options.md#member-press) to one writing invocation: `tmux send-keys -t PANE KEY...` or `herdr pane send-keys PANE KEY...`. The typed registry owns the common grammar and mappings below. Single printable characters preserve case; named keys and modifiers match case-insensitively, and control letters normalize to lowercase.
+
+| Common key | tmux argument | herdr argument |
+|---|---|---|
+| Single printable ASCII character, U+0021–U+007E | `0xXX` for its ASCII codepoint | Same character, with `+` as `plus`, `-` as `minus`, and `;` as `semicolon` |
+| `Space` | `Space` | `space` |
+| `Escape` | `Escape` | `esc` |
+| `Enter` | `Enter` | `enter` |
+| `Tab` | `Tab` | `tab` |
+| `Backspace` | `BSpace` | `backspace` |
+| `Up`, `Down`, `Left`, `Right` | Canonical capitalized name | Lowercase name |
+| `F1` through `F12` | `F1` through `F12` | `f1` through `f12` |
+| `Ctrl+a` through `Ctrl+z` | `C-a` through `C-z` | `ctrl+a` through `ctrl+z` |
+| `Shift+Tab` | `BTab` | `shift+tab` |
+
+Accept only these productions, with the CLI's count/UTF-8 bounds and complete-vector validation. Tmux hexadecimal character arguments keep punctuation out of its command parser. The dedicated key adapter sends only requested keys, using shell-free argv and no prompt phase or settling sleep.
+
+Acquire the same canonical pane-input lock used by deletion and validate its retained descriptor/path binding. Compare the configured/environment adapter with the recorded backend. Within that selected live context, require the current session/workspace to match the placement, then verify its complete target tuple: tmux reads `#{pane_id}|#{window_id}|#{session_name}` for the target and splits only the first two separators; herdr reads its pane-list JSON and requires exactly one matching workspace/tab/pane. Re-read the active member after metadata, compare its fixed fleet/kind/full placement and validate the held lock immediately before writing. A missing, ambiguous, malformed or changed target fails before the writing invocation.
+
+The placement records no historical socket/server-generation identity. Context validation establishes its complete tuple within the selected current server; it provides no cross-server fallback or proof of historical server/build equivalence. Keep that same adapter/environment across every probe and the write.
+
+Capture one inherited-or-new five-second absolute deadline before invocation database validation. The full availability/current-context/target-metadata/write chain uses absolute `run_until` execution with that supplied bound; relative or untimed helper execution supplies no press path. Retain one second for metadata/dispatch/cleanup when computing the lock-wait deadline, rather than the prompt reservation. Every later check uses the remaining original budget, and insufficient launch/cleanup reserve starts no new writing process.
+
+Within the original deadline, reserve 250 milliseconds for owned process cleanup and end collection/launch at that earlier bound. On an actual error, close read pipes, kill only the still-owned unreaped direct child and poll `try_wait` with sleeps at most 2 milliseconds while the original cleanup deadline has time remaining, checking that deadline after every interruption. Explicit cleanup and unwind fallback use the same original deadline and perform no blocking wait. An explicit cleanup attempt prevents a second Drop retry cycle; unconfirmed termination/reap remains an explicit diagnostic: `cleanup unconfirmed for child PID: original command deadline expired before reap`. Preserve actual kill/status errors and the primary process error; unwind emits cleanup diagnostics to stderr. Existing relative/untimed execution retains its separate behavior. Synchronous calls have no hard scheduler/syscall return-time guarantee.
+
+Both writing adapters acknowledge only successful process completion with empty/whitespace stdout. Unexpected non-whitespace stdout on success is unreadable acknowledgment with uncertain effects; herdr metadata retains its command-specific JSON parsing. Binary-not-found/not-started means zero writing invocations; every started failure, including pane-gone stderr, timeout or unreadable output, retains possible prefix delivery and receives no automatic retry. Backend keyboard modes or key interception can affect actual PTY bytes even after acknowledgment. Use the [CLI result/error contract](docs/docs/spec/cli-options.md#member-press) and observe actual native effects separately.
 
 #### Prompt dispatch (`send_prompt`) {#prompt-dispatch}
 
@@ -1369,7 +1444,7 @@ Native shell input starts with `! ` followed by the validated actual command. Co
 
 Opencode `mini` receives pushed notifications and direct prompts as submitted user turns. Native `! ` input executes a shell command. Poll returns the full persisted message, and ACK consumes its ID.
 
-Deletion and explicit pane-input operations start their five-second budgets after invocation schema and asset guards. Resolve native command bodies before starting their input budget. Each submission has one five-second transport budget:
+Deletion and prompt/exec operations start their five-second budgets after invocation schema and asset guards. Resolve native command bodies before starting their input budget. Each submission has one five-second transport budget:
 
 1. Reserve the one-second settle delay and one second for Enter, plus the 0.5-second Escape settle for the Escape lead. When no time remains beyond the reservation, fail with `insufficient pane input budget for literal input, settle and Enter` and start no input.
 2. For the Escape lead, send Escape bounded by one second or the unreserved time, whichever is shorter, then wait the Escape settle. Any Escape failure (launch, missing pane, nonzero exit or timeout) reports no dispatch, because no text was typed.
@@ -1468,6 +1543,12 @@ lines. Enforce the last-N window client-side even when the backend returns more
 than requested, so the window shows the drawn bottom rather than blank cursor
 space. A blank tail deeper than the requested window is why capture over-fetches.
 
+
+#### Explicit key adapter surface
+
+The validated `PressKeys` value owns its private typed vector and produces canonical names plus backend-specific arguments. `AnyMultiplexer` and each concrete backend expose `validate_key_target(placement, deadline)` and `send_keys(pane_id, keys, deadline)`; the latter accepts only that validated value and performs the [single bounded writing invocation](#explicit-key-dispatch). The runtime press entry accepts the original supplied connection/deadline and retains its validated borrowed pane lock through process cleanup.
+
+The press chain uses `CommandRunner::run_until(argv, absolute_deadline)` for every process, including availability/current-context/target probes. `SystemRunner` retains that absolute bound through spawn, collection and cleanup; `DeadlineRunner` clips it by any earlier retained bound. A `TimedRunError` retains `source: RunError` and ordered `cleanup_diagnostics`, preserving existing run-error variants. Legacy relative and untimed APIs retain their independent behavior.
 
 #### `TmuxMultiplexer` method surface
 
@@ -1611,7 +1692,7 @@ Preserve binary-not-found, nonzero stderr and timeout context in the backend err
 
 The receive task is the synchronous caller-owned process. Its round-robin cursor, attempted-message set and per-message diagnostics live only in memory. Check the subject/inbox and reconcile diagnostics against each successful snapshot before another attempt. Retry one eligible ordinary member other than the subject per one-second interval, excluding the root Director. A member remains eligible while it has a pending message this invocation has not attempted. Each failed attempt records its message ID in the attempted set and retains one diagnostic keyed by that ID, emitted in ascending message-ID order. Successful snapshots remove diagnostics for ACKed messages, departed recipients or messages notified by any invocation; the owned drain also removes entries for messages it notifies. Database busy or deadline exceeded before candidate selection records the same not-notified diagnostic for the selected rotation entry and adds that ID to the attempted set. A fatal error retains every notification diagnostic with its cause. Start a receive check or attempt only before the monotonic receive deadline; after expiry return the last successful snapshot reconciled with its owned attempt's typed result. A later invocation observes subsequent external changes.
 
-Each notification or explicit input operation has one five-second budget. Wrapped input includes pane locking, bounded identity/health validation, runner submission and durable receipt settlement; explicitly unwrapped input includes Escape, literal input, settle, Enter and database waits with its documented reservations. Mandatory database finalization uses the later of the original deadline and one second after finalization begins. A receive returns by its own deadline plus one in-flight attempt and at most one second of finalization grace, retaining diagnostics on snapshot contention at expiry. Explicit prompt and native command dispatch distinguish confirmed non-launch or missing-pane failures from ambiguous started writes.
+Each notification or composer submission has one five-second budget. Wrapped composer input includes pane locking, bounded identity/health validation, runner submission and durable receipt settlement; explicitly unwrapped composer input includes Escape, literal input, settle, Enter and database waits with its documented reservations. Explicit manual key input follows its separate [absolute dispatch and cleanup contract](#explicit-key-dispatch), including invocation database validation. Mandatory database finalization uses the later of the original deadline and one second after finalization begins. A receive returns by its own deadline plus one in-flight attempt and at most one second of finalization grace, retaining diagnostics on snapshot contention at expiry. Explicit prompt and native command dispatch distinguish confirmed non-launch or missing-pane failures from ambiguous started writes.
 
 The shared OS guard uses `File::try_lock`, retried every 50 milliseconds until the writer's lock deadline (its budget minus the input reservation). Store stable, owner-created lockfiles under `<canonical-database-file>.pane-locks/`, keyed by SHA-256 of backend, NUL, session, NUL, pane ID. Acquire before reload; retain ownership through final submission and durable settlement. No pane capture precedes input. Close on every path. Keep lockfiles in place. Placement deletion locks the same keys with sorted acquisition, revalidation and one five-second deadline.
 
@@ -1790,11 +1871,17 @@ prefix_rule(
     decision = "prompt",
     justification = "cafleet member exec runs an arbitrary shell command in a member pane",
 )
+
+prefix_rule(
+    pattern = ["cafleet", "member", "press"],
+    decision = "prompt",
+    justification = "cafleet member press sends explicit native keys to a member pane",
+)
 ```
 
-Codex applies the strictest matching decision, so `member prompt` and
-`member exec` keep requiring approval while every other subcommand matches
-only the broad allow.
+Codex applies the strictest matching decision, so explicit native pane-input
+commands retain their specific approval rules. Commands without a more
+specific rule match the broad allow.
 
 #### opencode preset
 
@@ -1823,7 +1910,7 @@ Preset discovery includes the relocated directory and default home configuration
 Agent definitions with the same name can merge across those sources; inspect the
 effective configuration when customizing a preset.
 
-The preset's `shell` ruleset places the `"*": "deny"` base before its explicit allowlist. Opencode selects the last matching rule: the later `cafleet member prompt *` and `cafleet member exec *` denies win over `cafleet *`. A member's denied command receives no permission prompt, while permitted broker commands run normally. Tool permission and assignment authority remain separate; the assigned role and Director instructions determine which allowed operations a member may perform.
+The preset's `shell` ruleset places the `"*": "deny"` base before its explicit allowlist. Opencode selects the last matching rule: later denies for Director-owned explicit pane-input commands, including `cafleet member press *`, win over `cafleet *`. A member's denied command receives no permission prompt, while permitted broker commands run normally. Tool permission and assignment authority remain separate; the assigned role and Director instructions determine which allowed operations a member may perform.
 
 The posture is a deny-by-default allowlist, with no OS-level sandbox.
 Standalone un-enumerated commands fall to the `"*": "deny"` base. Apply these
@@ -2350,6 +2437,12 @@ Retain the existing body folding, inline limit and long-body `message show` poin
 Screen observation cannot create an atomic native request API: unread child output may race with a write, an unknown CLI can redraw unexpectedly, and a person can type concurrently. The runner therefore guarantees suppression for observed/candidate interactions and refuses uncertain states; tested composer profiles bound the remaining race, rather than asserting universal prompt preservation. If a profile cannot safely distinguish an empty composer and its concurrent-work boundary, that profile supports manual input only. Release evidence must include this race and preserve uncertainty instead of authorizing a second submission.
 
 Human keystrokes from the outer terminal pass to the child as native input, including the human's intentional approval, denial or cancellation. A Director may submit a request-bound allow or deny through the permission-response path below after applying its session decision policy; ordinary preview/prompt/exec input remains held during the request. Keep attributed decisions, key submission, native outcomes and actual continuation separately observable. Unknown answer capability or uncertain request identity preserves manual original-surface operation. Retain the legacy mux path only for explicitly unwrapped members and preserve its narrower existing semantics.
+
+##### Explicit manual key input {#explicit-manual-key-input}
+
+An explicitly authorized `member press` sends only its requested ordered keys through the member's outer multiplexer pane under the shared pane lock and [selected-context/deadline contract](docs/docs/spec/multiplexer-backends.md#explicit-key-dispatch). It appends no Escape or Enter. This manual path remains available during observer degradation or a programmatic composer hold and follows the [separate CLI acknowledgment/error contract](docs/docs/spec/cli-options.md#member-press).
+
+The runner counts actual positive outer-terminal reads, retains their generation before any later I/O error and accounts each new delta once on both successful and failed transport steps before subsequent automatic advancement. Observed manual input invalidates automatic authority through the retained generation; a key argument or backend acknowledgment supplies no byte count, drain proof or permission receipt. Press changes no durable input/response row. Native approval/denial/cancellation and actual continuation remain independently observed outcomes under the existing Director/user policy.
 
 #### Request-bound permission responses
 

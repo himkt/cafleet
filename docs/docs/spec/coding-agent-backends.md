@@ -139,17 +139,16 @@ The flags do not cover these cases:
 | `Skill(cafleet)`, `Skill(cafleet-design-doc)` | Both | The Director and every member | Each loads the installed skills through the Skill tool. |
 | `Read(~/.claude/skills/**)` | Both | The Director and every member | Role and reference pages of an installed skill sit outside the working directory. |
 | `Edit`, `Write` | Both | Every member that writes files | A member's file edit is denied unless an entry matches it. No entry covers a protected path. |
-| `Bash(cafleet member prompt *)`, `Bash(cafleet member exec *)` under `ask` | Both | The Director | The operator confirms each dispatch; a member's own attempt is denied. |
+| Prefixes for explicit native pane input under `ask`, including `member press` | Both | The Director | The operator confirms each dispatch; a member's own attempt is denied. |
 
 The auto mode profile carries no `Bash(cafleet ...)` allow entry: the
 classifier reviews each Director command that no rule matches, auto mode
 approves the Director's file edits inside the working directory, and members
 receive their broker commands as spawn-time allow rules.
 
-`cafleet member prompt` and `cafleet member exec` stay under `ask` in both
-profiles because the first keystrokes arbitrary text into a member's pane and
-the second runs an arbitrary command there. An ask rule outranks every allow
-rule, so the entries hold beside `Bash(cafleet *)`.
+Commands that send explicit native pane input stay under `ask` in both
+profiles, including ordered manual keys through `member press`. An ask rule
+outranks every allow rule, so these entries hold beside `Bash(cafleet *)`.
 
 `Edit` and `Write` apply to every session that reads the settings file, so
 they also pre-approve file edits in your own sessions. To confine the
@@ -232,13 +231,19 @@ prefix_rule(
     decision = "prompt",
     justification = "cafleet member exec runs an arbitrary shell command in a member pane",
 )
+
+prefix_rule(
+    pattern = ["cafleet", "member", "press"],
+    decision = "prompt",
+    justification = "cafleet member press sends explicit native keys to a member pane",
+)
 ```
 
 Codex applies the strictest decision when more than one rule matches
-(`forbidden` > `prompt` > `allow`): `cafleet member prompt` and
-`cafleet member exec` each match the broad allow and their own rule, so the
-`prompt` wins and each invocation keeps requiring approval, while every other
-subcommand matches only the broad `["cafleet"]` allow — for every fleet,
+(`forbidden` > `prompt` > `allow`): explicit native pane-input commands match
+the broad allow and their specific prompt rules, so operator approval remains
+required. Commands without a more specific rule match the broad `["cafleet"]`
+allow for every fleet,
 since every id rides past the matched prefix as a positional or trailing
 argument.
 
@@ -273,12 +278,18 @@ prefix_rule(
     decision = "prompt",
     justification = "cafleet member exec runs an arbitrary shell command in a member pane",
 )
+
+prefix_rule(
+    pattern = ["cafleet", "member", "press"],
+    decision = "prompt",
+    justification = "cafleet member press sends explicit native keys to a member pane",
+)
 ```
 
 The `allow` rules cover the broker commands members run themselves — the same
 commands a claude member receives as
 [spawn-time allow rules](#spawn-time-allow-rules); the `prompt` rules keep
-`cafleet member prompt` and `cafleet member exec` under operator approval.
+explicit native pane-input commands under operator approval.
 
 The set is sufficient for members and is not the recommendation for a
 Director session. Codex has no classifier to review what these rules leave
@@ -318,8 +329,9 @@ then an explicit allowlist translated from the operator's Claude Code
 `permissions.allow` set (`cafleet *`, its declared Git commands,
 file-inspection utilities, and the project's cargo-backed mise tasks). opencode selects the
 **last** matching rule, so this order is the safety floor — every check
-resolves to `allow` or `deny`, never `ask`. Explicit `cafleet member prompt *` and `cafleet member exec *` deny
-entries follow the `cafleet *` allow, so they win: the preset configures
+resolves to `allow` or `deny`, never `ask`. Specific deny entries for explicit
+native pane-input commands, including `cafleet member press *`, follow the
+`cafleet *` allow, so they win: the preset configures
 members, and dispatching a command into another pane is the Director's act. A member's denied command receives no permission prompt, while permitted broker commands run normally. Tool permission and assignment authority are separate: the assigned role and Director instructions determine which allowed operations a member may perform. A permission popup in an opencode pane is
 therefore a regression escape, not a runtime decision: capture the pane,
 escalate, and extend the allowlist by operator decision — do not answer the

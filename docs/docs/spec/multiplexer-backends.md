@@ -136,7 +136,7 @@ retains its successful close and deregistration result.
 
 ## Pane input lock {#pane-input-lock}
 
-Every notification, prompt and native command uses one process-shared OS file lock. Acquire the guard before placement revalidation; wrapped operations hold it through short database validation, bounded runner submission and durable receipt/stamp settlement, while explicitly unwrapped operations hold it through the Escape lead, literal text, settle, Enter and the notification stamp of the last drained message. Close the non-cloned owned handle on every path.
+Every operation that writes pane input uses one process-shared OS file lock. Acquire the guard before placement revalidation. Wrapped prompt/exec/preview submissions hold it through short database validation, bounded runner submission and durable receipt/stamp settlement; explicitly unwrapped submissions hold it through the Escape lead, literal text, settle, Enter and the notification stamp of the last drained message. Explicit key requests hold it through their outer-pane dispatch and bounded cleanup. Close the non-cloned owned handle on every path.
 
 | Property | Contract |
 |---|---|
@@ -145,7 +145,7 @@ Every notification, prompt and native command uses one process-shared OS file lo
 | File | `<key>.lock`, read/write create without truncation, owner-only creation permissions |
 | Acquisition | Exclusive `std::fs::File::try_lock`, retried every 50 milliseconds while another writer holds it; preserve unexpected errors with path/member context |
 | Identity | Keep lockfiles stable while processes may use the database; unlinking a held file would let another process lock a different inode for the same pane |
-| Contention | A pane writer waits until its five-second budget minus the 3.5-second input reservation, at most 1.5 seconds. A lock still busy then fails that writer with its lock-busy error |
+| Contention | Prompt/exec/preview submission reserves 3.5 seconds, leaving at most 1.5 seconds to wait. Explicit keys use their [dispatch reservation](#explicit-key-dispatch); a lock still busy at its wait bound fails that writer |
 
 The 3.5-second input reservation covers a 0.5-second revalidation margin, the 0.5-second Escape settle, a 0.5-second minimum literal budget, the one-second submit settle and one second for Enter. A writer that acquires the lock within its wait therefore still submits; a lock released just before the wait ends still leads to a successful submission. No database statement runs while a writer waits for the lock.
 
@@ -154,6 +154,7 @@ The 3.5-second input reservation covers a 0.5-second revalidation margin, the 0.
 | `message send` / `message wait` delivery | `message MESSAGE_ID was not notified to member MEMBER_ID: pane input remained busy; the next send to member MEMBER_ID or the next message wait retries it.` |
 | `member prompt` | Exit 1: `member ID's pane input remained busy; prompt was not dispatched.` |
 | `member exec` | Exit 1: `member ID's pane input remained busy; native command was not dispatched.` |
+| `member press` | Exit 1 with the [primary and zero-dispatch diagnostics](cli-options.md#member-press) |
 
 When a delivery's lock wait ends, one short read selects the oldest pending message this invocation has not attempted for the recipient. When none remains, the attempt reports nothing. Otherwise the lock-busy diagnostic names that message.
 
@@ -171,6 +172,7 @@ Interrupting a host turn can also end the turn's in-flight shell tool, including
 |---|---|
 | `message send`, each `message wait` attempt | From lock acquisition through the last `notified_at` stamp |
 | `member prompt`, `member exec` | From lock acquisition through Enter |
+| `member press` | Begin before acquiring the lock; retain it through the writing process and bounded cleanup, releasing the lock before restoring signals |
 | `member create` | From the pane spawn through the registry commit or its compensation |
 | `member delete`, `fleet delete` | From lock acquisition through deregistration and layout cleanup |
 
@@ -182,8 +184,38 @@ Every span is bounded by its existing deadline, so a deferred signal waits at mo
 |---|---|---|
 | `message send` / `message wait` between first keystroke and stamp | `notified_at` stays NULL; the line may or may not have reached the pane | The next send or `message wait` retries it; a duplicate line is possible |
 | `member prompt` / `member exec` after typing began | Partial or complete input | `member capture`; re-dispatch only after inspecting the pane |
+| `member press` after its writing process starts | Any prefix, including empty or complete, may have been handled | Inspect the pane before an explicitly authorized new action |
 | `member create` | A pane without a registry row, or a row whose placement stays pending | `member list` and `fleet capture`; `member delete` the row, and close an unregistered pane with the multiplexer's own kill command |
 | `member delete` / `fleet delete` | A closed pane whose row remains, or the reverse | `member list`; rerun the delete |
+
+## Explicit key dispatch {#explicit-key-dispatch}
+
+`member press` maps the complete validated ordered vector from the [CLI contract](cli-options.md#member-press) to one writing invocation: `tmux send-keys -t PANE KEY...` or `herdr pane send-keys PANE KEY...`. The typed registry owns the common grammar and mappings below. Single printable characters preserve case; named keys and modifiers match case-insensitively, and control letters normalize to lowercase.
+
+| Common key | tmux argument | herdr argument |
+|---|---|---|
+| Single printable ASCII character, U+0021–U+007E | `0xXX` for its ASCII codepoint | Same character, with `+` as `plus`, `-` as `minus`, and `;` as `semicolon` |
+| `Space` | `Space` | `space` |
+| `Escape` | `Escape` | `esc` |
+| `Enter` | `Enter` | `enter` |
+| `Tab` | `Tab` | `tab` |
+| `Backspace` | `BSpace` | `backspace` |
+| `Up`, `Down`, `Left`, `Right` | Canonical capitalized name | Lowercase name |
+| `F1` through `F12` | `F1` through `F12` | `f1` through `f12` |
+| `Ctrl+a` through `Ctrl+z` | `C-a` through `C-z` | `ctrl+a` through `ctrl+z` |
+| `Shift+Tab` | `BTab` | `shift+tab` |
+
+Accept only these productions, with the CLI's count/UTF-8 bounds and complete-vector validation. Tmux hexadecimal character arguments keep punctuation out of its command parser. The dedicated key adapter sends only requested keys, using shell-free argv and no prompt phase or settling sleep.
+
+Acquire the same canonical pane-input lock used by deletion and validate its retained descriptor/path binding. Compare the configured/environment adapter with the recorded backend. Within that selected live context, require the current session/workspace to match the placement, then verify its complete target tuple: tmux reads `#{pane_id}|#{window_id}|#{session_name}` for the target and splits only the first two separators; herdr reads its pane-list JSON and requires exactly one matching workspace/tab/pane. Re-read the active member after metadata, compare its fixed fleet/kind/full placement and validate the held lock immediately before writing. A missing, ambiguous, malformed or changed target fails before the writing invocation.
+
+The placement records no historical socket/server-generation identity. Context validation establishes its complete tuple within the selected current server; it provides no cross-server fallback or proof of historical server/build equivalence. Keep that same adapter/environment across every probe and the write.
+
+Capture one inherited-or-new five-second absolute deadline before invocation database validation. The full availability/current-context/target-metadata/write chain uses absolute `run_until` execution with that supplied bound; relative or untimed helper execution supplies no press path. Retain one second for metadata/dispatch/cleanup when computing the lock-wait deadline, rather than the prompt reservation. Every later check uses the remaining original budget, and insufficient launch/cleanup reserve starts no new writing process.
+
+Within the original deadline, reserve 250 milliseconds for owned process cleanup and end collection/launch at that earlier bound. On an actual error, close read pipes, kill only the still-owned unreaped direct child and poll `try_wait` with sleeps at most 2 milliseconds while the original cleanup deadline has time remaining, checking that deadline after every interruption. Explicit cleanup and unwind fallback use the same original deadline and perform no blocking wait. An explicit cleanup attempt prevents a second Drop retry cycle; unconfirmed termination/reap remains an explicit diagnostic: `cleanup unconfirmed for child PID: original command deadline expired before reap`. Preserve actual kill/status errors and the primary process error; unwind emits cleanup diagnostics to stderr. Existing relative/untimed execution retains its separate behavior. Synchronous calls have no hard scheduler/syscall return-time guarantee.
+
+Both writing adapters acknowledge only successful process completion with empty/whitespace stdout. Unexpected non-whitespace stdout on success is unreadable acknowledgment with uncertain effects; herdr metadata retains its command-specific JSON parsing. Binary-not-found/not-started means zero writing invocations; every started failure, including pane-gone stderr, timeout or unreadable output, retains possible prefix delivery and receives no automatic retry. Backend keyboard modes or key interception can affect actual PTY bytes even after acknowledgment. Use the [CLI result/error contract](cli-options.md#member-press) and observe actual native effects separately.
 
 ## Prompt dispatch (`send_prompt`) {#prompt-dispatch}
 
@@ -208,7 +240,7 @@ Native shell input starts with `! ` followed by the validated actual command. Co
 
 Opencode `mini` receives pushed notifications and direct prompts as submitted user turns. Native `! ` input executes a shell command. Poll returns the full persisted message, and ACK consumes its ID.
 
-Deletion and explicit pane-input operations start their five-second budgets after invocation schema and asset guards. Resolve native command bodies before starting their input budget. Each submission has one five-second transport budget:
+Deletion and prompt/exec operations start their five-second budgets after invocation schema and asset guards. Resolve native command bodies before starting their input budget. Each submission has one five-second transport budget:
 
 1. Reserve the one-second settle delay and one second for Enter, plus the 0.5-second Escape settle for the Escape lead. When no time remains beyond the reservation, fail with `insufficient pane input budget for literal input, settle and Enter` and start no input.
 2. For the Escape lead, send Escape bounded by one second or the unreserved time, whichever is shorter, then wait the Escape settle. Any Escape failure (launch, missing pane, nonzero exit or timeout) reports no dispatch, because no text was typed.

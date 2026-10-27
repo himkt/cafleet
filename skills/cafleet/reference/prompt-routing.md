@@ -8,8 +8,9 @@ A member runs each command its host permits. A required unavailable command rout
 |---|---|
 | [member exec](../roles/director.md#member-exec) | Submit the actual one-line native shell command and return dispatch metadata |
 | [member prompt](../roles/director.md#member-prompt) | Submit explicitly authorized composer input or post-command continuation |
+| [member press](../roles/director.md#member-press) | Request explicitly authorized ordered manual keys |
 
-Every writer shares the bounded pane-input lock. Wrapped input validates the pinned runner and durable receipt, preserves candidate/open interactions and requires a tested empty composer; it submits literal native input without Escape. Explicitly unwrapped input retains Escape-first multiplexer submission. Successful submission establishes no command exit status.
+Every writer shares the bounded pane-input lock. Wrapped prompt/exec input validates the pinned runner and durable receipt, preserves candidate/open interactions and requires a tested empty composer; it submits literal native input without Escape. Explicitly unwrapped prompt/exec input retains Escape-first multiplexer submission. Manual `member press` requests only its explicit keys through the outer pane, including wrapped members, with no implicit Escape or Enter. Its success establishes backend acknowledgment, while actual native effects and continuation require separate observation.
 
 ## Member-side: reconsider, then route
 

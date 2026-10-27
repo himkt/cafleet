@@ -65,9 +65,7 @@ Substitute the literal integer ids for every angle-bracket token (the placeholde
 
 ## Director-only primitives
 
-You own these; ordinary members do NOT call them: `member create`, `member
-delete`, `member list`, `member capture`, `member prompt`, `member exec`
-(plus the backend-specific decision-relay primitive your overlay names). The permission split between the pane primitives is canonical in
+You own member lifecycle, roster listing, pane capture and explicit pane-input commands, plus the backend-specific decision-relay primitive your overlay names. Ordinary members retain their broker reception and evidence-routing authority. The permission split between the pane primitives is canonical in
 [`reference/prompt-routing.md`](../reference/prompt-routing.md) § *The
 Director's pane primitives*. Full flags and behavior live in the command
 sections below; the routing exchange built on `member exec` is in
@@ -370,6 +368,12 @@ Authorize the required one-line command and call `cafleet member exec <member-id
 ## Member Prompt
 
 Use `cafleet member prompt <member-id> TEXT` for explicitly authorized composer input. Wrapped input requires a tested empty composer and reaches the child without Escape; unsafe input is rejected while the original native interaction stays intact. Explicitly unwrapped input retains Escape-first behavior, and both paths reject the Director’s own pane. Success means submission only.
+
+## Member Press
+
+Use `cafleet member press <member-id> KEY...` for explicitly authorized ordered manual keys. Pass only the intended keys and use the ordinary `--` separator for literal punctuation; append neither Escape nor Enter. The [CLI contract](../reference/runtime/spec/cli-options.md#member-press) owns grammar, limits, exact output and error forms. The command holds the revalidated shared pane lock and sends one bounded backend request to the recorded outer pane, including wrapped members.
+
+Success establishes backend acknowledgment only. Inspect actual native effects and continuation independently; a started failure keeps delivery uncertain and requires a new explicit decision after inspection. Apply the existing host and request-specific user/Director decision policy before answering a native request. Use `permission respond` for the separately bound decision interface; selecting manual keys bypasses no host policy and supplies no permission to answer.
 
 ## Cross-references
 

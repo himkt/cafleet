@@ -63,7 +63,7 @@ Used only when your backend's section omits a token or your backend is unknown. 
 
 Every `cafleet` invocation that touches members or messages names its **subject** as a positional integer id placed immediately after the subcommand name; ids that describe a relationship stay as flags:
 
-- Positional `MEMBER_ID` — **the member in question**: the recipient on `message poll` / `wait` / `listen`, and the target on `member delete` / `show` / `prompt` / `exec` / `capture`. The fleet is derived from the member row.
+- Positional `MEMBER_ID` — **the member in question**: the recipient on `message poll` / `wait` / `listen`, and the target on member commands whose subject is a recorded member. The fleet is derived from the member row.
 - Positional `MESSAGE_ID` — the message on `message ack` / `message show`; recipient and fleet are derived from the message row.
 - Positional `FLEET_ID` — the fleet on `fleet show` / `fleet delete` / `member list` / `fleet capture`.
 - `--from-member-id <int>` / `--to-member-id <int>` — the two parties of a two-party command: the **sender** and the **recipient** on `message send`. The fleet is derived from the sender row.
@@ -164,6 +164,7 @@ Use the runtime owner for exact flags, outputs and errors. Ordinary members reta
 | Read-only roster pane snapshot | [Fleet capture](reference/runtime/spec/cli-options.md#fleet-capture) |
 | Runtime events, mode-dependent permission responses, receipts and recovery | [Member runtime procedure](reference/member-runtime.md) and [runtime contract](reference/runtime/spec/member-runtime.md) |
 | Explicit native shell input | [Member exec](reference/runtime/spec/cli-options.md#member-exec), [routing](reference/prompt-routing.md) |
+| Explicit ordered manual keys | [Member press](reference/runtime/spec/cli-options.md#member-press), [Director authority](roles/director.md#member-press) |
 | Pane input, exclusion and previews | [Multiplexer contracts](reference/runtime/spec/multiplexer-backends.md) |
 | Host continuation, native waiting and evidence boundaries | Selected backend's bound notes in [coding-agents.md](reference/coding-agents.md) |
 | Setup, configuration and diagnosis | [CLI configuration](reference/runtime/spec/cli-options.md#cafleet-setup) |

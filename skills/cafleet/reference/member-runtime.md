@@ -19,11 +19,17 @@ Native and managed policy remain authoritative. A response selects a tested sing
 
 Wrapped preview, prompt and native-exec input uses the pinned runner. Candidate/open interactions, drafts, work, unknown profiles and suspect/degraded observers hold previews and reject explicit composer input before bytes. A verified empty composer plus the exact-version executable submission plan permits literal text and its measured native submit key without Escape. Native exec requires its independent tested shell plan. Existing unwrapped members retain their narrower legacy behavior.
 
-Permission response is a separate input kind with an independently tested exact-version answer profile. The runner validates the current visible permission request and random token, resolves available manual input/output and atomically reserves its audit/episode claim/receipt before sending native answer keys. Human input or a request/ownership/visibility change invalidates the token. The CLI accepts semantic decisions rather than arbitrary keys.
+Permission response is a separate input kind with an independently tested exact-version answer profile. The runner validates the current visible permission request and random token, resolves available manual input/output and atomically reserves its audit/episode claim/receipt before sending native answer keys. Human input or a request/ownership/visibility change invalidates the token. The permission-response CLI accepts semantic decisions rather than arbitrary keys.
 
 Preserve known `input_id` from stdout or uncertainty errors and inspect `cafleet input show INPUT_ID --json`. Durable operation keys and episode claims prevent a possibly submitted answer from being repeated through another invocation/key. Only the Director records an evidence-based `input reconcile` disposition after synchronizing with the live writer or establishing exclusive recovery. Settlement sends zero bytes; a claim is released only with synchronized zero-byte/no-writer proof, independently of its disposition label. Unreachable-owner reconciliation retains the original pane/run locks and positive termination evidence while preserving lifecycle history under the [receipt ownership contract](runtime/spec/member-runtime.md#input-arbitration-and-the-original-native-answer); missing proof keeps uncertainty.
 
 A returned member-tool denial still includes the exact attempted command, absolute cwd, necessary environment overrides and actual refusal. A screen event supplements that route. A separately authorized native command is a new action rather than proof that the pending request was answered.
+
+## Explicit manual keys
+
+The Director may use explicitly authorized `cafleet member press MEMBER_ID KEY...` to send only the requested ordered keys through the real outer pane, including a wrapped member held for programmatic input. The [press CLI contract](runtime/spec/cli-options.md#member-press) owns its grammar, output and error forms. Keep the current request-specific decision and host authorization policy; this command supplies neither permission to answer nor a request-bound receipt.
+
+Backend acknowledgment is separate from actual PTY input and native outcomes. The runner accounts bytes actually read, including reads before a later transport error, and invalidates automatic authority from that real manual generation. Inspect the original request/result and continuation afterward; a started failure remains uncertain and receives no automatic retry.
 
 ## Inspect and recover
 
