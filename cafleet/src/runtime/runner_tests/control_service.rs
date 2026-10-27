@@ -34,6 +34,12 @@ fn runner_review_service_child() {
     let Some(descriptor) = std::env::var_os(DESCRIPTOR_ENV) else {
         return;
     };
+    if let Some(configured) = std::env::var_os(SERVICES_ENV) {
+        let directory = Path::new(&configured).parent().unwrap();
+        if directory.join("service-input-native.json").exists() {
+            input_service::install_panic_record(directory, "runner");
+        }
+    }
     let settings = Settings {
         database_url: std::env::var("CAFLEET_DATABASE_URL").unwrap(),
         max_text_len: 200,

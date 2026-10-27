@@ -4,6 +4,41 @@ use nix::sys::termios::{LocalFlags, SetArg, tcgetattr, tcsetattr};
 use std::fs::OpenOptions;
 use std::os::unix::fs::OpenOptionsExt;
 
+fn receipt_inputs(
+    conn: &rusqlite::Connection,
+    run_id: i64,
+    expires: u64,
+) -> rusqlite::Result<Vec<Value>> {
+    loop {
+        assert!(
+            Clock.sample().unwrap().monotonic_ns < expires,
+            "original owned native lifetime"
+        );
+        let result = (|| {
+            let mut statement = conn.prepare("SELECT input_id,state FROM member_input_operations WHERE run_id=?1 ORDER BY input_id")?;
+            let rows = statement.query_map([run_id], |row| {
+                Ok(json!({"input_id":row.get::<_,i64>(0)?,"state":row.get::<_,String>(1)?}))
+            })?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+        })();
+        match result {
+            Err(cause)
+                if matches!(
+                    cause.sqlite_error_code(),
+                    Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked)
+                ) =>
+            {
+                let now = Clock.sample().unwrap().monotonic_ns;
+                assert!(now < expires, "original owned native lifetime");
+                std::thread::sleep(
+                    Duration::from_millis(2).min(Duration::from_nanos(expires - now)),
+                );
+            }
+            result => return result,
+        }
+    }
+}
+
 pub(super) fn run(path: &Path) {
     let config: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     let directory = path.parent().unwrap();
@@ -57,14 +92,7 @@ pub(super) fn run(path: &Path) {
             if line == "finish" {
                 return;
             }
-            let mut statement = conn.prepare("SELECT input_id,state FROM member_input_operations WHERE run_id=?1 ORDER BY input_id").unwrap();
-            let inputs = statement
-                .query_map([run_id], |row| {
-                    Ok(json!({"input_id":row.get::<_,i64>(0)?,"state":row.get::<_,String>(1)?}))
-                })
-                .unwrap()
-                .collect::<std::result::Result<Vec<_>, _>>()
-                .unwrap();
+            let inputs = receipt_inputs(&conn, run_id, expires).unwrap();
             journal
                 .write_all(&serde_json::to_vec(&json!({"line":line,"inputs":inputs})).unwrap())
                 .unwrap();

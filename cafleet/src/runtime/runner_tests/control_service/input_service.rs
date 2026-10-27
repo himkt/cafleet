@@ -5,10 +5,87 @@ use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
 mod native;
 pub(super) fn native(path: &Path) {
+    install_panic_record(path.parent().unwrap(), "native");
     native::run(path);
 }
 pub(super) const NATIVE_ENV: &str = "CAFLEET_REVIEW_SERVICE_INPUT_NATIVE";
 const SCREEN: &[u8] = b"\x1b[2J\x1b[23;1HSynthetic state\r\nState end";
+const PANIC_RECORD_LIMIT: usize = 16 * 1024;
+const PANIC_DIRECTORY: &str = "service-input-panics";
+
+pub(super) fn install_panic_record(directory: &Path, role: &'static str) {
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+    assert!(matches!(role, "native" | "runner"));
+    let directory = directory.join(PANIC_DIRECTORY);
+    assert_eq!(
+        std::fs::metadata(&directory).unwrap().permissions().mode() & 0o777,
+        0o700,
+    );
+    let pid = std::process::id();
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(directory.join(format!("service-input-panic-{role}-{pid}.txt")))
+        .unwrap();
+    let record = std::sync::Mutex::new(Some(file));
+    let prior = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        match record.lock() {
+            Ok(mut slot) => {
+                if let Some(mut file) = slot.take() {
+                    let message = format!(
+                        "role={role}; pid={pid}; location={:?}; panic={info}\n",
+                        info.location(),
+                    );
+                    let bytes = &message.as_bytes()[..message.len().min(PANIC_RECORD_LIMIT)];
+                    if let Err(cause) = file.write_all(bytes).and_then(|()| file.flush()) {
+                        eprintln!("owned {role} panic record failed: {cause}");
+                    }
+                }
+            }
+            Err(cause) => eprintln!("owned {role} panic record lock failed: {cause}"),
+        }
+        prior(info);
+    }));
+}
+
+fn panic_records(directory: &Path) -> std::io::Result<Vec<(String, String)>> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut records = Vec::new();
+    for entry in std::fs::read_dir(directory.join(PANIC_DIRECTORY))? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.starts_with("service-input-panic-") {
+            continue;
+        }
+        let metadata = std::fs::symlink_metadata(entry.path())?;
+        if records.len() >= 2
+            || !metadata.is_file()
+            || metadata.permissions().mode() & 0o777 != 0o600
+        {
+            return Err(std::io::Error::new(
+                ErrorKind::InvalidData,
+                "owned panic records require two private regular files at most",
+            ));
+        }
+        let mut bytes = Vec::new();
+        File::open(entry.path())?
+            .take(u64::try_from(PANIC_RECORD_LIMIT + 1).unwrap())
+            .read_to_end(&mut bytes)?;
+        if bytes.len() > PANIC_RECORD_LIMIT {
+            return Err(std::io::Error::new(
+                ErrorKind::InvalidData,
+                "owned panic record exceeds its original limit",
+            ));
+        }
+        records.push((name, String::from_utf8_lossy(&bytes).into_owned()));
+    }
+    records.sort();
+    Ok(records)
+}
 
 struct Clock;
 impl InputDeadlineClock for Clock {
@@ -46,6 +123,12 @@ fn pause(until: Instant) {
 }
 
 fn configure(fixture: &mut Fixture, spec: &mut SpawnSpec, until: Instant) {
+    use std::os::unix::fs::DirBuilderExt;
+
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(fixture._dir.path().join(PANIC_DIRECTORY))
+        .unwrap();
     let mut catalog: Value =
         serde_json::from_str(include_str!("../fixtures/synthetic-profile.json")).unwrap();
     let mut executable = catalog["fixtures"][0].clone();
@@ -209,9 +292,31 @@ fn records(fixture: &ServiceFixture) -> Vec<Value> {
         .map(|line| serde_json::from_slice(line).unwrap())
         .collect()
 }
+fn failure_diagnostic(fixture: &mut ServiceFixture, stage: &str) -> String {
+    let flags = nix::fcntl::OFlag::from_bits_retain(
+        nix::fcntl::fcntl(&fixture.master, nix::fcntl::FcntlArg::F_GETFL).unwrap(),
+    );
+    assert!(flags.contains(nix::fcntl::OFlag::O_NONBLOCK));
+    let mut bytes = Vec::new();
+    let outer_read = (&mut fixture.master)
+        .take(64 * 1024)
+        .read_to_end(&mut bytes);
+    let prior = String::from_utf8_lossy(&fixture.output[..fixture.output.len().min(64 * 1024)])
+        .into_owned();
+    let connection = fixture.connection_diagnostic(stage);
+    let panics = panic_records(fixture.fixture._dir.path());
+    format!(
+        "{connection}; outer_read={outer_read:?}; outer_bytes={:?}; previous_outer_bytes={prior:?}; panic_records={panics:?}",
+        String::from_utf8_lossy(&bytes),
+    )
+}
 fn wait_record(fixture: &mut ServiceFixture, line: &str, until: Instant) {
     while !records(fixture).iter().any(|record| record["line"] == line) {
-        assert!(fixture.child.try_wait().unwrap().is_none());
+        assert!(
+            fixture.child.try_wait().unwrap().is_none(),
+            "runner remains live while awaiting its native journal: {}",
+            failure_diagnostic(fixture, "native journal wait"),
+        );
         pause(until);
     }
 }
@@ -258,7 +363,9 @@ fn with_service(body: impl FnOnce(&mut ServiceFixture, Instant)) {
             status
                 .expect("owned service reaped under original deadline")
                 .code(),
-            Some(0)
+            Some(0),
+            "owned service cleanup retains its original exit expectation: {}",
+            failure_diagnostic(&mut fixture, "service cleanup"),
         );
         let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
         assert_eq!(run.status, RunStatus::Exited);
