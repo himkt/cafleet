@@ -289,6 +289,171 @@ impl InputCoordinator {
         self.lock.validate(conn, &current.owner())
     }
 
+    fn validate_receipt_owner(&self, conn: &Connection, run: &RunRecord) -> Result<()> {
+        ensure(
+            stable_run_identity(run) == stable_run_identity(&self.run),
+            "receipt caller run identity changed",
+        )?;
+        let current = storage::validate_owner(conn, &self.run.owner())?;
+        ensure(
+            stable_run_identity(&current) == stable_run_identity(&self.run),
+            "receipt current run identity changed",
+        )?;
+        self.lock.validate(conn, &current.owner())
+    }
+
+    fn validate_receipt_cache(&self, input: &storage::InputOperation) -> Result<()> {
+        ensure(
+            input.run_id == self.run.run_id && input.kind != storage::InputKind::PermissionResponse,
+            "ordinary receipt for this run required",
+        )?;
+        if let Some(retained) = self.operations.get(&input.input_id) {
+            ensure(
+                retained.operation.run_id == input.run_id
+                    && retained.operation.operation_key == input.operation_key
+                    && retained.operation.kind == input.kind
+                    && retained.operation.payload_digest == input.payload_digest
+                    && retained.operation.message_id == input.message_id,
+                "receipt cache identity changed",
+            )?;
+        }
+        Ok(())
+    }
+
+    fn receipt_projection(&self, operation: &storage::InputOperation) -> Result<SubmissionResult> {
+        self.validate_receipt_cache(operation)?;
+        let mut result = self.result(operation);
+        if self.operations.contains_key(&operation.input_id) {
+            let actual = self.retained_checkpoint(operation.input_id)?;
+            result.stage = actual.stage;
+            result.output_seq = Some(actual.output_seq);
+        } else if operation.state == storage::InputState::Settled
+            && operation.disposition != Some(storage::InputDisposition::Submitted)
+        {
+            result.stage = SubmissionStage::Unknown;
+        }
+        Ok(result)
+    }
+
+    fn receipt_received(
+        &mut self,
+        conn: &mut Connection,
+        run: &RunRecord,
+        action: &super::ReceiptAction,
+        deadline: Instant,
+    ) -> Result<InputControlReply> {
+        use super::{ReceiptAction, ReceiptReply};
+        if let ReceiptAction::Retire { input_id } = action {
+            return self.retire_received(conn, run, *input_id, deadline);
+        }
+        let deadline = inherited_database_deadline(conn)
+            .map_or(deadline, |inherited| deadline.min(inherited.instant()));
+        check_deadline(Instant::now(), deadline)?;
+        let mut input_id = None;
+        let mut operation_key = None;
+        let result = (|| match action {
+            ReceiptAction::Query { operation_key: key } => {
+                operation_key = Some(key.clone());
+                validate_operation_key(key)?;
+                with_database_deadline(conn, deadline, |conn| {
+                    let tx = conn.transaction().map_err(db_err)?;
+                    self.validate_receipt_owner(&tx, run)?;
+                    let reply = if let Some(input) = storage::find_input(&tx, self.run.run_id, key)?
+                    {
+                        input_id = Some(input.input_id);
+                        InputControlReply::Receipt(ReceiptReply::Present {
+                            input_id: input.input_id,
+                            submission: self.receipt_projection(&input)?,
+                        })
+                    } else {
+                        ensure(
+                            !self
+                                .operations
+                                .values()
+                                .any(|retained| retained.operation.operation_key == *key),
+                            "retained input has no durable reservation",
+                        )?;
+                        InputControlReply::Receipt(ReceiptReply::Missing)
+                    };
+                    check_deadline(Instant::now(), deadline)?;
+                    tx.commit().map_err(db_err)?;
+                    Ok(reply)
+                })
+            }
+            ReceiptAction::Reconcile {
+                input_id: id,
+                expected,
+                disposition,
+                evidence_ref,
+            } => {
+                input_id = Some(*id);
+                ensure(*id > 0, "positive reconciliation input ID required")?;
+                ensure(
+                    !evidence_ref.trim().is_empty(),
+                    "nonempty reconciliation evidence required",
+                )?;
+                let settled = with_database_deadline(conn, deadline, |conn| {
+                    let tx = conn
+                        .transaction_with_behavior(TransactionBehavior::Immediate)
+                        .map_err(db_err)?;
+                    self.validate_receipt_owner(&tx, run)?;
+                    let input = storage::get_input(&tx, *id)?;
+                    operation_key = Some(input.operation_key.clone());
+                    self.validate_receipt_cache(&input)?;
+                    ensure(
+                        self.pending.is_none(),
+                        "reconciliation requires no active input writer",
+                    )?;
+                    if let Some(retained) = self.operations.get(id) {
+                        ensure(
+                            !retained.leased && !retained.attempt_available,
+                            "reconciliation requires an unleased consumed attempt",
+                        )?;
+                    }
+                    ensure(input.state == *expected, "input state changed")?;
+                    let settled = if input.state == storage::InputState::Settled {
+                        ensure(
+                            input.disposition == Some(*disposition),
+                            "settled input disposition changed",
+                        )?;
+                        input
+                    } else {
+                        storage::settle_input_in_transaction(
+                            &tx,
+                            &self.run.owner(),
+                            *id,
+                            *expected,
+                            *disposition,
+                            evidence_ref,
+                        )?
+                    };
+                    check_deadline(Instant::now(), deadline)?;
+                    tx.commit().map_err(db_err)?;
+                    Ok(settled)
+                })?;
+                if let Some(retained) = self.operations.get_mut(id) {
+                    retained.operation = settled;
+                }
+                check_deadline(Instant::now(), deadline)?;
+                Ok(InputControlReply::Receipt(ReceiptReply::Settled {
+                    input_id: *id,
+                }))
+            }
+            ReceiptAction::Retire { .. } => {
+                unreachable!("retirement handled before receipt transaction")
+            }
+        })();
+        result.map_err(|source| {
+            CafleetError::from(InputFailure {
+                source,
+                run_id: Some(self.run.run_id),
+                interaction_id: None,
+                input_id,
+                operation_key,
+            })
+        })
+    }
+
     fn retire_received(
         &mut self,
         conn: &mut Connection,
@@ -318,10 +483,9 @@ impl InputCoordinator {
                 operation_key = Some(input.operation_key.clone());
                 ensure(
                     input.run_id == self.run.run_id
-                        && input.kind == storage::InputKind::Preview
-                        && input.state == storage::InputState::Settled
-                        && input.disposition == Some(storage::InputDisposition::Submitted),
-                    "retirement requires this run's settled/submitted Preview",
+                        && input.kind != storage::InputKind::PermissionResponse
+                        && input.state == storage::InputState::Settled,
+                    "retirement requires this run's settled ordinary input",
                 )?;
                 ensure(
                     self.pending.is_none(),
@@ -474,14 +638,18 @@ impl InputCoordinator {
                 request.identity == expected && run.run_id == self.run.run_id,
                 "input request fixed identity mismatch",
             )?;
-            if let InputControlOperation::Receipt(super::ReceiptAction::Retire { input_id }) =
-                &request.operation
-            {
-                known_input_id = Some(*input_id);
+            if let InputControlOperation::Receipt(action) = &request.operation {
+                match action {
+                    super::ReceiptAction::Query { operation_key } => {
+                        known_key = Some(operation_key.clone())
+                    }
+                    super::ReceiptAction::Retire { input_id }
+                    | super::ReceiptAction::Reconcile { input_id, .. } => {
+                        known_input_id = Some(*input_id)
+                    }
+                }
                 request.identity.validate(&self.run)?;
-                return self
-                    .retire_received(conn, run, *input_id, deadline)
-                    .map(Some);
+                return self.receipt_received(conn, run, action, deadline).map(Some);
             }
             let (input, composer_operation) = match request.operation {
                 InputControlOperation::SubmitPrompt(input) => (input, ComposerOperation::Prompt),

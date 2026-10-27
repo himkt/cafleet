@@ -575,6 +575,201 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
     })();
     result.map_err(|source| context.failure(source))
 }
+fn validate_receipt_target(
+    conn: &Connection,
+    settings: &Settings,
+    expected: &RunRecord,
+    placement: &Placement,
+) -> Result<()> {
+    validate_receipt_database(conn, settings)?;
+    let current = storage::validate_owner(conn, &expected.owner())?;
+    ensure(
+        stable_run_identity(&current) == stable_run_identity(expected),
+        "receipt run identity changed",
+    )?;
+    let member = crate::broker::get_member(conn, expected.member_id, expected.fleet_id)?
+        .ok_or_else(|| error("receipt member is absent"))?;
+    ensure(
+        member.kind == crate::broker::records::MemberKind::Member
+            && member.placement.as_ref() == Some(placement),
+        "receipt member placement changed",
+    )?;
+    validate_run_paths(conn, &current).map(|_| ())
+}
+
+fn validate_receipt_database(conn: &Connection, settings: &Settings) -> Result<()> {
+    let selected_path = conn
+        .path()
+        .ok_or_else(|| error("file-backed receipt database required"))?;
+    ensure(
+        std::fs::canonicalize(selected_path).map_err(io_error)?
+            == std::fs::canonicalize(crate::db::database_path(&settings.database_url)?)
+                .map_err(io_error)?,
+        "receipt connection and configured database differ",
+    )
+}
+
+pub(crate) fn reconcile_input(
+    conn: &mut Connection,
+    settings: &Settings,
+    input_id: i64,
+    disposition: InputDisposition,
+    evidence_ref: &str,
+    deadline: Deadline,
+) -> std::result::Result<InputOperation, InputFailure> {
+    reconcile_ordinary_with_host(
+        conn,
+        settings,
+        input_id,
+        disposition,
+        evidence_ref,
+        deadline,
+        &mut NativeInputHost,
+    )
+}
+
+fn reconcile_ordinary_with_host(
+    conn: &mut Connection,
+    settings: &Settings,
+    input_id: i64,
+    disposition: InputDisposition,
+    evidence_ref: &str,
+    deadline: Deadline,
+    host: &mut impl InputCommandHost,
+) -> std::result::Result<InputOperation, InputFailure> {
+    let mut context = InputContext {
+        run_id: None,
+        interaction_id: None,
+        input_id: (input_id > 0).then_some(input_id),
+        operation_key: None,
+    };
+    let result = (|| {
+        let deadline = submission_deadline(conn, deadline)?;
+        usage(input_id > 0, "positive reconciliation input ID required")?;
+        usage(
+            !evidence_ref.trim().is_empty(),
+            "nonempty reconciliation evidence required",
+        )?;
+        let (original, run, placement) = with_database_budget(conn, deadline, |conn| {
+            let tx = conn.transaction().map_err(db_err)?;
+            validate_receipt_database(&tx, settings)?;
+            let input = storage::get_input(&tx, input_id)?;
+            context.run_id = Some(input.run_id);
+            context.operation_key = Some(input.operation_key.clone());
+            ensure(
+                input.kind != InputKind::PermissionResponse,
+                "ordinary receipt reconciliation required",
+            )?;
+            let recorded_run = storage::get_run(&tx, input.run_id)?;
+            let run = storage::validate_owner(&tx, &recorded_run.owner())?;
+            let placement = if input.state == InputState::Settled {
+                ensure(
+                    input.disposition == Some(disposition),
+                    "settled input disposition changed",
+                )?;
+                None
+            } else {
+                Some(
+                    crate::broker::get_member(&tx, run.member_id, run.fleet_id)?
+                        .and_then(|member| member.placement)
+                        .ok_or_else(|| error("receipt requires its recorded member placement"))?,
+                )
+            };
+            deadline.remaining()?;
+            tx.commit().map_err(db_err)?;
+            Ok((input, run, placement))
+        })?;
+        if original.state == InputState::Settled {
+            return Ok(original);
+        }
+        let placement = placement.expect("nonsettled receipt has its recorded placement");
+        let expiration = InputExpiration::capture(deadline.instant(), &mut RealInputDeadlineClock)?;
+        let held = host
+            .lock(settings, &run, &placement, deadline)
+            .map_err(CafleetError::from)?
+            .ok_or_else(|| error("receipt pane input remained busy"))?;
+        let read_target = |conn: &mut Connection| {
+            with_database_budget(conn, deadline, |conn| {
+                let tx = conn.transaction().map_err(db_err)?;
+                held.validate_binding(&settings.database_url, &placement)?;
+                validate_receipt_target(&tx, settings, &run, &placement)?;
+                let input = storage::get_input(&tx, input_id)?;
+                ensure(
+                    input.run_id == original.run_id
+                        && input.operation_key == original.operation_key
+                        && input.kind == original.kind
+                        && input.payload_digest == original.payload_digest
+                        && input.message_id == original.message_id,
+                    "receipt immutable input identity changed",
+                )?;
+                deadline.remaining()?;
+                tx.commit().map_err(db_err)?;
+                Ok(input)
+            })
+        };
+        read_target(conn)?;
+        let health = host
+            .health(&run, deadline.instant())
+            .map_err(CafleetError::from)?;
+        health.validate(&run)?;
+        deadline.remaining()?;
+        read_target(conn)?;
+        let request = |action| InputControlRequest {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            identity: ControlIdentity::from_run(&run),
+            expires_at_mono_ns: expiration.monotonic_ns(),
+            operation: InputControlOperation::Receipt(action),
+        };
+        let query = request(ReceiptAction::Query {
+            operation_key: original.operation_key.clone(),
+        });
+        let reply = host
+            .exchange(&run, &query, deadline.instant())
+            .map_err(CafleetError::from)?;
+        ensure(
+            matches!(reply, InputControlReply::Receipt(ReceiptReply::Present { input_id: actual, submission })
+                if actual == input_id && submission.input_id == Some(input_id)),
+            "receipt query has no matching durable input identity",
+        )?;
+        deadline.remaining()?;
+        read_target(conn)?;
+        let reconcile = request(ReceiptAction::Reconcile {
+            input_id,
+            expected: original.state,
+            disposition,
+            evidence_ref: evidence_ref.into(),
+        });
+        let reply = host
+            .exchange(&run, &reconcile, deadline.instant())
+            .map_err(CafleetError::from)?;
+        ensure(
+            matches!(reply, InputControlReply::Receipt(ReceiptReply::Settled { input_id: actual }) if actual == input_id),
+            "receipt settlement acknowledgment identity mismatch",
+        )?;
+        let settled = read_target(conn)?;
+        ensure(
+            settled.state == InputState::Settled
+                && settled.disposition == Some(disposition)
+                && settled.evidence_ref.as_deref() == Some(evidence_ref),
+            "receipt settlement acknowledgment has no matching durable settlement",
+        )?;
+        deadline.remaining()?;
+        let retirement = request(ReceiptAction::Retire { input_id });
+        let reply = host
+            .exchange(&run, &retirement, deadline.instant())
+            .map_err(CafleetError::from)?;
+        ensure(
+            matches!(reply, InputControlReply::Receipt(ReceiptReply::Retired { input_id: actual }) if actual == input_id),
+            "receipt retirement acknowledgment identity mismatch",
+        )?;
+        deadline.remaining()?;
+        let recorded = read_target(conn)?;
+        ensure(recorded == settled, "receipt changed after retirement")?;
+        Ok(recorded)
+    })();
+    result.map_err(|source| context.failure(source))
+}
+
 fn usage(ok: bool, description: &str) -> Result<()> {
     if ok {
         Ok(())

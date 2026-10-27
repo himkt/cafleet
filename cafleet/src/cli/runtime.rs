@@ -76,7 +76,12 @@ pub fn event(conn: &Connection, command: EventCommand) -> Result<(), CafleetErro
     }
 }
 
-pub fn input(conn: &Connection, command: InputCommand) -> Result<(), CafleetError> {
+pub fn input(
+    conn: &mut Connection,
+    settings: &crate::config::Settings,
+    command: InputCommand,
+    deadline: crate::input::Deadline,
+) -> Result<(), CafleetError> {
     match command {
         InputCommand::Show { input_id, json } => {
             let input = runtime::get_input(conn, input_id)?;
@@ -91,11 +96,24 @@ pub fn input(conn: &Connection, command: InputCommand) -> Result<(), CafleetErro
             evidence_ref,
             json,
         } => {
-            let input = runtime::get_input(conn, input_id)?;
-            let _request = (input, disposition, evidence_ref, json);
-            Err(CafleetError::App(format!(
-                "input_id={input_id}: reconciliation requires synchronized runner or exclusive recovery ownership"
-            )))
+            let disposition = match disposition {
+                Disposition::Submitted => runtime::InputDisposition::Submitted,
+                Disposition::NotSubmitted => runtime::InputDisposition::NotSubmitted,
+                Disposition::AbandonedUncertain => runtime::InputDisposition::AbandonedUncertain,
+            };
+            let input = crate::runtime::runner::reconcile_input(
+                conn,
+                settings,
+                input_id,
+                disposition,
+                &evidence_ref,
+                deadline,
+            )
+            .map_err(CafleetError::from)?;
+            emit(json, &crate::presentation::input_operation(&input), || {
+                crate::output::format_input_operation(&input)
+            });
+            Ok(())
         }
     }
 }
@@ -307,7 +325,7 @@ mod tests {
     #[test]
     fn live_receipt_cli_reconciles_real_exec_history_and_preserves_repeat_evidence() {
         crate::runtime::with_input_service(|fixture, outer| {
-            let run = fixture.fixture.run.clone();
+            let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
             let settings = Settings::from_lookup(|name| {
                 (name == "CAFLEET_DATABASE_URL")
                     .then(|| format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()))

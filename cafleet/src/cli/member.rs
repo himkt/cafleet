@@ -1147,11 +1147,13 @@ mod tests {
                 deadline,
             ),
             "input_show" => crate::cli::runtime::input(
-                &conn,
+                &mut conn,
+                &settings,
                 crate::cli::runtime::InputCommand::Show {
                     input_id: config["input_id"].as_i64().unwrap(),
                     json,
                 },
+                deadline,
             ),
             other => panic!("unknown owned member subprocess action: {other}"),
         };

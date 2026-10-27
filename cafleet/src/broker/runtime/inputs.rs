@@ -238,18 +238,41 @@ pub fn settle_input(
         "state",
         "settled operations retain their disposition",
     )?;
-    owned_transaction(conn, owner, |conn, run| {
-        let input = owned_input(conn, run, input_id)?;
-        require(
-            input.state == expected,
-            "member_input_operations.state",
-            "input state changed",
-        )?;
-        if input.kind == InputKind::Preview && disposition == InputDisposition::Submitted {
-            stamp_preview(conn, run, &input)?;
-        }
-        settle(conn, input_id, expected, disposition, Some(evidence_ref))
+    owned_transaction(conn, owner, |conn, _run| {
+        settle_input_in_transaction(conn, owner, input_id, expected, disposition, evidence_ref)
     })
+}
+
+pub(crate) fn settle_input_in_transaction(
+    conn: &Connection,
+    owner: &RunOwner,
+    input_id: i64,
+    expected: InputState,
+    disposition: InputDisposition,
+    evidence_ref: &str,
+) -> Result<InputOperation, CafleetError> {
+    require(
+        !conn.is_autocommit(),
+        "transaction",
+        "input settlement requires an active ownership transaction",
+    )?;
+    nonblank(evidence_ref, "evidence_ref")?;
+    require(
+        expected != InputState::Settled,
+        "state",
+        "settled operations retain their disposition",
+    )?;
+    let run = validate_owner(conn, owner)?;
+    let input = owned_input(conn, &run, input_id)?;
+    require(
+        input.state == expected,
+        "member_input_operations.state",
+        "input state changed",
+    )?;
+    if input.kind == InputKind::Preview && disposition == InputDisposition::Submitted {
+        stamp_preview(conn, &run, &input)?;
+    }
+    settle(conn, input_id, expected, disposition, Some(evidence_ref))
 }
 
 fn settle(
