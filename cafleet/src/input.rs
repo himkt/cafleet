@@ -95,6 +95,29 @@ thread_local! {
     };
 }
 
+pub(crate) fn inherited_database_deadline(conn: &Connection) -> Option<Deadline> {
+    DATABASE_WAITS.with(|waits| {
+        let waits = waits.borrow();
+        if waits.frames.is_empty() {
+            assert!(
+                waits.identity.is_none(),
+                "an empty database scope has no owner"
+            );
+            return None;
+        }
+        assert_eq!(
+            waits.identity,
+            Some(std::ptr::from_ref(conn).addr()),
+            "inherited database scopes use the same connection"
+        );
+        waits
+            .frames
+            .iter()
+            .map(|frame| frame.deadline)
+            .min_by_key(|deadline| deadline.instant())
+    })
+}
+
 fn remaining_database_wait() -> Option<Duration> {
     DATABASE_WAITS.with(|waits| {
         let waits = waits.borrow();

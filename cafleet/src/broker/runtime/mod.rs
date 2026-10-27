@@ -9,6 +9,7 @@ mod records;
 
 pub use events::{get_event, persist_transition, update_interaction_evidence};
 pub(crate) use events::{persist_transition_counted, persist_transition_in_transaction};
+pub(crate) use inputs::{InputReservation, reserve_input_with_provenance};
 pub use inputs::{
     find_input, get_input, record_input_state, reserve_input, settle_input, settle_preview,
 };

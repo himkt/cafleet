@@ -26,21 +26,7 @@ impl ComposerOperation {
 
 #[derive(Clone)]
 pub(super) struct ComposerSubmission {
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the reviewed input coordinator consumes executable composer plans"
-        )
-    )]
     pub prefix: Vec<u8>,
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the reviewed input coordinator consumes executable composer plans"
-        )
-    )]
     pub submit: Vec<u8>,
     pub fixtures: Vec<Fixture>,
 }
@@ -51,13 +37,6 @@ impl ComposerSubmission {
     }
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reviewed input coordinator consumes executable composer plans"
-    )
-)]
 pub(crate) struct ComposerPlan {
     backend: CodingAgent,
     native_version: String,
@@ -70,68 +49,26 @@ pub(crate) struct ComposerPlan {
 }
 
 impl ComposerPlan {
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the reviewed input coordinator consumes executable composer plans"
-        )
-    )]
     pub(crate) fn backend(&self) -> CodingAgent {
         self.backend
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the reviewed input coordinator consumes executable composer plans"
-        )
-    )]
     pub(crate) fn native_version(&self) -> &str {
         &self.native_version
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the reviewed input coordinator consumes executable composer plans"
-        )
-    )]
     pub(crate) fn profile_version(&self) -> &str {
         &self.profile_version
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the reviewed input coordinator consumes executable composer plans"
-        )
-    )]
     pub(crate) fn rule_ids(&self) -> &[String] {
         &self.rule_ids
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the reviewed input coordinator consumes executable composer plans"
-        )
-    )]
     pub(crate) fn fixture_ids(&self) -> &[String] {
         &self.fixture_ids
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the reviewed input coordinator consumes executable composer plans"
-        )
-    )]
     pub(crate) fn encode(&self, literal: &str) -> Result<Vec<u8>, CafleetError> {
         assert!(
             self.prefix.len() == self.operation.prefix_hex().len() / 2,
@@ -155,13 +92,6 @@ impl ComposerPlan {
 }
 
 impl ProfileCatalog {
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the reviewed input coordinator consumes executable composer plans"
-        )
-    )]
     pub(crate) fn composer_plan(
         &self,
         backend: CodingAgent,

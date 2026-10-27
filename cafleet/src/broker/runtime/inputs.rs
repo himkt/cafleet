@@ -93,11 +93,26 @@ pub fn find_input(
     input.map(|input| validate_input(conn, input)).transpose()
 }
 
+pub(crate) enum InputReservation {
+    Inserted(InputOperation),
+    Existing(InputOperation),
+}
+
 pub fn reserve_input(
     conn: &mut Connection,
     owner: &RunOwner,
     new: &NewInput,
 ) -> Result<InputOperation, CafleetError> {
+    reserve_input_with_provenance(conn, owner, new).map(|reservation| match reservation {
+        InputReservation::Inserted(operation) | InputReservation::Existing(operation) => operation,
+    })
+}
+
+pub(crate) fn reserve_input_with_provenance(
+    conn: &mut Connection,
+    owner: &RunOwner,
+    new: &NewInput,
+) -> Result<InputReservation, CafleetError> {
     require(
         new.kind != InputKind::PermissionResponse,
         "kind",
@@ -114,7 +129,7 @@ pub fn reserve_input(
                 "operation_key",
                 "conflicting operation key reuse",
             )?;
-            return Ok(input);
+            return Ok(InputReservation::Existing(input));
         }
         require(
             run.status == RunStatus::Running && historical_ownership(conn, run)?.is_none(),
@@ -147,7 +162,7 @@ pub fn reserve_input(
              VALUES(?1,?2,?3,?4,'in_progress',?5,?5,?6)",
             params![run.run_id,new.operation_key,new.kind.as_str(),new.payload_digest,now,new.message_id],
         ).map_err(db_err)?;
-        get_input(conn, conn.last_insert_rowid())
+        get_input(conn, conn.last_insert_rowid()).map(InputReservation::Inserted)
     })
 }
 

@@ -1,7 +1,9 @@
+use super::input::InputGuard;
 use super::*;
 use std::collections::VecDeque;
 use std::io::{self, ErrorKind};
 use std::sync::Arc;
+use std::time::Instant;
 
 mod drain;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -14,31 +16,26 @@ pub(crate) enum InputDrain {
 }
 
 pub(super) struct DrainedInput {
-    #[expect(
-        dead_code,
-        reason = "the reviewed coordinator validates this opaque drain fact"
-    )]
     instance: Arc<()>,
-    #[expect(
-        dead_code,
-        reason = "the reviewed coordinator validates this opaque drain fact"
-    )]
     turn: u64,
-    #[expect(
-        dead_code,
-        reason = "the reviewed coordinator validates this opaque drain fact"
-    )]
     human_generation: u64,
-    #[expect(
-        dead_code,
-        reason = "the reviewed coordinator validates this opaque drain fact"
-    )]
     output_seq: u64,
-    #[expect(
-        dead_code,
-        reason = "the reviewed coordinator validates this opaque drain fact"
-    )]
     health: ObservationHealth,
+}
+
+impl DrainedInput {
+    pub(super) fn evidence(&self) -> InputDrain {
+        InputDrain::Quiescent {
+            human_generation: self.human_generation,
+            output_seq: self.output_seq,
+        }
+    }
+}
+
+pub(crate) enum ProgrammaticWrite {
+    Complete { bytes: usize },
+    Partial { bytes: usize },
+    Pending,
 }
 
 pub(crate) trait ByteInput {
@@ -317,16 +314,78 @@ impl Transport {
     pub(super) fn human_generation(&self) -> u64 {
         self.human_generation
     }
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the reviewed service/coordinator integration consumes input drain state"
-        )
-    )]
     pub(super) fn take_input_drain(&mut self) -> Option<DrainedInput> {
         self.input_drain.take()
     }
+    pub(super) fn validate_input_drain(
+        &self,
+        proof: &DrainedInput,
+        deadline: Instant,
+    ) -> Result<()> {
+        check_deadline(Instant::now(), deadline)?;
+        ensure(
+            Arc::ptr_eq(&self.input_instance, &proof.instance)
+                && self.input_turn == proof.turn
+                && self.human_generation == proof.human_generation
+                && self.terminal.snapshot().screen_seq == proof.output_seq,
+            "input drain binding changed",
+        )?;
+        ensure(
+            self.observation_complete
+                && !self.outer_eof
+                && !self.child_eof
+                && self.input.is_empty()
+                && self.display.len() < self.limits.display_bytes,
+            "input transport is no longer quiescent",
+        )?;
+        proof.health.validate()?;
+        ensure(
+            !proof.health.degraded
+                && proof.health.pending_count == 0
+                && !proof.health.pending_evidence
+                && proof.health.diagnostic.is_none()
+                && proof.health.eligibility == InputEligibility::ComposerEmpty
+                && proof.health.visibility == Visibility::NotVisible,
+            "input drain is not eligible for composer input",
+        )
+    }
+
+    pub(super) fn write_programmatic(
+        &mut self,
+        pty: &mut impl PtyIo,
+        bytes: &[u8],
+        guard: &mut InputGuard<'_>,
+        deadline: Instant,
+    ) -> Result<ProgrammaticWrite> {
+        let effective = guard.begin_write(self, bytes, deadline)?;
+        self.invalidate_input_drain();
+        check_deadline(Instant::now(), effective)?;
+        guard.mark_io_possible();
+        let result = pty.try_write(bytes);
+        let recorded = guard.record_write_result(&result, bytes.len());
+        if let Err(recording) = recorded {
+            return Err(match result {
+                Err(primary) => CafleetError::WithDiagnostics {
+                    cause: Box::new(io_error(primary)),
+                    diagnostics: vec![recording.message().into_owned()],
+                },
+                Ok(_) => recording,
+            });
+        }
+        check_deadline(Instant::now(), effective)?;
+        match result {
+            Ok(count) if count == bytes.len() => Ok(ProgrammaticWrite::Complete { bytes: count }),
+            Ok(0) => Err(error("native input write returned zero bytes")),
+            Ok(count) => Ok(ProgrammaticWrite::Partial { bytes: count }),
+            Err(cause)
+                if matches!(cause.kind(), ErrorKind::WouldBlock | ErrorKind::Interrupted) =>
+            {
+                Ok(ProgrammaticWrite::Pending)
+            }
+            Err(cause) => Err(io_error(cause)),
+        }
+    }
+
     pub(crate) fn snapshot(&self) -> ScreenSnapshot {
         self.terminal.snapshot()
     }
