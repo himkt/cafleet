@@ -1,4 +1,6 @@
 pub mod herdr;
+#[cfg(test)]
+mod press_tests;
 pub mod tmux;
 
 use std::fmt;

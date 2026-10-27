@@ -322,6 +322,7 @@ pub fn read_stdin() -> std::io::Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    mod press_tests;
     use nix::errno::Errno;
     use nix::sys::wait::{WaitPidFlag, waitpid};
     use nix::unistd::Pid;
