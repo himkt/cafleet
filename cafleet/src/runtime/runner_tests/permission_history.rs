@@ -27,7 +27,7 @@ pub(in crate::runtime) struct Case {
     pub(in crate::runtime) settings: Settings,
     placement: crate::broker::records::Placement,
     _artifacts: RunArtifacts,
-    _lock: Arc<RunLock>,
+    pub(in crate::runtime) _lock: Arc<RunLock>,
 }
 impl Case {
     pub(in crate::runtime) fn new(state: Retained) -> Self {

@@ -632,6 +632,280 @@ pub(super) mod tests {
     }
 
     #[test]
+    fn exclusive_permission_ready_proof_and_claim_release_share_the_owner_transaction() {
+        use crate::runtime::runner_tests::permission_history::{Case, Retained};
+
+        let mut case = Case::new(Retained::InProgress);
+        storage::record_input_state(
+            &mut case.fixture.conn,
+            &case.fixture.run.owner(),
+            case.input_id,
+            InputState::InProgress,
+            InputState::Ready,
+        )
+        .unwrap();
+        case.fixture.conn.execute(
+            "UPDATE member_runs SET status='exited',cleanup_state='complete',exit_code=7,ended_at='2026-10-27T18:13:00Z' WHERE run_id=?1",
+            [case.fixture.run.run_id],
+        ).unwrap();
+        let run = storage::get_run(&case.fixture.conn, case.fixture.run.run_id).unwrap();
+        let original = storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
+        let placement = crate::broker::get_member(&case.fixture.conn, run.member_id, run.fleet_id)
+            .unwrap()
+            .unwrap()
+            .placement
+            .unwrap();
+        let held = PaneLock::try_acquire(&case.settings.database_url, &placement)
+            .unwrap()
+            .unwrap();
+        let paths = RuntimePaths::for_run(&run.database_identity_json, run.run_id).unwrap();
+        std::fs::write(&paths.outbox, [0, 0]).unwrap();
+        let spool = || {
+            let meta = std::fs::symlink_metadata(&paths.outbox).unwrap();
+            (
+                std::fs::read(&paths.outbox).unwrap(),
+                meta.dev(),
+                meta.ino(),
+            )
+        };
+        let original_spool = spool();
+        let before = rows(&case.fixture.conn, &[]);
+        drop(case._lock);
+        let until = Instant::now() + Duration::from_secs(2);
+        let input_id = case.input_id;
+        let epoch = run.owner_epoch + 1;
+        case.fixture
+            .conn
+            .execute_batch(&format!(
+                "CREATE TRIGGER reject_exclusive_permission_claim_delete
+             BEFORE DELETE ON member_permission_response_claims WHEN OLD.input_id={input_id}
+             BEGIN
+               SELECT CASE WHEN EXISTS(
+                 SELECT 1 FROM member_input_operations i JOIN member_runs r ON r.run_id=i.run_id
+                 WHERE i.input_id=OLD.input_id AND i.state='settled'
+                   AND i.disposition='not_submitted'
+                   AND i.evidence_ref='fixture:exclusive-permission-zero'
+                   AND r.owner_epoch={epoch} AND r.owner_kind='reconciler'
+               ) THEN RAISE(ABORT,'owned exclusive permission claim delete failure')
+                 ELSE RAISE(ABORT,'owned exclusive permission delete missing settlement') END;
+             END"
+            ))
+            .unwrap();
+        let mut host = TypedHost::new(until);
+        let expected_run = run.clone();
+        let settings = case.settings.clone();
+        let pinned = placement.clone();
+        host.action = Some(Box::new(move |boundary, current, actual| {
+            assert_eq!(actual, until);
+            assert!(
+                PaneLock::try_acquire(&settings.database_url, &pinned)
+                    .unwrap()
+                    .is_none()
+            );
+            if matches!(boundary, RecoveryBoundary::AfterTakeover) {
+                assert_owner_only(&expected_run, current);
+            }
+            Ok(())
+        }));
+        let failed = super::reconcile_input_with_host(
+            &mut case.fixture.conn,
+            &case.settings,
+            &original.input,
+            &run,
+            Some(&placement),
+            Some(&held),
+            InputDisposition::NotSubmitted,
+            "fixture:exclusive-permission-zero",
+            until,
+            &mut host,
+        );
+        let removed = case
+            .fixture
+            .conn
+            .execute_batch("DROP TRIGGER reject_exclusive_permission_claim_delete");
+        assert!(
+            removed.is_ok(),
+            "primary={:?}; trigger_cleanup={removed:?}",
+            failed.as_ref().err()
+        );
+        let failure = failed.unwrap_err();
+        assert!(
+            failure
+                .source
+                .message()
+                .contains("owned exclusive permission claim delete failure"),
+            "actual={failure:?}"
+        );
+        assert_eq!(
+            (failure.run_id, failure.interaction_id, failure.input_id),
+            (
+                Some(run.run_id),
+                Some(original.response.metadata.interaction_id),
+                Some(input_id)
+            )
+        );
+        assert_eq!(
+            failure.operation_key.as_deref(),
+            Some(original.input.operation_key.as_str())
+        );
+        assert!(host.calls.contains(&"after"));
+        assert_eq!(rows(&case.fixture.conn, &[]), before);
+        assert_eq!(spool(), original_spool);
+        let lock = RunLock::acquire(&case.fixture.conn, &run.owner())
+            .unwrap()
+            .unwrap();
+        lock.validate(&case.fixture.conn, &run.owner()).unwrap();
+        drop(lock);
+        let mut retry = TypedHost::new(until);
+        let settled = super::reconcile_input_with_host(
+            &mut case.fixture.conn,
+            &case.settings,
+            &original.input,
+            &run,
+            Some(&placement),
+            Some(&held),
+            InputDisposition::NotSubmitted,
+            "fixture:exclusive-permission-zero",
+            until,
+            &mut retry,
+        )
+        .unwrap();
+        let receipt = storage::get_permission_response(&case.fixture.conn, input_id).unwrap();
+        assert_eq!(settled, receipt.input);
+        let mut expected = original.input.clone();
+        expected.state = InputState::Settled;
+        expected.disposition = Some(InputDisposition::NotSubmitted);
+        expected.evidence_ref = Some("fixture:exclusive-permission-zero".into());
+        expected.updated_at = settled.updated_at.clone();
+        assert_eq!(settled, expected);
+        assert_eq!(receipt.response, original.response);
+        assert!(receipt.claim.is_none());
+        let current = storage::get_run(&case.fixture.conn, run.run_id).unwrap();
+        assert_owner_only(&run, &current);
+        assert!(current.owner_epoch > receipt.response.metadata.expected_owner_epoch);
+        let excluded = &[
+            "member_runs",
+            "member_input_operations",
+            "member_permission_response_claims",
+        ];
+        let expected_history: Vec<_> = before
+            .into_iter()
+            .filter(|(name, _)| !excluded.contains(&name.as_str()))
+            .collect();
+        assert_eq!(rows(&case.fixture.conn, excluded), expected_history);
+        assert_eq!(spool(), original_spool);
+        held.validate_binding(&case.settings.database_url, &placement)
+            .unwrap();
+        RunLock::acquire(&case.fixture.conn, &current.owner())
+            .unwrap()
+            .unwrap()
+            .validate(&case.fixture.conn, &current.owner())
+            .unwrap();
+    }
+
+    #[test]
+    fn exclusive_permission_receipt_pins_original_audit_and_creation_after_snapshot() {
+        use crate::runtime::runner_tests::permission_history::{Case, Retained};
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        for changed in ["decided_at", "created_at"] {
+            let mut case = Case::new(Retained::Uncertain);
+            let run = case.fixture.run.clone();
+            let original =
+                storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
+            let placement =
+                crate::broker::get_member(&case.fixture.conn, run.member_id, run.fleet_id)
+                    .unwrap()
+                    .unwrap()
+                    .placement
+                    .unwrap();
+            let held = PaneLock::try_acquire(&case.settings.database_url, &placement)
+                .unwrap()
+                .unwrap();
+            let excluded = if changed == "decided_at" {
+                "member_permission_responses"
+            } else {
+                "member_input_operations"
+            };
+            let before = rows(&case.fixture.conn, &[excluded]);
+            let path = case.fixture.conn.path().unwrap().to_owned();
+            let input_id = case.input_id;
+            let observed = Arc::new(AtomicBool::new(false));
+            let wrote = observed.clone();
+            drop(case._lock);
+            let mut host = TypedHost::new(Instant::now() + Duration::from_secs(2));
+            host.action = Some(Box::new(move |boundary, _, _| {
+                if matches!(boundary, RecoveryBoundary::AfterSnapshot) {
+                    let conn = Connection::open(&path).unwrap();
+                    let sql = if changed == "decided_at" {
+                        "UPDATE member_permission_responses SET decided_at='2026-10-27T21:55:00Z' WHERE input_id=?1"
+                    } else {
+                        "UPDATE member_input_operations SET created_at='2026-10-27T21:55:00Z' WHERE input_id=?1"
+                    };
+                    assert_eq!(conn.execute(sql, [input_id]).unwrap(), 1);
+                    wrote.store(true, Ordering::Release);
+                }
+                Ok(())
+            }));
+            let result = super::reconcile_input_with_host(
+                &mut case.fixture.conn,
+                &case.settings,
+                &original.input,
+                &run,
+                Some(&placement),
+                Some(&held),
+                InputDisposition::NotSubmitted,
+                "fixture:exclusive-fixed-permission",
+                host.until,
+                &mut host,
+            );
+            assert!(
+                observed.load(Ordering::Acquire),
+                "actual snapshot callback must update {changed}; result={result:?}"
+            );
+            let failure = result.unwrap_err();
+            assert_eq!(
+                (failure.run_id, failure.interaction_id, failure.input_id),
+                (
+                    Some(run.run_id),
+                    Some(original.response.metadata.interaction_id),
+                    Some(input_id)
+                )
+            );
+            assert_eq!(
+                failure.operation_key.as_deref(),
+                Some(original.input.operation_key.as_str())
+            );
+            assert_eq!(host.calls, vec!["snapshot"]);
+            let mut expected = original.clone();
+            if changed == "decided_at" {
+                expected.response.decided_at = "2026-10-27T21:55:00Z".into();
+                expected
+                    .input
+                    .permission_response
+                    .as_mut()
+                    .unwrap()
+                    .decided_at = expected.response.decided_at.clone();
+            } else {
+                expected.input.created_at = "2026-10-27T21:55:00Z".into();
+            }
+            assert_eq!(
+                storage::get_permission_response(&case.fixture.conn, input_id).unwrap(),
+                expected
+            );
+            assert_eq!(rows(&case.fixture.conn, &[excluded]), before);
+            RunLock::acquire(&case.fixture.conn, &run.owner())
+                .unwrap()
+                .unwrap()
+                .validate(&case.fixture.conn, &run.owner())
+                .unwrap();
+            held.validate_binding(&case.settings.database_url, &placement)
+                .unwrap();
+        }
+    }
+
+    #[test]
     fn exclusive_receipt_terminal_preview_commits_only_owner_disposition_and_stamp() {
         let mut case = ReceiptCase::new();
         let held = PaneLock::try_acquire(&case.settings.database_url, &case.placement)

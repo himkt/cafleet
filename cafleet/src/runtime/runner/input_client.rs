@@ -2617,7 +2617,7 @@ mod tests {
             failure.operation_key.as_deref(),
             Some(original.input.operation_key.as_str())
         );
-        assert!(recovery.calls.is_empty());
+        assert_eq!(recovery.calls, vec!["snapshot"]);
         assert!(recovery.processes.is_empty());
         assert!(recovery.startups.is_empty());
         assert_eq!(
@@ -2634,6 +2634,136 @@ mod tests {
             .expect("failed live invocation releases its genuine pane guard")
             .validate_binding(&case.settings.database_url, &placement)
             .unwrap();
+    }
+
+    #[test]
+    fn exclusive_permission_receipt_client_preserves_uncertain_claim_and_continuous_guard() {
+        use super::super::input_recovery::tests::TypedHost;
+        use crate::runtime::runner_tests::permission_history::{Case, Retained};
+
+        for absent in [false, true] {
+            let mut case = Case::new(Retained::Uncertain);
+            case.fixture.conn.execute(
+                "UPDATE member_runs SET status='exited',cleanup_state='complete',exit_code=7,ended_at='2026-10-27T18:13:00Z' WHERE run_id=?1",
+                [case.fixture.run.run_id],
+            ).unwrap();
+            let run = storage::get_run(&case.fixture.conn, case.fixture.run.run_id).unwrap();
+            let original =
+                storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
+            let placement =
+                crate::broker::get_member(&case.fixture.conn, run.member_id, run.fleet_id)
+                    .unwrap()
+                    .unwrap()
+                    .placement
+                    .unwrap();
+            if absent {
+                assert!(
+                    crate::broker::deregister_member(&mut case.fixture.conn, run.member_id)
+                        .unwrap()
+                );
+            }
+            let before = health_records(&case.fixture.conn);
+            drop(case._lock);
+            let until = Instant::now() + Duration::from_secs(2);
+            let mut live = UnavailableReceiptHost {
+                settings: case.settings.clone(),
+                placement: placement.clone(),
+                until,
+                input_id: case.input_id,
+                change_digest: false,
+                calls: [0; 3],
+            };
+            let mut recovery = TypedHost::new(until);
+            let settings = case.settings.clone();
+            let pinned = placement.clone();
+            recovery.action = Some(Box::new(move |_, _, actual| {
+                assert_eq!(actual, until);
+                if !absent {
+                    assert!(
+                        PaneLock::try_acquire(&settings.database_url, &pinned)
+                            .unwrap()
+                            .is_none()
+                    );
+                }
+                Ok(())
+            }));
+            let result =
+                with_database_budget(&mut case.fixture.conn, Deadline::until(until), |conn| {
+                    Ok(reconcile_receipt_with_hosts(
+                        conn,
+                        &case.settings,
+                        case.input_id,
+                        InputDisposition::NotSubmitted,
+                        "fixture:exclusive-uncertain-permission",
+                        Deadline::until(until + Duration::from_secs(1)),
+                        (&mut live, &mut recovery),
+                    ))
+                })
+                .unwrap()
+                .unwrap();
+            assert_eq!(live.calls, if absent { [0; 3] } else { [1, 1, 0] });
+            let current = storage::get_run(&case.fixture.conn, run.run_id).unwrap();
+            let mut expected_run = run.clone();
+            expected_run.owner_epoch += 1;
+            expected_run.owner_kind = OwnerKind::Reconciler;
+            let process = ProcessIdentity::current().unwrap();
+            expected_run.owner_pid = process.pid;
+            expected_run.owner_start_identity = process.start_identity;
+            assert_eq!(current, expected_run);
+            assert!(recovery.calls.contains(&"after"));
+            assert!(
+                recovery
+                    .startups
+                    .iter()
+                    .any(|(checked, actual)| checked == &run
+                        && actual.as_ref() == if absent { None } else { Some(&placement) })
+            );
+            let receipt =
+                storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap();
+            assert_eq!(result, receipt.input);
+            let mut expected = original.input.clone();
+            expected.state = InputState::Settled;
+            expected.disposition = Some(InputDisposition::NotSubmitted);
+            expected.evidence_ref = Some("fixture:exclusive-uncertain-permission".into());
+            expected.updated_at = result.updated_at.clone();
+            assert_eq!(result, expected);
+            assert_eq!(receipt.response, original.response);
+            assert_eq!(receipt.claim, original.claim);
+            assert!(
+                receipt.claim.is_some(),
+                "owner exclusion is no zero-byte fact for Uncertain history"
+            );
+            assert_eq!(health_records(&case.fixture.conn), before);
+            let changes = case.fixture.conn.total_changes();
+            let repeated = reconcile_ordinary_with_host(
+                &mut case.fixture.conn,
+                &case.settings,
+                case.input_id,
+                InputDisposition::NotSubmitted,
+                "fixture:later-unsubstituted-evidence",
+                Deadline::until(until),
+                &mut NoLiveHost,
+            )
+            .unwrap();
+            assert_eq!(repeated, result);
+            assert_eq!(case.fixture.conn.total_changes(), changes);
+            assert_eq!(
+                storage::get_permission_response(&case.fixture.conn, case.input_id).unwrap(),
+                receipt
+            );
+            if !absent {
+                PaneLock::try_acquire(&case.settings.database_url, &placement)
+                    .unwrap()
+                    .unwrap()
+                    .validate_binding(&case.settings.database_url, &placement)
+                    .unwrap();
+            }
+            RunLock::acquire(&case.fixture.conn, &current.owner())
+                .unwrap()
+                .unwrap()
+                .validate(&case.fixture.conn, &current.owner())
+                .unwrap();
+        }
     }
 
     struct UnavailableReceiptHost {
