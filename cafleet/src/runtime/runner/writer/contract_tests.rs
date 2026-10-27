@@ -2,6 +2,7 @@ use super::*;
 use crate::broker::runtime::*;
 use crate::runtime::runner_tests::Fixture;
 mod controller;
+mod input_drain;
 mod outbox;
 mod refresh;
 mod support;
