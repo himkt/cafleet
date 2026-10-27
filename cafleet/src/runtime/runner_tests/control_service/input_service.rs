@@ -571,3 +571,87 @@ fn step5_service_input_expired_unreserved_attempt_releases_pending_work_for_a_fr
         );
     });
 }
+
+#[test]
+fn step5_service_input_post_write_failure_preserves_known_identity_and_original_history() {
+    with_service(|fixture, until| {
+        let key = "prompt:service:known-input-error";
+        let literal = "SERVICE_R2_PRIVATE_LITERAL_λ";
+        fixture.fixture.conn.execute_batch(&format!(
+            "CREATE TRIGGER owned_input_accept_failure BEFORE UPDATE OF state ON member_input_operations
+             WHEN OLD.operation_key='{key}' AND OLD.state='in_progress' AND NEW.state='accepted'
+             BEGIN SELECT RAISE(FAIL,'owned accepted update failure'); END"
+        )).unwrap();
+        let value = request(
+            fixture,
+            key,
+            literal,
+            InputKind::Prompt,
+            None,
+            until.min(Instant::now() + Duration::from_secs(3)),
+        );
+        let attempt = catch_unwind(AssertUnwindSafe(|| exchange(fixture, &value, until)));
+        let removed = fixture
+            .fixture
+            .conn
+            .execute_batch("DROP TRIGGER owned_input_accept_failure");
+        let reply = match attempt {
+            Ok(reply) => {
+                removed.unwrap();
+                reply
+            }
+            Err(primary) => {
+                if let Err(cleanup) = removed {
+                    eprintln!("owned SQL trigger removal also failed: {cleanup}");
+                }
+                resume_unwind(primary);
+            }
+        };
+        let cause = reply["error"]
+            .as_str()
+            .expect("actual Accepted-persistence failure envelope");
+        assert!(cause.contains("owned accepted update failure"), "{reply}");
+        assert!(
+            !cause.contains(literal),
+            "safe identities replace literal payloads in errors"
+        );
+        let original = storage::find_input(&fixture.fixture.conn, fixture.fixture.run.run_id, key)
+            .unwrap()
+            .expect("independent durable reservation after the actual write");
+        assert_eq!(original.run_id, fixture.fixture.run.run_id);
+        assert_eq!(original.operation_key, key);
+        assert_eq!(original.state, InputState::InProgress);
+        wait_record(fixture, literal, until);
+        let history = exchange(fixture, &value, until);
+        assert!(history.get("error").is_none(), "{history}");
+        assert_eq!(history["result"]["kind"], "submission");
+        let retained: SubmissionResult =
+            serde_json::from_value(history["result"]["submission"].clone()).unwrap();
+        assert_eq!(retained.input_id, Some(original.input_id));
+        assert_eq!(retained.status, SubmissionStatus::Uncertain);
+        assert_eq!(retained.stage, SubmissionStage::Submitted);
+        barrier(fixture, until);
+        let count = records(fixture)
+            .iter()
+            .filter(|record| record["line"] == literal)
+            .count();
+        assert_eq!(count, 1);
+        assert_eq!(
+            storage::get_input(&fixture.fixture.conn, original.input_id).unwrap(),
+            original
+        );
+        eprintln!(
+            "actual post-write persistence error: cause={cause:?}; input_id={}; run_id={}; key={:?}; state={:?}; child_line_count={count}",
+            original.input_id, original.run_id, original.operation_key, original.state
+        );
+        assert!(
+            cause.contains(&format!("input_id={}", original.input_id))
+                && cause.contains(&format!("run_id={}", original.run_id))
+                && cause.contains(&format!(
+                    "operation_key={}",
+                    serde_json::to_string(&original.operation_key).unwrap()
+                )),
+            "actual bookkeeping failure retains the independently observed safe input identities: {cause}"
+        );
+    });
+}
