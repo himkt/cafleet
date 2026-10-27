@@ -1,6 +1,7 @@
 use super::CodingAgent;
 use super::catalog::{Capture, Profile, ProfileCatalog, Rule};
 use crate::broker::runtime::InteractionClass;
+use crate::coding_agent::AnswerPlan;
 use crate::error::CafleetError;
 use crate::runtime::runner::ScreenSnapshot;
 use serde_json::{Value, json};
@@ -175,6 +176,37 @@ pub(crate) struct Detector {
     version: Option<String>,
     profile: Option<Profile>,
 }
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct AnswerMatch {
+    plan: AnswerPlan,
+    semantic: SemanticFingerprint,
+    choices: Vec<String>,
+    focus: String,
+    output_seq: u64,
+}
+impl AnswerMatch {
+    pub(crate) fn plan(&self) -> &AnswerPlan {
+        &self.plan
+    }
+    pub(crate) fn semantic(&self) -> &SemanticFingerprint {
+        &self.semantic
+    }
+    pub(crate) fn choices(&self) -> &[String] {
+        &self.choices
+    }
+    pub(crate) fn focus(&self) -> &str {
+        &self.focus
+    }
+    pub(crate) fn output_seq(&self) -> u64 {
+        self.output_seq
+    }
+    pub(crate) fn same_request(&self, other: &Self) -> bool {
+        self.plan == other.plan
+            && self.semantic == other.semantic
+            && self.choices == other.choices
+            && self.focus == other.focus
+    }
+}
 struct LogicalLine {
     text: String,
     start: u16,
@@ -238,6 +270,7 @@ struct Matched {
     choices: Vec<String>,
     native: Option<String>,
     excerpt: String,
+    focuses: BTreeMap<String, String>,
 }
 fn captured(
     reference: &Capture,
@@ -306,6 +339,7 @@ fn match_rule(rule: &Rule, screen: &ScreenSnapshot, lines: &[LogicalLine]) -> Op
         .collect::<Vec<_>>()
         .join("\n");
     let mut values = BTreeMap::new();
+    let mut focuses = BTreeMap::new();
     for matcher in &rule.matchers {
         let texts = if matcher.scope == "region" {
             vec![region_text.as_str()]
@@ -325,16 +359,22 @@ fn match_rule(rule: &Rule, screen: &ScreenSnapshot, lines: &[LogicalLine]) -> Op
                             .map(|v| (name.into(), v.as_str().into()))
                     })
                     .collect::<BTreeMap<String, String>>();
-                captured_values.push(named);
+                let full = captures
+                    .get(0)
+                    .expect("regex match has full capture")
+                    .as_str();
+                captured_values.push((named, full.to_owned()));
             }
         }
         if captured_values.len() != 1 {
             return None;
         }
-        values.insert(
+        let (named, full) = captured_values.pop().expect("single matcher capture");
+        focuses.insert(
             matcher.id.clone(),
-            captured_values.pop().expect("single matcher capture"),
+            serde_json::to_string(&(&matcher.id, &full, &named)).expect("focus strings serialize"),
         );
+        values.insert(matcher.id.clone(), named);
     }
     let operation = match &rule.operation {
         Some(reference) => Some(captured(reference, &values)?),
@@ -356,9 +396,69 @@ fn match_rule(rule: &Rule, screen: &ScreenSnapshot, lines: &[LogicalLine]) -> Op
         choices,
         native,
         excerpt: region_text,
+        focuses,
     })
 }
 impl Detector {
+    pub(crate) fn match_answer(
+        &self,
+        screen: &ScreenSnapshot,
+        plan: &AnswerPlan,
+    ) -> Result<Option<AnswerMatch>> {
+        let Some(profile) = &self.profile else {
+            return Ok(None);
+        };
+        let capability = plan.capability();
+        if capability.backend() != self.backend
+            || self.version.as_deref() != Some(capability.native_version())
+            || profile
+                .answer_plan(
+                    capability.native_version(),
+                    capability.request_rule_id(),
+                    capability.decision(),
+                )
+                .as_ref()
+                != Some(plan)
+        {
+            return Ok(None);
+        }
+        let observed = self.observe(screen)?;
+        if observed.kind != ObservationKind::Interaction(InteractionClass::PermissionRequest)
+            || observed.match_evidence != MatchEvidence::Complete
+            || observed.rule_id != capability.request_rule_id()
+        {
+            return Ok(None);
+        }
+        let rule = profile
+            .rules
+            .iter()
+            .find(|r| r.id == observed.rule_id)
+            .expect("selected compiled request rule");
+        if !rule
+            .choices
+            .iter()
+            .any(|c| c.id == plan.choice_id() && c.scope == "single_request")
+        {
+            return Ok(None);
+        }
+        let Some(matched) = match_rule(rule, screen, &logical_lines(screen)?) else {
+            return Ok(None);
+        };
+        let focus = matched
+            .focuses
+            .get(plan.focus_matcher_id())
+            .expect("validated focus matcher")
+            .clone();
+        Ok(Some(AnswerMatch {
+            plan: plan.clone(),
+            semantic: observed
+                .fingerprint
+                .expect("complete permission fingerprint"),
+            choices: matched.choices,
+            focus,
+            output_seq: screen.screen_seq,
+        }))
+    }
     pub(crate) fn new(
         catalog: &ProfileCatalog,
         backend: CodingAgent,

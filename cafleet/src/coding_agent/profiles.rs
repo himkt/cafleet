@@ -9,6 +9,7 @@ use crate::error::CafleetError;
 pub(crate) use catalog::inspection_tests::{
     inspection_fixture_definition, inspection_fixture_form,
 };
+pub(crate) use catalog::{AnswerPlan, AnswerStage};
 pub use catalog::{NativeCapabilities, ProfileCatalog};
 pub(crate) use composer::{ComposerOperation, ComposerPlan};
 pub(crate) use detector::*;
@@ -2743,7 +2744,7 @@ mod contract_tests {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnswerCapability {
     backend: CodingAgent,
     native_version: String,

@@ -1050,9 +1050,19 @@ pub(crate) fn respond_permission(
 }
 pub(crate) fn inspect_permission(
     conn: &mut Connection,
-    _settings: &Settings,
+    settings: &Settings,
     input: &PermissionInspectInput,
     deadline: Deadline,
+) -> std::result::Result<PermissionInspection, InputFailure> {
+    inspect_permission_with_host(conn, settings, input, deadline, &mut NativeInputHost)
+}
+
+fn inspect_permission_with_host(
+    conn: &mut Connection,
+    settings: &Settings,
+    input: &PermissionInspectInput,
+    deadline: Deadline,
+    host: &mut impl InputCommandHost,
 ) -> std::result::Result<PermissionInspection, InputFailure> {
     let mut context = InputContext {
         run_id: None,
@@ -1071,30 +1081,147 @@ pub(crate) fn inspect_permission(
             .all(|id| *id > 0),
             "positive permission request IDs are required",
         )?;
-        with_database_budget(conn, deadline, |conn| {
+        let deadline = submission_deadline(conn, deadline)?;
+        let (run, placement, original) = with_database_budget(conn, deadline, |conn| {
             let tx = conn.transaction().map_err(db_err)?;
-            let run_id = tx
-                .query_row(
-                    "SELECT run_id FROM member_runtime_events WHERE event_id=?1",
-                    [input.event_id],
-                    |row| row.get::<_, i64>(0),
-                )
-                .optional()
-                .map_err(db_err)?
-                .ok_or_else(|| {
-                    CafleetError::Value(format!("Event {} not found", input.event_id))
-                })?;
-            context.run_id = Some(run_id);
-            let run = selected_run(&tx, run_id)?;
-            association(
-                &tx,
-                &run,
-                input.interaction_id,
-                input.event_id,
-                input.director_member_id,
+            let view = storage::get_event(&tx, input.event_id)?;
+            let run = selected_run(&tx, view.event.run_id)?;
+            context.run_id = Some(run.run_id);
+            let placement = crate::broker::get_member(&tx, run.member_id, run.fleet_id)?
+                .and_then(|member| member.placement)
+                .ok_or_else(|| error("permission member placement unavailable"))?;
+            validate_submission_target(&tx, settings, &run, &placement)?;
+            let view = super::input::inspection_association(&tx, &run, input)?;
+            deadline.remaining()?;
+            tx.commit().map_err(db_err)?;
+            Ok((run, placement, view))
+        })?;
+        let expiration = InputExpiration::capture(deadline.instant(), &mut RealInputDeadlineClock)?;
+        let held = host
+            .lock(settings, &run, &placement, deadline)
+            .map_err(CafleetError::from)?
+            .ok_or_else(|| error("permission pane input lock is busy"))?;
+        let validate =
+            |conn: &mut Connection| -> Result<()> {
+                deadline.remaining()?;
+                held.validate_binding(&settings.database_url, &placement)?;
+                with_database_budget(conn, deadline, |conn| {
+                    let tx = conn.transaction().map_err(db_err)?;
+                    validate_submission_target(&tx, settings, &run, &placement)?;
+                    let view = super::input::inspection_association(&tx, &run, input)?;
+                    ensure(
+                        view.event == original.event
+                            && view.interaction.as_ref().map(|i| {
+                                (i.interaction_id, i.run_id, i.episode_seq, i.classification)
+                            }) == original.interaction.as_ref().map(|i| {
+                                (i.interaction_id, i.run_id, i.episode_seq, i.classification)
+                            }),
+                        "permission inspection association changed",
+                    )?;
+                    deadline.remaining()?;
+                    tx.commit().map_err(db_err)
+                })
+            };
+        validate(conn)?;
+        host.health(&run, deadline.instant())
+            .map_err(CafleetError::from)?
+            .validate(&run)?;
+        validate(conn)?;
+        let request = InputControlRequest {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            identity: ControlIdentity::from_run(&run),
+            expires_at_mono_ns: expiration.monotonic_ns(),
+            operation: InputControlOperation::PermissionInspect(PermissionInspectInput {
+                event_id: input.event_id,
+                interaction_id: input.interaction_id,
+                director_member_id: input.director_member_id,
+            }),
+        };
+        let reply = host
+            .exchange(&run, &request, deadline.instant())
+            .map_err(CafleetError::from)?;
+        validate(conn)?;
+        let InputControlReply::Inspection(reply) = reply else {
+            return Err(error("permission inspection requires its typed reply"));
+        };
+        let interaction = original
+            .interaction
+            .as_ref()
+            .expect("validated permission interaction");
+        ensure(
+            reply.event_id == input.event_id
+                && reply.interaction_id == input.interaction_id
+                && reply.message_id == original.event.message_id.expect("validated inbox message")
+                && reply.run_id == run.run_id
+                && reply.owner_epoch == run.owner_epoch
+                && reply.member_id == run.member_id
+                && reply.fleet_id == run.fleet_id
+                && reply.director_member_id == run.director_member_id
+                && reply.episode_seq == interaction.episode_seq
+                && reply.backend == run.backend
+                && reply.native_version == run.native_version
+                && reply.profile_version == run.profile_version,
+            "permission inspection reply identity mismatch",
+        )?;
+        storage::evidence::validate(&reply.evidence)?;
+        ensure(
+            reply.evidence["backend"].as_str() == Some(run.backend.as_str())
+                && reply.evidence["native_version"].as_str() == run.native_version.as_deref()
+                && reply.evidence["profile_version"].as_str() == run.profile_version.as_deref()
+                && reply.evidence["screen_seq"].as_u64() == Some(reply.output_seq),
+            "permission inspection evidence identity mismatch",
+        )?;
+        let missing = super::input::inspection_missing_evidence(&reply.evidence)?;
+        ensure(
+            reply
+                .missing_evidence
+                .iter()
+                .map(MissingEvidence::as_str)
+                .eq(missing.iter().map(MissingEvidence::as_str)),
+            "permission inspection evidence completeness mismatch",
+        )?;
+        if let Some(token) = &reply.request_token {
+            validate_request_token(token)?;
+        }
+        let expected_order = [PermissionDecision::Allow, PermissionDecision::Deny]
+            .into_iter()
+            .filter(|decision| reply.supported_decisions.contains(decision))
+            .collect::<Vec<_>>();
+        ensure(
+            reply.supported_decisions == expected_order,
+            "permission inspection decisions are not an ordered subset",
+        )?;
+        match reply.answer_capability {
+            Coverage::Tested => ensure(
+                reply.request_token.is_some()
+                    && !reply.supported_decisions.is_empty()
+                    && reply.answer_profile_version == run.profile_version
+                    && reply.classification == Some(InteractionClass::PermissionRequest)
+                    && reply.visibility == Visibility::Visible
+                    && reply.capability_reason.is_none(),
+                "permission inspection capability fields disagree",
+            )?,
+            Coverage::Unknown => ensure(
+                reply.request_token.is_none()
+                    && reply.supported_decisions.is_empty()
+                    && reply
+                        .capability_reason
+                        .as_ref()
+                        .is_some_and(|text| !text.trim().is_empty()),
+                "permission inspection unavailable fields disagree",
+            )?,
+        }
+        for value in [&reply.answer_profile_version, &reply.answer_rule_id]
+            .into_iter()
+            .flatten()
+        {
+            ensure(
+                !value.trim().is_empty() && value.len() <= 256,
+                "permission inspection profile identity is invalid",
             )?;
-            Err(error("live permission coordination is not implemented"))
-        })
+        }
+        deadline.remaining()?;
+        Ok(*reply)
     })();
     result.map_err(|source| context.failure(source))
 }
@@ -1112,6 +1239,50 @@ mod tests {
     use std::net::Shutdown;
     use std::time::Duration;
 
+    fn inspection_barrier(fixture: &mut InputServiceFixture, start: usize, barrier: &str) {
+        use std::io::Read;
+        let until = Instant::now() + Duration::from_secs(2);
+        let expected = format!("review-answer={barrier}");
+        fixture
+            .master
+            .write_all(format!("{barrier}\r").as_bytes())
+            .unwrap();
+        loop {
+            let interval = String::from_utf8_lossy(&fixture.output[start..]);
+            if let Some(position) = interval.find(&expected)
+                && interval[position..].contains('\n')
+            {
+                let answers = interval
+                    .split_inclusive('\n')
+                    .filter_map(|line| {
+                        line.find("review-answer=")
+                            .map(|position| line[position..].trim_end_matches(['\r', '\n']))
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    answers,
+                    vec![expected.as_str()],
+                    "complete retained native answer interval: {interval:?}"
+                );
+                return;
+            }
+            assert!(
+                Instant::now() < until,
+                "complete manual barrier within its original two-second bound: {interval:?}"
+            );
+            let mut bytes = [0; 4096];
+            match fixture.master.read(&mut bytes) {
+                Ok(0) => panic!("owned outer PTY closed before complete inspection barrier"),
+                Ok(count) => fixture.output.extend_from_slice(&bytes[..count]),
+                Err(cause) if cause.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(cause) => panic!("owned inspection barrier read: {cause}"),
+            }
+            std::thread::sleep(
+                Duration::from_millis(2).min(until.saturating_duration_since(Instant::now())),
+            );
+        }
+    }
+
     #[test]
     fn permission_inspection_actual_service_projects_current_unsupported_request_without_answering()
     {
@@ -1122,6 +1293,7 @@ mod tests {
         let until = Instant::now() + Duration::from_secs(2);
         fixture.master.write_all(b"form-inspection\r").unwrap();
         fixture.read_until("Operation: write form-inspection.txt");
+        let output_start = fixture.output.len();
         let (event_id, interaction_id, message_id) = loop {
             let row = with_database_budget(&mut fixture.fixture.conn, Deadline::until(until), |conn| {
                 conn.query_row(
@@ -1211,8 +1383,7 @@ mod tests {
             )
             .unwrap();
         assert!(notified.is_none());
-        fixture.master.write_all(b"inspection-barrier\r").unwrap();
-        fixture.read_until("review-answer=inspection-barrier");
+        inspection_barrier(&mut fixture, output_start, "inspection-barrier");
         fixture.finish();
     }
 
@@ -1287,6 +1458,7 @@ mod tests {
             .write_all(b"form-executable-inspection\r")
             .unwrap();
         fixture.read_until("Operation: write form-executable-inspection.txt");
+        let output_start = fixture.output.len();
         let (event_id, interaction_id, message_id) = loop {
             let ids = with_database_budget(&mut fixture.fixture.conn,Deadline::until(outer),|conn| {
                 conn.query_row("SELECT event_id,interaction_id,message_id FROM member_runtime_events WHERE run_id=?1 AND kind='interaction_opened'",[fixture.fixture.run.run_id],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?))).optional().map_err(db_err)
@@ -1392,18 +1564,50 @@ mod tests {
                 .contains(value.request_token.as_ref().unwrap())
         );
 
+        let original_sender: i64 = fixture
+            .fixture
+            .conn
+            .query_row(
+                "SELECT from_member_id FROM messages WHERE message_id=?1",
+                [message_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(original_sender, run.member_id);
+        let replacement_sender = run.director_member_id;
+        assert_ne!(
+            replacement_sender, original_sender,
+            "distinct valid fixture member identity"
+        );
         let database = settings.database_url.clone();
         let mut changed = SocketHost::new(&settings, &placement, outer);
         changed.after_health = Some(Box::new(move || {
             let conn = crate::db::connect(&database).unwrap();
+            let before: i64 = conn
+                .query_row(
+                    "SELECT from_member_id FROM messages WHERE message_id=?1",
+                    [message_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(before, original_sender);
             assert_eq!(
                 conn.execute(
                     "UPDATE messages SET from_member_id=?1 WHERE message_id=?2",
-                    rusqlite::params![run.member_id, message_id]
+                    rusqlite::params![replacement_sender, message_id]
                 )
                 .unwrap(),
                 1
             );
+            let after: i64 = conn
+                .query_row(
+                    "SELECT from_member_id FROM messages WHERE message_id=?1",
+                    [message_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_ne!(before, after);
+            assert_eq!(after, replacement_sender);
         }));
         assert!(
             inspect_permission_with_host(
@@ -1420,6 +1624,16 @@ mod tests {
             [1, 1, 0],
             "durable association is reread after actual health wait"
         );
+        let actual_sender: i64 = fixture
+            .fixture
+            .conn
+            .query_row(
+                "SELECT from_member_id FROM messages WHERE message_id=?1",
+                [message_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(actual_sender, replacement_sender);
         for table in [
             "member_input_operations",
             "member_permission_responses",
@@ -1442,11 +1656,7 @@ mod tests {
             )
             .unwrap();
         assert!(notified.is_none());
-        fixture
-            .master
-            .write_all(b"inspection-client-barrier\r")
-            .unwrap();
-        fixture.read_until("review-answer=inspection-client-barrier");
+        inspection_barrier(&mut fixture, output_start, "inspection-client-barrier");
         fixture.finish();
     }
 

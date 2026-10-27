@@ -80,6 +80,7 @@ pub(crate) struct EpisodeTracker {
     last_output: Option<u64>,
     last_time: Option<Instant>,
     finished: bool,
+    current_evidence: Option<Value>,
 }
 fn elapsed(now: Instant, since: Instant, duration: Duration) -> bool {
     now.saturating_duration_since(since) >= duration
@@ -113,7 +114,16 @@ impl EpisodeTracker {
             last_output: None,
             last_time: None,
             finished: false,
+            current_evidence: None,
         })
+    }
+    pub(crate) fn active_episode(&self) -> Option<(i64, InteractionClass)> {
+        self.active
+            .as_ref()
+            .map(|active| (active.sequence, active.class))
+    }
+    pub(super) fn current_evidence(&self) -> Option<&Value> {
+        self.current_evidence.as_ref()
     }
     fn draft(
         &self,
@@ -201,6 +211,7 @@ impl EpisodeTracker {
             "observation evidence sequence mismatch",
         )?;
         let evidence = self.policy.apply(&value.raw_evidence)?;
+        self.current_evidence = Some(evidence.clone());
         if matches!(
             value.kind,
             ObservationKind::Interaction(_) | ObservationKind::PermissionDenied
@@ -397,6 +408,7 @@ impl EpisodeTracker {
         Ok(update)
     }
     pub(crate) fn reset_observation(&mut self, reason: GateReason) -> Result<EpisodeUpdate> {
+        self.current_evidence = None;
         ensure(
             matches!(reason, GateReason::Gap | GateReason::ObserverUnavailable),
             "reset requires observation-gap cause",

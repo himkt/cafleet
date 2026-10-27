@@ -3,7 +3,7 @@ use crate::broker::runtime::{
     self as storage, InteractionCloseReason, OwnerKind, RunRecord, RunStatus, RuntimeEventKind,
     evidence::EvidencePolicy,
 };
-use crate::coding_agent::{Detector, ProfileCatalog};
+use crate::coding_agent::{AnswerMatch, Detector, ProfileCatalog};
 use std::ops::RangeInclusive;
 use std::time::{Duration, Instant};
 
@@ -14,11 +14,29 @@ mod inspection_tests {
 
     #[test]
     fn permission_inspection_request_generation_exhaustion_invalidates_without_wrap() {
+        use crate::coding_agent::{inspection_fixture_definition, inspection_fixture_form};
+        use crate::runtime::runner_tests::owned_child::OwnedChild;
+        use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+        use std::process::{Command, Stdio};
+        use std::sync::Arc;
+
+        struct Native {
+            child: OwnedChild,
+            until: Instant,
+        }
+        impl Drop for Native {
+            fn drop(&mut self) {
+                self.child.terminate_until(self.until);
+            }
+        }
+        let until = Instant::now() + Duration::from_secs(5);
         let mut fixture = Fixture::new();
-        let _artifacts = fixture.artifacts();
-        let lock = RunLock::acquire(&fixture.conn, &fixture.run.owner())
-            .unwrap()
-            .unwrap();
+        let artifacts = fixture.artifacts();
+        let lock = Arc::new(
+            RunLock::acquire(&fixture.conn, &fixture.run.owner())
+                .unwrap()
+                .unwrap(),
+        );
         lock.transfer_to_runner(
             &mut fixture.conn,
             &fixture.run.owner(),
@@ -27,29 +45,167 @@ mod inspection_tests {
         .unwrap();
         fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
         storage::reserve_event_sequences(&mut fixture.conn, &fixture.run.owner()).unwrap();
+        fixture.conn.execute("UPDATE member_runs SET native_version='synthetic-0.0.1',profile_version='synthetic-profile-1',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
         fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-        let mut controller = ObservationController::new(
-            &fixture.run,
-            &ProfileCatalog::bundled().unwrap(),
-            EvidencePolicy::metadata(),
-            1..=256,
+        let catalog = ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
+        let mut controller =
+            ObservationController::new(&fixture.run, &catalog, EvidencePolicy::metadata(), 1..=256)
+                .unwrap();
+        let mut writer = EventWriter::start(
+            format!("sqlite:///{}", fixture.conn.path().unwrap()),
+            fixture.run.clone(),
+            lock,
+            artifacts.paths.outbox.clone(),
         )
         .unwrap();
-        controller.request_generation = u64::MAX;
-        assert!(
+        writer.set_deadline(until);
+        let mut native = Native {
+            child: OwnedChild::new(
+                Command::new("/bin/cat")
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .unwrap(),
+            ),
+            until,
+        };
+        let identity = ProcessIdentity::read(i64::from(native.child.id()))
+            .unwrap()
+            .expect("owned live synthetic child");
+        assert!(identity.matches().unwrap());
+        fixture.conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3 WHERE run_id=?4",rusqlite::params![identity.pid,identity.start_identity,crate::time::format_utc(crate::time::now_utc()),fixture.run.run_id]).unwrap();
+        fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+        let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
+        let primary = catch_unwind(AssertUnwindSafe(|| {
             controller
-                .observer_failed(ObservationFailure::Parser, &RealObservationClock)
-                .is_err()
-        );
-        assert_eq!(controller.request_generation(), u64::MAX);
-        assert!(controller.current_request().is_none());
-        assert!(
+                .started(
+                    &fixture.run,
+                    &terminal.snapshot(),
+                    &writer,
+                    &RealObservationClock,
+                )
+                .unwrap();
+            terminal
+                .feed(&inspection_fixture_form(
+                    "overflow current request",
+                    "synthetic-only",
+                ))
+                .unwrap();
             controller
-                .observer_failed(ObservationFailure::Detector, &RealObservationClock)
-                .is_err()
-        );
-        assert_eq!(controller.request_generation(), u64::MAX);
-        assert!(controller.current_request().is_none());
+                .observer(&writer, &RealObservationClock)
+                .observe(&terminal.snapshot())
+                .unwrap();
+            loop {
+                controller
+                    .poll(&terminal.snapshot(), &writer, &RealObservationClock)
+                    .unwrap();
+                if controller.current_request().is_some() {
+                    break;
+                }
+                assert!(
+                    Instant::now() < until,
+                    "actual current authority before original fixture deadline"
+                );
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            assert!(controller.tracker.active_episode().is_some());
+            assert!(controller.current_request().is_some());
+            controller.request_generation = u64::MAX;
+            assert!(
+                controller
+                    .observer_failed(ObservationFailure::Parser, &RealObservationClock)
+                    .is_err()
+            );
+            assert_eq!(controller.request_generation(), u64::MAX);
+            assert!(controller.current_request().is_none());
+            terminal
+                .feed(&inspection_fixture_form(
+                    "overflow current request",
+                    "synthetic-only",
+                ))
+                .unwrap();
+            let observed = Detector::new(
+                &catalog,
+                crate::coding_agent::CodingAgent::Codex,
+                Some("synthetic-0.0.1"),
+            )
+            .unwrap()
+            .observe(&terminal.snapshot())
+            .unwrap();
+            assert_eq!(
+                observed.match_evidence,
+                crate::coding_agent::MatchEvidence::Complete
+            );
+            assert_eq!(
+                observed.kind,
+                crate::coding_agent::ObservationKind::Interaction(
+                    storage::InteractionClass::PermissionRequest
+                )
+            );
+            let later = controller
+                .observer(&writer, &RealObservationClock)
+                .observe(&terminal.snapshot());
+            if let Err(cause) = later {
+                assert!(
+                    cause.message().contains("generation") || cause.message().contains("exhaust"),
+                    "explicit authority fence: {cause}"
+                );
+            }
+            assert_eq!(controller.request_generation(), u64::MAX);
+            assert!(
+                controller.current_request().is_none(),
+                "a later genuine complete screen cannot restore exhausted authority"
+            );
+            let stable_at = Instant::now() + Duration::from_millis(110);
+            assert!(
+                stable_at < until,
+                "later stability observation retains the original cap"
+            );
+            std::thread::sleep(stable_at.saturating_duration_since(Instant::now()));
+            let later = controller.poll(&terminal.snapshot(), &writer, &RealObservationClock);
+            if let Err(cause) = later {
+                assert!(
+                    cause.message().contains("generation") || cause.message().contains("exhaust"),
+                    "explicit authority fence: {cause}"
+                );
+            }
+            assert_eq!(controller.request_generation(), u64::MAX);
+            assert!(
+                controller.current_request().is_none(),
+                "stable later complete evidence stays fenced"
+            );
+            assert!(
+                controller
+                    .observer_failed(ObservationFailure::Detector, &RealObservationClock)
+                    .is_err()
+            );
+            assert_eq!(controller.request_generation(), u64::MAX);
+            assert!(controller.current_request().is_none());
+        }));
+        let cleanup = catch_unwind(AssertUnwindSafe(|| {
+            let counts = writer.finish(until);
+            let status = writer.status();
+            native.child.terminate_until(until);
+            assert!(
+                native.child.try_wait().unwrap().is_some(),
+                "owned synthetic child reap confirmed"
+            );
+            assert_eq!(counts, (0, 0), "{status:?}");
+            assert!(
+                !status.degraded && status.diagnostic.is_none(),
+                "{status:?}"
+            );
+        }));
+        if let Err(primary) = primary {
+            if let Err(cleanup) = &cleanup {
+                eprintln!("inspection overflow cleanup also failed: {cleanup:?}");
+            }
+            resume_unwind(primary);
+        }
+        if let Err(cleanup) = cleanup {
+            resume_unwind(cleanup);
+        }
     }
 
     #[test]
@@ -176,11 +332,49 @@ pub(crate) struct ObservationController {
     exit_recorded: Option<ChildExit>,
     last_time: Option<Instant>,
     last_output: Option<u64>,
+    catalog: ProfileCatalog,
+    request_generation: u64,
+    request_generation_failed: bool,
+    current_request: Option<ObservedRequest>,
+    current_classification: Option<storage::InteractionClass>,
     pending_error: Option<CafleetError>,
     #[cfg(test)]
     capture: Option<NativeCapturePort>,
     #[cfg(test)]
     observation_hooks: Option<std::sync::Arc<dyn ObservationHooks>>,
+}
+pub(crate) struct ObservedRequest {
+    pub(super) request_generation: u64,
+    pub(super) answer_matches: Vec<AnswerMatch>,
+    pub(super) episode_seq: i64,
+    pub(super) classification: storage::InteractionClass,
+    pub(super) native_version: String,
+    pub(super) detector_profile_version: String,
+    pub(super) request_rule_id: String,
+    pub(super) semantic: SemanticFingerprint,
+    pub(super) choices: Vec<String>,
+    pub(super) focus: String,
+    pub(super) native_correlation: Option<String>,
+    pub(super) output_seq: u64,
+}
+impl ObservedRequest {
+    fn same_request(&self, other: &Self) -> bool {
+        self.episode_seq == other.episode_seq
+            && self.classification == other.classification
+            && self.native_version == other.native_version
+            && self.detector_profile_version == other.detector_profile_version
+            && self.request_rule_id == other.request_rule_id
+            && self.semantic == other.semantic
+            && self.choices == other.choices
+            && self.focus == other.focus
+            && self.native_correlation == other.native_correlation
+            && self.answer_matches.len() == other.answer_matches.len()
+            && self
+                .answer_matches
+                .iter()
+                .zip(&other.answer_matches)
+                .all(|(a, b)| a.same_request(b))
+    }
 }
 pub(crate) struct OrderedObservation<'a> {
     controller: &'a mut ObservationController,
@@ -254,12 +448,119 @@ impl ObservationController {
             exit_recorded: None,
             last_time: None,
             last_output: None,
+            catalog: catalog.clone(),
+            request_generation: 0,
+            request_generation_failed: false,
+            current_request: None,
+            current_classification: None,
             pending_error: None,
             #[cfg(test)]
             capture: None,
             #[cfg(test)]
             observation_hooks: None,
         })
+    }
+    pub(crate) fn current_request(&self) -> Option<&ObservedRequest> {
+        self.current_request.as_ref()
+    }
+    pub(super) fn request_generation(&self) -> u64 {
+        self.request_generation
+    }
+    pub(super) fn current_evidence(&self) -> Option<&Value> {
+        self.tracker.current_evidence()
+    }
+    pub(super) fn current_classification(&self) -> Option<storage::InteractionClass> {
+        self.current_classification
+    }
+    fn invalidate_request(&mut self) -> Result<()> {
+        self.current_request = None;
+        match self.request_generation.checked_add(1) {
+            Some(next) if !self.request_generation_failed => {
+                self.request_generation = next;
+                Ok(())
+            }
+            _ => {
+                self.request_generation_failed = true;
+                Err(error("permission request generation exhausted"))
+            }
+        }
+    }
+    fn update_request(
+        &mut self,
+        screen: &ScreenSnapshot,
+        observed: &ScreenObservation,
+    ) -> Result<()> {
+        ensure(
+            !self.request_generation_failed,
+            "permission request generation exhausted",
+        )?;
+        self.current_classification = match observed.kind {
+            ObservationKind::Interaction(class) => Some(class),
+            _ => None,
+        };
+        let next = (|| -> Result<Option<ObservedRequest>> {
+            if observed.kind
+                != ObservationKind::Interaction(storage::InteractionClass::PermissionRequest)
+                || observed.match_evidence != MatchEvidence::Complete
+                || self.eligibility != InputEligibility::Hold(GateReason::Interaction)
+            {
+                return Ok(None);
+            }
+            let Some((episode_seq, classification)) = self.tracker.active_episode() else {
+                return Ok(None);
+            };
+            let Some(version) = &self.run.native_version else {
+                return Ok(None);
+            };
+            let Some(profile_version) = &observed.profile_version else {
+                return Ok(None);
+            };
+            let backend = crate::coding_agent::coding_agent(&self.run.backend)
+                .expect("validated observer backend");
+            let mut answer_matches = Vec::new();
+            for decision in [
+                storage::PermissionDecision::Allow,
+                storage::PermissionDecision::Deny,
+            ] {
+                if let Some(plan) =
+                    self.catalog
+                        .answer_plan(backend, version, &observed.rule_id, decision)?
+                    && let Some(matched) = self.detector.match_answer(screen, &plan)?
+                {
+                    answer_matches.push(matched);
+                }
+            }
+            let Some(first) = answer_matches.first() else {
+                return Ok(None);
+            };
+            Ok(Some(ObservedRequest {
+                request_generation: self.request_generation,
+                episode_seq,
+                classification,
+                native_version: version.clone(),
+                detector_profile_version: profile_version.clone(),
+                request_rule_id: observed.rule_id.clone(),
+                semantic: first.semantic().clone(),
+                choices: first.choices().to_vec(),
+                focus: first.focus().to_owned(),
+                native_correlation: observed.native_correlation.clone(),
+                output_seq: first.output_seq(),
+                answer_matches,
+            }))
+        })()?;
+        let same = match (&self.current_request, &next) {
+            (Some(old), Some(new)) => old.same_request(new),
+            (None, None) => true,
+            _ => false,
+        };
+        if !same {
+            self.invalidate_request()?;
+        }
+        self.current_request = next.map(|mut request| {
+            request.request_generation = self.request_generation;
+            request
+        });
+        Ok(())
     }
     fn moment(&mut self, clock: &dyn ObservationClock) -> Result<ObservationMoment> {
         let now = clock.sample();
@@ -324,6 +625,8 @@ impl ObservationController {
         }
     }
     fn gap(&mut self, reason: ObservationFailure, now: &ObservationMoment) -> Result<()> {
+        self.invalidate_request()?;
+        self.current_classification = None;
         self.gap_count = self
             .gap_count
             .checked_add(1)
@@ -545,6 +848,7 @@ impl ObservationController {
             .tracker
             .observe(&observed, now.monotonic, &now.observed_at)?;
         self.retain(update)?;
+        self.update_request(screen, &observed)?;
         self.route(writer, &now)
     }
     pub(crate) fn poll(
@@ -653,6 +957,7 @@ impl ObservationController {
                 .tracker
                 .observe(&value, now.monotonic, &now.observed_at)?;
             self.retain(update)?;
+            self.update_request(current, &value)?;
             self.route(writer, &now)?;
         }
         Ok(self.status())
@@ -668,6 +973,7 @@ impl ObservationController {
             ensure(old == exit, "native exit identity changed")?;
         } else {
             let now = self.moment(clock)?;
+            self.invalidate_request()?;
             self.exit_recorded = Some(exit);
             self.exit = Some(PendingExit {
                 exit,

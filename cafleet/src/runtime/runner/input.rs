@@ -7,12 +7,13 @@ use super::{
     InputFailure, ProcessIdentity, Result, RunLock, SubmissionStage, Transport, check_deadline,
     ensure, error, stable_run_identity, with_database_deadline,
 };
+use super::{MissingEvidence, PermissionInspectInput, PermissionInspection};
 #[cfg(test)]
 use super::{RealInputDeadlineClock, receive_input_expiration};
 use crate::broker::members::db_err;
 use crate::broker::records::{MemberKind, Placement};
 use crate::broker::runtime::{self as storage, OwnerKind, RunRecord, RunStatus};
-use crate::coding_agent::ProfileCatalog;
+use crate::coding_agent::{AnswerMatch, ProfileCatalog, SemanticFingerprint};
 use crate::coding_agent::{ComposerOperation, coding_agent};
 use crate::error::CafleetError;
 use crate::input::{Deadline, inherited_database_deadline, with_database_budget};
@@ -308,9 +309,12 @@ mod permission_inspection_contracts {
             let ids = stable_form(h);
             let original = inspect(h, ids);
             let mut previous = token(&original);
-            form(h, "PRIVATE_INSPECTION_OPERATION", "synthetic-only");
+            let revision = h.controller.request_generation();
+            h.pty.child.bytes.extend(b"\x1b[?25l\x1b[?25h");
+            h.drain();
             let redraw = inspect(h, ids);
             assert!(redraw.output_seq > original.output_seq);
+            assert_eq!(h.controller.request_generation(), revision);
             assert_eq!(token(&redraw), previous);
             h.transport
                 .resize(
@@ -321,6 +325,13 @@ mod permission_inspection_contracts {
             assert_eq!(token(&inspect(h, ids)), previous);
             h.coordinator.observe_manual(0).unwrap();
             assert_eq!(token(&inspect(h, ids)), previous);
+            form(h, "PRIVATE_INSPECTION_OPERATION", "synthetic-only");
+            let rebuilt = token(&inspect(h, ids));
+            assert_ne!(
+                rebuilt, previous,
+                "clear/rebuild traverses incompatible observed screens"
+            );
+            previous = rebuilt;
             h.human.bytes.push_back(b'!');
             h.drain();
             assert_eq!(h.pty.manual, b"!");
@@ -369,7 +380,7 @@ mod permission_inspection_contracts {
             assert!(candidate.supported_decisions.is_empty());
             form(h, "PRIVATE_INSPECTION_OPERATION", "synthetic-alt");
             assert_ne!(token(&inspect(h, ids)), token(&alternate));
-            assert_eq!(calls.load(Ordering::SeqCst), 6);
+            assert_eq!(calls.load(Ordering::SeqCst), 7);
             assert!(h.pty.program.is_empty());
         });
     }
@@ -559,10 +570,6 @@ mod permission_inspection_contracts {
 }
 
 pub(crate) trait RequestTokenSource: Send {
-    #[expect(
-        dead_code,
-        reason = "the reviewed permission integration requests random tokens"
-    )]
     fn fill(&mut self, bytes: &mut [u8; 32]) -> Result<()>;
 }
 
@@ -605,10 +612,6 @@ impl InputHooks for InertInputHooks {
 
 pub(crate) struct InputServices {
     pub catalog: ProfileCatalog,
-    #[expect(
-        dead_code,
-        reason = "the reviewed permission integration requests random tokens"
-    )]
     pub token_source: Box<dyn RequestTokenSource>,
     pub hooks: Arc<dyn InputHooks>,
 }
@@ -622,6 +625,112 @@ pub(crate) struct InputCoordinator {
     placement: Placement,
     operations: BTreeMap<i64, RetainedInput>,
     pending: Option<PendingInput>,
+    current_request: Option<(CurrentRequest, String)>,
+    input_fenced: bool,
+}
+
+pub(crate) struct CurrentRequest {
+    request_generation: u64,
+    identity: ControlIdentity,
+    interaction_id: i64,
+    event_id: i64,
+    message_id: i64,
+    episode_seq: i64,
+    native_version: String,
+    detector_profile_version: String,
+    request_rule_id: String,
+    semantic: SemanticFingerprint,
+    choices: Vec<String>,
+    focus: String,
+    native_correlation: Option<String>,
+    manual_generation: u64,
+    output_seq: u64,
+    answer_matches: Vec<AnswerMatch>,
+}
+impl CurrentRequest {
+    fn same_request(&self, other: &Self) -> bool {
+        self.request_generation == other.request_generation
+            && self.identity == other.identity
+            && self.interaction_id == other.interaction_id
+            && self.event_id == other.event_id
+            && self.message_id == other.message_id
+            && self.episode_seq == other.episode_seq
+            && self.native_version == other.native_version
+            && self.detector_profile_version == other.detector_profile_version
+            && self.request_rule_id == other.request_rule_id
+            && self.semantic == other.semantic
+            && self.choices == other.choices
+            && self.focus == other.focus
+            && self.native_correlation == other.native_correlation
+            && self.manual_generation == other.manual_generation
+            && self.answer_matches.len() == other.answer_matches.len()
+            && self
+                .answer_matches
+                .iter()
+                .zip(&other.answer_matches)
+                .all(|(a, b)| a.same_request(b))
+    }
+}
+
+pub(super) fn inspection_association(
+    conn: &Connection,
+    run: &RunRecord,
+    input: &PermissionInspectInput,
+) -> Result<storage::RuntimeEventView> {
+    ensure(
+        input.event_id > 0
+            && input.interaction_id > 0
+            && input.director_member_id == run.director_member_id,
+        "permission inspection identity mismatch",
+    )?;
+    let view = storage::get_event(conn, input.event_id)?;
+    ensure(
+        view.event.run_id == run.run_id
+            && view.event.interaction_id == Some(input.interaction_id)
+            && view.event.kind == storage::RuntimeEventKind::InteractionOpened
+            && view.event.notification_state == storage::NotificationState::Inbox
+            && view.event.message_id.is_some_and(|id| id > 0)
+            && view.interaction.as_ref().is_some_and(|i| {
+                i.run_id == run.run_id
+                    && i.classification == storage::InteractionClass::PermissionRequest
+                    && i.closed_at.is_none()
+            }),
+        "permission inspection current event/interaction/message mismatch",
+    )?;
+    let director = crate::broker::get_member(conn, run.director_member_id, run.fleet_id)?
+        .ok_or_else(|| error("permission Director is absent"))?;
+    ensure(
+        director.kind == MemberKind::Director
+            && crate::broker::active_member_fleet(conn, run.director_member_id)?
+                == Some(run.fleet_id),
+        "permission Director is inactive",
+    )?;
+    let live: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM fleets WHERE fleet_id=?1 AND director_member_id=?2 AND deleted_at IS NULL)", rusqlite::params![run.fleet_id, run.director_member_id], |r| r.get(0)).map_err(db_err)?;
+    ensure(live, "permission fleet/Director changed")?;
+    Ok(view)
+}
+
+pub(super) fn inspection_missing_evidence(
+    evidence: &serde_json::Value,
+) -> Result<Vec<MissingEvidence>> {
+    storage::evidence::validate(evidence)?;
+    let mut missing = Vec::new();
+    let known = evidence["truncated"] == false
+        && evidence["operation"]
+            .as_str()
+            .is_some_and(|text| !text.trim().is_empty() && text != "[redacted]");
+    if !known {
+        missing.push(MissingEvidence::Operation);
+    }
+    missing.extend([
+        MissingEvidence::Arguments,
+        MissingEvidence::Cwd,
+        MissingEvidence::Environment,
+        MissingEvidence::Targets,
+        MissingEvidence::Effects,
+        MissingEvidence::ChoiceScope,
+    ]);
+    Ok(missing)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -763,6 +872,175 @@ enum WriteValidation {
 }
 
 impl InputCoordinator {
+    pub(super) fn inspect_received(
+        &mut self,
+        conn: &mut Connection,
+        run: &RunRecord,
+        request: InputControlRequest,
+        live: (&ObservationController, &mut Transport),
+        deadline: Instant,
+    ) -> std::result::Result<InputControlReply, InputFailure> {
+        let (observation, transport) = live;
+        let interaction_id = match &request.operation {
+            InputControlOperation::PermissionInspect(input) => Some(input.interaction_id),
+            _ => None,
+        };
+        let result =
+            (|| {
+                let deadline = inherited_database_deadline(conn)
+                    .map_or(deadline, |bound| deadline.min(bound.instant()));
+                check_deadline(Instant::now(), deadline)?;
+                ensure(
+                    request.protocol_version == super::CONTROL_PROTOCOL_VERSION,
+                    "input control protocol version mismatch",
+                )?;
+                request.identity.validate(&self.run)?;
+                let InputControlOperation::PermissionInspect(input) = request.operation else {
+                    return Err(error("permission inspection operation required"));
+                };
+                let view = with_database_deadline(conn, deadline, |conn| {
+                    let tx = conn.transaction().map_err(db_err)?;
+                    self.validate_live(&tx, run)?;
+                    let view = inspection_association(&tx, &self.run, &input)?;
+                    check_deadline(Instant::now(), deadline)?;
+                    tx.commit().map_err(db_err)?;
+                    Ok(view)
+                })?;
+                let interaction = view
+                    .interaction
+                    .expect("validated current permission interaction");
+                let message_id = view.event.message_id.expect("validated inbox message");
+                let evidence = observation
+                    .current_evidence()
+                    .ok_or_else(|| error("current inspection observation unavailable"))?
+                    .clone();
+                let missing_evidence = inspection_missing_evidence(&evidence)?;
+                let fresh = match transport.take_input_drain() {
+                    Some(proof) => {
+                        transport.validate_observation_drain(&proof, deadline)?;
+                        true
+                    }
+                    None => false,
+                };
+                let observed = observation.current_request();
+                if let Some((current, _)) = &self.current_request
+                    && (current.request_generation != observation.request_generation()
+                        || current.manual_generation != self.manual_generation
+                        || observed.is_none())
+                {
+                    self.current_request = None;
+                }
+                let mut supported_decisions = Vec::new();
+                let mut answer_profile_version = None;
+                let mut answer_rule_id = None;
+                let mut request_token = None;
+                let mut reason = Some("current executable permission request unavailable".into());
+                if fresh && let Some(observed) = observed {
+                    ensure(
+                        observed.episode_seq == interaction.episode_seq
+                            && observed.classification == interaction.classification,
+                        "permission inspection durable episode changed",
+                    )?;
+                    let next = CurrentRequest {
+                        request_generation: observed.request_generation,
+                        identity: ControlIdentity::from_run(&self.run),
+                        interaction_id: interaction.interaction_id,
+                        event_id: view.event.event_id,
+                        message_id,
+                        episode_seq: observed.episode_seq,
+                        native_version: observed.native_version.clone(),
+                        detector_profile_version: observed.detector_profile_version.clone(),
+                        request_rule_id: observed.request_rule_id.clone(),
+                        semantic: observed.semantic.clone(),
+                        choices: observed.choices.clone(),
+                        focus: observed.focus.clone(),
+                        native_correlation: observed.native_correlation.clone(),
+                        manual_generation: self.manual_generation,
+                        output_seq: observed.output_seq,
+                        answer_matches: observed.answer_matches.clone(),
+                    };
+                    if !next.answer_matches.is_empty() {
+                        if let Some((current, _)) = &mut self.current_request
+                            && current.same_request(&next)
+                        {
+                            current.output_seq = next.output_seq;
+                        } else {
+                            self.current_request = None;
+                            let mut bytes = [0; 32];
+                            self.services.token_source.fill(&mut bytes)?;
+                            let token = bytes.iter().map(|b| format!("{b:02x}")).collect();
+                            self.current_request = Some((next, token));
+                        }
+                        let (current, token) = self
+                            .current_request
+                            .as_ref()
+                            .expect("matched current request retained");
+                        let first = current.answer_matches[0].plan().capability();
+                        answer_profile_version = Some(first.profile_version().to_owned());
+                        if current.answer_matches.iter().all(|m| {
+                            m.plan().capability().answer_rule_id() == first.answer_rule_id()
+                        }) {
+                            answer_rule_id = Some(first.answer_rule_id().to_owned());
+                        }
+                        supported_decisions = current
+                            .answer_matches
+                            .iter()
+                            .map(|m| m.plan().capability().decision())
+                            .collect();
+                        request_token = Some(token.clone());
+                        reason = None;
+                    }
+                }
+                check_deadline(Instant::now(), deadline)?;
+                Ok(InputControlReply::Inspection(Box::new(
+                    PermissionInspection {
+                        event_id: view.event.event_id,
+                        message_id,
+                        member_id: self.run.member_id,
+                        fleet_id: self.run.fleet_id,
+                        director_member_id: self.run.director_member_id,
+                        run_id: self.run.run_id,
+                        owner_epoch: self.run.owner_epoch,
+                        interaction_id: interaction.interaction_id,
+                        episode_seq: interaction.episode_seq,
+                        classification: observation.current_classification(),
+                        visibility: observation.status().visibility,
+                        backend: self.run.backend.clone(),
+                        native_version: self.run.native_version.clone(),
+                        profile_version: self.run.profile_version.clone(),
+                        answer_profile_version,
+                        answer_rule_id,
+                        answer_capability: if request_token.is_some() {
+                            storage::Coverage::Tested
+                        } else {
+                            storage::Coverage::Unknown
+                        },
+                        capability_reason: reason,
+                        supported_decisions,
+                        request_token,
+                        output_seq: transport.snapshot().screen_seq,
+                        evidence,
+                        missing_evidence,
+                    },
+                )))
+            })();
+        result.map_err(|source| {
+            self.current_request = None;
+            InputFailure {
+                source,
+                run_id: Some(self.run.run_id),
+                interaction_id,
+                input_id: None,
+                operation_key: None,
+            }
+        })
+    }
+
+    pub(crate) fn fence(&mut self, deadline: Instant) -> Result<()> {
+        self.current_request = None;
+        self.input_fenced = true;
+        check_deadline(Instant::now(), deadline)
+    }
     fn failure(&self, source: CafleetError) -> InputFailure {
         InputFailure {
             source,
@@ -791,7 +1069,7 @@ impl InputCoordinator {
 
     fn validate_live(&self, conn: &Connection, expected: &RunRecord) -> Result<()> {
         ensure(
-            !self.manual_accounting_failed,
+            !self.manual_accounting_failed && !self.input_fenced,
             "manual accounting failure fenced input",
         )?;
         ensure(
@@ -1754,6 +2032,8 @@ impl InputCoordinator {
             services,
             manual_generation: 0,
             manual_accounting_failed: false,
+            current_request: None,
+            input_fenced: false,
         })
     }
 
@@ -1785,6 +2065,9 @@ impl InputCoordinator {
     }
 
     pub(crate) fn observe_manual(&mut self, count: usize) -> Result<()> {
+        if count > 0 {
+            self.current_request = None;
+        }
         let next = u64::try_from(count)
             .map_err(|_| error("manual input count exceeds generation range"))
             .and_then(|count| {

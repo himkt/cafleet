@@ -129,7 +129,7 @@ pub(crate) struct ServiceFixture {
     _slave: File,
     creator: Option<Wire>,
     prepared: Option<ControlIdentity>,
-    output: Vec<u8>,
+    pub(in crate::runtime) output: Vec<u8>,
     stopped: bool,
     cleanup_deadline: Option<Instant>,
     startup_deadline: Instant,

@@ -322,6 +322,19 @@ impl Transport {
         proof: &DrainedInput,
         deadline: Instant,
     ) -> Result<()> {
+        self.validate_observation_drain(proof, deadline)?;
+        ensure(
+            proof.health.eligibility == InputEligibility::ComposerEmpty
+                && proof.health.visibility == Visibility::NotVisible,
+            "input drain is not eligible for composer input",
+        )
+    }
+
+    pub(super) fn validate_observation_drain(
+        &self,
+        proof: &DrainedInput,
+        deadline: Instant,
+    ) -> Result<()> {
         check_deadline(Instant::now(), deadline)?;
         ensure(
             Arc::ptr_eq(&self.input_instance, &proof.instance)
@@ -343,10 +356,8 @@ impl Transport {
             !proof.health.degraded
                 && proof.health.pending_count == 0
                 && !proof.health.pending_evidence
-                && proof.health.diagnostic.is_none()
-                && proof.health.eligibility == InputEligibility::ComposerEmpty
-                && proof.health.visibility == Visibility::NotVisible,
-            "input drain is not eligible for composer input",
+                && proof.health.diagnostic.is_none(),
+            "observation drain is not healthy",
         )
     }
 

@@ -631,6 +631,70 @@ fn run_service(
                             Ok(ServiceControlRequest::Input(request))
                                 if matches!(
                                     request.operation,
+                                    InputControlOperation::PermissionInspect(_)
+                                ) =>
+                            {
+                                let interaction_id = match &request.operation {
+                                    InputControlOperation::PermissionInspect(input) => {
+                                        input.interaction_id
+                                    }
+                                    _ => unreachable!("matched inspection operation"),
+                                };
+                                let result = (|| -> Result<InputControlReply> {
+                                    let deadline = receive_input_expiration(
+                                        request.expires_at_mono_ns,
+                                        frame.admitted_at(),
+                                        None,
+                                        &mut RealInputDeadlineClock,
+                                    )?;
+                                    request.identity.validate(&run)?;
+                                    let coordinator = coordinator
+                                        .as_mut()
+                                        .ok_or_else(|| error("native input has not started"))?;
+                                    coordinator
+                                        .progress_with_manual(&mut transport, |transport| {
+                                            transport.quiesce_for_input(
+                                                &mut input,
+                                                &mut pty,
+                                                &mut output,
+                                                &mut controller
+                                                    .observer(&writer, services.clock.as_ref()),
+                                                deadline,
+                                            )
+                                        })
+                                        .map_err(CafleetError::from)?;
+                                    coordinator
+                                        .inspect_received(
+                                            &mut conn,
+                                            &run,
+                                            *request,
+                                            (&controller, &mut transport),
+                                            deadline,
+                                        )
+                                        .map_err(CafleetError::from)
+                                })()
+                                .map_err(|source| {
+                                    CafleetError::from(InputFailure {
+                                        source,
+                                        run_id: Some(run.run_id),
+                                        interaction_id: Some(interaction_id),
+                                        input_id: None,
+                                        operation_key: None,
+                                    })
+                                });
+                                let replied = match &result {
+                                    Ok(reply) => client.reply_input(Ok(reply)),
+                                    Err(cause) => client.reply_input(Err(cause)),
+                                };
+                                if replied.is_err() {
+                                    client.closed = true;
+                                    break;
+                                }
+                                continue;
+                            }
+                            Ok(ServiceControlRequest::Input(request))
+                                if matches!(
+                                    request.operation,
                                     InputControlOperation::SubmitPrompt(_)
                                         | InputControlOperation::SubmitExec(_)
                                         | InputControlOperation::Receipt(_)
@@ -1050,6 +1114,14 @@ fn run_service(
     };
     if let Some(coordinator) = coordinator.as_mut() {
         coordinator.finish_pending_attempt();
+        if let Err(cause) = coordinator.fence(clock.storage_deadline()) {
+            let message = cause.message();
+            if let Some(prior) = &mut failure {
+                prior.push_str(&format!("; input fence: {message}"));
+            } else {
+                failure = Some(message.into_owned());
+            }
+        }
     }
     let clock = pty.begin_shutdown(clock);
     let mut live = LiveShutdown {

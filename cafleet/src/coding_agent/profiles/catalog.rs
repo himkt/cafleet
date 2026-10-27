@@ -250,7 +250,7 @@ fn lower_hex(value: &str) -> bool {
         .bytes()
         .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub(super) struct Fixture {
     pub id: String,
     pub kind: String,
@@ -306,6 +306,79 @@ pub(super) struct Answer {
     pub request: String,
     pub id: String,
     pub fixtures: Vec<String>,
+    pub choice_id: String,
+    pub focus_matcher_id: String,
+    pub stages: Vec<AnswerStage>,
+    pub provenance: Vec<Fixture>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct AnswerStage {
+    bytes: Vec<u8>,
+    required_rule_id: String,
+    required_choice_id: String,
+}
+impl AnswerStage {
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "native permission response stages consume measured bytes"
+        )
+    )]
+    pub(crate) fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "native permission response stages revalidate the required request rule"
+        )
+    )]
+    pub(crate) fn required_rule_id(&self) -> &str {
+        &self.required_rule_id
+    }
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "native permission response stages revalidate the required choice"
+        )
+    )]
+    pub(crate) fn required_choice_id(&self) -> &str {
+        &self.required_choice_id
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct AnswerPlan {
+    capability: AnswerCapability,
+    choice_id: String,
+    focus_matcher_id: String,
+    stages: Vec<AnswerStage>,
+    provenance: Vec<Fixture>,
+}
+impl AnswerPlan {
+    pub(crate) fn capability(&self) -> &AnswerCapability {
+        &self.capability
+    }
+    pub(crate) fn choice_id(&self) -> &str {
+        &self.choice_id
+    }
+    pub(crate) fn focus_matcher_id(&self) -> &str {
+        &self.focus_matcher_id
+    }
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "native permission responses advance the measured ordered stages"
+        )
+    )]
+    pub(crate) fn stages(&self) -> &[AnswerStage] {
+        &self.stages
+    }
 }
 #[derive(Clone)]
 pub(super) struct Profile {
@@ -317,6 +390,34 @@ pub(super) struct Profile {
     pub composer: Option<Capability>,
     pub submissions: [Option<ComposerSubmission>; 2],
     pub answers: Vec<Answer>,
+}
+impl Profile {
+    pub(super) fn answer_plan(
+        &self,
+        version: &str,
+        request: &str,
+        decision: PermissionDecision,
+    ) -> Option<AnswerPlan> {
+        let answer = self
+            .answers
+            .iter()
+            .find(|a| a.request == request && a.decision == decision)?;
+        Some(AnswerPlan {
+            capability: AnswerCapability {
+                backend: self.backend,
+                native_version: version.into(),
+                profile_version: self.version.clone(),
+                request_rule_id: request.into(),
+                answer_rule_id: answer.id.clone(),
+                decision,
+                fixture_ids: answer.fixtures.clone(),
+            },
+            choice_id: answer.choice_id.clone(),
+            focus_matcher_id: answer.focus_matcher_id.clone(),
+            stages: answer.stages.clone(),
+            provenance: answer.provenance.clone(),
+        })
+    }
 }
 #[derive(Clone)]
 pub struct ProfileCatalog {
@@ -603,6 +704,10 @@ impl ProfileCatalog {
                     .iter()
                     .flatten()
                     .all(ComposerSubmission::native_provenance)
+                    && profile
+                        .answers
+                        .iter()
+                        .all(|a| a.provenance.iter().all(|f| f.kind == "native"))
             }),
             "bundled executable composer plans require native provenance",
         )?;
@@ -745,14 +850,25 @@ impl ProfileCatalog {
                     "unknown answer focus matcher",
                 )?;
                 let stages = array(&a["stages"])?;
-                require(!stages.is_empty(), "measured answer stages required")?;
+                require(
+                    (1..=16).contains(&stages.len()),
+                    "one to sixteen measured answer stages required",
+                )?;
+                let mut compiled_stages = Vec::new();
                 for v in stages {
                     let s = object(v, &["bytes_hex", "required_rule_id", "required_choice_id"])?;
                     let bytes = text(&s["bytes_hex"])?;
                     require(
-                        bytes.len().is_multiple_of(2) && lower_hex(&bytes),
-                        "nonempty lowercase stage bytes required",
+                        (2..=512).contains(&bytes.len())
+                            && bytes.len().is_multiple_of(2)
+                            && lower_hex(&bytes),
+                        "one to 256 lowercase hexadecimal stage bytes required",
                     )?;
+                    compiled_stages.push(AnswerStage {
+                        bytes: decoded_hex(&bytes),
+                        required_rule_id: request.clone(),
+                        required_choice_id: choice_id.clone(),
+                    });
                     require(
                         text(&s["required_rule_id"])? == request
                             && text(&s["required_choice_id"])? == choice_id,
@@ -765,7 +881,20 @@ impl ProfileCatalog {
                     decision,
                     request,
                     id,
+                    provenance: fixture_ids
+                        .iter()
+                        .map(|id| {
+                            fixtures
+                                .iter()
+                                .find(|f| &f.id == id)
+                                .expect("validated answer fixture reference")
+                                .clone()
+                        })
+                        .collect(),
                     fixtures: fixture_ids,
+                    choice_id,
+                    focus_matcher_id: focus,
+                    stages: compiled_stages,
                 });
             }
             profiles.push(Profile {
@@ -863,5 +992,17 @@ impl ProfileCatalog {
                 decision,
                 fixture_ids: answer.fixtures.clone(),
             }))
+    }
+
+    pub(crate) fn answer_plan(
+        &self,
+        backend: CodingAgent,
+        version: &str,
+        request: &str,
+        decision: PermissionDecision,
+    ) -> Result<Option<AnswerPlan>> {
+        Ok(self
+            .matching(backend, Some(version))
+            .and_then(|p| p.answer_plan(version, request, decision)))
     }
 }
