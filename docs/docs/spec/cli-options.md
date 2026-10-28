@@ -433,8 +433,7 @@ Each check applies the same statuses to its own file:
 Setup installs every preset, so a missing `cafleet-ask` preset is an `error`:
 the installation predates that preset or was altered.
 
-An OpenCode installation recorded only at another base, such as `~/.opencode`,
-is not the resolved installation. With `OPENCODE_CONFIG_DIR` unset, doctor
+An OpenCode installation recorded only at another base is not the resolved installation. With `OPENCODE_CONFIG_DIR` unset, doctor
 reports it through the checks at the resolved base:
 
 | Check name | Status | Detail |

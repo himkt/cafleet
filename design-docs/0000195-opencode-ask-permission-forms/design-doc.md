@@ -138,11 +138,12 @@ The runner forwards outer-terminal input to the native child as manual input. On
 | Read | Each tick repeats the non-blocking outer read until it would block, reaches EOF or fills the 65536-byte input queue; each read keeps the existing per-read capacity |
 | Write | The tick then writes the whole queue to the PTY master in one write; bytes the master does not accept stay queued, in order, for the next tick |
 | EOF | Bytes read before EOF are forwarded; EOF is then reported as today |
-| Pacing | When a tick read outer bytes or leaves input queued, the service loop starts the next tick without its idle sleep; otherwise the idle sleep is unchanged |
+| Pacing | When a tick moved input bytes, by reading outer bytes or writing a positive count to the PTY master, the service loop starts the next tick without its idle sleep; otherwise, including a tick whose queued input the master did not accept, the idle sleep is unchanged |
 | Framing | None: bytes pass unchanged and in order, with no escape-sequence parsing, holding or timeout |
 | Manual accounting | Unchanged: every read advances the manual-input generation by its byte count |
 
 A reply longer than the 65536-byte queue still spans ticks, but with no idle sleep between them.
+
 
 ### Native version probe
 
@@ -309,8 +310,9 @@ Add these OpenCode cases, all with backend `opencode`, permission mode `cafleet-
 | `opencode-focus-always-001` | `answer_stage` | `deny` | `6c` | — | `deny` | `of01.db` | `of01` | Stopped before its capture published; no fixture |
 | `opencode-focus-always-002` | `answer_stage` | `deny` | `6c` | — | `deny` | `of02.db` | `of02` | The `Always allow`-focused fixture; no confirming byte is sent |
 | `opencode-idle-001` | `no_answer` | — | — | — | — | `oi01.db` | `oi01` | The idle-composer fixture |
+| `opencode-herdr-env-cells-001` | `no_answer` | — | — | — | `allow` | `oh01.db` | `oh01` | The runner grid under herdr's terminal identity at 36`opencode-herdr-env-cells-001` uses 36x166, the live herdr width, and is the only case with a child-environment override: the harness passes `TERM=xterm-256color`, `COLORTERM=truecolor`, `TERM_PROGRAM=herdr`, `TERM_PROGRAM_VERSION=0.9.5` and `HERDR_ENV=1` to its native child and exports the same identity into its dedicated tmux server.iew record for that registry, yet it lists neither the case nor the override mechanism. Add the case row and one sentence specifying the child-environment override and the case it applies to. -->
 
-`opencode-focus-always-002` sends only the measured `l` and never Enter, so both markers stay absent and the form is closed by member cleanup.
+
 
 A capture's two samples come from the runner's quiet-timer polling, so a static screen needs no output after arming. The runner does cancel an unpublished capture when its case stops, and a stage byte sent before the second sample enters the pre-stage fixture. The driver's `arm` therefore returns only after the capture manifest is published, and `stop` refuses an armed case whose manifest is not yet published.
 
@@ -418,7 +420,7 @@ Record detection-to-inbox latency, the CAFleet commit, versions, geometry and ev
 ### Step 7: Forward outer-terminal input bursts intact
 
 - [x] Document § Outer-terminal input forwarding in `docs/docs/spec/member-runtime.md` and `SPEC.md`, where the runner's outer-input relay is specified. <!-- completed: 2026-10-28T14:22 -->
-- [x] Write tests: one tick drains a fake outer input that returns 4096 bytes, then 3600 bytes, then would-block, queues all 7696 bytes in order and writes them to the PTY master within that tick; the manual-input generation advances by 7696; reads stop when the 65536-byte input queue is full, leave the rest unread and resume on the next tick; data followed by EOF forwards the data and reports outer EOF; a partial PTY write keeps the remainder queued in order; the pacing decision starts the next tick without the idle sleep while a tick read outer bytes or input stays queued, and keeps the idle sleep otherwise; and the existing transport tests still pass. <!-- completed: 2026-10-28T14:25 -->
+- [x] Write tests: one tick drains a fake outer input that returns 4096 bytes, then 3600 bytes, then would-block, queues all 7696 bytes in order and writes them to the PTY master within that tick; the manual-input generation advances by 7696; reads stop when the 65536-byte input queue is full, leave the rest unread and resume on the next tick; data followed by EOF forwards the data and reports outer EOF; a partial PTY write keeps the remainder queued in order; the pacing decision starts the next tick without the idle sleep when a tick read outer bytes or wrote a positive count to the PTY master, and keeps the idle sleep otherwise, including a tick whose queued input the blocked master did not accept; and the existing transport tests still pass. <!-- completed: 2026-10-28T14:25 -->
 - [x] Implement the draining outer read and whole-queue PTY write in the transport tick, and the input-aware pacing in the service loop. <!-- completed: 2026-10-28T14:29 -->
 - [x] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck`. <!-- completed: 2026-10-28T14:29 -->
 

@@ -251,7 +251,7 @@ Forward outer-terminal input so that a burst spanning several reads reaches the 
 | Read | Each tick repeats the non-blocking outer read until it would block, reaches EOF or fills the 65536-byte input queue |
 | Write | The tick then writes the whole queue to the PTY master in one write; unaccepted bytes stay queued, in order, for the next tick |
 | EOF | Bytes read before EOF are forwarded before outer EOF is reported |
-| Pacing | A tick that read outer bytes or leaves input queued is followed immediately by the next tick; an idle tick keeps the loop's idle sleep |
+| Pacing | A tick that moved input bytes, by reading outer bytes or writing a positive count to the PTY master, is followed immediately by the next tick; every other tick, including one whose queued input the master did not accept, keeps the loop's idle sleep |
 | Framing | None: bytes pass unchanged and in order, with no escape-sequence parsing, holding or timeout |
 
 Every read advances the manual-input generation by its byte count, as specified for manual input.
