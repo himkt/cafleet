@@ -1,12 +1,9 @@
 pub(crate) mod control_service;
 mod creation;
 mod fleet_deletion;
-mod lifecycle;
 pub(crate) mod owned_child;
 pub(in crate::runtime) mod permission_history;
 mod recovery;
-mod shutdown;
-mod transport;
 
 mod native_capture;
 use rusqlite::Connection;
