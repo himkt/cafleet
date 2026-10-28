@@ -1,0 +1,330 @@
+{
+  "schema_version": 1,
+  "fixtures": [
+    {
+      "id": "claude-2.1.302-default-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude-2.1.302-default-permission-1.json",
+      "sha256": "be7c9c5c62f7fd73939d7838c7b6457c1db47d238956bc25e48da58cb7e95c8f"
+    },
+    {
+      "id": "claude-2.1.302-allow-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude-2.1.302-allow-pre-stage-1.json",
+      "sha256": "96ef6ca358b364ea097d9cc28d5fb25eee03ac0bb4d2d079659aed0a1bba098c"
+    },
+    {
+      "id": "claude-2.1.302-deny-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude-2.1.302-deny-pre-stage-1.json",
+      "sha256": "012ffa7d2bef37d65538e104e6b43452e9c4be86ce7c9c1e58aaf66dd987a060"
+    },
+    {
+      "id": "claude-2.1.302-idle-composer-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude-2.1.302-idle-composer-1.json",
+      "sha256": "e606b8080d5fcd53505c0722c8922bb7943e3b39dd0b8a841f892c1505726bd4"
+    },
+    {
+      "id": "claude-2.1.302-wrapped-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 52,
+      "source_ref": "native/claude-2.1.302-wrapped-permission-1.json",
+      "sha256": "4d8f8f75fd1b318b3d4054eacaada7983e3413380d294646e1c6f0a74d9c76fd"
+    },
+    {
+      "id": "claude-2.1.302-wrapped-allow-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 52,
+      "source_ref": "native/claude-2.1.302-wrapped-allow-pre-stage-1.json",
+      "sha256": "dca8b4f19c4ce51a218f61aa4ab9a712962de9768b62cbce63c2c5e65818d5a8"
+    },
+    {
+      "id": "claude-2.1.302-wrapped-deny-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 52,
+      "source_ref": "native/claude-2.1.302-wrapped-deny-pre-stage-1.json",
+      "sha256": "3a671776c75c8f13cff4941954658d0b67d9978b13732e0c4f6a71b0b1f9c960"
+    },
+    {
+      "id": "claude-2.1.302-boxed-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 89,
+      "source_ref": "native/claude-2.1.302-boxed-permission-1.json",
+      "sha256": "c9d97c8b92b38546a7aee55db404af97e4872fdcbbf84b1ea7b992694dd5f2cf"
+    },
+    {
+      "id": "claude-2.1.302-boxed-single-row-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude-2.1.302-boxed-single-row-permission-1.json",
+      "sha256": "0a701f94912057b13c5775c74e2574683dd861787a205424dc5a991e9699b062"
+    },
+    {
+      "id": "codex-0.163.0-on-request-permission-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex-0.163.0-on-request-permission-1.json",
+      "sha256": "e30e9533cb23f2adc95a3913467b79a8a286ad4a4b21d86ac447419818223dcd"
+    },
+    {
+      "id": "codex-0.163.0-allow-pre-stage-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex-0.163.0-allow-pre-stage-1.json",
+      "sha256": "d263d9bdb4328dc292c615603c38924fae86a263ccab76fe2b579d3eed4b6419"
+    },
+    {
+      "id": "codex-0.163.0-deny-pre-stage-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex-0.163.0-deny-pre-stage-1.json",
+      "sha256": "5e7fddce15a225b72a3eb0b705601c1d11e83f2eae687b9f8c6feee70f928a20"
+    },
+    {
+      "id": "codex-0.163.0-idle-composer-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex-0.163.0-idle-composer-1.json",
+      "sha256": "f7337eae171edcce09eafad4750e7b2fa6354b680adff0c3089ec435be5c5a2b"
+    }
+  ],
+  "profiles": [
+    {
+      "backend": "claude",
+      "native_versions": ["2.1.302"],
+      "profile_version": "claude-2.1.302-default-3",
+      "rules": [
+        {
+          "id": "claude-bash-permission",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^ Bash command$",
+            "end_pattern": "^ Esc to cancel · Tab to amend$",
+            "max_rows": 24,
+            "cursor": "inside"
+          },
+          "matchers": [
+            {"id": "heading", "scope": "line", "pattern": "^ Bash command$"},
+            {"id": "operation", "scope": "region", "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"},
+            {"id": "approval", "scope": "line", "pattern": "^ This command requires approval$"},
+            {"id": "question", "scope": "line", "pattern": "^ Do you want to proceed\\?$"},
+            {"id": "focus", "scope": "line", "pattern": "^ ❯ [1-9]\\. "},
+            {"id": "allow", "scope": "line", "pattern": "^ [❯ ] 1\\. (?P<label>Yes)$"},
+            {"id": "deny", "scope": "line", "pattern": "^ [❯ ] 4\\. (?P<label>No)$"}
+          ],
+          "extract": {
+            "operation": {"matcher_id": "operation", "capture": "operation", "row_margin": " "},
+            "choices": [
+              {"id": "allow-once", "label": {"matcher_id": "allow", "capture": "label"}, "scope": "single_request"},
+              {"id": "deny-once", "label": {"matcher_id": "deny", "capture": "label"}, "scope": "single_request"}
+            ],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "claude-idle-composer",
+          "priority": 50,
+          "observation": "composer_empty",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^❯\\u{a0}",
+            "end_pattern": "^❯\\u{a0}",
+            "max_rows": 1,
+            "cursor": "at_end"
+          },
+          "matchers": [
+            {"id": "prompt", "scope": "line", "pattern": "^❯\\u{a0}"}
+          ],
+          "extract": {
+            "operation": null,
+            "choices": [],
+            "native_request_id": null
+          },
+          "verified_noninteraction": true,
+          "sensitive": false
+        }
+      ],
+      "capabilities": {
+        "detection": {
+          "rule_ids": ["claude-bash-permission"],
+          "fixture_ids": [
+            "claude-2.1.302-default-permission-1",
+            "claude-2.1.302-wrapped-permission-1",
+            "claude-2.1.302-boxed-permission-1",
+            "claude-2.1.302-boxed-single-row-permission-1"
+          ]
+        },
+        "composer": {
+          "rule_ids": ["claude-idle-composer"],
+          "fixture_ids": ["claude-2.1.302-idle-composer-1"]
+        },
+        "answers": [
+          {
+            "decision": "allow",
+            "request_rule_id": "claude-bash-permission",
+            "answer_rule_id": "claude-bash-allow-digit",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {"bytes_hex": "31", "required_rule_id": "claude-bash-permission", "required_choice_id": "allow-once"}
+            ],
+            "fixture_ids": ["claude-2.1.302-allow-pre-stage-1", "claude-2.1.302-wrapped-allow-pre-stage-1"]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "claude-bash-permission",
+            "answer_rule_id": "claude-bash-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {"bytes_hex": "34", "required_rule_id": "claude-bash-permission", "required_choice_id": "deny-once"}
+            ],
+            "fixture_ids": ["claude-2.1.302-deny-pre-stage-1", "claude-2.1.302-wrapped-deny-pre-stage-1"]
+          }
+        ]
+      }
+    },
+    {
+      "backend": "codex",
+      "native_versions": ["0.163.0"],
+      "profile_version": "codex-0.163.0-on-request-1",
+      "rules": [
+        {
+          "id": "codex-exec-approval",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^  Would you like to run the following command\\?\\s*$",
+            "end_pattern": "^  Press enter to confirm or esc to cancel\\s*$",
+            "max_rows": 24,
+            "cursor": "inside"
+          },
+          "matchers": [
+            {"id": "heading", "scope": "line", "pattern": "^  Would you like to run the following command\\?\\s*$"},
+            {"id": "environment", "scope": "line", "pattern": "^  Environment: \\S+\\s*$"},
+            {"id": "reason", "scope": "line", "pattern": "^  Reason: \\S"},
+            {"id": "operation", "scope": "line", "pattern": "^  \\$ (?P<operation>\\S.*?)\\s*$"},
+            {"id": "focus", "scope": "line", "pattern": "^› [1-9]\\. "},
+            {"id": "allow", "scope": "line", "pattern": "^[› ] 1\\. (?P<label>Yes, proceed) \\(y\\)\\s*$"},
+            {"id": "deny", "scope": "line", "pattern": "^[› ] 3\\. (?P<label>No, and tell Codex what to do differently) \\(esc\\)\\s*$"}
+          ],
+          "extract": {
+            "operation": {"matcher_id": "operation", "capture": "operation"},
+            "choices": [
+              {"id": "allow-once", "label": {"matcher_id": "allow", "capture": "label"}, "scope": "single_request"},
+              {"id": "deny-once", "label": {"matcher_id": "deny", "capture": "label"}, "scope": "single_request"}
+            ],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "codex-idle-composer",
+          "priority": 50,
+          "observation": "composer_empty",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^› ",
+            "end_pattern": "^› ",
+            "max_rows": 1,
+            "cursor": "at_end"
+          },
+          "matchers": [
+            {"id": "prompt", "scope": "line", "pattern": "^› "}
+          ],
+          "extract": {
+            "operation": null,
+            "choices": [],
+            "native_request_id": null
+          },
+          "verified_noninteraction": true,
+          "sensitive": false
+        }
+      ],
+      "capabilities": {
+        "detection": {
+          "rule_ids": ["codex-exec-approval"],
+          "fixture_ids": ["codex-0.163.0-on-request-permission-1"]
+        },
+        "composer": {
+          "rule_ids": ["codex-idle-composer"],
+          "fixture_ids": ["codex-0.163.0-idle-composer-1"]
+        },
+        "answers": [
+          {
+            "decision": "allow",
+            "request_rule_id": "codex-exec-approval",
+            "answer_rule_id": "codex-exec-allow-y",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {"bytes_hex": "79", "required_rule_id": "codex-exec-approval", "required_choice_id": "allow-once"}
+            ],
+            "fixture_ids": ["codex-0.163.0-allow-pre-stage-1"]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "codex-exec-approval",
+            "answer_rule_id": "codex-exec-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {"bytes_hex": "33", "required_rule_id": "codex-exec-approval", "required_choice_id": "deny-once"}
+            ],
+            "fixture_ids": ["codex-0.163.0-deny-pre-stage-1"]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -35,12 +35,24 @@ pub fn register_member(
     description: &str,
     placement: Option<&NewPlacement>,
 ) -> Result<RegisteredMember, CafleetError> {
-    let now = format_utc(now_utc());
     let tx = conn
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(db_err)?;
-    super::fleets::require_live_fleet(&tx, fleet_id)?;
-    let member = tx
+    let member = register_member_rows(&tx, fleet_id, name, description, placement)?;
+    tx.commit().map_err(db_err)?;
+    Ok(member)
+}
+
+pub(crate) fn register_member_rows(
+    conn: &Connection,
+    fleet_id: i64,
+    name: &str,
+    description: &str,
+    placement: Option<&NewPlacement>,
+) -> Result<RegisteredMember, CafleetError> {
+    let now = format_utc(now_utc());
+    super::fleets::require_live_fleet(conn, fleet_id)?;
+    let member = conn
         .query_row(
             "INSERT INTO members (fleet_id, name, description, status, registered_at)
          VALUES (?1, ?2, ?3, 'active', ?4) RETURNING member_id, name, registered_at",
@@ -56,7 +68,7 @@ pub fn register_member(
         .map_err(db_err)?;
     let member_id = member.member_id;
     if let Some(p) = placement {
-        tx.execute(
+        conn.execute(
             "INSERT INTO member_placements
              (member_id, mux_session, mux_window_id, mux_pane_id, backend, coding_agent, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -72,7 +84,6 @@ pub fn register_member(
         )
         .map_err(db_err)?;
     }
-    tx.commit().map_err(db_err)?;
     Ok(member)
 }
 
@@ -82,7 +93,7 @@ pub fn get_member(
     fleet_id: i64,
 ) -> Result<Option<MemberRecord>, CafleetError> {
     super::fleets::require_live_fleet(conn, fleet_id)?;
-    conn.query_row(
+    let mut member = conn.query_row(
         "SELECT m.name, m.description, m.status, m.registered_at,
                 f.director_member_id=m.member_id,
                 p.backend, p.mux_session, p.mux_window_id, p.mux_pane_id, p.coding_agent, p.created_at
@@ -97,9 +108,14 @@ pub fn get_member(
                 status: row.get(2)?, registered_at: row.get(3)?,
                 kind: if row.get(4)? { MemberKind::Director } else { MemberKind::Member },
                 placement: backend.map(|_| Placement::from_row(row, 5)).transpose()?,
+                runtime: None,
             })
         },
-    ).optional().map_err(db_err)
+    ).optional().map_err(db_err)?;
+    if let Some(member) = &mut member {
+        member.runtime = super::runtime::member_runtime(conn, member_id)?;
+    }
+    Ok(member)
 }
 
 pub fn active_member_fleet(conn: &Connection, member_id: i64) -> Result<Option<i64>, CafleetError> {
@@ -197,6 +213,7 @@ fn roster_rows(conn: &Connection, fleet_id: i64) -> Result<Vec<MemberActivity>, 
                     MemberKind::Member
                 },
                 placement: backend.map(|_| Placement::from_row(row, 4)).transpose()?,
+                runtime: None,
                 description: row.get(10)?,
                 registered_at: row.get(11)?,
             },
@@ -440,6 +457,7 @@ mod tests {
                 status: MemberStatus::Active,
                 kind: MemberKind::Member,
                 placement: None,
+                runtime: None,
             },
             last_sent: sent.map(str::to_owned),
             last_recv: received.map(str::to_owned),

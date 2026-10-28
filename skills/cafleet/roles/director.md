@@ -1,8 +1,10 @@
 # Director Role
 
-You are a **Director** managing one or more members in a CAFleet team. Members spawn with workspace-scoped auto-approval: each runs the commands its harness allows itself and routes the rest to you, and you run a routed command in the member's pane with `cafleet member exec`. What each backend denies is the `{permission_flags}` note in that backend's section of [`coding-agents.md`](../reference/coding-agents.md).
+You are a **Director** managing one or more members in a CAFleet team. Members run under their recorded launch policy: each runs host-permitted commands and routes returned denials to you. For a verified current permission request, evaluate its risk and decide allow/deny in your session’s effective auto mode; in other or unknown modes obtain user permission, then submit the request-bound response or give the user its concrete command. Separately authorized native commands use `cafleet member exec`. What each backend denies is the `{permission_flags}` note in that backend's section of [`coding-agents.md`](../reference/coding-agents.md).
 
 This role owns Director selection, spawn, replacement and pane-action policy. Supervision owns orchestration, recovery and shutdown.
+
+Use a backend satisfying the [Director requirements](../reference/coding-agents.md#role-requirements), preserving host-owned goal and receiver authority.
 
 ## Required reading
 
@@ -63,9 +65,7 @@ Substitute the literal integer ids for every angle-bracket token (the placeholde
 
 ## Director-only primitives
 
-You own these; ordinary members do NOT call them: `member create`, `member
-delete`, `member list`, `member capture`, `member prompt`, `member exec`
-(plus the backend-specific decision-relay primitive your overlay names). The permission split between the pane primitives is canonical in
+You own member lifecycle, roster listing, pane capture and explicit pane-input commands, plus the backend-specific decision-relay primitive your overlay names. Ordinary members retain their broker reception and evidence-routing authority. The permission split between the pane primitives is canonical in
 [`reference/prompt-routing.md`](../reference/prompt-routing.md) § *The
 Director's pane primitives*. Full flags and behavior live in the command
 sections below; the routing exchange built on `member exec` is in
@@ -111,7 +111,7 @@ cafleet member create --fleet-id <fleet-id> \
 
 An absent backend binary exits 1 with `Error: binary <name> not found on PATH`. A missing OpenCode preset exits 1 with `opencode agent preset not found at <preset>; run 'cafleet setup --coding-agent opencode' first`. Path/file errors are catalogued in [`cli-options.md`](../reference/runtime/spec/cli-options.md#error-messages).
 
-The per-backend spawn argv is in [`cli-options.md`](../reference/runtime/spec/cli-options.md#member-create) § Spawn command per backend. In all three modes the member's Bash tool is enabled, its broker commands are allowed from spawn, and no call waits on a permission prompt — an approved call runs and any other is denied; a command the harness does not run is routed per [`reference/prompt-routing.md`](../reference/prompt-routing.md). Per-backend deltas: [`claude`](../reference/coding-agents.md#claude) / [`codex`](../reference/coding-agents.md#codex) / [`opencode`](../reference/coding-agents.md#opencode).
+The per-backend spawn argv is in [`cli-options.md`](../reference/runtime/spec/cli-options.md#member-create) § Spawn command per backend. The omitted policies retain their existing command posture and broker allowances. Explicit `--permission-mode` selects the backend’s native launch policy; a runner-observed permission request follows your own session’s mode-dependent decision and bound response under the [runtime procedure](../reference/member-runtime.md). Returned denials route per [`reference/prompt-routing.md`](../reference/prompt-routing.md). Per-backend deltas: [`claude`](../reference/coding-agents.md#claude) / [`codex`](../reference/coding-agents.md#codex) / [`opencode`](../reference/coding-agents.md#opencode).
 
 ### Model-name-to-backend inference
 
@@ -328,7 +328,7 @@ Caps and fail-closed cases: the initial member plus at most two replacements per
 
 ## Member Delete
 
-For a concrete placement, acquire its shared pane-input lock and revalidate the placement before killing the pane and deregistering the member; preserve the backend’s layout cleanup. Retry lock contention every 50 milliseconds against one operation-wide five-second monotonic deadline. On expiry, exit 1 with `member ID's pane input remained busy for 5 seconds; member was not deleted.` and leave the pane/registry unchanged. A pending or placementless member follows plain registry deregistration without a pane lock or multiplexer operation; an already-gone concrete pane retains its documented tolerated teardown.
+For a wrapped run, coordinate identity-pinned runner shutdown and bounded event recovery before pane/registry cleanup, retaining unconfirmed descendants and recoverable artifacts. For a concrete placement, acquire its shared pane-input lock and revalidate the placement before killing the pane and deregistering the member; preserve the backend’s layout cleanup. Retry lock contention every 50 milliseconds against one operation-wide five-second monotonic deadline. On expiry, exit 1 with `member ID's pane input remained busy for 5 seconds; member was not deleted.` and leave the pane/registry unchanged. A pending or placementless unwrapped member follows plain registry deregistration without a pane lock or multiplexer operation; an already-gone concrete pane retains its documented tolerated teardown.
 
 ```bash
 cafleet member delete <member-id>
@@ -367,7 +367,13 @@ Authorize the required one-line command and call `cafleet member exec <member-id
 
 ## Member Prompt
 
-Use `cafleet member prompt <member-id> TEXT` for explicitly authorized composer input. The prompt leads with Escape, so it can interrupt a working turn or dismiss an open prompt in the member pane, and it rejects the Director's own pane. Success means submission only.
+Use `cafleet member prompt <member-id> TEXT` for explicitly authorized composer input. Wrapped input requires a tested empty composer and reaches the child without Escape; unsafe input is rejected while the original native interaction stays intact. Explicitly unwrapped input retains Escape-first behavior, and both paths reject the Director’s own pane. Success means submission only.
+
+## Member Press
+
+Use `cafleet member press <member-id> KEY...` for explicitly authorized ordered manual keys. Pass only the intended keys and use the ordinary `--` separator for literal punctuation; append neither Escape nor Enter. The [CLI contract](../reference/runtime/spec/cli-options.md#member-press) owns grammar, limits, exact output and error forms. The command holds the revalidated shared pane lock and sends one bounded backend request to the recorded outer pane, including wrapped members.
+
+Success establishes backend acknowledgment only. Inspect actual native effects and continuation independently; a started failure keeps delivery uncertain and requires a new explicit decision after inspection. Apply the existing host and request-specific user/Director decision policy before answering a native request. Use `permission respond` for the separately bound decision interface; selecting manual keys bypasses no host policy and supplies no permission to answer.
 
 ## Cross-references
 
@@ -378,3 +384,8 @@ Use `cafleet member prompt <member-id> TEXT` for explicitly authorized composer 
 ## Director wake
 
 Follow [supervision](../reference/supervision.md#director-wake): arm native reception before member replies, retain one owned handle and apply the executing backend's receive lifecycle. Reconcile full broker records, record deferred actions and ACK consumption. On every batch/wake inspect roster, panes and artifacts, and consume the Director's own pending IDs through broker reads.
+
+
+## Runtime events and recovery
+
+Follow the [member runtime procedure](../reference/member-runtime.md) for event consumption, host-evidenced mode/risk decisions, request-bound responses, manual native input and result-based continuation and explicit finite wait after consuming/ACKing available records. Keep the pending action after ACK. Use `event show` and `input show` to reconcile durable identities; only the Director owns `permission inspect/respond`, `input reconcile` and `member recover`, preserving ownership, snapshot-bound evidence and uncertainty.

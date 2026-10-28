@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "fixture_id": "codex-0.163.0-allow-pre-stage-1",
+  "provenance": "native",
+  "backend": "codex",
+  "native_version": "0.163.0",
+  "rows": 36,
+  "cols": 120,
+  "alternate_screen": true,
+  "screen_seq": 24241,
+  "cursor_row": 35,
+  "cursor_col": 120,
+  "lines": [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "  approval request for the operator. After the native decision, report the actual result and stop. Keep work inside",
+    "  this disposable operation.",
+    " ",
+    " ",
+    "• 指定されたコマンドを、指定の承認設定で実行します。承認の判断後、実行結果を報告して終了します。",
+    " ",
+    "• Running /tmp/cafleet-194/codex-ans-allow-001/permission-probe allow",
+    " ",
+    " ",
+    "  Would you like to run the following command?",
+    " ",
+    "  Environment: local",
+    " ",
+    "  Reason: CAFleet permission probe",
+    " ",
+    "  $ /tmp/cafleet-194/codex-ans-allow-001/permission-probe allow",
+    " ",
+    " ",
+    "› 1. Yes, proceed (y)                                                                                                   ",
+    "  2. Yes, and don't ask again for commands that start with `/tmp/cafleet-194/codex-ans-allow-001/permission-probe allow`",
+    "     (p)",
+    "  3. No, and tell Codex what to do differently (esc)",
+    " ",
+    "  Press enter to confirm or esc to cancel                                                                               "
+  ],
+  "masked_rows": [
+    {
+      "row": 0,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 1,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 2,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 3,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 4,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 5,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 6,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 7,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 8,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 9,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 10,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 11,
+      "reason": "reviewed_privacy"
+    }
+  ]
+}

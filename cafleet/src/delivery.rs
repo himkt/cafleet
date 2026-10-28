@@ -1,5 +1,8 @@
 use crate::broker;
 use crate::broker::records::MemberKind;
+use crate::broker::runtime::{
+    self as storage, InputDisposition, InputKind, InputState, PermissionReceiptIdentity,
+};
 use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::input::{Deadline, PaneLock, complete_database_budget, with_database_budget};
@@ -8,6 +11,11 @@ use crate::multiplexer::{
     MultiplexerError,
 };
 use crate::receive::{AttemptEnd, AttemptOutcome, NotificationError};
+use crate::runtime::runner::{
+    InputCommandHost, InputControlReply, InputFailure, NativeInputHost, PreparedSubmission,
+    RealInputDeadlineClock, ReceiptReply, SubmissionStatus, SubmitInput, find_submission,
+    submit_wrapped_input_under_pane_lock_with_host, validate_submission_target,
+};
 use crate::time::format_utc;
 use rusqlite::Connection;
 use std::collections::BTreeSet;
@@ -37,6 +45,13 @@ fn fold_visible(text: &str) -> String {
 }
 
 pub(crate) fn notification_line(message: &broker::records::MessageRecord) -> String {
+    format!(
+        "{} {DISMISSED_PROMPT_NOTE}",
+        wrapped_notification_line(message)
+    )
+}
+
+fn wrapped_notification_line(message: &broker::records::MessageRecord) -> String {
     let folded = fold_visible(&message.text);
     let body = if folded.chars().count() <= INLINE_BODY_LIMIT {
         folded
@@ -48,7 +63,7 @@ pub(crate) fn notification_line(message: &broker::records::MessageRecord) -> Str
         )
     };
     format!(
-        "[cafleet msg {} from {} {}] {body} {RESUME_CLAUSE} {DISMISSED_PROMPT_NOTE}",
+        "[cafleet msg {} from {} {}] {body} {RESUME_CLAUSE}",
         message.message_id, message.from_member_id, message.created_at
     )
 }
@@ -89,17 +104,16 @@ pub(crate) fn deliver_pending(
     attempted: &BTreeSet<i64>,
     resolve: impl FnOnce() -> Result<AnyMultiplexer, MultiplexerError>,
 ) -> Result<AttemptOutcome, CafleetError> {
-    with_database_budget(conn, deadline, |conn| {
-        deliver_pending_scoped(
-            conn,
-            settings,
-            member_id,
-            expected_fleet,
-            deadline,
-            attempted,
-            resolve,
-        )
-    })
+    deliver_pending_with_host(
+        conn,
+        settings,
+        member_id,
+        expected_fleet,
+        deadline,
+        attempted,
+        resolve,
+        &mut NativeInputHost,
+    )
 }
 
 fn read_snapshot<T>(
@@ -152,7 +166,11 @@ fn preview_snapshot(
     })
 }
 
-fn deliver_pending_scoped(
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the approved delivery core retains its public arguments and shared input host"
+)]
+fn deliver_pending_with_host(
     conn: &mut Connection,
     settings: &Settings,
     member_id: i64,
@@ -160,124 +178,341 @@ fn deliver_pending_scoped(
     deadline: Deadline,
     attempted: &BTreeSet<i64>,
     resolve: impl FnOnce() -> Result<AnyMultiplexer, MultiplexerError>,
+    host: &mut impl InputCommandHost,
 ) -> Result<AttemptOutcome, CafleetError> {
-    let ended = |end| Ok(AttemptOutcome::ended(end));
-    let failed = |message_id, cause: String| {
-        AttemptEnd::Failed(notification_error(member_id, message_id, cause))
-    };
-    let Some((member, initial)) =
-        preview_snapshot(conn, member_id, expected_fleet, deadline, attempted)?
-    else {
-        return ended(AttemptEnd::NoPending);
-    };
-    let fleet_id = member.fleet_id;
+    let deadline = crate::input::inherited_database_deadline(conn).map_or(deadline, |inherited| {
+        Deadline::until(deadline.instant().min(inherited.instant()))
+    });
+    with_database_budget(conn, deadline, |conn| {
+        let ended = |end| Ok(AttemptOutcome::ended(end));
+        let failed = |message_id, cause: String| {
+            AttemptEnd::Failed(notification_error(member_id, message_id, cause))
+        };
+        let Some((member, initial)) =
+            preview_snapshot(conn, member_id, expected_fleet, deadline, attempted)?
+        else {
+            return ended(AttemptEnd::NoPending);
+        };
+        if member.runtime.is_some() {
+            return deliver_wrapped_pending(
+                conn,
+                settings,
+                (member, initial),
+                deadline,
+                attempted,
+                host,
+            );
+        }
+        let fleet_id = member.fleet_id;
+        let Some(placement) = member
+            .placement
+            .as_ref()
+            .filter(|p| p.mux_pane_id.is_some())
+        else {
+            return ended(AttemptEnd::Held);
+        };
+        let lock = PaneLock::acquire_within(
+            &settings.database_url,
+            placement,
+            deadline.reserving(INPUT_RESERVATION),
+        );
+        let _guard = match lock {
+            Ok(Some(guard)) => guard,
+            Ok(None) => {
+                let still_pending = match read_snapshot(conn, deadline, |conn| {
+                    broker::oldest_pending_preview(conn, member_id, attempted)
+                }) {
+                    Ok(pending) => pending,
+                    Err(error) => {
+                        return ended(storage_failure(member_id, initial.message_id, error)?);
+                    }
+                };
+                return ended(match still_pending {
+                    None => AttemptEnd::NoPending,
+                    Some(message) => failed(message.message_id, "pane input remained busy".into()),
+                });
+            }
+            Err(error) => {
+                return ended(failed(
+                    initial.message_id,
+                    format!("pane input: {}", error.message()),
+                ));
+            }
+        };
+        let _span = crate::signals::DeferTermination::begin()?;
+        let (current, first) =
+            match preview_snapshot(conn, member_id, Some(fleet_id), deadline, attempted) {
+                Ok(Some(snapshot)) => snapshot,
+                Ok(None) => return ended(AttemptEnd::NoPending),
+                Err(error) => return ended(storage_failure(member_id, initial.message_id, error)?),
+            };
+        if current.placement != member.placement {
+            return ended(AttemptEnd::Held);
+        }
+        let mux = match resolve().and_then(|mux| {
+            mux.ensure_available()?;
+            Ok(mux.bounded(deadline))
+        }) {
+            Ok(mux) => mux,
+            Err(error) => return ended(failed(first.message_id, error.to_string())),
+        };
+        let pane = placement
+            .mux_pane_id
+            .as_deref()
+            .expect("concrete preview placement");
+        let mut sent = Vec::new();
+        let mut lead = Lead::Escape;
+        let mut candidate_id = first.message_id;
+        let end = loop {
+            if deadline.remaining().is_err() {
+                break if sent.is_empty() {
+                    failed(candidate_id, INSUFFICIENT_INPUT_BUDGET.into())
+                } else {
+                    AttemptEnd::BudgetExhausted
+                };
+            }
+            let snapshot = read_snapshot(conn, deadline, |conn| {
+                let Some(current) = eligible_member(conn, member_id, Some(fleet_id))? else {
+                    return Ok(None);
+                };
+                let candidate = broker::oldest_pending_preview(conn, member_id, attempted)?;
+                Ok(Some((current, candidate)))
+            });
+            let (current, candidate) = match snapshot {
+                Ok(Some(snapshot)) => snapshot,
+                Ok(None) => break AttemptEnd::NoPending,
+                Err(error) => break storage_failure(member_id, candidate_id, error)?,
+            };
+            if current.placement != member.placement {
+                break AttemptEnd::Held;
+            }
+            let Some(message) = candidate else {
+                break AttemptEnd::Drained;
+            };
+            candidate_id = message.message_id;
+            if !deadline
+                .remaining()
+                .is_ok_and(|remaining| remaining >= lead.reserved() + MIN_LITERAL_BUDGET)
+            {
+                break if sent.is_empty() {
+                    failed(candidate_id, INSUFFICIENT_INPUT_BUDGET.into())
+                } else {
+                    AttemptEnd::BudgetExhausted
+                };
+            }
+            if let Err(error) = mux.send_prompt(pane, &notification_line(&message), lead) {
+                break failed(candidate_id, error.to_string());
+            }
+            lead = Lead::Direct;
+            match complete_database_budget(conn, deadline, |conn| {
+                broker::messaging::stamp_notified_validated(
+                    conn,
+                    candidate_id,
+                    &format_utc(crate::time::now_utc()),
+                )
+            }) {
+                Ok(_) => sent.push(candidate_id),
+                Err(error) => break storage_failure(member_id, candidate_id, error)?,
+            }
+        };
+        Ok(AttemptOutcome { sent, end })
+    })
+}
+
+fn deliver_wrapped_pending(
+    conn: &mut Connection,
+    settings: &Settings,
+    initial: PreviewSnapshot,
+    deadline: Deadline,
+    attempted: &BTreeSet<i64>,
+    host: &mut impl InputCommandHost,
+) -> Result<AttemptOutcome, CafleetError> {
+    let (member, mut message) = initial;
+    let run = member
+        .runtime
+        .as_ref()
+        .expect("wrapped delivery has its run")
+        .run
+        .clone();
     let Some(placement) = member
         .placement
         .as_ref()
         .filter(|p| p.mux_pane_id.is_some())
     else {
-        return ended(AttemptEnd::Held);
+        return Ok(AttemptOutcome::ended(AttemptEnd::Held));
     };
-    let lock = PaneLock::acquire_within(
-        &settings.database_url,
-        placement,
-        deadline.reserving(INPUT_RESERVATION),
-    );
-    let _guard = match lock {
-        Ok(Some(guard)) => guard,
-        Ok(None) => {
-            let still_pending = match read_snapshot(conn, deadline, |conn| {
-                broker::oldest_pending_preview(conn, member_id, attempted)
-            }) {
-                Ok(pending) => pending,
-                Err(error) => return ended(storage_failure(member_id, initial.message_id, error)?),
-            };
-            return ended(match still_pending {
-                None => AttemptEnd::NoPending,
-                Some(message) => failed(message.message_id, "pane input remained busy".into()),
-            });
-        }
-        Err(error) => {
-            return ended(failed(
-                initial.message_id,
-                format!("pane input: {}", error.message()),
-            ));
-        }
+    let identity = PermissionReceiptIdentity {
+        database_identity_json: run.database_identity_json.clone(),
+        run_id: run.run_id,
     };
-    let _span = crate::signals::DeferTermination::begin()?;
-    let (current, first) =
-        match preview_snapshot(conn, member_id, Some(fleet_id), deadline, attempted) {
-            Ok(Some(snapshot)) => snapshot,
-            Ok(None) => return ended(AttemptEnd::NoPending),
-            Err(error) => return ended(storage_failure(member_id, initial.message_id, error)?),
-        };
-    if current.placement != member.placement {
-        return ended(AttemptEnd::Held);
+    enum Stage {
+        Submission,
+        Retirement,
+        NextPreview,
     }
-    let mux = match resolve().and_then(|mux| {
-        mux.ensure_available()?;
-        Ok(mux.bounded(deadline))
-    }) {
-        Ok(mux) => mux,
-        Err(error) => return ended(failed(first.message_id, error.to_string())),
-    };
-    let pane = placement
-        .mux_pane_id
-        .as_deref()
-        .expect("concrete preview placement");
+
+    let mut guard = None;
     let mut sent = Vec::new();
-    let mut lead = Lead::Escape;
-    let mut candidate_id = first.message_id;
-    let end = loop {
-        if deadline.remaining().is_err() {
-            break if sent.is_empty() {
-                failed(candidate_id, INSUFFICIENT_INPUT_BUDGET.into())
-            } else {
-                AttemptEnd::BudgetExhausted
+    let mut operation_key = format!("preview:{}:{}", run.run_id, message.message_id);
+    let mut known_input_id = None;
+    let mut stage = Stage::Submission;
+    let result = (|| {
+        let end = loop {
+            deadline.remaining()?;
+            let request = SubmitInput {
+                operation_key: operation_key.clone(),
+                input_kind: InputKind::Preview,
+                message_id: Some(message.message_id),
+                literal: wrapped_notification_line(&message),
             };
-        }
-        let snapshot = read_snapshot(conn, deadline, |conn| {
-            let Some(current) = eligible_member(conn, member_id, Some(fleet_id))? else {
-                return Ok(None);
+            let retained =
+                find_submission(conn, &identity, &request, deadline).map_err(CafleetError::from)?;
+            known_input_id = retained.as_ref().map(|input| input.input_id);
+            if retained.as_ref().is_some_and(|input| {
+                matches!(input.state, InputState::InProgress | InputState::Uncertain)
+                    || (input.state == InputState::Settled
+                        && input.disposition != Some(InputDisposition::Submitted))
+            }) {
+                break AttemptEnd::Held;
+            }
+            let attempt =
+                PreparedSubmission::new(&request, deadline.instant(), &mut RealInputDeadlineClock)?;
+            if guard.is_none() {
+                guard = host
+                    .lock(settings, &run, placement, deadline)
+                    .map_err(CafleetError::from)?;
+                if guard.is_none() {
+                    break AttemptEnd::Failed(notification_error(
+                        member.member_id,
+                        message.message_id,
+                        "pane input remained busy",
+                    ));
+                }
+            }
+            let held = guard.as_ref().expect("wrapped delivery owns its pane lock");
+            held.validate_binding(&settings.database_url, placement)?;
+            with_database_budget(conn, deadline, |conn| {
+                validate_submission_target(conn, settings, &run, placement)
+            })?;
+            let input_id = match retained.as_ref() {
+                Some(input)
+                    if matches!(input.state, InputState::Accepted | InputState::Settled) =>
+                {
+                    input.input_id
+                }
+                _ => {
+                    let result = submit_wrapped_input_under_pane_lock_with_host(
+                        conn, settings, &run, placement, held, &attempt, deadline, host,
+                    )
+                    .map_err(CafleetError::from)?;
+                    if !matches!(result.status, SubmissionStatus::Accepted) {
+                        break AttemptEnd::Held;
+                    }
+                    result
+                        .input_id
+                        .expect("accepted Preview has its validated durable input ID")
+                }
             };
-            let candidate = broker::oldest_pending_preview(conn, member_id, attempted)?;
-            Ok(Some((current, candidate)))
-        });
-        let (current, candidate) = match snapshot {
-            Ok(Some(snapshot)) => snapshot,
-            Ok(None) => break AttemptEnd::NoPending,
-            Err(error) => break storage_failure(member_id, candidate_id, error)?,
-        };
-        if current.placement != member.placement {
-            break AttemptEnd::Held;
-        }
-        let Some(message) = candidate else {
-            break AttemptEnd::Drained;
-        };
-        candidate_id = message.message_id;
-        if !deadline
-            .remaining()
-            .is_ok_and(|remaining| remaining >= lead.reserved() + MIN_LITERAL_BUDGET)
-        {
-            break if sent.is_empty() {
-                failed(candidate_id, INSUFFICIENT_INPUT_BUDGET.into())
-            } else {
-                AttemptEnd::BudgetExhausted
-            };
-        }
-        if let Err(error) = mux.send_prompt(pane, &notification_line(&message), lead) {
-            break failed(candidate_id, error.to_string());
-        }
-        lead = Lead::Direct;
-        match complete_database_budget(conn, deadline, |conn| {
-            broker::messaging::stamp_notified_validated(
+            known_input_id = Some(input_id);
+            let settled = with_database_budget(conn, deadline, |conn| {
+                validate_submission_target(conn, settings, &run, placement)?;
+                storage::settle_preview(conn, &run.owner(), input_id)
+            })
+            .map_err(|source| {
+                CafleetError::from(InputFailure {
+                    source,
+                    run_id: Some(run.run_id),
+                    interaction_id: None,
+                    input_id: Some(input_id),
+                    operation_key: Some(request.operation_key.clone()),
+                })
+            })?;
+            sent.push(message.message_id);
+            stage = Stage::Retirement;
+            deadline.remaining()?;
+            held.validate_binding(&settings.database_url, placement)?;
+            with_database_budget(conn, deadline, |conn| {
+                validate_submission_target(conn, settings, &run, placement)
+            })?;
+            let retirement = attempt.retirement_request(&run, settled.input_id)?;
+            let reply = host
+                .exchange(&run, &retirement, deadline.instant())
+                .map_err(CafleetError::from)?;
+            if !matches!(reply, InputControlReply::Receipt(ReceiptReply::Retired { input_id: actual }) if actual == input_id)
+            {
+                return Err(crate::runtime::runner::error(
+                    "retirement acknowledgment input identity mismatch",
+                ));
+            }
+            with_database_budget(conn, deadline, |conn| {
+                validate_submission_target(conn, settings, &run, placement)
+            })?;
+            deadline.remaining()?;
+            if deadline.remaining().is_err() {
+                break AttemptEnd::BudgetExhausted;
+            }
+            stage = Stage::NextPreview;
+            let Some((current, next)) = preview_snapshot(
                 conn,
-                candidate_id,
-                &format_utc(crate::time::now_utc()),
-            )
-        }) {
-            Ok(_) => sent.push(candidate_id),
-            Err(error) => break storage_failure(member_id, candidate_id, error)?,
+                member.member_id,
+                Some(member.fleet_id),
+                deadline,
+                attempted,
+            )?
+            else {
+                break AttemptEnd::NoPending;
+            };
+            if current.placement != member.placement
+                || current
+                    .runtime
+                    .as_ref()
+                    .map(|runtime| crate::runtime::runner::stable_run_identity(&runtime.run))
+                    != Some(crate::runtime::runner::stable_run_identity(&run))
+            {
+                break AttemptEnd::Held;
+            }
+            message = next;
+            operation_key = format!("preview:{}:{}", run.run_id, message.message_id);
+            known_input_id = None;
+            stage = Stage::Submission;
+        };
+        Ok::<_, CafleetError>(end)
+    })();
+    let end = match result {
+        Ok(end) => end,
+        Err(source) if sent.is_empty() => return Err(source),
+        Err(source) => {
+            let cause = CafleetError::from(InputFailure {
+                source,
+                run_id: Some(run.run_id),
+                interaction_id: None,
+                input_id: known_input_id,
+                operation_key: Some(operation_key),
+            });
+            let warning = match stage {
+                Stage::Submission => {
+                    notification_error(member.member_id, message.message_id, cause)
+                }
+                Stage::Retirement | Stage::NextPreview => {
+                    let input_id = known_input_id.expect("committed Preview has its input ID");
+                    let phase = match stage {
+                        Stage::Retirement => "receipt retirement",
+                        Stage::NextPreview => "next preview lookup",
+                        Stage::Submission => unreachable!(),
+                    };
+                    NotificationError {
+                        member_id: member.member_id,
+                        message_id: message.message_id,
+                        error: format!(
+                            "message {} was notified to member {}; input {input_id} is settled/submitted; {phase} failed: {}",
+                            message.message_id,
+                            member.member_id,
+                            cause.message()
+                        ),
+                    }
+                }
+            };
+            AttemptEnd::Failed(warning)
         }
     };
     Ok(AttemptOutcome { sent, end })
@@ -288,6 +523,11 @@ mod tests {
     use super::*;
     use crate::multiplexer::{CommandRunner, RunError, TmuxMultiplexer};
     use crate::receive::AttemptEnd;
+    use crate::runtime::runner::{
+        ControlIdentity, HealthSnapshot, InputCommandHost, InputControlOperation,
+        InputControlReply, InputControlRequest, InputFailure, NativeInputHost, ReceiptAction,
+        ReceiptReply,
+    };
     use std::{
         collections::{BTreeSet, HashMap},
         rc::Rc,
@@ -331,6 +571,837 @@ mod tests {
     fn settings_for(conn: &Connection) -> Settings {
         let url = format!("sqlite:///{}", conn.path().unwrap());
         Settings::from_lookup(|name| (name == "CAFLEET_DATABASE_URL").then(|| url.clone())).unwrap()
+    }
+
+    fn wrapped_line(message: &broker::records::MessageRecord, body: &str) -> String {
+        format!(
+            "[cafleet msg {} from {} {}] {body} [cafleet] Resume your work if something was still running.",
+            message.message_id, message.from_member_id, message.created_at
+        )
+    }
+
+    fn wrapped_attempt(
+        fixture: &mut crate::runtime::InputServiceFixture,
+        deadline: Deadline,
+    ) -> Result<AttemptOutcome, CafleetError> {
+        let settings = settings_for(&fixture.fixture.conn);
+        let placement = broker::get_member(
+            &fixture.fixture.conn,
+            fixture.fixture.run.member_id,
+            fixture.fixture.run.fleet_id,
+        )
+        .unwrap()
+        .unwrap()
+        .placement
+        .unwrap();
+        let mut host = DeliveryHost::new(&settings, &placement, deadline.instant());
+        let outcome = deliver_pending_with_host(
+            &mut fixture.fixture.conn,
+            &settings,
+            fixture.fixture.run.member_id,
+            Some(fixture.fixture.run.fleet_id),
+            deadline,
+            &BTreeSet::new(),
+            || panic!("wrapped delivery uses its runner, not a multiplexer"),
+            &mut host,
+        );
+        if let Ok(result) = &outcome {
+            if result.sent.is_empty() {
+                assert_eq!(host.calls, [0, 0, 0]);
+            } else {
+                assert_eq!(host.calls, [1, 1, 2]);
+                assert_eq!(
+                    host.retired.len(),
+                    result.sent.len(),
+                    "actual typed retirement acknowledgments"
+                );
+            }
+        }
+        outcome
+    }
+
+    struct NoDeliveryHost;
+    impl InputCommandHost for NoDeliveryHost {
+        fn lock(
+            &mut self,
+            _: &Settings,
+            _: &broker::runtime::RunRecord,
+            _: &broker::records::Placement,
+            _: Deadline,
+        ) -> std::result::Result<Option<PaneLock>, InputFailure> {
+            panic!("retained delivery is resolved before the pane wait")
+        }
+        fn health(
+            &mut self,
+            _: &broker::runtime::RunRecord,
+            _: Instant,
+        ) -> std::result::Result<HealthSnapshot, InputFailure> {
+            panic!("retained delivery needs no live health")
+        }
+        fn exchange(
+            &mut self,
+            _: &broker::runtime::RunRecord,
+            _: &InputControlRequest,
+            _: Instant,
+        ) -> std::result::Result<InputControlReply, InputFailure> {
+            panic!("retained delivery sends no native request")
+        }
+    }
+
+    struct DeliveryHost {
+        inner: NativeInputHost,
+        settings: Settings,
+        placement: broker::records::Placement,
+        until: Instant,
+        calls: [usize; 3],
+        expiration: Option<u64>,
+        retired: Vec<i64>,
+        expire_retirement: bool,
+        after_retirement: Option<Box<dyn FnMut()>>,
+    }
+    impl DeliveryHost {
+        fn new(
+            settings: &Settings,
+            placement: &broker::records::Placement,
+            until: Instant,
+        ) -> Self {
+            Self {
+                inner: NativeInputHost,
+                settings: settings.clone(),
+                placement: placement.clone(),
+                until,
+                calls: [0; 3],
+                expiration: None,
+                retired: Vec::new(),
+                expire_retirement: false,
+                after_retirement: None,
+            }
+        }
+        fn held(&self) {
+            assert!(
+                PaneLock::try_acquire(&self.settings.database_url, &self.placement)
+                    .unwrap()
+                    .is_none(),
+                "actual delivery guard remains held"
+            );
+        }
+    }
+    impl InputCommandHost for DeliveryHost {
+        fn lock(
+            &mut self,
+            settings: &Settings,
+            run: &broker::runtime::RunRecord,
+            placement: &broker::records::Placement,
+            deadline: Deadline,
+        ) -> std::result::Result<Option<PaneLock>, InputFailure> {
+            self.calls[0] += 1;
+            assert_eq!(deadline.instant(), self.until);
+            assert_eq!(placement, &self.placement);
+            let result = self.inner.lock(settings, run, placement, deadline)?;
+            result
+                .as_ref()
+                .expect("actual available pane lock")
+                .validate_binding(&settings.database_url, placement)
+                .unwrap();
+            self.held();
+            Ok(result)
+        }
+        fn health(
+            &mut self,
+            run: &broker::runtime::RunRecord,
+            deadline: Instant,
+        ) -> std::result::Result<HealthSnapshot, InputFailure> {
+            self.calls[1] += 1;
+            assert_eq!(deadline, self.until);
+            self.held();
+            self.inner.health(run, deadline)
+        }
+        fn exchange(
+            &mut self,
+            run: &broker::runtime::RunRecord,
+            request: &InputControlRequest,
+            deadline: Instant,
+        ) -> std::result::Result<InputControlReply, InputFailure> {
+            self.calls[2] += 1;
+            assert_eq!(deadline, self.until);
+            self.held();
+            assert_eq!(
+                serde_json::to_value(&request.identity).unwrap(),
+                serde_json::to_value(ControlIdentity::from_run(run)).unwrap()
+            );
+            if let Some(expiration) = self.expiration {
+                assert_eq!(
+                    request.expires_at_mono_ns, expiration,
+                    "retirement retains the submission expiration"
+                );
+            } else {
+                self.expiration = Some(request.expires_at_mono_ns);
+            }
+            if let InputControlOperation::Receipt(ReceiptAction::Retire { input_id }) =
+                &request.operation
+            {
+                let independent = crate::db::connect(&self.settings.database_url).unwrap();
+                let row = broker::runtime::get_input(&independent, *input_id).unwrap();
+                assert_eq!(row.state, broker::runtime::InputState::Settled);
+                assert_eq!(
+                    row.disposition,
+                    Some(broker::runtime::InputDisposition::Submitted)
+                );
+                assert!(
+                    preview_stamp(&independent, row.message_id.unwrap()).is_some(),
+                    "retirement follows the committed stamp"
+                );
+                if self.expire_retirement {
+                    std::thread::sleep(
+                        deadline.saturating_duration_since(Instant::now())
+                            + Duration::from_millis(1),
+                    );
+                    assert!(Instant::now() >= deadline);
+                }
+                let reply: InputControlReply = self.inner.exchange(run, request, deadline)?;
+                assert!(
+                    matches!(reply, InputControlReply::Receipt(ReceiptReply::Retired { input_id: retired }) if retired == *input_id),
+                    "actual matching retirement reply"
+                );
+                self.retired.push(*input_id);
+                self.expiration = None;
+                if let Some(callback) = &mut self.after_retirement {
+                    callback();
+                }
+                return Ok(reply);
+            }
+            assert!(matches!(
+                request.operation,
+                InputControlOperation::SubmitPrompt(_)
+            ));
+            self.inner.exchange(run, request, deadline)
+        }
+    }
+
+    fn assert_later_failure_preserves_committed_prefix(later_candidate: bool) {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+        use std::sync::{
+            Arc, Mutex,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        crate::runtime::with_input_service(|fixture, outer| {
+            let run = fixture.fixture.run.clone();
+            let settings = settings_for(&fixture.fixture.conn);
+            let placement = broker::get_member(&fixture.fixture.conn, run.member_id, run.fleet_id)
+                .unwrap()
+                .unwrap()
+                .placement
+                .unwrap();
+            let first = broker::send_message(
+                &mut fixture.fixture.conn,
+                run.director_member_id,
+                run.member_id,
+                "private committed prefix λ",
+            )
+            .unwrap();
+            let second = broker::send_message(
+                &mut fixture.fixture.conn,
+                run.director_member_id,
+                run.member_id,
+                "private later candidate λ",
+            )
+            .unwrap();
+            let first_line = wrapped_line(&first, &first.text);
+            let second_line = wrapped_line(&second, &second.text);
+            if later_candidate {
+                fixture.fixture.conn.execute_batch(&format!("CREATE TRIGGER prefix_second_stamp_failure BEFORE UPDATE OF notified_at ON messages WHEN NEW.message_id={} BEGIN SELECT RAISE(ABORT,'owned later preview stamp failure'); END", second.message_id)).unwrap();
+            }
+            let until = outer.min(Instant::now() + Duration::from_secs(5));
+            let armed = Arc::new(AtomicBool::new(false));
+            let arm = armed.clone();
+            let mut host = DeliveryHost::new(&settings, &placement, until);
+            host.after_retirement = Some(Box::new(move || arm.store(true, Ordering::SeqCst)));
+            let budgets = Arc::new(Mutex::new(Vec::new()));
+            let observed = budgets.clone();
+            fixture
+                .fixture
+                .conn
+                .authorizer(Some(move |context: AuthContext<'_>| {
+                    let selected = if later_candidate {
+                        matches!(
+                            context.action,
+                            AuthAction::Update {
+                                table_name: "messages",
+                                ..
+                            }
+                        )
+                    } else {
+                        matches!(
+                            context.action,
+                            AuthAction::Read {
+                                table_name: "messages",
+                                column_name: "text"
+                            }
+                        )
+                    };
+                    if armed.load(Ordering::SeqCst) && selected {
+                        observed
+                            .lock()
+                            .unwrap()
+                            .push(Deadline::inherited_or_new().instant());
+                        if !later_candidate {
+                            return Authorization::Deny;
+                        }
+                    }
+                    Authorization::Allow
+                }))
+                .unwrap();
+            let outcome = deliver_pending_with_host(
+                &mut fixture.fixture.conn,
+                &settings,
+                run.member_id,
+                Some(run.fleet_id),
+                Deadline::until(until),
+                &BTreeSet::new(),
+                || panic!("wrapped prefix regression uses its actual runner"),
+                &mut host,
+            );
+            let removed = fixture
+                .fixture
+                .conn
+                .authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+            let trigger_cleanup = if later_candidate {
+                fixture
+                    .fixture
+                    .conn
+                    .execute_batch("DROP TRIGGER prefix_second_stamp_failure")
+            } else {
+                Ok(())
+            };
+            assert!(
+                removed.is_ok() && trigger_cleanup.is_ok(),
+                "delivery={outcome:?}; authorizer_cleanup={removed:?}; trigger_cleanup={trigger_cleanup:?}"
+            );
+            let committed =
+                preview_row(&fixture.fixture.conn, run.run_id, first.message_id).unwrap();
+            let stamp = preview_stamp(&fixture.fixture.conn, first.message_id)
+                .expect("first notification actually committed");
+            assert_eq!(committed.state, broker::runtime::InputState::Settled);
+            assert_eq!(
+                committed.disposition,
+                Some(broker::runtime::InputDisposition::Submitted)
+            );
+            assert_eq!(host.retired, vec![committed.input_id]);
+            let uncommitted = preview_row(&fixture.fixture.conn, run.run_id, second.message_id);
+            assert_eq!(
+                preview_stamp(&fixture.fixture.conn, second.message_id),
+                None
+            );
+            if later_candidate {
+                assert_eq!(
+                    uncommitted.as_ref().unwrap().state,
+                    broker::runtime::InputState::Accepted
+                );
+                assert_eq!(host.calls, [1, 2, 3]);
+            } else {
+                assert!(uncommitted.is_none());
+                assert_eq!(host.calls, [1, 1, 2]);
+            }
+            let observed = budgets.lock().unwrap();
+            assert!(
+                !observed.is_empty(),
+                "actual later SQL failure boundary reached"
+            );
+            assert!(
+                observed.iter().all(|deadline| *deadline <= until),
+                "later SQL retains the original inherited budget"
+            );
+            assert!(
+                Instant::now() < until,
+                "failure is the original SQL cause, before original expiry"
+            );
+            drop(observed);
+            crate::runtime::input_service_barrier(fixture, outer);
+            let records = crate::runtime::input_service_records(fixture);
+            assert_eq!(
+                records
+                    .iter()
+                    .filter(|record| record["line"] == first_line)
+                    .count(),
+                1
+            );
+            assert_eq!(
+                records
+                    .iter()
+                    .filter(|record| record["line"] == second_line)
+                    .count(),
+                usize::from(later_candidate)
+            );
+            let next = deliver_pending_with_host(
+                &mut fixture.fixture.conn,
+                &settings,
+                run.member_id,
+                Some(run.fleet_id),
+                Deadline::until(outer),
+                &BTreeSet::from([second.message_id]),
+                || panic!("committed history schedules no replay"),
+                &mut NoDeliveryHost,
+            )
+            .unwrap();
+            assert_eq!(next, AttemptOutcome::ended(AttemptEnd::NoPending));
+            assert_eq!(
+                preview_row(&fixture.fixture.conn, run.run_id, first.message_id),
+                Some(committed.clone())
+            );
+            assert_eq!(
+                preview_stamp(&fixture.fixture.conn, first.message_id),
+                Some(stamp)
+            );
+            eprintln!(
+                "later_candidate={later_candidate}; first_input_id={}; first_message_id={}; first_state={:?}; second_state={:?}; calls={:?}; delivery={outcome:?}",
+                committed.input_id,
+                first.message_id,
+                committed.state,
+                uncommitted.as_ref().map(|row| row.state),
+                host.calls
+            );
+            let outcome =
+                outcome.expect("later failure preserves the actual committed sent prefix");
+            assert_eq!(outcome.sent, vec![first.message_id]);
+            let AttemptEnd::Failed(warning) = outcome.end else {
+                panic!("actual later failure retains its cause")
+            };
+            assert_eq!(warning.member_id, run.member_id);
+            if later_candidate {
+                assert_eq!(warning.message_id, second.message_id);
+                assert!(
+                    warning.error.contains("owned later preview stamp failure"),
+                    "{}",
+                    warning.error
+                );
+                assert!(warning.error.contains(&uncommitted.unwrap().operation_key));
+            } else {
+                assert_eq!(warning.message_id, first.message_id);
+                assert!(
+                    warning
+                        .error
+                        .contains("access to messages.text is prohibited"),
+                    "{}",
+                    warning.error
+                );
+                assert!(
+                    !warning
+                        .error
+                        .contains(&format!("message {} was not notified", first.message_id))
+                );
+                assert!(warning.error.contains(&committed.operation_key));
+            }
+            assert!(!warning.error.contains(&first.text));
+            assert!(!warning.error.contains(&second.text));
+        });
+    }
+
+    #[test]
+    fn wrapped_delivery_later_lookup_failure_preserves_the_committed_sent_prefix() {
+        assert_later_failure_preserves_committed_prefix(false);
+    }
+
+    #[test]
+    fn wrapped_delivery_later_stamp_failure_preserves_only_the_committed_sent_prefix() {
+        assert_later_failure_preserves_committed_prefix(true);
+    }
+
+    #[test]
+    fn wrapped_delivery_history_and_conflicts_precede_the_real_held_pane_lock() {
+        use broker::runtime::{self as storage, InputDisposition, InputKind, InputState};
+        crate::runtime::with_input_service(|fixture, outer| {
+            let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+            let settings = settings_for(&fixture.fixture.conn);
+            let placement = broker::get_member(&fixture.fixture.conn, run.member_id, run.fleet_id)
+                .unwrap()
+                .unwrap()
+                .placement
+                .unwrap();
+            let message = broker::send_message(
+                &mut fixture.fixture.conn,
+                run.director_member_id,
+                run.member_id,
+                "retained preview",
+            )
+            .unwrap();
+            let literal = wrapped_line(&message, "retained preview");
+            let original = storage::reserve_input(
+                &mut fixture.fixture.conn,
+                &run.owner(),
+                &storage::NewInput {
+                    operation_key: format!("preview:{}:{}", run.run_id, message.message_id),
+                    kind: InputKind::Preview,
+                    payload_digest: preview_digest(run.run_id, message.message_id, &literal),
+                    message_id: Some(message.message_id),
+                },
+            )
+            .unwrap();
+            let _held = PaneLock::try_acquire(&settings.database_url, &placement)
+                .unwrap()
+                .unwrap();
+            for state in [
+                InputState::InProgress,
+                InputState::Uncertain,
+                InputState::Settled,
+            ] {
+                if state == InputState::Uncertain {
+                    storage::record_input_state(
+                        &mut fixture.fixture.conn,
+                        &run.owner(),
+                        original.input_id,
+                        InputState::InProgress,
+                        state,
+                    )
+                    .unwrap();
+                } else if state == InputState::Settled {
+                    storage::settle_input(
+                        &mut fixture.fixture.conn,
+                        &run.owner(),
+                        original.input_id,
+                        InputState::Uncertain,
+                        InputDisposition::AbandonedUncertain,
+                        "owned retained preview",
+                    )
+                    .unwrap();
+                }
+                let before = storage::get_input(&fixture.fixture.conn, original.input_id).unwrap();
+                let changes = fixture.fixture.conn.total_changes();
+                let result = deliver_pending_with_host(
+                    &mut fixture.fixture.conn,
+                    &settings,
+                    run.member_id,
+                    Some(run.fleet_id),
+                    Deadline::until(outer),
+                    &BTreeSet::new(),
+                    || panic!("retained preview has no mux"),
+                    &mut NoDeliveryHost,
+                )
+                .unwrap();
+                assert_eq!(result, AttemptOutcome::ended(AttemptEnd::Held));
+                assert_eq!(fixture.fixture.conn.total_changes(), changes);
+                assert_eq!(
+                    storage::get_input(&fixture.fixture.conn, original.input_id).unwrap(),
+                    before
+                );
+                assert_eq!(
+                    preview_stamp(&fixture.fixture.conn, message.message_id),
+                    None
+                );
+            }
+            fixture
+                .fixture
+                .conn
+                .execute(
+                    "UPDATE messages SET text='conflicting private preview' WHERE message_id=?1",
+                    [message.message_id],
+                )
+                .unwrap();
+            let changes = fixture.fixture.conn.total_changes();
+            let failure = deliver_pending_with_host(
+                &mut fixture.fixture.conn,
+                &settings,
+                run.member_id,
+                Some(run.fleet_id),
+                Deadline::until(outer),
+                &BTreeSet::new(),
+                || panic!("conflicting preview has no mux"),
+                &mut NoDeliveryHost,
+            )
+            .unwrap_err();
+            assert!(!failure.to_string().contains("conflicting private preview"));
+            assert_eq!(fixture.fixture.conn.total_changes(), changes);
+            assert!(crate::runtime::input_service_records(fixture).is_empty());
+        });
+    }
+
+    #[test]
+    fn wrapped_delivery_retirement_expiry_preserves_the_notified_prefix_without_retyping() {
+        crate::runtime::with_input_service(|fixture, outer| {
+            let run = broker::runtime::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id)
+                .unwrap();
+            let settings = settings_for(&fixture.fixture.conn);
+            let placement = broker::get_member(&fixture.fixture.conn, run.member_id, run.fleet_id)
+                .unwrap()
+                .unwrap()
+                .placement
+                .unwrap();
+            let message = broker::send_message(
+                &mut fixture.fixture.conn,
+                run.director_member_id,
+                run.member_id,
+                "private retirement payload λ",
+            )
+            .unwrap();
+            let expected = wrapped_line(&message, &message.text);
+            let until = outer.min(Instant::now() + Duration::from_secs(2));
+            let mut host = DeliveryHost::new(&settings, &placement, until);
+            host.expire_retirement = true;
+            let outcome = deliver_pending_with_host(
+                &mut fixture.fixture.conn,
+                &settings,
+                run.member_id,
+                Some(run.fleet_id),
+                Deadline::until(until),
+                &BTreeSet::new(),
+                || panic!("wrapped retirement uses no mux"),
+                &mut host,
+            )
+            .unwrap();
+            assert_eq!(outcome.sent, vec![message.message_id]);
+            let AttemptEnd::Failed(warning) = outcome.end else {
+                panic!("expired actual retirement reports its committed outcome")
+            };
+            let row = preview_row(&fixture.fixture.conn, run.run_id, message.message_id).unwrap();
+            assert_eq!(row.state, broker::runtime::InputState::Settled);
+            assert_eq!(
+                row.disposition,
+                Some(broker::runtime::InputDisposition::Submitted)
+            );
+            assert!(preview_stamp(&fixture.fixture.conn, message.message_id).is_some());
+            assert!(warning.error.starts_with(&format!("message {} was notified to member {}; input {} is settled/submitted; receipt retirement failed:", message.message_id, run.member_id, row.input_id)), "{}", warning.error);
+            assert!(warning.error.contains("deadline"), "{}", warning.error);
+            assert!(warning.error.contains(&format!("run_id={}", run.run_id)));
+            assert!(warning.error.contains(&row.operation_key));
+            assert!(!warning.error.contains(&message.text));
+            assert_eq!(host.calls, [1, 1, 2]);
+            assert!(host.retired.is_empty());
+            assert_eq!(
+                wrapped_attempt(fixture, Deadline::until(outer))
+                    .unwrap()
+                    .end,
+                AttemptEnd::NoPending
+            );
+            crate::runtime::input_service_barrier(fixture, outer);
+            assert_eq!(
+                crate::runtime::input_service_records(fixture)
+                    .iter()
+                    .filter(|record| record["line"] == expected)
+                    .count(),
+                1
+            );
+            assert_eq!(
+                preview_row(&fixture.fixture.conn, run.run_id, message.message_id),
+                Some(row)
+            );
+        });
+    }
+
+    fn preview_row(
+        conn: &Connection,
+        run_id: i64,
+        message_id: i64,
+    ) -> Option<broker::runtime::InputOperation> {
+        broker::runtime::find_input(conn, run_id, &format!("preview:{run_id}:{message_id}"))
+            .unwrap()
+    }
+
+    fn preview_stamp(conn: &Connection, message_id: i64) -> Option<String> {
+        conn.query_row(
+            "SELECT notified_at FROM messages WHERE message_id=?1",
+            [message_id],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    fn preview_digest(run_id: i64, message_id: i64, literal: &str) -> String {
+        use sha2::{Digest, Sha256};
+        let canonical = format!(
+            "{{\"kind\":\"preview\",\"literal\":{},\"message_id\":{message_id},\"run_id\":{run_id}}}",
+            serde_json::to_string(literal).unwrap()
+        );
+        Sha256::digest(canonical.as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    }
+
+    #[test]
+    fn wrapped_delivery_submits_real_preview_and_atomically_settles_the_actual_message() {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        crate::runtime::with_input_service(|fixture, outer| {
+            let run = fixture.fixture.run.clone();
+            let message = broker::send_message(
+                &mut fixture.fixture.conn,
+                run.director_member_id,
+                run.member_id,
+                "first\n\tλ",
+            )
+            .unwrap();
+            let expected = wrapped_line(&message, "first⏎␉λ");
+            let deadline = Deadline::until(outer.min(Instant::now() + Duration::from_secs(5)));
+            let settings = settings_for(&fixture.fixture.conn);
+            let placement = broker::get_member(&fixture.fixture.conn, run.member_id, run.fleet_id)
+                .unwrap()
+                .unwrap()
+                .placement
+                .unwrap();
+            let stamped_under_guard = Arc::new(AtomicBool::new(false));
+            let observed = stamped_under_guard.clone();
+            fixture
+                .fixture
+                .conn
+                .authorizer(Some(move |context: AuthContext<'_>| {
+                    if matches!(
+                        context.action,
+                        AuthAction::Update {
+                            table_name: "messages",
+                            ..
+                        }
+                    ) {
+                        assert!(
+                            PaneLock::try_acquire(&settings.database_url, &placement)
+                                .unwrap()
+                                .is_none(),
+                            "supplied-connection settlement retains the physical guard"
+                        );
+                        observed.store(true, Ordering::SeqCst);
+                    }
+                    Authorization::Allow
+                }))
+                .unwrap();
+            let outcome = wrapped_attempt(fixture, deadline);
+            let removed = fixture
+                .fixture
+                .conn
+                .authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+            assert!(
+                outcome.is_ok(),
+                "delivery={outcome:?}; authorizer_cleanup={removed:?}"
+            );
+            removed.unwrap();
+            let outcome = outcome.unwrap();
+            assert_eq!(outcome.sent, vec![message.message_id], "{outcome:?}");
+            assert!(
+                stamped_under_guard.load(Ordering::SeqCst),
+                "actual stamp uses the supplied connection while holding the borrowed lock"
+            );
+            assert!(
+                matches!(outcome.end, AttemptEnd::Drained | AttemptEnd::NoPending),
+                "{outcome:?}"
+            );
+            crate::runtime::wait_input_service_record(fixture, &expected, outer);
+            crate::runtime::input_service_barrier(fixture, outer);
+            let row = preview_row(&fixture.fixture.conn, run.run_id, message.message_id).unwrap();
+            assert_eq!(row.kind, broker::runtime::InputKind::Preview);
+            assert_eq!(row.message_id, Some(message.message_id));
+            assert_eq!(
+                row.payload_digest,
+                preview_digest(run.run_id, message.message_id, &expected)
+            );
+            assert_eq!(row.state, broker::runtime::InputState::Settled);
+            assert_eq!(
+                row.disposition,
+                Some(broker::runtime::InputDisposition::Submitted)
+            );
+            assert!(preview_stamp(&fixture.fixture.conn, message.message_id).is_some());
+            let status: String = fixture
+                .fixture
+                .conn
+                .query_row(
+                    "SELECT status_state FROM messages WHERE message_id=?1",
+                    [message.message_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(status, "input_required");
+            let records = crate::runtime::input_service_records(fixture);
+            assert_eq!(
+                records
+                    .iter()
+                    .filter(|record| record["line"] == expected)
+                    .count(),
+                1
+            );
+            assert_eq!(
+                wrapped_attempt(fixture, Deadline::until(outer))
+                    .unwrap()
+                    .end,
+                AttemptEnd::NoPending
+            );
+            assert_eq!(
+                preview_row(&fixture.fixture.conn, run.run_id, message.message_id),
+                Some(row)
+            );
+        });
+    }
+
+    #[test]
+    fn wrapped_delivery_failed_stamp_retries_the_same_receipt_without_retyping() {
+        crate::runtime::with_input_service(|fixture, outer| {
+            let run = fixture.fixture.run.clone();
+            let message = broker::send_message(
+                &mut fixture.fixture.conn,
+                run.director_member_id,
+                run.member_id,
+                "retry preview",
+            )
+            .unwrap();
+            let expected = wrapped_line(&message, "retry preview");
+            fixture.fixture.conn.execute_batch("CREATE TRIGGER wrapped_stamp_failure BEFORE UPDATE OF notified_at ON messages BEGIN SELECT RAISE(ABORT,'owned wrapped stamp failure'); END").unwrap();
+            let first = wrapped_attempt(
+                fixture,
+                Deadline::until(outer.min(Instant::now() + Duration::from_secs(5))),
+            );
+            let removed = fixture
+                .fixture
+                .conn
+                .execute_batch("DROP TRIGGER wrapped_stamp_failure");
+            assert!(
+                first
+                    .as_ref()
+                    .is_err_and(|cause| cause.to_string().contains("owned wrapped stamp failure")),
+                "first={first:?}; trigger_cleanup={removed:?}"
+            );
+            removed.unwrap();
+            crate::runtime::wait_input_service_record(fixture, &expected, outer);
+            let row = preview_row(&fixture.fixture.conn, run.run_id, message.message_id).unwrap();
+            assert_eq!(row.state, broker::runtime::InputState::Accepted);
+            assert_eq!(
+                preview_stamp(&fixture.fixture.conn, message.message_id),
+                None
+            );
+            let settings = settings_for(&fixture.fixture.conn);
+            let mut independent = crate::db::connect(&settings.database_url).unwrap();
+            let outcome = deliver_pending(
+                &mut independent,
+                &settings,
+                run.member_id,
+                Some(run.fleet_id),
+                Deadline::until(outer),
+                &BTreeSet::new(),
+                || panic!("wrapped retry uses its durable receipt"),
+            )
+            .unwrap();
+            assert_eq!(outcome.sent, vec![message.message_id], "{outcome:?}");
+            let settled = preview_row(&independent, run.run_id, message.message_id).unwrap();
+            assert!(
+                matches!(outcome.end, AttemptEnd::Drained | AttemptEnd::NoPending),
+                "retry requires actual retirement acknowledgment: {outcome:?}"
+            );
+            assert_eq!(settled.input_id, row.input_id);
+            assert_eq!(settled.state, broker::runtime::InputState::Settled);
+            assert_eq!(
+                settled.disposition,
+                Some(broker::runtime::InputDisposition::Submitted)
+            );
+            assert!(preview_stamp(&independent, message.message_id).is_some());
+            crate::runtime::input_service_barrier(fixture, outer);
+            assert_eq!(
+                crate::runtime::input_service_records(fixture)
+                    .iter()
+                    .filter(|record| record["line"] == expected)
+                    .count(),
+                1
+            );
+            let count: i64 = independent.query_row("SELECT count(*) FROM member_input_operations WHERE run_id=?1 AND kind='preview'", [run.run_id], |row| row.get(0)).unwrap();
+            assert_eq!(count, 1);
+        });
     }
 
     #[test]

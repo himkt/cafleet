@@ -10,7 +10,8 @@ CAFleet hosts coding-agent sessions in tmux or herdr panes. Pane IDs are opaque 
 | Access | CLI subprocess | CLI subprocess |
 | Spawn working directory | Splitting pane inheritance | Explicit `--cwd` |
 | Capture for `member capture` / `fleet capture` | `capture-pane -e` | `pane read --format ansi` |
-| Input | Optional Escape lead, literal text, settle, Enter | Optional Escape lead, literal text, settle, Enter |
+| Unwrapped input | Optional Escape lead, literal text, settle, Enter | Optional Escape lead, literal text, settle, Enter |
+| Wrapped input | Pinned PTY runner control socket | Pinned PTY runner control socket |
 | Delete layout | Native auto-fit | Best-effort rebalance scoped to the closed pane’s tab |
 
 ## Backend selection {#backend-selection}
@@ -135,7 +136,7 @@ retains its successful close and deregistration result.
 
 ## Pane input lock {#pane-input-lock}
 
-Every notification, prompt and native command uses one process-shared OS file lock. Acquire the guard before placement revalidation; hold it through the Escape lead, literal text, settle, Enter and the notification stamp of the last drained message. Close the non-cloned owned handle on every path.
+Every operation that writes pane input uses one process-shared OS file lock. Acquire the guard before placement revalidation. Wrapped prompt/exec/preview submissions hold it through short database validation, bounded runner submission and durable receipt/stamp settlement; explicitly unwrapped submissions hold it through the Escape lead, literal text, settle, Enter and the notification stamp of the last drained message. Explicit key requests hold it through their outer-pane dispatch and bounded cleanup. Close the non-cloned owned handle on every path.
 
 | Property | Contract |
 |---|---|
@@ -144,7 +145,7 @@ Every notification, prompt and native command uses one process-shared OS file lo
 | File | `<key>.lock`, read/write create without truncation, owner-only creation permissions |
 | Acquisition | Exclusive `std::fs::File::try_lock`, retried every 50 milliseconds while another writer holds it; preserve unexpected errors with path/member context |
 | Identity | Keep lockfiles stable while processes may use the database; unlinking a held file would let another process lock a different inode for the same pane |
-| Contention | A pane writer waits until its five-second budget minus the 3.5-second input reservation, at most 1.5 seconds. A lock still busy then fails that writer with its lock-busy error |
+| Contention | Prompt/exec/preview submission reserves 3.5 seconds, leaving at most 1.5 seconds to wait. Explicit keys use their [dispatch reservation](#explicit-key-dispatch); a lock still busy at its wait bound fails that writer |
 
 The 3.5-second input reservation covers a 0.5-second revalidation margin, the 0.5-second Escape settle, a 0.5-second minimum literal budget, the one-second submit settle and one second for Enter. A writer that acquires the lock within its wait therefore still submits; a lock released just before the wait ends still leads to a successful submission. No database statement runs while a writer waits for the lock.
 
@@ -153,6 +154,7 @@ The 3.5-second input reservation covers a 0.5-second revalidation margin, the 0.
 | `message send` / `message wait` delivery | `message MESSAGE_ID was not notified to member MEMBER_ID: pane input remained busy; the next send to member MEMBER_ID or the next message wait retries it.` |
 | `member prompt` | Exit 1: `member ID's pane input remained busy; prompt was not dispatched.` |
 | `member exec` | Exit 1: `member ID's pane input remained busy; native command was not dispatched.` |
+| `member press` | Exit 1 with the [primary and zero-dispatch diagnostics](cli-options.md#member-press) |
 
 When a delivery's lock wait ends, one short read selects the oldest pending message this invocation has not attempted for the recipient. When none remains, the attempt reports nothing. Otherwise the lock-busy diagnostic names that message.
 
@@ -170,6 +172,7 @@ Interrupting a host turn can also end the turn's in-flight shell tool, including
 |---|---|
 | `message send`, each `message wait` attempt | From lock acquisition through the last `notified_at` stamp |
 | `member prompt`, `member exec` | From lock acquisition through Enter |
+| `member press` | Begin before acquiring the lock; retain it through the writing process and bounded cleanup, releasing the lock before restoring signals |
 | `member create` | From the pane spawn through the registry commit or its compensation |
 | `member delete`, `fleet delete` | From lock acquisition through deregistration and layout cleanup |
 
@@ -181,10 +184,42 @@ Every span is bounded by its existing deadline, so a deferred signal waits at mo
 |---|---|---|
 | `message send` / `message wait` between first keystroke and stamp | `notified_at` stays NULL; the line may or may not have reached the pane | The next send or `message wait` retries it; a duplicate line is possible |
 | `member prompt` / `member exec` after typing began | Partial or complete input | `member capture`; re-dispatch only after inspecting the pane |
+| `member press` after its writing process starts | Any prefix, including empty or complete, may have been handled | Inspect the pane before an explicitly authorized new action |
 | `member create` | A pane without a registry row, or a row whose placement stays pending | `member list` and `fleet capture`; `member delete` the row, and close an unregistered pane with the multiplexer's own kill command |
 | `member delete` / `fleet delete` | A closed pane whose row remains, or the reverse | `member list`; rerun the delete |
 
+## Explicit key dispatch {#explicit-key-dispatch}
+
+`member press` maps the complete validated ordered vector from the [CLI contract](cli-options.md#member-press) to one writing invocation: `tmux send-keys -t PANE KEY...` or `herdr pane send-keys PANE KEY...`. The typed registry owns the common grammar and mappings below. Single printable characters preserve case; named keys and modifiers match case-insensitively, and control letters normalize to lowercase.
+
+| Common key | tmux argument | herdr argument |
+|---|---|---|
+| Single printable ASCII character, U+0021–U+007E | `0xXX` for its ASCII codepoint | Same character, with `+` as `plus`, `-` as `minus`, and `;` as `semicolon` |
+| `Space` | `Space` | `space` |
+| `Escape` | `Escape` | `esc` |
+| `Enter` | `Enter` | `enter` |
+| `Tab` | `Tab` | `tab` |
+| `Backspace` | `BSpace` | `backspace` |
+| `Up`, `Down`, `Left`, `Right` | Canonical capitalized name | Lowercase name |
+| `F1` through `F12` | `F1` through `F12` | `f1` through `f12` |
+| `Ctrl+a` through `Ctrl+z` | `C-a` through `C-z` | `ctrl+a` through `ctrl+z` |
+| `Shift+Tab` | `BTab` | `shift+tab` |
+
+Accept only these productions, with the CLI's count/UTF-8 bounds and complete-vector validation. Tmux hexadecimal character arguments keep punctuation out of its command parser. The dedicated key adapter sends only requested keys, using shell-free argv and no prompt phase or settling sleep.
+
+Acquire the same canonical pane-input lock used by deletion and validate its retained descriptor/path binding. Compare the configured/environment adapter with the recorded backend. Within that selected live context, require the current session/workspace to match the placement, then verify its complete target tuple: tmux reads `#{pane_id}|#{window_id}|#{session_name}` for the target and splits only the first two separators; herdr reads its pane-list JSON and requires exactly one matching workspace/tab/pane. Re-read the active member after metadata, compare its fixed fleet/kind/full placement and validate the held lock immediately before writing. A missing, ambiguous, malformed or changed target fails before the writing invocation.
+
+The placement records no historical socket/server-generation identity. Context validation establishes its complete tuple within the selected current server; it provides no cross-server fallback or proof of historical server/build equivalence. Keep that same adapter/environment across every probe and the write.
+
+Capture one inherited-or-new five-second absolute deadline before invocation database validation. The full availability/current-context/target-metadata/write chain uses absolute `run_until` execution with that supplied bound; relative or untimed helper execution supplies no press path. Retain one second for metadata/dispatch/cleanup when computing the lock-wait deadline, rather than the prompt reservation. Every later check uses the remaining original budget, and insufficient launch/cleanup reserve starts no new writing process.
+
+Within the original deadline, reserve 250 milliseconds for owned process cleanup and end collection/launch at that earlier bound. On an actual error, close read pipes, kill only the still-owned unreaped direct child and poll `try_wait` with sleeps at most 2 milliseconds while the original cleanup deadline has time remaining, checking that deadline after every interruption. Explicit cleanup and unwind fallback use the same original deadline and perform no blocking wait. An explicit cleanup attempt prevents a second Drop retry cycle; unconfirmed termination/reap remains an explicit diagnostic: `cleanup unconfirmed for child PID: original command deadline expired before reap`. Preserve actual kill/status errors and the primary process error; unwind emits cleanup diagnostics to stderr. Existing relative/untimed execution retains its separate behavior. Synchronous calls have no hard scheduler/syscall return-time guarantee.
+
+Both writing adapters acknowledge only successful process completion with empty/whitespace stdout. Unexpected non-whitespace stdout on success is unreadable acknowledgment with uncertain effects; herdr metadata retains its command-specific JSON parsing. Binary-not-found/not-started means zero writing invocations; every started failure, including pane-gone stderr, timeout or unreadable output, retains possible prefix delivery and receives no automatic retry. Backend keyboard modes or key interception can affect actual PTY bytes even after acknowledgment. Use the [CLI result/error contract](cli-options.md#member-press) and observe actual native effects separately.
+
 ## Prompt dispatch (`send_prompt`) {#prompt-dispatch}
+
+The sequences below specify the explicitly unwrapped multiplexer path. Runner-managed members use a pinned, healthy control socket and the tested composer profile under the [runtime input contract](member-runtime.md#input-arbitration-and-the-original-native-answer); they send literal text and the native submit key without Escape, hold previews for an observed/candidate interaction and reject unsafe explicit input before writing. Unknown coverage and uncertain reachability preserve manual terminal use while holding generated input.
 
 Validate a nonblank literal line without CR/LF or C0/DEL control characters before starting any process. No input path captures the pane or consults its state. Every submission selects a lead:
 
@@ -205,7 +240,7 @@ Native shell input starts with `! ` followed by the validated actual command. Co
 
 Opencode `mini` receives pushed notifications and direct prompts as submitted user turns. Native `! ` input executes a shell command. Poll returns the full persisted message, and ACK consumes its ID.
 
-Deletion and explicit pane-input operations start their five-second budgets after invocation schema and asset guards. Resolve native command bodies before starting their input budget. Each submission has one five-second transport budget:
+Deletion and prompt/exec operations start their five-second budgets after invocation schema and asset guards. Resolve native command bodies before starting their input budget. Each submission has one five-second transport budget:
 
 1. Reserve the one-second settle delay and one second for Enter, plus the 0.5-second Escape settle for the Escape lead. When no time remains beyond the reservation, fail with `insufficient pane input budget for literal input, settle and Enter` and start no input.
 2. For the Escape lead, send Escape bounded by one second or the unreserved time, whichever is shorter, then wait the Escape settle. Any Escape failure (launch, missing pane, nonzero exit or timeout) reports no dispatch, because no text was typed.
@@ -217,41 +252,45 @@ The lock excludes CAFleet writers; the user's keyboard and host UI can change at
 
 ## Push notifications {#push-notifications}
 
-Active ordinary recipients with concrete panes receive automatic message lines. The fleet's root Director receives through native [message listen](cli-options.md#message-listen) or manual broker reads, with zero automatic pane input. Self-sends persist with no pane input.
+Active ordinary recipients with concrete panes receive previews through their recorded transport. The root Director receives through native [message listen](cli-options.md#message-listen) or manual broker reads, with zero automatic pane input. Self-sends persist without pane input.
 
-Read preview eligibility in short consistent snapshots before and after acquiring the shared input lock, then revalidate ordinary-member kind, activity, fleet, concrete placement, message status and `notified_at` before writing. Exclude the Director before selecting a preview, locking a pane or resolving a multiplexer. The invocation validates its connection before notification operations. One connection-scoped database budget owns input eligibility; commit every read snapshot before multiplexer I/O. Each delivered message becomes one literal line:
+Wrapped previews use this exact line through eligible runner input:
+
+```text
+[cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] BODY [cafleet] Resume your work if something was still running.
+```
+
+Explicitly unwrapped previews retain their full legacy line:
 
 ```text
 [cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] BODY [cafleet] Resume your work if something was still running. [cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.
 ```
 
-Stored text remains exact. The line folds the full message body to one line: CRLF/LF/CR become `⏎`, tabs become `␉`, and other C0/DEL controls become visible hexadecimal escapes (`\xNN`). A folded body of at most 4000 Unicode scalar values appears inline. A longer one is replaced by `Body is N characters; run cafleet message show MESSAGE_ID --json to read it.`, where `N` counts the stored text. The line is independent of `CAFLEET_MAX_TEXT_LEN`. Every line, including drained follow-up lines and pointer lines, carries both trailing clauses. The fixed prefix distinguishes message text from native composer controls.
+Stored text remains exact. Both forms fold CRLF/LF/CR to `⏎`, tabs to `␉`, and other C0/DEL controls to visible hexadecimal escapes (`\xNN`). A folded body of at most 4000 Unicode scalar values appears inline; a longer body becomes `Body is N characters; run cafleet message show MESSAGE_ID --json to read it.`, where N counts stored text. This limit is independent of `CAFLEET_MAX_TEXT_LEN`. Every wrapped line ends with the resume clause; every unwrapped line carries both clauses.
 
-For example:
+One synchronous drain owns the shared pane lock and five-second attempt budget. Commit short read snapshots before socket or multiplexer I/O.
 
-```text
-[cafleet msg 57 from 15 2026-10-24T09:00:00.000000+00:00] ready (doc)⏎see the reviewer notes [cafleet] Resume your work if something was still running. [cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.
-```
+1. Read recipient/message eligibility, excluding the root Director before preview selection or pane locking. An inactive/ineligible recipient, fleet mismatch or no pending row ends the attempt; pending placement holds it.
+2. For wrapped delivery, query durable key `preview:<run_id>:<message_id>` before pane acquisition or live input eligibility. Conflicting reuse fails; in-progress or uncertain holds for inspection, and a settled key returns its existing disposition without replay. An accepted receipt permits settlement without typing. Capture one expiration from the original deadline before the pane wait for every path that will submit, settle or retire, including retained accepted/submitted history.
+3. Acquire the pane input lock, then revalidate activity, member kind, fleet, concrete placement, message status and notification stamp. Changed placement holds delivery.
+4. Resolve the recorded transport. A wrapped new input attempt requires a fresh pinned identity/epoch and socket health; retained accepted history proceeds to settlement. An unwrapped placement resolves the multiplexer and checks availability.
+5. Select the oldest unattempted pending message by `(created_at,message_id)` and revalidate the recipient/placement. Each invocation attempts a selected message at most once. Query the wrapped receipt for each later candidate before current input eligibility; retain the same owned lock.
+6. A wrapped new eligible attempt commits its durable in-progress row before child bytes, then records accepted or uncertain submission. Reuse its captured expiration for submission and any later retirement.
+7. Settle wrapped accepted delivery in one transaction that stamps `notified_at` or verifies ACK and marks the receipt settled/submitted. The serialized service verifies that same durable settled/submitted receipt and excludes every active pending writer before removing an unleased cache entry with no available attempt permit. Retirement uses the remaining original expiration and sends zero native bytes. Failure after possible input preserves the actual receipt state and notification stamp for reconciliation.
+8. For unwrapped delivery, reserve the lead/settle/Enter time plus the minimum literal budget before input. Use Escape for the first line and direct input for later drained lines, then stamp `notified_at` after full submission; an intervening ACK counts as notified.
+9. Continue at step 5 while the budget and input state permit. Wrapped input rechecks current output and composer state for every new attempt; a busy/unsafe state holds the next message.
 
-A synchronous send drains the recipient's pending messages oldest-first, ordered by `(created_at, message_id)`, within one lock hold and one five-second budget:
+A retirement failure after settlement preserves the committed sent prefix and `notification_sent=true`. Report `message MESSAGE_ID was notified to member MEMBER_ID; input INPUT_ID is settled/submitted; receipt retirement failed: CAUSE`, retaining known run/input/key context and the original cause. This warning uses the existing attempt error shape; durable settlement remains authoritative and grants no submission replay.
 
-1. Take the eligibility snapshot. An inactive/ineligible recipient, a fleet mismatch or no pending message ends the attempt with nothing to deliver. A placement without a concrete pane holds delivery.
-2. Wait for the [pane input lock](#pane-input-lock).
-3. Under the lock, re-read the snapshot; a changed placement holds delivery. Resolve the multiplexer and check its availability.
-4. Re-read the recipient and select its oldest pending message that this invocation has not already attempted. A departed recipient or one now serving as root Director ends the drain, and a placement change holds it. The drain ends when no such message remains.
-5. When the remaining budget no longer covers the lead's reservation plus a 0.5-second minimum literal budget, stop. For the first message this fails with the not-notified diagnostic; later messages stay pending with no diagnostic.
-6. Submit its line, with the Escape lead for the first line and the direct lead afterwards. A submission failure ends the drain with the not-notified diagnostic for that message.
-7. Stamp `notified_at` while the message remains pending, then continue at step 4. A message the recipient ACKed before the stamp counts as notified. A stamp failure ends the drain with the not-notified diagnostic for that message.
+The lock remains held through final submission/settlement. Wrapped delivery follows the [durable input contract](member-runtime.md#input-arbitration-and-the-original-native-answer); only absent receipts or certified ready/zero-byte state permit a new eligible attempt. Explicitly unwrapped delivery remains at-least-once: a failed stamp leaves the message pending, so later send/wait may repeat partial or complete input. Poll and ACK identify consumption independently of either transport.
 
-The lock is held from placement revalidation through the last Enter and the last `notified_at` stamp of the drain.
+The [notification diagnostic](cli-options.md#message-send-delivery) applies to failed input attempts and database contention, retaining actual causes and the committed message. Mandatory finalization uses the later of the original deadline and one second after finalization begins, while the transport remains within its original deadline. Other fatal storage errors retain their cause; a send preserves its committed result. A held state remains pending for external retry and reports no successful notification.
 
-Delivery is at-least-once. Nothing is written before input: a message stays pending, with `notified_at` NULL, until its complete submission is stamped. Every failure leaves the message pending and ends the drain with one not-notified diagnostic. The next send to that recipient or a later `message wait` invocation retries it, so a partially or fully submitted line can appear twice; every line carries its message ID, and `message poll` plus ACK remain authoritative. Mandatory finalization uses the later of the original deadline and one second after finalization begins. The Director consumes its own pending records through broker reads.
-
-The [notification diagnostic](cli-options.md#message-send-delivery) applies to lock, multiplexer, budget and transport failures, and to database busy or deadline exceeded during the under-lock snapshot or stamp. Other failures, including corruption, incompatible or unreadable storage and a termination-span start failure, retain their causes: send keeps its committed result and persisted-prefix diagnostic; wait exits 1 with its cause and every retained notification diagnostic.
-
-Delivery leaves `status_state` unchanged. A delivered message, inline or pointer, stays `input_required` and in `message poll` output until the recipient ACKs the ID shown in the line's `[cafleet msg ID …]` prefix.
+Delivery leaves `status_state` unchanged. An inline or pointer preview remains `input_required` until its recipient consumes and ACKs the message ID.
 
 ### Held delivery {#held-delivery}
+
+Wrapped delivery additionally remains held for a candidate/open interaction, draft/working/unknown composer, untested profile, degraded/recovering/lost observer or uncertain receipt/reachability. Only a verified empty composer allows a new submission. Held delivery leaves `notified_at` unset, creates no new permission event and grants no native answer. After inspecting the attributed native response, its actual result and continuation, consume/ACK available inbox records and explicitly invoke finite `message wait` to retry previews; the runner and listener perform no autonomous retry.
 
 Pending placement and a placement change under the lock are holds. Lock contention waits for the lock within the attempt budget. A message remains pending while the lock stays busy, the pane is not yet placed, the budget runs out or an attempt fails. The next send to that ordinary recipient, or a [message wait](cli-options.md#message-wait) rotation, retries it. Rotation selects concrete ordinary-member placements, excluding the root Director and the wait's own subject, and attempts at most one member per interval. One invocation attempts each pending message at most once; a later invocation retries a failed one. Successful snapshots can establish ACK, departure or notification by another invocation.
 
@@ -259,7 +298,7 @@ Transport and stamp failures after persistence remain diagnostics alongside a su
 
 ### Accepted trade-offs {#accepted-trade-offs}
 
-What a single Escape does depends on the backend, and a backend may need more than one Escape to interrupt a running session. Delivery is correct whatever Escape does: when Escape does not interrupt, the line is still typed into the composer and the host submits or queues it. Both trailing clauses are conditional, so they stay accurate either way.
+The following trade-offs apply to explicitly unwrapped input. What a single Escape does depends on the backend, and a backend may need more than one Escape to interrupt a running session. Delivery is correct whatever Escape does: when Escape does not interrupt, the line is still typed into the composer and the host submits or queues it. Both trailing clauses are conditional, so they stay accurate either way.
 
 - Where Escape interrupts an ordinary member's working turn, the resume clause tells the recipient to continue.
 - Where Escape dismisses an ordinary member's question, confirmation or approval prompt, the dismissed-prompt note tells that member the rejection did not come from the user and to re-issue the required tool call.

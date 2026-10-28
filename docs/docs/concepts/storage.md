@@ -37,3 +37,9 @@ Run [`cafleet setup`](../spec/cli-options.md#cafleet-setup) after installation. 
 ## Retention and pane locks
 
 Deregistration and fleet deletion retain message history while active query paths filter the registry state. Input ownership uses stable lockfiles adjacent to the canonical database file, as specified by [pane input](../spec/multiplexer-backends.md#pane-input-lock). Keep those files in place while processes may use the database.
+
+## Member runtime artifacts
+
+A private runtime namespace beside the canonical database separates each database file and instance. Replacement at the same pathname fences old runners; recorded identity and ownership govern every recovery attempt. Private descriptors are removed after launch/compensation, while event outboxes and settled input records retain their recovery roles. [Runtime identity and lifecycle](../spec/member-runtime.md#runner-boundary-and-creation-transaction) owns paths, permissions and validation.
+
+Terminal transport continues independently of database contention. Events become durable at SQLite commit; a flushed outbox frame is recoverable pending delivery. Metadata evidence stores no screen-derived text or hidden-text hash; explicit redacted evidence applies the configured policy before every persisted field. [The runtime contract](../spec/member-runtime.md#storage-pressure-and-durability-boundary) defines bounded pressure and exclusive recovery.

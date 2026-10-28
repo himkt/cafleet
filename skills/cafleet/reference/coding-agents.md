@@ -15,6 +15,19 @@ Model catalogs, their provenance/context notes, canonical Role defaults, and sha
 
 Prices are standard provider USD rates per MTok and are planning estimates, not an invoice guarantee. Each backend's catalog is ordered most → least capable as reviewed judgment. Context windows are listed for the `claude` backend, whose model strings are the ones a context-window suffix can apply to. Selection policy, including cost efficiency mode and reviewer/member rules, lives in [Director model selection](../roles/director.md#model-selection).
 
+`{permission_flags}` records omitted-policy launch defaults. An explicit `member create --permission-mode MODE` is resolved through the version-qualified backend catalog before spawn, retaining the remaining argv and sandbox boundaries; the selected policy belongs to the run rather than a fleet default. The Director resolves its own effective mode separately from current host/session evidence: verified auto permits its risk-based allow/deny decision, while other or unknown modes require user permission. Detection, composer and request-bound answer capabilities are independently tested; the [runtime procedure](member-runtime.md) owns consumption and response.
+
+## Role requirements
+
+| Role | Required backend capability |
+|---|---|
+| Director | Native goal lifecycle controls, such as a goal command, and background execution while supervision continues. Both capabilities are required. |
+| Member | Runner-compatible PTY lifecycle and an explicit detection-coverage declaration, with launch, detection and safe composer input treated separately. |
+
+Evaluate roles independently. An interactive Member policy is eligible; automatic-review or fixed allow/deny capability does not require its selection. Preserve native guards, managed policy, explicit denies and sandbox boundaries. Unknown detection/composer coverage permits manual native terminal work and holds CAFleet-generated input. The [member runtime procedure](member-runtime.md) owns event, input and continuation handling.
+
+Goal support is a host capability; retain supplied activation, pause, completion and budget authority. Evaluate native reception separately: a host satisfying both Director prerequisites can use explicit manual `poll` or finite `wait` when no verified receive adapter is available. Background execution alone establishes no unsolicited wake or per-record reception guarantee.
+
 ## claude
 
 ### Runtime bindings
@@ -64,7 +77,7 @@ Sources: [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pr
 | A separate evaluator checks the session condition against the transcript; native background work defers evaluation and returns a host result. Per-record reception follows the native recipe below. | [Director wake](supervision.md#director-wake) |
 | Receive Director records through one owned Monitor task using the native recipe below. Preserve the supplied `/goal` state and pending user decisions across events and renewal. | [Director wake](supervision.md#director-wake); [native reception](#claude-native-director-reception) |
 | Native shell probes displayed command/stdout/stderr followed by a model turn; its trigger and a second permission check were not established. The Director authorizes routed native input under its host rules. | [Command authorization](prompt-routing.md#director-side-dispatch) |
-| `dontAsk` permits spawn-allowed broker tools, built-in read-only work and matching host allow rules; denied work routes to the Director. Protected file edits need the Director or a host-rule change. | `{permission_flags}`; [routing](prompt-routing.md#member-side-reconsider-then-route) |
+| The omitted `dontAsk` policy permits spawn-allowed broker tools, built-in read-only work and matching host allow rules; returned denials route to the Director. An explicitly interactive native policy can block on a request-bound Director/user response or manual native input under the runner procedure; protected file edits retain their host-rule boundary. | `{permission_flags}`; [routing](prompt-routing.md#member-side-reconsider-then-route) |
 
 Evidence: Claude Code 2.1.296, checked 2026-10-22; [host continuation](https://code.claude.com/docs/en/goal) and [block cap](https://code.claude.com/docs/en/hooks-guide#stop-hook-hits-the-block-cap). Local probes establish only exercised behavior.
 
@@ -80,7 +93,7 @@ Retain the task ID, pinned member/fleet IDs, receive status and unfinished actio
 
 The finite CLI lease normally ends before the tested Monitor lifetime. On `closed` or native stream-ended/completion notification, establish the old task and source process exited. Renew once while authorized work remains, then reconcile replay. Deduplicate closure and completion notices by the owned task ID, ignoring stale completion notices after ownership moves. A host timeout before CLI closure follows [receiver recovery](supervision.md#receiver-recovery); establish source-child termination before replacement and retain one owned source process.
 
-Use verified native cancellation with observed child cleanup, or stop renewal and drain the finite lease. Preserve the supplied `/goal` activation, pause, completion and budget controls; receiving, ACKing and renewal use no goal lifecycle calls. Ordinary `Bash(run_in_background=true)` provides a different capability: observed completion notification did not establish per-line reception while the process lived. Where Monitor is unavailable or denied, disclose the limitation and use manual `poll`/finite `wait`.
+Use verified native cancellation with observed child cleanup, or stop renewal and drain the finite lease. Preserve the supplied `/goal` activation, pause, completion and budget controls; receiving, ACKing and renewal use no goal lifecycle calls. Ordinary `Bash(run_in_background=true)` provides a different capability: observed completion notification did not establish per-line reception while the process lived. On a host satisfying the [Director requirements](#role-requirements), disclose unavailable or denied Monitor reception and use manual `poll`/finite `wait`.
 
 Evidence: Claude Code 2.1.301 stream probes established separate event turns from one process. Actual Monitor expiry, cancellation, child cleanup and independently observed goal/decision preservation require acceptance evidence; the invocation shape alone establishes none of them.
 
@@ -126,7 +139,7 @@ Sources: [OpenAI pricing](https://developers.openai.com/api/docs/pricing) and [C
 | The objective belongs to the thread with model-callable lifecycle tools and optional token-budget accounting. Retain native session handles and explicitly read the owned receiver while delegated work remains, preserving goal activation, pause, completion and budget authority. | [Director wake](supervision.md#director-wake); [native reception](#codex-native-director-reception) |
 | Native shell input displayed command, exit code, duration and output. Installed protocol metadata describes unsandboxed dispatch while public CLI guidance describes current approval/sandbox settings; the effective TUI boundary and protocol path were not established. | [Native authorization](prompt-routing.md#director-side-dispatch) |
 | The Director authorizes routed native input under its host rules; harmless command visibility establishes no second member-tool permission check. Inspect output before explicit continuation. | [Dispatch and continuation](prompt-routing.md#director-side-dispatch) |
-| Run host-permitted workspace commands directly and route required denied operations. The configured sandbox and approval posture remain authoritative. | `{permission_flags}`; [member routing](prompt-routing.md#member-side-reconsider-then-route) |
+| Run host-permitted workspace commands directly and route returned denials. Explicit interactive approval uses the original native surface and runtime-event procedure; the workspace sandbox and managed policy remain authoritative. | `{permission_flags}`; [member routing](prompt-routing.md#member-side-reconsider-then-route) |
 
 Evidence: Codex CLI 0.162.1, checked 2026-10-22; [host continuation](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex) and [command reference](https://learn.chatgpt.com/docs/developer-commands).
 
@@ -389,9 +402,9 @@ Source: [OpenCode Go](https://opencode.ai/v2/docs/console/go).
 | Note | Applies at |
 |---|---|
 | A member routes concrete questions to the Director and receives the operator's answer as a message. | `{decision_surface}`; [user relay](supervision.md#user-delegation-protocol) |
-| Members perform assignments using the selected provider/model, workspace reads/edits, permitted tools and broker communication. A Director without a verified native stream adapter uses explicit manual `poll`/finite `wait` and states that reception limit. | [Director wake](supervision.md#director-wake) |
+| Members perform assignments using the selected provider/model, workspace reads/edits, permitted tools and broker communication. A host satisfying the [Director requirements](#role-requirements) without a verified native stream adapter uses explicit manual `poll`/finite `wait` and states that reception limit. | [Director wake](supervision.md#director-wake) |
 | `OPENCODE_CONFIG_DIR` adds a preset search directory alongside default home configuration. Same-name agent definitions can merge across sources; inspect the effective configuration when customizing a preset. | `{permission_flags}`; preset discovery |
-| The preset uses the last matching permission rule, so the specific `member prompt` and `member exec` denies win over the broad `cafleet *` allow. Denied member commands receive no permission prompt, while permitted broker commands run normally. | `{permission_flags}`; [member routing](prompt-routing.md#member-side-reconsider-then-route) |
+| The preset uses the last matching permission rule, so specific denies for Director-owned explicit pane-input commands, including `member press`, win over the broad `cafleet *` allow. Denied member commands receive no permission prompt, while permitted broker commands run normally. | `{permission_flags}`; [member routing](prompt-routing.md#member-side-reconsider-then-route) |
 | MCP tools' participation in preset permission evaluation and compound-shell permission matching are unverified on opencode 2.1.4. Keep loaded configurations free of MCP servers and submit one command per invocation. | `{permission_flags}`; [command isolation](../SKILL.md#one-shot-command-isolation) |
 | Each pane runs `opencode mini --standalone --agent cafleet` with `--prompt`, optional model selection and a private server. | `{permission_flags}`; member spawn |
 | Mini receives pushed notifications and direct prompts as submitted user turns. Captures can expose only the status bar; inspect retained session records for omitted input/output and broker poll/ACK for message consumption. | [Push notifications](runtime/spec/multiplexer-backends.md#push-notifications); prompt dispatch |
@@ -404,7 +417,7 @@ Add a `## <name>` backend with every subsection below. Fill every value, keep ru
 
 ### Runtime bindings
 
-Supply all five tokens: `{decision_surface}` (recorded user-reaction surface; members relay), `{permission_flags}` (exact auto-approval flags), `{pane_title}` (title mechanism or no analog), `{skill_loader}` (supported loader or complete absolute-path reads), and `{effort_levels}` (accepted values/flag or unsupported).
+Supply all five tokens: `{decision_surface}` (recorded user-reaction surface; members relay), `{permission_flags}` (omitted launch-policy flags and explicit-selection behavior), `{pane_title}` (title mechanism or no analog), `{skill_loader}` (supported loader or complete absolute-path reads), and `{effort_levels}` (accepted values/flag or unsupported).
 
 ### Role defaults
 

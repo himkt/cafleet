@@ -23,11 +23,7 @@ The flag means slightly different things per command:
   and is recorded as placement metadata. When the flag is omitted, the member inherits the spawning Director's placement backend (an explicit
   value still wins).
 
-Each backend is spawned with flags that enable shell commands with no runtime
-permission prompts, and with its broker commands already allowed: a claude
-member needs no user-level allow rule to send, poll, or ACK. The per-backend
-spawn argv, shell-command posture, and sandbox trade-offs are specified in
-[Coding-agent backends § Spawn argv](../spec/coding-agent-backends.md#spawn-argv).
+New members run through the CAFleet PTY runner with a declared detection-coverage state. Select native permission behavior with `--permission-mode`; omission retains the backend default. Interactive native policies are eligible, with request-bound Director/user decisions under the Director session’s effective mode or manual original-surface input. Detector, composer and answer coverage are independent; unknown coverage holds generated input. Broker access remains supplied by each backend’s launch configuration, subject to native and managed rules. [Member permission events](member-permission-events.md) explains the workflow, and [Spawn argv](../spec/coding-agent-backends.md#spawn-argv) specifies child arguments and sandbox boundaries.
 
 ## cafleet usage from a member pane
 
@@ -41,7 +37,7 @@ command. Each placeholder and its label line is in
 Each backend honors a leading-`!` shell shortcut on the coding agent's input line,
 including opencode `mini`; backend-specific permission limits are in
 [Coding-agent backends](../spec/coding-agent-backends.md).
-`cafleet member exec` submits a visible native command Escape-first; a member routes a
+`cafleet member exec` submits a visible native command through a tested runner composer profile; explicitly unwrapped members retain Escape-first input. A member routes a
 command its harness does not run through the Director — see
 [Command routing](member-lifecycle.md#command-routing). For the full
 broker CLI reference, see [CLI options](../spec/cli-options.md).
@@ -144,4 +140,4 @@ Use the [manual lifecycle](../how-to/mixed-backend-team.md#manual-lifecycle) for
 
 ## Director wake
 
-Director reception uses the executing backend's native stdout tools, with one owned receiver and explicit ACK consumption. The installed CAFleet backend instructions own concrete recipes; a backend without a verified adapter uses explicit manual broker reads and states that limit. Follow [the manual lifecycle](../how-to/mixed-backend-team.md#manual-lifecycle), preserving host continuation controls and pending user decisions.
+Director reception uses the executing backend's native stdout tools, with one owned receiver and explicit ACK consumption. The installed CAFleet backend instructions own concrete recipes; a host satisfying the [Director requirements](../spec/coding-agent-backends.md#role-requirements) may use explicit manual broker reads when a verified adapter is unavailable and states that reception limit. Follow [the manual lifecycle](../how-to/mixed-backend-team.md#manual-lifecycle), preserving host continuation controls and pending user decisions.

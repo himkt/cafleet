@@ -6,35 +6,45 @@ use std::os::fd::{AsFd, BorrowedFd};
 
 use nix::fcntl::{FcntlArg, OFlag, fcntl};
 use nix::poll::{PollFd, PollFlags, poll};
-use std::path::PathBuf;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::coding_agent::SpawnProbe;
-use crate::multiplexer::{CommandRunner, RunError};
+use crate::multiplexer::{CommandRunner, RunError, TimedRunError};
 
 /// Resolve `name` against the `PATH` environment variable to an executable
 /// regular file.
 pub fn find_on_path(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
-        let candidate = dir.join(name);
-        let Ok(metadata) = candidate.metadata() else {
-            continue;
-        };
-        if !metadata.is_file() {
-            continue;
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if metadata.permissions().mode() & 0o111 == 0 {
-                continue;
-            }
-        }
-        return Some(candidate);
+    std::env::split_paths(&path)
+        .map(|dir| dir.join(name))
+        .find(|candidate| is_executable_file(candidate))
+}
+
+/// Resolve `name` to the first executable regular file under an absolute
+/// entry of `path`, returning the path as found without resolving links.
+pub fn find_executable_in(path: &OsStr, name: &str) -> Option<PathBuf> {
+    std::env::split_paths(path)
+        .filter(|dir| dir.is_absolute())
+        .map(|dir| dir.join(name))
+        .find(|candidate| is_executable_file(candidate))
+}
+
+fn is_executable_file(candidate: &Path) -> bool {
+    let Ok(metadata) = candidate.metadata() else {
+        return false;
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
     }
-    None
+    #[cfg(not(unix))]
+    {
+        metadata.is_file()
+    }
 }
 
 pub struct SystemRunner;
@@ -50,6 +60,10 @@ impl CommandRunner for SystemRunner {
 
     fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError> {
         run_process(argv, Some(timeout))
+    }
+
+    fn run_until(&self, argv: &[String], deadline: Instant) -> Result<String, TimedRunError> {
+        run_process_until(argv, deadline)
     }
 
     fn sleep(&self, seconds: f64) {
@@ -95,14 +109,134 @@ fn run_process(argv: &[String], timeout: Option<Duration>) -> Result<String, Run
     }
 }
 
+const COMMAND_CLEANUP_RESERVE: Duration = Duration::from_millis(250);
+
+fn run_process_until(argv: &[String], deadline: Instant) -> Result<String, TimedRunError> {
+    let started = Instant::now();
+    let (program, args) = argv.split_first().expect("argv carries the program");
+    let cutoff = deadline
+        .checked_sub(COMMAND_CLEANUP_RESERVE)
+        .filter(|cutoff| *cutoff > started)
+        .ok_or_else(TimedRunError::before_launch)?;
+    let child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| TimedRunError {
+            source: if error.kind() == io::ErrorKind::NotFound {
+                RunError::BinaryNotFound(error.to_string())
+            } else {
+                RunError::NotStarted(error.to_string())
+            },
+            cleanup_diagnostics: Vec::new(),
+        })?;
+    let mut owned = OwnedChild {
+        child,
+        reaped: false,
+        cleanup_deadline: Some(deadline),
+        cleanup_attempted: false,
+    };
+    let result = collect_timed(&mut owned, started, cutoff.duration_since(started)).and_then(
+        |(status, stdout, stderr)| {
+            if Instant::now() >= cutoff {
+                return Err(RunError::Timeout);
+            }
+            if status.success() {
+                Ok(String::from_utf8_lossy(&stdout).into_owned())
+            } else {
+                Err(RunError::Failed {
+                    stderr: String::from_utf8_lossy(&stderr).into_owned(),
+                })
+            }
+        },
+    );
+    result.map_err(|source| TimedRunError {
+        source,
+        cleanup_diagnostics: owned.cleanup_absolute(),
+    })
+}
+
 struct OwnedChild {
     child: Child,
     reaped: bool,
+    cleanup_deadline: Option<Instant>,
+    cleanup_attempted: bool,
+}
+
+impl OwnedChild {
+    fn cleanup_absolute(&mut self) -> Vec<String> {
+        let deadline = self
+            .cleanup_deadline
+            .expect("absolute cleanup retains its original deadline");
+        assert!(
+            !self.cleanup_attempted,
+            "absolute cleanup is attempted once"
+        );
+        self.cleanup_attempted = true;
+        drop(self.child.stdout.take());
+        drop(self.child.stderr.take());
+        let mut diagnostics = Vec::new();
+        if self.reaped {
+            return diagnostics;
+        }
+        let pid = self.child.id();
+        loop {
+            match self.child.kill() {
+                Err(error)
+                    if error.kind() == io::ErrorKind::Interrupted && Instant::now() < deadline =>
+                {
+                    continue;
+                }
+                Err(error) => {
+                    diagnostics.push(format!("cleanup failed for child {pid} kill: {error}"))
+                }
+                Ok(()) => {}
+            }
+            break;
+        }
+        loop {
+            let Some(_) = deadline
+                .checked_duration_since(Instant::now())
+                .filter(|left| !left.is_zero())
+            else {
+                diagnostics.push(format!("cleanup unconfirmed for child {pid}: original command deadline expired before reap"));
+                break;
+            };
+            match self.child.try_wait() {
+                Ok(Some(_)) => {
+                    self.reaped = true;
+                    break;
+                }
+                Ok(None) => std::thread::sleep(
+                    deadline
+                        .saturating_duration_since(Instant::now())
+                        .min(Duration::from_millis(2)),
+                ),
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) => {
+                    diagnostics.push(format!("cleanup failed for child {pid} try_wait: {error}"));
+                    diagnostics.push(format!(
+                        "cleanup unconfirmed for child {pid}: status inspection failed"
+                    ));
+                    break;
+                }
+            }
+        }
+        diagnostics
+    }
 }
 
 impl Drop for OwnedChild {
     fn drop(&mut self) {
-        if !self.reaped {
+        if self.cleanup_deadline.is_some() {
+            if !self.cleanup_attempted {
+                for diagnostic in self.cleanup_absolute() {
+                    let _ = writeln!(io::stderr().lock(), "{diagnostic}");
+                }
+            }
+        } else if !self.reaped {
             let _ = self.child.kill();
             let _ = retry_interrupted(|| self.child.wait());
         }
@@ -123,6 +257,8 @@ fn run_timed(child: Child, timeout: Duration) -> Result<String, RunError> {
     let mut owned = OwnedChild {
         child,
         reaped: false,
+        cleanup_deadline: None,
+        cleanup_attempted: false,
     };
     let result = collect_timed(&mut owned, started, timeout);
     match result {
@@ -299,8 +435,8 @@ fn collect_timed(
 pub struct SystemProbe;
 
 impl SpawnProbe for SystemProbe {
-    fn binary_on_path(&self, name: &str) -> bool {
-        find_on_path(name).is_some()
+    fn resolve_binary(&self, name: &str) -> Option<PathBuf> {
+        find_executable_in(&std::env::var_os("PATH")?, name)
     }
 
     fn home_dir(&self) -> PathBuf {
@@ -322,6 +458,64 @@ pub fn read_stdin() -> std::io::Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    mod press_tests {
+        use super::*;
+
+        #[test]
+        fn step5_press_absolute_runner_reserves_cleanup_and_reaps_the_actual_direct_child() {
+            let fixture = ProcessFixture::new();
+            let argv = vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                "printf '%s' \"$$\" > \"$1/pid\"\nexec sleep 4".into(),
+                "cafleet-absolute-press-test".into(),
+                fixture.dir.path().to_str().unwrap().into(),
+            ];
+            let not_started =
+                SystemRunner.run_until(&argv, Instant::now() + Duration::from_millis(200));
+            let not_started = match not_started {
+                Ok(_) => panic!("insufficient cleanup reserve starts no process"),
+                Err(cause) => cause,
+            };
+            assert!(matches!(not_started.source, RunError::NotStarted(_)));
+            assert!(not_started.cleanup_diagnostics.is_empty());
+            assert!(!fixture.dir.path().join("pid").exists());
+
+            let started = Instant::now();
+            let until = started + Duration::from_secs(2);
+            let result = SystemRunner.run_until(&argv, until);
+            let returned = Instant::now();
+            let observed = result
+                .as_ref()
+                .cloned()
+                .map_err(|cause| cause.source.clone());
+            fixture.assert_direct_child_reaped(&observed);
+            let cause = match result {
+                Ok(_) => panic!("the direct child outlives the collection budget"),
+                Err(cause) => cause,
+            };
+            assert!(
+                matches!(cause.source, RunError::Timeout),
+                "{:?}",
+                cause.source
+            );
+            assert!(
+                cause.cleanup_diagnostics.is_empty(),
+                "{:?}",
+                cause.cleanup_diagnostics
+            );
+            assert!(
+                returned >= until - Duration::from_millis(350),
+                "elapsed={:?}",
+                returned - started
+            );
+            assert!(
+                returned <= until - Duration::from_millis(150),
+                "elapsed={:?}",
+                returned - started
+            );
+        }
+    }
     use nix::errno::Errno;
     use nix::sys::wait::{WaitPidFlag, waitpid};
     use nix::unistd::Pid;
@@ -330,6 +524,81 @@ mod tests {
 
     // Concurrent process launches can exhaust a one-second deadline before sh starts.
     static PROCESS_FIXTURE_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn native_executable_resolution_uses_the_first_absolute_path_entry_as_found() {
+        use std::ffi::OsString;
+        use std::os::unix::fs::PermissionsExt;
+        fn executable(path: &std::path::Path) {
+            std::fs::write(path, "#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        assert_eq!(std::env::current_dir().unwrap(), manifest);
+        let in_cwd = tempfile::Builder::new()
+            .prefix(".path-test-")
+            .tempfile_in(manifest)
+            .unwrap();
+        std::fs::set_permissions(in_cwd.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let name = in_cwd
+            .path()
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let relative = tempfile::Builder::new()
+            .prefix(".path-test-")
+            .tempdir_in(manifest)
+            .unwrap();
+        executable(&relative.path().join(&name));
+        let relative_entry = relative.path().file_name().unwrap().to_str().unwrap();
+        let absolute = tempfile::tempdir().unwrap();
+        let unusable = absolute.path().join("unusable");
+        let directory = absolute.path().join("directory");
+        let good = absolute.path().join("good");
+        let linked = absolute.path().join("linked");
+        let dangling = absolute.path().join("dangling");
+        for dir in [&unusable, &directory, &good, &linked, &dangling] {
+            std::fs::create_dir(dir).unwrap();
+        }
+        std::fs::write(unusable.join(&name), "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(unusable.join(&name), std::fs::Permissions::from_mode(0o644))
+            .unwrap();
+        std::fs::create_dir(directory.join(&name)).unwrap();
+        executable(&good.join(&name));
+        std::os::unix::fs::symlink(good.join(&name), linked.join(&name)).unwrap();
+        std::os::unix::fs::symlink(absolute.path().join("absent"), dangling.join(&name)).unwrap();
+        let search =
+            |entries: &[&str]| find_executable_in(&OsString::from(entries.join(":")), &name);
+        let good_entry = good.to_str().unwrap();
+        assert_eq!(
+            search(&[relative_entry, "", good_entry]),
+            Some(good.join(&name)),
+            "relative and empty entries are skipped even when they hold the binary"
+        );
+        assert_eq!(
+            search(&[good_entry, relative_entry, ""]),
+            Some(good.join(&name))
+        );
+        assert_eq!(search(&[relative_entry, ""]), None);
+        assert_eq!(
+            search(&[
+                dangling.to_str().unwrap(),
+                unusable.to_str().unwrap(),
+                directory.to_str().unwrap(),
+                good_entry,
+            ]),
+            Some(good.join(&name)),
+            "dangling links, non-executable files and directories are skipped"
+        );
+        assert_eq!(
+            search(&[linked.to_str().unwrap(), good_entry]),
+            Some(linked.join(&name)),
+            "a symbolic link is used as found"
+        );
+        assert_eq!(search(&[]), None);
+    }
 
     struct ProcessFixture {
         dir: TempDir,

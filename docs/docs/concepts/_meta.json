@@ -18,5 +18,10 @@
     "type": "file",
     "name": "storage",
     "label": "Storage"
+  },
+  {
+    "type": "file",
+    "name": "member-permission-events",
+    "label": "Member permission events"
   }
 ]

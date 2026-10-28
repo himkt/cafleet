@@ -4,17 +4,17 @@ Register the calling session as Director, then create independent member panes a
 
 ## Registration and readiness
 
-`fleet create` registers the current Director atomically. `member create` inherits that Director's backend unless overridden, validates model/effort and prompt identity, then registers a pending placement, splits a pane and patches its owned pane ID. Creation compensates for failures while preserving the original cause and any cleanup error.
+`fleet create` registers the current Director atomically. `member create` inherits that Director's backend unless overridden, validates model/effort, native policy, evidence policy and prompt identity, then registers a pending placement/run and starts the owned PTY runner. Creation retains its guards through the prepared/start/started handshake. Creation compensates for failures while preserving the original cause and any cleanup error.
 
 Each member reads its role and required host rules, sends `ready` as its first operational broker command, and immediately polls its inbox. The Director can assign that member as soon as its ready arrives. The member polls before completion reports and on every subsequent wake, then handles queued assignments before becoming idle.
 
 ## Assignment and receiving
 
-Messages are point-to-point. Send individually to every selected recipient. Ordinary members receive Escape-first pane previews; the root Director uses a persistent native inbox stream or explicit manual broker reads. Record deferred actions and ACK consumption, retaining unfinished work in host-owned task state. Arm Director reception before relying on ready replies and collect the receiver's exit during teardown. See [run a fleet](../how-to/mixed-backend-team.md#manual-lifecycle).
+Messages are point-to-point. Send individually to every selected recipient. Runner-managed members receive previews only through eligible native composer input; existing unwrapped members retain Escape-first previews. The root Director uses a persistent native inbox stream or explicit manual broker reads. Record deferred actions and ACK consumption, retaining unfinished work in host-owned task state. Arm Director reception before relying on ready replies and collect the receiver's exit during teardown. See [run a fleet](../how-to/mixed-backend-team.md#manual-lifecycle).
 
 ## Command routing
 
-A member runs commands its host permits and routes a required denied command to the Director. The Director authorizes `member exec`, which visibly submits the actual native shell command and returns submission metadata. Inspect native output with `member capture`; after completion, send an explicit `member prompt` to continue if the host has not resumed the member. A failed or uncertain dispatch requires inspection before any newly authorized retry.
+A member runs commands its host permits and routes a required denied command to the Director. The Director authorizes `member exec`, which visibly submits the actual native shell command and returns submission metadata. Inspect native output with `member capture`; after completion, send an explicit `member prompt` to continue if the host has not resumed the member. A held permission request uses the Director’s effective mode: verified auto permits its allow/deny decision, while other/unknown modes require user permission. Submit only a current request-bound response or use manual native input, then inspect actual results and continuation. Inspect a failed or uncertain dispatch and its durable input receipt before any newly authorized retry. [Member permission events](member-permission-events.md) explains the complete event/answer/retry sequence.
 
 The [native dispatch contract](../spec/cli-options.md#member-exec) owns validation, lock and uncertainty errors. File-edit permission gaps need a matching host rule or a Director edit.
 
@@ -24,4 +24,4 @@ Use `member list`, `member capture` and `fleet capture` to check roster and pane
 
 ## Teardown
 
-Delete owned ordinary members before deleting the fleet. Member deletion kills its owned pane and deregisters it; fleet deletion deregisters the registry without closing panes. Both serialize placement changes with pane input and fail without registry changes if lock contention lasts five seconds. The root Director is protected from individual member deletion.
+Delete owned ordinary members before deleting the fleet. Runner-managed deletion coordinates shutdown and event recovery under the existing pane locks, retaining unconfirmed child cleanup and recoverable artifacts explicitly. Member deletion kills its owned pane and deregisters it; fleet deletion deregisters the registry without closing panes. Both serialize placement changes with pane input and fail without registry changes if lock contention lasts five seconds. The root Director is protected from individual member deletion.

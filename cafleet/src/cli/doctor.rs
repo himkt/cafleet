@@ -73,6 +73,46 @@ pub fn run(settings: &Settings, args: DoctorArgs) -> Result<(), CafleetError> {
         &SystemProbe,
         home.as_deref(),
     ));
+    if matches!(schema, SchemaState::Head { .. }) {
+        let conn = conn
+            .as_ref()
+            .expect("compatible schema has an open connection");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut statement = conn
+            .prepare("SELECT run_id FROM member_runs ORDER BY run_id")
+            .map_err(crate::broker::members::db_err)?;
+        let runs = statement
+            .query_map([], |row| row.get::<_, i64>(0))
+            .map_err(crate::broker::members::db_err)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(crate::broker::members::db_err)?;
+        for run_id in runs {
+            if std::time::Instant::now() >= deadline {
+                checks.push(Check::new(
+                    "member_runtime",
+                    "info",
+                    "runtime diagnosis budget exhausted; inspect remaining runs explicitly",
+                ));
+                break;
+            }
+            let until =
+                deadline.min(std::time::Instant::now() + std::time::Duration::from_millis(100));
+            checks.push(
+                match crate::runtime::runner::diagnose_runtime(conn, run_id, until) {
+                    Ok(diagnosis) => Check::new(
+                        format!("member_runtime.{run_id}"),
+                        "info",
+                        diagnosis.diagnostics.join("; "),
+                    ),
+                    Err(cause) => Check::new(
+                        format!("member_runtime.{run_id}"),
+                        "error",
+                        cause.to_string(),
+                    ),
+                },
+            );
+        }
+    }
     if args.json {
         println!(
             "{}",
@@ -138,7 +178,7 @@ fn agent_checks(
             ),
             Err(cause) => Check::new(format!("{name}.configuration"), "error", cause.to_string()),
         });
-        let available = probe.binary_on_path(agent.binary_name());
+        let available = probe.resolve_binary(agent.binary_name()).is_some();
         checks.push(Check::new(
             format!("{name}.executable"),
             if available { "ok" } else { "info" },
@@ -248,9 +288,10 @@ mod tests {
         invalid: Option<&'static str>,
     }
     impl SpawnProbe for Probe {
-        fn binary_on_path(&self, name: &str) -> bool {
+        fn resolve_binary(&self, name: &str) -> Option<PathBuf> {
             assert!(crate::coding_agent::coding_agent(name).is_some());
             self.executable
+                .then(|| PathBuf::from("/fixture/bin").join(name))
         }
         fn home_dir(&self) -> PathBuf {
             self.home.clone()

@@ -28,13 +28,27 @@ pub fn format_messages(messages: &[MessageRecord], limit: usize) -> String {
         .join("\n\n")
 }
 
-pub fn format_member_detail(member: &MemberRecord) -> String {
+pub(crate) fn format_member_press(value: &crate::runtime::KeyAcknowledgment) -> String {
     format!(
+        "Acknowledged keys {} for member {} ({}).",
+        serde_json::to_string(&value.keys).expect("key strings serialize"),
+        value.member_id,
+        value.pane_id
+    )
+}
+
+pub fn format_member_detail(member: &MemberRecord) -> String {
+    let mut text = format!(
         "{} {} {}",
         member.member_id,
         member.name,
         member.status.as_str()
-    )
+    );
+    if let Some(runtime) = &member.runtime {
+        text.push('\n');
+        text.push_str(&super::format_runtime_snapshot(runtime));
+    }
+    text
 }
 
 pub fn format_fleet_create(fleet: &CreatedFleet) -> String {
@@ -132,6 +146,7 @@ mod tests {
             kind: MemberKind::Member,
             registered_at: "registered".into(),
             placement: None,
+            runtime: None,
         };
         let mut row = MemberActivity {
             member,

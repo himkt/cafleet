@@ -4,10 +4,23 @@ Every member pane runs a coding-agent binary selected from the backend registry.
 per member in `member_placements.coding_agent`; selection and inheritance via
 `--coding-agent`, mixed-backend teams, and identity delivery are covered in
 [Coding agents](../concepts/coding-agents.md). This page specifies each
-backend's spawn argv, auto-approval posture, model-flag format, and
+backend's child argv, selected permission policy, model-flag format, and
 version/config requirements.
 
+## Role requirements {#role-requirements}
+
+| Role | Required backend capability |
+|---|---|
+| Director | A goal command or equivalent native goal lifecycle controls, plus background execution while supervision continues. |
+| Member | A compatible PTY lifecycle with an explicit detection-coverage declaration; launchability, detection and safe composer input are evaluated separately. |
+
+Evaluate each role independently. Interactive member policies are eligible under the runner contract; automatic review or fixed allow/deny capability may remain available without being the selected mode. Preserve native guards, managed policy, explicit denies and sandbox boundaries. A backend with unknown detector/composer coverage permits manual terminal work and holds generated input.
+
+Goal support is a host capability; preserve supplied activation, pause, completion and budget authority. A verified native receive adapter is evaluated separately: a host satisfying both Director prerequisites may use explicit manual `poll` or finite `wait` when its native adapter is unavailable. Background execution alone establishes no unsolicited wake or per-record reception guarantee.
+
 ## Spawn argv {#spawn-argv}
+
+These are the child argv with omitted permission selection. The leading token names the backend binary; the launched `argv[0]` is the absolute path chosen by [native executable resolution](member-runtime.md#native-executable-resolution), the same path the version probe ran. The multiplexer starts the CAFleet PTY runner, which preserves the literal child argv, cwd and required environment. Explicit selection changes only the native permission argument through the [launch-policy contract](member-runtime.md#launch-policy-and-capability-registry).
 
 | Backend | Spawn argv |
 |---|---|
@@ -17,7 +30,7 @@ version/config requirements.
 
 Shared contract:
 
-- Each posture enables shell commands with no runtime permission prompts.
+- Each omitted policy retains its existing command posture; an explicit interactive policy may display native approval prompts.
 - Each backend honors the leading-`!` shell shortcut that
   [`cafleet member exec`](cli-options.md#member-exec) dispatches through.
 - Every member can run its broker commands from the moment it is spawned:
@@ -47,6 +60,12 @@ Per-backend capabilities:
 | `codex` | kernel-enforced ([Codex](#codex)) | no — locate the pane through `cafleet member list` (`pane_id` is ground truth) | Runs commands its workspace/host rules permit; routes required denied commands | `~/.codex/rules/cafleet.rules` (`CODEX_HOME` relocates it), plus the `~/.codex/config.toml` settings and a trusted working directory — a permission posture, not a spawn dependency ([the rules file](#cafleet-rules-file)) |
 | `opencode` | none | no — locate the pane through `cafleet member list` | Deny-by-default allowlist; everything outside it routes to the Director | `~/.opencode/agents/cafleet.md` (`OPENCODE_CONFIG_DIR` relocates it) — a spawn precondition ([the agent preset](#cafleet-agent-preset)) |
 
+## Director decision policy
+
+The Director resolves its own effective approval mode from current host/session evidence, independently of member launch argv. Verified auto permits the Director to evaluate a current permission request and decide allow/deny; other or unknown modes require the user’s request-specific permission. Native and managed rules remain authoritative, including authorization to execute the response command.
+
+The [permission workflow](../concepts/member-permission-events.md) owns consumption and risk review. Request-bound answer support is an independently tested exact-version profile capability; detection or composer support supplies no answer-key mapping. Unknown answer coverage preserves manual native input.
+
 ## Model selection {#model-selection}
 
 | Backend | Accepted value format | Example values | Create-time validation |
@@ -65,12 +84,11 @@ Per-backend capabilities:
 
 ## Claude {#claude}
 
-A separate evaluator checks the session condition against the transcript; native background work defers evaluation and returns a host result. Use one native Monitor task for Director inbox records, retaining its handle across separate events and renewing after observed source-task exit. The installed CAFleet skill's Claude native instructions own discovery, invocation, renewal and evidence limits; the [manual lifecycle](../how-to/mixed-backend-team.md#manual-lifecycle) explains operation. Preserve supplied `/goal` state and pending user decisions; manual finite reception remains available when Monitor is unavailable or denied.
+A separate evaluator checks the session condition against the transcript; native background work defers evaluation and returns a host result. Use one native Monitor task for Director inbox records, retaining its handle across separate events and renewing after observed source-task exit. The installed CAFleet skill's Claude native instructions own discovery, invocation, renewal and evidence limits; the [manual lifecycle](../how-to/mixed-backend-team.md#manual-lifecycle) explains operation. Preserve supplied `/goal` state and pending user decisions; manual finite reception remains available on a host satisfying the [Director requirements](#role-requirements) when Monitor is unavailable or denied.
 
 Native shell probes displayed command/stdout/stderr followed by a model turn; the trigger and any second permission check were not established. The Director authorizes each routed command under its host rules.
 
-`--permission-mode dontAsk` is the reference auto-approval posture the other
-backends match. A member runs four kinds of call without a prompt: its
+`--permission-mode dontAsk` is the omitted Claude member policy. Explicit native modes retain their own permission behavior. Under `dontAsk`, a member runs these calls without a prompt: its
 [spawn-time allow rules](#spawn-time-allow-rules), Claude Code's built-in
 read-only commands, file reads inside its working directory, and every tool
 call matching `permissions.allow`. Every other call — a shell command or a
@@ -80,6 +98,8 @@ prompt. A write to one of Claude Code's protected paths, such as a project's
 the broker commands, the operator's settings are therefore the member's allow
 list; the recommended profiles are in
 [Claude Code configuration](../quickstart.md#claude-code).
+
+Launch-policy evidence is pinned to Claude Code 2.1.302 and Codex CLI 0.163.0. The inspected Claude parser accepts canonical `default` and alias `manual`, although help renders the canonical mode as `manual`; explicit argv preserves the selected spelling. [Claude’s permission-mode reference](https://code.claude.com/docs/en/permission-modes) documents the alias. Codex help confirms `on-request` and `never` with the explicit workspace sandbox retained. These observations establish launch-policy eligibility. Detection, empty-composer and answer coverage for exactly these versions comes from their [bundled profiles](member-runtime.md#bundled-profiles-and-native-screen-fixtures); every other version records `coverage=unknown`.
 
 ### Spawn-time allow rules {#spawn-time-allow-rules}
 
@@ -119,17 +139,16 @@ The flags do not cover these cases:
 | `Skill(cafleet)`, `Skill(cafleet-design-doc)` | Both | The Director and every member | Each loads the installed skills through the Skill tool. |
 | `Read(~/.claude/skills/**)` | Both | The Director and every member | Role and reference pages of an installed skill sit outside the working directory. |
 | `Edit`, `Write` | Both | Every member that writes files | A member's file edit is denied unless an entry matches it. No entry covers a protected path. |
-| `Bash(cafleet member prompt *)`, `Bash(cafleet member exec *)` under `ask` | Both | The Director | The operator confirms each dispatch; a member's own attempt is denied. |
+| Prefixes for explicit native pane input under `ask`, including `member press` | Both | The Director | The operator confirms each dispatch; a member's own attempt is denied. |
 
 The auto mode profile carries no `Bash(cafleet ...)` allow entry: the
 classifier reviews each Director command that no rule matches, auto mode
 approves the Director's file edits inside the working directory, and members
 receive their broker commands as spawn-time allow rules.
 
-`cafleet member prompt` and `cafleet member exec` stay under `ask` in both
-profiles because the first keystrokes arbitrary text into a member's pane and
-the second runs an arbitrary command there. An ask rule outranks every allow
-rule, so the entries hold beside `Bash(cafleet *)`.
+Commands that send explicit native pane input stay under `ask` in both
+profiles, including ordered manual keys through `member press`. An ask rule
+outranks every allow rule, so these entries hold beside `Bash(cafleet *)`.
 
 `Edit` and `Write` apply to every session that reads the settings file, so
 they also pre-approve file edits in your own sessions. To confine the
@@ -212,13 +231,37 @@ prefix_rule(
     decision = "prompt",
     justification = "cafleet member exec runs an arbitrary shell command in a member pane",
 )
+
+prefix_rule(
+    pattern = ["cafleet", "member", "press"],
+    decision = "prompt",
+    justification = "cafleet member press sends explicit native keys to a member pane",
+)
+
+prefix_rule(
+    pattern = ["cafleet", "permission", "respond"],
+    decision = "prompt",
+    justification = "cafleet permission respond writes a native permission answer into a member pane",
+)
+
+prefix_rule(
+    pattern = ["cafleet", "input", "reconcile"],
+    decision = "prompt",
+    justification = "cafleet input reconcile records a Director-owned input disposition",
+)
+
+prefix_rule(
+    pattern = ["cafleet", "member", "recover"],
+    decision = "prompt",
+    justification = "cafleet member recover reconciles a member run under exclusive ownership",
+)
 ```
 
 Codex applies the strictest decision when more than one rule matches
-(`forbidden` > `prompt` > `allow`): `cafleet member prompt` and
-`cafleet member exec` each match the broad allow and their own rule, so the
-`prompt` wins and each invocation keeps requiring approval, while every other
-subcommand matches only the broad `["cafleet"]` allow — for every fleet,
+(`forbidden` > `prompt` > `allow`): the Director-owned explicit pane-input,
+native-answer, input-reconciliation and run-recovery commands match the broad
+allow and their specific prompt rules, so operator approval remains required. Commands without a more specific rule match the broad `["cafleet"]`
+allow for every fleet,
 since every id rides past the matched prefix as a positional or trailing
 argument.
 
@@ -253,12 +296,18 @@ prefix_rule(
     decision = "prompt",
     justification = "cafleet member exec runs an arbitrary shell command in a member pane",
 )
+
+prefix_rule(
+    pattern = ["cafleet", "member", "press"],
+    decision = "prompt",
+    justification = "cafleet member press sends explicit native keys to a member pane",
+)
 ```
 
 The `allow` rules cover the broker commands members run themselves — the same
 commands a claude member receives as
 [spawn-time allow rules](#spawn-time-allow-rules); the `prompt` rules keep
-`cafleet member prompt` and `cafleet member exec` under operator approval.
+explicit native pane-input commands under operator approval.
 
 The set is sufficient for members and is not the recommendation for a
 Director session. Codex has no classifier to review what these rules leave
@@ -298,9 +347,14 @@ then an explicit allowlist translated from the operator's Claude Code
 `permissions.allow` set (`cafleet *`, its declared Git commands,
 file-inspection utilities, and the project's cargo-backed mise tasks). opencode selects the
 **last** matching rule, so this order is the safety floor — every check
-resolves to `allow` or `deny`, never `ask`. Explicit `cafleet member prompt *` and `cafleet member exec *` deny
-entries follow the `cafleet *` allow, so they win: the preset configures
-members, and dispatching a command into another pane is the Director's act. A member's denied command receives no permission prompt, while permitted broker commands run normally. Tool permission and assignment authority are separate: the assigned role and Director instructions determine which allowed operations a member may perform. A permission popup in an opencode pane is
+resolves to `allow` or `deny`, never `ask`. Specific deny entries for the
+Director-owned commands — explicit pane input (`cafleet member prompt *`,
+`cafleet member exec *`, `cafleet member press *`), request-bound native answers
+(`cafleet permission respond *`), input reconciliation
+(`cafleet input reconcile *`) and run recovery (`cafleet member recover *`) —
+follow the `cafleet *` allow, so they win: the preset configures members, and
+dispatching input into another pane, answering a native request, settling an
+input receipt or reconciling a run is the Director's act. A member's denied command receives no permission prompt, while permitted broker commands run normally. Tool permission and assignment authority are separate: the assigned role and Director instructions determine which allowed operations a member may perform. A permission popup in an opencode pane is
 therefore a regression escape, not a runtime decision: capture the pane,
 escalate, and extend the allowlist by operator decision — do not answer the
 popup ad hoc.

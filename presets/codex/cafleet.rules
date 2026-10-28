@@ -11,3 +11,27 @@ prefix_rule(
     decision = "prompt",
     justification = "cafleet member exec runs an arbitrary shell command in a member pane",
 )
+
+prefix_rule(
+    pattern = ["cafleet", "member", "press"],
+    decision = "prompt",
+    justification = "cafleet member press sends explicit native keys to a member pane",
+)
+
+prefix_rule(
+    pattern = ["cafleet", "permission", "respond"],
+    decision = "prompt",
+    justification = "cafleet permission respond writes a native permission answer into a member pane",
+)
+
+prefix_rule(
+    pattern = ["cafleet", "input", "reconcile"],
+    decision = "prompt",
+    justification = "cafleet input reconcile records a Director-owned input disposition",
+)
+
+prefix_rule(
+    pattern = ["cafleet", "member", "recover"],
+    decision = "prompt",
+    justification = "cafleet member recover reconciles a member run under exclusive ownership",
+)

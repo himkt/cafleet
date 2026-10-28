@@ -16,7 +16,12 @@ The unified `cafleet` CLI uses literal subject IDs, synchronous SQLite access an
 | `member delete` | Kill its owned pane and deregister | `MEMBER_ID` | yes |
 | `member show` / `member list` | Read detail / active roster | `MEMBER_ID` / `FLEET_ID` | yes |
 | `member prompt` / `member exec` | Submit authorized native input | `MEMBER_ID` | yes |
+| `member press` | Request explicit ordered keys | `MEMBER_ID` | yes |
 | `member capture` | Read a pane tail | `MEMBER_ID` | yes |
+| `member recover` | Reconcile the recorded run without restarting an agent | `MEMBER_ID` | yes |
+| `event show` | Read a durable runtime event and current state | `EVENT_ID` | yes |
+| `input show` / `input reconcile` | Read / settle a durable input receipt | `INPUT_ID` | yes |
+| `permission inspect` / `permission respond` | Inspect / answer the current native permission request | `INTERACTION_ID` | yes |
 | `message send` | Persist a point-to-point message and preview it for an ordinary recipient | Sender/recipient flags | yes |
 | `message poll` / `message wait` | Read incoming deliveries / block until deliveries arrive | `MEMBER_ID` | yes |
 | `message listen` | Stream pending inbox records through stdout | `MEMBER_ID` | JSONL only |
@@ -36,6 +41,18 @@ The default expands HOME once. An explicit URL has the form `sqlite:///<path>`; 
 
 `cafleet --version` prints `cafleet <version>` and exits 0 before dispatch.
 
+## Help text {#help-text}
+
+`--help` describes every visible command, subcommand and option with a one-line description. Command group descriptions state the purpose given in the [subcommand summary](#subcommand-summary). Help derives choice lists from the same registries that validate the values:
+
+| Option | Help shows | Source |
+|---|---|---|
+| `member create --permission-mode MODE` | Each backend's accepted modes and its omitted default, in backend registry order, as `BACKEND: MODE, MODE (default MODE)` joined by `; ` | The backend [policy catalog](member-runtime.md#launch-policy-and-capability-registry) |
+| `permission respond --decision`, `--decision-source`, `--director-mode` | Their possible values | The stored enum values of the [permission response storage](member-runtime.md#permission-response-storage) |
+| `input reconcile --disposition`, `member create --event-evidence` | Their possible values | Their command enums |
+
+An invalid value for an option with possible values exits 2 with a usage error that lists those values. `member create` resolves its backend at run time, so a `--permission-mode` value outside that backend's catalog keeps its run-time usage error `--permission-mode for BACKEND must be one of CHOICES (got 'VALUE')`, also with exit 2.
+
 ## Output shapes {#output-shapes}
 
 | Command | Text | JSON |
@@ -50,12 +67,18 @@ The default expands HOME once. An explicit URL has the form `sqlite:///<path>`; 
 | `message show` | Envelope | `{message}` |
 | `message wait` | Availability/timeout line and any messages | `{member_id, outcome, messages, notification_errors}` |
 | `message listen` | — | Tagged `ready`, `message`, `closed` JSONL records; no `--json` flag |
-| `member create` | `ID NAME backend=AGENT pane=PANE` | Member with placement |
+| `member create` | `ID NAME backend=AGENT pane=PANE` plus runtime line | Member with placement and runtime |
 | `member delete` | `Member deleted.` with member/pane lines | `{member_id, pane_status}` |
-| `member show` | `ID NAME STATUS` | Detail including kind and placement |
+| `member show` | `ID NAME STATUS` plus wrapped runtime line | Detail including kind, placement and runtime |
+| `member recover` | Recovery counts/state and cleanup lines | Ordered recovery result |
+| `event show` | Event, runtime and optional interaction lines | Event and current state |
+| `input show` / `input reconcile` | Input receipt and optional decision lines | `{input}` |
+| `permission inspect` | Request identity/capability lines | `{request}` |
+| `permission respond` | Answer submission status/stage line | `{response}` |
 | `member list` | Roster rows or `0 members.` | Roster array |
-| `member prompt` | `Sent prompt TEXT_REPR to member NAME (PANE).` | `{member_id, pane_id, text}` |
-| `member exec` | `Dispatched native command to member ID (PANE). Inspect the pane for its result.` | `{member_id, pane_id, coding_agent, command, dispatched}` |
+| `member prompt` | `Sent prompt TEXT_REPR to member NAME (PANE).` plus wrapped input line | `{member_id, pane_id, text, input_id}` |
+| `member exec` | `Dispatched native command to member ID (PANE). Inspect the pane for its result.` plus wrapped input line | `{member_id, pane_id, coding_agent, command, dispatched, input_id}` |
+| `member press` | `Acknowledged keys KEYS_JSON for member ID (PANE).` | Ordered `member_id, pane_id, keys, status` |
 | `member capture` | Exact selected content | `{member_id, pane_id, lines, content, captured_at, content_sha256}` |
 | `fleet capture` | One annotated section per entry | Ordered capture-entry array |
 | `doctor` | Complete diagnosis and issue footer | Diagnosis object |
@@ -66,11 +89,11 @@ Roster records include `member_id`, `name`, `kind`, `placement`, `last_sent`, `l
 
 ## JSON output (`--json`) {#json-output}
 
-Use a trailing per-subcommand `--json`. It emits compact single-line JSON with UTF-8 and complete untruncated message text. Application errors remain stderr text; parse errors exit 2. Commands marked no reject the flag, including the root group.
+Place `--json` among the subcommand options, before a `--` separator that introduces literal key arguments. It emits compact single-line JSON with UTF-8 and complete untruncated message text. Application errors remain stderr text, with the [structured permission-response exception](#permission-commands); parse errors exit 2. Commands marked no reject the flag, including the root group.
 
 ## Positional subject ids {#positional-subject-ids}
 
-Place `FLEET_ID`, `MEMBER_ID` or `MESSAGE_ID` immediately after the subcommand. The subject row supplies related fleet/recipient state. IDs are complete DB-assigned integers, without prefix resolution or environment defaults. A missing or malformed subject uses the parser's native error, exit 2.
+Place the command’s subject ID immediately after its subcommand; event, input and permission subjects use their positive durable event, input and interaction IDs. The subject row supplies related fleet/recipient state. IDs are complete DB-assigned integers, without prefix resolution or environment defaults. A missing or malformed subject uses the parser's native error, exit 2.
 
 Spawned members read literal `FLEET ID:`, `YOUR MEMBER ID:`, `DIRECTOR MEMBER ID:` and `CODING AGENT:` lines. Pass these literal IDs on each invocation.
 
@@ -82,7 +105,7 @@ Send requires integer sender and recipient flags. Both must be active in the sam
 
 Use prefix rules such as `Bash(cafleet message *)` to cover broker operations, including `cafleet message listen ID --timeout 300` and finite `cafleet message wait`. Verify native Monitor authorization separately: a Bash-rule check establishes no Monitor permission. Director capture is covered by `Bash(cafleet fleet capture *)` or a broader authorized prefix. Literal IDs and trailing JSON flags preserve prefix matching.
 
-Keep `Bash(cafleet member prompt *)` and `Bash(cafleet member exec *)` under `permissions.ask`, because their bodies carry operator-controlled input. Ask rules outrank allow rules. The [permission profiles](coding-agent-backends.md#claude-profile-entries) describe each role's needs.
+Keep commands that send explicit native pane input under `permissions.ask`, including the `Bash(cafleet member prompt *)`, `Bash(cafleet member exec *)` and `Bash(cafleet member press *)` prefixes. Ask rules outrank allow rules. Authorize `cafleet permission respond` under the Director host’s effective policy after its request-specific decision; mode/source flags bypass no ask, deny or managed rule. Ordinary member role authority covers broker reception and evidence routing, while the Director owns permission responses. The [permission profiles](coding-agent-backends.md#claude-profile-entries) describe each role's needs.
 
 ## Message Body Truncation
 
@@ -420,6 +443,17 @@ The section cannot see a blocking `PreToolUse` hook, or a rule added after a
 member is spawned — see
 [Spawn-time allow rules](coding-agent-backends.md#spawn-time-allow-rules).
 
+### Member runtime checks {#doctor-member-runtime}
+
+With a compatible at-head database, doctor diagnoses every recorded member run in ascending `run_id` order without mutating registry or runtime state. Each run produces one entry named `member_runtime.<run_id>`:
+
+| Outcome | Status | Detail |
+|---|---|---|
+| The read-only diagnosis completes | `info` | The run's diagnostics joined by `; `, such as a leftover launch descriptor, the owner-lock observation and the health-probe result |
+| The diagnosis fails | `error` | The diagnosis cause; it counts as an issue |
+
+One five-second budget covers all runs, and each run's diagnosis is bounded by the smaller of 100 ms and the remaining budget. When the budget is spent, doctor adds one `member_runtime` entry with status `info` and detail `runtime diagnosis budget exhausted; inspect remaining runs explicitly`, and skips the remaining runs. A database that is not at head produces no runtime entries. The [recovery contract](member-runtime.md#storage-pressure-and-durability-boundary) owns the probes and their recovery actions.
+
 ### Footer and exit code
 
 Last line: `no issues found`, `1 issue found`, or `<N> issues found` (proper
@@ -629,6 +663,9 @@ one root Director by construction, so no override flag exists.
 | `--description` | yes | One-sentence purpose. |
 | `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; when omitted, the member — every role — inherits the spawning Director's placement backend. Exits 1 with `Error: binary <name> not found on PATH` when the binary is missing. The opencode backend additionally requires its agent preset at the resolved preset path (via `OPENCODE_CONFIG_DIR` — see [Config-dir resolution](#config-dir-resolution)); a missing preset or an invalid variable exits 1 per [Error Messages](#error-messages). |
 | `--model` | no | Model forwarded to the backend binary's own `--model` flag. The opencode backend additionally requires `<provider-id>/<model-id>`; per-backend formats and create-time validation are in [Model selection](coding-agent-backends.md#model-selection). |
+| `--permission-mode MODE` | no | Launch-only selection from the resolved backend’s [policy catalog](member-runtime.md#launch-policy-and-capability-registry); omission preserves its default. |
+| `--event-evidence POLICY` | no | `metadata` by default, or explicit `redacted` evidence under the [privacy contract](member-runtime.md#persistence-notification-and-read-interfaces). |
+| `--event-redaction-file PATH` | for redacted | Absolute readable UTF-8 redaction configuration; invalid combinations/configuration fail with usage exit 2 before registration. |
 | `--effort` | no | Reasoning-effort level forwarded to the backend binary, validated per backend before any side effect. Accepted levels, forwarding forms, and rejection strings are in [Reasoning effort](coding-agent-backends.md#reasoning-effort). |
 | positional `PROMPT` | one of | Inline spawn prompt (backend-neutral template). Exactly one of `PROMPT` / `--file`. |
 | `--file PATH` | one of | Path to a UTF-8 file whose contents are the spawn prompt (`-` = stdin). Follow the shared [body-input and transport contract](#text-body-input). |
@@ -638,7 +675,7 @@ one root Director by construction, so no override flag exists.
 
 #### Spawn command per backend
 
-The per-backend spawn argv and auto-approval flags live in
+The per-backend child argv and omitted permission defaults live in
 [Coding-agent backends](coding-agent-backends.md#spawn-argv).
 
 #### Spawn-prompt substitution
@@ -669,8 +706,7 @@ the placement.
 
 #### Creation failure compensation {#creation-failure-compensation}
 
-Member creation registers a pending placement, renders the prompt, creates a
-pane, and patches its id. The CLI owns a registration guard after successful
+Member creation validates policy, evidence configuration and assignment, and records the installed native version through the [native version probe](member-runtime.md#native-version-probe), then registers a pending placement and run. A failed probe adds the stderr line `Warning: native version unavailable for BACKEND: CAUSE; coverage unknown.` and creation continues with unknown coverage. The multiplexer starts a runner from a private descriptor; a `prepared` handshake precedes placement publication and `start`, and creation returns only after child spawn produces `started` within one handshake deadline. The [runner creation contract](member-runtime.md#runner-boundary-and-creation-transaction) owns descriptor cleanup and uncertain-launch compensation. The CLI owns a registration guard after successful
 registration and acquires a pane guard only when `split_window` succeeds.
 The backend owns the pane before that return; see
 [pane ownership](multiplexer-backends.md#pane-creation-ownership).
@@ -702,17 +738,14 @@ Report transaction rollback failures explicitly. Existing rollback-success
 suffixes may describe confirmed compensation; they must not claim success or
 complete rollback when cleanup failed or pane compensation is unconfirmed.
 Guards disarm through explicit `finish`/`rollback`, preventing repeated kill
-or deregistration; `Drop` handles only remaining unhandled ownership. Once a
-member placement is confirmed , disarm all creation
-guards before the existing `emit` call. Successful text/JSON output keeps its
-shape, ordering, and nulls. No new stdout-failure exit or diagnostic contract
+or deregistration; `Drop` handles only remaining unhandled ownership. Once the runner reports `started` under the matching identity, disarm creation guards before emitting the result. Placement publication alone keeps registration and pane guards armed; a post-start timeout reconciles and cleans up the already-started child. Existing output keys retain their order and nullability; runtime fields append under the [runtime presentation contract](#runtime-presentation). No new stdout-failure exit or diagnostic contract
 is introduced.
 
 
 
 ### `member delete` {#member-delete}
 
-Lock the concrete placement before kill/deregistration. A member without a concrete pane needs no lock. Retry contention every 50 milliseconds against one five-second deadline; expiry exits 1 with `member ID's pane input remained busy for 5 seconds; member was not deleted.` and leaves state unchanged. Preserve pane/registry errors and layout cleanup ownership.
+For wrapped members, request owned runner shutdown under the recorded identity before pane/registry cleanup, retaining explicit unconfirmed-child diagnostics and recoverable runtime records. Attempt remaining event replay before deregistration only within the remaining operation deadline. Lock the concrete placement before kill/deregistration. A member without a concrete pane needs no lock. Retry contention every 50 milliseconds against one five-second deadline; expiry exits 1 with `member ID's pane input remained busy for 5 seconds; member was not deleted.` and leaves state unchanged. Preserve pane/registry errors and layout cleanup ownership.
 
 Revalidate pending or absent placement and deregister atomically. For a concrete pane, retain input ownership while closing it outside a SQLite write transaction, then revalidate and finalize the registry. After successful close, mandatory registry finalization uses the later of the original deadline and one second after finalization begins, allowing short reader/writer contention to clear; actual database failures report that the pane was closed and preserve the database cause. Optional layout work follows mandatory finalization within the original deadline. A failed or expired restoration emits a stderr diagnostic while preserving successful deregistration.
 
@@ -723,8 +756,8 @@ any active registry entry — placed or placementless (root Director included).
 
 Registry read — no multiplexer requirement. Text is the compact one-line row;
 the detailed view — including `kind` ([`director` / `member`](data-model.md#members)) and the
-placement sub-dict — is the `--json` payload (see
-[Output shapes](#output-shapes)).
+placement sub-dict and appended runtime summary — is the `--json` payload (see
+[Runtime presentation](#runtime-presentation)). A wrapped result appends the runtime text line; an unwrapped result retains its existing row.
 
 
 ### `member list` {#member-list}
@@ -747,7 +780,7 @@ Per-member detail such as `description` and `registered_at` lives on
 
 `cafleet member prompt MEMBER_ID TEXT [--json]` validates a nonblank line without CR/LF or C0/DEL controls, otherwise exits 2 with `text must be one non-empty line without control characters.`
 
-A root Director target exits 1 with `cannot prompt the Director's own pane` before any pane I/O, because Escape would interrupt the Director's own running turn. Otherwise acquire the shared input lock within its [bounded wait](multiplexer-backends.md#pane-input-lock) and revalidate activity/placement. Submit the Director-authored text unchanged with the Escape lead: Escape, settle, literal text, settle and Enter. Escape can interrupt a working turn or dismiss an open prompt in the member pane. Exit 0 means submission only, with `{member_id, pane_id, text}`.
+A root Director target exits 1 with `cannot prompt the Director's own pane` before any pane I/O, because Escape would interrupt the Director's own running turn. Otherwise acquire the shared input lock within its [bounded wait](multiplexer-backends.md#pane-input-lock) and revalidate activity/placement. For a wrapped member, submit literal text and the native submit key through the verified runner composer profile, gated by the [input arbitration contract](member-runtime.md#input-arbitration-and-the-original-native-answer). Explicitly unwrapped members retain Escape, settle, literal text, settle and Enter; that legacy path can interrupt work or dismiss a prompt. Exit 0 means submission only, with ordered `{member_id, pane_id, text, input_id}`; unwrapped input has a null ID.
 
 A lock still busy when the wait ends uses `member ID's pane input remained busy; prompt was not dispatched.` Pre-write error, including an Escape failure: `prompt was not dispatched to member ID: CAUSE`. Partial uncertainty: `prompt delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` These exit 1 without a success record.
 
@@ -757,12 +790,12 @@ A lock still busy when the wait ends uses `member ID's pane input remained busy;
 
 Require a nonblank line without CR/LF, NUL or other C0/DEL controls, including tabs. Invalid input exits 2 before pane I/O with `command must be one non-empty line without control characters.` A multiline task supplies a one-line explicit script invocation.
 
-Resolve an active ordinary member and concrete placement, reject the root Director, lock input within its [bounded wait](multiplexer-backends.md#pane-input-lock) and reload. With the Escape lead, send Escape, settle, type native shell input `! ` followed by the actual command once, settle and Enter. The backend owns working directory, environment, permissions, output and exit rendering.
+Resolve an active ordinary member and concrete placement, reject the root Director, lock input within its [bounded wait](multiplexer-backends.md#pane-input-lock) and reload. Wrapped input uses the tested native-shell composer profile, literal `! ` plus the command, and the native submit key through the runner. Explicitly unwrapped input retains Escape, settle, literal native shell input, settle and Enter. The backend owns working directory, environment, permissions, output and exit rendering.
 
 Successful exit 0 establishes complete submission/dispatch only. Ordered JSON is:
 
 ```json
-{"member_id":42,"pane_id":"w1:p2","coding_agent":"codex","command":"printf example","dispatched":true}
+{"member_id":42,"pane_id":"w1:p2","coding_agent":"codex","command":"printf example","dispatched":true,"input_id":null}
 ```
 
 Text: `Dispatched native command to member ID (PANE). Inspect the pane for its result.`
@@ -775,9 +808,50 @@ Text: `Dispatched native command to member ID (PANE). Inspect the pane for its r
 | Escape or transport failure before typing | `native command was not dispatched to member ID: CAUSE` |
 | Typing may have begun | `native command delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` |
 
-The first text-writing call can partially type even if it fails. Failure after Enter may mean execution began. Inspect native pane output before any newly authorized retry. The command writes no execution ledger, helper script or wrapper and returns only dispatch metadata. The Director authorizes native input under its host rules; visibility establishes no second member-tool permission check.
+The first text-writing call can partially type even if it fails. Failure after Enter may mean execution began. Inspect native pane output before any newly authorized retry. A wrapped operation durably records its operation key, payload digest and submission state; the receipt contains no command text. The result describes dispatch, independently of native execution. The Director authorizes native input under its host rules; visibility establishes no second member-tool permission check.
 
 After native completion, inspect the pane and send an explicit prompt to use the output and continue when the host has not resumed the member.
+
+### `member press` {#member-press}
+
+`cafleet member press MEMBER_ID KEY... [--json]` requests only the specified ordered keys. Require a positive signed 64-bit member ID and one through 64 keys, each at most 32 UTF-8 bytes, using the [common key grammar and backend mappings](multiplexer-backends.md#explicit-key-dispatch). Preserve literal character case and render named keys canonically. Validate the complete vector before any backend probe or writing invocation.
+
+Use the ordinary `--` option separator before literal punctuation that could be read as an option; put `--json` before that separator. For example, `cafleet member press 42 -- '-' '+' ';'` requests three keys. It supplies no Escape prelude, Enter suffix, prompt text or shell-command submission.
+
+Resolve an active ordinary member and its concrete placement, preserving the Director-target restriction and the [shared input lock, selected-context validation and original budget](multiplexer-backends.md#explicit-key-dispatch). Wrapped members receive the request through their outer pane as [manual native input](member-runtime.md#explicit-manual-key-input). Success means backend acknowledgment of this ordered request; actual PTY bytes, native approval and completion require their own observation.
+
+Exit 0 prints compact ordered JSON when `--json` is selected:
+
+```json
+{"member_id":42,"pane_id":"%5","keys":["Ctrl+a",";"],"status":"acknowledged"}
+```
+
+Otherwise print `Acknowledged keys KEYS_JSON for member ID (PANE).`, where `KEYS_JSON` is the compact JSON array of canonical keys. Both modes end with one newline. The result carries no native-byte count, delivered-prefix count or permission receipt.
+
+Missing/extra positional arguments and a nonpositive/malformed member ID use Clap's native usage diagnostics. Direct key validation uses these usage-error bodies, with one-based `N` and JSON-quoted invalid input:
+
+| Condition | Error body (exit 2) |
+|---|---|
+| Key count outside the domain | `press requires between 1 and 64 keys` |
+| A key exceeds its UTF-8 bound | `press key at position N exceeds 32 UTF-8 bytes` |
+| A key is outside the common grammar | `invalid press key at position N: JSON_QUOTED_TOKEN` |
+
+Operational failures exit 1 with empty stdout, including under `--json`. Retain the original typed cause and any cleanup diagnostics, then append the effect diagnostic below on its own stderr line; the executable prefixes the primary first line with `Error: `.
+
+| Observed boundary | Effect diagnostic |
+|---|---|
+| Before any writing process starts, including a failed metadata probe | `keys were not dispatched to member ID.` |
+| A writing process starts and fails, times out or returns an unreadable acknowledgment | `key delivery to member ID is uncertain; any prefix may have been handled. Inspect the pane before an explicit retry.` |
+
+| Local refusal | Primary error body |
+|---|---|
+| Root Director target | `cannot press keys in the Director's own pane` |
+| Input lock remains busy | `member ID's pane input remained busy` |
+| Revalidated target changes | `member ID placement changed before key dispatch` |
+| Selected adapter differs from placement | `press backend does not match the recorded placement` |
+| Selected live context differs from placement | `press target context does not match the recorded placement` |
+
+Missing member/placement and native process errors retain their existing primary diagnostics. A pending pane uses `member ID has no pane yet (pending placement) — nothing to press.` Binary-not-found, not-started and prelaunch expiration have zero writing invocations. Every started failure, including a pane-gone response, retains possible partial delivery; perform no automatic retry. Request-bound permission decisions retain the separate `permission respond` contract and host authorization.
 
 ### `member capture` {#member-capture}
 
@@ -808,9 +882,125 @@ format stay unchanged. Text member capture prints content without adding a
 newline; JSON retains its existing fields and ordering.
 
 
+## Runtime presentation {#runtime-presentation}
+
+Member create preserves ordered `member_id,name,registered_at,placement` and appends `runtime`; member show preserves ordered `member_id,name,description,status,registered_at,kind,placement` and appends `runtime`. An explicitly unwrapped member has `runtime: null`. The runtime object has ordered keys `run_id,resolved_mode,status,reachability,owner_epoch,last_health_at,coverage,current_interaction_id,unresolved_input_ids,owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity`, preserving stored nullability. `unresolved_input_ids` lists the run's inputs in `in_progress`, `accepted` or `uncertain`, in input-ID order; an accepted input needs no reconciliation and stays listed until a settlement records its disposition, while `in_progress` and `uncertain` inputs need Director reconciliation. These are registry reads and make no live-health claim.
+
+Wrapped create/show preserves its existing text row and appends `Runtime: run=RUN_ID mode=MODE status=STATUS coverage=COVERAGE`. Wrapped prompt/exec preserves its existing success line and appends `Input: INPUT_ID` when a durable ID exists; JSON appends nullable `input_id` after existing keys. An uncertain error retains its existing exit category and includes known receipt identity in the cause as `input_id=INPUT_ID`; run/interaction context accompanies held/rejected input.
+
+## Runtime event and input commands
+
+`cafleet event show EVENT_ID [--json]` returns ordered `event,notification_state,message_id,archive_reason,run,interaction`. The event is the complete [versioned runtime payload](member-runtime.md#persistence-notification-and-read-interfaces), run is the current runtime summary, and nullable interaction contains the stored interaction fields in the interaction field order below. Text is `Event: EVENT_ID run=RUN_ID seq=EVENT_SEQ kind=KIND notification=STATE message=MESSAGE_ID` followed by the runtime summary line and `Interaction: INTERACTION_ID classification=CLASS closed_at=TIMESTAMP close_reason=REASON` when linked. Unavailable optional text values render `-`.
+
+`cafleet input show INPUT_ID [--json]` and `cafleet input reconcile INPUT_ID --disposition DISPOSITION --evidence-ref REFERENCE [--json]` return `{input}` with the durable row ordered `input_id,run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,disposition,evidence_ref,permission_response`. The nullable audit object and additional text line follow the [permission contract](#permission-response-audit-output). Text is `Input: INPUT_ID run=RUN_ID kind=KIND state=STATE disposition=DISPOSITION message=MESSAGE_ID`, with `-` for absent optional fields.
+
+Reconciliation is Director-owned. CLI disposition tokens are `submitted`, `not-submitted` and `abandoned-uncertain`, persisted with underscores as defined by the [receipt contract](member-runtime.md#input-arbitration-and-the-original-native-answer). Require a nonempty evidence reference, synchronize with the current owner before CAS settlement and preserve uncertainty while an active writer cannot be ruled out. A settled ordinary receipt with the same disposition returns its original row and evidence reference before live work; a conflicting disposition fails unchanged. Settlement sends no input and establishes no native command result. One original five-second budget covers the pane wait, current-owner synchronization, supplied-connection SQL and socket exchange. If the writer is unreachable, use the [receipt-only exclusive ownership contract](member-runtime.md#input-arbitration-and-the-original-native-answer), preserving the fixed placement state, any original pane guard, the original identity-matching run lock and lifecycle history; unavailable proof retains uncertainty. Ordinary member recovery keeps its completed-terminal no-work behavior.
+
+All event/input IDs are positive database-assigned integers; malformed IDs/options fail with usage exit 2. Missing rows and invalid stored state fail explicitly. Interaction fields are ordered `interaction_id,run_id,episode_seq,classification,evidence_digest,opened_at,evidence_json,closed_at,close_reason`.
+
+### `member recover` {#member-recover}
+
+`cafleet member recover MEMBER_ID [--json]` is Director-owned and reconciles a recorded run of an active or deregistered member. A member without a run fails explicitly before mutation. The [recovery contract](member-runtime.md#storage-pressure-and-durability-boundary) owns identity, ownership, replay, archival and its bounded pass.
+
+The exceptional form is `cafleet member recover MEMBER_ID --owner-terminated --expected-run-id RUN_ID --expected-owner-epoch EPOCH --evidence-ref REFERENCE [--json]`. Require all four options together, positive snapshot IDs/epoch and a nonempty operator evidence reference; incomplete or invalid input exits 2. A changed owner rejects the attestation, and positive live evidence preserves the live owner.
+
+Ordered JSON keys are `member_id,run_id,outcome,replayed_count,inbox_count,archived_count,status,cleanup_diagnostics`. Outcome is `recovered`, `recovering`, `live_or_unreachable` or `operator_reconciliation_required`; diagnostics retain cleanup/attestation provenance. Counters measure work newly committed by this invocation under the [runtime recovery count domains](member-runtime.md#storage-pressure-and-durability-boundary). A matching completed terminal return validates supplied current run/epoch expectations and preserves existing history with zero counts. Text is `Recovery: member=MEMBER_ID run=RUN_ID outcome=OUTCOME status=STATUS replayed=COUNT inbox=COUNT archived=COUNT`, followed by each bounded diagnostic as `Cleanup: DIAGNOSTIC` in array order. A string diagnostic renders its contained text; a structured diagnostic renders compact JSON. Incomplete or unreachable outcomes remain distinct from confirmed recovery.
+
+## Permission commands {#permission-commands}
+
+`cafleet permission inspect INTERACTION_ID --event-id EVENT_ID --from-member-id DIRECTOR_ID [--json]` reads the current request through its pinned runner. Require positive IDs, then an existing interaction (an unknown `INTERACTION_ID` is reported as not found before any event, run or database-identity check), then an active ordinary target, pinned active Director and live fleet; verify the event/message association and interaction ownership under the existing pane lock. One original five-second deadline, clipped to any inherited SQL bound, covers locking, current observation/manual progress, database work and the control exchange. Inspection sends zero programmatic child bytes and creates no receipt, audit or claim. Unknown answer capability is an inspection result; stale ownership or an unavailable owner is an operational error.
+
+The inspection JSON is `{request}`. Its object has ordered keys:
+
+```text
+event_id,message_id,member_id,fleet_id,director_member_id,run_id,owner_epoch,interaction_id,episode_seq,classification,visibility,backend,native_version,profile_version,answer_profile_version,answer_rule_id,answer_capability,capability_reason,supported_decisions,request_token,output_seq,evidence,missing_evidence
+```
+
+IDs/epoch/episode are positive integers; `output_seq` is an unsigned integer. `message_id` is the verified inbox message ID. `classification` is the current interactive class or null, and `visibility` is `visible`, `obscured`, `not_visible` or `unknown`. Native/detector/answer-profile identifiers are nullable when unavailable. `answer_profile_version` is shared by the currently supported decision plans. `answer_rule_id` is their common rule when unique, including the actual rule for one supported decision; differing supported rules yield null. Respond derives its chosen nonnullable rule internally for the immutable audit. `answer_capability` is `tested` or `unknown`; `capability_reason` is null when the current request is answerable and otherwise a bounded explanation. `supported_decisions` contains the currently tested subset of `allow,deny`, in that order; a blocked or unsupported request returns an empty array and null token.
+
+`request_token` is a nullable random lowercase 64-hex value issued by the current runner, bound to the request and invalidated under the [response contract](member-runtime.md#request-bound-permission-responses). `evidence` is the complete selected current post-policy object. `missing_evidence` lists unavailable public facts in order from `operation,arguments,cwd,environment,targets,effects,choice_scope`. Treat operation as available only when its post-policy value is nonblank, unredacted and untruncated; metadata-only, `[redacted]` or truncated evidence leaves it missing. The current detector supplies no independent structured arguments, cwd, environment, targets or effects, so those facts remain missing rather than being parsed from operation text. Include `choice_scope` whenever the public post-policy evidence has no explicit scope fact, including scope-free evidence accompanied by a valid token and a proved private `single_request` plan. The Director obtains necessary missing facts through authorized current capture/routed evidence before deciding. Token identity and private plan eligibility are independent of public evidence completeness and authorization. The token binds the full immutable decision-to-plan set, including each profile, rule and stage identity; a null common-rule field supplies no authority to select a replacement plan.
+
+Inspection text is:
+
+```text
+Permission: interaction=INTERACTION_ID event=EVENT_ID member=MEMBER_ID run=RUN_ID epoch=EPOCH visibility=VISIBILITY answers=DECISIONS
+Request: token=TOKEN output_seq=SEQUENCE profile=ANSWER_PROFILE rule=ANSWER_RULE
+```
+
+Join supported decisions with commas and render unavailable values or an empty decision set as `-`. Append `Capability: REASON` when nonnull and `Missing evidence: FIELDS` when the array is nonempty; join fields with commas. Text includes no raw screen content.
+
+`respond` requires this complete request snapshot and decision provenance:
+
+```text
+cafleet permission respond INTERACTION_ID --event-id EVENT_ID --from-member-id DIRECTOR_ID --expected-run-id RUN_ID --expected-owner-epoch EPOCH --request-token TOKEN --decision allow|deny --decision-source director-auto|user --director-mode auto|manual|unknown --mode-evidence-ref REFERENCE --decision-evidence-ref REFERENCE --operation-key KEY [--json]
+```
+
+Require positive IDs/epoch, the token's exact hex form, a nonblank operation key and the [bounded evidence references](member-runtime.md#permission-response-storage). Source `director-auto` requires mode `auto`; source `user` records the user's decision in any mode. Enum/shape/source-mode errors exit 2 before lock or byte effects. These fields are attributed claims: resolve Director mode from current host evidence independently of member launch policy and obtain user permission in other/unknown modes. Native and managed rules still authorize running the command.
+
+Validate a retained operation key against its recorded database/run, response identity and canonical digest before any current-request eligibility check, pane lock or live-owner probe. A matching retained receipt returns its stored result after token revocation, interaction closure, deregistration or owner exit, sending zero bytes; conflicting reuse fails. Validate historical audit relationships against recorded ownership while preserving closed/inactive history. Only an absent key or a positively recorded ready zero-byte attempt enters current live-request validation.
+
+The response JSON is `{response}`, with ordered keys:
+
+```text
+status,input_id,member_id,run_id,owner_epoch,interaction_id,event_id,decision,decision_source,stage,output_seq,reason
+```
+
+`status` is `accepted`, `held`, `rejected` or `uncertain`; `input_id` is nullable until a durable row exists. Decision/source retain their command enums. `stage` is `zero_bytes`, `partial`, `submitted` or `unknown`; accepted has submitted stage, held/rejected has zero-byte stage, and uncertainty reports the observed partial/submitted stage or unknown. `output_seq` is a nullable unsigned integer when no current sequence can be established. `reason` is a nullable bounded explanation. A matching settled/submitted receipt returns accepted without typing; another settled disposition returns rejected without typing and explains that the key is consumed.
+
+Historical response projection uses only the durable row and immutable audit. Return the original input identity, decision/source and audit `expected_owner_epoch` as `owner_epoch`, with `output_seq=null`; current owner/screen evidence supplies no replacement value. It performs no lock, live probe, control exchange or database mutation.
+
+| Durable receipt | Retry status and stage |
+|---|---|
+| `accepted`, or `settled/submitted` | `accepted/submitted`. |
+| `in_progress` or `uncertain` | `uncertain/unknown`; retain original transmission uncertainty and claim. |
+| `settled/not_submitted` or `settled/abandoned_uncertain` | `rejected/zero_bytes` with a consumed-key reason; preserve the original disposition and claim. |
+| `ready` | The separate exact-metadata live-validation path; retain its original epoch/token binding. |
+
+For a consumed key, `zero_bytes` describes this retry only and supplies no zero-byte evidence about the original attempt. A prior abandoned-uncertain claim remains possibly transmitted. This projection reads retained history even after current owner/interaction eligibility is lost.
+
+
+Response text is:
+
+```text
+Permission response: interaction=INTERACTION_ID run=RUN_ID decision=DECISION source=SOURCE status=STATUS input=INPUT_ID stage=STAGE output_seq=SEQUENCE
+```
+
+Render null values as `-` and append `Reason: REASON` when nonnull. Accepted means answer-key submission, independently of native approval and execution.
+
+Exit 0 means accepted submission or its matching prior submitted receipt. A structured held/rejected/uncertain reply prints the response in the selected text/JSON form and exits 1, with stderr `Error: permission response STATUS for interaction INTERACTION_ID: REASON`; append ` (input_id=INPUT_ID)` when known. This structured-response stdout is the exception to ordinary application errors being stderr-only. Pre-reply operational failures retain their ordinary error category and include known run/interaction/input context; usage failures exit 2.
+
+A new attempt against a blocked current request fails before any receipt, audit, claim or byte. It exits 1 with the primary stderr line `Error: runner control: permission request is blocked: REASON`, followed by the known run/interaction/operation-key context. Respond checks the blocker at admission, after its admission drain, and again before each answer stage. `REASON` is the same bounded explanation that `permission inspect` returns as `capability_reason` for that state, so a blocked inspection shows a null token, an empty decision set and the reason a response would report:
+
+| Reason | Blocking state |
+|---|---|
+| `permission input is fenced` | Programmatic input is fenced for shutdown, ownership loss or recovery. |
+| `manual input accounting failed` | The runner could not account for actual manual input. |
+| `observation degraded: CODE` | The observer recorded a gap or degradation with diagnostic `CODE`. |
+| `observation transitions pending` | Observed transitions await persistence. |
+| `observation evidence pending` | An interaction evidence refresh awaits persistence. |
+| `observation update pending` | A retained transition, draft or evidence update has not completed. |
+| `observation incomplete` | Child output was read but its observation has not completed. |
+| `observation health unavailable` | The observer reported no input health. |
+| `terminal input interrupted` | A terminal read was interrupted during the drain. |
+| `outer terminal closed` | The outer terminal reached end of input. |
+| `native output closed` | The native child's output reached end of file. |
+| `terminal output still arriving` | The drain's bounded rounds ended before human and child input were quiet. |
+| `permission request is not visible` | The request is obscured, closed or not observed as visible. |
+| `permission request is not the current interaction` | Input eligibility is not held for the current permission interaction. |
+
+A retained operation key is resolved before the admission drain, so its stored result returns without typing even when the current request is blocked.
+
+The CLI takes semantic decisions. For a new attempt, the pinned runner validates the current stable permission request, token, profile, manual input and output state, atomically reserves its audit/claim/receipt, and sends only a tested single-request native choice. Same-key retries return the prior receipt; a conflicting decision/digest or another key bypassing the episode claim fails. Unknown capability preserves manual native input. `member prompt`, `member exec`, message previews, receipt settlement and recovery remain separate operations.
+
+### Permission-response audit output
+
+`input show` and `input reconcile` append nullable `permission_response` after `evidence_ref`. For a response kind it contains ordered `input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_profile_version,answer_rule_id,decided_at`; every field is required and follows its SQL type/nullability. Other input kinds return null.
+
+Preserve the existing input text line and append `Permission decision: interaction=INTERACTION_ID event=EVENT_ID decision=DECISION source=SOURCE mode=MODE director=DIRECTOR_ID epoch=EPOCH` for a response audit. Settlement records disposition and sends zero bytes; it neither grants a native answer nor releases a possibly transmitted episode claim.
+
 ## Error Messages
 
-Application errors print as stderr text even with `--json`; the flag selects successful output. Input errors use the documented usage/application category. Dispatch, input-lock, compatibility and deletion-lock errors are specified at their action owners above.
+Application errors print as stderr text even with `--json`; the flag selects successful output. The [permission-response exception](#permission-commands) also prints a structured held/rejected/uncertain response to stdout before exit 1 and its stderr diagnostic. Input errors use the documented usage/application category. Dispatch, input-lock, compatibility and deletion-lock errors are specified at their action owners above.
 
 | Command | Situation | Error message | Exit | Notes |
 |---|---|---|---|---|
@@ -858,3 +1048,5 @@ Application errors print as stderr text even with `--json`; the flag selects suc
 | `member create` | A malformed brace expression in the prompt | `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` | 2 | `member create` attempts deregistration; cleanup failures follow the primary error |
 | `member create` | `--coding-agent` omitted and the spawning Director not found in the fleet | `Error: cannot resolve the member's coding agent: Director <director-id> not found in fleet <fleet-id>. Re-run with an explicit --coding-agent.` | 1 | Nothing spawned |
 | `member create` | `--coding-agent` omitted and the spawning Director has no placement row | `Error: cannot resolve the member's coding agent: Director <director-id> has no placement row recording its backend. Re-run with an explicit --coding-agent.` | 1 | Nothing spawned |
+| `permission inspect` | An unknown `INTERACTION_ID` | `Error: Interaction <interaction-id> not found` | 1 | Reported before any event, run or database-identity check |
+| `permission inspect` | The inspected run records a database identity other than the selected database's | `Error: invalid stored value for member_runs.database_identity_json: selected database identity mismatch` | 1 | Followed by the known interaction context |

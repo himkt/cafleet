@@ -57,7 +57,7 @@ Suppose the returned ID is `3`. Receive its ready, ACK its actual message ID, th
 cafleet message send --from-member-id 2 --to-member-id 3 "Review the change and report findings."
 ```
 
-The send types the assignment into the member's pane as one line, led by Escape. A pending preview remains pending only while the pane lock stays busy, the pane is not yet placed, or the send budget runs out; the next send to that recipient or a `message wait` rotation retries it. The member's startup/report/wake polls also discover durable assignments.
+The send persists the assignment and submits a preview when the member’s recorded transport permits input. A runner holds input during candidate/open interactions, work, drafts, uncertain receipts or unknown coverage; explicitly unwrapped members retain Escape-first input. A later send or finite `message wait` rotation retries eligible pending previews. The member's startup/report/wake polls also discover durable assignments.
 
 ### Receive results
 
@@ -77,11 +77,15 @@ Keep deferred questions/approvals in host-owned task state after ACK. Reconcile 
 
 A clean expired listener lease can renew after its native task exits while authorized work remains. Unexpected EOF or failure requires inspecting the exit, reconciling the inbox and a fresh successful broker health check before replacement. Retain incomplete JSONL across chunks and preserve unACKed messages after damaged output. Establish old-process termination before replacing a receiver. Fully idle Codex waits for the next user/native activation; a background process alone supplies no unsolicited per-line wake.
 
-Where a verified native adapter is unavailable, state the limitation and use explicit manual poll or finite reception within host permissions. Finite wait also provides ordinary-member retry recovery:
+On a host satisfying the [Director requirements](../spec/coding-agent-backends.md#role-requirements), state an unavailable native adapter’s reception limit and use explicit manual poll or finite reception within host permissions. Finite wait also provides ordinary-member retry recovery:
 
 ```bash
 cafleet message wait 2 --timeout 300 --json
 ```
+
+### Handle an observed permission request
+
+Use [Member permission events](../concepts/member-permission-events.md#consume-a-runtime-event) to verify the durable event/message link, record the unfinished action and ACK consumption. For a current permission request, evaluate its risk and use the Director session’s verified auto mode to decide allow/deny; otherwise obtain user permission. Submit the complete bound response command, give it to the user to execute, or use manual native input when answer coverage is unavailable. Inspect actual output and resumed work, consume/ACK available records, then explicitly invoke finite `message wait` to retry held previews; the listener alone performs no retry. A native command dispatched separately does not answer the original request.
 
 ### Run a command for a member
 

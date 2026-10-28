@@ -18,6 +18,21 @@ pub(crate) fn valid_input(text: &str) -> bool {
 }
 
 impl Deadline {
+    pub(crate) fn instant(self) -> Instant {
+        self.0
+    }
+    pub(crate) fn inherited_or_new() -> Self {
+        DATABASE_WAITS
+            .with(|waits| {
+                waits
+                    .borrow()
+                    .frames
+                    .iter()
+                    .map(|frame| frame.deadline)
+                    .min_by_key(|deadline| deadline.0)
+            })
+            .unwrap_or_default()
+    }
     pub fn new() -> Self {
         Self::until(Instant::now() + Duration::from_secs(5))
     }
@@ -78,6 +93,29 @@ thread_local! {
     static DATABASE_WAITS: std::cell::RefCell<DatabaseWaits> = const {
         std::cell::RefCell::new(DatabaseWaits { identity: None, frames: Vec::new() })
     };
+}
+
+pub(crate) fn inherited_database_deadline(conn: &Connection) -> Option<Deadline> {
+    DATABASE_WAITS.with(|waits| {
+        let waits = waits.borrow();
+        if waits.frames.is_empty() {
+            assert!(
+                waits.identity.is_none(),
+                "an empty database scope has no owner"
+            );
+            return None;
+        }
+        assert_eq!(
+            waits.identity,
+            Some(std::ptr::from_ref(conn).addr()),
+            "inherited database scopes use the same connection"
+        );
+        waits
+            .frames
+            .iter()
+            .map(|frame| frame.deadline)
+            .min_by_key(|deadline| deadline.instant())
+    })
 }
 
 fn remaining_database_wait() -> Option<Duration> {
@@ -203,6 +241,19 @@ pub fn with_database_budget<T>(
 ) -> Result<T, CafleetError> {
     deadline.remaining()?;
     scoped_database_budget(conn, deadline, false, operation)
+}
+
+pub(crate) fn finalize_deletion<T>(
+    conn: &mut Connection,
+    deadline: Deadline,
+    wrapped: bool,
+    operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
+) -> Result<T, CafleetError> {
+    if wrapped {
+        with_database_budget(conn, deadline, operation)
+    } else {
+        complete_database_budget(conn, deadline, operation)
+    }
 }
 
 // Pane side effects are irreversible; mandatory storage finalization gets a
@@ -466,6 +517,7 @@ mod database_scope_tests {
 
 pub struct PaneLock {
     _file: File,
+    path: PathBuf,
 }
 
 pub fn lock_path(database_url: &str, placement: &Placement) -> Result<PathBuf, CafleetError> {
@@ -490,6 +542,32 @@ pub fn lock_path(database_url: &str, placement: &Placement) -> Result<PathBuf, C
 }
 
 impl PaneLock {
+    pub(crate) fn validate_binding(
+        &self,
+        database_url: &str,
+        placement: &Placement,
+    ) -> Result<(), CafleetError> {
+        use std::os::unix::fs::MetadataExt;
+        let path = lock_path(database_url, placement)?;
+        if self.path != path {
+            return Err(CafleetError::App("held pane lock binding mismatch".into()));
+        }
+        let open = self
+            ._file
+            .metadata()
+            .map_err(|cause| CafleetError::App(cause.to_string()))?;
+        let named = std::fs::symlink_metadata(&path)
+            .map_err(|cause| CafleetError::App(cause.to_string()))?;
+        if !named.is_file()
+            || named.file_type().is_symlink()
+            || (open.dev(), open.ino()) != (named.dev(), named.ino())
+        {
+            return Err(CafleetError::App(
+                "held pane lock pathname identity mismatch".into(),
+            ));
+        }
+        Ok(())
+    }
     pub fn try_acquire(
         database_url: &str,
         placement: &Placement,
@@ -518,7 +596,7 @@ impl PaneLock {
                 ))
             })?;
         match file.try_lock() {
-            Ok(()) => Ok(Some(Self { _file: file })),
+            Ok(()) => Ok(Some(Self { _file: file, path })),
             Err(TryLockError::WouldBlock) => Ok(None),
             Err(TryLockError::Error(error)) => Err(CafleetError::App(format!(
                 "cannot lock pane input {}: {error}",
@@ -550,6 +628,18 @@ pub struct LockedMember {
     _guard: PaneLock,
 }
 
+impl LockedMember {
+    pub(crate) fn pane_lock(&self, database_url: &str) -> Result<&PaneLock, CafleetError> {
+        let placement = self
+            .member
+            .placement
+            .as_ref()
+            .expect("locked member has a placement");
+        self._guard.validate_binding(database_url, placement)?;
+        Ok(&self._guard)
+    }
+}
+
 pub(crate) struct LockedDeletion<S, T> {
     pub snapshot: S,
     pub value: T,
@@ -557,16 +647,40 @@ pub(crate) struct LockedDeletion<S, T> {
     _guards: Vec<PaneLock>,
 }
 
+pub(crate) fn pane_lock_for<'a>(
+    guards: &'a [PaneLock],
+    database_url: &str,
+    placement: &Placement,
+) -> Result<&'a PaneLock, CafleetError> {
+    let path = lock_path(database_url, placement)?;
+    let guard = guards
+        .iter()
+        .find(|guard| guard.path == path)
+        .ok_or_else(|| CafleetError::App("matching held pane lock required".into()))?;
+    guard.validate_binding(database_url, placement)?;
+    Ok(guard)
+}
+
+impl<S, T> LockedDeletion<S, T> {
+    pub(crate) fn pane_lock(
+        &self,
+        database_url: &str,
+        placement: &Placement,
+    ) -> Result<&PaneLock, CafleetError> {
+        pane_lock_for(&self._guards, database_url, placement)
+    }
+}
+
 pub(crate) fn lock_deletion<S, T>(
     conn: &mut Connection,
     settings: &Settings,
     deadline: Deadline,
     mut load: impl FnMut(&mut Connection) -> Result<(S, Vec<(i64, Placement)>), CafleetError>,
-    mut revalidate: impl FnMut(&mut Connection, &S) -> Result<Option<T>, CafleetError>,
+    mut revalidate: impl FnMut(&mut Connection, &mut S, &[PaneLock]) -> Result<Option<T>, CafleetError>,
     busy: impl Fn(i64) -> CafleetError,
 ) -> Result<LockedDeletion<S, T>, CafleetError> {
     loop {
-        let (snapshot, targets) = with_database_budget(conn, deadline, &mut load)?;
+        let (mut snapshot, targets) = with_database_budget(conn, deadline, &mut load)?;
         let mut targets = targets
             .into_iter()
             .map(|(member_id, placement)| {
@@ -601,7 +715,9 @@ pub(crate) fn lock_deletion<S, T>(
             guards.push(guard);
         }
         let span = crate::signals::DeferTermination::begin()?;
-        let value = with_database_budget(conn, deadline, |conn| revalidate(conn, &snapshot))?;
+        let value = with_database_budget(conn, deadline, |conn| {
+            revalidate(conn, &mut snapshot, &guards)
+        })?;
         if let Some(value) = value {
             return Ok(LockedDeletion {
                 snapshot,
@@ -622,13 +738,29 @@ pub fn lock_member(
     member: &MemberRecord,
     deadline: Deadline,
 ) -> Result<Option<LockedMember>, CafleetError> {
+    lock_member_with_reservation(
+        conn,
+        settings,
+        member,
+        deadline,
+        crate::multiplexer::INPUT_RESERVATION,
+    )
+}
+
+pub(crate) fn lock_member_with_reservation(
+    conn: &mut Connection,
+    settings: &Settings,
+    member: &MemberRecord,
+    deadline: Deadline,
+    reservation: Duration,
+) -> Result<Option<LockedMember>, CafleetError> {
     let placement = member.placement.as_ref().ok_or_else(|| {
         CafleetError::App(format!("member {} has no placement row", member.member_id))
     })?;
     let Some(guard) = PaneLock::acquire_within(
         &settings.database_url,
         placement,
-        deadline.reserving(crate::multiplexer::INPUT_RESERVATION),
+        deadline.reserving(reservation),
     )
     .map_err(|error| {
         CafleetError::App(format!(
@@ -980,7 +1112,7 @@ mod pane_lock_wait_tests {
                     vec![(member, placement.clone()), (member + 1, placement.clone())],
                 ))
             },
-            |_, _| {
+            |_, _, _| {
                 assert!(
                     PaneLock::try_acquire(&fixture.settings.database_url, &placement)
                         .unwrap()
@@ -1035,7 +1167,7 @@ mod pane_lock_wait_tests {
                             .collect(),
                     ))
                 },
-                |_, _| Ok(Some(())),
+                |_, _, _| Ok(Some(())),
                 |_| CafleetError::App("sorted lock wait expired".into()),
             )
             .unwrap();
@@ -1132,11 +1264,12 @@ mod pane_lock_wait_tests {
     }
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 struct DeletionPlacement {
     member_id: i64,
     placement: Placement,
     path: PathBuf,
+    run_identity: Option<serde_json::Value>,
 }
 
 fn deletion_placements(
@@ -1163,15 +1296,88 @@ fn deletion_placements(
                 error.message()
             ))
         })?;
+        let run_identity = crate::broker::runtime::member_runtime(conn, member_id)?
+            .map(|runtime| deletion_run_identity(&runtime.run));
         placements.push(DeletionPlacement {
             member_id,
             placement,
             path,
+            run_identity,
         });
     }
     placements
         .sort_by(|left, right| (&left.path, left.member_id).cmp(&(&right.path, right.member_id)));
     Ok(placements)
+}
+
+pub(crate) trait FleetDeletionHost {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "deletion forwards the validated caller identity and actual retained guard"
+    )]
+    fn recover(
+        &mut self,
+        conn: &mut Connection,
+        settings: &Settings,
+        member_id: i64,
+        expected_run: &crate::broker::runtime::RunRecord,
+        expected_placement: &Placement,
+        held: &PaneLock,
+        deadline: Deadline,
+    ) -> Result<crate::runtime::runner::RecoveryCompletion, CafleetError> {
+        crate::runtime::runner::recover_member_under_pane_lock(
+            conn,
+            settings,
+            member_id,
+            expected_run,
+            expected_placement,
+            deadline.instant(),
+            held,
+        )
+    }
+    fn shutdown(
+        &mut self,
+        conn: &mut Connection,
+        run: &crate::broker::runtime::RunRecord,
+        deadline: Deadline,
+    ) -> Result<crate::runtime::runner::ShutdownOutcome, CafleetError>;
+    fn close_pane(&mut self, placement: &Placement, deadline: Deadline)
+    -> Result<(), CafleetError>;
+}
+
+struct NativeFleetDeletionHost<'a> {
+    settings: &'a Settings,
+}
+
+impl FleetDeletionHost for NativeFleetDeletionHost<'_> {
+    fn shutdown(
+        &mut self,
+        conn: &mut Connection,
+        run: &crate::broker::runtime::RunRecord,
+        deadline: Deadline,
+    ) -> Result<crate::runtime::runner::ShutdownOutcome, CafleetError> {
+        crate::runtime::runner::request_shutdown(conn, run, deadline.instant())
+    }
+
+    fn close_pane(
+        &mut self,
+        placement: &Placement,
+        deadline: Deadline,
+    ) -> Result<(), CafleetError> {
+        let pane = placement
+            .mux_pane_id
+            .as_deref()
+            .expect("deletion target has a concrete pane");
+        crate::runtime::resolve_mux(self.settings)
+            .map_err(|cause| CafleetError::App(cause.to_string()))?
+            .bounded(deadline)
+            .kill_pane(pane, true)
+            .map_err(|cause| CafleetError::App(cause.to_string()))
+    }
+}
+
+fn deletion_run_identity(run: &crate::broker::runtime::RunRecord) -> serde_json::Value {
+    crate::runtime::runner::stable_run_identity(run)
 }
 
 pub fn delete_fleet(
@@ -1180,11 +1386,32 @@ pub fn delete_fleet(
     fleet_id: i64,
     deadline: Deadline,
 ) -> Result<crate::broker::records::DeletedFleet, CafleetError> {
+    delete_fleet_with_host(
+        conn,
+        settings,
+        fleet_id,
+        deadline,
+        &mut NativeFleetDeletionHost { settings },
+    )
+}
+
+pub(crate) fn delete_fleet_with_host(
+    conn: &mut Connection,
+    settings: &Settings,
+    fleet_id: i64,
+    deadline: Deadline,
+    host: &mut impl FleetDeletionHost,
+) -> Result<crate::broker::records::DeletedFleet, CafleetError> {
     with_database_budget(conn, deadline, |conn| {
         crate::broker::fleets::fetch_fleet(conn, fleet_id)?
             .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;
         Ok(())
     })?;
+    let changed_error = || {
+        CafleetError::App(format!(
+            "fleet {fleet_id} placement or runtime ownership changed during cleanup; fleet was not deleted."
+        ))
+    };
     let locked = lock_deletion(
         conn,
         settings,
@@ -1197,12 +1424,104 @@ pub fn delete_fleet(
                 .collect();
             Ok((snapshot, targets))
         },
-        |conn, snapshot| {
+        |conn, snapshot, guards| {
+            if deletion_placements(conn, settings, fleet_id)? != *snapshot {
+                return Ok(None);
+            }
+            let mut effects_started = false;
+            for index in 0..snapshot.len() {
+                let target = snapshot[index].clone();
+                if deletion_placements(conn, settings, fleet_id)? != *snapshot {
+                    return if effects_started {
+                        Err(changed_error())
+                    } else {
+                        Ok(None)
+                    };
+                }
+                let runtime = crate::broker::runtime::member_runtime(conn, target.member_id)?;
+                if runtime
+                    .as_ref()
+                    .map(|value| deletion_run_identity(&value.run))
+                    != target.run_identity
+                {
+                    return if effects_started {
+                        Err(changed_error())
+                    } else {
+                        Ok(None)
+                    };
+                }
+                if let Some(runtime) = runtime {
+                    if !runtime.run.status.terminal()
+                        || runtime.run.cleanup_state
+                            == crate::broker::runtime::CleanupState::Incomplete
+                    {
+                        deadline.remaining()?;
+                        effects_started = true;
+                        let outcome = host.shutdown(conn, &runtime.run, deadline)?;
+                        if outcome.cleanup_state != crate::broker::runtime::CleanupState::Complete {
+                            return Err(CafleetError::App(format!(
+                                "member {} child cleanup remains unconfirmed: {}; inspect with cafleet doctor",
+                                target.member_id,
+                                outcome.diagnostics.join("; ")
+                            )));
+                        }
+                    }
+                    if deletion_placements(conn, settings, fleet_id)? != *snapshot {
+                        return if effects_started {
+                            Err(changed_error())
+                        } else {
+                            Ok(None)
+                        };
+                    }
+                    let expected = crate::broker::runtime::get_run(conn, runtime.run.run_id)?;
+                    if Some(deletion_run_identity(&expected)) != target.run_identity {
+                        return Err(changed_error());
+                    }
+                    deadline.remaining()?;
+                    effects_started = true;
+                    let completion = host.recover(
+                        conn,
+                        settings,
+                        target.member_id,
+                        &expected,
+                        &target.placement,
+                        pane_lock_for(guards, &settings.database_url, &target.placement)?,
+                        deadline,
+                    )?;
+                    crate::runtime::runner::validate_recovery_completion(&expected, &completion)?;
+                    snapshot[index].run_identity = Some(deletion_run_identity(&completion.run));
+                    if deletion_placements(conn, settings, fleet_id)? != *snapshot {
+                        return Err(changed_error());
+                    }
+                    if !matches!(
+                        completion.report.outcome,
+                        crate::runtime::runner::RecoveryOutcome::Recovered
+                    ) {
+                        return Err(CafleetError::App(format!(
+                            "member {} recovery remains incomplete; inspect with cafleet doctor",
+                            target.member_id
+                        )));
+                    }
+                    deadline.remaining()?;
+                    host.close_pane(&target.placement, deadline)
+                        .map_err(|cause| {
+                            CafleetError::App(format!(
+                                "member {} pane cleanup failed: {}",
+                                target.member_id,
+                                cause.message()
+                            ))
+                        })?;
+                }
+            }
             let tx = conn
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                 .map_err(crate::broker::members::db_err)?;
             if deletion_placements(&tx, settings, fleet_id)? != *snapshot {
-                return Ok(None);
+                return if effects_started {
+                    Err(changed_error())
+                } else {
+                    Ok(None)
+                };
             }
             let result = crate::broker::fleets::delete_fleet_rows(&tx, fleet_id)?;
             deadline.remaining()?;

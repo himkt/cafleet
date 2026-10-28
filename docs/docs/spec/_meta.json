@@ -23,5 +23,10 @@
     "type": "file",
     "name": "coding-agent-backends",
     "label": "Agent backends"
+  },
+  {
+    "type": "file",
+    "name": "member-runtime",
+    "label": "Member runtime"
   }
 ]
