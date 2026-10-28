@@ -2154,7 +2154,7 @@ Claude Code `2.1.302`, profile `claude-2.1.302-default-3`:
 
 | Capability | Status | Declaration |
 |---|---|---|
-| Detection | `tested` | The native `default` Bash permission form (`Bash command` heading, approval text, proceed question, focused choice and the `Yes`/`No` single-request choices) in the alternate screen, unwrapped or wrapped, within 24 rows from its heading to its `Esc to cancel · Tab to amend` line |
+| Detection | `tested` | The native `default` Bash permission form (`Bash command` heading, approval text, proceed question, focused choice and the `Yes`/`No` single-request choices) in the alternate screen, with a plain or boxed operation, unwrapped or wrapped, within 24 rows from its heading to its `Esc to cancel · Tab to amend` line |
 | Allow answer | `tested` | One stage, byte `31` (digit `1`), selecting `Yes` as `allow-once` |
 | Deny answer | `tested` | One stage, byte `34` (digit `4`), selecting `No` as `deny-once` |
 | Empty-composer observation | `tested` | The idle prompt line with the terminal cursor immediately after the prompt prefix; a verified non-interaction boundary |
@@ -2163,12 +2163,14 @@ Claude Code `2.1.302`, profile `claude-2.1.302-default-3`:
 
 Both answers select their choice by its number, so they do not depend on which choice is focused. The broadened choices 2 and 3 have no answer plan. The empty-composer observation reads the composer as empty only when the cursor sits at the end of the prompt prefix; a draft whose cursor was moved back to the prefix reads as empty. Every backend and native version without a bundled profile yields `coverage=unknown`.
 
-Detection and both answers rest on native captures of the form at 120 columns, where it renders unwrapped, and at 52 columns, where it wraps. A narrow pane or a long command makes Claude wrap the form: the tip, the description and the choice labels continue on further rows, and the operation between the dashed rules spans several rows. The operation rows take one of two native shapes:
+Detection rests on native captures of the form unwrapped at 120 columns, wrapped plain at 52 columns, and boxed at 89 and 120 columns; both answers rest on the 120-column and the 52-column plain captures. A narrow pane or a long command makes Claude wrap the form: the tip, the description and the choice labels continue on further rows, and the operation between the dashed rules spans several rows. The operation rows take one of two native shapes:
 
 | Shape | Row prefix | Where Claude breaks the operation | Native evidence |
 |---|---|---|---|
 | Plain | One space | At the row's last usable column, one column before the pane's right edge, even inside a token | Captures at 52 columns |
-| Boxed | ` │ ` | At a space | A screen observed on herdr at about 89 columns |
+| Boxed | ` │ ` | At a space | Captures at 89 columns (two rows) and 120 columns (one row) |
+
+The shape follows the operation's length rather than the pane width. In the captures, operations of 57 and 61 characters render plain, and an 86-character operation renders boxed, on one row at 120 columns and over two rows at 89 columns.
 
 Claude positions every row explicitly, so the terminal records no soft wrap for the rule to follow. The rule reassembles the operation before extracting it: it removes each row's prefix and joins a row to the next without a separator only where it observes a wrap: a plain row that reaches the last usable column. Every other row boundary stays a line break in the operation, after a shorter plain row and after every boxed row, because a boxed break at a space cannot be told from a line break in the command itself. A multi-line command therefore keeps its separate lines and never reads as one line.
 
