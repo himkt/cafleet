@@ -1671,6 +1671,53 @@ mod tests {
     }
 
     #[test]
+    fn a_worker_drain_with_both_directions_pending_never_names_the_root_directors_pane() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet(&mut conn, "both directions");
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
+        let reply = broker::send_message(&mut conn, worker, director, "reply").unwrap();
+        let assignment = broker::send_message(&mut conn, director, worker, "assignment").unwrap();
+        let settings = settings_for(&conn);
+        let runner = crate::multiplexer::recording::FakeRunner::with_binary("tmux");
+        runner.succeed(3);
+        let result = deliver_pending(
+            &mut conn,
+            &settings,
+            worker,
+            Some(fleet),
+            Deadline::new(),
+            &BTreeSet::new(),
+            || Ok(fake_mux(runner.clone())),
+        )
+        .unwrap();
+        assert_eq!(result.sent, vec![assignment.message_id]);
+        assert_eq!(result.end, AttemptEnd::Drained);
+        let calls = runner.run_argvs();
+        assert_eq!(calls.len(), 3);
+        for call in &calls {
+            assert!(call.iter().any(|arg| arg == "%2"), "{call:?}");
+            assert!(!call.iter().any(|arg| arg.contains("%0")), "{call:?}");
+        }
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|call| call.last().unwrap() == "Escape")
+                .count(),
+            1
+        );
+        let notified: Option<String> = conn
+            .query_row(
+                "SELECT notified_at FROM messages WHERE message_id=?1",
+                [reply.message_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(notified, None);
+        assert_eq!(broker::poll_messages(&conn, director).unwrap(), vec![reply]);
+    }
+
+    #[test]
     fn placement_changes_during_a_real_lock_wait_are_detected_before_input() {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = migrated_conn(&dir);
