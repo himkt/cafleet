@@ -1,7 +1,7 @@
 # OpenCode Ask Permission Forms
 
 **Status**: Approved
-**Progress**: 0/17 tasks complete
+**Progress**: 2/17 tasks complete
 **Last Updated**: 2026-10-28
 
 ## Overview
@@ -234,8 +234,8 @@ Record detection-to-inbox latency, the CAFleet commit, versions, geometry and ev
 
 ### Step 1: Document the policy, preset and probe contracts
 
-- [ ] Update `docs/docs/spec/member-runtime.md`, `docs/docs/spec/coding-agent-backends.md`, `docs/docs/spec/cli-options.md`, the concepts pages and quickstart for the `cafleet-ask` policy, both installed presets, setup's per-preset success lines, doctor's per-preset checks, the selected-preset precondition with the shipped error string and the `v`-prefixed version token. <!-- completed: -->
-- [ ] Update `SPEC.md` and `skills/cafleet/reference/coding-agents.md`, `skills/cafleet/reference/member-runtime.md` and `skills/cafleet/roles/director.md` for the same contracts. <!-- completed: -->
+- [x] Update `docs/docs/spec/member-runtime.md`, `docs/docs/spec/coding-agent-backends.md`, `docs/docs/spec/cli-options.md`, the concepts pages and quickstart for the `cafleet-ask` policy, both installed presets, setup's per-preset success lines, doctor's per-preset checks, the selected-preset precondition with the shipped error string and the `v`-prefixed version token. <!-- completed: 2026-10-28T11:38 -->
+- [x] Update `SPEC.md` and `skills/cafleet/reference/coding-agents.md`, `skills/cafleet/reference/member-runtime.md` and `skills/cafleet/roles/director.md` for the same contracts. <!-- completed: 2026-10-28T11:41 -->
 
 ### Step 2: Implement the policy, preset, setup and probe
 

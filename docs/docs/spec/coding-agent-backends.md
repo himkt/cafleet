@@ -28,6 +28,8 @@ These are the child argv with omitted permission selection. The leading token na
 | `codex` | `codex --ask-for-approval never --sandbox workspace-write <prompt>` |
 | `opencode` | `opencode mini --standalone --agent cafleet --prompt <prompt>` |
 
+An explicit `--permission-mode cafleet-ask` for `opencode` launches `opencode mini --standalone --agent cafleet-ask --prompt <prompt>`; the `--agent` value always equals the resolved mode.
+
 Shared contract:
 
 - Each omitted policy retains its existing command posture; an explicit interactive policy may display native approval prompts.
@@ -58,7 +60,7 @@ Per-backend capabilities:
 |---|---|---|---|---|
 | `claude` | none | yes, via `--name <member-name>` | Runs the broker commands under its spawn-time allow rules, read-only commands, and every command matching the operator's `permissions.allow`; a denied command routes to the Director | A permission profile in `~/.claude/settings.json` — a permission posture, not a spawn dependency ([Claude](#claude)) |
 | `codex` | kernel-enforced ([Codex](#codex)) | no — locate the pane through `cafleet member list` (`pane_id` is ground truth) | Runs commands its workspace/host rules permit; routes required denied commands | `~/.codex/rules/cafleet.rules` (`CODEX_HOME` relocates it), plus the `~/.codex/config.toml` settings and a trusted working directory — a permission posture, not a spawn dependency ([the rules file](#cafleet-rules-file)) |
-| `opencode` | none | no — locate the pane through `cafleet member list` | Deny-by-default allowlist; everything outside it routes to the Director | `~/.opencode/agents/cafleet.md` (`OPENCODE_CONFIG_DIR` relocates it) — a spawn precondition ([the agent preset](#cafleet-agent-preset)) |
+| `opencode` | none | no — locate the pane through `cafleet member list` | `cafleet`: deny-by-default allowlist, everything outside it routes to the Director; `cafleet-ask`: the same allowlist, everything else opens a native permission form | The selected policy's preset, `~/.opencode/agents/<mode>.md` (`OPENCODE_CONFIG_DIR` relocates it) — a spawn precondition ([the agent presets](#cafleet-agent-preset)) |
 
 ## Director decision policy
 
@@ -99,7 +101,7 @@ the broker commands, the operator's settings are therefore the member's allow
 list; the recommended profiles are in
 [Claude Code configuration](../quickstart.md#claude-code).
 
-Launch-policy evidence is pinned to Claude Code 2.1.302 and Codex CLI 0.163.0. The inspected Claude parser accepts canonical `default` and alias `manual`, although help renders the canonical mode as `manual`; explicit argv preserves the selected spelling. [Claude’s permission-mode reference](https://code.claude.com/docs/en/permission-modes) documents the alias. Codex help confirms `on-request` and `never` with the explicit workspace sandbox retained. These observations establish launch-policy eligibility. Detection, empty-composer and answer coverage for exactly these versions comes from their [bundled profiles](member-runtime.md#bundled-profiles-and-native-screen-fixtures); every other version records `coverage=unknown`.
+Launch-policy evidence is pinned to Claude Code 2.1.302, Codex CLI 0.163.0 and OpenCode 2.1.4. The inspected Claude parser accepts canonical `default` and alias `manual`, although help renders the canonical mode as `manual`; explicit argv preserves the selected spelling. [Claude’s permission-mode reference](https://code.claude.com/docs/en/permission-modes) documents the alias. Codex help confirms `on-request` and `never` with the explicit workspace sandbox retained. OpenCode 2.1.4 prints `opencode v2.1.4` for `--version` and loads the agent preset that `--agent` names; its `cafleet` and `cafleet-ask` choices select presets rather than native flags, so both are eligible for every OpenCode version. These observations establish launch-policy eligibility. Detection, empty-composer and answer coverage for exactly these versions comes from their [bundled profiles](member-runtime.md#bundled-profiles-and-native-screen-fixtures); every other version records `coverage=unknown`.
 
 ### Spawn-time allow rules {#spawn-time-allow-rules}
 
@@ -324,45 +326,70 @@ The pane runs `opencode mini --standalone`, the long-lived minimal interactive
 interface with a private server per pane. The prompt travels through `--prompt`
 because `mini` takes no positional message.
 
-### The `cafleet` agent preset {#cafleet-agent-preset}
+### The `cafleet` and `cafleet-ask` agent presets {#cafleet-agent-preset}
 
-`--agent cafleet` binds the member to `~/.opencode/agents/cafleet.md`
-(`OPENCODE_CONFIG_DIR` relocates the `~/.opencode` base — see
+Each OpenCode launch policy names an agent preset of the same name:
+
+| Policy | Spawn argument | Preset file | Embedded asset |
+|---|---|---|---|
+| `cafleet` (default) | `--agent cafleet` | `~/.opencode/agents/cafleet.md` | `presets/opencode/cafleet.md` |
+| `cafleet-ask` | `--agent cafleet-ask` | `~/.opencode/agents/cafleet-ask.md` | `presets/opencode/cafleet-ask.md` |
+
+`OPENCODE_CONFIG_DIR` relocates the `~/.opencode` base — see
 [Config-dir resolution](cli-options.md#config-dir-resolution); the spawn
-precondition checks the same resolved path `setup` installs to). The
-preset is embedded in the released binary (`presets/opencode/cafleet.md`).
-`cafleet setup` installs it offline, replacing any existing copy; rerun setup
-after upgrading CAFleet to refresh it. The
-preset is a spawn precondition: the spawn argv references `--agent cafleet`,
-so `cafleet member create --coding-agent opencode` fails with `opencode agent
-preset not found at <preset>; run 'cafleet setup --coding-agent opencode'
-first` when the file is missing.
+precondition checks the same resolved path `setup` installs to. Both presets
+are embedded in the released binary. `cafleet setup` installs every preset
+offline, replacing any existing copy; rerun setup after upgrading CAFleet to
+refresh them. The selected policy's preset is a spawn precondition: `cafleet
+member create --coding-agent opencode` reads `<preset base>/agents/<mode>.md`
+for the resolved mode and fails with `cannot read opencode agent preset at
+<preset>: <cause>; run 'cafleet setup --coding-agent opencode' first` when that
+file is missing or unreadable. The unselected preset is not consulted.
 
 Preset discovery includes the relocated directory and default home configuration.
 Agent definitions with the same name can merge across those sources; inspect the
 effective configuration when customizing a preset.
 
-The preset's `shell` ruleset is deny-by-default: a `"*": "deny"` base first,
-then an explicit allowlist translated from the operator's Claude Code
-`permissions.allow` set (`cafleet *`, its declared Git commands,
-file-inspection utilities, and the project's cargo-backed mise tasks). opencode selects the
-**last** matching rule, so this order is the safety floor — every check
-resolves to `allow` or `deny`, never `ask`. Specific deny entries for the
-Director-owned commands — explicit pane input (`cafleet member prompt *`,
+Each preset's `shell` ruleset starts with a `"*"` base, then an explicit
+allowlist translated from the operator's Claude Code `permissions.allow` set
+(`cafleet *`, its declared Git commands, file-inspection utilities, and the
+project's cargo-backed mise tasks). opencode selects the **last** matching
+rule, so this order is the safety floor. The two presets differ only in their
+description, their shell base and their permission paragraph; every allowlist
+entry, every Director-only deny and every non-shell permission is identical:
+
+| Preset | Shell base | An unmatched shell command |
+|---|---|---|
+| `cafleet` | `"*": "deny"` | Is denied without a form; every check resolves to `allow` or `deny`, never `ask` |
+| `cafleet-ask` | `"*": "ask"` | Opens a native permission form |
+
+Specific deny entries for the Director-owned commands — explicit pane input (`cafleet member prompt *`,
 `cafleet member exec *`, `cafleet member press *`), request-bound native answers
 (`cafleet permission respond *`), input reconciliation
 (`cafleet input reconcile *`) and run recovery (`cafleet member recover *`) —
 follow the `cafleet *` allow, so they win: the preset configures members, and
 dispatching input into another pane, answering a native request, settling an
-input receipt or reconciling a run is the Director's act. A member's denied command receives no permission prompt, while permitted broker commands run normally. Tool permission and assignment authority are separate: the assigned role and Director instructions determine which allowed operations a member may perform. A permission popup in an opencode pane is
-therefore a regression escape, not a runtime decision: capture the pane,
-escalate, and extend the allowlist by operator decision — do not answer the
-popup ad hoc.
+input receipt or reconciling a run is the Director's act. A member's denied command receives no permission prompt, while permitted broker commands run normally. Tool permission and assignment authority are separate: the assigned role and Director instructions determine which allowed operations a member may perform.
+
+Non-shell permissions (`read`, `edit`, `external_directory`, `webfetch`,
+`websearch`, `repo_clone`, `question`, `plan_enter`, `plan_exit`) never ask
+under either preset, so only a shell command can open a form and the `question`
+tool raises no competing question form.
+
+Under `cafleet-ask`, a shell permission form is a runtime decision. The member
+runtime detects it, notifies the Director with an `interaction_opened` event,
+and the Director answers it through `cafleet permission respond` under the
+[permission workflow](../concepts/member-permission-events.md); the member
+continues from the result OpenCode returns. Under `cafleet`, a permission
+popup in an opencode pane is a regression escape: capture the pane, escalate,
+and extend the allowlist by operator decision, leaving the popup for that
+decision.
 
 ### Safety-floor caveats {#safety-floor-caveats}
 
-The posture is a deny-by-default allowlist, with no OS-level sandbox.
-Standalone un-enumerated commands fall to the `"*": "deny"` base. Apply these
+Both postures are allowlists with no OS-level sandbox. Standalone
+un-enumerated commands fall to the `"*"` base: denied under `cafleet`, a
+native permission form under `cafleet-ask`. Apply these
 limits when choosing tools and authorizing commands:
 
 | Surface | Example | Usage limit |

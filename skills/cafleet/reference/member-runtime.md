@@ -1,6 +1,6 @@
 # Member runtime procedure
 
-New members run inside a CAFleet-owned PTY runner. Native launch policy, detector coverage, empty-composer observation, prompt submission, native-exec submission and request-bound answer coverage are separate. Omitted launch policy retains backend defaults; explicit `member create --permission-mode MODE` selects only that member launch. Unknown coverage preserves manual terminal operation. The bundled [runtime contract](runtime/spec/member-runtime.md) owns identity, privacy, capabilities and durable receipts.
+New members run inside a CAFleet-owned PTY runner. Native launch policy, detector coverage, empty-composer observation, prompt submission, native-exec submission and request-bound answer coverage are separate. Omitted launch policy retains backend defaults; explicit `member create --permission-mode MODE` selects only that member launch. Interactive member policies include OpenCode's `cafleet-ask`, whose agent preset opens a native permission form for every shell command outside its allowlist. Unknown coverage preserves manual terminal operation. The bundled [runtime contract](runtime/spec/member-runtime.md) owns identity, privacy, capabilities and durable receipts.
 
 ## Consume observed interactions
 

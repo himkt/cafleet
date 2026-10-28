@@ -163,7 +163,7 @@ The default expands HOME once. An explicit URL has the form `sqlite:///<path>`; 
 | `permission respond --decision`, `--decision-source`, `--director-mode` | Their possible values | The stored enum values of the [permission response storage](docs/docs/spec/member-runtime.md#permission-response-storage) |
 | `input reconcile --disposition`, `member create --event-evidence` | Their possible values | Their command enums |
 
-An invalid value for an option with possible values exits 2 with a usage error that lists those values. `member create` resolves its backend at run time, so a `--permission-mode` value outside that backend's catalog keeps its run-time usage error `--permission-mode for BACKEND must be one of CHOICES (got 'VALUE')`, also with exit 2.
+An invalid value for an option with possible values exits 2 with a usage error that lists those values. `member create` resolves its backend at run time, so a `--permission-mode` value outside that backend's catalog keeps its run-time usage error `--permission-mode for BACKEND must be one of CHOICES (got 'VALUE')`, also with exit 2. For opencode, help reads `opencode: cafleet, cafleet-ask (default cafleet)` and the error reads `--permission-mode for opencode must be one of cafleet, cafleet-ask (got 'VALUE')`.
 
 #### Output shapes {#output-shapes}
 
@@ -246,11 +246,11 @@ environment variable, falling back to the default when the variable is unset:
 | claude | `CLAUDE_CONFIG_DIR` | `$CLAUDE_CONFIG_DIR` | `~/.claude` | `<base>/skills` | — |
 | codex | `CODEX_HOME` | `$CODEX_HOME` | `~/.codex` | `<base>/skills` | `<base>/rules/cafleet.rules` |
 | opencode (skills) | — (fixed discovery path) | — | `~/.config/opencode` | `<base>/skills` | — |
-| opencode (preset) | `OPENCODE_CONFIG_DIR` | `$OPENCODE_CONFIG_DIR` | `~/.opencode` | — | `<base>/agents/cafleet.md` |
+| opencode (preset) | `OPENCODE_CONFIG_DIR` | `$OPENCODE_CONFIG_DIR` | `~/.opencode` | — | `<base>/agents/cafleet.md`, `<base>/agents/cafleet-ask.md` |
 
 opencode splits by purpose: `agents/` is in `OPENCODE_CONFIG_DIR`'s
-documented search list, so the preset may relocate and remain a valid
-`--agent cafleet` discovery path; skills are not in that list — opencode
+documented search list, so the presets may relocate and remain valid
+`--agent <mode>` discovery paths; skills are not in that list — opencode
 discovers them only at fixed paths — so the skills install ignores the
 variable.
 
@@ -294,31 +294,44 @@ validation):
 
 ##### Assets half {#assets-half}
 
-Each agent's preset, where one exists, is a static file embedded in the
+Each agent's presets, where they exist, are static files embedded in the
 binary next to the skills; install targets resolve per
-[Config-dir resolution](#config-dir-resolution):
+[Config-dir resolution](#config-dir-resolution). Setup installs every embedded
+preset of the agent, in this order:
 
 | Agent | Bundled preset | Install target |
 |---|---|---|
 | claude | — (skills only) | — |
 | codex | `presets/codex/cafleet.rules` | `<codex base>/rules/cafleet.rules` (default `~/.codex/rules/cafleet.rules`) |
 | opencode | `presets/opencode/cafleet.md` | `<preset base>/agents/cafleet.md` (default `~/.opencode/agents/cafleet.md`) |
+| opencode | `presets/opencode/cafleet-ask.md` | `<preset base>/agents/cafleet-ask.md` (default `~/.opencode/agents/cafleet-ask.md`) |
 
 Each backend replaces the two embedded skills sequentially, removes a leftover
-`cafleet-research` entry, then replaces its preset where present. Existing targets
+`cafleet-research` entry, then replaces each of its presets in order. Existing targets
 are deleted before their replacements are written. Unrelated skills remain
 untouched. A symlink target is unlinked as an entry;
 its referent is not deleted. Skills-operation errors retain `failed to install
 skills into <skills_dir>: <error>` and preset-operation errors retain `failed
-to install preset into <target>: <error>`.
+to install preset into <target>: <error>`. A successful install records one
+`asset_installs` row for the agent, covering all of its presets; a failure on
+any preset fails setup and records no installation.
 
 The command prints each success line after that operation completes, then
-records the installed version after all operations succeed. The preset line
-appears only for codex and opencode:
+records the installed version after all operations succeed: the skills line,
+then one preset line per installed preset target in install order. Claude
+prints only the skills line:
 
 ```
 <agent>: installed cafleet, cafleet-design-doc (v<version>) -> <skills dir>
 <agent>: installed preset (v<version>) -> <target>
+```
+
+`cafleet setup --coding-agent opencode` prints:
+
+```
+opencode: installed cafleet, cafleet-design-doc (v<version>) -> <skills dir>
+opencode: installed preset (v<version>) -> <preset base>/agents/cafleet.md
+opencode: installed preset (v<version>) -> <preset base>/agents/cafleet-ask.md
 ```
 
 
@@ -505,6 +518,30 @@ note: <agent> was previously set up at <path>
 ```
 
 Footnotes are informational — they never count as issues.
+
+###### OpenCode preset checks {#doctor-opencode-preset}
+
+`doctor` has no selected launch policy, so it checks the preset of every
+OpenCode launch-policy choice (§ Launch policy and capability registry), in
+catalog order. The default choice keeps the check name `opencode.preset`;
+every other choice appends `.<mode>`:
+
+| Check name | File |
+|---|---|
+| `opencode.preset` | `<preset base>/agents/cafleet.md` |
+| `opencode.preset.cafleet-ask` | `<preset base>/agents/cafleet-ask.md` |
+
+Each check applies the same statuses to its own file:
+
+| State | Status | Detail |
+|---|---|---|
+| The file is readable | `ok` | The preset path |
+| The file is missing or unreadable | `error` | `<path>: <cause>; run 'cafleet setup --coding-agent opencode'` |
+| The opencode configuration failed | `info` | `unavailable: configuration failed: <cause>` |
+| The `opencode` executable is absent from `PATH` | `info` | `unavailable: executable is absent` |
+
+Setup installs every preset, so a missing `cafleet-ask` preset is an `error`:
+the installation predates that preset or was altered.
 
 ##### Member permissions section {#member-permissions}
 
@@ -773,9 +810,9 @@ one root Director by construction, so no override flag exists.
 | `--fleet-id` | yes | The fleet the new member joins — a relationship flag; the subject of the command is the member being created. |
 | `--name` | yes | Display name — see [Known asymmetries](docs/docs/concepts/coding-agents.md#known-asymmetries-intentional-non-goals) for pane-title behavior. |
 | `--description` | yes | One-sentence purpose. |
-| `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; when omitted, the member — every role — inherits the spawning Director's placement backend. Exits 1 with `Error: binary <name> not found on PATH` when the binary is missing. The opencode backend additionally requires its agent preset at the resolved preset path (via `OPENCODE_CONFIG_DIR` — see [Config-dir resolution](#config-dir-resolution)); a missing preset or an invalid variable exits 1 per [Error Messages](#error-messages). |
+| `--coding-agent` | no | One of `claude`, `codex`, or `opencode`; when omitted, the member — every role — inherits the spawning Director's placement backend. Exits 1 with `Error: binary <name> not found on PATH` when the binary is missing. The opencode backend additionally requires the selected launch policy's agent preset, `<preset base>/agents/<mode>.md`, at the resolved preset path (via `OPENCODE_CONFIG_DIR` — see [Config-dir resolution](#config-dir-resolution)); a missing or unreadable selected preset or an invalid variable exits 1 per [Error Messages](#error-messages). |
 | `--model` | no | Model forwarded to the backend binary's own `--model` flag. The opencode backend additionally requires `<provider-id>/<model-id>`; per-backend formats and create-time validation are in [Model selection](docs/docs/spec/coding-agent-backends.md#model-selection). |
-| `--permission-mode MODE` | no | Launch-only selection from the resolved backend’s [policy catalog](docs/docs/spec/member-runtime.md#launch-policy-and-capability-registry); omission preserves its default. |
+| `--permission-mode MODE` | no | Launch-only selection from the resolved backend’s [policy catalog](docs/docs/spec/member-runtime.md#launch-policy-and-capability-registry); omission preserves its default. For opencode the choices are `cafleet` (default) and `cafleet-ask`, each selecting the agent preset of that name. |
 | `--event-evidence POLICY` | no | `metadata` by default, or explicit `redacted` evidence under the [privacy contract](docs/docs/spec/member-runtime.md#persistence-notification-and-read-interfaces). |
 | `--event-redaction-file PATH` | for redacted | Absolute readable UTF-8 redaction configuration; invalid combinations/configuration fail with usage exit 2 before registration. |
 | `--effort` | no | Reasoning-effort level forwarded to the backend binary, validated per backend before any side effect. Accepted levels, forwarding forms, and rejection strings are in [Reasoning effort](docs/docs/spec/coding-agent-backends.md#reasoning-effort). |
@@ -1123,7 +1160,7 @@ Application errors print as stderr text even with `--json`; the flag selects suc
 | (any non-setup command) | The recorded schema version is ahead of the embedded head | [Schema-version guard](#schema-version-guard) | 1 | See [Schema-version guard](#schema-version-guard) |
 | (any fleet-scoped command) | No agent has an `asset_installs` row at its currently-resolved path | [Stale-assets guard](#stale-assets-guard) | 1 | See [Stale-assets guard](#stale-assets-guard) |
 | (any fleet-scoped command) | An `asset_installs` row at a resolved path differs from the runtime CLI version | [Stale-assets guard](#stale-assets-guard) | 1 | See [Stale-assets guard](#stale-assets-guard) |
-| `member create` | `--coding-agent opencode` with no agent preset at the resolved preset path | `Error: opencode agent preset not found at <preset>; run 'cafleet setup --coding-agent opencode' first` | 1 | `<preset>` is the resolved `<preset base>/agents/cafleet.md` — see [Config-dir resolution](#config-dir-resolution) |
+| `member create` | `--coding-agent opencode` with the selected agent preset missing or unreadable at the resolved preset path | `Error: cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first` | 1 | `<preset>` is the resolved `<preset base>/agents/<mode>.md` for the resolved launch policy, and `<cause>` is the read error; fires before registration or multiplexer effects — see [Config-dir resolution](#config-dir-resolution) |
 | `setup` | No database remains after a failed db half, or `asset_installs` is removed after the assets-half format check | `the database schema is missing or outdated; run 'cafleet setup' first` | 1 | An assets-half failure |
 | (any subject-taking command) | Missing positional subject id | The parser's native missing-required-argument error naming the positional | 2 | — |
 | (any id argument) | A non-integer id | The parser's native invalid-value error | 2 | — |
@@ -1873,26 +1910,29 @@ rejected.) `validate_effort` rejects **every** non-None value with the
 opencode effort value-error (see § Contract error strings) — the backend has
 no reasoning-effort control, so `build_spawn_argv` never receives a non-None
 `effort` and never emits effort tokens (it asserts `effort is None`).
-`ensure_available` PATH check on `opencode` **first**, then verify
-the preset file exists at the resolved preset path `<preset
-base>/agents/cafleet.md` — `<preset base>` resolved through the probe's
-`env_var` lookup per §6.3 *Config-dir resolution* (`OPENCODE_CONFIG_DIR`,
-default `~/.opencode`); an invalid variable surfaces the pinned validation
-error before the existence check (see § opencode
-preset). `display_name` is ignored; the prompt is
-passed as a `--prompt <prompt>` flag pair (two tokens), unlike claude/codex's
-bare positional.
+`member create` resolves the launch policy before `ensure_available`, which
+runs the PATH check on `opencode` **first**, then reads the selected preset
+file at the resolved preset path `<preset base>/agents/<mode>.md` for the
+resolved mode — `<preset base>` resolved through the probe's `env_var` lookup
+per §6.3 *Config-dir resolution* (`OPENCODE_CONFIG_DIR`, default
+`~/.opencode`); an invalid variable surfaces the pinned validation error
+before the read (see § opencode preset). The unselected preset is not
+consulted. The preset requirement is `required_preset(config, mode)`, which
+returns `<config>/agents/<mode>.md` for opencode and nothing for the other
+backends. `display_name` is ignored; the prompt is passed as a `--prompt
+<prompt>` flag pair (two tokens), unlike claude/codex's bare positional.
 
 ```
-["opencode", "mini", "--standalone", "--agent", "cafleet"]
+["opencode", "mini", "--standalone", "--agent", <mode>]   # <mode> is cafleet or cafleet-ask
   (+ ["--model", <model>]  if model is not None)
   (+ ["--prompt", <prompt>])                         # prompt via flag — TWO tokens
 ```
 
 The pane runs `opencode mini --standalone`, the long-lived minimal interactive
 interface with a private server per pane. The prompt travels through `--prompt`
-because `mini` takes no positional message. This is the only opencode spawn argv;
-availability checks validate PATH and preset existence without detecting a version.
+because `mini` takes no positional message. The `--agent` value is the only
+argv difference between the two launch policies; availability checks validate
+PATH and the selected preset without detecting a version.
 Spawn, preset loading, broker input and native shell input are validated against
 opencode 2.1.4; opencode 2 is the minimum supported version.
 
@@ -1956,36 +1996,55 @@ specific rule match the broad allow.
 
 #### opencode preset
 
-The `cafleet` agent definition is a static file embedded in the binary
-(source `presets/opencode/cafleet.md`) and installed to
-`<preset base>/agents/cafleet.md` — `<preset base>` resolved per §6.3
-*Config-dir resolution* (`OPENCODE_CONFIG_DIR`, default `~/.opencode`) — by
-the assets half of `setup`
-(§6.3), overwriting any existing target. **Two opencode base directories serve
-two distinct purposes** and are not interchangeable: the agent preset lives
-under the resolved preset base (default `~/.opencode/`), which is opencode's
-`--agent cafleet` discovery path (`agents/` is in `OPENCODE_CONFIG_DIR`'s
-documented search list, so a relocated preset remains discoverable);
-`setup`'s skills install (§6.3) targets the fixed `~/.config/opencode/`,
-cafleet's
-own skills-install target for the opencode agent.
+Each opencode launch policy names an agent definition of the same name. Both
+are static files embedded in the binary and installed, in this order, by the
+assets half of `setup` (§6.3), overwriting any existing target — `<preset
+base>` resolved per §6.3 *Config-dir resolution* (`OPENCODE_CONFIG_DIR`,
+default `~/.opencode`):
 
-The preset is a spawn precondition (the spawn argv references `--agent
-cafleet`): opencode's `ensure_available` verifies the file exists at the
-resolved install target and raises `opencode agent preset not found at
-{preset}; run 'cafleet setup --coding-agent opencode' first` when it does
-not — the remedy names the selector as the targeted repair; plain
-`cafleet setup` also installs it, as it covers all three agents.
+| Launch policy | Spawn argument | Source | Install target |
+|---|---|---|---|
+| `cafleet` (default) | `--agent cafleet` | `presets/opencode/cafleet.md` | `<preset base>/agents/cafleet.md` |
+| `cafleet-ask` | `--agent cafleet-ask` | `presets/opencode/cafleet-ask.md` | `<preset base>/agents/cafleet-ask.md` |
+
+**Two opencode base directories serve two distinct purposes** and are not
+interchangeable: the agent presets live under the resolved preset base
+(default `~/.opencode/`), which is opencode's `--agent <mode>` discovery path
+(`agents/` is in `OPENCODE_CONFIG_DIR`'s documented search list, so a
+relocated preset remains discoverable); `setup`'s skills install (§6.3)
+targets the fixed `~/.config/opencode/`, cafleet's own skills-install target
+for the opencode agent.
+
+The selected policy's preset is a spawn precondition (the spawn argv references
+`--agent <mode>`): opencode's `ensure_available` reads the file at the resolved
+install target for the resolved mode and raises `cannot read opencode agent
+preset at {preset}: {cause}; run 'cafleet setup --coding-agent opencode'
+first` when the read fails — the remedy names the selector as the targeted
+repair; plain `cafleet setup` also installs it, as it covers all three agents.
+The unselected preset is not consulted.
 
 Preset discovery includes the relocated directory and default home configuration.
 Agent definitions with the same name can merge across those sources; inspect the
 effective configuration when customizing a preset.
 
-The preset's `shell` ruleset places the `"*": "deny"` base before its explicit allowlist. Opencode selects the last matching rule: later denies for the Director-owned commands — explicit pane input (`cafleet member prompt *`, `cafleet member exec *`, `cafleet member press *`), request-bound native answers (`cafleet permission respond *`), input reconciliation (`cafleet input reconcile *`) and run recovery (`cafleet member recover *`) — win over `cafleet *`. A member's denied command receives no permission prompt, while permitted broker commands run normally. Tool permission and assignment authority remain separate; the assigned role and Director instructions determine which allowed operations a member may perform.
+Each preset's `shell` ruleset places its `"*"` base before its explicit allowlist. Opencode selects the last matching rule: later denies for the Director-owned commands — explicit pane input (`cafleet member prompt *`, `cafleet member exec *`, `cafleet member press *`), request-bound native answers (`cafleet permission respond *`), input reconciliation (`cafleet input reconcile *`) and run recovery (`cafleet member recover *`) — win over `cafleet *`. A member's denied command receives no permission prompt, while permitted broker commands run normally. Tool permission and assignment authority remain separate; the assigned role and Director instructions determine which allowed operations a member may perform.
 
-The posture is a deny-by-default allowlist, with no OS-level sandbox.
-Standalone un-enumerated commands fall to the `"*": "deny"` base. Apply these
-limits when choosing tools and authorizing commands:
+The `cafleet-ask` preset differs from the `cafleet` preset only in its
+`description`, its shell base and the first body paragraph; every allowlist
+entry, every Director-only deny, their order and every non-shell permission are
+identical:
+
+| Preset | Shell base | An unmatched shell command |
+|---|---|---|
+| `cafleet` | `"*": "deny"` | Is denied without a permission form |
+| `cafleet-ask` | `"*": "ask"` | Opens a native permission form, which the member runtime reports to the Director |
+
+Non-shell permissions never ask under either preset, so only a shell command
+opens a form and the `question` tool raises no competing question form.
+
+Both postures are allowlists with no OS-level sandbox. Standalone
+un-enumerated commands fall to the `"*"` base. Apply these limits when
+choosing tools and authorizing commands:
 
 | Surface | Example | Usage limit |
 |---|---|---|
@@ -2075,9 +2134,81 @@ Your role and the Director's assignment determine which permitted tools you may 
 Perform assignments with the selected provider/model and permitted workspace tools. Poll after ready, before reports and on every wake; ACK consumed messages and handle queued work before becoming idle. The Director owns explicit pane input dispatch, including native keys and shell commands, and inspects native output before explicit continuation when needed.
 ````
 
-The body has three paragraphs after the heading, separated by a blank line, with
-no internal hard line breaks in either paragraph. The file ends with exactly
-one trailing newline.
+The checked-in `presets/opencode/cafleet-ask.md` follows the same format. Its
+frontmatter equals the `cafleet` preset's except `description` and the shell
+`"*"` value, and its body replaces only the first paragraph:
+
+````markdown
+---
+{
+  "description": "CAFleet-spawned member whose unmatched shell commands open a native permission form for the Director to answer.",
+  "mode": "primary",
+  "permission": {
+    "shell": {
+      "*": "ask",
+      "git add *": "allow",
+      "git commit *": "allow",
+      "git diff *": "allow",
+      "git grep *": "allow",
+      "git log *": "allow",
+      "git ls-tree *": "allow",
+      "git ls-files *": "allow",
+      "git branch *": "allow",
+      "git status": "allow",
+      "grep *": "allow",
+      "ls": "allow",
+      "ls *": "allow",
+      "stat *": "allow",
+      "tree": "allow",
+      "tree *": "allow",
+      "mise //cafleet:test": "allow",
+      "mise //cafleet:test *": "allow",
+      "mise //cafleet:lint": "allow",
+      "mise //cafleet:format": "allow",
+      "mise //cafleet:typecheck": "allow",
+      "mise //cafleet:build": "allow",
+      "wc *": "allow",
+      "cafleet *": "allow",
+      "cafleet member prompt *": "deny",
+      "cafleet member exec *": "deny",
+      "cafleet member press *": "deny",
+      "cafleet member recover *": "deny",
+      "cafleet permission respond *": "deny",
+      "cafleet input reconcile *": "deny"
+    },
+    "read": {
+      "*": "allow",
+      "**/.env": "deny",
+      "**/.env.*": "deny"
+    },
+    "edit": {
+      "*": "allow",
+      "**/.env": "deny",
+      "**/.env.*": "deny"
+    },
+    "external_directory": "deny",
+    "webfetch": "deny",
+    "websearch": "deny",
+    "repo_clone": "deny",
+    "question": "deny",
+    "plan_enter": "deny",
+    "plan_exit": "deny"
+  }
+}
+---
+
+# CAFleet member agent
+
+You are a CAFleet member spawned by the Director. The frontmatter is the literal tool-permission map: Shell allows its listed patterns, including `cafleet *`, the listed Git commands, inspection utilities and CAFleet mise tasks, denies the Director-owned CAFleet commands, and asks for every other command. An asked command opens a native permission form; CAFleet notifies the Director, who answers it, and you continue from the result OpenCode returns. Read/edit permit their listed paths with `.env` exclusions; external-directory access and the other named tools retain their declared denials.
+
+Your role and the Director's assignment determine which permitted tools you may use for this task. Broad tool patterns do not grant Director-only actions or Git write authority to an ordinary member. Follow the CAFleet member protocol and route a genuinely needed denied command through prompt-routing after reconsidering it. Read the Director's spawn instructions for your assigned scope.
+
+Perform assignments with the selected provider/model and permitted workspace tools. Poll after ready, before reports and on every wake; ACK consumed messages and handle queued work before becoming idle. The Director owns explicit pane input dispatch, including native keys and shell commands, and inspects native output before explicit continuation when needed.
+````
+
+In each preset, the body has three paragraphs after the heading, separated by a
+blank line, with no internal hard line breaks in any paragraph. Each file ends
+with exactly one trailing newline.
 
 #### Contract error strings
 
@@ -2089,8 +2220,9 @@ one trailing newline.
 - codex effort level: `--effort for the codex backend must be one of minimal,
   low, medium, high, xhigh (got '{effort}').`
 - opencode effort: `opencode does not support reasoning effort.`
-- missing opencode preset: `opencode agent preset not found at {preset}; run
-  'cafleet setup --coding-agent opencode' first`
+- missing or unreadable selected opencode preset: `cannot read opencode agent
+  preset at {preset}: {cause}; run 'cafleet setup --coding-agent opencode'
+  first`
 - invalid config-path variable: `{var} must be an absolute path (got
   '{value}')` (§6.3 *Config-dir resolution*)
 
@@ -2122,15 +2254,15 @@ Settings retain the selected SQLite URL, nonnegative text limit and optional mul
 |---|---|---|
 | Claude | `dontAsk` | Use the native permission-mode value through `--permission-mode`; retain broker-tool allowance, prompt suggestions, name and model/effort boundaries. |
 | Codex | `never` with `workspace-write` | Map native approval-policy values through `--ask-for-approval`; retain the explicit workspace sandbox. |
-| OpenCode | Existing `cafleet` preset | Accept exactly `cafleet`, preserving the fixed preset; explicit `cafleet` records `mode_source=explicit`. |
+| OpenCode | `cafleet` preset | Map `cafleet` and `cafleet-ask` to `--agent <mode>`, selecting the agent preset of that name; explicit `cafleet` records `mode_source=explicit`. |
 
-The bundled backend policy catalog is the single source of truth for each backend's launch-policy catalog, default, exact argv mapping, native-version eligibility and detector/composer/answer profiles. Help and usage errors report choices from that catalog. Claude accepts native `--permission-mode` values verified from installed help and parser evidence, including documented aliases, recorded by its version-qualified adapter. Claude Code 2.1.302 accepts canonical `default` and its `manual` alias; help displays `manual`, while the [official permission-mode reference](https://code.claude.com/docs/en/permission-modes) documents both. Preserve the explicitly requested spelling in argv and launch intent. Codex accepts the native `--ask-for-approval` values read from the installed `codex --help` and recorded the same way. OpenCode accepts exactly the token `cafleet`; every other explicit token fails with usage exit `2`.
+The bundled backend policy catalog is the single source of truth for each backend's launch-policy catalog, default, exact argv mapping, native-version eligibility and detector/composer/answer profiles. Help and usage errors report choices from that catalog. Claude accepts native `--permission-mode` values verified from installed help and parser evidence, including documented aliases, recorded by its version-qualified adapter. Claude Code 2.1.302 accepts canonical `default` and its `manual` alias; help displays `manual`, while the [official permission-mode reference](https://code.claude.com/docs/en/permission-modes) documents both. Preserve the explicitly requested spelling in argv and launch intent. Codex accepts the native `--ask-for-approval` values read from the installed `codex --help` and recorded the same way. OpenCode accepts `cafleet` and `cafleet-ask` for every native version, because both select an agent preset rather than a native permission flag; every other explicit token fails with usage exit `2`. The `cafleet` preset resolves every shell check to `allow` or `deny`; the `cafleet-ask` preset asks for every shell command outside its allowlist and its Director-only denies, so OpenCode opens a native permission form.
 
 Creation success establishes that the child was spawned, not that its native policy was accepted. A fast native exit after spawning, including policy rejection, produces `runner_exited` with the actual code/signal and a Director inbox event; the runner preserves the chosen mode rather than retrying with another one. An error from the spawn operation itself still fails creation and follows compensation. There is no post-spawn liveness window.
 
 Record `requested_mode` as nullable text, `resolved_mode` as required text, `mode_source` as `default` or `explicit`, and the exact non-secret permission/sandbox argv in the run record. These fields state launch intent. `effective_policy_json` remains null unless an actual native observation supplies it; an installed version, argv or selected profile alone proves no effective authorization decision.
 
-Keep launch, detection, empty-composer observation, prompt submission, native-exec submission and request-bound answer capabilities separate. Answer profiles declare support for each semantic decision independently. Profiles declare exact backend versions, rule-set version and capability-specific fixture provenance; bundled tested declarations require matching native captures and measured single-request answer stages for the capability claimed. Synthetic fixtures exercise rule and capability validation while unverified components remain unknown or unsupported. A missing version/profile yields `coverage=unknown`, an initial coverage notification and held programmatic input; it still permits manual terminal operation and records the selected mode. Automatic/fixed policies remain useful even where screen detection is unknown. The default OpenCode preset's returned denials continue through member evidence routing; returned tool responses are observable only when the native terminal exposes them.
+Keep launch, detection, empty-composer observation, prompt submission, native-exec submission and request-bound answer capabilities separate. Answer profiles declare support for each semantic decision independently. Profiles declare exact backend versions, rule-set version and capability-specific fixture provenance; bundled tested declarations require matching native captures and measured single-request answer stages for the capability claimed. Synthetic fixtures exercise rule and capability validation while unverified components remain unknown or unsupported. A missing version/profile yields `coverage=unknown`, an initial coverage notification and held programmatic input; it still permits manual terminal operation and records the selected mode. Automatic/fixed policies remain useful even where screen detection is unknown. The `cafleet` OpenCode preset's returned denials continue through member evidence routing; returned tool responses are observable only when the native terminal exposes them.
 
 ##### Native executable resolution
 
@@ -2142,7 +2274,16 @@ The version probe below runs that exact path, and the same path is `argv[0]` of 
 
 `member create` records the installed native version of the resolved backend. After launch-policy validation and the backend availability check, and before registration, it runs the resolved executable (§ Native executable resolution) with exactly the argument `--version`, so `claude`, `codex` and `opencode` each report their own version. The probe has null stdin and captures at most 4096 bytes each of stdout and stderr. It ends within two seconds, and those two seconds belong to the command's existing ten-second creation budget, which starts before the probe. A probe still running at its bound is killed.
 
-The probe yields a version only when it exits with status `0` and the first stdout line has exactly one whitespace-separated token matching `^[0-9]+(\.[0-9]+)+([-+][0-9A-Za-z.]+)?$`. That token is recorded verbatim as the run's `native_version`; for example `2.1.302 (Claude Code)` yields `2.1.302` and `codex-cli 0.163.0` yields `0.163.0`. The bundled catalog entry for that backend and exact version then supplies `profile_version`, and `coverage` is `tested` when that profile declares detection. A version without a bundled profile records `profile_version` null and `coverage=unknown`.
+The probe yields a version only when it exits with status `0` and the first stdout line has exactly one whitespace-separated token matching `^v?[0-9]+(\.[0-9]+)+([-+][0-9A-Za-z.]+)?$`. That token, without a leading `v`, is recorded as the run's `native_version`:
+
+| First stdout line | Recorded `native_version` |
+|---|---|
+| `2.1.302 (Claude Code)` | `2.1.302` |
+| `codex-cli 0.163.0` | `0.163.0` |
+| `opencode v2.1.4` | `2.1.4` |
+| `v2.1.4 2.1.5` | Probe failure: several version tokens |
+
+The bundled catalog entry for that backend and exact version then supplies `profile_version`, and `coverage` is `tested` when that profile declares detection. A version without a bundled profile records `profile_version` null and `coverage=unknown`.
 
 A probe that cannot start, times out, exits nonzero, prints non-UTF-8 output or has zero or several version tokens records `native_version` null, `profile_version` null and `coverage=unknown`. Creation continues. The command writes one stderr line, `Warning: native version unavailable for BACKEND: CAUSE; coverage unknown.`, and leaves its stdout text and JSON unchanged. The probed version identifies the installed binary only; it establishes no effective native policy.
 

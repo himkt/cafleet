@@ -29,13 +29,13 @@ system:
 |---|---|---|---|---|
 | `claude` (Claude Code) | `~/.claude/settings.json` | The permission profile below that matches the Director's mode | The skills | The sub-section below |
 | `codex` (OpenAI Codex CLI) | `~/.codex/config.toml` | The `[sandbox_workspace_write]` entries below | The skills, plus `~/.codex/rules/cafleet.rules` | [The `cafleet` rules file](spec/coding-agent-backends.md#cafleet-rules-file) |
-| `opencode` | none | none required | The skills, plus the `cafleet` agent preset at `~/.opencode/agents/cafleet.md` | [Opencode](spec/coding-agent-backends.md#opencode) |
+| `opencode` | none | none required | The skills, plus the `cafleet` and `cafleet-ask` agent presets at `~/.opencode/agents/cafleet.md` and `~/.opencode/agents/cafleet-ask.md` | [Opencode](spec/coding-agent-backends.md#opencode) |
 
 The paths above are defaults. `CLAUDE_CONFIG_DIR` and `CODEX_HOME` relocate
 their skills and presets. `OPENCODE_CONFIG_DIR` relocates only the Opencode
-preset; its skills remain under `~/.config/opencode/skills`. See
+presets; its skills remain under `~/.config/opencode/skills`. See
 [Config-dir resolution](spec/cli-options.md#config-dir-resolution).
-Opencode also loads default home configuration alongside the relocated preset
+Opencode also loads default home configuration alongside the relocated presets
 directory; same-name agent definitions can merge across these sources.
 
 The snippets below are the recommended starting points for the two backends
