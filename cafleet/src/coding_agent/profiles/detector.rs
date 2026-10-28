@@ -1162,17 +1162,22 @@ fn reassemble_edge_joined_rows(rows: &str, lines: &[LogicalLine], cols: u16) -> 
         return None;
     }
     let mut operation = String::new();
-    let mut previous_reached_edge = true;
+    let mut joins_next_directly = true;
     for (row, line) in rows.into_iter().zip(lines) {
         if row != line.text {
             return None;
         }
-        let content = row.strip_prefix(" │ ").or_else(|| row.strip_prefix(' '))?;
-        if !previous_reached_edge {
+        if !joins_next_directly {
             operation.push(' ');
         }
-        operation.push_str(content);
-        previous_reached_edge = line.end_col() + 1 >= cols;
+        // Boxed rows break only at a space; plain rows break at the last usable column.
+        if let Some(content) = row.strip_prefix(" │ ") {
+            operation.push_str(content);
+            joins_next_directly = false;
+        } else {
+            operation.push_str(row.strip_prefix(' ')?);
+            joins_next_directly = line.end_col() + 1 >= cols;
+        }
     }
     Some(operation)
 }
