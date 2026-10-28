@@ -680,6 +680,7 @@ mod tests {
         );
         assert_eq!(transport.pending_input_bytes(), 0);
         assert_eq!(progress.human_bytes, 7696);
+        assert_eq!(progress.forwarded_bytes, 7696);
         assert!(!progress.outer_eof);
         assert_eq!(transport.human_generation(), generation + 7696);
     }
@@ -719,6 +720,11 @@ mod tests {
         assert_eq!(unread(&human), 16384);
         let held = one_tick(&mut transport, &mut human, &mut pty);
         assert_eq!(held.human_bytes, 0, "a full queue admits no further read");
+        assert_eq!(
+            held.forwarded_bytes, 0,
+            "the blocked master accepted none of the queued input"
+        );
+        assert_eq!(transport.pending_input_bytes(), 65536);
         assert_eq!(unread(&human), 16384);
         pty.blocked = false;
         for _ in 0..3 {
