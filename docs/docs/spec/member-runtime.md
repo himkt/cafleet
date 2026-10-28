@@ -49,6 +49,8 @@ The bundled catalog is embedded in the CAFleet binary together with the native s
 
 Both answers select their choice by its number, so they do not depend on which choice is focused. The broadened choices 2 and 3 have no answer plan. The empty-composer observation reads the composer as empty only when the cursor sits at the end of the prompt prefix; a draft whose cursor was moved back to the prefix reads as empty. Every other backend and native version yields `coverage=unknown`.
 
+Detection covers the permission form only when it renders within 16 rows from its `Bash command` heading to its `Esc to cancel · Tab to amend` line, with the operation on a single line between the dashed rules. A narrow pane or a long command makes Claude wrap the form: the operation becomes boxed `│` rows and the choice labels continue on further rows. A wrapped form yields no detection, so no `interaction_opened` event is produced, programmatic input stays held, and the request is answered manually on the native surface.
+
 A native screen fixture records one captured terminal screen with exactly these fields:
 
 | Field | Requirement |
@@ -291,7 +293,7 @@ Add `cafleet event show <EVENT_ID> --json` for the complete durable event, notif
 
 ## CLI presentation contract
 
-Member create/show JSON preserves existing fields and appends `runtime`. An unwrapped member has `runtime: null`. The runtime object has ordered keys `run_id`, `resolved_mode`, `status`, `reachability`, `owner_epoch`, `last_health_at`, `coverage`, `current_interaction_id`, `unresolved_input_ids`, `owner_kind`, `owner_pid`, `owner_start_identity`, `runner_pid`, `runner_start_identity`, `child_pid`, `child_start_identity`. Process fields preserve their stored nullability. These registry-only fields let the Director bind a recovery attestation to the inspected owner snapshot without probing a live socket. Existing member text rows remain intact; a wrapped create/show appends `Runtime: run=RUN_ID mode=MODE status=STATUS coverage=COVERAGE` on a separate line.
+Member create/show JSON preserves existing fields and appends `runtime`. An unwrapped member has `runtime: null`. The runtime object has ordered keys `run_id`, `resolved_mode`, `status`, `reachability`, `owner_epoch`, `last_health_at`, `coverage`, `current_interaction_id`, `unresolved_input_ids`, `owner_kind`, `owner_pid`, `owner_start_identity`, `runner_pid`, `runner_start_identity`, `child_pid`, `child_start_identity`. Process fields preserve their stored nullability. `unresolved_input_ids` lists the run's inputs in `in_progress`, `accepted` or `uncertain`, in input-ID order. An accepted input is a durable submitted receipt that needs no reconciliation and stays listed until a settlement records its disposition; `in_progress` and `uncertain` inputs need Director reconciliation before a separate deliberate action. These registry-only fields let the Director bind a recovery attestation to the inspected owner snapshot without probing a live socket. Existing member text rows remain intact; a wrapped create/show appends `Runtime: run=RUN_ID mode=MODE status=STATUS coverage=COVERAGE` on a separate line.
 
 | Command | Ordered JSON keys and values |
 |---|---|
