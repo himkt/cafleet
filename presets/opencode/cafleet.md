@@ -31,6 +31,9 @@
       "cafleet member prompt *": "deny",
       "cafleet member exec *": "deny",
       "cafleet member press *": "deny",
+      "cafleet member recover *": "deny",
+      "cafleet permission respond *": "deny",
+      "cafleet input reconcile *": "deny"
     },
     "read": {
       "*": "allow",

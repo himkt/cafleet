@@ -237,12 +237,30 @@ prefix_rule(
     decision = "prompt",
     justification = "cafleet member press sends explicit native keys to a member pane",
 )
+
+prefix_rule(
+    pattern = ["cafleet", "permission", "respond"],
+    decision = "prompt",
+    justification = "cafleet permission respond writes a native permission answer into a member pane",
+)
+
+prefix_rule(
+    pattern = ["cafleet", "input", "reconcile"],
+    decision = "prompt",
+    justification = "cafleet input reconcile records a Director-owned input disposition",
+)
+
+prefix_rule(
+    pattern = ["cafleet", "member", "recover"],
+    decision = "prompt",
+    justification = "cafleet member recover reconciles a member run under exclusive ownership",
+)
 ```
 
 Codex applies the strictest decision when more than one rule matches
-(`forbidden` > `prompt` > `allow`): explicit native pane-input commands match
-the broad allow and their specific prompt rules, so operator approval remains
-required. Commands without a more specific rule match the broad `["cafleet"]`
+(`forbidden` > `prompt` > `allow`): the Director-owned explicit pane-input,
+native-answer, input-reconciliation and run-recovery commands match the broad
+allow and their specific prompt rules, so operator approval remains required. Commands without a more specific rule match the broad `["cafleet"]`
 allow for every fleet,
 since every id rides past the matched prefix as a positional or trailing
 argument.
@@ -329,10 +347,14 @@ then an explicit allowlist translated from the operator's Claude Code
 `permissions.allow` set (`cafleet *`, its declared Git commands,
 file-inspection utilities, and the project's cargo-backed mise tasks). opencode selects the
 **last** matching rule, so this order is the safety floor — every check
-resolves to `allow` or `deny`, never `ask`. Specific deny entries for explicit
-native pane-input commands, including `cafleet member press *`, follow the
-`cafleet *` allow, so they win: the preset configures
-members, and dispatching a command into another pane is the Director's act. A member's denied command receives no permission prompt, while permitted broker commands run normally. Tool permission and assignment authority are separate: the assigned role and Director instructions determine which allowed operations a member may perform. A permission popup in an opencode pane is
+resolves to `allow` or `deny`, never `ask`. Specific deny entries for the
+Director-owned commands — explicit pane input (`cafleet member prompt *`,
+`cafleet member exec *`, `cafleet member press *`), request-bound native answers
+(`cafleet permission respond *`), input reconciliation
+(`cafleet input reconcile *`) and run recovery (`cafleet member recover *`) —
+follow the `cafleet *` allow, so they win: the preset configures members, and
+dispatching input into another pane, answering a native request, settling an
+input receipt or reconciling a run is the Director's act. A member's denied command receives no permission prompt, while permitted broker commands run normally. Tool permission and assignment authority are separate: the assigned role and Director instructions determine which allowed operations a member may perform. A permission popup in an opencode pane is
 therefore a regression escape, not a runtime decision: capture the pane,
 escalate, and extend the allowlist by operator decision — do not answer the
 popup ad hoc.

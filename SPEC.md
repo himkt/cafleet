@@ -1929,10 +1929,29 @@ prefix_rule(
     decision = "prompt",
     justification = "cafleet member press sends explicit native keys to a member pane",
 )
+
+prefix_rule(
+    pattern = ["cafleet", "permission", "respond"],
+    decision = "prompt",
+    justification = "cafleet permission respond writes a native permission answer into a member pane",
+)
+
+prefix_rule(
+    pattern = ["cafleet", "input", "reconcile"],
+    decision = "prompt",
+    justification = "cafleet input reconcile records a Director-owned input disposition",
+)
+
+prefix_rule(
+    pattern = ["cafleet", "member", "recover"],
+    decision = "prompt",
+    justification = "cafleet member recover reconciles a member run under exclusive ownership",
+)
 ```
 
-Codex applies the strictest matching decision, so explicit native pane-input
-commands retain their specific approval rules. Commands without a more
+Codex applies the strictest matching decision, so the Director-owned explicit
+pane-input, native-answer, input-reconciliation and run-recovery commands retain
+their specific approval rules. Commands without a more
 specific rule match the broad allow.
 
 #### opencode preset
@@ -1962,7 +1981,7 @@ Preset discovery includes the relocated directory and default home configuration
 Agent definitions with the same name can merge across those sources; inspect the
 effective configuration when customizing a preset.
 
-The preset's `shell` ruleset places the `"*": "deny"` base before its explicit allowlist. Opencode selects the last matching rule: later denies for Director-owned explicit pane-input commands, including `cafleet member press *`, win over `cafleet *`. A member's denied command receives no permission prompt, while permitted broker commands run normally. Tool permission and assignment authority remain separate; the assigned role and Director instructions determine which allowed operations a member may perform.
+The preset's `shell` ruleset places the `"*": "deny"` base before its explicit allowlist. Opencode selects the last matching rule: later denies for the Director-owned commands — explicit pane input (`cafleet member prompt *`, `cafleet member exec *`, `cafleet member press *`), request-bound native answers (`cafleet permission respond *`), input reconciliation (`cafleet input reconcile *`) and run recovery (`cafleet member recover *`) — win over `cafleet *`. A member's denied command receives no permission prompt, while permitted broker commands run normally. Tool permission and assignment authority remain separate; the assigned role and Director instructions determine which allowed operations a member may perform.
 
 The posture is a deny-by-default allowlist, with no OS-level sandbox.
 Standalone un-enumerated commands fall to the `"*": "deny"` base. Apply these
@@ -2021,6 +2040,10 @@ around command names and `.env`):
       "cafleet *": "allow",
       "cafleet member prompt *": "deny",
       "cafleet member exec *": "deny",
+      "cafleet member press *": "deny",
+      "cafleet member recover *": "deny",
+      "cafleet permission respond *": "deny",
+      "cafleet input reconcile *": "deny"
     },
     "read": {
       "*": "allow",
@@ -2049,7 +2072,7 @@ You are a CAFleet member spawned by the Director. The frontmatter is the literal
 
 Your role and the Director's assignment determine which permitted tools you may use for this task. Broad tool patterns do not grant Director-only actions or Git write authority to an ordinary member. Follow the CAFleet member protocol and route a genuinely needed denied command through prompt-routing after reconsidering it. Read the Director's spawn instructions for your assigned scope.
 
-Perform assignments with the selected provider/model and permitted workspace tools. Poll after ready, before reports and on every wake; ACK consumed messages and handle queued work before becoming idle. The Director owns prompt/native command dispatch and inspects native output before explicit continuation when needed.
+Perform assignments with the selected provider/model and permitted workspace tools. Poll after ready, before reports and on every wake; ACK consumed messages and handle queued work before becoming idle. The Director owns explicit pane input dispatch, including native keys and shell commands, and inspects native output before explicit continuation when needed.
 ````
 
 The body has three paragraphs after the heading, separated by a blank line, with
@@ -2397,7 +2420,7 @@ Before persistence, the outbox stores an `ObservedTransition` keyed by `(run_id,
 
 The runner uses the broker library directly and never depends on its child invoking `cafleet message send`. A persisted notification remains pending through Director absence or listener restart. Live events use `notification_state=inbox`; active ownership and the sender/recipient fleet checks remain mandatory. After closure, ordinary observation stops. Exclusive recovery may replay historical frames as `notification_state=archived`, `message_id=null`, with `archive_reason=member_inactive|fleet_deleted|director_inactive`; it retains the event/interaction history without inserting a message from an inactive sender or claiming Director notification.
 
-Add `cafleet event show <EVENT_ID> --json` for the complete durable event, notification/archive state, nullable associated message ID and current interaction/run state. Add `cafleet input show <INPUT_ID> --json` for a durable programmatic-input receipt. These IDs are positive database-assigned integers. Add a `runtime` object to member detail/create JSON containing run ID, resolved mode, status, recorded reachability, owner epoch, last health observation, coverage, current interaction ID and unresolved input IDs; use `runtime: null` for an unwrapped member. The CLI reference fixes exact layouts and key order. Existing broker message envelopes and ACK semantics stay intact; the wrapped pane-preview text differs as specified below.
+`cafleet event show <EVENT_ID> --json` returns the complete durable event, its notification/archive state, the nullable associated message ID and the current interaction/run state. `cafleet input show <INPUT_ID> --json` returns a durable programmatic-input receipt. These IDs are positive database-assigned integers. Member detail/create JSON carries a `runtime` object with the run ID, resolved mode, status, recorded reachability, owner epoch, last health observation, coverage, current interaction ID and unresolved input IDs; an unwrapped member has `runtime: null`. The CLI reference fixes exact layouts and key order. Existing broker message envelopes and ACK semantics stay intact; the wrapped pane-preview text differs as specified below.
 
 #### CLI presentation contract
 
