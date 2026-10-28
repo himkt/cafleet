@@ -34,7 +34,7 @@ mod contract_tests;
 #[cfg(test)]
 mod permission_inspection_contracts {
     use super::contract_tests::ordinary_prompt::support::{
-        Host, catalog_definition, with_catalog_policy_host,
+        Host, HostProfile, catalog_definition, with_profile_host,
     };
     use super::*;
     use crate::broker::runtime::{Coverage, InteractionClass, PermissionDecision};
@@ -71,10 +71,10 @@ mod permission_inspection_contracts {
     pub(super) fn with_redacted_inspection(
         body: impl FnOnce(&mut Host, Arc<AtomicUsize>, Arc<AtomicBool>),
     ) {
-        with_definition_policy(
+        with_definition_profile(
             inspection_fixture_definition(),
             b"unused-program~".to_vec(),
-            (
+            HostProfile::synthetic(
                 storage::evidence::EvidencePolicy::redacted(
                     &serde_json::json!({"schema_version":1,"patterns":["synthetic-redaction-canary"],"sensitive_rules":[]}),
                     &["synthetic-permission"],
@@ -90,17 +90,82 @@ mod permission_inspection_contracts {
         expected_program: Vec<u8>,
         body: impl FnOnce(&mut Host, Arc<AtomicUsize>, Arc<AtomicBool>),
     ) {
-        with_definition_policy(
+        with_definition_profile(
             definition,
             expected_program,
-            (storage::evidence::EvidencePolicy::metadata(), "metadata"),
+            HostProfile::synthetic(storage::evidence::EvidencePolicy::metadata(), "metadata"),
             body,
         );
     }
-    fn with_definition_policy(
+    pub(super) const CLAUDE_PERMISSION_SCREEN: &str =
+        include_str!("../../coding_agent/profiles/native/claude-2.1.302-default-permission-1.json");
+    const CLAUDE_IDLE_SCREEN: &str =
+        include_str!("../../coding_agent/profiles/native/claude-2.1.302-idle-composer-1.json");
+
+    // The same byte stream the profile tests replay into a terminal for a committed native screen.
+    pub(super) fn native_screen_bytes(fixture: &str) -> Vec<u8> {
+        let screen: serde_json::Value = serde_json::from_str(fixture).unwrap();
+        let mut bytes = Vec::new();
+        if screen["alternate_screen"].as_bool().unwrap() {
+            bytes.extend(b"\x1b[?1049h");
+        }
+        bytes.extend(b"\x1b[2J");
+        for (row, line) in screen["lines"].as_array().unwrap().iter().enumerate() {
+            let line = line.as_str().unwrap();
+            if !line.is_empty() {
+                bytes.extend(format!("\x1b[{};1H{line}", row + 1).into_bytes());
+            }
+        }
+        bytes.extend(
+            format!(
+                "\x1b[{};{}H",
+                screen["cursor_row"].as_u64().unwrap() + 1,
+                screen["cursor_col"].as_u64().unwrap() + 1
+            )
+            .into_bytes(),
+        );
+        bytes
+    }
+
+    pub(super) fn with_claude_inspection(
+        body: impl FnOnce(&mut Host, Arc<AtomicUsize>, Arc<AtomicBool>),
+    ) {
+        with_profile_host(
+            ProfileCatalog::bundled().unwrap(),
+            b"unused-program~".to_vec(),
+            HostProfile {
+                policy: storage::evidence::EvidencePolicy::metadata(),
+                event_evidence: "metadata",
+                backend: crate::coding_agent::CodingAgent::Claude,
+                native_version: "2.1.302",
+                profile_version: "claude-2.1.302-default-2",
+                size: crate::runtime::runner::TerminalSize {
+                    rows: 36,
+                    cols: 120,
+                },
+                screen: native_screen_bytes(CLAUDE_IDLE_SCREEN),
+            },
+            |h| with_counted_tokens(h, body),
+        );
+    }
+
+    fn with_counted_tokens(
+        h: &mut Host,
+        body: impl FnOnce(&mut Host, Arc<AtomicUsize>, Arc<AtomicBool>),
+    ) {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let fail = Arc::new(AtomicBool::new(false));
+        h.coordinator.services.token_source = Box::new(Tokens {
+            calls: calls.clone(),
+            fail: fail.clone(),
+        });
+        body(h, calls, fail);
+    }
+
+    fn with_definition_profile(
         mut definition: serde_json::Value,
         expected_program: Vec<u8>,
-        policy: (storage::evidence::EvidencePolicy, &'static str),
+        profile: HostProfile,
         body: impl FnOnce(&mut Host, Arc<AtomicUsize>, Arc<AtomicBool>),
     ) {
         let composer = catalog_definition();
@@ -114,19 +179,11 @@ mod permission_inspection_contracts {
             .push(composer["profiles"][0]["rules"][0].clone());
         definition["profiles"][0]["capabilities"]["composer"] =
             composer["profiles"][0]["capabilities"]["composer"].clone();
-        with_catalog_policy_host(
+        with_profile_host(
             ProfileCatalog::from_definitions(&definition).unwrap(),
             expected_program,
-            policy,
-            |h| {
-                let calls = Arc::new(AtomicUsize::new(0));
-                let fail = Arc::new(AtomicBool::new(false));
-                h.coordinator.services.token_source = Box::new(Tokens {
-                    calls: calls.clone(),
-                    fail: fail.clone(),
-                });
-                body(h, calls, fail);
-            },
+            profile,
+            |h| with_counted_tokens(h, body),
         );
     }
 
@@ -160,7 +217,7 @@ mod permission_inspection_contracts {
     pub(super) fn detail_rewrite(detail: &str) -> Vec<u8> {
         format!("\x1b[23;1H\x1b[2KDetail: {detail}\x1b[24;12H").into_bytes()
     }
-    fn settled_ids(h: &mut Host) -> (i64, i64, i64, i64) {
+    pub(super) fn settled_ids(h: &mut Host) -> (i64, i64, i64, i64) {
         loop {
             h.drain();
             if h.controller.current_request().is_some()
@@ -632,8 +689,9 @@ mod permission_inspection_contracts {
 mod permission_response_contracts {
     use super::contract_tests::ordinary_prompt::support::{Host, Pty};
     use super::permission_inspection_contracts::{
-        counts, detail_rewrite, form, inspect, inspect_request, request as inspection_target,
-        stable_detailed_form, stable_form, with_definition, with_inspection,
+        CLAUDE_PERMISSION_SCREEN, counts, detail_rewrite, form, inspect, inspect_request,
+        native_screen_bytes, request as inspection_target, settled_ids, stable_detailed_form,
+        stable_form, with_claude_inspection, with_definition, with_inspection,
         with_redacted_inspection,
     };
     use super::*;
@@ -936,6 +994,125 @@ mod permission_response_contracts {
     }
 
     const OUTPUT_ARRIVING: &str = "terminal output still arriving";
+
+    // Captured from the blocked Claude Code 2.1.302 form: eleven status-dot blink writes, each
+    // moving the cursor home, to the bottom row and back to the form without touching form rows.
+    const CLAUDE_BLINK: &[u8] =
+        include_bytes!("../runner_tests/fixtures/claude-2.1.302-blocked-form-blink-1.raw");
+
+    fn blink_writes() -> Vec<&'static [u8]> {
+        let starts = CLAUDE_BLINK
+            .windows(4)
+            .enumerate()
+            .filter(|(_, window)| *window == b"\x1b[H\r")
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        assert_eq!(starts.first(), Some(&0));
+        starts
+            .iter()
+            .enumerate()
+            .map(|(index, &start)| {
+                &CLAUDE_BLINK[start..starts.get(index + 1).copied().unwrap_or(CLAUDE_BLINK.len())]
+            })
+            .collect()
+    }
+
+    fn claude_blocked_form(h: &mut Host) -> (i64, i64, i64, i64) {
+        h.pty
+            .child
+            .bytes
+            .extend(native_screen_bytes(CLAUDE_PERMISSION_SCREEN));
+        settled_ids(h)
+    }
+
+    #[test]
+    fn permission_claude_blink_cursor_transit_keeps_generation_and_token_and_admits_respond() {
+        assert_eq!(CLAUDE_BLINK.len(), 441);
+        assert_eq!(
+            Sha256::digest(CLAUDE_BLINK)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>(),
+            "014fe1213f56da769340abaf3cb46961c682a58d16fbccd7e16e62ca8e582e9e"
+        );
+        let writes = blink_writes();
+        assert_eq!(writes.len(), 11);
+        with_claude_inspection(|h, _, _| {
+            let ids = claude_blocked_form(h);
+            let inspected = inspect(h, ids);
+            assert!(inspected.request_token.is_some());
+            assert_eq!(
+                inspected.supported_decisions,
+                [PermissionDecision::Allow, PermissionDecision::Deny]
+            );
+            let generation = h.controller.request_generation();
+            for (index, write) in writes.iter().enumerate() {
+                h.pty.child.bytes.extend(write.iter().copied());
+                h.drain();
+                assert_eq!(
+                    h.controller.request_generation(),
+                    generation,
+                    "blink write {index} is a cursor transit"
+                );
+                assert!(
+                    h.controller.current_request().is_some(),
+                    "blink write {index} ends on the restored request"
+                );
+                assert_eq!(
+                    inspect(h, ids).request_token,
+                    inspected.request_token,
+                    "blink write {index} keeps the token"
+                );
+            }
+            let input = command(
+                h,
+                &inspected,
+                "response:claude-blink",
+                PermissionDecision::Allow,
+            );
+            assert!(
+                handle(h, &input).unwrap().is_none(),
+                "respond is admitted on the quiesced frame after every blink"
+            );
+        });
+    }
+
+    #[test]
+    fn permission_claude_transit_that_rewrites_a_form_row_revokes_the_token() {
+        let blink = blink_writes()[0];
+        let landing = b"\x1b[9B";
+        let at = blink
+            .windows(landing.len())
+            .position(|window| window == landing)
+            .expect("the blink moves down to its status row");
+        let mut onto_form = blink[..at].to_vec();
+        onto_form.extend(b"\x1b[21B");
+        onto_form.extend(&blink[at + landing.len()..]);
+        with_claude_inspection(|h, _, _| {
+            let ids = claude_blocked_form(h);
+            let inspected = inspect(h, ids);
+            let generation = h.controller.request_generation();
+            h.pty.child.bytes.extend(onto_form);
+            h.drain();
+            assert!(
+                h.controller.request_generation() > generation,
+                "a transit frame with a changed form row invalidates the request"
+            );
+            assert_ne!(inspect(h, ids).request_token, inspected.request_token);
+            let input = command(
+                h,
+                &inspected,
+                "response:claude-rewritten-row",
+                PermissionDecision::Allow,
+            );
+            assert!(
+                handle(h, &input).is_err(),
+                "the revoked token refuses respond"
+            );
+            assert_eq!(counts(h), [0, 0, 0]);
+            assert!(h.pty.program.is_empty());
+        });
+    }
 
     #[test]
     fn permission_drain_reason_is_current_and_never_a_stale_earlier_reason() {

@@ -45,6 +45,32 @@ pub(super) fn encoded() -> Vec<u8> {
     bytes
 }
 
+pub(in crate::runtime::runner::input) struct HostProfile {
+    pub policy: storage::evidence::EvidencePolicy,
+    pub event_evidence: &'static str,
+    pub backend: crate::coding_agent::CodingAgent,
+    pub native_version: &'static str,
+    pub profile_version: &'static str,
+    pub size: TerminalSize,
+    pub screen: Vec<u8>,
+}
+impl HostProfile {
+    pub fn synthetic(
+        policy: storage::evidence::EvidencePolicy,
+        event_evidence: &'static str,
+    ) -> Self {
+        Self {
+            policy,
+            event_evidence,
+            backend: crate::coding_agent::CodingAgent::Codex,
+            native_version: VERSION,
+            profile_version: PROFILE,
+            size: TerminalSize { rows: 24, cols: 80 },
+            screen: SCREEN.to_vec(),
+        }
+    }
+}
+
 struct Tokens;
 impl RequestTokenSource for Tokens {
     fn fill(&mut self, _: &mut [u8; 32]) -> Result<()> {
@@ -213,26 +239,26 @@ impl Host {
         Self::build(
             catalog,
             encoded(),
-            (storage::evidence::EvidencePolicy::metadata(), "metadata"),
+            HostProfile::synthetic(storage::evidence::EvidencePolicy::metadata(), "metadata"),
             Instant::now() + Duration::from_secs(5),
         )
     }
     fn with_catalog(
         catalog: ProfileCatalog,
         expected_program: Vec<u8>,
-        policy: (storage::evidence::EvidencePolicy, &'static str),
+        profile: HostProfile,
     ) -> Self {
         Self::build(
             || catalog,
             expected_program,
-            policy,
+            profile,
             Instant::now() + Duration::from_secs(5),
         )
     }
     fn build(
         catalog: impl FnOnce() -> ProfileCatalog,
         expected_program: Vec<u8>,
-        (policy, event_evidence): (storage::evidence::EvidencePolicy, &'static str),
+        profile: HostProfile,
         until: Instant,
     ) -> Self {
         assert!(
@@ -259,12 +285,19 @@ impl Host {
         storage::reserve_event_sequences(&mut fixture.conn, &fixture.run.owner()).unwrap();
         let catalog = catalog();
         let coverage = catalog
-            .capabilities(crate::coding_agent::CodingAgent::Codex, Some(VERSION))
+            .capabilities(profile.backend, Some(profile.native_version))
             .detection;
-        fixture.conn.execute("UPDATE member_runs SET native_version=?1,profile_version=?2,coverage=?3,event_evidence=?4 WHERE run_id=?5",rusqlite::params![VERSION,PROFILE,coverage.as_str(),event_evidence,fixture.run.run_id]).unwrap();
+        fixture.conn.execute("UPDATE member_runs SET backend=?1,native_version=?2,profile_version=?3,coverage=?4,event_evidence=?5 WHERE run_id=?6",rusqlite::params![profile.backend.name(),profile.native_version,profile.profile_version,coverage.as_str(),profile.event_evidence,fixture.run.run_id]).unwrap();
+        fixture
+            .conn
+            .execute(
+                "UPDATE member_placements SET coding_agent=?1 WHERE member_id=?2",
+                rusqlite::params![profile.backend.name(), fixture.run.member_id],
+            )
+            .unwrap();
         fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
         let mut controller =
-            ObservationController::new(&fixture.run, &catalog, policy, 1..=256).unwrap();
+            ObservationController::new(&fixture.run, &catalog, profile.policy, 1..=256).unwrap();
         let url = format!("sqlite:///{}", fixture.conn.path().unwrap());
         let mut writer = EventWriter::start(
             url.clone(),
@@ -291,7 +324,7 @@ impl Host {
         assert!(identity.matches().unwrap());
         fixture.conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3 WHERE run_id=?4",rusqlite::params![identity.pid,identity.start_identity,crate::time::format_utc(crate::time::now_utc()),fixture.run.run_id]).unwrap();
         fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-        let transport = Self::transport();
+        let transport = Self::transport_sized(profile.size);
         controller
             .started(
                 &fixture.run,
@@ -318,7 +351,7 @@ impl Host {
         .unwrap();
         let pty = Pty {
             child: Reader {
-                bytes: SCREEN.iter().copied().collect(),
+                bytes: profile.screen.into_iter().collect(),
                 ..Reader::default()
             },
             offers: Vec::new(),
@@ -351,9 +384,9 @@ impl Host {
         ));
         host
     }
-    pub fn transport() -> Transport {
+    fn transport_sized(size: TerminalSize) -> Transport {
         Transport::new(
-            TerminalSize { rows: 24, cols: 80 },
+            size,
             TransportLimits {
                 input_bytes: 4096,
                 display_bytes: 4096,
@@ -490,7 +523,7 @@ pub(in crate::runtime::runner::input) fn with_host_until(
         Host::build(
             catalog,
             encoded(),
-            (storage::evidence::EvidencePolicy::metadata(), "metadata"),
+            HostProfile::synthetic(storage::evidence::EvidencePolicy::metadata(), "metadata"),
             until,
         ),
         body,
@@ -501,20 +534,20 @@ pub(in crate::runtime::runner::input) fn with_catalog_host(
     expected_program: Vec<u8>,
     body: impl FnOnce(&mut Host),
 ) {
-    with_catalog_policy_host(
+    with_profile_host(
         catalog,
         expected_program,
-        (storage::evidence::EvidencePolicy::metadata(), "metadata"),
+        HostProfile::synthetic(storage::evidence::EvidencePolicy::metadata(), "metadata"),
         body,
     );
 }
-pub(in crate::runtime::runner::input) fn with_catalog_policy_host(
+pub(in crate::runtime::runner::input) fn with_profile_host(
     catalog: ProfileCatalog,
     expected_program: Vec<u8>,
-    policy: (storage::evidence::EvidencePolicy, &'static str),
+    profile: HostProfile,
     body: impl FnOnce(&mut Host),
 ) {
-    with_owned_host(Host::with_catalog(catalog, expected_program, policy), body);
+    with_owned_host(Host::with_catalog(catalog, expected_program, profile), body);
 }
 fn with_owned_host(mut host: Host, body: impl FnOnce(&mut Host)) {
     let primary = catch_unwind(AssertUnwindSafe(|| body(&mut host)));
