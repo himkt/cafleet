@@ -1,10 +1,7 @@
-mod artifacts;
-mod control_codec;
 pub(crate) mod control_service;
 mod creation;
 mod fleet_deletion;
 mod health;
-mod input_clock;
 mod launch_readiness;
 mod lifecycle;
 mod mechanisms;
@@ -12,7 +9,6 @@ pub(crate) mod owned_child;
 pub(in crate::runtime) mod permission_history;
 mod recovery;
 mod shutdown;
-mod terminal;
 mod transport;
 
 mod native_capture;
@@ -24,6 +20,66 @@ use tempfile::TempDir;
 use super::runner::*;
 use crate::broker::runtime::{self as storage, *};
 use crate::broker::tests as common;
+
+pub(super) fn read_fixture_bytes(
+    stream: &mut std::os::unix::net::UnixStream,
+    mut bytes: &mut [u8],
+    deadline: std::time::Instant,
+) {
+    use std::io::Read;
+    while !bytes.is_empty() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "fixture request read timed out"
+        );
+        match stream.read(bytes) {
+            Ok(0) => panic!("actual health client closed an incomplete request"),
+            Ok(count) => bytes = &mut bytes[count..],
+            Err(cause)
+                if matches!(
+                    cause.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                ) =>
+            {
+                std::thread::sleep(
+                    std::time::Duration::from_millis(2)
+                        .min(deadline.saturating_duration_since(std::time::Instant::now())),
+                );
+            }
+            Err(cause) => panic!("fixture request read failed: {cause}"),
+        }
+    }
+}
+
+pub(super) fn write_fixture_bytes(
+    stream: &mut std::os::unix::net::UnixStream,
+    mut bytes: &[u8],
+    deadline: std::time::Instant,
+) {
+    use std::io::Write;
+    while !bytes.is_empty() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "fixture reply write timed out"
+        );
+        match stream.write(bytes) {
+            Ok(0) => panic!("fixture reply write made no progress"),
+            Ok(count) => bytes = &bytes[count..],
+            Err(cause)
+                if matches!(
+                    cause.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                ) =>
+            {
+                std::thread::sleep(
+                    std::time::Duration::from_millis(2)
+                        .min(deadline.saturating_duration_since(std::time::Instant::now())),
+                );
+            }
+            Err(cause) => panic!("fixture reply write failed: {cause}"),
+        }
+    }
+}
 
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut encoded = String::with_capacity(64);
@@ -105,7 +161,7 @@ impl Fixture {
         artifacts
     }
 
-    fn spec(&self) -> SpawnSpec {
+    pub(super) fn spec(&self) -> SpawnSpec {
         SpawnSpec {
             argv: vec![
                 "/usr/bin/env".into(),

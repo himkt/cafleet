@@ -11,8 +11,8 @@ use nix::sys::socket::{
 };
 use serde_json::Value;
 
-use super::control_codec::{read_fixture_bytes, write_fixture_bytes};
 use super::*;
+use super::{read_fixture_bytes, write_fixture_bytes};
 use crate::error::CafleetError;
 use crate::multiplexer::{AnyMultiplexer, MultiplexerContext, TmuxMultiplexer, recording};
 
