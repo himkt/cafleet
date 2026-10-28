@@ -1108,7 +1108,6 @@ fn run_service(
                 }
                 std::thread::sleep(tick_sleep(
                     &tick_progress,
-                    transport.pending_input_bytes(),
                     controller.status().next_deadline,
                     Instant::now(),
                 ));
@@ -1226,7 +1225,6 @@ const IDLE_TICK_SLEEP: Duration = Duration::from_millis(2);
 
 fn tick_sleep(
     progress: &TransportProgress,
-    _pending_input: usize,
     next_deadline: Option<Instant>,
     now: Instant,
 ) -> Duration {
