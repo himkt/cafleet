@@ -4,7 +4,7 @@
 **Progress**: 22/22 tasks complete
 **Last Updated**: 2026-10-28
 
-**Execution state**: Implementation and the release-minimum native acceptance are complete on branch `wip/0000194-respond-binding` (fleet 1, 2026-10-28); the fresh Reviewer loop and user approval follow.
+**Execution state**: Implementation and the release-minimum native acceptance are complete on branch `feat/0000194-member-pty-permission-events` (2026-10-28); the fresh Reviewer loop and user approval follow.
 
 ## Overview
 
@@ -26,11 +26,10 @@ Run members inside a CAFleet-owned PTY runner that observes native approval scre
 
 ## Background
 
-This is a design-only change. The inspected source baseline is `4a7a57409ad69b5d8e77088fc11c7762669b7332`. `CodingAgent::build_spawn_argv()` selects Claude `dontAsk`, Codex `--ask-for-approval never --sandbox workspace-write`, and OpenCode `mini --standalone --agent cafleet`; `member::create()` passes that argv directly to the multiplexer. The source has neither a member PTY runner nor a per-member permission selector. Historical automatic-review work described in [0000192](../0000192-member-auto-approval/design-doc.md) is evidence of that earlier work, not proof that its launch policy or prompt-assembly wrapper exists at this baseline.
-
+The design started from source baseline is `4a7a57409ad69b5d8e77088fc11c7762669b7332`. `CodingAgent::build_spawn_argv()` selects Claude `dontAsk`, Codex `--ask-for-approval never --sandbox workspace-write`, and OpenCode `mini --standalone --agent cafleet`; `member::create()` passes that argv directly to the multiplexer. The source has neither a member PTY runner nor a per-member permission selector. Historical automatic-review work described in [0000192](../0000192-member-auto-approval/design-doc.md) is evidence of that earlier work, not proof that its launch policy or prompt-assembly wrapper exists at this baseline.
 The current broker already persists member-to-Director messages. `delivery::eligible_member()` limits automatic pane previews to ordinary members; Directors receive through broker reads and their host's stdout receiver. Ordinary-member delivery and `member prompt` / `member exec` currently use Escape-first multiplexer input. That behavior can dismiss the very approval screen this design must preserve.
 
-The supplied discussion, `cafleet-pty-permission-propagation-discussion-2026-10-26.md`, distinguishes historical source findings from proposed runner/event interfaces. This document chooses those interfaces after clarification. It makes no claim of live PTY, detection, native-policy or continuation validation in this documentation session.
+The supplied discussion, `cafleet-pty-permission-propagation-discussion-2026-10-26.md`, distinguishes historical source findings from proposed runner/event interfaces. This document chose those interfaces after clarification; the Implementation section records the shipped runtime and its native acceptance.
 
 ---
 
@@ -48,7 +47,7 @@ The first implementation includes launch-time policy selection, the runner, clas
 | [0000193](../0000193-backend-role-requirements/design-doc.md) | Preserve the Approved document. It plans a Member requirement for `auto` / `dontAsk` or equivalent; this design replaces that execution-mode prerequisite for runner-observed members after the runtime acceptance gates below pass. |
 | Existing unwrapped members | Keep their recorded launch behavior and existing supervision procedures. They acquire neither a runner nor new detection guarantees while already running. |
 
-The implementation documentation must reconcile the Member requirement from 0000193 with the final shipping behavior, whether that plan lands before or after this feature. For wrapped members, backend suitability requires the PTY lifecycle and an explicit detection-coverage declaration; the selected execution mode may be interactive. A backend may retain automatic or fixed-policy capability without requiring that every member select it. Preserve the Director requirements and its host-owned goal/receiver authority from 0000193. This task edits no production requirements documentation and changes no existing approval status except the authorized abort of 0000192.
+The implementation documentation must reconcile the Member requirement from 0000193 with the final shipping behavior, whether that plan lands before or after this feature. For wrapped members, backend suitability requires the PTY lifecycle and an explicit detection-coverage declaration; the selected execution mode may be interactive. A backend may retain automatic or fixed-policy capability without requiring that every member select it. Preserve the Director requirements and its host-owned goal/receiver authority from 0000193. The implementation reconciled that Member requirement in the shipping documentation and skills, and changed no existing approval status except the authorized abort of 0000192.
 
 ### herdr references for backend extensions
 
@@ -442,7 +441,6 @@ Record source/installed CAFleet version, native CLI version, native configuratio
 ### Execution record
 
 Execution ran from 2026-10-26 to 2026-10-28 across several fleets and two machines (macOS, then Linux). This record keeps the facts that explain the shipped behavior and its acceptance. Raw evidence (captures, command plans, decision records and run logs) lives under `.execution/194/` as local-only audit material; it is not part of the repository.
-
 #### Respond-binding defect and fixes
 
 The first shipping-CLI end-to-end run (fleet 25, Claude Code 2.1.302 `default`, tmux) produced an `interaction_opened` event and a tested inspection, but every `permission respond` failed before any byte with `permission request token or current plan binding changed`. Three independent causes were found and fixed.

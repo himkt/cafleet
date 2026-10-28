@@ -1,1 +1,0 @@
-{"schema_version":1,"patterns":["[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}","sk-ant-[A-Za-z0-9_-]+","(?i)(api[_-]?key|token|secret|password|authorization)\\s*[:=]\\s*\\S+"],"sensitive_rules":[]}
