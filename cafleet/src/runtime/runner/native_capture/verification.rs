@@ -102,8 +102,14 @@ struct ApprovedCase {
     probe_argument: Option<&'static str>,
     database: &'static str,
     socket: &'static str,
+    size: TerminalSize,
 }
-const APPROVED_CASES: [ApprovedCase; 9] = [
+const DRIVER_FULL_SIZE: TerminalSize = TerminalSize {
+    rows: 36,
+    cols: 120,
+};
+const DRIVER_WRAPPED_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 64 };
+const APPROVED_CASES: [ApprovedCase; 12] = [
     ApprovedCase {
         id: "cells-002",
         backend: CodingAgent::Claude,
@@ -114,6 +120,7 @@ const APPROVED_CASES: [ApprovedCase; 9] = [
         probe_argument: Some("allow"),
         database: "nc02.db",
         socket: "tc02",
+        size: DRIVER_FULL_SIZE,
     },
     ApprovedCase {
         id: "ans-allow-001",
@@ -125,6 +132,7 @@ const APPROVED_CASES: [ApprovedCase; 9] = [
         probe_argument: Some("allow"),
         database: "na01.db",
         socket: "ta01",
+        size: DRIVER_FULL_SIZE,
     },
     ApprovedCase {
         id: "ans-deny-001",
@@ -136,6 +144,7 @@ const APPROVED_CASES: [ApprovedCase; 9] = [
         probe_argument: Some("deny"),
         database: "nd01.db",
         socket: "td01",
+        size: DRIVER_FULL_SIZE,
     },
     ApprovedCase {
         id: "idle-001",
@@ -147,6 +156,7 @@ const APPROVED_CASES: [ApprovedCase; 9] = [
         probe_argument: None,
         database: "ni01.db",
         socket: "ti01",
+        size: DRIVER_FULL_SIZE,
     },
     ApprovedCase {
         id: "codex-trust-001",
@@ -158,6 +168,7 @@ const APPROVED_CASES: [ApprovedCase; 9] = [
         probe_argument: None,
         database: "xt01.db",
         socket: "xt01",
+        size: DRIVER_FULL_SIZE,
     },
     ApprovedCase {
         id: "codex-cells-001",
@@ -169,6 +180,7 @@ const APPROVED_CASES: [ApprovedCase; 9] = [
         probe_argument: Some("allow"),
         database: "xc01.db",
         socket: "xc01",
+        size: DRIVER_FULL_SIZE,
     },
     ApprovedCase {
         id: "codex-ans-allow-001",
@@ -180,6 +192,7 @@ const APPROVED_CASES: [ApprovedCase; 9] = [
         probe_argument: Some("allow"),
         database: "xa01.db",
         socket: "xa01",
+        size: DRIVER_FULL_SIZE,
     },
     ApprovedCase {
         id: "codex-ans-deny-001",
@@ -191,6 +204,7 @@ const APPROVED_CASES: [ApprovedCase; 9] = [
         probe_argument: Some("deny"),
         database: "xd01.db",
         socket: "xd01",
+        size: DRIVER_FULL_SIZE,
     },
     ApprovedCase {
         id: "codex-idle-001",
@@ -202,6 +216,43 @@ const APPROVED_CASES: [ApprovedCase; 9] = [
         probe_argument: None,
         database: "xi01.db",
         socket: "xi01",
+        size: DRIVER_FULL_SIZE,
+    },
+    ApprovedCase {
+        id: "claude-wrap-cells-001",
+        backend: CodingAgent::Claude,
+        permission_mode: "default",
+        mode: DriverMode::NoAnswer,
+        decision: None,
+        stage_hex: None,
+        probe_argument: Some("allow"),
+        database: "nwc1.db",
+        socket: "twc1",
+        size: DRIVER_WRAPPED_SIZE,
+    },
+    ApprovedCase {
+        id: "claude-wrap-ans-allow-001",
+        backend: CodingAgent::Claude,
+        permission_mode: "default",
+        mode: DriverMode::AnswerStage,
+        decision: Some("allow"),
+        stage_hex: Some("31"),
+        probe_argument: Some("allow"),
+        database: "nwa1.db",
+        socket: "twa1",
+        size: DRIVER_WRAPPED_SIZE,
+    },
+    ApprovedCase {
+        id: "claude-wrap-ans-deny-001",
+        backend: CodingAgent::Claude,
+        permission_mode: "default",
+        mode: DriverMode::AnswerStage,
+        decision: Some("deny"),
+        stage_hex: Some("34"),
+        probe_argument: Some("deny"),
+        database: "nwd1.db",
+        socket: "twd1",
+        size: DRIVER_WRAPPED_SIZE,
     },
 ];
 impl ApprovedCase {
@@ -226,6 +277,9 @@ impl ApprovedCase {
     }
     fn member_name(&self) -> String {
         format!("cafleet-194-{}", self.id)
+    }
+    fn tmux_geometry(&self) -> String {
+        format!("{}|{}", self.size.cols, self.size.rows)
     }
     fn requested_marker(&self) -> Option<String> {
         self.probe_argument
@@ -527,7 +581,11 @@ fn driver_armed(case: &DriverCase) -> Result<bool> {
             .try_exists()
             .map_err(io_error)?)
 }
-fn driver_validate_privacy(case: &DriverCase, ownership: &DriverOwnership) -> Result<()> {
+fn driver_validate_privacy(
+    case: &DriverCase,
+    approved: &ApprovedCase,
+    ownership: &DriverOwnership,
+) -> Result<()> {
     case.capture_policy.verify()?;
     case.event_redaction.verify()?;
     let privacy: DriverPrivacy = driver_read(&case.privacy_confirmation_path)?;
@@ -536,8 +594,8 @@ fn driver_validate_privacy(case: &DriverCase, ownership: &DriverOwnership) -> Re
             && privacy.case_manifest_sha256 == ownership.case_manifest_sha256
             && privacy.started_record_sha256
                 == super::files::file_digest(&case.started_record_path)?
-            && privacy.rows == 36
-            && privacy.cols == 120
+            && privacy.rows == approved.size.rows
+            && privacy.cols == approved.size.cols
             && privacy.capture_policy_sha256 == case.capture_policy.sha256
             && privacy.event_redaction_sha256 == case.event_redaction.sha256,
         "privacy confirmation binding differs",
@@ -579,6 +637,7 @@ fn driver_capture_runner_pane(case: &DriverCase, pane: &str, until: Instant) -> 
 
 fn driver_complete_capture(
     case: &DriverCase,
+    approved: &ApprovedCase,
     launched: &LaunchOutcome,
     service: &Value,
 ) -> Result<Value> {
@@ -630,8 +689,9 @@ fn driver_complete_capture(
                 == serde_json::to_value(&launched.started.child).map_err(io_error)?
             && value["samples"].as_array().is_some_and(|s| {
                 s.len() == 2
-                    && s.iter()
-                        .all(|sample| sample["rows"] == 36 && sample["cols"] == 120)
+                    && s.iter().all(|sample| {
+                        sample["rows"] == approved.size.rows && sample["cols"] == approved.size.cols
+                    })
             }),
         "actual complete parser pair required",
     )?;
@@ -761,7 +821,10 @@ fn driver_prepare(
         "reviewed exact-geometry masks required",
     )?;
     ensure(
-        capture.masks.iter().all(|m| m.rows == 36 && m.cols == 120),
+        capture
+            .masks
+            .iter()
+            .all(|m| m.rows == approved.size.rows && m.cols == approved.size.cols),
         "case mask geometry differs",
     )?;
     let spawn = SpawnSpec {
@@ -769,10 +832,7 @@ fn driver_prepare(
         cwd: case.cwd.clone(),
         environment: vec![("CAFLEET_DATABASE_URL".into(), case.database_url.clone())],
         evidence_policy: json!({"mode":"redacted","config":config}),
-        size: TerminalSize {
-            rows: 36,
-            cols: 120,
-        },
+        size: approved.size,
     };
     spawn.validate()?;
     NativeCapturePolicy::from_launch(&spawn, &capture.masks, &catalog)?;
@@ -869,6 +929,9 @@ fn driver_work(
         .mux_pane_id
         .as_deref()
         .ok_or_else(|| error("owned runner pane required"))?;
+    let approved = ApprovedCase::select(case)?;
+    let cols = approved.size.cols.to_string();
+    let rows = approved.size.rows.to_string();
     driver_tmux(
         case,
         &[
@@ -876,7 +939,7 @@ fn driver_work(
             "-t",
             &case.tmux.window_id,
             "-x",
-            "120",
+            &cols,
             "-y",
             "80",
         ],
@@ -894,7 +957,7 @@ fn driver_work(
     )?;
     driver_tmux(
         case,
-        &["resize-pane", "-t", pane, "-x", "120", "-y", "36"],
+        &["resize-pane", "-t", pane, "-x", &cols, "-y", &rows],
         work_until,
     )?;
     let geometry = driver_tmux(
@@ -909,7 +972,7 @@ fn driver_work(
         work_until,
     )?;
     ensure(
-        geometry.trim() == "120|36",
+        geometry.trim() == approved.tmux_geometry(),
         "actual native geometry differs",
     )?;
     let ownership_hash = super::files::file_digest(&case.driver_ownership_path)?;
@@ -921,13 +984,12 @@ fn driver_work(
         runner: launched.started.runner.clone(),
         child: launched.started.child.clone(),
         pane_id: pane.into(),
-        rows: 36,
-        cols: 120,
+        rows: approved.size.rows,
+        cols: approved.size.cols,
         capture_policy_sha256: case.capture_policy.sha256.clone(),
         event_redaction_sha256: case.event_redaction.sha256.clone(),
     };
     driver_publish(&case.started_record_path, &started, work_until)?;
-    let approved = ApprovedCase::select(case)?;
     let mut armed_validated_at: Option<Instant> = None;
     let mut armed_output_seq: Option<u64> = None;
     loop {
@@ -962,7 +1024,7 @@ fn driver_work(
         };
         if armed_validation_due && driver_armed(case)? {
             armed_validated_at = Some(Instant::now());
-            driver_validate_privacy(case, ownership)?;
+            driver_validate_privacy(case, approved, ownership)?;
             driver_validate_tmux(case, ownership, work_until)?;
             driver_validate_run(conn, launched)?;
             let geometry = driver_tmux(
@@ -976,7 +1038,10 @@ fn driver_work(
                 ],
                 work_until,
             )?;
-            ensure(geometry.trim() == "120|36", "armed geometry changed")?;
+            ensure(
+                geometry.trim() == approved.tmux_geometry(),
+                "armed geometry changed",
+            )?;
             if armed_output_seq.is_none() {
                 armed_output_seq = Some(driver_output_seq(conn, launched, work_until)?);
             }
@@ -1228,8 +1293,8 @@ fn run_native_capture_prepare_start(config_path: &Path) -> Result<()> {
                     driver_armed(&case)?,
                     "not_armed: the capture was never armed",
                 )?;
-                driver_validate_privacy(&case, &ownership)?;
-                let capture = driver_complete_capture(&case, &launched, &service)?;
+                driver_validate_privacy(&case, approved, &ownership)?;
+                let capture = driver_complete_capture(&case, approved, &launched, &service)?;
                 let pane_status = driver_tmux(
                     &case,
                     &[
