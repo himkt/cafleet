@@ -1071,6 +1071,128 @@ mod runtime_parser_tests {
         assert!(!help.contains("__member-run"));
     }
 
+    fn flattened(text: impl ToString) -> String {
+        text.to_string()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn subcommand_help(path: &[&str]) -> String {
+        use clap::CommandFactory;
+        let mut command = CliArgs::command();
+        let mut selected = &mut command;
+        for name in path {
+            selected = selected
+                .find_subcommand_mut(name)
+                .unwrap_or_else(|| panic!("registered subcommand {name}"));
+        }
+        flattened(selected.render_long_help())
+    }
+
+    fn possible_values(path: &[&str], argument: &str) -> Vec<String> {
+        use clap::CommandFactory;
+        let command = CliArgs::command();
+        let mut selected = &command;
+        for name in path {
+            selected = selected.find_subcommand(name).unwrap();
+        }
+        selected
+            .get_arguments()
+            .find(|candidate| candidate.get_id() == argument)
+            .unwrap_or_else(|| panic!("{path:?} declares {argument}"))
+            .get_possible_values()
+            .iter()
+            .map(|value| value.get_name().to_owned())
+            .collect()
+    }
+
+    #[test]
+    fn help_describes_command_groups_and_derives_choices_from_their_registries() {
+        use crate::coding_agent::CodingAgent;
+        use clap::CommandFactory;
+        let catalog = CodingAgent::all()
+            .iter()
+            .map(|agent| {
+                let default = agent.resolve_policy(None, None).unwrap().resolved_mode;
+                format!(
+                    "{}: {} (default {default})",
+                    agent.name(),
+                    agent.policy_choices(None).join(", ")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        let create = subcommand_help(&["member", "create"]);
+        assert!(create.contains(&catalog), "{catalog} in {create}");
+        let command = CliArgs::command();
+        for group in ["event", "input", "permission"] {
+            let about = command
+                .find_subcommand(group)
+                .unwrap_or_else(|| panic!("registered group {group}"))
+                .get_about()
+                .map(|about| about.to_string())
+                .unwrap_or_default();
+            assert!(
+                !about.trim().is_empty(),
+                "{group} has a top-level description"
+            );
+        }
+        for (argument, values) in [
+            ("decision", vec!["allow", "deny"]),
+            ("decision_source", vec!["director-auto", "user"]),
+            ("director_mode", vec!["auto", "manual", "unknown"]),
+        ] {
+            assert_eq!(
+                possible_values(&["permission", "respond"], argument),
+                values,
+                "{argument}"
+            );
+            let respond = subcommand_help(&["permission", "respond"]);
+            assert!(
+                respond.contains(&format!("[possible values: {}]", values.join(", "))),
+                "{argument} help lists {values:?}: {respond}"
+            );
+        }
+        assert_eq!(
+            possible_values(&["input", "reconcile"], "disposition"),
+            ["submitted", "not-submitted", "abandoned-uncertain"]
+        );
+        assert_eq!(
+            possible_values(&["member", "create"], "event_evidence"),
+            ["metadata", "redacted"]
+        );
+        let invalid = usage_error(&[
+            "permission",
+            "respond",
+            "1",
+            "--event-id",
+            "1",
+            "--from-member-id",
+            "1",
+            "--expected-run-id",
+            "1",
+            "--expected-owner-epoch",
+            "1",
+            "--request-token",
+            &"0".repeat(64),
+            "--decision",
+            "maybe",
+            "--decision-source",
+            "user",
+            "--director-mode",
+            "manual",
+            "--mode-evidence-ref",
+            "mode",
+            "--decision-evidence-ref",
+            "decision",
+            "--operation-key",
+            "key",
+        ]);
+        assert_eq!(invalid.exit_code(), 2);
+        assert!(flattened(invalid.render()).contains("allow, deny"));
+    }
+
     #[test]
     fn member_runner_internal_command_requires_its_descriptor_argument() {
         assert_eq!(usage_error(&["__member-run"]).exit_code(), 2);
