@@ -73,6 +73,120 @@ pub(super) mod inspection_tests {
         format!("\x1b[2J\x1b[19;1HSynthetic permission request\r\nOperation: {operation}\r\n> Allow once\r\n  Deny once\r\nRequest form: {focus}\r\nSelection: ").into_bytes()
     }
 
+    pub(crate) const GATED_RULE: &str = "synthetic-gated";
+    pub(crate) const GATED_REASON_RULE: &str = "synthetic-reason";
+    pub(crate) const GATED_REASON_FIXTURE: &str = "synthetic-reason-native-1";
+    pub(crate) const FOCUS_SGR: &str = "\x1b[48;2;250;178;131m";
+
+    pub(crate) fn gated_fixture_definition() -> Value {
+        let mut value: Value = serde_json::from_str(include_str!(
+            "../../runtime/runner_tests/fixtures/synthetic-profile.json"
+        ))
+        .unwrap();
+        let mut native = value["fixtures"][0].clone();
+        native["id"] = json!(GATED_REASON_FIXTURE);
+        native["kind"] = json!("native");
+        value["fixtures"].as_array_mut().unwrap().push(native);
+        value["profiles"][0]["rules"] = json!([
+            {
+                "id":GATED_RULE,"priority":100,"observation":"permission_request",
+                "region":{"screen":"either","start_pattern":"^Synthetic gated request$","end_pattern":"^Selection: $","max_rows":8,"cursor":"any"},
+                "matchers":[
+                    {"id":"heading","scope":"line","pattern":"^Synthetic gated request$"},
+                    {"id":"operation","scope":"line","pattern":"^Operation: (?P<operation>.+)$"},
+                    {"id":"focus","scope":"line","pattern":"^  Allow once   (?:Always allow   )?Deny once$","focus_style":"background"},
+                    {"id":"allow","scope":"line","pattern":"^  (?P<label>Allow once)   "},
+                    {"id":"deny","scope":"line","pattern":"   (?P<label>Deny once)$"}
+                ],
+                "extract":{"operation":{"matcher_id":"operation","capture":"operation"},"choices":[
+                    {"id":"allow-once","label":{"matcher_id":"allow","capture":"label"},"scope":"single_request"},
+                    {"id":"deny-once","label":{"matcher_id":"deny","capture":"label"},"scope":"single_request"}
+                ],"native_request_id":null},
+                "verified_noninteraction":false,"sensitive":false
+            },
+            {
+                "id":GATED_REASON_RULE,"priority":100,"observation":"permission_continuation",
+                "region":{"screen":"either","start_pattern":"^Synthetic reject reason$","end_pattern":"^Confirm: enter$","max_rows":4,"cursor":"any"},
+                "matchers":[
+                    {"id":"heading","scope":"line","pattern":"^Synthetic reject reason$"},
+                    {"id":"empty","scope":"line","pattern":"^Reason: \\(empty\\)$"}
+                ],
+                "extract":{"operation":null,"choices":[],"native_request_id":null},
+                "verified_noninteraction":false,"sensitive":false,
+                "continues_rule_id":GATED_RULE,"continues_choice_id":"deny-once",
+                "fixture_ids":[GATED_REASON_FIXTURE]
+            }
+        ]);
+        value["profiles"][0]["capabilities"]["detection"]["rule_ids"] = json!([GATED_RULE]);
+        value["profiles"][0]["capabilities"]["answers"] = json!([
+            {
+                "decision":"allow","request_rule_id":GATED_RULE,"answer_rule_id":"synthetic-gated-allow",
+                "choice_id":"allow-once","focus_matcher_id":"focus","fixture_ids":["synthetic-permission-1"],
+                "stages":[
+                    {"bytes_hex":"0d","required_rule_id":GATED_RULE,"required_choice_id":"allow-once","required_focus_choice_id":"allow-once"}
+                ]
+            },
+            {
+                "decision":"deny","request_rule_id":GATED_RULE,"answer_rule_id":"synthetic-gated-deny",
+                "choice_id":"deny-once","focus_matcher_id":"focus","fixture_ids":["synthetic-permission-1"],
+                "stages":[
+                    {"bytes_hex":"68","required_rule_id":GATED_RULE,"required_choice_id":"deny-once","required_focus_choice_id":"allow-once"},
+                    {"bytes_hex":"0d","required_rule_id":GATED_RULE,"required_choice_id":"deny-once","required_focus_choice_id":"deny-once"},
+                    {"bytes_hex":"0d","required_rule_id":GATED_RULE,"required_choice_id":"deny-once","required_screen_rule_id":GATED_REASON_RULE}
+                ]
+            }
+        ]);
+        value
+    }
+
+    /// `focused` names the labels painted with `focus_sgr`; the rest of the choice row keeps
+    /// `row_sgr`, which is the row background the detector compares against.
+    pub(crate) fn gated_fixture_form_styled(
+        operation: &str,
+        always: bool,
+        focused: &[&str],
+        row_sgr: &str,
+        focus_sgr: &str,
+    ) -> Vec<u8> {
+        let labels: &[&str] = if always {
+            &["Allow once", "Always allow", "Deny once"]
+        } else {
+            &["Allow once", "Deny once"]
+        };
+        let mut row = format!("{row_sgr}  ");
+        for (index, label) in labels.iter().enumerate() {
+            if index > 0 {
+                row.push_str("   ");
+            }
+            if focused.contains(label) {
+                row.push_str(&format!("{focus_sgr}{label}\x1b[0m{row_sgr}"));
+            } else {
+                row.push_str(label);
+            }
+        }
+        row.push_str("\x1b[0m");
+        format!("\x1b[0m\x1b[2J\x1b[19;1HSynthetic gated request\r\nOperation: {operation}\r\n{row}\r\nSelection: ").into_bytes()
+    }
+
+    pub(crate) fn gated_fixture_form(operation: &str, focused: &str) -> Vec<u8> {
+        let focused: &[&str] = match focused {
+            "allow" => &["Allow once"],
+            "deny" => &["Deny once"],
+            "always" => &["Always allow"],
+            "none" => &[],
+            _ => panic!("known synthetic focus"),
+        };
+        gated_fixture_form_styled(operation, true, focused, "", FOCUS_SGR)
+    }
+
+    pub(crate) fn gated_reason_dialog(reason: Option<&str>) -> Vec<u8> {
+        let reason = reason.unwrap_or("(empty)");
+        format!(
+            "\x1b[0m\x1b[2J\x1b[19;1HSynthetic reject reason\r\nReason: {reason}\r\nConfirm: enter"
+        )
+        .into_bytes()
+    }
+
     #[test]
     fn permission_inspection_catalog_retains_exact_executable_plans_and_provenance() {
         let catalog = ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();

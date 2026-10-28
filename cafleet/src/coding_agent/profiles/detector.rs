@@ -139,6 +139,8 @@ pub(super) mod inspection_tests {
                     .unwrap();
             }
         }
+        let backgrounds = background_rewrite(&screen, &terminal.snapshot());
+        terminal.feed(&backgrounds).unwrap();
         let (row, col) = cursor.unwrap_or((
             u16::try_from(screen["cursor_row"].as_u64().unwrap()).unwrap(),
             u16::try_from(screen["cursor_col"].as_u64().unwrap()).unwrap(),
@@ -147,6 +149,48 @@ pub(super) mod inspection_tests {
             .feed(format!("\x1b[{};{}H", row + 1, col + 1).as_bytes())
             .unwrap();
         terminal.snapshot()
+    }
+
+    /// Repaints each `cell_backgrounds` run over the already written text, so the replayed
+    /// cells keep their captured contents and gain the captured background.
+    pub(in crate::coding_agent) fn background_rewrite(
+        fixture: &Value,
+        text: &ScreenSnapshot,
+    ) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        let Some(runs) = fixture.get("cell_backgrounds") else {
+            return bytes;
+        };
+        for run in runs.as_array().unwrap() {
+            let row = u16::try_from(run["row"].as_u64().unwrap()).unwrap();
+            let start = u16::try_from(run["start_col"].as_u64().unwrap()).unwrap();
+            let end = u16::try_from(run["end_col"].as_u64().unwrap()).unwrap();
+            let bg = &run["bg"];
+            let sgr = match bg["kind"].as_str().unwrap() {
+                "rgb" => format!(
+                    "\x1b[48;2;{};{};{}m",
+                    bg["r"].as_u64().unwrap(),
+                    bg["g"].as_u64().unwrap(),
+                    bg["b"].as_u64().unwrap()
+                ),
+                "indexed" => format!("\x1b[48;5;{}m", bg["index"].as_u64().unwrap()),
+                other => panic!("unknown fixture colour kind {other}"),
+            };
+            bytes.extend(format!("\x1b[{};{}H{sgr}", row + 1, start + 1).into_bytes());
+            for col in start..end {
+                let cell = text.screen.cell(row, col).expect("run inside geometry");
+                if cell.is_wide_continuation() {
+                    continue;
+                }
+                if cell.has_contents() {
+                    bytes.extend(cell.contents().as_bytes());
+                } else {
+                    bytes.push(b' ');
+                }
+            }
+            bytes.extend(b"\x1b[0m");
+        }
+        bytes
     }
 
     fn allow_or_deny_plan(decision: PermissionDecision) -> AnswerPlan {

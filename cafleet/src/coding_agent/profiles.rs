@@ -7,7 +7,9 @@ use crate::broker::runtime::PermissionDecision;
 use crate::error::CafleetError;
 #[cfg(test)]
 pub(crate) use catalog::inspection_tests::{
-    inspection_fixture_definition, inspection_fixture_form,
+    FOCUS_SGR, GATED_REASON_RULE, GATED_RULE, gated_fixture_definition, gated_fixture_form,
+    gated_fixture_form_styled, gated_reason_dialog, inspection_fixture_definition,
+    inspection_fixture_form,
 };
 pub(crate) use catalog::{AnswerPlan, AnswerStage};
 pub use catalog::{NativeCapabilities, ProfileCatalog};
@@ -492,6 +494,693 @@ mod contract_tests {
             impl<T: ?Sized + serde::Serialize> AmbiguousIfImplemented<SerializeImplemented> for T {}
             // A forbidden trait implementation makes the inferred marker ambiguous.
             let _ = <SemanticFingerprint as AmbiguousIfImplemented<_>>::check;
+        }
+    }
+    mod focus_resolution {
+        use super::*;
+
+        fn gated_catalog() -> ProfileCatalog {
+            ProfileCatalog::from_definitions(&gated_fixture_definition()).unwrap()
+        }
+
+        fn screen(bytes: &[u8]) -> ScreenSnapshot {
+            let mut state = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
+            state.feed(bytes).unwrap();
+            state.snapshot()
+        }
+
+        fn detector() -> Detector {
+            Detector::new(&gated_catalog(), CodingAgent::Codex, Some(VERSION)).unwrap()
+        }
+
+        fn gated_plan(decision: PermissionDecision) -> AnswerPlan {
+            gated_catalog()
+                .answer_plan(CodingAgent::Codex, VERSION, GATED_RULE, decision)
+                .unwrap()
+                .unwrap()
+        }
+
+        fn matched(bytes: &[u8], decision: PermissionDecision) -> AnswerMatch {
+            detector()
+                .match_answer(&screen(bytes), &gated_plan(decision))
+                .unwrap()
+                .expect("the gated form matches regardless of its focus")
+        }
+
+        fn focused(bytes: &[u8]) -> Option<String> {
+            let allow = matched(bytes, PermissionDecision::Allow);
+            let deny = matched(bytes, PermissionDecision::Deny);
+            assert_eq!(
+                allow.focused_choice_id(),
+                deny.focused_choice_id(),
+                "both plans read the same focus matcher"
+            );
+            allow.focused_choice_id().map(str::to_owned)
+        }
+
+        #[test]
+        fn focus_style_background_resolves_the_one_focused_choice() {
+            for (focus, expected) in [("allow", "allow-once"), ("deny", "deny-once")] {
+                let bytes = gated_fixture_form("write disposable.txt", focus);
+                assert_eq!(focused(&bytes).as_deref(), Some(expected), "{focus}");
+                let observation = detector().observe(&screen(&bytes)).unwrap();
+                assert_eq!(
+                    observation.kind,
+                    ObservationKind::Interaction(InteractionClass::PermissionRequest)
+                );
+                assert_eq!(observation.rule_id, GATED_RULE);
+                assert_eq!(observation.match_evidence, MatchEvidence::Complete);
+                assert_eq!(
+                    observation.raw_evidence["choices"],
+                    json!(["Allow once", "Deny once"])
+                );
+            }
+        }
+
+        #[test]
+        fn focus_style_background_resolves_no_choice_for_none_several_or_an_unlisted_option() {
+            for (case, bytes) in [
+                ("no styled label", gated_fixture_form("write disposable.txt", "none")),
+                (
+                    "an option without a choice entry",
+                    gated_fixture_form("write disposable.txt", "always"),
+                ),
+                (
+                    "several styled choices",
+                    gated_fixture_form_styled(
+                        "write disposable.txt",
+                        true,
+                        &["Allow once", "Deny once"],
+                        "",
+                        FOCUS_SGR,
+                    ),
+                ),
+                (
+                    "a label only partly styled",
+                    format!(
+                        "\x1b[0m\x1b[2J\x1b[19;1HSynthetic gated request\r\nOperation: write disposable.txt\r\n  {FOCUS_SGR}Allow\x1b[0m once   Always allow   Deny once\r\nSelection: "
+                    )
+                    .into_bytes(),
+                ),
+            ] {
+                assert_eq!(focused(&bytes), None, "{case}");
+            }
+        }
+
+        #[test]
+        fn focus_style_background_compares_backgrounds_not_theme_colours() {
+            for (case, always, row, focus) in [
+                ("indexed theme", true, "\x1b[48;5;236m", "\x1b[48;5;214m"),
+                (
+                    "rgb theme",
+                    true,
+                    "\x1b[48;2;30;30;30m",
+                    "\x1b[48;2;10;200;10m",
+                ),
+                ("two-option layout", false, "\x1b[48;2;30;30;30m", FOCUS_SGR),
+                ("default row background", false, "", "\x1b[48;5;4m"),
+            ] {
+                for (label, expected) in [("Allow once", "allow-once"), ("Deny once", "deny-once")]
+                {
+                    let bytes = gated_fixture_form_styled(
+                        "write disposable.txt",
+                        always,
+                        &[label],
+                        row,
+                        focus,
+                    );
+                    assert_eq!(focused(&bytes).as_deref(), Some(expected), "{case} {label}");
+                }
+                let unfocused =
+                    gated_fixture_form_styled("write disposable.txt", always, &[], row, focus);
+                assert_eq!(focused(&unfocused), None, "{case} on the row background");
+            }
+        }
+
+        #[test]
+        fn styling_only_focus_change_changes_the_request_focus_but_not_its_semantics() {
+            let allow = gated_fixture_form("write disposable.txt", "allow");
+            let deny = gated_fixture_form("write disposable.txt", "deny");
+            let always = gated_fixture_form("write disposable.txt", "always");
+            for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                let first = matched(&allow, decision);
+                let moved = matched(&deny, decision);
+                let unlisted = matched(&always, decision);
+                assert!(first.semantic() == moved.semantic());
+                assert_eq!(first.choices(), moved.choices());
+                assert_ne!(first.focus(), moved.focus(), "{decision:?}");
+                assert_ne!(first.focus(), unlisted.focus(), "{decision:?}");
+                assert!(!first.same_request(&moved));
+                assert!(first.same_request(&matched(&allow, decision)));
+            }
+            let detector = detector();
+            let a = detector.observe(&screen(&allow)).unwrap();
+            let b = detector.observe(&screen(&deny)).unwrap();
+            assert!(
+                a.fingerprint == b.fingerprint,
+                "a focus move keeps the episode identity"
+            );
+        }
+
+        #[test]
+        fn continuation_rule_observes_only_the_empty_reason_dialog() {
+            let detector = detector();
+            let empty = detector
+                .observe(&screen(&gated_reason_dialog(None)))
+                .unwrap();
+            assert_eq!(empty.kind, ObservationKind::PermissionContinuation);
+            assert_eq!(empty.rule_id, GATED_REASON_RULE);
+            assert_eq!(empty.match_evidence, MatchEvidence::Complete);
+            assert!(!empty.verified_noninteraction);
+            for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                assert!(
+                    detector
+                        .match_answer(&screen(&gated_reason_dialog(None)), &gated_plan(decision))
+                        .unwrap()
+                        .is_none(),
+                    "a continuation is not an answerable request form"
+                );
+            }
+            for reason in ["typed reason", "(empty) and more"] {
+                let typed = detector
+                    .observe(&screen(&gated_reason_dialog(Some(reason))))
+                    .unwrap();
+                assert_ne!(
+                    typed.kind,
+                    ObservationKind::PermissionContinuation,
+                    "{reason}"
+                );
+                assert_ne!(typed.rule_id, GATED_REASON_RULE, "{reason}");
+            }
+        }
+    }
+    mod continuation_episodes {
+        use super::*;
+
+        fn gated(bytes: &[u8], sequence: u64) -> ScreenObservation {
+            let catalog = ProfileCatalog::from_definitions(&gated_fixture_definition()).unwrap();
+            let mut state = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
+            state.feed(bytes).unwrap();
+            let mut value = Detector::new(&catalog, CodingAgent::Codex, Some(VERSION))
+                .unwrap()
+                .observe(&state.snapshot())
+                .unwrap();
+            value.output_seq = sequence;
+            value.raw_evidence["screen_seq"] = json!(sequence);
+            value
+        }
+
+        fn request(sequence: u64) -> ScreenObservation {
+            gated(
+                &gated_fixture_form("write disposable.txt", "deny"),
+                sequence,
+            )
+        }
+
+        fn dialog(sequence: u64) -> ScreenObservation {
+            let value = gated(&gated_reason_dialog(None), sequence);
+            assert_eq!(value.kind, ObservationKind::PermissionContinuation);
+            value
+        }
+
+        #[test]
+        fn continuation_keeps_the_active_episode_open_and_visible_without_events() {
+            let origin = Instant::now();
+            let mut tracker = tracker();
+            open(&mut tracker, &request(1), origin);
+            let episode = tracker.active_episode();
+            assert!(episode.is_some());
+            for (index, millis) in [200u64, 400, 2300, 4500].into_iter().enumerate() {
+                let update = tracker
+                    .observe(
+                        &dialog(2 + index as u64),
+                        origin + Duration::from_millis(millis),
+                        NOW,
+                    )
+                    .unwrap();
+                assert!(
+                    update.transitions.is_empty(),
+                    "a continuation emits no event at {millis} ms: {:?}",
+                    update.transitions
+                );
+                assert_eq!(update.visibility, Visibility::Visible, "{millis} ms");
+                assert_eq!(
+                    update.eligibility,
+                    InputEligibility::Hold(GateReason::Interaction),
+                    "{millis} ms"
+                );
+                assert!(
+                    update.latest_evidence.is_none(),
+                    "the stored request evidence is unchanged"
+                );
+                assert_eq!(tracker.active_episode(), episode);
+            }
+            let returned = tracker
+                .observe(&request(9), origin + Duration::from_secs(5), NOW)
+                .unwrap();
+            assert!(returned.transitions.is_empty());
+            assert_eq!(returned.visibility, Visibility::Visible);
+            assert_eq!(tracker.active_episode(), episode);
+        }
+
+        #[test]
+        fn continuation_starts_no_obscured_timer_that_a_later_uncertainty_inherits() {
+            let origin = Instant::now();
+            let mut tracker = tracker();
+            open(&mut tracker, &request(1), origin);
+            tracker
+                .observe(&dialog(2), origin + Duration::from_millis(200), NOW)
+                .unwrap();
+            tracker
+                .observe(&dialog(3), origin + Duration::from_millis(3000), NOW)
+                .unwrap();
+            let blank = gated(b"\x1b[0m\x1b[2J", 4);
+            let uncertain = tracker
+                .observe(&blank, origin + Duration::from_millis(3100), NOW)
+                .unwrap();
+            assert!(
+                uncertain.transitions.is_empty(),
+                "uncertainty after a continuation starts its own two-second interval"
+            );
+            let obscured = tracker
+                .observe(&blank, origin + Duration::from_millis(5100), NOW)
+                .unwrap();
+            assert_eq!(obscured.transitions.len(), 1);
+            assert_eq!(
+                obscured.transitions[0].kind,
+                RuntimeEventKind::InteractionObscured
+            );
+        }
+
+        #[test]
+        fn continuation_without_an_active_episode_is_an_unknown_screen() {
+            let origin = Instant::now();
+            let mut continuation = tracker();
+            let mut unknown = tracker();
+            let blank = gated(b"\x1b[0m\x1b[2J", 1);
+            for millis in [0u64, 150, 400, 2500] {
+                let at = origin + Duration::from_millis(millis);
+                let left = continuation.observe(&dialog(1 + millis), at, NOW).unwrap();
+                let mut blank = blank.clone();
+                blank.output_seq = 1 + millis;
+                blank.raw_evidence["screen_seq"] = json!(1 + millis);
+                let right = unknown.observe(&blank, at, NOW).unwrap();
+                assert!(left.transitions.is_empty(), "{millis} ms");
+                assert_eq!(left.visibility, right.visibility, "{millis} ms");
+                assert_eq!(left.eligibility, right.eligibility, "{millis} ms");
+                assert_eq!(continuation.active_episode(), None);
+            }
+        }
+    }
+    mod gated_catalog {
+        use super::*;
+
+        const STAGES: &str = "/profiles/0/capabilities/answers/1/stages";
+        const ALLOW_STAGES: &str = "/profiles/0/capabilities/answers/0/stages";
+        const REASON: &str = "/profiles/0/rules/1";
+
+        fn rejected(case: &str, change: impl FnOnce(&mut Value)) {
+            assert!(ProfileCatalog::from_definitions(&gated_fixture_definition()).is_ok());
+            let mut value = gated_fixture_definition();
+            change(&mut value);
+            assert!(
+                ProfileCatalog::from_definitions(&value).is_err(),
+                "{case} must fail catalog loading"
+            );
+        }
+
+        fn stage(bytes: &str, choice: &str, gate: (&str, &str)) -> Value {
+            let mut stage = json!({"bytes_hex":bytes,"required_rule_id":GATED_RULE,"required_choice_id":choice});
+            stage[gate.0] = json!(gate.1);
+            stage
+        }
+
+        fn plan(decision: PermissionDecision) -> AnswerPlan {
+            ProfileCatalog::from_definitions(&gated_fixture_definition())
+                .unwrap()
+                .answer_plan(CodingAgent::Codex, VERSION, GATED_RULE, decision)
+                .unwrap()
+                .expect("gated synthetic plan")
+        }
+
+        #[test]
+        fn gated_catalog_retains_each_stage_gate_in_declared_order() {
+            let allow = plan(PermissionDecision::Allow);
+            assert_eq!(allow.stages().len(), 1);
+            assert_eq!(allow.stages()[0].bytes(), b"\r");
+            assert_eq!(
+                allow.stages()[0].required_focus_choice_id(),
+                Some("allow-once")
+            );
+            assert_eq!(allow.stages()[0].required_screen_rule_id(), None);
+            let deny = plan(PermissionDecision::Deny);
+            let gates = deny
+                .stages()
+                .iter()
+                .map(|stage| {
+                    (
+                        stage.bytes().to_vec(),
+                        stage.required_choice_id().to_owned(),
+                        stage.required_focus_choice_id().map(str::to_owned),
+                        stage.required_screen_rule_id().map(str::to_owned),
+                    )
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                gates,
+                [
+                    (
+                        b"h".to_vec(),
+                        "deny-once".into(),
+                        Some("allow-once".into()),
+                        None
+                    ),
+                    (
+                        b"\r".to_vec(),
+                        "deny-once".into(),
+                        Some("deny-once".into()),
+                        None
+                    ),
+                    (
+                        b"\r".to_vec(),
+                        "deny-once".into(),
+                        None,
+                        Some(GATED_REASON_RULE.into())
+                    ),
+                ]
+            );
+        }
+
+        #[test]
+        fn gated_catalog_keeps_existing_ungated_plans_without_gates() {
+            let synthetic = ProfileCatalog::from_definitions(&inspection_fixture_definition())
+                .unwrap()
+                .answer_plan(
+                    CodingAgent::Codex,
+                    VERSION,
+                    "synthetic-permission",
+                    PermissionDecision::Allow,
+                )
+                .unwrap()
+                .unwrap();
+            let bundled = ProfileCatalog::bundled().unwrap();
+            let mut plans = vec![synthetic];
+            for (backend, version, rule) in [
+                (CodingAgent::Claude, "2.1.302", "claude-bash-permission"),
+                (CodingAgent::Codex, "0.163.0", "codex-exec-approval"),
+            ] {
+                for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                    plans.push(
+                        bundled
+                            .answer_plan(backend, version, rule, decision)
+                            .unwrap()
+                            .expect("bundled ungated plan"),
+                    );
+                }
+            }
+            for plan in plans {
+                for stage in plan.stages() {
+                    assert_eq!(stage.required_focus_choice_id(), None);
+                    assert_eq!(stage.required_screen_rule_id(), None);
+                }
+            }
+        }
+
+        #[test]
+        fn gated_catalog_rejects_a_focus_gate_on_an_unknown_choice_or_a_malformed_gate() {
+            for (case, value) in [
+                ("unknown choice", json!("always-allow")),
+                ("non-string gate", json!(1)),
+                ("null gate", Value::Null),
+                ("blank gate", json!(" ")),
+            ] {
+                rejected(case, |definition| {
+                    *definition
+                        .pointer_mut(&format!("{STAGES}/0/required_focus_choice_id"))
+                        .unwrap() = value;
+                });
+            }
+            rejected("unknown continuation rule", |definition| {
+                *definition
+                    .pointer_mut(&format!("{STAGES}/2/required_screen_rule_id"))
+                    .unwrap() = json!("missing-rule");
+            });
+            rejected("both gates on one stage", |definition| {
+                definition.pointer_mut(&format!("{STAGES}/1")).unwrap()["required_screen_rule_id"] =
+                    json!(GATED_REASON_RULE);
+            });
+            rejected("unknown stage field", |definition| {
+                definition.pointer_mut(&format!("{STAGES}/0")).unwrap()["required_focus"] =
+                    json!("allow-once");
+            });
+        }
+
+        #[test]
+        fn gated_catalog_rejects_a_plan_that_gates_only_some_stages() {
+            rejected("ungated first stage", |definition| {
+                definition
+                    .pointer_mut(&format!("{STAGES}/0"))
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("required_focus_choice_id");
+            });
+            rejected("ungated middle stage", |definition| {
+                definition
+                    .pointer_mut(&format!("{STAGES}/1"))
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("required_focus_choice_id");
+            });
+            rejected("ungated final stage", |definition| {
+                *definition.pointer_mut(STAGES).unwrap() = json!([
+                    stage("68", "deny-once", ("required_focus_choice_id", "allow-once")),
+                    {"bytes_hex":"0d","required_rule_id":GATED_RULE,"required_choice_id":"deny-once"}
+                ]);
+            });
+        }
+
+        #[test]
+        fn gated_catalog_rejects_a_final_gate_on_another_choice() {
+            rejected("allow ends on the deny focus", |definition| {
+                *definition.pointer_mut(ALLOW_STAGES).unwrap() = json!([stage(
+                    "0d",
+                    "allow-once",
+                    ("required_focus_choice_id", "deny-once")
+                )]);
+            });
+            rejected("deny ends on the allow focus", |definition| {
+                *definition.pointer_mut(STAGES).unwrap() = json!([stage(
+                    "0d",
+                    "deny-once",
+                    ("required_focus_choice_id", "allow-once")
+                )]);
+            });
+            let mut ends_on_deny_focus = gated_fixture_definition();
+            *ends_on_deny_focus.pointer_mut(STAGES).unwrap() = json!([
+                stage(
+                    "68",
+                    "deny-once",
+                    ("required_focus_choice_id", "allow-once")
+                ),
+                stage("0d", "deny-once", ("required_focus_choice_id", "deny-once"))
+            ]);
+            assert!(
+                ProfileCatalog::from_definitions(&ends_on_deny_focus).is_ok(),
+                "a final focus gate on the answer's own choice is valid"
+            );
+        }
+
+        #[test]
+        fn gated_catalog_rejects_screen_gates_without_their_continuation_succession() {
+            rejected("screen gate on the request rule itself", |definition| {
+                *definition
+                    .pointer_mut(&format!("{STAGES}/2/required_screen_rule_id"))
+                    .unwrap() = json!(GATED_RULE);
+            });
+            rejected("screen gate as the first stage", |definition| {
+                *definition.pointer_mut(STAGES).unwrap() = json!([stage(
+                    "0d",
+                    "deny-once",
+                    ("required_screen_rule_id", GATED_REASON_RULE)
+                )]);
+            });
+            rejected("screen gate after a stage on another focus", |definition| {
+                *definition.pointer_mut(STAGES).unwrap() = json!([
+                    stage(
+                        "68",
+                        "deny-once",
+                        ("required_focus_choice_id", "allow-once")
+                    ),
+                    stage(
+                        "0d",
+                        "deny-once",
+                        ("required_screen_rule_id", GATED_REASON_RULE)
+                    )
+                ]);
+            });
+            rejected("continuation of an unrelated request rule", |definition| {
+                let mut other = definition["profiles"][0]["rules"][0].clone();
+                other["id"] = json!("synthetic-other-request");
+                other["region"]["start_pattern"] = json!("^Synthetic other request$");
+                other["matchers"][0]["pattern"] = json!("^Synthetic other request$");
+                definition["profiles"][0]["rules"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(other);
+                definition["profiles"][0]["capabilities"]["detection"]["rule_ids"] =
+                    json!([GATED_RULE, "synthetic-other-request"]);
+                definition.pointer_mut(REASON).unwrap()["continues_rule_id"] =
+                    json!("synthetic-other-request");
+            });
+            rejected("final continuation of another choice", |definition| {
+                definition.pointer_mut(REASON).unwrap()["continues_choice_id"] =
+                    json!("allow-once");
+                *definition.pointer_mut(STAGES).unwrap() = json!([
+                    stage(
+                        "0d",
+                        "deny-once",
+                        ("required_focus_choice_id", "allow-once")
+                    ),
+                    stage(
+                        "0d",
+                        "deny-once",
+                        ("required_screen_rule_id", GATED_REASON_RULE)
+                    )
+                ]);
+            });
+        }
+
+        #[test]
+        fn gated_catalog_validates_the_continuation_rule_declaration() {
+            rejected("continuation with an operation", |definition| {
+                let rule = definition.pointer_mut(REASON).unwrap();
+                rule["matchers"].as_array_mut().unwrap().push(
+                    json!({"id":"operation","scope":"line","pattern":"^Reason: (?P<operation>.+)$"}),
+                );
+                rule["extract"]["operation"] =
+                    json!({"matcher_id":"operation","capture":"operation"});
+            });
+            rejected("continuation with choices", |definition| {
+                let rule = definition.pointer_mut(REASON).unwrap();
+                rule["matchers"].as_array_mut().unwrap().push(
+                    json!({"id":"confirm","scope":"line","pattern":"^Confirm: (?P<label>enter)$"}),
+                );
+                rule["extract"]["choices"] = json!([{"id":"confirm","label":{"matcher_id":"confirm","capture":"label"},"scope":"single_request"}]);
+            });
+            rejected("continuation as an answer request rule", |definition| {
+                definition["profiles"][0]["capabilities"]["answers"][0]["request_rule_id"] =
+                    json!(GATED_REASON_RULE);
+            });
+            rejected("continuation verifying noninteraction", |definition| {
+                definition.pointer_mut(REASON).unwrap()["verified_noninteraction"] = json!(true);
+            });
+            for key in ["continues_rule_id", "continues_choice_id", "fixture_ids"] {
+                rejected(&format!("continuation without {key}"), |definition| {
+                    definition
+                        .pointer_mut(REASON)
+                        .unwrap()
+                        .as_object_mut()
+                        .unwrap()
+                        .remove(key);
+                });
+            }
+            for (case, key, value) in [
+                (
+                    "unknown continued rule",
+                    "continues_rule_id",
+                    json!("missing-rule"),
+                ),
+                (
+                    "unknown continued choice",
+                    "continues_choice_id",
+                    json!("missing-choice"),
+                ),
+                ("no cited fixture", "fixture_ids", json!([])),
+                (
+                    "unknown cited fixture",
+                    "fixture_ids",
+                    json!(["missing-fixture"]),
+                ),
+                (
+                    "synthetic cited fixture",
+                    "fixture_ids",
+                    json!(["synthetic-permission-1"]),
+                ),
+            ] {
+                rejected(case, |definition| {
+                    definition.pointer_mut(REASON).unwrap()[key] = value;
+                });
+            }
+            rejected("continuation of a non-permission rule", |definition| {
+                definition["profiles"][0]["rules"][0]["observation"] = json!("question");
+                definition["profiles"][0]["capabilities"]["answers"] = json!([]);
+            });
+            for key in ["continues_rule_id", "continues_choice_id", "fixture_ids"] {
+                rejected(
+                    &format!("{key} on a permission request rule"),
+                    |definition| {
+                        let value = definition.pointer(REASON).unwrap()[key].clone();
+                        definition["profiles"][0]["rules"][0][key] = value;
+                    },
+                );
+            }
+        }
+
+        #[test]
+        fn gated_catalog_requires_a_background_focus_matcher_over_line_scoped_labels() {
+            rejected("focus matcher without focus_style", |definition| {
+                definition["profiles"][0]["rules"][0]["matchers"][2]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("focus_style");
+            });
+            for style in [json!("bold"), json!(""), Value::Null, json!(true)] {
+                rejected(&format!("focus_style {style}"), |definition| {
+                    definition["profiles"][0]["rules"][0]["matchers"][2]["focus_style"] = style;
+                });
+            }
+            rejected("region-scoped choice label", |definition| {
+                definition["profiles"][0]["rules"][0]["matchers"][3]["scope"] = json!("region");
+            });
+            let mut textual = definitions();
+            textual["profiles"][0]["rules"][0]["matchers"][1]["focus_style"] = json!("background");
+            assert!(
+                ProfileCatalog::from_definitions(&textual).is_ok(),
+                "an ungated profile may declare a background focus matcher"
+            );
+        }
+
+        #[test]
+        fn every_backend_rejects_an_escape_byte_in_any_answer_stage() {
+            for bytes in ["1b", "0d1b", "1b5b41"] {
+                rejected(&format!("gated stage {bytes}"), |definition| {
+                    *definition
+                        .pointer_mut(&format!("{STAGES}/0/bytes_hex"))
+                        .unwrap() = json!(bytes);
+                });
+                for backend in ["codex", "claude", "opencode"] {
+                    let mut value = definitions();
+                    value["fixtures"][0]["backend"] = json!(backend);
+                    value["profiles"][0]["backend"] = json!(backend);
+                    value["profiles"][0]["capabilities"]["answers"] = json!([{
+                        "decision":"deny","request_rule_id":RULE,"answer_rule_id":"synthetic-escape",
+                        "choice_id":"deny-once","focus_matcher_id":"deny","fixture_ids":[FIXTURE],
+                        "stages":[{"bytes_hex":"6e","required_rule_id":RULE,"required_choice_id":"deny-once"}]
+                    }]);
+                    assert!(
+                        ProfileCatalog::from_definitions(&value).is_ok(),
+                        "{backend} baseline"
+                    );
+                    value["profiles"][0]["capabilities"]["answers"][0]["stages"][0]["bytes_hex"] =
+                        json!(bytes);
+                    assert!(
+                        ProfileCatalog::from_definitions(&value).is_err(),
+                        "{backend} ungated stage {bytes}"
+                    );
+                }
+            }
         }
     }
     mod detector {
@@ -2806,6 +3495,7 @@ mod contract_tests {
             FIXTURES
                 .iter()
                 .chain(super::bundled_codex::FIXTURES.iter())
+                .chain(super::bundled_opencode::FIXTURES.iter())
                 .map(|&(_, source, bytes)| (source, bytes))
                 .collect()
         }
@@ -4176,6 +4866,982 @@ mod contract_tests {
                 .observe(&at(&idle, 5), origin + Duration::from_millis(650), NOW)
                 .unwrap();
             let closes = closed(&held);
+            assert_eq!(closes.len(), 1, "{:?}", held.transitions);
+            assert_eq!(
+                closes[0].close_reason,
+                Some(InteractionCloseReason::NotVisible)
+            );
+        }
+    }
+
+    mod bundled_opencode {
+        use super::*;
+        use sha2::{Digest, Sha256};
+        use std::collections::BTreeSet;
+
+        const OPENCODE_VERSION: &str = "2.1.4";
+        const PROFILE_VERSION: &str = "opencode-2.1.4-cafleet-ask-1";
+        const PERMISSION_RULE: &str = "opencode-shell-permission";
+        const REASON_RULE: &str = "opencode-reject-reason";
+        const IDLE_RULE: &str = "opencode-idle-composer";
+        const PERMISSION_FIXTURE: &str = "opencode-2.1.4-ask-permission-1";
+        const ALLOW_FIXTURE: &str = "opencode-2.1.4-allow-pre-stage-1";
+        const DENY_1_FIXTURE: &str = "opencode-2.1.4-deny-pre-stage-1";
+        const DENY_2_FIXTURE: &str = "opencode-2.1.4-deny-pre-stage-2";
+        const DENY_3_FIXTURE: &str = "opencode-2.1.4-deny-pre-stage-3";
+        const ALWAYS_FIXTURE: &str = "opencode-2.1.4-focus-always-1";
+        const IDLE_FIXTURE: &str = "opencode-2.1.4-idle-composer-1";
+        const PERMISSION_BYTES: &[u8] =
+            include_bytes!("profiles/native/opencode-2.1.4-ask-permission-1.json");
+        const ALLOW_BYTES: &[u8] =
+            include_bytes!("profiles/native/opencode-2.1.4-allow-pre-stage-1.json");
+        const DENY_1_BYTES: &[u8] =
+            include_bytes!("profiles/native/opencode-2.1.4-deny-pre-stage-1.json");
+        const DENY_2_BYTES: &[u8] =
+            include_bytes!("profiles/native/opencode-2.1.4-deny-pre-stage-2.json");
+        const DENY_3_BYTES: &[u8] =
+            include_bytes!("profiles/native/opencode-2.1.4-deny-pre-stage-3.json");
+        const ALWAYS_BYTES: &[u8] =
+            include_bytes!("profiles/native/opencode-2.1.4-focus-always-1.json");
+        const IDLE_BYTES: &[u8] =
+            include_bytes!("profiles/native/opencode-2.1.4-idle-composer-1.json");
+        pub(super) const FIXTURES: [(&str, &str, &[u8]); 7] = [
+            (
+                PERMISSION_FIXTURE,
+                "native/opencode-2.1.4-ask-permission-1.json",
+                PERMISSION_BYTES,
+            ),
+            (
+                ALLOW_FIXTURE,
+                "native/opencode-2.1.4-allow-pre-stage-1.json",
+                ALLOW_BYTES,
+            ),
+            (
+                DENY_1_FIXTURE,
+                "native/opencode-2.1.4-deny-pre-stage-1.json",
+                DENY_1_BYTES,
+            ),
+            (
+                DENY_2_FIXTURE,
+                "native/opencode-2.1.4-deny-pre-stage-2.json",
+                DENY_2_BYTES,
+            ),
+            (
+                DENY_3_FIXTURE,
+                "native/opencode-2.1.4-deny-pre-stage-3.json",
+                DENY_3_BYTES,
+            ),
+            (
+                ALWAYS_FIXTURE,
+                "native/opencode-2.1.4-focus-always-1.json",
+                ALWAYS_BYTES,
+            ),
+            (
+                IDLE_FIXTURE,
+                "native/opencode-2.1.4-idle-composer-1.json",
+                IDLE_BYTES,
+            ),
+        ];
+        const FORM_FIXTURES: [(&[u8], &str, &str); 5] = [
+            (PERMISSION_BYTES, "opencode-cells-001", "allow"),
+            (ALLOW_BYTES, "opencode-ans-allow-001", "allow"),
+            (DENY_1_BYTES, "opencode-ans-deny-001", "deny"),
+            (DENY_2_BYTES, "opencode-ans-deny-002", "deny"),
+            (ALWAYS_BYTES, "opencode-focus-always-002", "deny"),
+        ];
+        const HEADING: &str = "  △ Permission required";
+        const CHOICE_ROW: &str = "   Allow once   Always allow   Reject                                             ⇆ select  enter confirm  esc reject";
+        const REASON_HEADING: &str = "  △ Reject permission";
+        const REASON_CONTROL: &str = "  Tell OpenCode what to do differently                                                      enter confirm  esc cancel";
+
+        type ScreenChange = (&'static str, fn(&mut Value));
+
+        fn source(id: &str) -> &'static str {
+            FIXTURES
+                .iter()
+                .find(|(fixture, _, _)| *fixture == id)
+                .map(|&(_, source, _)| source)
+                .expect("known bundled OpenCode fixture")
+        }
+
+        fn fixture(id: &str) -> &'static [u8] {
+            FIXTURES
+                .iter()
+                .find(|(fixture, _, _)| *fixture == id)
+                .map(|&(_, _, bytes)| bytes)
+                .expect("known bundled OpenCode fixture")
+        }
+
+        fn parsed(bytes: &[u8]) -> Value {
+            serde_json::from_slice(bytes).unwrap()
+        }
+
+        fn lines(bytes: &[u8]) -> Vec<String> {
+            parsed(bytes)["lines"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|line| line.as_str().unwrap().to_owned())
+                .collect()
+        }
+
+        fn digest(bytes: &[u8]) -> String {
+            Sha256::digest(bytes)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect()
+        }
+
+        fn definitions() -> Value {
+            serde_json::from_str(include_str!("profiles/bundled.json")).unwrap()
+        }
+
+        fn entry<'a>(definitions: &'a mut Value, id: &str) -> &'a mut Value {
+            definitions["fixtures"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|entry| entry["id"] == id)
+                .expect("bundled catalog cites the OpenCode fixture")
+        }
+
+        fn profile(definitions: &Value) -> &Value {
+            definitions["profiles"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|profile| profile["backend"] == "opencode")
+                .expect("bundled OpenCode profile")
+        }
+
+        fn rule<'a>(definitions: &'a Value, id: &str) -> &'a Value {
+            profile(definitions)["rules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|rule| rule["id"] == id)
+                .expect("bundled OpenCode rule")
+        }
+
+        fn guarded_fixture(
+            id: &str,
+            change_screen: impl FnOnce(&mut Value),
+        ) -> Result<ProfileCatalog, CafleetError> {
+            let mut screen = parsed(fixture(id));
+            change_screen(&mut screen);
+            let bytes = serde_json::to_vec_pretty(&screen).unwrap();
+            let mut value = definitions();
+            entry(&mut value, id)["sha256"] = json!(digest(&bytes));
+            let cited = source(id);
+            let mut embedded = super::bundled_claude::embedded();
+            embedded.retain(|&(reference, _)| reference != cited);
+            embedded.push((cited, &bytes));
+            ProfileCatalog::from_bundled_definitions(&value, &embedded)
+        }
+
+        fn replay(bytes: &[u8]) -> ScreenSnapshot {
+            replay_changed(bytes, |_| {}, None)
+        }
+
+        fn replay_changed(
+            bytes: &[u8],
+            change: impl FnOnce(&mut Vec<String>),
+            cursor: Option<(u16, u16)>,
+        ) -> ScreenSnapshot {
+            super::super::detector::inspection_tests::replay_native_fixture(
+                std::str::from_utf8(bytes).unwrap(),
+                change,
+                false,
+                cursor,
+            )
+        }
+
+        fn detector() -> Detector {
+            Detector::new(
+                &ProfileCatalog::bundled().unwrap(),
+                CodingAgent::Opencode,
+                Some(OPENCODE_VERSION),
+            )
+            .unwrap()
+        }
+
+        fn observe(screen: &ScreenSnapshot) -> ScreenObservation {
+            detector().observe(screen).unwrap()
+        }
+
+        fn plan(decision: PermissionDecision) -> AnswerPlan {
+            ProfileCatalog::bundled()
+                .unwrap()
+                .answer_plan(
+                    CodingAgent::Opencode,
+                    OPENCODE_VERSION,
+                    PERMISSION_RULE,
+                    decision,
+                )
+                .unwrap()
+                .expect("measured bundled OpenCode answer plan")
+        }
+
+        fn focused(screen: &ScreenSnapshot) -> Option<String> {
+            let detector = detector();
+            let mut resolved = BTreeSet::new();
+            for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                let matched = detector
+                    .match_answer(screen, &plan(decision))
+                    .unwrap()
+                    .expect("the form matches both plans whatever its focus");
+                resolved.insert(matched.focused_choice_id().map(str::to_owned));
+            }
+            assert_eq!(resolved.len(), 1, "both plans share the focus matcher");
+            resolved.pop_first().unwrap()
+        }
+
+        fn assert_form(observation: &ScreenObservation, case: &str, probe: &str) {
+            assert_eq!(
+                observation.kind,
+                ObservationKind::Interaction(InteractionClass::PermissionRequest),
+                "{case}"
+            );
+            assert_eq!(observation.rule_id, PERMISSION_RULE, "{case}");
+            assert_eq!(
+                observation.match_evidence,
+                MatchEvidence::Complete,
+                "{case}"
+            );
+            assert_eq!(
+                observation.profile_version.as_deref(),
+                Some(PROFILE_VERSION)
+            );
+            assert!(!observation.verified_noninteraction);
+            assert_eq!(
+                observation.raw_evidence["operation"],
+                json!(format!("/tmp/cafleet-194/{case}/permission-probe {probe}")),
+                "{case}"
+            );
+            assert_eq!(observation.raw_evidence["operation_rows"], json!(1));
+            assert_eq!(
+                observation.raw_evidence["choices"],
+                json!(["Allow once", "Reject"])
+            );
+            assert_eq!(observation.raw_evidence["native_request_id"], Value::Null);
+            assert_eq!(observation.native_correlation, None);
+            let region = observation.matched_region.expect("live form region");
+            assert_eq!((region.top, region.bottom), (10, 22), "{case}");
+        }
+
+        #[test]
+        fn bundled_opencode_fixtures_match_their_catalog_entries_and_declare_the_masked_row() {
+            let mut value = definitions();
+            for (id, _, bytes) in FIXTURES {
+                assert_eq!(
+                    entry(&mut value, id),
+                    &json!({"id":id,"kind":"native","backend":"opencode","native_version":OPENCODE_VERSION,
+                        "rows":36,"cols":120,"source_ref":source(id),"sha256":digest(bytes)})
+                );
+                let screen = parsed(bytes);
+                let mut expected = BTreeSet::from([
+                    "schema_version",
+                    "fixture_id",
+                    "provenance",
+                    "backend",
+                    "native_version",
+                    "rows",
+                    "cols",
+                    "alternate_screen",
+                    "screen_seq",
+                    "cursor_row",
+                    "cursor_col",
+                    "lines",
+                    "masked_rows",
+                ]);
+                if id != IDLE_FIXTURE {
+                    expected.insert("cell_backgrounds");
+                }
+                assert_eq!(
+                    screen
+                        .as_object()
+                        .unwrap()
+                        .keys()
+                        .map(String::as_str)
+                        .collect::<BTreeSet<_>>(),
+                    expected,
+                    "{id} has exactly the documented fields"
+                );
+                assert_eq!(screen["schema_version"], 1);
+                assert_eq!(screen["fixture_id"], id);
+                assert_eq!(screen["provenance"], "native");
+                assert_eq!(screen["backend"], "opencode");
+                assert_eq!(screen["native_version"], OPENCODE_VERSION);
+                assert_eq!(
+                    (screen["rows"].clone(), screen["cols"].clone()),
+                    (json!(36), json!(120))
+                );
+                assert_eq!(
+                    screen["alternate_screen"], false,
+                    "{id} uses the primary screen"
+                );
+                assert_eq!(
+                    screen["masked_rows"],
+                    json!([{"row":35,"reason":"reviewed_privacy"}])
+                );
+                let rows = lines(bytes);
+                assert_eq!(rows.len(), 36);
+                assert_eq!(rows[35], "");
+                for (row, line) in rows.iter().enumerate() {
+                    for private in ["/Users/", "/root", "/home/", "himkt"] {
+                        assert!(
+                            !line.contains(private),
+                            "{id} row {row} carries {private:?}"
+                        );
+                    }
+                }
+            }
+            for (bytes, case, probe) in FORM_FIXTURES {
+                let rows = lines(bytes);
+                assert_eq!(rows[10].trim_end(), HEADING, "{case}");
+                assert!(
+                    rows[14].starts_with(&format!(
+                        "  $ /tmp/cafleet-194/{case}/permission-probe {probe} "
+                    )),
+                    "{case}"
+                );
+                assert_eq!(rows[21].trim_end(), CHOICE_ROW, "{case}");
+                assert_eq!(rows[21].chars().count(), 120);
+            }
+            let dialog = lines(DENY_3_BYTES);
+            assert_eq!(dialog[10].trim_end(), REASON_HEADING);
+            assert_eq!(
+                dialog[12].trim_end(),
+                "  Tell OpenCode what to do differently"
+            );
+            assert_eq!(dialog[21].trim_end(), REASON_CONTROL);
+            let idle = lines(IDLE_BYTES);
+            assert_eq!(idle[11].trim_end(), "┃");
+            assert_eq!(
+                (
+                    parsed(IDLE_BYTES)["cursor_row"].clone(),
+                    parsed(IDLE_BYTES)["cursor_col"].clone()
+                ),
+                (json!(11), json!(2))
+            );
+        }
+
+        #[test]
+        fn bundled_opencode_2_1_4_declares_detection_idle_composer_and_both_answers_only() {
+            let bundled = ProfileCatalog::bundled().unwrap();
+            let opencode = bundled.capabilities(CodingAgent::Opencode, Some(OPENCODE_VERSION));
+            assert_eq!(opencode.backend, CodingAgent::Opencode);
+            assert_eq!(opencode.native_version.as_deref(), Some(OPENCODE_VERSION));
+            assert_eq!(opencode.profile_version.as_deref(), Some(PROFILE_VERSION));
+            assert_eq!(opencode.detection, Coverage::Tested);
+            assert_eq!(opencode.composer, Coverage::Tested);
+            assert_eq!(opencode.prompt_submission, Coverage::Unknown);
+            assert_eq!(opencode.native_exec_submission, Coverage::Unknown);
+            assert_eq!(opencode.answer_decisions.len(), 2);
+            for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                assert!(
+                    opencode.answer_decisions.contains(&decision),
+                    "{decision:?}"
+                );
+            }
+            assert_eq!(opencode.capability_reason, None);
+            for version in [None, Some("2.1.3"), Some("2.1.5"), Some("v2.1.4")] {
+                let unknown = bundled.capabilities(CodingAgent::Opencode, version);
+                assert_eq!(unknown.detection, Coverage::Unknown, "{version:?}");
+                assert_eq!(unknown.composer, Coverage::Unknown, "{version:?}");
+                assert_eq!(unknown.profile_version, None, "{version:?}");
+                assert!(unknown.answer_decisions.is_empty());
+                assert!(unknown.capability_reason.is_some());
+            }
+            for backend in [CodingAgent::Claude, CodingAgent::Codex] {
+                let other = bundled.capabilities(backend, Some(OPENCODE_VERSION));
+                assert_eq!(other.detection, Coverage::Unknown, "{backend:?}");
+                assert!(other.answer_decisions.is_empty());
+            }
+            let definitions = definitions();
+            let capabilities = &profile(&definitions)["capabilities"];
+            assert_eq!(
+                profile(&definitions)["native_versions"],
+                json!([OPENCODE_VERSION])
+            );
+            assert_eq!(profile(&definitions)["profile_version"], PROFILE_VERSION);
+            assert_eq!(
+                capabilities["detection"]["rule_ids"],
+                json!([PERMISSION_RULE])
+            );
+            assert_eq!(
+                capabilities["detection"]["fixture_ids"],
+                json!([PERMISSION_FIXTURE])
+            );
+            assert_eq!(capabilities["composer"]["rule_ids"], json!([IDLE_RULE]));
+            assert_eq!(
+                capabilities["composer"]["fixture_ids"],
+                json!([IDLE_FIXTURE])
+            );
+            assert!(capabilities["composer"].get("submission").is_none());
+            let reason = rule(&definitions, REASON_RULE);
+            assert_eq!(reason["observation"], "permission_continuation");
+            assert_eq!(reason["continues_rule_id"], PERMISSION_RULE);
+            assert_eq!(reason["continues_choice_id"], "deny-once");
+            assert_eq!(reason["fixture_ids"], json!([DENY_3_FIXTURE]));
+            assert_eq!(
+                reason["extract"],
+                json!({"operation":null,"choices":[],"native_request_id":null})
+            );
+            assert_eq!(reason["region"]["cursor"], "any");
+            let form = rule(&definitions, PERMISSION_RULE);
+            assert_eq!(form["observation"], "permission_request");
+            assert_eq!(form["region"]["screen"], "primary");
+            assert_eq!(form["region"]["cursor"], "any");
+            assert_eq!(form["region"]["max_rows"], 24);
+            assert_eq!(form["sensitive"], false);
+            assert_eq!(form["extract"]["native_request_id"], Value::Null);
+            assert_eq!(
+                form["extract"]["choices"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|choice| (choice["id"].clone(), choice["scope"].clone()))
+                    .collect::<Vec<_>>(),
+                [
+                    (json!("allow-once"), json!("single_request")),
+                    (json!("deny-once"), json!("single_request"))
+                ],
+                "the always choice has no choice entry"
+            );
+            let ids = form["matchers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|matcher| matcher["id"].as_str().unwrap())
+                .collect::<BTreeSet<_>>();
+            for id in ["heading", "operation", "focus", "allow", "deny"] {
+                assert!(ids.contains(id), "required matcher {id}");
+            }
+            let focus = form["matchers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|matcher| matcher["id"] == "focus")
+                .unwrap();
+            assert_eq!(focus["focus_style"], "background");
+            let idle = rule(&definitions, IDLE_RULE);
+            assert_eq!(idle["observation"], "composer_empty");
+            assert_eq!(idle["region"]["cursor"], "at_end");
+            assert_eq!(idle["verified_noninteraction"], true);
+        }
+
+        #[test]
+        fn bundled_opencode_answer_plans_are_the_measured_gated_stages() {
+            let allow = plan(PermissionDecision::Allow);
+            let deny = plan(PermissionDecision::Deny);
+            for (plan, decision, choice, answer_rule, fixtures, stages) in [
+                (
+                    &allow,
+                    PermissionDecision::Allow,
+                    "allow-once",
+                    "opencode-shell-allow-once",
+                    vec![ALLOW_FIXTURE.to_owned()],
+                    vec![(vec![0x0d], Some("allow-once"), None)],
+                ),
+                (
+                    &deny,
+                    PermissionDecision::Deny,
+                    "deny-once",
+                    "opencode-shell-deny-once",
+                    vec![
+                        DENY_1_FIXTURE.to_owned(),
+                        DENY_2_FIXTURE.to_owned(),
+                        DENY_3_FIXTURE.to_owned(),
+                    ],
+                    vec![
+                        (vec![0x68], Some("allow-once"), None),
+                        (vec![0x0d], Some("deny-once"), None),
+                        (vec![0x0d], None, Some(REASON_RULE)),
+                    ],
+                ),
+            ] {
+                assert_eq!(plan.choice_id(), choice);
+                assert_eq!(plan.focus_matcher_id(), "focus");
+                let actual = plan
+                    .stages()
+                    .iter()
+                    .map(|stage| {
+                        assert_eq!(stage.required_rule_id(), PERMISSION_RULE);
+                        assert_eq!(stage.required_choice_id(), choice);
+                        assert!(!stage.bytes().contains(&0x1b), "no stage sends Escape");
+                        (
+                            stage.bytes().to_vec(),
+                            stage.required_focus_choice_id(),
+                            stage.required_screen_rule_id(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(actual, stages, "{decision:?}");
+                let capability = plan.capability();
+                assert_eq!(capability.backend(), CodingAgent::Opencode);
+                assert_eq!(capability.native_version(), OPENCODE_VERSION);
+                assert_eq!(capability.profile_version(), PROFILE_VERSION);
+                assert_eq!(capability.request_rule_id(), PERMISSION_RULE);
+                assert_eq!(capability.answer_rule_id(), answer_rule);
+                assert_eq!(capability.decision(), decision);
+                assert_eq!(capability.fixture_ids(), fixtures.as_slice());
+                let bundled = ProfileCatalog::bundled().unwrap();
+                for (backend, version, request) in [
+                    (CodingAgent::Opencode, "2.1.3", PERMISSION_RULE),
+                    (CodingAgent::Opencode, OPENCODE_VERSION, REASON_RULE),
+                    (CodingAgent::Opencode, OPENCODE_VERSION, IDLE_RULE),
+                    (CodingAgent::Codex, OPENCODE_VERSION, PERMISSION_RULE),
+                    (CodingAgent::Claude, OPENCODE_VERSION, PERMISSION_RULE),
+                ] {
+                    assert!(
+                        bundled
+                            .answer_plan(backend, version, request, decision)
+                            .unwrap()
+                            .is_none(),
+                        "{backend:?} {version} {request}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn bundled_opencode_detects_each_native_form_from_its_live_region() {
+            for (bytes, case, probe) in FORM_FIXTURES {
+                let observation = observe(&replay(bytes));
+                assert_form(&observation, case, probe);
+                assert!(observation.fingerprint.is_some());
+            }
+            let detector = detector();
+            let a = detector.observe(&replay(DENY_1_BYTES)).unwrap();
+            let b = detector.observe(&replay(DENY_2_BYTES)).unwrap();
+            assert!(
+                a.fingerprint != b.fingerprint,
+                "different cases carry different operations"
+            );
+            let cursor_elsewhere = observe(&replay_changed(DENY_1_BYTES, |_| {}, Some((5, 0))));
+            assert_form(&cursor_elsewhere, "opencode-ans-deny-001", "deny");
+        }
+
+        #[test]
+        fn bundled_opencode_focus_resolves_from_the_captured_cell_backgrounds() {
+            for (bytes, expected) in [
+                (PERMISSION_BYTES, Some("allow-once")),
+                (ALLOW_BYTES, Some("allow-once")),
+                (DENY_1_BYTES, Some("allow-once")),
+                (DENY_2_BYTES, Some("deny-once")),
+                (ALWAYS_BYTES, None),
+            ] {
+                assert_eq!(
+                    focused(&replay(bytes)).as_deref(),
+                    expected,
+                    "{}",
+                    parsed(bytes)["fixture_id"]
+                );
+            }
+            let mut text_only = parsed(PERMISSION_BYTES);
+            text_only
+                .as_object_mut()
+                .unwrap()
+                .remove("cell_backgrounds");
+            let text_only = serde_json::to_vec(&text_only).unwrap();
+            let screen = replay(&text_only);
+            assert_form(&observe(&screen), "opencode-cells-001", "allow");
+            assert_eq!(
+                focused(&screen),
+                None,
+                "the form marks focus by cell background only"
+            );
+        }
+
+        #[test]
+        fn bundled_opencode_focus_resolution_is_independent_of_the_theme_colours() {
+            for (bytes, expected) in [
+                (PERMISSION_BYTES, Some("allow-once")),
+                (DENY_2_BYTES, Some("deny-once")),
+                (ALWAYS_BYTES, None),
+            ] {
+                let mut screen = parsed(bytes);
+                for run in screen["cell_backgrounds"].as_array_mut().unwrap() {
+                    let rgb = (
+                        run["bg"]["r"].clone(),
+                        run["bg"]["g"].clone(),
+                        run["bg"]["b"].clone(),
+                    );
+                    run["bg"] = if rgb == (json!(250), json!(178), json!(131)) {
+                        json!({"kind":"indexed","index":214})
+                    } else if rgb == (json!(30), json!(30), json!(30)) {
+                        json!({"kind":"rgb","r":238,"g":238,"b":238})
+                    } else {
+                        json!({"kind":"indexed","index":250})
+                    };
+                }
+                let rethemed = serde_json::to_vec(&screen).unwrap();
+                assert_eq!(focused(&replay(&rethemed)).as_deref(), expected);
+            }
+        }
+
+        #[test]
+        fn bundled_opencode_stage_gates_hold_on_their_pre_stage_fixtures() {
+            let allow = plan(PermissionDecision::Allow);
+            assert_eq!(
+                focused(&replay(ALLOW_BYTES)).as_deref(),
+                allow.stages()[0].required_focus_choice_id()
+            );
+            let deny = plan(PermissionDecision::Deny);
+            assert_eq!(
+                focused(&replay(DENY_1_BYTES)).as_deref(),
+                deny.stages()[0].required_focus_choice_id()
+            );
+            assert_eq!(
+                focused(&replay(DENY_2_BYTES)).as_deref(),
+                deny.stages()[1].required_focus_choice_id()
+            );
+            let dialog = observe(&replay(DENY_3_BYTES));
+            assert_eq!(dialog.kind, ObservationKind::PermissionContinuation);
+            assert_eq!(dialog.match_evidence, MatchEvidence::Complete);
+            assert_eq!(
+                Some(dialog.rule_id.as_str()),
+                deny.stages()[2].required_screen_rule_id()
+            );
+            assert!(!dialog.verified_noninteraction);
+            for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                assert!(
+                    detector()
+                        .match_answer(&replay(DENY_3_BYTES), &plan(decision))
+                        .unwrap()
+                        .is_none(),
+                    "the rejection-reason dialog is not an answerable form"
+                );
+            }
+            let always = focused(&replay(ALWAYS_BYTES));
+            for stage in allow.stages().iter().chain(deny.stages()) {
+                if let Some(gate) = stage.required_focus_choice_id() {
+                    assert_ne!(
+                        always.as_deref(),
+                        Some(gate),
+                        "no focus gate holds on Always allow"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn bundled_opencode_reject_reason_requires_the_empty_placeholder_textarea() {
+            let typed = observe(&replay_changed(
+                DENY_3_BYTES,
+                |lines| {
+                    lines[21] = lines[21].replacen(
+                        "Tell OpenCode what to do differently",
+                        "run it in the sandbox instead      ",
+                        1,
+                    )
+                },
+                None,
+            ));
+            assert_ne!(typed.kind, ObservationKind::PermissionContinuation);
+            assert_ne!(typed.rule_id, REASON_RULE);
+            let appended = observe(&replay_changed(
+                DENY_3_BYTES,
+                |lines| {
+                    lines[21] = lines[21].replacen(
+                        "Tell OpenCode what to do differently ",
+                        "Tell OpenCode what to do differently!",
+                        1,
+                    )
+                },
+                None,
+            ));
+            assert_ne!(
+                appended.rule_id, REASON_RULE,
+                "the span equals the placeholder exactly"
+            );
+            let without_prompt = observe(&replay_changed(
+                DENY_3_BYTES,
+                |lines| lines[12] = String::new(),
+                None,
+            ));
+            assert_ne!(without_prompt.rule_id, REASON_RULE);
+        }
+
+        #[test]
+        fn bundled_opencode_idle_composer_is_a_verified_non_interaction_boundary() {
+            let idle = observe(&replay(IDLE_BYTES));
+            assert_eq!(idle.kind, ObservationKind::ComposerEmpty);
+            assert_eq!(idle.match_evidence, MatchEvidence::Complete);
+            assert!(idle.verified_noninteraction);
+            assert_eq!(idle.rule_id, IDLE_RULE);
+            assert_eq!(idle.raw_evidence["operation"], Value::Null);
+            assert!(idle.fingerprint.is_none());
+            let draft = observe(&replay_changed(
+                IDLE_BYTES,
+                |lines| lines[11] = "┃ hello".into(),
+                Some((11, 7)),
+            ));
+            assert_ne!(draft.kind, ObservationKind::ComposerEmpty, "typed draft");
+            assert!(!draft.verified_noninteraction);
+            let away = observe(&replay_changed(IDLE_BYTES, |_| {}, Some((11, 0))));
+            assert_ne!(
+                away.kind,
+                ObservationKind::ComposerEmpty,
+                "cursor before the prefix end"
+            );
+            assert!(!away.verified_noninteraction);
+            let working = observe(&replay(PERMISSION_BYTES));
+            assert!(!working.verified_noninteraction);
+            assert_ne!(working.kind, ObservationKind::ComposerEmpty);
+        }
+
+        #[test]
+        fn bundled_opencode_detects_nothing_from_form_or_dialog_text_outside_a_live_region() {
+            let form = lines(PERMISSION_BYTES);
+            let dialog = lines(DENY_3_BYTES);
+            let cases: [(&str, Box<dyn Fn(&mut Vec<String>)>); 6] = [
+                ("idle screen", Box::new(|_| {})),
+                (
+                    "quoted heading and command in the transcript",
+                    Box::new(|lines: &mut Vec<String>| {
+                        lines[5] = HEADING.into();
+                        lines[6] =
+                            "  $ /tmp/cafleet-194/opencode-cells-001/permission-probe allow".into();
+                    }),
+                ),
+                (
+                    "quoted form without its control line",
+                    Box::new(move |lines: &mut Vec<String>| {
+                        lines[..11].clone_from_slice(&form[10..21]);
+                    }),
+                ),
+                (
+                    "quoted control line without its heading",
+                    Box::new(|lines: &mut Vec<String>| lines[5] = CHOICE_ROW.into()),
+                ),
+                (
+                    "heading and control line too far apart",
+                    Box::new(|lines: &mut Vec<String>| {
+                        lines[0] = HEADING.into();
+                        lines[34] = CHOICE_ROW.into();
+                    }),
+                ),
+                (
+                    "quoted reject dialog without its control line",
+                    Box::new(move |lines: &mut Vec<String>| {
+                        lines[5] = dialog[10].clone();
+                        lines[7] = dialog[12].clone();
+                    }),
+                ),
+            ];
+            for (case, change) in cases {
+                let observation = observe(&replay_changed(IDLE_BYTES, |lines| change(lines), None));
+                assert!(
+                    !matches!(
+                        observation.kind,
+                        ObservationKind::Interaction(_) | ObservationKind::PermissionContinuation
+                    ),
+                    "{case} must not open a request"
+                );
+                assert_ne!(observation.rule_id, PERMISSION_RULE, "{case}");
+                assert_ne!(observation.rule_id, REASON_RULE, "{case}");
+            }
+        }
+
+        #[test]
+        fn bundled_opencode_replay_paints_each_captured_background_run() {
+            let screen = replay(PERMISSION_BYTES);
+            let bg = |row: u16, col: u16| screen.screen.cell(row, col).unwrap().bgcolor();
+            assert_eq!(bg(21, 0), vt100::Color::Rgb(30, 30, 30));
+            for col in 2..14 {
+                assert_eq!(bg(21, col), vt100::Color::Rgb(250, 178, 131), "col {col}");
+            }
+            assert_eq!(bg(21, 14), vt100::Color::Rgb(30, 30, 30));
+            assert_eq!(bg(10, 0), vt100::Color::Rgb(20, 20, 20));
+            assert_eq!(bg(3, 0), vt100::Color::Default);
+            assert_eq!(bg(23, 0), vt100::Color::Default);
+            assert_eq!(
+                screen.screen.cell(21, 3).unwrap().contents(),
+                "A",
+                "the repaint keeps the captured text"
+            );
+            let idle = replay(IDLE_BYTES);
+            for row in 0..36 {
+                for col in 0..120 {
+                    assert_eq!(
+                        idle.screen.cell(row, col).unwrap().bgcolor(),
+                        vt100::Color::Default,
+                        "an absent key means every cell has the default background"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn bundled_guard_accepts_the_opencode_fixtures_and_rejects_altered_backgrounds() {
+            for (id, _, _) in FIXTURES {
+                assert!(guarded_fixture(id, |_| {}).is_ok(), "{id}");
+                let screen_changes: [ScreenChange; 4] = [
+                    ("synthetic provenance", |s| {
+                        s["provenance"] = json!("synthetic")
+                    }),
+                    ("nonempty masked row", |s| {
+                        s["lines"][35] = json!("restored")
+                    }),
+                    ("native version", |s| s["native_version"] = json!("2.1.3")),
+                    ("extra field", |s| s["note"] = json!("unreviewed")),
+                ];
+                for (case, change) in screen_changes {
+                    assert!(guarded_fixture(id, change).is_err(), "{id} {case}");
+                }
+            }
+            let run = |row: u64, start: u64, end: u64, bg: Value| json!({"row":row,"start_col":start,"end_col":end,"bg":bg});
+            let rgb = json!({"kind":"rgb","r":1,"g":2,"b":3});
+            for (case, runs) in [
+                (
+                    "indexed colour",
+                    json!([run(30, 0, 4, json!({"kind":"indexed","index":255}))]),
+                ),
+                (
+                    "adjacent runs",
+                    json!([
+                        run(30, 0, 4, rgb.clone()),
+                        run(30, 4, 8, json!({"kind":"indexed","index":3}))
+                    ]),
+                ),
+                ("full-width run", json!([run(30, 0, 120, rgb.clone())])),
+            ] {
+                assert!(
+                    guarded_fixture(IDLE_FIXTURE, |s| s["cell_backgrounds"] = runs).is_ok(),
+                    "{case} is a valid run set"
+                );
+            }
+            for (case, runs) in [
+                (
+                    "row below the geometry",
+                    json!([run(36, 0, 4, rgb.clone())]),
+                ),
+                (
+                    "end past the width",
+                    json!([run(30, 100, 121, rgb.clone())]),
+                ),
+                ("masked row", json!([run(35, 0, 4, rgb.clone())])),
+                ("empty run", json!([run(30, 4, 4, rgb.clone())])),
+                ("reversed run", json!([run(30, 8, 4, rgb.clone())])),
+                (
+                    "overlapping runs",
+                    json!([run(30, 0, 6, rgb.clone()), run(30, 5, 9, rgb.clone())]),
+                ),
+                (
+                    "default colour",
+                    json!([run(30, 0, 4, json!({"kind":"default"}))]),
+                ),
+                (
+                    "unknown colour kind",
+                    json!([run(30, 0, 4, json!({"kind":"named","name":"red"}))]),
+                ),
+                (
+                    "rgb component out of range",
+                    json!([run(30, 0, 4, json!({"kind":"rgb","r":256,"g":0,"b":0}))]),
+                ),
+                (
+                    "rgb component missing",
+                    json!([run(30, 0, 4, json!({"kind":"rgb","r":1,"g":2}))]),
+                ),
+                (
+                    "rgb extra field",
+                    json!([run(30, 0, 4, json!({"kind":"rgb","r":1,"g":2,"b":3,"a":4}))]),
+                ),
+                (
+                    "indexed out of range",
+                    json!([run(30, 0, 4, json!({"kind":"indexed","index":256}))]),
+                ),
+                (
+                    "negative column",
+                    json!([{"row":30,"start_col":-1,"end_col":4,"bg":rgb.clone()}]),
+                ),
+                (
+                    "run extra field",
+                    json!([{"row":30,"start_col":0,"end_col":4,"bg":rgb.clone(),"fg":rgb.clone()}]),
+                ),
+                (
+                    "run missing field",
+                    json!([{"row":30,"start_col":0,"bg":rgb.clone()}]),
+                ),
+                ("not an array", json!({"row":30})),
+            ] {
+                assert!(
+                    guarded_fixture(IDLE_FIXTURE, |s| s["cell_backgrounds"] = runs).is_err(),
+                    "{case} must be rejected"
+                );
+            }
+            assert!(
+                guarded_fixture(PERMISSION_FIXTURE, |s| {
+                    s["cell_backgrounds"]
+                        .as_array_mut()
+                        .unwrap()
+                        .push(json!({"row":21,"start_col":5,"end_col":7,"bg":{"kind":"indexed","index":1}}));
+                })
+                .is_err(),
+                "a run overlapping a captured run is rejected"
+            );
+            let mut tampered = PERMISSION_BYTES.to_vec();
+            tampered.push(b'\n');
+            let cited = source(PERMISSION_FIXTURE);
+            let mut with_tampered = super::bundled_claude::embedded();
+            with_tampered.retain(|&(reference, _)| reference != cited);
+            with_tampered.push((cited, &tampered));
+            assert!(
+                ProfileCatalog::from_bundled_definitions(&definitions(), &with_tampered).is_err()
+            );
+        }
+
+        #[test]
+        fn bundled_opencode_episode_survives_the_dialog_and_closes_not_visible_on_the_idle_composer()
+         {
+            let at = |bytes: &[u8], output_seq: u64| {
+                let mut replayed = observe(&replay(bytes));
+                replayed.output_seq = output_seq;
+                replayed.raw_evidence["screen_seq"] = json!(output_seq);
+                replayed
+            };
+            let origin = Instant::now();
+            let mut tracker = tracker();
+            open(&mut tracker, &at(PERMISSION_BYTES, 1), origin);
+            let episode = tracker.active_episode();
+            for (index, millis) in [200u64, 400, 3000].into_iter().enumerate() {
+                let update = tracker
+                    .observe(
+                        &at(DENY_3_BYTES, 2 + index as u64),
+                        origin + Duration::from_millis(millis),
+                        NOW,
+                    )
+                    .unwrap();
+                assert!(
+                    update.transitions.is_empty(),
+                    "{millis} ms: {:?}",
+                    update.transitions
+                );
+                assert_eq!(update.visibility, Visibility::Visible, "{millis} ms");
+                assert_eq!(tracker.active_episode(), episode);
+            }
+            let first = tracker
+                .observe(
+                    &at(IDLE_BYTES, 10),
+                    origin + Duration::from_millis(3100),
+                    NOW,
+                )
+                .unwrap();
+            assert!(first.transitions.is_empty());
+            let held = tracker
+                .observe(
+                    &at(IDLE_BYTES, 11),
+                    origin + Duration::from_millis(3350),
+                    NOW,
+                )
+                .unwrap();
+            let closes = held
+                .transitions
+                .iter()
+                .filter(|t| t.kind == RuntimeEventKind::InteractionClosed)
+                .collect::<Vec<_>>();
             assert_eq!(closes.len(), 1, "{:?}", held.transitions);
             assert_eq!(
                 closes[0].close_reason,

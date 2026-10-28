@@ -22,7 +22,10 @@ pub(crate) use profiles::{
     Detector, MatchEvidence, ObservationKind, ScreenObservation, SemanticFingerprint,
 };
 #[cfg(test)]
-pub(crate) use profiles::{inspection_fixture_definition, inspection_fixture_form};
+pub(crate) use profiles::{
+    gated_fixture_definition, gated_fixture_form, gated_reason_dialog,
+    inspection_fixture_definition, inspection_fixture_form,
+};
 
 #[cfg(test)]
 mod policy_contract_tests {
