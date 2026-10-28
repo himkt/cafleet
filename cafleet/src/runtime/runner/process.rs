@@ -27,25 +27,7 @@ impl ProcessIdentity {
     }
     #[cfg(target_os = "macos")]
     pub(crate) fn read(pid: i64) -> Result<Option<Self>> {
-        use libproc::libproc::{bsd_info::BSDInfo, proc_pid::pidinfo};
-        let pid32 = i32::try_from(pid).map_err(io_error)?;
-        match pidinfo::<BSDInfo>(pid32, 0) {
-            Ok(info) => Ok(Some(Self {
-                pid,
-                start_identity: format!("{}:{}", info.pbi_start_tvsec, info.pbi_start_tvusec),
-            })),
-            Err(cause) => {
-                if std::io::Error::last_os_error().raw_os_error() == Some(nix::libc::ESRCH) {
-                    return Ok(None);
-                }
-                match nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid32), None) {
-                    Err(nix::errno::Errno::ESRCH) => Ok(None),
-                    _ => Err(error(format!(
-                        "cannot establish process start identity: {cause}"
-                    ))),
-                }
-            }
-        }
+        Ok(kernel_process(pid)?.map(|process| process.identity))
     }
     #[cfg(not(target_os = "macos"))]
     pub(crate) fn read(pid: i64) -> Result<Option<Self>> {
@@ -72,6 +54,73 @@ impl ProcessIdentity {
     }
 }
 
+#[cfg(target_os = "macos")]
+struct KernelProcess {
+    identity: ProcessIdentity,
+    zombie: bool,
+}
+// LP64 Darwin kinfo_proc: kp_proc.p_starttime (timeval) at 0, p_stat at 36, p_pid at 40.
+#[cfg(target_os = "macos")]
+const KINFO_PROC_BYTES: usize = 648;
+// proc_pidinfo(PROC_PIDTBSDINFO) refuses group members with another effective UID (setuid
+// helpers), while kern.proc.pid reports the same p_start for every process.
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+fn kinfo_proc_bytes(pid: i32) -> io::Result<([u8; KINFO_PROC_BYTES], usize)> {
+    let mut mib = [
+        nix::libc::CTL_KERN,
+        nix::libc::KERN_PROC,
+        nix::libc::KERN_PROC_PID,
+        pid,
+    ];
+    let mut buffer = [0u8; KINFO_PROC_BYTES];
+    let mut length: nix::libc::size_t = KINFO_PROC_BYTES;
+    // SAFETY: `mib` is a live four-element array and its length is passed exactly; `buffer` is
+    // a live, writable byte array whose capacity is passed in `length`, and the kernel writes at
+    // most `length` bytes and stores the written count back into `length`; no new value is set.
+    let status = unsafe {
+        nix::libc::sysctl(
+            mib.as_mut_ptr(),
+            mib.len() as nix::libc::c_uint,
+            buffer.as_mut_ptr().cast(),
+            &mut length,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if status != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok((buffer, length))
+}
+#[cfg(target_os = "macos")]
+fn kernel_process(pid: i64) -> Result<Option<KernelProcess>> {
+    const SZOMB: u8 = 5;
+    let pid32 = i32::try_from(pid).map_err(io_error)?;
+    let (bytes, length) = kinfo_proc_bytes(pid32)
+        .map_err(|cause| error(format!("cannot establish process start identity: {cause}")))?;
+    if length == 0 {
+        return Ok(None);
+    }
+    ensure(
+        length == KINFO_PROC_BYTES,
+        "kern.proc.pid returned an unexpected kinfo_proc size",
+    )?;
+    let reported = i32::from_ne_bytes(bytes[40..44].try_into().expect("four-byte p_pid"));
+    ensure(
+        i64::from(reported) == pid,
+        "kern.proc.pid returned another process",
+    )?;
+    let seconds = i64::from_ne_bytes(bytes[0..8].try_into().expect("eight-byte tv_sec"));
+    let micros = i32::from_ne_bytes(bytes[8..12].try_into().expect("four-byte tv_usec"));
+    Ok(Some(KernelProcess {
+        identity: ProcessIdentity {
+            pid,
+            start_identity: format!("{seconds}:{micros}"),
+        },
+        zombie: bytes[36] == SZOMB,
+    }))
+}
 #[cfg(target_os = "macos")]
 fn group_members(group: i32) -> Result<Vec<i64>> {
     // libproc interprets an empty group through errno, which preceding I/O can leave stale.
@@ -100,11 +149,7 @@ fn group_members(group: i32) -> Result<Vec<i64>> {
 }
 #[cfg(target_os = "macos")]
 fn stopped(pid: i64) -> Result<bool> {
-    use libproc::libproc::{bsd_info::BSDInfo, proc_pid::pidinfo};
-    match pidinfo::<BSDInfo>(i32::try_from(pid).map_err(io_error)?, 0) {
-        Ok(info) => Ok(info.pbi_status == 5),
-        Err(_) => Ok(ProcessIdentity::read(pid)?.is_none()),
-    }
+    Ok(kernel_process(pid)?.is_none_or(|process| process.zombie))
 }
 #[cfg(not(target_os = "macos"))]
 fn stopped(pid: i64) -> Result<bool> {
