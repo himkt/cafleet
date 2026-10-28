@@ -29,9 +29,6 @@ use std::sync::Arc;
 use std::time::Instant;
 
 #[cfg(test)]
-mod contract_tests;
-
-#[cfg(test)]
 mod permission_inspection_contracts {
     use super::contract_tests::ordinary_prompt::support::{
         Host, HostProfile, catalog_definition, with_profile_host,
@@ -6169,5 +6166,1841 @@ mod retirement_contracts {
             assert!(h.coordinator.operations.is_empty());
             assert!(h.pty.offers.is_empty());
         });
+    }
+}
+
+#[cfg(test)]
+mod contract_tests {
+    mod manual_progress {
+        use super::super::*;
+        use crate::broker::runtime::{self as storage, RunStatus};
+        use crate::coding_agent::ProfileCatalog;
+        use crate::error::CafleetError;
+        use crate::runtime::runner::*;
+        use crate::runtime::runner_tests::{Fixture, owned_child::OwnedChild};
+        use std::collections::VecDeque;
+        use std::io::{self, ErrorKind};
+        use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+        use std::process::{Command, Stdio};
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
+
+        struct UnusedTokens;
+
+        impl RequestTokenSource for UnusedTokens {
+            fn fill(&mut self, _: &mut [u8; 32]) -> Result<()> {
+                panic!("manual progress obtains no request token")
+            }
+        }
+
+        #[derive(Default)]
+        struct Human {
+            queued: VecDeque<u8>,
+            consumed: Vec<u8>,
+        }
+
+        impl ByteInput for Human {
+            fn try_read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+                assert!(!bytes.is_empty());
+                if self.queued.is_empty() {
+                    return Err(ErrorKind::WouldBlock.into());
+                }
+                let count = bytes.len().min(self.queued.len());
+                for byte in &mut bytes[..count] {
+                    *byte = self.queued.pop_front().expect("queued human byte");
+                }
+                self.consumed.extend_from_slice(&bytes[..count]);
+                Ok(count)
+            }
+        }
+
+        #[derive(Default)]
+        struct Pty {
+            blocked: bool,
+            failure: Option<ErrorKind>,
+            offered: Vec<Vec<u8>>,
+            written: Vec<u8>,
+            reads: usize,
+        }
+
+        impl ByteInput for Pty {
+            fn try_read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+                self.reads += 1;
+                Err(ErrorKind::WouldBlock.into())
+            }
+        }
+
+        impl PtyIo for Pty {
+            fn try_write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                assert!(!bytes.is_empty());
+                self.offered.push(bytes.to_vec());
+                if let Some(kind) = self.failure {
+                    return Err(io::Error::new(kind, "manual progress PTY failure"));
+                }
+                if self.blocked {
+                    return Err(ErrorKind::WouldBlock.into());
+                }
+                self.written.extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+
+            fn resize(&mut self, _: TerminalSize) -> Result<()> {
+                Ok(())
+            }
+
+            fn close(&mut self) -> Result<()> {
+                Ok(())
+            }
+        }
+
+        struct Output;
+
+        impl Display for Output {
+            fn try_write(&mut self, _: &[u8]) -> io::Result<usize> {
+                panic!("the quiet child supplies no display bytes")
+            }
+
+            fn try_flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        struct NativeChild {
+            child: OwnedChild,
+            until: Instant,
+        }
+
+        impl NativeChild {
+            fn spawn(until: Instant) -> Self {
+                Self {
+                    child: OwnedChild::new(
+                        Command::new("/bin/cat")
+                            .stdin(Stdio::piped())
+                            .stdout(Stdio::null())
+                            .stderr(Stdio::null())
+                            .spawn()
+                            .unwrap(),
+                    ),
+                    until,
+                }
+            }
+        }
+
+        impl Drop for NativeChild {
+            fn drop(&mut self) {
+                self.child.terminate_until(self.until);
+            }
+        }
+
+        struct Harness {
+            fixture: Fixture,
+            _artifacts: RunArtifacts,
+            lock: Arc<RunLock>,
+            writer: EventWriter,
+            controller: ObservationController,
+            transport: Transport,
+            child: NativeChild,
+            until: Instant,
+        }
+
+        impl Harness {
+            fn new() -> Self {
+                let until = Instant::now() + Duration::from_secs(4);
+                let mut fixture = Fixture::new();
+                let artifacts = fixture.artifacts();
+                let lock = Arc::new(
+                    RunLock::acquire(&fixture.conn, &fixture.run.owner())
+                        .unwrap()
+                        .expect("original run lock"),
+                );
+                lock.transfer_to_runner(
+                    &mut fixture.conn,
+                    &fixture.run.owner(),
+                    ProcessIdentity::current().unwrap(),
+                )
+                .unwrap();
+                fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+                storage::reserve_event_sequences(&mut fixture.conn, &fixture.run.owner()).unwrap();
+                fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+                let mut controller = ObservationController::new(
+                    &fixture.run,
+                    &ProfileCatalog::bundled().unwrap(),
+                    storage::evidence::EvidencePolicy::metadata(),
+                    1..=256,
+                )
+                .unwrap();
+                let mut writer = EventWriter::start(
+                    format!("sqlite:///{}", fixture.conn.path().unwrap()),
+                    fixture.run.clone(),
+                    lock.clone(),
+                    artifacts.paths.outbox.clone(),
+                )
+                .unwrap();
+                writer.set_deadline(until);
+                let child = NativeChild::spawn(until);
+                let identity = ProcessIdentity::read(i64::from(child.child.id()))
+                    .unwrap()
+                    .expect("owned live native child");
+                assert!(identity.matches().unwrap());
+                fixture.conn.execute(
+                    "UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3 WHERE run_id=?4",
+                    rusqlite::params![identity.pid, identity.start_identity, crate::time::format_utc(crate::time::now_utc()), fixture.run.run_id],
+                ).unwrap();
+                fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+                assert_eq!(fixture.run.status, RunStatus::Running);
+                let transport = Transport::new(
+                    TerminalSize { rows: 24, cols: 80 },
+                    TransportLimits {
+                        input_bytes: 64,
+                        display_bytes: 64,
+                        bytes_per_tick: 64,
+                    },
+                )
+                .unwrap();
+                controller
+                    .started(
+                        &fixture.run,
+                        &transport.snapshot(),
+                        &writer,
+                        &RealObservationClock,
+                    )
+                    .unwrap();
+                Self {
+                    fixture,
+                    _artifacts: artifacts,
+                    lock,
+                    writer,
+                    controller,
+                    transport,
+                    child,
+                    until,
+                }
+            }
+
+            fn coordinator(&mut self) -> InputCoordinator {
+                InputCoordinator::new(
+                    &mut self.fixture.conn,
+                    &self.fixture.run,
+                    self.lock.clone(),
+                    InputServices {
+                        catalog: ProfileCatalog::bundled().unwrap(),
+                        token_source: Box::new(UnusedTokens),
+                        hooks: Arc::new(InertInputHooks),
+                    },
+                    self.until,
+                )
+                .unwrap()
+            }
+
+            fn quiet_control(&mut self) {
+                loop {
+                    self.controller
+                        .poll(
+                            &self.transport.snapshot(),
+                            &self.writer,
+                            &RealObservationClock,
+                        )
+                        .unwrap();
+                    let health = self.controller.health(&self.writer);
+                    if !health.degraded && health.pending_count == 0 && !health.pending_evidence {
+                        break;
+                    }
+                    assert!(Instant::now() < self.until, "writer health: {health:?}");
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                assert_eq!(
+                    self.transport
+                        .quiesce_for_input(
+                            &mut Human::default(),
+                            &mut Pty::default(),
+                            &mut Output,
+                            &mut self
+                                .controller
+                                .observer(&self.writer, &RealObservationClock),
+                            self.until,
+                        )
+                        .unwrap(),
+                    InputDrain::Quiescent {
+                        human_generation: 0,
+                        output_seq: 0,
+                    }
+                );
+            }
+
+            fn finish(&mut self) {
+                let counts = self.writer.finish(self.until);
+                let status = self.writer.status();
+                self.child.child.terminate_until(self.until);
+                let reaped = self.child.child.try_wait();
+                assert_eq!(counts, (0, 0), "writer cleanup: {status:?}");
+                assert!(
+                    !status.degraded && status.diagnostic.is_none(),
+                    "writer finish confirms join or reports degradation: {status:?}"
+                );
+                assert!(reaped.unwrap().is_some(), "owned native child was reaped");
+            }
+        }
+
+        fn with_harness(body: impl FnOnce(&mut Harness)) {
+            let mut harness = Harness::new();
+            let primary = catch_unwind(AssertUnwindSafe(|| body(&mut harness)));
+            let cleanup = catch_unwind(AssertUnwindSafe(|| harness.finish()));
+            if let Err(primary) = primary {
+                if let Err(cleanup) = &cleanup {
+                    eprintln!("manual-progress cleanup also failed: {cleanup:?}");
+                }
+                resume_unwind(primary);
+            }
+            if let Err(cleanup) = cleanup {
+                resume_unwind(cleanup);
+            }
+        }
+
+        #[test]
+        fn step5_manual_progress_counts_only_new_reads_across_pending_zero_and_successive_steps() {
+            with_harness(|h| {
+                h.quiet_control();
+                let mut coordinator = h.coordinator();
+                assert_eq!(coordinator.manual_generation, 0);
+                let mut human = Human::default();
+                human.queued.extend(b"first");
+                let mut pty = Pty {
+                    blocked: true,
+                    ..Pty::default()
+                };
+                let mut calls = 0;
+                let result = coordinator
+                    .progress_with_manual(&mut h.transport, |transport| {
+                        calls += 1;
+                        transport.quiesce_for_input(
+                            &mut human,
+                            &mut pty,
+                            &mut Output,
+                            &mut h.controller.observer(&h.writer, &RealObservationClock),
+                            h.until,
+                        )
+                    })
+                    .unwrap();
+                assert_eq!(result, InputDrain::Pending);
+                assert_eq!(calls, 1);
+                assert_eq!(human.consumed, b"first");
+                assert_eq!(h.transport.human_generation(), 5);
+                assert_eq!(coordinator.manual_generation, 5);
+                assert_eq!(h.transport.pending_input_bytes(), 5);
+                assert!(pty.written.is_empty());
+
+                let zero = coordinator
+                    .progress_with_manual(&mut h.transport, |transport| {
+                        calls += 1;
+                        transport.tick(
+                            &mut human,
+                            &mut pty,
+                            &mut Output,
+                            &mut h.controller.observer(&h.writer, &RealObservationClock),
+                        )
+                    })
+                    .unwrap();
+                assert_eq!(zero.human_bytes, 0);
+                assert_eq!(calls, 2);
+                assert_eq!(h.transport.human_generation(), 5);
+                assert_eq!(coordinator.manual_generation, 5);
+                assert_eq!(h.transport.pending_input_bytes(), 5);
+
+                human.queued.extend(b"+next");
+                pty.blocked = false;
+                let next = coordinator
+                    .progress_with_manual(&mut h.transport, |transport| {
+                        calls += 1;
+                        transport.tick(
+                            &mut human,
+                            &mut pty,
+                            &mut Output,
+                            &mut h.controller.observer(&h.writer, &RealObservationClock),
+                        )
+                    })
+                    .unwrap();
+                assert_eq!(next.human_bytes, 5);
+                assert_eq!(calls, 3);
+                assert_eq!(human.consumed, b"first+next");
+                assert_eq!(h.transport.human_generation(), 10);
+                assert_eq!(coordinator.manual_generation, 10);
+                assert_eq!(h.transport.pending_input_bytes(), 0);
+                assert_eq!(pty.written, b"first+next");
+            });
+        }
+
+        #[test]
+        fn step5_manual_progress_accounts_real_human_read_before_returning_the_pty_failure() {
+            with_harness(|h| {
+                h.quiet_control();
+                let mut coordinator = h.coordinator();
+                let mut human = Human::default();
+                human.queued.extend(b"typed");
+                let mut pty = Pty {
+                    failure: Some(ErrorKind::BrokenPipe),
+                    ..Pty::default()
+                };
+                let mut calls = 0;
+                let result = coordinator.progress_with_manual(&mut h.transport, |transport| {
+                    calls += 1;
+                    transport.tick(
+                        &mut human,
+                        &mut pty,
+                        &mut Output,
+                        &mut h.controller.observer(&h.writer, &RealObservationClock),
+                    )
+                });
+                let failure = match result {
+                    Ok(_) => panic!("actual PTY failure remains the progress result"),
+                    Err(failure) => failure,
+                };
+                assert_eq!(calls, 1);
+                assert_eq!(human.consumed, b"typed");
+                assert_eq!(h.transport.human_generation(), 5);
+                assert_eq!(coordinator.manual_generation, 5);
+                assert_eq!(h.transport.pending_input_bytes(), 5);
+                assert_eq!(pty.offered, vec![b"typed".to_vec()]);
+                assert!(pty.written.is_empty());
+                assert_eq!(pty.reads, 0);
+                assert!(matches!(&failure.source, CafleetError::App(message)
+                    if message == "member runtime: manual progress PTY failure"));
+                assert_eq!(failure.source.exit_code(), 1);
+                assert_eq!(failure.run_id, Some(h.fixture.run.run_id));
+                assert_eq!(failure.interaction_id, None);
+                assert_eq!(failure.input_id, None);
+                assert_eq!(failure.operation_key, None);
+            });
+        }
+
+        #[test]
+        fn step5_manual_progress_composes_only_the_constructed_accounting_error_branches() {
+            let only = combine_manual_progress(
+                Ok(17),
+                Err(CafleetError::DatabaseBusy("accounting only".into())),
+            )
+            .expect_err("accounting error remains visible after successful progress");
+            assert!(
+                matches!(&only, CafleetError::DatabaseBusy(message) if message == "accounting only")
+            );
+            assert_eq!(only.exit_code(), 1);
+            let both = combine_manual_progress::<()>(
+                Err(CafleetError::Usage("primary progress".into())),
+                Err(CafleetError::DatabaseBusy("secondary accounting".into())),
+            )
+            .expect_err("both errors remain visible");
+            assert_eq!(both.exit_code(), 2);
+            match both {
+                CafleetError::WithDiagnostics { cause, diagnostics } => {
+                    assert!(
+                        matches!(*cause, CafleetError::Usage(ref message) if message == "primary progress")
+                    );
+                    assert_eq!(diagnostics, vec!["secondary accounting"]);
+                }
+                other => {
+                    panic!(
+                        "dual errors retain the primary cause and accounting diagnostic: {other:?}"
+                    )
+                }
+            }
+        }
+    }
+
+    pub(in crate::runtime::runner::input) mod ordinary_prompt {
+        use super::super::*;
+        use crate::broker::runtime as storage;
+        use crate::coding_agent::ProfileCatalog;
+        use crate::error::CafleetError;
+        use crate::runtime::runner::*;
+        use crate::runtime::runner_tests::Fixture;
+        use std::collections::VecDeque;
+        use std::io;
+        use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
+
+        use support::*;
+
+        fn submitted(reply: InputControlReply) -> SubmissionResult {
+            match reply {
+                InputControlReply::Submission(value) => value,
+                _ => panic!("ordinary Prompt returns its actual submission"),
+            }
+        }
+
+        #[test]
+        fn step5_prompt_reservation_and_each_hook_require_a_fresh_drain_before_one_real_write() {
+            with_host(|h| {
+                let id = h.arm("prompt:fixture-complete");
+                assert!(h.advance().is_none());
+                assert!(h.pty.program.is_empty());
+                h.drain();
+                let expected_seq = h.transport.snapshot().screen_seq;
+                let reply = submitted(h.advance().expect("actual completed write reply"));
+                assert!(matches!(reply.status, SubmissionStatus::Accepted));
+                assert!(matches!(reply.stage, SubmissionStage::Submitted));
+                assert_eq!(reply.input_id, Some(id));
+                assert_eq!(reply.output_seq, Some(expected_seq));
+                assert_eq!(h.pty.program, vec![encoded()]);
+                assert!(matches!(
+                    storage::get_input(&h.fixture.conn, id).unwrap().state,
+                    storage::InputState::Accepted
+                ));
+                let retained = h.coordinator.retained_checkpoint(id).unwrap();
+                assert!(matches!(retained.stage, SubmissionStage::Submitted));
+                assert_eq!(
+                    retained.written_bytes,
+                    u64::try_from(encoded().len()).unwrap()
+                );
+                assert_eq!(retained.output_seq, expected_seq);
+                let repeat = h.request("prompt:fixture-complete");
+                let replay = submitted(
+                    h.coordinator
+                        .handle(
+                            &mut h.fixture.conn,
+                            &h.fixture.run,
+                            repeat,
+                            &h.controller,
+                            h.until,
+                        )
+                        .unwrap()
+                        .expect("retained key lookup"),
+                );
+                assert!(matches!(replay.status, SubmissionStatus::Accepted));
+                assert_eq!(replay.input_id, Some(id));
+                assert_eq!(h.pty.program.len(), 1);
+                assert_eq!(h.hooks.count("reserved"), 1);
+                assert_eq!(h.hooks.count("before"), 1);
+                assert_eq!(h.hooks.count("after"), 1);
+            });
+        }
+
+        #[test]
+        fn step5_prompt_positive_short_write_retains_partial_uncertainty_without_a_second_stage() {
+            with_host(|h| {
+                let id = h.arm("prompt:fixture-short");
+                h.pty.short = Some(3);
+                h.drain();
+                let reply = submitted(h.advance().expect("actual short-write outcome"));
+                assert!(matches!(reply.status, SubmissionStatus::Uncertain));
+                assert!(matches!(reply.stage, SubmissionStage::Partial));
+                assert_eq!(reply.input_id, Some(id));
+                let point = h.coordinator.retained_checkpoint(id).unwrap();
+                assert!(matches!(point.stage, SubmissionStage::Partial));
+                assert_eq!(point.written_bytes, 3);
+                assert!(matches!(
+                    storage::get_input(&h.fixture.conn, id).unwrap().state,
+                    storage::InputState::Uncertain
+                ));
+                h.drain();
+                assert!(h.advance().is_none());
+                assert_eq!(h.pty.program, vec![encoded()]);
+                assert_eq!(h.hooks.count("after"), 1);
+                let after = h
+                    .hooks
+                    .points
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .find(|p| p.boundary == "after")
+                    .unwrap()
+                    .clone();
+                assert_eq!(after.count, 3);
+                assert_eq!(after.seq, point.output_seq);
+            });
+        }
+
+        #[test]
+        fn step5_prompt_reservation_race_returns_existing_uncertainty_without_write_authority() {
+            use sha2::{Digest, Sha256};
+
+            with_host(|h| {
+                let key = "prompt:interleaved-reservation";
+                let request = h.request(key);
+                assert!(
+                    h.coordinator
+                        .handle(
+                            &mut h.fixture.conn,
+                            &h.fixture.run,
+                            request,
+                            &h.controller,
+                            h.until,
+                        )
+                        .unwrap()
+                        .is_none()
+                );
+                assert!(
+                    storage::find_input(&h.fixture.conn, h.fixture.run.run_id, key)
+                        .unwrap()
+                        .is_none()
+                );
+                let canonical = format!(
+                    "{{\"kind\":\"prompt\",\"literal\":{},\"message_id\":null,\"run_id\":{}}}",
+                    serde_json::to_string(LITERAL).unwrap(),
+                    h.fixture.run.run_id,
+                );
+                let new = storage::NewInput {
+                    operation_key: key.into(),
+                    kind: storage::InputKind::Prompt,
+                    payload_digest: Sha256::digest(canonical.as_bytes())
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect(),
+                    message_id: None,
+                };
+                let mut independent =
+                    crate::db::connect(&format!("sqlite:///{}", h.fixture.conn.path().unwrap()))
+                        .unwrap();
+                let original =
+                    storage::reserve_input(&mut independent, &h.fixture.run.owner(), &new).unwrap();
+                assert!(matches!(original.state, storage::InputState::InProgress));
+                assert_eq!(
+                    storage::find_input(&h.fixture.conn, h.fixture.run.run_id, key).unwrap(),
+                    Some(original.clone())
+                );
+                let reply = submitted(
+                    (0..3)
+                        .find_map(|_| {
+                            h.drain();
+                            h.advance()
+                        })
+                        .expect("retained reservation resolves within three real drained turns"),
+                );
+                let after = storage::get_input(&independent, original.input_id).unwrap();
+                assert!(
+                    reply.input_id == Some(original.input_id)
+                        && matches!(reply.status, SubmissionStatus::Uncertain)
+                        && matches!(reply.stage, SubmissionStage::Unknown)
+                        && h.pty.offers.is_empty()
+                        && after == original,
+                    "existing reservation retains its history without fresh write authority: status={}; input_id={:?}; stage={:?}; offers={:?}; before={original:?}; after={after:?}",
+                    reply.status.as_str(),
+                    reply.input_id,
+                    reply.stage,
+                    h.pty.offers,
+                );
+            });
+        }
+
+        mod guards {
+            use super::*;
+
+            fn rejected(result: Result<ProgrammaticWrite>) {
+                assert!(
+                    result.is_err(),
+                    "genuine guarded write is refused before native I/O"
+                );
+            }
+
+            fn binding(
+                h: &mut Host,
+                other: Option<&mut Transport>,
+                wrong_bytes: bool,
+                stale: bool,
+            ) {
+                let id = h.arm("prompt:guard-binding");
+                h.drain();
+                let before = storage::get_input(&h.fixture.conn, id).unwrap();
+                let mut guard = h
+                    .coordinator
+                    .acquire_write_guard(
+                        &mut h.fixture.conn,
+                        &h.fixture.run,
+                        &mut h.transport,
+                        &h.controller,
+                        h.until,
+                    )
+                    .unwrap()
+                    .expect("actual Armed acquisition");
+                if stale {
+                    h.transport
+                        .tick(
+                            &mut h.human,
+                            &mut h.pty,
+                            &mut h.output,
+                            &mut h.controller.observer(&h.writer, &RealObservationClock),
+                        )
+                        .unwrap();
+                }
+                let bytes = if wrong_bytes {
+                    b"unselected bytes".to_vec()
+                } else {
+                    encoded()
+                };
+                match other {
+                    Some(other) => {
+                        rejected(other.write_programmatic(&mut h.pty, &bytes, &mut guard, h.until))
+                    }
+                    None => rejected(
+                        h.transport
+                            .write_programmatic(&mut h.pty, &bytes, &mut guard, h.until),
+                    ),
+                }
+                rejected(h.transport.write_programmatic(
+                    &mut h.pty,
+                    &encoded(),
+                    &mut guard,
+                    h.until,
+                ));
+                assert!(h.pty.offers.is_empty());
+                drop(guard);
+                let point = h.coordinator.retained_checkpoint(id).unwrap();
+                assert!(matches!(point.stage, SubmissionStage::ZeroBytes));
+                assert_eq!(point.written_bytes, 0);
+                assert_eq!(storage::get_input(&h.fixture.conn, id).unwrap(), before);
+            }
+
+            #[test]
+            fn step5_prompt_genuine_guard_binds_transport_turn_and_selected_bytes_and_consumes_rejection()
+             {
+                with_host(|h| {
+                    with_host(|other| binding(h, Some(&mut other.transport), false, false))
+                });
+                with_host(|h| binding(h, None, true, false));
+                with_host(|h| binding(h, None, false, true));
+            }
+
+            #[test]
+            fn step5_prompt_guard_drop_distinguishes_consumed_pre_io_from_unrecorded_possible_io() {
+                for possible in [false, true] {
+                    with_host(|h| {
+                        let id = h.arm("prompt:guard-drop");
+                        h.drain();
+                        let before = storage::get_input(&h.fixture.conn, id).unwrap();
+                        let hooks = h.hooks.points.lock().unwrap().len();
+                        let mut guard = h
+                            .coordinator
+                            .acquire_write_guard(
+                                &mut h.fixture.conn,
+                                &h.fixture.run,
+                                &mut h.transport,
+                                &h.controller,
+                                h.until,
+                            )
+                            .unwrap()
+                            .expect("real reservation and fresh drain");
+                        let bound = if possible {
+                            h.until
+                        } else {
+                            Instant::now() + Duration::from_millis(30)
+                        };
+                        let effective = guard.begin_write(&h.transport, &encoded(), bound).unwrap();
+                        assert!(effective <= bound);
+                        if possible {
+                            guard.mark_io_possible();
+                        } else {
+                            assert!(
+                                guard
+                                    .begin_write(&h.transport, &encoded(), h.until)
+                                    .is_err(),
+                                "successful pre-I/O validation consumes the permit too"
+                            );
+                            std::thread::sleep(
+                                effective.saturating_duration_since(Instant::now())
+                                    + Duration::from_millis(1),
+                            );
+                        }
+                        drop(guard);
+                        let point = h.coordinator.retained_checkpoint(id).unwrap();
+                        if possible {
+                            assert!(matches!(point.stage, SubmissionStage::Unknown));
+                        } else {
+                            assert!(matches!(point.stage, SubmissionStage::ZeroBytes));
+                        }
+                        assert_eq!(point.written_bytes, 0);
+                        assert_eq!(point.output_seq, h.transport.snapshot().screen_seq);
+                        assert!(h.pty.offers.is_empty());
+                        assert_eq!(
+                            h.hooks.points.lock().unwrap().len(),
+                            hooks,
+                            "drop creates no checkpoint hook"
+                        );
+                        assert_eq!(
+                            storage::get_input(&h.fixture.conn, id).unwrap(),
+                            before,
+                            "durable InProgress stays unchanged"
+                        );
+                    });
+                }
+            }
+        }
+
+        mod preview_exec {
+            use super::*;
+            use crate::coding_agent::CodingAgent;
+
+            fn request(
+                host: &Host,
+                key: String,
+                kind: storage::InputKind,
+                message_id: Option<i64>,
+            ) -> InputControlRequest {
+                let mut request = host.request(&key);
+                let input = SubmitInput {
+                    operation_key: key,
+                    input_kind: kind,
+                    message_id,
+                    literal: LITERAL.into(),
+                };
+                request.operation = if kind == storage::InputKind::Exec {
+                    InputControlOperation::SubmitExec(input)
+                } else {
+                    InputControlOperation::SubmitPrompt(input)
+                };
+                request
+            }
+
+            fn complete(host: &mut Host, request: InputControlRequest) -> SubmissionResult {
+                assert!(
+                    host.coordinator
+                        .handle(
+                            &mut host.fixture.conn,
+                            &host.fixture.run,
+                            request,
+                            &host.controller,
+                            host.until,
+                        )
+                        .unwrap()
+                        .is_none()
+                );
+                let reply = submitted(
+                    (0..3)
+                        .find_map(|_| {
+                            host.drain();
+                            host.advance()
+                        })
+                        .expect("operation completes through three genuine drained turns"),
+                );
+                assert_eq!(reply.status, SubmissionStatus::Accepted);
+                assert_eq!(reply.stage, SubmissionStage::Submitted);
+                reply
+            }
+
+            fn refuse(host: &mut Host, request: InputControlRequest) {
+                let result = host.coordinator.handle(
+                    &mut host.fixture.conn,
+                    &host.fixture.run,
+                    request,
+                    &host.controller,
+                    host.until,
+                );
+                let result = match result {
+                    Ok(None) => (0..3)
+                        .find_map(|_| {
+                            host.drain();
+                            match host.coordinator.advance(
+                                &mut host.fixture.conn,
+                                &host.fixture.run,
+                                &mut host.transport,
+                                &mut host.pty,
+                                &host.controller,
+                                host.until,
+                            ) {
+                                Ok(None) => None,
+                                result => Some(result),
+                            }
+                        })
+                        .expect("ineligible operation resolves within bounded drained turns"),
+                    result => result,
+                };
+                match result {
+                    Err(_) => {}
+                    Ok(Some(reply)) => assert!(matches!(
+                        submitted(reply).status,
+                        SubmissionStatus::Held | SubmissionStatus::Rejected
+                    )),
+                    Ok(None) => panic!("ineligible operation returns a refusal"),
+                }
+                assert!(host.pty.offers.is_empty());
+                assert_eq!(
+                    host.fixture
+                        .conn
+                        .query_row("SELECT COUNT(*) FROM member_input_operations", [], |row| {
+                            row.get::<_, i64>(0)
+                        })
+                        .unwrap(),
+                    0
+                );
+            }
+
+            #[test]
+            fn step5_operations_preview_binds_the_exact_run_message_key_and_durable_recipient() {
+                with_host(|host| {
+                    let message = crate::broker::send_message(
+                        &mut host.fixture.conn,
+                        host.fixture.run.director_member_id,
+                        host.fixture.run.member_id,
+                        LITERAL,
+                    )
+                    .unwrap();
+                    let key = format!("preview:{}:{}", host.fixture.run.run_id, message.message_id);
+                    let input = request(
+                        host,
+                        key.clone(),
+                        storage::InputKind::Preview,
+                        Some(message.message_id),
+                    );
+                    let reply = complete(host, input);
+                    let row =
+                        storage::get_input(&host.fixture.conn, reply.input_id.unwrap()).unwrap();
+                    assert_eq!(row.kind, storage::InputKind::Preview);
+                    assert_eq!(row.operation_key, key);
+                    assert_eq!(row.message_id, Some(message.message_id));
+                    assert_eq!(row.state, storage::InputState::Accepted);
+                    assert_eq!(host.pty.offers, vec![encoded()]);
+                    assert_eq!(
+                        crate::broker::get_message(&host.fixture.conn, message.message_id).unwrap(),
+                        message
+                    );
+                    let notified: Option<String> = host
+                        .fixture
+                        .conn
+                        .query_row(
+                            "SELECT notified_at FROM messages WHERE message_id=?1",
+                            [message.message_id],
+                            |row| row.get(0),
+                        )
+                        .unwrap();
+                    assert!(notified.is_none());
+                });
+
+                for wrong_recipient in [false, true] {
+                    with_host(|host| {
+                        let run = &host.fixture.run;
+                        let (sender, recipient) = if wrong_recipient {
+                            (run.member_id, run.director_member_id)
+                        } else {
+                            (run.director_member_id, run.member_id)
+                        };
+                        let message = crate::broker::send_message(
+                            &mut host.fixture.conn,
+                            sender,
+                            recipient,
+                            LITERAL,
+                        )
+                        .unwrap();
+                        let key_run = run.run_id + i64::from(!wrong_recipient);
+                        let input = request(
+                            host,
+                            format!("preview:{key_run}:{}", message.message_id),
+                            storage::InputKind::Preview,
+                            Some(message.message_id),
+                        );
+                        refuse(host, input);
+                        assert_eq!(
+                            crate::broker::get_message(&host.fixture.conn, message.message_id)
+                                .unwrap(),
+                            message
+                        );
+                    });
+                }
+            }
+
+            #[test]
+            fn step5_operations_exec_selects_its_native_shell_plan_and_requires_its_own_coverage() {
+                let mut definition = catalog_definition();
+                let mut fixture = definition["fixtures"][0].clone();
+                fixture["id"] = serde_json::json!("synthetic-exec-plan");
+                definition["fixtures"].as_array_mut().unwrap().push(fixture);
+                definition["profiles"][0]["capabilities"]["composer"]["submission"] = serde_json::json!({
+                    "prompt":null,
+                    "exec":{"prefix_hex":"2120","submit_hex":"6b6c","fixture_ids":["synthetic-exec-plan"]}
+                });
+                let exec_catalog = ProfileCatalog::from_definitions(&definition).unwrap();
+                let coverage = exec_catalog.capabilities(CodingAgent::Codex, Some(VERSION));
+                assert_eq!(coverage.composer, storage::Coverage::Tested);
+                assert_eq!(coverage.prompt_submission, storage::Coverage::Unknown);
+                assert_eq!(coverage.native_exec_submission, storage::Coverage::Tested);
+                let mut expected = b"! ".to_vec();
+                expected.extend_from_slice(LITERAL.as_bytes());
+                expected.extend_from_slice(b"kl");
+                with_catalog_host(exec_catalog, expected.clone(), |host| {
+                    let key = format!("exec:{}:{}", host.fixture.run.run_id, "b".repeat(64));
+                    let input = request(host, key.clone(), storage::InputKind::Exec, None);
+                    let reply = complete(host, input);
+                    let row =
+                        storage::get_input(&host.fixture.conn, reply.input_id.unwrap()).unwrap();
+                    assert_eq!(row.kind, storage::InputKind::Exec);
+                    assert_eq!(row.operation_key, key);
+                    assert_eq!(row.message_id, None);
+                    assert_eq!(row.state, storage::InputState::Accepted);
+                    assert_eq!(host.pty.offers, vec![expected]);
+                });
+
+                let prompt_catalog = catalog();
+                let coverage = prompt_catalog.capabilities(CodingAgent::Codex, Some(VERSION));
+                assert_eq!(coverage.prompt_submission, storage::Coverage::Tested);
+                assert_eq!(coverage.native_exec_submission, storage::Coverage::Unknown);
+                with_catalog_host(prompt_catalog, encoded(), |host| {
+                    let input = request(
+                        host,
+                        format!("exec:{}:{}", host.fixture.run.run_id, "c".repeat(64)),
+                        storage::InputKind::Exec,
+                        None,
+                    );
+                    refuse(host, input);
+                });
+            }
+        }
+
+        mod sql {
+            use super::*;
+            use crate::input::{Deadline, with_database_budget};
+            use rusqlite::Connection;
+            use rusqlite::hooks::{AuthAction, AuthContext, Authorization, TransactionOperation};
+            use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+            struct SqlObservation {
+                begins: AtomicUsize,
+                run_read: AtomicBool,
+                delay: Option<Instant>,
+                entered: AtomicBool,
+            }
+            fn observed_sql<T>(
+                conn: &mut Connection,
+                state: Arc<SqlObservation>,
+                body: impl FnOnce(&mut Connection) -> T,
+            ) -> T {
+                let authorization = state.clone();
+                conn.authorizer(Some(move |context: AuthContext<'_>| {
+                    match context.action {
+                        AuthAction::Transaction {
+                            operation: TransactionOperation::Begin,
+                        } => {
+                            authorization.begins.fetch_add(1, Ordering::SeqCst);
+                        }
+                        AuthAction::Read {
+                            table_name: "member_runs",
+                            ..
+                        } => {
+                            authorization.run_read.store(true, Ordering::SeqCst);
+                        }
+                        _ => {}
+                    }
+                    Authorization::Allow
+                }))
+                .unwrap();
+                conn.progress_handler(
+                    1,
+                    Some(move || {
+                        if state.run_read.load(Ordering::SeqCst)
+                            && !state.entered.swap(true, Ordering::SeqCst)
+                            && let Some(until) = state.delay
+                        {
+                            std::thread::sleep(
+                                until.saturating_duration_since(Instant::now())
+                                    + Duration::from_millis(1),
+                            );
+                        }
+                        false
+                    }),
+                )
+                .expect("install supplied-connection SQL progress observer");
+                let result = catch_unwind(AssertUnwindSafe(|| body(conn)));
+                let progress = conn.progress_handler(0, None::<fn() -> bool>);
+                let authorization = conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+                match result {
+                    Ok(result) => {
+                        assert!(
+                            progress.is_ok() && authorization.is_ok(),
+                            "SQL observer cleanup failed: progress={progress:?}; authorizer={authorization:?}"
+                        );
+                        result
+                    }
+                    Err(primary) => {
+                        if progress.is_err() || authorization.is_err() {
+                            eprintln!(
+                                "SQL observer cleanup also failed: progress={progress:?}; authorizer={authorization:?}"
+                            );
+                        }
+                        resume_unwind(primary)
+                    }
+                }
+            }
+            fn sql_state(delay: Option<Instant>) -> Arc<SqlObservation> {
+                Arc::new(SqlObservation {
+                    begins: AtomicUsize::new(0),
+                    run_read: AtomicBool::new(false),
+                    delay,
+                    entered: AtomicBool::new(false),
+                })
+            }
+            fn timeout(conn: &Connection) -> i64 {
+                conn.query_row("PRAGMA busy_timeout", [], |row| row.get(0))
+                    .unwrap()
+            }
+
+            #[test]
+            fn step5_prompt_final_sql_is_nonwaiting_on_the_supplied_connection_and_fresh_drain_progresses()
+             {
+                with_host(|h| {
+                    let id = h.arm("prompt:contended");
+                    h.drain();
+                    h.fixture
+                        .conn
+                        .busy_timeout(Duration::from_millis(600))
+                        .unwrap();
+                    let blocker = crate::db::connect(&format!(
+                        "sqlite:///{}",
+                        h.fixture.conn.path().unwrap()
+                    ))
+                    .unwrap();
+                    blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
+                    let state = sql_state(None);
+                    let run = h.fixture.run.clone();
+                    let until = h.until;
+                    let original_address = &h.fixture.conn as *const Connection as usize;
+                    let coordinator = &mut h.coordinator;
+                    let transport = &mut h.transport;
+                    let pty = &mut h.pty;
+                    let observation = &h.controller;
+                    let started = Instant::now();
+                    let pending = observed_sql(&mut h.fixture.conn, state.clone(), |conn| {
+                        with_database_budget(conn, Deadline::until(until), |conn| {
+                            assert_eq!(conn as *const Connection as usize, original_address);
+                            let result = coordinator
+                                .advance(conn, &run, transport, pty, observation, until)
+                                .map_err(|f| f.source)?;
+                            assert!(conn.is_autocommit());
+                            Ok(result)
+                        })
+                    })
+                    .unwrap();
+                    let elapsed = started.elapsed();
+                    assert!(pending.is_none());
+                    assert!(
+                        elapsed < Duration::from_millis(200),
+                        "final validation waits neither its600ms connection timeout nor the original request budget: {elapsed:?}"
+                    );
+                    assert!(
+                        state.begins.load(Ordering::SeqCst) > 0,
+                        "the supplied connection attempts its actual final transaction"
+                    );
+                    assert!(h.fixture.conn.is_autocommit());
+                    assert_eq!(timeout(&h.fixture.conn), 600);
+                    assert!(h.pty.program.is_empty());
+                    assert!(matches!(
+                        storage::get_input(&h.fixture.conn, id).unwrap().state,
+                        storage::InputState::InProgress
+                    ));
+                    assert_eq!(h.hooks.count("before"), 1);
+
+                    h.human.bytes.extend(b"human");
+                    h.pty.child.bytes.extend(SCREEN);
+                    let previous_seq = h.transport.snapshot().screen_seq;
+                    h.drain();
+                    assert_eq!(h.human.consumed, 5);
+                    assert_eq!(h.coordinator.manual_generation, 5);
+                    assert_eq!(h.pty.manual, b"human");
+                    assert!(h.transport.snapshot().screen_seq > previous_seq);
+                    assert!(h.advance().is_none());
+                    assert!(h.pty.program.is_empty());
+                    blocker.execute_batch("ROLLBACK").unwrap();
+                    assert!(
+                        h.advance().is_none(),
+                        "contention consumes the preceding drain"
+                    );
+                    h.drain();
+                    let result =
+                        submitted(h.advance().expect("fresh real drain after SQLite release"));
+                    assert!(matches!(result.status, SubmissionStatus::Accepted));
+                    assert_eq!(result.input_id, Some(id));
+                    assert_eq!(h.pty.program, vec![encoded()]);
+                    assert_eq!(h.hooks.count("before"), 1);
+                    assert_eq!(timeout(&h.fixture.conn), 600);
+                });
+            }
+
+            #[test]
+            fn step5_prompt_inherited_expiry_refuses_before_sql_and_after_uncontended_sql_on_the_actual_connection()
+             {
+                for during in [false, true] {
+                    with_host(|h| {
+                        let id = h.arm("prompt:sql-expiry");
+                        h.drain();
+                        h.fixture
+                            .conn
+                            .busy_timeout(Duration::from_millis(123))
+                            .unwrap();
+                        let outer = Instant::now() + Duration::from_millis(50);
+                        let state = sql_state(during.then_some(outer));
+                        let run = h.fixture.run.clone();
+                        let until = h.until;
+                        let coordinator = &mut h.coordinator;
+                        let transport = &mut h.transport;
+                        let observation = &h.controller;
+                        let original_address = &h.fixture.conn as *const Connection as usize;
+                        let result = observed_sql(&mut h.fixture.conn, state.clone(), |conn| {
+                            with_database_budget(conn, Deadline::until(outer), |conn| {
+                                assert_eq!(conn as *const Connection as usize, original_address);
+                                if !during {
+                                    std::thread::sleep(
+                                        outer.saturating_duration_since(Instant::now())
+                                            + Duration::from_millis(1),
+                                    );
+                                }
+                                match coordinator.acquire_write_guard(
+                                    conn,
+                                    &run,
+                                    transport,
+                                    observation,
+                                    until,
+                                ) {
+                                    Err(failure) => {
+                                        assert_eq!(failure.run_id, Some(run.run_id));
+                                        assert_eq!(failure.input_id, Some(id));
+                                        Err(failure.source)
+                                    }
+                                    Ok(Some(guard)) => {
+                                        drop(guard);
+                                        Ok(true)
+                                    }
+                                    Ok(None) => Ok(false),
+                                }
+                            })
+                        });
+                        assert!(matches!(result, Err(CafleetError::DeadlineExceeded)));
+                        assert_eq!(
+                            state.entered.load(Ordering::SeqCst),
+                            during,
+                            "actual member-run SQL entry is control-separated"
+                        );
+                        assert!(h.fixture.conn.is_autocommit());
+                        assert_eq!(timeout(&h.fixture.conn), 123);
+                        assert!(h.pty.offers.is_empty());
+                        assert!(matches!(
+                            storage::get_input(&h.fixture.conn, id).unwrap().state,
+                            storage::InputState::InProgress
+                        ));
+                    });
+                }
+            }
+
+            #[test]
+            fn step5_prompt_guard_keeps_the_earliest_inherited_expiration_after_sql_scope_restoration()
+             {
+                with_host(|h| {
+                    let id = h.arm("prompt:guard-sql-bound");
+                    h.drain();
+                    let before = storage::get_input(&h.fixture.conn, id).unwrap();
+                    h.fixture
+                        .conn
+                        .busy_timeout(Duration::from_millis(321))
+                        .unwrap();
+                    let outer = Instant::now() + Duration::from_millis(80);
+                    let run = h.fixture.run.clone();
+                    let until = h.until;
+                    let coordinator = &mut h.coordinator;
+                    let transport = &mut h.transport;
+                    let observation = &h.controller;
+                    let mut guard =
+                        with_database_budget(&mut h.fixture.conn, Deadline::until(outer), |conn| {
+                            coordinator
+                                .acquire_write_guard(conn, &run, transport, observation, until)
+                                .map_err(|failure| failure.source)?
+                                .ok_or_else(|| {
+                                    CafleetError::App(
+                                        "healthy Armed operation yields a real guard".into(),
+                                    )
+                                })
+                        })
+                        .unwrap();
+                    assert_eq!(timeout(&h.fixture.conn), 321);
+                    std::thread::sleep(
+                        outer.saturating_duration_since(Instant::now()) + Duration::from_millis(1),
+                    );
+                    assert!(Instant::now() < until);
+                    let result =
+                        h.transport
+                            .write_programmatic(&mut h.pty, &encoded(), &mut guard, until);
+                    assert!(matches!(result, Err(CafleetError::DeadlineExceeded)));
+                    assert!(h.pty.offers.is_empty());
+                    drop(guard);
+                    let point = h.coordinator.retained_checkpoint(id).unwrap();
+                    assert!(matches!(point.stage, SubmissionStage::ZeroBytes));
+                    assert_eq!(point.written_bytes, 0);
+                    assert_eq!(storage::get_input(&h.fixture.conn, id).unwrap(), before);
+                    assert!(h.fixture.conn.is_autocommit());
+                    assert_eq!(timeout(&h.fixture.conn), 321);
+                });
+            }
+        }
+
+        pub(in crate::runtime::runner::input) mod support {
+            use super::*;
+            use crate::runtime::runner_tests::owned_child::OwnedChild;
+            use std::process::{Command, Stdio};
+            use std::sync::Mutex;
+
+            pub(super) const LITERAL: &str = "ordinary fixture λ";
+            pub(super) const SCREEN: &[u8] = b"\x1b[2J\x1b[23;1HSynthetic state\r\nState end";
+            pub(super) const VERSION: &str = "synthetic-0.0.1";
+            const PROFILE: &str = "synthetic-profile-1";
+
+            pub(in crate::runtime::runner::input) fn catalog_definition() -> serde_json::Value {
+                let mut value: serde_json::Value = serde_json::from_str(include_str!(
+                    "../runner_tests/fixtures/synthetic-profile.json"
+                ))
+                .unwrap();
+                let fixture = value["fixtures"][0].clone();
+                let mut executable = fixture.clone();
+                executable["id"] = serde_json::json!("synthetic-prompt-plan");
+                value["fixtures"].as_array_mut().unwrap().push(executable);
+                let rule = &mut value["profiles"][0]["rules"][0];
+                rule["id"] = serde_json::json!("synthetic-composer-empty");
+                rule["observation"] = serde_json::json!("composer_empty");
+                rule["region"]["start_pattern"] = serde_json::json!("^Synthetic state$");
+                rule["region"]["end_pattern"] = serde_json::json!("^State end$");
+                rule["matchers"] = serde_json::json!([{"id":"state","scope":"line","pattern":"^Synthetic state$"}]);
+                rule["extract"] =
+                    serde_json::json!({"operation":null,"choices":[],"native_request_id":null});
+                rule["verified_noninteraction"] = serde_json::json!(true);
+                value["profiles"][0]["capabilities"] = serde_json::json!({
+                    "detection":null,"answers":[],"composer":{
+                        "rule_ids":["synthetic-composer-empty"],"fixture_ids":[fixture["id"]],
+                        "submission":{"prompt":{"prefix_hex":"","submit_hex":"7e","fixture_ids":["synthetic-prompt-plan"]},"exec":null}
+                    }
+                });
+                value
+            }
+
+            pub(super) fn catalog() -> ProfileCatalog {
+                ProfileCatalog::from_definitions(&catalog_definition()).unwrap()
+            }
+
+            pub(super) fn encoded() -> Vec<u8> {
+                let mut bytes = LITERAL.as_bytes().to_vec();
+                bytes.push(b'~');
+                bytes
+            }
+
+            pub(in crate::runtime::runner::input) struct HostProfile {
+                pub policy: storage::evidence::EvidencePolicy,
+                pub event_evidence: &'static str,
+                pub backend: crate::coding_agent::CodingAgent,
+                pub native_version: &'static str,
+                pub profile_version: &'static str,
+                pub size: TerminalSize,
+                pub screen: Vec<u8>,
+            }
+            impl HostProfile {
+                pub fn synthetic(
+                    policy: storage::evidence::EvidencePolicy,
+                    event_evidence: &'static str,
+                ) -> Self {
+                    Self {
+                        policy,
+                        event_evidence,
+                        backend: crate::coding_agent::CodingAgent::Codex,
+                        native_version: VERSION,
+                        profile_version: PROFILE,
+                        size: TerminalSize { rows: 24, cols: 80 },
+                        screen: SCREEN.to_vec(),
+                    }
+                }
+            }
+
+            struct Tokens;
+            impl RequestTokenSource for Tokens {
+                fn fill(&mut self, _: &mut [u8; 32]) -> Result<()> {
+                    panic!("ordinary Prompt creates no permission token")
+                }
+            }
+
+            #[derive(Clone, Debug)]
+            pub(in crate::runtime::runner::input) struct Point {
+                pub boundary: &'static str,
+                pub id: Option<i64>,
+                pub count: u64,
+                pub seq: u64,
+            }
+
+            pub(in crate::runtime::runner::input) struct Hooks {
+                pub points: Mutex<Vec<Point>>,
+                pub until: Instant,
+            }
+            impl Hooks {
+                pub fn count(&self, boundary: &str) -> usize {
+                    self.points
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .filter(|p| p.boundary == boundary)
+                        .count()
+                }
+                pub fn input_id(&self) -> i64 {
+                    self.points
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .find(|p| p.boundary == "reserved")
+                        .expect("real Reserved checkpoint")
+                        .id
+                        .expect("actual durable input ID")
+                }
+            }
+            impl InputHooks for Hooks {
+                fn checkpoint(
+                    &self,
+                    boundary: InputBoundary,
+                    state: &InputCheckpoint,
+                    deadline: Instant,
+                ) -> Result<()> {
+                    assert!(deadline <= self.until);
+                    let boundary = match boundary {
+                        InputBoundary::Reserved => "reserved",
+                        InputBoundary::BeforeWrite => "before",
+                        InputBoundary::AfterWrite => "after",
+                        InputBoundary::TerminalState => "terminal",
+                        InputBoundary::Settled => "settled",
+                        InputBoundary::Retired => "retired",
+                    };
+                    self.points.lock().unwrap().push(Point {
+                        boundary,
+                        id: state.input_id,
+                        count: state.written_bytes,
+                        seq: state.output_seq,
+                    });
+                    Ok(())
+                }
+            }
+
+            #[derive(Default)]
+            pub(in crate::runtime::runner::input) struct Reader {
+                pub bytes: VecDeque<u8>,
+                pub consumed: usize,
+                pub calls: usize,
+            }
+            impl ByteInput for Reader {
+                fn try_read(&mut self, target: &mut [u8]) -> io::Result<usize> {
+                    self.calls += 1;
+                    if self.bytes.is_empty() {
+                        return Err(io::ErrorKind::WouldBlock.into());
+                    }
+                    let count = target.len().min(self.bytes.len());
+                    assert!(count > 0);
+                    for byte in &mut target[..count] {
+                        *byte = self.bytes.pop_front().unwrap();
+                    }
+                    self.consumed += count;
+                    Ok(count)
+                }
+            }
+
+            pub(in crate::runtime::runner::input) struct Pty {
+                pub child: Reader,
+                pub offers: Vec<Vec<u8>>,
+                pub program: Vec<Vec<u8>>,
+                pub manual: Vec<u8>,
+                pub short: Option<usize>,
+                expected_program: Vec<u8>,
+                database_url: String,
+                hooks: Arc<Hooks>,
+            }
+            impl ByteInput for Pty {
+                fn try_read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+                    self.child.try_read(bytes)
+                }
+            }
+            impl PtyIo for Pty {
+                fn try_write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                    assert!(!bytes.is_empty());
+                    self.offers.push(bytes.to_vec());
+                    if bytes == self.expected_program {
+                        let conn = crate::db::connect(&self.database_url).unwrap();
+                        let row = storage::get_input(&conn, self.hooks.input_id()).unwrap();
+                        assert!(matches!(row.state, storage::InputState::InProgress));
+                        assert!(self.hooks.count("before") > 0);
+                        self.program.push(bytes.to_vec());
+                        Ok(self.short.unwrap_or(bytes.len()))
+                    } else {
+                        self.manual.extend_from_slice(bytes);
+                        Ok(bytes.len())
+                    }
+                }
+                fn resize(&mut self, _: TerminalSize) -> Result<()> {
+                    Ok(())
+                }
+                fn close(&mut self) -> Result<()> {
+                    Ok(())
+                }
+            }
+            #[derive(Default)]
+            pub(in crate::runtime::runner::input) struct Output(pub Vec<u8>);
+            impl Display for Output {
+                fn try_write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                    self.0.extend_from_slice(bytes);
+                    Ok(bytes.len())
+                }
+                fn try_flush(&mut self) -> io::Result<()> {
+                    Ok(())
+                }
+            }
+
+            struct Child {
+                native: OwnedChild,
+                until: Instant,
+            }
+            impl Drop for Child {
+                fn drop(&mut self) {
+                    self.native.terminate_until(self.until);
+                }
+            }
+
+            pub(in crate::runtime::runner::input) struct Host {
+                pub fixture: Fixture,
+                _artifacts: RunArtifacts,
+                pub coordinator: InputCoordinator,
+                pub writer: EventWriter,
+                pub controller: ObservationController,
+                pub transport: Transport,
+                pub human: Reader,
+                pub pty: Pty,
+                pub output: Output,
+                pub hooks: Arc<Hooks>,
+                pub until: Instant,
+                expires: u64,
+                child: Child,
+            }
+
+            impl Host {
+                pub fn new() -> Self {
+                    Self::build(
+                        catalog,
+                        encoded(),
+                        HostProfile::synthetic(
+                            storage::evidence::EvidencePolicy::metadata(),
+                            "metadata",
+                        ),
+                        Instant::now() + Duration::from_secs(5),
+                    )
+                }
+                fn with_catalog(
+                    catalog: ProfileCatalog,
+                    expected_program: Vec<u8>,
+                    profile: HostProfile,
+                ) -> Self {
+                    Self::build(
+                        || catalog,
+                        expected_program,
+                        profile,
+                        Instant::now() + Duration::from_secs(5),
+                    )
+                }
+                fn build(
+                    catalog: impl FnOnce() -> ProfileCatalog,
+                    expected_program: Vec<u8>,
+                    profile: HostProfile,
+                    until: Instant,
+                ) -> Self {
+                    assert!(
+                        Instant::now() < until,
+                        "original fixture construction deadline"
+                    );
+                    let expires = InputExpiration::capture(until, &mut RealInputDeadlineClock)
+                        .unwrap()
+                        .monotonic_ns();
+                    let mut fixture = Fixture::new();
+                    let artifacts = fixture.artifacts();
+                    let lock = Arc::new(
+                        RunLock::acquire(&fixture.conn, &fixture.run.owner())
+                            .unwrap()
+                            .unwrap(),
+                    );
+                    lock.transfer_to_runner(
+                        &mut fixture.conn,
+                        &fixture.run.owner(),
+                        ProcessIdentity::current().unwrap(),
+                    )
+                    .unwrap();
+                    fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+                    storage::reserve_event_sequences(&mut fixture.conn, &fixture.run.owner())
+                        .unwrap();
+                    let catalog = catalog();
+                    let coverage = catalog
+                        .capabilities(profile.backend, Some(profile.native_version))
+                        .detection;
+                    fixture.conn.execute("UPDATE member_runs SET backend=?1,native_version=?2,profile_version=?3,coverage=?4,event_evidence=?5 WHERE run_id=?6",rusqlite::params![profile.backend.name(),profile.native_version,profile.profile_version,coverage.as_str(),profile.event_evidence,fixture.run.run_id]).unwrap();
+                    fixture
+                        .conn
+                        .execute(
+                            "UPDATE member_placements SET coding_agent=?1 WHERE member_id=?2",
+                            rusqlite::params![profile.backend.name(), fixture.run.member_id],
+                        )
+                        .unwrap();
+                    fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+                    let mut controller =
+                        ObservationController::new(&fixture.run, &catalog, profile.policy, 1..=256)
+                            .unwrap();
+                    let url = format!("sqlite:///{}", fixture.conn.path().unwrap());
+                    let mut writer = EventWriter::start(
+                        url.clone(),
+                        fixture.run.clone(),
+                        lock.clone(),
+                        artifacts.paths.outbox.clone(),
+                    )
+                    .unwrap();
+                    writer.set_deadline(until);
+                    let child = Child {
+                        native: OwnedChild::new(
+                            Command::new("/bin/cat")
+                                .stdin(Stdio::piped())
+                                .stdout(Stdio::null())
+                                .stderr(Stdio::null())
+                                .spawn()
+                                .unwrap(),
+                        ),
+                        until,
+                    };
+                    let identity = ProcessIdentity::read(i64::from(child.native.id()))
+                        .unwrap()
+                        .expect("owned live child");
+                    assert!(identity.matches().unwrap());
+                    fixture.conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3 WHERE run_id=?4",rusqlite::params![identity.pid,identity.start_identity,crate::time::format_utc(crate::time::now_utc()),fixture.run.run_id]).unwrap();
+                    fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+                    let transport = Self::transport_sized(profile.size);
+                    controller
+                        .started(
+                            &fixture.run,
+                            &transport.snapshot(),
+                            &writer,
+                            &RealObservationClock,
+                        )
+                        .unwrap();
+                    let hooks = Arc::new(Hooks {
+                        points: Mutex::new(Vec::new()),
+                        until,
+                    });
+                    let coordinator = InputCoordinator::new(
+                        &mut fixture.conn,
+                        &fixture.run,
+                        lock,
+                        InputServices {
+                            catalog,
+                            token_source: Box::new(Tokens),
+                            hooks: hooks.clone(),
+                        },
+                        until,
+                    )
+                    .unwrap();
+                    let pty = Pty {
+                        child: Reader {
+                            bytes: profile.screen.into_iter().collect(),
+                            ..Reader::default()
+                        },
+                        offers: Vec::new(),
+                        program: Vec::new(),
+                        manual: Vec::new(),
+                        short: None,
+                        expected_program,
+                        database_url: url,
+                        hooks: hooks.clone(),
+                    };
+                    let mut host = Self {
+                        fixture,
+                        _artifacts: artifacts,
+                        coordinator,
+                        writer,
+                        controller,
+                        transport,
+                        human: Reader::default(),
+                        pty,
+                        output: Output::default(),
+                        hooks,
+                        until,
+                        expires,
+                        child,
+                    };
+                    host.drain();
+                    assert!(matches!(
+                        host.controller.health(&host.writer).eligibility,
+                        InputEligibility::ComposerEmpty
+                    ));
+                    host
+                }
+                fn transport_sized(size: TerminalSize) -> Transport {
+                    Transport::new(
+                        size,
+                        TransportLimits {
+                            input_bytes: 4096,
+                            display_bytes: 4096,
+                            bytes_per_tick: 4096,
+                        },
+                    )
+                    .unwrap()
+                }
+                pub fn request(&self, key: &str) -> InputControlRequest {
+                    let run = &self.fixture.run;
+                    InputControlRequest {
+                        protocol_version: 1,
+                        identity: ControlIdentity {
+                            database_identity_json: run.database_identity_json.clone(),
+                            fleet_id: run.fleet_id,
+                            member_id: run.member_id,
+                            director_member_id: run.director_member_id,
+                            run_id: run.run_id,
+                            owner_epoch: run.owner_epoch,
+                            launch_nonce: run.launch_nonce.clone(),
+                        },
+                        expires_at_mono_ns: self.expires,
+                        operation: InputControlOperation::SubmitPrompt(SubmitInput {
+                            operation_key: key.into(),
+                            input_kind: storage::InputKind::Prompt,
+                            message_id: None,
+                            literal: LITERAL.into(),
+                        }),
+                    }
+                }
+                pub fn drain(&mut self) {
+                    loop {
+                        assert!(
+                            Instant::now() < self.until,
+                            "actual fixture becomes healthy and quiescent within its original deadline"
+                        );
+                        self.controller
+                            .poll(
+                                &self.transport.snapshot(),
+                                &self.writer,
+                                &RealObservationClock,
+                            )
+                            .unwrap();
+                        let result = self
+                            .coordinator
+                            .progress_with_manual(&mut self.transport, |transport| {
+                                transport.quiesce_for_input(
+                                    &mut self.human,
+                                    &mut self.pty,
+                                    &mut self.output,
+                                    &mut self
+                                        .controller
+                                        .observer(&self.writer, &RealObservationClock),
+                                    self.until,
+                                )
+                            })
+                            .unwrap();
+                        if matches!(result, InputDrain::Quiescent { .. }) {
+                            return;
+                        }
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                }
+                pub fn advance(&mut self) -> Option<InputControlReply> {
+                    self.coordinator
+                        .advance(
+                            &mut self.fixture.conn,
+                            &self.fixture.run,
+                            &mut self.transport,
+                            &mut self.pty,
+                            &self.controller,
+                            self.until,
+                        )
+                        .unwrap()
+                }
+                pub fn arm(&mut self, key: &str) -> i64 {
+                    let request = self.request(key);
+                    assert!(
+                        self.coordinator
+                            .handle(
+                                &mut self.fixture.conn,
+                                &self.fixture.run,
+                                request,
+                                &self.controller,
+                                self.until
+                            )
+                            .unwrap()
+                            .is_none()
+                    );
+                    for _ in 0..8 {
+                        self.drain();
+                        assert!(self.advance().is_none());
+                        assert!(self.pty.program.is_empty());
+                        if self.hooks.count("before") == 1 {
+                            let id = self.hooks.input_id();
+                            assert!(matches!(
+                                storage::get_input(&self.fixture.conn, id).unwrap().state,
+                                storage::InputState::InProgress
+                            ));
+                            return id;
+                        }
+                        if self.hooks.count("reserved") == 1 {
+                            assert!(self.advance().is_none());
+                            assert_eq!(
+                                self.hooks.count("before"),
+                                0,
+                                "reservation consumes its old drain proof"
+                            );
+                        }
+                    }
+                    panic!("real reservation and BeforeWrite reach Armed within finite turns");
+                }
+                pub fn finish(&mut self) {
+                    let counts = self.writer.finish(self.until);
+                    let status = self.writer.status();
+                    self.child.native.terminate_until(self.until);
+                    let child = self.child.native.try_wait();
+                    assert_eq!(counts, (0, 0), "{status:?}");
+                    assert!(
+                        !status.degraded && status.diagnostic.is_none(),
+                        "writer join: {status:?}"
+                    );
+                    assert!(child.unwrap().is_some(), "owned child reap confirmed");
+                }
+            }
+            pub(in crate::runtime::runner::input) fn with_host(body: impl FnOnce(&mut Host)) {
+                with_owned_host(Host::new(), body);
+            }
+            pub(in crate::runtime::runner::input) fn with_host_until(
+                until: Instant,
+                body: impl FnOnce(&mut Host),
+            ) {
+                with_owned_host(
+                    Host::build(
+                        catalog,
+                        encoded(),
+                        HostProfile::synthetic(
+                            storage::evidence::EvidencePolicy::metadata(),
+                            "metadata",
+                        ),
+                        until,
+                    ),
+                    body,
+                );
+            }
+            pub(in crate::runtime::runner::input) fn with_catalog_host(
+                catalog: ProfileCatalog,
+                expected_program: Vec<u8>,
+                body: impl FnOnce(&mut Host),
+            ) {
+                with_profile_host(
+                    catalog,
+                    expected_program,
+                    HostProfile::synthetic(
+                        storage::evidence::EvidencePolicy::metadata(),
+                        "metadata",
+                    ),
+                    body,
+                );
+            }
+            pub(in crate::runtime::runner::input) fn with_profile_host(
+                catalog: ProfileCatalog,
+                expected_program: Vec<u8>,
+                profile: HostProfile,
+                body: impl FnOnce(&mut Host),
+            ) {
+                with_owned_host(Host::with_catalog(catalog, expected_program, profile), body);
+            }
+            fn with_owned_host(mut host: Host, body: impl FnOnce(&mut Host)) {
+                let primary = catch_unwind(AssertUnwindSafe(|| body(&mut host)));
+                let cleanup = catch_unwind(AssertUnwindSafe(|| host.finish()));
+                if let Err(primary) = primary {
+                    if let Err(cleanup) = &cleanup {
+                        eprintln!("ordinary Prompt cleanup also failed: {cleanup:?}");
+                    }
+                    resume_unwind(primary);
+                }
+                if let Err(cleanup) = cleanup {
+                    resume_unwind(cleanup);
+                }
+            }
+        }
     }
 }
