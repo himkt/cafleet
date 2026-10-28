@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "fixture_id": "claude-2.1.302-wrapped-allow-pre-stage-1",
+  "provenance": "native",
+  "backend": "claude",
+  "native_version": "2.1.302",
+  "rows": 36,
+  "cols": 52,
+  "alternate_screen": true,
+  "screen_seq": 7053,
+  "cursor_row": 27,
+  "cursor_col": 1,
+  "lines": [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "  ⎿  $ /tmp/cafleet-194/claude-wrap-ans-allow-001/pe",
+    "     rmission-probe allow",
+    "",
+    "────────────────────────────────────────────────────",
+    " Bash command",
+    " Tip: auto mode handles these prompts for you — ",
+    " choose \"switch to auto mode\" below",
+    " Run the permission probe with the allow argument",
+    "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+    " /tmp/cafleet-194/claude-wrap-ans-allow-001/permiss",
+    " ion-probe allow",
+    "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+    " This command requires approval",
+    "",
+    " Do you want to proceed?",
+    " ❯ 1. Yes",
+    "   2. Yes, and don’t ask again for: /tmp/cafleet-194",
+    "      /claude-wrap-ans-allow-001/permission-probe",
+    "      allow *",
+    "   3. Yes, and switch to auto mode · auto mode ",
+    "      handles these prompts for you",
+    "   4. No",
+    "",
+    " Esc to cancel · Tab to amend"
+  ],
+  "masked_rows": [
+    {
+      "row": 0,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 1,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 2,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 3,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 4,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 5,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 6,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 7,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 8,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 9,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 10,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 11,
+      "reason": "reviewed_privacy"
+    }
+  ]
+}

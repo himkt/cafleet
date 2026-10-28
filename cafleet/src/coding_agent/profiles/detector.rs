@@ -124,8 +124,8 @@ pub(super) mod inspection_tests {
             .collect();
         change(&mut lines);
         let mut terminal = TerminalState::new(TerminalSize {
-            rows: 36,
-            cols: 120,
+            rows: u16::try_from(screen["rows"].as_u64().unwrap()).unwrap(),
+            cols: u16::try_from(screen["cols"].as_u64().unwrap()).unwrap(),
         })
         .unwrap();
         if alternate {
@@ -328,6 +328,346 @@ pub(super) mod inspection_tests {
         assert_ne!(broadened.kind, permission, "only broadened choices remain");
         let headless = claude_observation(&native_screen(|lines| lines[14].clear(), true));
         assert_ne!(headless.kind, permission, "form without its heading");
+    }
+
+    const WRAPPED_SCREEN: &str = include_str!("native/claude-2.1.302-wrapped-permission-1.json");
+    const WRAPPED_ALLOW_SCREEN: &str =
+        include_str!("native/claude-2.1.302-wrapped-allow-pre-stage-1.json");
+    const WRAPPED_DENY_SCREEN: &str =
+        include_str!("native/claude-2.1.302-wrapped-deny-pre-stage-1.json");
+    const WRAPPED_OPERATION: &str = "/tmp/cafleet-194/claude-wrap-cells-001/permission-probe allow";
+    const NATIVE_OPERATION: &str = "/private/tmp/cafleet-194/cells-002/permission-probe allow";
+
+    fn wrapped_screen(change: impl FnOnce(&mut Vec<String>), alternate: bool) -> ScreenSnapshot {
+        replay_native_fixture(WRAPPED_SCREEN, change, alternate, None)
+    }
+
+    // Replaces the 120-column fixture's single operation row (row 18) with `rows`, taking the extra
+    // rows from the empty masked header so every later row keeps its position.
+    fn native_with_operation_rows(rows: &[&str]) -> ScreenSnapshot {
+        native_screen(
+            |lines| {
+                let at = 18 - (rows.len() - 1);
+                lines.drain(0..rows.len() - 1);
+                lines.remove(at);
+                for (offset, &row) in rows.iter().enumerate() {
+                    lines.insert(at + offset, row.to_owned());
+                }
+            },
+            true,
+        )
+    }
+
+    fn unwrapped_rendering(operation: &str) -> ScreenSnapshot {
+        native_with_operation_rows(&[&format!(" {operation}")])
+    }
+
+    fn assert_claude_request(observation: &ScreenObservation, operation: &str) {
+        assert_eq!(
+            observation.kind,
+            ObservationKind::Interaction(InteractionClass::PermissionRequest),
+            "{operation}"
+        );
+        assert_eq!(
+            observation.match_evidence,
+            MatchEvidence::Complete,
+            "{operation}"
+        );
+        assert_eq!(observation.rule_id, "claude-bash-permission");
+        assert_eq!(
+            observation.profile_version.as_deref(),
+            Some("claude-2.1.302-default-3")
+        );
+        assert_eq!(observation.raw_evidence["operation"], operation);
+        assert_eq!(observation.raw_evidence["choices"], json!(["Yes", "No"]));
+        assert!(observation.fingerprint.is_some());
+        assert!(!observation.verified_noninteraction);
+        assert!(observation.native_correlation.is_none());
+    }
+
+    #[test]
+    fn bundled_claude_detects_the_wrapped_native_form_and_reassembles_its_edge_broken_operation() {
+        let screen = wrapped_screen(|_| {}, true);
+        assert_eq!((screen.rows, screen.cols), (36, 52));
+        assert_eq!((screen.cursor_row, screen.cursor_col), (28, 1));
+        let observation = claude_observation(&screen);
+        assert_claude_request(&observation, WRAPPED_OPERATION);
+        let region = observation
+            .matched_region
+            .expect("a wrapped permission match locates its live region");
+        assert_eq!(
+            (region.top, region.bottom),
+            (17, 36),
+            "the region runs from the heading to the closing line: {region:?}"
+        );
+        for (fixture, operation) in [
+            (
+                WRAPPED_ALLOW_SCREEN,
+                "/tmp/cafleet-194/claude-wrap-ans-allow-001/permission-probe allow",
+            ),
+            (
+                WRAPPED_DENY_SCREEN,
+                "/tmp/cafleet-194/claude-wrap-ans-deny-001/permission-probe deny",
+            ),
+        ] {
+            let pre_stage = claude_observation(&replay_native_fixture(fixture, |_| {}, true, None));
+            assert_claude_request(&pre_stage, operation);
+        }
+        let catalog = ProfileCatalog::bundled().unwrap();
+        let unprofiled = Detector::new(&catalog, CodingAgent::Claude, Some("2.1.301"))
+            .unwrap()
+            .observe(&screen)
+            .unwrap();
+        assert_eq!(unprofiled.kind, ObservationKind::Unknown);
+    }
+
+    #[test]
+    fn bundled_claude_unwrapped_native_forms_stay_detected_under_the_wrapped_profile() {
+        assert_claude_request(
+            &claude_observation(&native_screen(|_| {}, true)),
+            NATIVE_OPERATION,
+        );
+        for (fixture, operation) in [
+            (
+                ALLOW_SCREEN,
+                "/private/tmp/cafleet-194/ans-allow-001/permission-probe allow",
+            ),
+            (
+                DENY_SCREEN,
+                "/private/tmp/cafleet-194/ans-deny-001/permission-probe deny",
+            ),
+        ] {
+            assert_claude_request(
+                &claude_observation(&replay_native_fixture(fixture, |_| {}, true, None)),
+                operation,
+            );
+        }
+    }
+
+    #[test]
+    fn bundled_claude_wrapped_and_unwrapped_renderings_of_one_request_share_its_identity() {
+        let wrapped = claude_observation(&wrapped_screen(|_| {}, true));
+        let unwrapped = claude_observation(&unwrapped_rendering(WRAPPED_OPERATION));
+        assert_claude_request(&unwrapped, WRAPPED_OPERATION);
+        assert!(
+            wrapped.fingerprint == unwrapped.fingerprint,
+            "the 52-column and 120-column renderings are one request"
+        );
+        let native = claude_observation(&native_screen(|_| {}, true));
+        assert!(native.fingerprint != wrapped.fingerprint);
+        let edge_row = " /private/tmp/cafleet-194/cells-002/permission-prob";
+        assert_eq!(
+            edge_row.chars().count(),
+            51,
+            "reaches the last usable column"
+        );
+        let rewrapped = claude_observation(&wrapped_screen(
+            |lines| {
+                lines[22] = edge_row.into();
+                lines[23] = " e allow".into();
+            },
+            true,
+        ));
+        assert_claude_request(&rewrapped, NATIVE_OPERATION);
+        assert!(
+            rewrapped.fingerprint == native.fingerprint,
+            "the native 120-column request rewrapped at 52 columns keeps its identity"
+        );
+    }
+
+    #[test]
+    fn bundled_claude_wrapped_operation_joins_at_the_display_cell_edge_and_spaces_shorter_rows() {
+        let short = claude_observation(&wrapped_screen(
+            |lines| {
+                lines[22] = " /tmp/cafleet-194/claude-wrap-cells-001".into();
+                lines[23] = " permission-probe allow".into();
+            },
+            true,
+        ));
+        assert_claude_request(
+            &short,
+            "/tmp/cafleet-194/claude-wrap-cells-001 permission-probe allow",
+        );
+        for (filler, separator) in [(28, ""), (27, " ")] {
+            let row = format!(" /tmp/cafleet-194/界界/{}", "a".repeat(filler));
+            assert_eq!(
+                row.chars().count() + 2,
+                23 + filler,
+                "each 界 occupies two display cells"
+            );
+            let observation = claude_observation(&wrapped_screen(
+                |lines| {
+                    lines[22] = row;
+                    lines[23] = " b allow".into();
+                },
+                true,
+            ));
+            assert_claude_request(
+                &observation,
+                &format!(
+                    "/tmp/cafleet-194/界界/{}{separator}b allow",
+                    "a".repeat(filler)
+                ),
+            );
+        }
+    }
+
+    #[test]
+    fn bundled_claude_edge_join_applies_only_between_the_dashed_rules() {
+        let screen = serde_json::from_str::<Value>(WRAPPED_SCREEN).unwrap();
+        let transcript = screen["lines"][13].as_str().unwrap();
+        assert!(transcript.starts_with("  ⎿  $ "));
+        assert_eq!(
+            transcript.chars().count(),
+            52,
+            "the transcript row above the heading fills the width"
+        );
+        let base = " Run the permission probe with the allow argument";
+        let description = format!("{base}{}", "x".repeat(51 - base.chars().count()));
+        let observation = claude_observation(&wrapped_screen(
+            |lines| {
+                assert_eq!(lines[20], base);
+                lines[20] = description;
+            },
+            true,
+        ));
+        assert_claude_request(&observation, WRAPPED_OPERATION);
+    }
+
+    #[test]
+    fn bundled_claude_synthetic_boxed_operation_rows_reassemble_with_one_space() {
+        let unwrapped = claude_observation(&unwrapped_rendering(WRAPPED_OPERATION));
+        for rows in [
+            &[
+                " │ /tmp/cafleet-194/claude-wrap-cells-001/permission-probe",
+                " │ allow",
+            ][..],
+            &[
+                " │ /tmp/cafleet-194/claude-wrap-cells-001",
+                " │ permission-probe",
+                " │ allow",
+            ][..],
+        ] {
+            let boxed = claude_observation(&native_with_operation_rows(rows));
+            assert_claude_request(&boxed, WRAPPED_OPERATION);
+            assert!(
+                boxed.fingerprint == unwrapped.fingerprint,
+                "{} boxed rows keep the unwrapped identity",
+                rows.len()
+            );
+        }
+    }
+
+    #[test]
+    fn bundled_claude_wrapped_form_keeps_the_false_positive_guards() {
+        let permission = ObservationKind::Interaction(InteractionClass::PermissionRequest);
+        let primary = claude_observation(&wrapped_screen(|_| {}, false));
+        assert_ne!(primary.kind, permission, "primary-screen transcript copy");
+        let quoted = claude_observation(&wrapped_screen(
+            |lines| lines[15] = " Bash command".into(),
+            true,
+        ));
+        assert_ne!(quoted.kind, permission, "a heading copy above the form");
+        let doubled = claude_observation(&wrapped_screen(
+            |lines| lines[26] = " Bash command".into(),
+            true,
+        ));
+        assert_ne!(doubled.kind, permission, "a second heading inside the form");
+        let unfocused = claude_observation(&wrapped_screen(
+            |lines| lines[28] = lines[28].replace('❯', " "),
+            true,
+        ));
+        assert_ne!(unfocused.kind, permission, "form without a focus marker");
+        let headless = claude_observation(&wrapped_screen(|lines| lines[17].clear(), true));
+        assert_ne!(headless.kind, permission, "form without its heading");
+        let outside = claude_observation(&replay_native_fixture(
+            WRAPPED_SCREEN,
+            |_| {},
+            true,
+            Some((12, 0)),
+        ));
+        assert_ne!(outside.kind, permission, "cursor outside the form");
+        let grown = |extra: usize| {
+            wrapped_screen(
+                |lines| {
+                    lines.drain(0..extra);
+                    for _ in 0..extra {
+                        lines.insert(26 - extra, String::new());
+                    }
+                    assert_eq!(lines[17 - extra], " Bash command");
+                    assert_eq!(lines[28], " ❯ 1. Yes");
+                },
+                true,
+            )
+        };
+        assert_claude_request(&claude_observation(&grown(5)), WRAPPED_OPERATION);
+        assert_ne!(
+            claude_observation(&grown(6)).kind,
+            permission,
+            "a form taller than 24 rows"
+        );
+    }
+
+    #[test]
+    fn bundled_claude_answer_plans_match_the_wrapped_pre_stage_forms_and_bind_focus() {
+        for (decision, fixture, choice, byte) in [
+            (
+                PermissionDecision::Allow,
+                WRAPPED_ALLOW_SCREEN,
+                "allow-once",
+                b'1',
+            ),
+            (
+                PermissionDecision::Deny,
+                WRAPPED_DENY_SCREEN,
+                "deny-once",
+                b'4',
+            ),
+        ] {
+            let plan = allow_or_deny_plan(decision);
+            assert_eq!(plan.stages().len(), 1);
+            assert_eq!(plan.stages()[0].bytes(), &[byte]);
+            let screen = replay_native_fixture(fixture, |_| {}, true, None);
+            assert_eq!((screen.cursor_row, screen.cursor_col), (27, 1));
+            let matched =
+                claude_answer(&screen, &plan).expect("wrapped pre-stage form matches its plan");
+            assert_eq!(matched.choices(), &["Yes".to_owned(), "No".to_owned()]);
+            assert_eq!(matched.plan().choice_id(), choice);
+            assert!(!matched.focus().is_empty());
+            assert!(Some(matched.semantic()) == claude_observation(&screen).fingerprint.as_ref());
+            let moved = replay_native_fixture(
+                fixture,
+                |lines| {
+                    lines[27] = lines[27].replacen('❯', " ", 1);
+                    lines[28] = lines[28].replacen("   2.", " ❯ 2.", 1);
+                },
+                true,
+                Some((28, 1)),
+            );
+            let refocused = claude_answer(&moved, &plan)
+                .expect("a moved focus still identifies the wrapped form");
+            assert!(refocused.semantic() == matched.semantic());
+            assert_ne!(
+                refocused.focus(),
+                matched.focus(),
+                "token binding sees the focus move"
+            );
+            let unfocused = replay_native_fixture(
+                fixture,
+                |lines| lines[27] = lines[27].replacen('❯', " ", 1),
+                true,
+                None,
+            );
+            assert!(
+                claude_answer(&unfocused, &plan).is_none(),
+                "{decision:?} without ❯"
+            );
+            let primary = replay_native_fixture(fixture, |_| {}, false, None);
+            assert!(
+                claude_answer(&primary, &plan).is_none(),
+                "{decision:?} primary screen"
+            );
+        }
     }
 
     const CODEX_VERSION: &str = "0.163.0";
