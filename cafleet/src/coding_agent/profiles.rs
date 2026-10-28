@@ -320,6 +320,30 @@ mod contract_tests {
         }
 
         #[test]
+        fn runtime_profile_operation_row_margin_must_be_a_nonempty_single_row_string() {
+            let mut margined = definitions();
+            margined["profiles"][0]["rules"][0]["extract"]["operation"]["row_margin"] = json!(" ");
+            assert!(ProfileCatalog::from_definitions(&margined).is_ok());
+            for margin in [
+                json!(1),
+                json!(null),
+                json!([" "]),
+                json!(""),
+                json!("\n"),
+                json!(" \n "),
+            ] {
+                invalid(|value| {
+                    value["profiles"][0]["rules"][0]["extract"]["operation"]["row_margin"] = margin;
+                });
+            }
+            invalid(|value| {
+                let operation = &mut value["profiles"][0]["rules"][0]["extract"]["operation"];
+                operation["row_margin"] = json!(" ");
+                operation["reassembly"] = json!("rows");
+            });
+        }
+
+        #[test]
         fn runtime_profile_capability_provenance_references_are_checked() {
             for (path, replacement) in [
                 ("/fixtures/0/backend", json!("claude")),
