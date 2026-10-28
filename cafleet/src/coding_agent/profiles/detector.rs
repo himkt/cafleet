@@ -1208,9 +1208,10 @@ fn reassemble_edge_joined_rows(rows: &str, lines: &[LogicalLine], cols: u16) -> 
             return None;
         }
         if !joins_next_directly {
-            operation.push(' ');
+            operation.push('\n');
         }
-        // Boxed rows break only at a space; plain rows break at the last usable column.
+        // Only a plain row filled to the last usable column is an observed wrap; a boxed break at
+        // a space is indistinguishable from a line break in the command itself.
         if let Some(content) = row.strip_prefix(" │ ") {
             operation.push_str(content);
             joins_next_directly = false;
