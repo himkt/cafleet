@@ -1,7 +1,7 @@
 # Delivery-dismissed approval recovery
 
 **Status**: Approved
-**Progress**: 0/16 tasks complete
+**Progress**: 5/16 tasks complete
 **Last Updated**: 2026-10-28
 
 ## Overview
@@ -192,11 +192,11 @@ Existing coverage stays as is and needs no new test: `director_delivery_ends_bef
 
 ### Step 1: Agent reference documentation
 
-- [ ] Add the two Note → applies at rows and replace the `Evidence:` line in `skills/cafleet/reference/coding-agents.md` § `claude` per Specification <!-- completed: -->
-- [ ] Replace the delivered-line sentences in `skills/cafleet/roles/member.md` § On spawn and add the **Delivery-dismissed prompts** paragraph to § Command execution <!-- completed: -->
-- [ ] Add the open-prompt check paragraph to `skills/cafleet/reference/prompt-routing.md` § Director-side dispatch <!-- completed: -->
-- [ ] Append the open-prompt check sentence to `skills/cafleet/roles/director.md` § Member Prompt <!-- completed: -->
-- [ ] Append the Director-pane sentence to the intro of `skills/cafleet/reference/supervision.md` § Director wake, leaving the numbered steps unchanged <!-- completed: -->
+- [x] Add the two Note → applies at rows and replace the `Evidence:` line in `skills/cafleet/reference/coding-agents.md` § `claude` per Specification <!-- completed: 2026-10-28T13:49 -->
+- [x] Replace the delivered-line sentences in `skills/cafleet/roles/member.md` § On spawn and add the **Delivery-dismissed prompts** paragraph to § Command execution <!-- completed: 2026-10-28T13:49 -->
+- [x] Add the open-prompt check paragraph to `skills/cafleet/reference/prompt-routing.md` § Director-side dispatch <!-- completed: 2026-10-28T13:49 -->
+- [x] Append the open-prompt check sentence to `skills/cafleet/roles/director.md` § Member Prompt <!-- completed: 2026-10-28T13:49 -->
+- [x] Append the Director-pane sentence to the intro of `skills/cafleet/reference/supervision.md` § Director wake, leaving the numbered steps unchanged <!-- completed: 2026-10-28T13:49 -->
 
 ### Step 2: Operator documentation
 
