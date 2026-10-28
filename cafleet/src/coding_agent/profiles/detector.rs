@@ -330,6 +330,339 @@ pub(super) mod inspection_tests {
         assert_ne!(headless.kind, permission, "form without its heading");
     }
 
+    const CODEX_VERSION: &str = "0.163.0";
+    const CODEX_PERMISSION_SCREEN: &str =
+        include_str!("native/codex-0.163.0-on-request-permission-1.json");
+    const CODEX_ALLOW_SCREEN: &str = include_str!("native/codex-0.163.0-allow-pre-stage-1.json");
+    const CODEX_DENY_SCREEN: &str = include_str!("native/codex-0.163.0-deny-pre-stage-1.json");
+    const CODEX_IDLE_SCREEN: &str = include_str!("native/codex-0.163.0-idle-composer-1.json");
+    const CODEX_CHOICES: [&str; 2] = ["Yes, proceed", "No, and tell Codex what to do differently"];
+
+    fn codex_observation(screen: &ScreenSnapshot) -> ScreenObservation {
+        let catalog = ProfileCatalog::bundled().unwrap();
+        Detector::new(&catalog, CodingAgent::Codex, Some(CODEX_VERSION))
+            .unwrap()
+            .observe(screen)
+            .unwrap()
+    }
+
+    fn codex_plan(decision: PermissionDecision) -> AnswerPlan {
+        ProfileCatalog::bundled()
+            .unwrap()
+            .answer_plan(
+                CodingAgent::Codex,
+                CODEX_VERSION,
+                "codex-exec-approval",
+                decision,
+            )
+            .unwrap()
+            .expect("measured bundled Codex answer plan")
+    }
+
+    fn codex_answer(screen: &ScreenSnapshot, plan: &AnswerPlan) -> Option<AnswerMatch> {
+        let catalog = ProfileCatalog::bundled().unwrap();
+        Detector::new(&catalog, CodingAgent::Codex, Some(CODEX_VERSION))
+            .unwrap()
+            .match_answer(screen, plan)
+            .unwrap()
+    }
+
+    fn codex_form(
+        change: impl FnOnce(&mut Vec<String>),
+        cursor: Option<(u16, u16)>,
+    ) -> ScreenSnapshot {
+        replay_native_fixture(CODEX_PERMISSION_SCREEN, change, true, cursor)
+    }
+
+    // Writing the full-width cursor row last leaves the terminal in its pending-wrap state, which an
+    // absolute cursor move cannot reach.
+    fn replay_with_pending_wrap(
+        fixture: &str,
+        change: impl FnOnce(&mut Vec<String>),
+    ) -> ScreenSnapshot {
+        let screen: Value = serde_json::from_str(fixture).unwrap();
+        assert_eq!(
+            screen["cursor_col"], 120,
+            "fixture records a pending-wrap cursor"
+        );
+        let row = usize::try_from(screen["cursor_row"].as_u64().unwrap()).unwrap();
+        let mut lines: Vec<String> = screen["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|line| line.as_str().unwrap().to_owned())
+            .collect();
+        change(&mut lines);
+        assert_eq!(
+            lines[row].chars().count(),
+            120,
+            "the cursor row fills the width"
+        );
+        let mut terminal = TerminalState::new(TerminalSize {
+            rows: 36,
+            cols: 120,
+        })
+        .unwrap();
+        terminal.feed(b"\x1b[?1049h\x1b[2J").unwrap();
+        for (index, line) in lines.iter().enumerate() {
+            if index != row && !line.is_empty() {
+                terminal
+                    .feed(format!("\x1b[{};1H{line}", index + 1).as_bytes())
+                    .unwrap();
+            }
+        }
+        terminal
+            .feed(format!("\x1b[{};1H{}", row + 1, lines[row]).as_bytes())
+            .unwrap();
+        terminal.snapshot()
+    }
+
+    fn continued_choice_two(lines: &mut Vec<String>) {
+        let choice = lines[32]
+            .strip_suffix(" (p)")
+            .expect("choice 2 fits one row")
+            .to_owned();
+        lines.remove(12);
+        lines[31] = choice;
+        lines.insert(32, "     (p)".into());
+    }
+
+    #[test]
+    fn bundled_codex_detector_replays_the_native_approval_form_from_unmasked_rows() {
+        let screen = codex_form(|_| {}, None);
+        let observation = codex_observation(&screen);
+        assert_eq!(
+            observation.kind,
+            ObservationKind::Interaction(InteractionClass::PermissionRequest)
+        );
+        assert_eq!(observation.rule_id, "codex-exec-approval");
+        assert_eq!(observation.match_evidence, MatchEvidence::Complete);
+        assert_eq!(
+            observation.raw_evidence["operation"],
+            "/tmp/cafleet-194/codex-cells-001/permission-probe allow"
+        );
+        assert_eq!(observation.raw_evidence["choices"], json!(CODEX_CHOICES));
+        assert!(!observation.verified_noninteraction);
+        assert!(observation.native_correlation.is_none());
+        let region = observation
+            .matched_region
+            .expect("an approval match locates its live region");
+        assert!(region.top >= 12, "{region:?}");
+        assert!(region.top <= 22 && region.bottom >= 36, "{region:?}");
+        let replay = codex_observation(&codex_form(|_| {}, None));
+        assert!(observation.fingerprint.is_some());
+        assert!(replay.fingerprint == observation.fingerprint);
+        let catalog = ProfileCatalog::bundled().unwrap();
+        let unprofiled = Detector::new(&catalog, CodingAgent::Codex, Some("0.162.0"))
+            .unwrap()
+            .observe(&screen)
+            .unwrap();
+        assert_eq!(unprofiled.kind, ObservationKind::Unknown);
+    }
+
+    #[test]
+    fn bundled_codex_detection_counts_a_pending_wrap_cursor_on_the_full_width_closing_row_as_inside()
+     {
+        let screen = replay_with_pending_wrap(CODEX_PERMISSION_SCREEN, |_| {});
+        assert_eq!(
+            (screen.cursor_row, screen.cursor_col),
+            (35, 120),
+            "the live terminal reports the pending-wrap column"
+        );
+        let observation = codex_observation(&screen);
+        assert_eq!(
+            observation.kind,
+            ObservationKind::Interaction(InteractionClass::PermissionRequest),
+            "a pending-wrap cursor on the closing row lies inside the form"
+        );
+        assert!(
+            observation.fingerprint == codex_observation(&codex_form(|_| {}, None)).fingerprint
+        );
+        for fixture in [CODEX_ALLOW_SCREEN, CODEX_DENY_SCREEN] {
+            let pre_stage = codex_observation(&replay_with_pending_wrap(fixture, |_| {}));
+            assert_eq!(
+                pre_stage.kind,
+                ObservationKind::Interaction(InteractionClass::PermissionRequest)
+            );
+        }
+    }
+
+    #[test]
+    fn bundled_codex_detector_rejects_copies_that_are_not_the_live_approval_form() {
+        let permission = ObservationKind::Interaction(InteractionClass::PermissionRequest);
+        let primary = codex_observation(&replay_native_fixture(
+            CODEX_PERMISSION_SCREEN,
+            |_| {},
+            false,
+            None,
+        ));
+        assert_ne!(primary.kind, permission, "primary-screen transcript copy");
+        let unfocused = codex_observation(&codex_form(
+            |lines| lines[31] = lines[31].replacen('›', " ", 1),
+            None,
+        ));
+        assert_ne!(unfocused.kind, permission, "form without a focus marker");
+        let broadened = codex_observation(&codex_form(
+            |lines| {
+                lines[31].clear();
+                lines[33].clear();
+            },
+            None,
+        ));
+        assert_ne!(
+            broadened.kind, permission,
+            "only the prefix-approval choice remains"
+        );
+        let headless = codex_observation(&codex_form(|lines| lines[22].clear(), None));
+        assert_ne!(headless.kind, permission, "form without its heading");
+        let reasonless = codex_observation(&codex_form(|lines| lines[26].clear(), None));
+        assert_ne!(reasonless.kind, permission, "form without its reason line");
+        let outside = codex_observation(&codex_form(|_| {}, Some((12, 0))));
+        assert_ne!(outside.kind, permission, "cursor outside the form");
+    }
+
+    #[test]
+    fn bundled_codex_form_with_choice_two_on_one_row_or_continued_detects_the_same_request() {
+        let single = codex_observation(&codex_form(|_| {}, None));
+        let continued = codex_observation(&codex_form(continued_choice_two, None));
+        for observation in [&single, &continued] {
+            assert_eq!(
+                observation.kind,
+                ObservationKind::Interaction(InteractionClass::PermissionRequest)
+            );
+            assert_eq!(
+                observation.raw_evidence["operation"],
+                "/tmp/cafleet-194/codex-cells-001/permission-probe allow"
+            );
+            assert_eq!(observation.raw_evidence["choices"], json!(CODEX_CHOICES));
+        }
+        assert!(single.fingerprint.is_some());
+        assert!(
+            continued.fingerprint == single.fingerprint,
+            "a continued (p) row keeps the request identity"
+        );
+        for (fixture, operation) in [
+            (
+                CODEX_ALLOW_SCREEN,
+                "/tmp/cafleet-194/codex-ans-allow-001/permission-probe allow",
+            ),
+            (
+                CODEX_DENY_SCREEN,
+                "/tmp/cafleet-194/codex-ans-deny-001/permission-probe deny",
+            ),
+        ] {
+            let pre_stage = codex_observation(&replay_native_fixture(fixture, |_| {}, true, None));
+            assert_eq!(
+                pre_stage.kind,
+                ObservationKind::Interaction(InteractionClass::PermissionRequest)
+            );
+            assert_eq!(pre_stage.raw_evidence["operation"], operation);
+            assert_eq!(pre_stage.raw_evidence["choices"], json!(CODEX_CHOICES));
+        }
+    }
+
+    #[test]
+    fn bundled_codex_answer_plans_match_their_measured_pre_stage_screens_and_bind_focus() {
+        for (decision, fixture, choice) in [
+            (PermissionDecision::Allow, CODEX_ALLOW_SCREEN, "allow-once"),
+            (PermissionDecision::Deny, CODEX_DENY_SCREEN, "deny-once"),
+        ] {
+            let plan = codex_plan(decision);
+            let screen = replay_native_fixture(fixture, |_| {}, true, None);
+            let matched = codex_answer(&screen, &plan).expect("pre-stage form matches its plan");
+            assert_eq!(
+                matched.choices(),
+                CODEX_CHOICES.map(str::to_owned).as_slice()
+            );
+            assert_eq!(matched.plan().choice_id(), choice);
+            assert!(!matched.focus().is_empty());
+            assert!(Some(matched.semantic()) == codex_observation(&screen).fingerprint.as_ref());
+            let moved = replay_native_fixture(
+                fixture,
+                |lines| {
+                    lines[30] = lines[30].replacen('›', " ", 1);
+                    lines[31] = lines[31].replacen("  2.", "› 2.", 1);
+                },
+                true,
+                None,
+            );
+            let refocused =
+                codex_answer(&moved, &plan).expect("a moved focus still identifies the form");
+            assert!(refocused.semantic() == matched.semantic());
+            assert_ne!(
+                refocused.focus(),
+                matched.focus(),
+                "token binding sees the focus move"
+            );
+            let unfocused = replay_native_fixture(
+                fixture,
+                |lines| lines[30] = lines[30].replacen('›', " ", 1),
+                true,
+                None,
+            );
+            assert!(
+                codex_answer(&unfocused, &plan).is_none(),
+                "{decision:?} without ›"
+            );
+            let primary = replay_native_fixture(fixture, |_| {}, false, None);
+            assert!(
+                codex_answer(&primary, &plan).is_none(),
+                "{decision:?} primary screen"
+            );
+        }
+    }
+
+    #[test]
+    fn bundled_codex_idle_composer_is_a_verified_non_interaction_distinct_from_the_form() {
+        let idle = codex_observation(&replay_native_fixture(
+            CODEX_IDLE_SCREEN,
+            |_| {},
+            true,
+            None,
+        ));
+        assert_eq!(idle.kind, ObservationKind::ComposerEmpty);
+        assert_eq!(idle.match_evidence, MatchEvidence::Complete);
+        assert!(idle.verified_noninteraction);
+        assert_eq!(idle.rule_id, "codex-idle-composer");
+        let region = idle
+            .matched_region
+            .expect("the idle rule locates its composer");
+        assert_eq!((region.top, region.bottom), (32, 33), "{region:?}");
+        let form = codex_observation(&codex_form(|_| {}, None));
+        assert_eq!(form.rule_id, "codex-exec-approval");
+        assert!(!form.verified_noninteraction);
+    }
+
+    #[test]
+    fn bundled_codex_idle_rule_rejects_drafts_primary_copies_and_a_cursor_off_the_prefix_end() {
+        let draft = codex_observation(&replay_native_fixture(
+            CODEX_IDLE_SCREEN,
+            |lines| lines[32] = "› hello".into(),
+            true,
+            Some((32, 7)),
+        ));
+        assert_ne!(draft.kind, ObservationKind::ComposerEmpty, "typed draft");
+        assert!(!draft.verified_noninteraction);
+        let primary = codex_observation(&replay_native_fixture(
+            CODEX_IDLE_SCREEN,
+            |_| {},
+            false,
+            None,
+        ));
+        assert!(!primary.verified_noninteraction, "primary-screen copy");
+        let away = codex_observation(&replay_native_fixture(
+            CODEX_IDLE_SCREEN,
+            |_| {},
+            true,
+            Some((32, 0)),
+        ));
+        assert!(
+            !away.verified_noninteraction,
+            "cursor before the prefix end"
+        );
+        assert_ne!(away.kind, ObservationKind::ComposerEmpty);
+    }
+
     #[test]
     fn permission_inspection_answer_matches_have_no_debug_or_serialized_representation() {
         trait AmbiguousIfImplemented<Marker> {

@@ -2716,7 +2716,7 @@ mod contract_tests {
             include_bytes!("profiles/native/claude-2.1.302-deny-pre-stage-1.json");
         const IDLE_BYTES: &[u8] =
             include_bytes!("profiles/native/claude-2.1.302-idle-composer-1.json");
-        const FIXTURES: [(&str, &str, &[u8]); 4] = [
+        pub(super) const FIXTURES: [(&str, &str, &[u8]); 4] = [
             (NATIVE_FIXTURE, NATIVE_SOURCE, NATIVE_BYTES),
             (
                 ALLOW_FIXTURE,
@@ -2735,9 +2735,10 @@ mod contract_tests {
             ),
         ];
 
-        fn embedded() -> Vec<(&'static str, &'static [u8])> {
+        pub(super) fn embedded() -> Vec<(&'static str, &'static [u8])> {
             FIXTURES
                 .iter()
+                .chain(super::bundled_codex::FIXTURES.iter())
                 .map(|&(_, source, bytes)| (source, bytes))
                 .collect()
         }
@@ -3188,6 +3189,463 @@ mod contract_tests {
         #[test]
         fn bundled_claude_episode_closes_not_visible_once_the_idle_composer_holds_250_ms() {
             let permission = bundled_observation(NATIVE_BYTES);
+            let idle = bundled_observation(IDLE_BYTES);
+            assert_eq!(idle.rule_id, IDLE_RULE);
+            assert!(idle.verified_noninteraction);
+            let at = |observation: &ScreenObservation, output_seq: u64| {
+                let mut replayed = observation.clone();
+                replayed.output_seq = output_seq;
+                replayed.raw_evidence["screen_seq"] = json!(output_seq);
+                replayed
+            };
+            let origin = Instant::now();
+            let mut tracker = tracker();
+            open(&mut tracker, &at(&permission, 1), origin);
+            let closed = |update: &EpisodeUpdate| {
+                update
+                    .transitions
+                    .iter()
+                    .filter(|t| t.kind == RuntimeEventKind::InteractionClosed)
+                    .cloned()
+                    .collect::<Vec<_>>()
+            };
+            let flash = tracker
+                .observe(&at(&idle, 2), origin + Duration::from_millis(200), NOW)
+                .unwrap();
+            assert!(closed(&flash).is_empty(), "idle shown for 0 ms stays open");
+            let back = tracker
+                .observe(
+                    &at(&permission, 3),
+                    origin + Duration::from_millis(300),
+                    NOW,
+                )
+                .unwrap();
+            assert!(
+                closed(&back).is_empty(),
+                "an idle flash under 250 ms keeps the episode"
+            );
+            let first = tracker
+                .observe(&at(&idle, 4), origin + Duration::from_millis(400), NOW)
+                .unwrap();
+            assert!(closed(&first).is_empty());
+            let held = tracker
+                .observe(&at(&idle, 5), origin + Duration::from_millis(650), NOW)
+                .unwrap();
+            let closes = closed(&held);
+            assert_eq!(closes.len(), 1, "{:?}", held.transitions);
+            assert_eq!(
+                closes[0].close_reason,
+                Some(InteractionCloseReason::NotVisible)
+            );
+        }
+    }
+
+    mod bundled_codex {
+        use super::*;
+        use sha2::{Digest, Sha256};
+        use std::collections::BTreeSet;
+
+        const CODEX_VERSION: &str = "0.163.0";
+        const PROFILE_VERSION: &str = "codex-0.163.0-on-request-1";
+        const PERMISSION_RULE: &str = "codex-exec-approval";
+        const IDLE_RULE: &str = "codex-idle-composer";
+        const PERMISSION_FIXTURE: &str = "codex-0.163.0-on-request-permission-1";
+        const ALLOW_FIXTURE: &str = "codex-0.163.0-allow-pre-stage-1";
+        const DENY_FIXTURE: &str = "codex-0.163.0-deny-pre-stage-1";
+        const IDLE_FIXTURE: &str = "codex-0.163.0-idle-composer-1";
+        const PERMISSION_BYTES: &[u8] =
+            include_bytes!("profiles/native/codex-0.163.0-on-request-permission-1.json");
+        const ALLOW_BYTES: &[u8] =
+            include_bytes!("profiles/native/codex-0.163.0-allow-pre-stage-1.json");
+        const DENY_BYTES: &[u8] =
+            include_bytes!("profiles/native/codex-0.163.0-deny-pre-stage-1.json");
+        const IDLE_BYTES: &[u8] =
+            include_bytes!("profiles/native/codex-0.163.0-idle-composer-1.json");
+        pub(super) const FIXTURES: [(&str, &str, &[u8]); 4] = [
+            (
+                PERMISSION_FIXTURE,
+                "native/codex-0.163.0-on-request-permission-1.json",
+                PERMISSION_BYTES,
+            ),
+            (
+                ALLOW_FIXTURE,
+                "native/codex-0.163.0-allow-pre-stage-1.json",
+                ALLOW_BYTES,
+            ),
+            (
+                DENY_FIXTURE,
+                "native/codex-0.163.0-deny-pre-stage-1.json",
+                DENY_BYTES,
+            ),
+            (
+                IDLE_FIXTURE,
+                "native/codex-0.163.0-idle-composer-1.json",
+                IDLE_BYTES,
+            ),
+        ];
+        const APPROVAL_HEADING: &str = "  Would you like to run the following command?";
+        const ALLOW_CHOICE: &str = "› 1. Yes, proceed (y)";
+        const DENY_CHOICE: &str = "  3. No, and tell Codex what to do differently (esc)";
+        const CLOSING_LINE: &str = "  Press enter to confirm or esc to cancel";
+
+        type ScreenChange = (&'static str, fn(&mut Value));
+
+        fn fixture(id: &str) -> (&'static str, &'static [u8]) {
+            FIXTURES
+                .iter()
+                .find(|(fixture, _, _)| *fixture == id)
+                .map(|&(_, source, bytes)| (source, bytes))
+                .expect("known bundled Codex fixture")
+        }
+
+        fn lines(bytes: &[u8]) -> Vec<String> {
+            serde_json::from_slice::<Value>(bytes).unwrap()["lines"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|line| line.as_str().unwrap().to_owned())
+                .collect()
+        }
+
+        fn digest(bytes: &[u8]) -> String {
+            Sha256::digest(bytes)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect()
+        }
+
+        fn definitions() -> Value {
+            serde_json::from_str(include_str!("profiles/bundled.json")).unwrap()
+        }
+
+        fn entry<'a>(definitions: &'a mut Value, id: &str) -> &'a mut Value {
+            definitions["fixtures"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|entry| entry["id"] == id)
+                .expect("bundled catalog cites the Codex fixture")
+        }
+
+        fn guarded_fixture(
+            id: &str,
+            change_definitions: impl FnOnce(&mut Value),
+            change_screen: impl FnOnce(&mut Value),
+        ) -> Result<ProfileCatalog, CafleetError> {
+            let (source, original) = fixture(id);
+            let mut screen: Value = serde_json::from_slice(original).unwrap();
+            change_screen(&mut screen);
+            let bytes = serde_json::to_vec_pretty(&screen).unwrap();
+            let mut value = definitions();
+            entry(&mut value, id)["sha256"] = json!(digest(&bytes));
+            change_definitions(&mut value);
+            let mut embedded = super::bundled_claude::embedded();
+            embedded.retain(|&(cited, _)| cited != source);
+            embedded.push((source, &bytes));
+            ProfileCatalog::from_bundled_definitions(&value, &embedded)
+        }
+
+        fn bundled_observation(bytes: &[u8]) -> ScreenObservation {
+            let catalog = ProfileCatalog::bundled().unwrap();
+            let screen = super::super::detector::inspection_tests::replay_native_fixture(
+                std::str::from_utf8(bytes).unwrap(),
+                |_| {},
+                true,
+                None,
+            );
+            Detector::new(&catalog, CodingAgent::Codex, Some(CODEX_VERSION))
+                .unwrap()
+                .observe(&screen)
+                .unwrap()
+        }
+
+        #[test]
+        fn bundled_codex_fixtures_match_their_catalog_entries_and_declare_masked_header_rows() {
+            let mut value = definitions();
+            let header: Vec<usize> = (0..12).collect();
+            for (id, sequence, cursor) in [
+                (PERMISSION_FIXTURE, 25293, (35, 120)),
+                (ALLOW_FIXTURE, 24241, (35, 120)),
+                (DENY_FIXTURE, 25695, (35, 120)),
+                (IDLE_FIXTURE, 18164, (32, 2)),
+            ] {
+                let (source, bytes) = fixture(id);
+                assert_eq!(
+                    entry(&mut value, id),
+                    &json!({"id":id,"kind":"native","backend":"codex","native_version":CODEX_VERSION,
+                        "rows":36,"cols":120,"source_ref":source,"sha256":digest(bytes)})
+                );
+                let screen: Value = serde_json::from_slice(bytes).unwrap();
+                assert_eq!(
+                    screen
+                        .as_object()
+                        .unwrap()
+                        .keys()
+                        .map(String::as_str)
+                        .collect::<BTreeSet<_>>(),
+                    BTreeSet::from([
+                        "schema_version",
+                        "fixture_id",
+                        "provenance",
+                        "backend",
+                        "native_version",
+                        "rows",
+                        "cols",
+                        "alternate_screen",
+                        "screen_seq",
+                        "cursor_row",
+                        "cursor_col",
+                        "lines",
+                        "masked_rows",
+                    ]),
+                    "{id} has exactly the documented fields"
+                );
+                assert_eq!(screen["schema_version"], 1);
+                assert_eq!(screen["fixture_id"], id);
+                assert_eq!(screen["provenance"], "native");
+                assert_eq!(screen["backend"], "codex");
+                assert_eq!(screen["native_version"], CODEX_VERSION);
+                assert_eq!(
+                    (screen["rows"].clone(), screen["cols"].clone()),
+                    (json!(36), json!(120))
+                );
+                assert_eq!(screen["alternate_screen"], true, "{id}");
+                assert_eq!(screen["screen_seq"], sequence);
+                assert_eq!(
+                    (screen["cursor_row"].clone(), screen["cursor_col"].clone()),
+                    (json!(cursor.0), json!(cursor.1)),
+                    "{id}"
+                );
+                assert_eq!(
+                    screen["masked_rows"],
+                    json!(
+                        header
+                            .iter()
+                            .map(|row| json!({"row":row,"reason":"reviewed_privacy"}))
+                            .collect::<Vec<_>>()
+                    )
+                );
+                let rows = lines(bytes);
+                assert_eq!(rows.len(), 36);
+                for (row, line) in rows.iter().enumerate() {
+                    if header.contains(&row) {
+                        assert_eq!(line, "", "{id} masked row {row} is empty");
+                    }
+                    for private in ["/Users/", "/root", "himkt"] {
+                        assert!(
+                            !line.contains(private),
+                            "{id} row {row} carries {private:?}"
+                        );
+                    }
+                }
+            }
+            let permission = lines(PERMISSION_BYTES);
+            assert_eq!(permission[22], APPROVAL_HEADING);
+            assert_eq!(
+                permission[28],
+                "  $ /tmp/cafleet-194/codex-cells-001/permission-probe allow"
+            );
+            assert_eq!(permission[31].trim_end(), ALLOW_CHOICE);
+            assert!(
+                permission[32].starts_with("  2. Yes, and don't ask again")
+                    && permission[32].ends_with("` (p)"),
+                "choice 2 fits one row"
+            );
+            assert_eq!(permission[33], DENY_CHOICE);
+            assert_eq!(permission[35].trim_end(), CLOSING_LINE);
+            assert_eq!(
+                permission[35].chars().count(),
+                120,
+                "the closing row fills the width"
+            );
+            for (bytes, operation) in [
+                (
+                    ALLOW_BYTES,
+                    "  $ /tmp/cafleet-194/codex-ans-allow-001/permission-probe allow",
+                ),
+                (
+                    DENY_BYTES,
+                    "  $ /tmp/cafleet-194/codex-ans-deny-001/permission-probe deny",
+                ),
+            ] {
+                let rows = lines(bytes);
+                assert_eq!(rows[21], APPROVAL_HEADING);
+                assert_eq!(rows[27], operation);
+                assert_eq!(rows[30].trim_end(), ALLOW_CHOICE);
+                assert!(
+                    rows[31].ends_with('`'),
+                    "choice 2 continues on the next row"
+                );
+                assert_eq!(rows[32], "     (p)");
+                assert_eq!(rows[33], DENY_CHOICE);
+                assert_eq!(rows[35].trim_end(), CLOSING_LINE);
+                assert_eq!(rows[35].chars().count(), 120);
+            }
+            assert_eq!(lines(IDLE_BYTES)[32], "› Ask Codex to do anything");
+        }
+
+        #[test]
+        fn bundled_codex_0_163_0_declares_detection_idle_composer_and_both_answers_only() {
+            let bundled = ProfileCatalog::bundled().unwrap();
+            let codex = bundled.capabilities(CodingAgent::Codex, Some(CODEX_VERSION));
+            assert_eq!(codex.backend, CodingAgent::Codex);
+            assert_eq!(codex.native_version.as_deref(), Some(CODEX_VERSION));
+            assert_eq!(codex.profile_version.as_deref(), Some(PROFILE_VERSION));
+            assert_eq!(codex.detection, Coverage::Tested);
+            assert_eq!(codex.composer, Coverage::Tested);
+            assert_eq!(codex.prompt_submission, Coverage::Unknown);
+            assert_eq!(codex.native_exec_submission, Coverage::Unknown);
+            assert_eq!(codex.answer_decisions.len(), 2);
+            for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                assert!(codex.answer_decisions.contains(&decision), "{decision:?}");
+            }
+            for version in [None, Some("0.162.0"), Some("0.164.0")] {
+                let unknown = bundled.capabilities(CodingAgent::Codex, version);
+                assert_eq!(unknown.detection, Coverage::Unknown, "{version:?}");
+                assert_eq!(unknown.composer, Coverage::Unknown, "{version:?}");
+                assert!(unknown.answer_decisions.is_empty());
+                assert!(unknown.capability_reason.is_some());
+            }
+            for &backend in CodingAgent::all()
+                .iter()
+                .filter(|&&backend| backend != CodingAgent::Codex)
+            {
+                let other = bundled.capabilities(backend, Some(CODEX_VERSION));
+                assert_eq!(other.detection, Coverage::Unknown, "{backend:?}");
+                assert!(other.answer_decisions.is_empty());
+            }
+        }
+
+        #[test]
+        fn bundled_codex_answer_plans_are_the_measured_single_byte_stages() {
+            let bundled = ProfileCatalog::bundled().unwrap();
+            for (decision, byte, choice, answer_rule, provenance) in [
+                (
+                    PermissionDecision::Allow,
+                    0x79,
+                    "allow-once",
+                    "codex-exec-allow-y",
+                    ALLOW_FIXTURE,
+                ),
+                (
+                    PermissionDecision::Deny,
+                    0x33,
+                    "deny-once",
+                    "codex-exec-deny-digit",
+                    DENY_FIXTURE,
+                ),
+            ] {
+                let plan = bundled
+                    .answer_plan(CodingAgent::Codex, CODEX_VERSION, PERMISSION_RULE, decision)
+                    .unwrap()
+                    .expect("measured bundled answer plan");
+                assert_eq!(plan.choice_id(), choice);
+                assert_eq!(plan.focus_matcher_id(), "focus");
+                assert_eq!(plan.stages().len(), 1, "{decision:?} is one measured stage");
+                let stage = &plan.stages()[0];
+                assert_eq!(stage.bytes(), &[byte]);
+                assert_eq!(stage.required_rule_id(), PERMISSION_RULE);
+                assert_eq!(stage.required_choice_id(), choice);
+                let capability = plan.capability();
+                assert_eq!(capability.backend(), CodingAgent::Codex);
+                assert_eq!(capability.native_version(), CODEX_VERSION);
+                assert_eq!(capability.profile_version(), PROFILE_VERSION);
+                assert_eq!(capability.request_rule_id(), PERMISSION_RULE);
+                assert_eq!(capability.answer_rule_id(), answer_rule);
+                assert_eq!(capability.decision(), decision);
+                assert_eq!(capability.fixture_ids(), &[provenance.to_owned()]);
+                for (backend, version) in [
+                    (CodingAgent::Codex, "0.162.0"),
+                    (CodingAgent::Claude, CODEX_VERSION),
+                    (CodingAgent::Opencode, CODEX_VERSION),
+                ] {
+                    assert!(
+                        bundled
+                            .answer_plan(backend, version, PERMISSION_RULE, decision)
+                            .unwrap()
+                            .is_none(),
+                        "{backend:?} {version}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn bundled_guard_rejects_synthetic_or_altered_codex_fixtures() {
+            for (id, _, _) in FIXTURES {
+                assert!(guarded_fixture(id, |_| {}, |_| {}).is_ok(), "{id}");
+                assert!(
+                    guarded_fixture(id, |d| entry(d, id)["kind"] = json!("synthetic"), |_| {})
+                        .is_err(),
+                    "{id} synthetic catalog kind"
+                );
+                let screen_changes: [ScreenChange; 6] = [
+                    ("synthetic provenance", |s| {
+                        s["provenance"] = json!("synthetic")
+                    }),
+                    ("nonempty masked row", |s| {
+                        s["lines"][0] = json!("restored header")
+                    }),
+                    ("backend", |s| s["backend"] = json!("claude")),
+                    ("native version", |s| s["native_version"] = json!("0.162.0")),
+                    ("extra field", |s| s["note"] = json!("unreviewed")),
+                    ("line count", |s| {
+                        s["lines"].as_array_mut().unwrap().pop();
+                    }),
+                ];
+                for (case, change) in screen_changes {
+                    assert!(
+                        guarded_fixture(id, |_| {}, change).is_err(),
+                        "{id} {case} must be rejected"
+                    );
+                }
+                let (source, bytes) = fixture(id);
+                let mut tampered = bytes.to_vec();
+                tampered.push(b'\n');
+                let mut with_tampered = super::bundled_claude::embedded();
+                with_tampered.retain(|&(cited, _)| cited != source);
+                with_tampered.push((source, &tampered));
+                assert!(
+                    ProfileCatalog::from_bundled_definitions(&definitions(), &with_tampered)
+                        .is_err(),
+                    "{id} digest mismatch"
+                );
+            }
+        }
+
+        #[test]
+        fn bundled_guard_accepts_a_pending_wrap_cursor_at_cols_and_rejects_one_past_it() {
+            assert!(
+                guarded_fixture(PERMISSION_FIXTURE, |_| {}, |s| s["cursor_col"] = json!(120))
+                    .is_ok(),
+                "cursor_col equal to cols records the pending-wrap position"
+            );
+            assert!(
+                guarded_fixture(IDLE_FIXTURE, |_| {}, |s| s["cursor_col"] = json!(120)).is_ok(),
+                "the pending-wrap position is valid on any row"
+            );
+            for (case, change) in [
+                ("one past the pending-wrap column", (35, 121)),
+                ("a row below the geometry", (36, 0)),
+            ] {
+                assert!(
+                    guarded_fixture(
+                        PERMISSION_FIXTURE,
+                        |_| {},
+                        |s| {
+                            s["cursor_row"] = json!(change.0);
+                            s["cursor_col"] = json!(change.1);
+                        }
+                    )
+                    .is_err(),
+                    "{case} must be rejected"
+                );
+            }
+        }
+
+        #[test]
+        fn bundled_codex_episode_closes_not_visible_once_the_idle_composer_holds_250_ms() {
+            let permission = bundled_observation(PERMISSION_BYTES);
             let idle = bundled_observation(IDLE_BYTES);
             assert_eq!(idle.rule_id, IDLE_RULE);
             assert!(idle.verified_noninteraction);
