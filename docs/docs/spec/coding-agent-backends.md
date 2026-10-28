@@ -380,7 +380,7 @@ Under `cafleet-ask`, a shell permission form is a runtime decision. The member
 runtime detects it, notifies the Director with an `interaction_opened` event,
 and the Director answers it through `cafleet permission respond` under the
 [permission workflow](../concepts/member-permission-events.md); the member
-continues from the result OpenCode returns. Under `cafleet`, a permission
+continues from the result OpenCode returns. The [OpenCode 2.1.4 profile](member-runtime.md#bundled-profiles-and-native-screen-fixtures) answers allow with Enter on `Allow once`. It answers deny by moving the focus to `Reject`, selecting it and submitting the rejection-reason dialog with an empty reason. After a deny OpenCode shows `Step interrupted` and does not continue on its own, so the Director continues the member with an ordinary message. A command that wraps in the form, a reason the user wants to give, and every OpenCode version other than 2.1.4 are answered manually on the native surface. Under `cafleet`, a permission
 popup in an opencode pane is a regression escape: capture the pane, escalate,
 and extend the allowlist by operator decision, leaving the popup for that
 decision.

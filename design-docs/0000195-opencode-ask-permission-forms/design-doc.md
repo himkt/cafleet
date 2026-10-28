@@ -1,7 +1,7 @@
 # OpenCode Ask Permission Forms
 
 **Status**: Approved
-**Progress**: 7/20 tasks complete
+**Progress**: 9/20 tasks complete
 **Last Updated**: 2026-10-28
 
 ## Overview
@@ -15,7 +15,7 @@ Add the explicit OpenCode launch policy `cafleet-ask`, backed by a second embedd
 - [ ] The `cafleet-ask` preset differs from the `cafleet` preset only in its description, its shell base rule `"*": "ask"` and its body text; every allowlist entry, every Director-only shell deny and every non-shell permission is identical.
 - [ ] The native version probe records `2.1.4` for OpenCode 2.1.4, whose `--version` prints `opencode v2.1.4`, and an OpenCode 2.1.4 member under either policy records profile `opencode-2.1.4-cafleet-ask-1` and `coverage=tested`.
 - [ ] The bundled profile declares tested detection, allow-once and reject-once answers and the empty-composer observation, each resting on native OpenCode 2.1.4 `mini` captures at 36x120; every answer stage is gated on the observed focus or continuation screen and none contains Escape, prompt and native-exec submission stay `unknown`, and no answer plan exists for an "always" choice.
-- [ ] On both tmux and herdr, a `cafleet-ask` member's shell permission form produces one `interaction_opened` event with the review instruction, and Director-auto allow and deny through `permission respond` reach the original request, close the episode `not_visible` and show the native result and the member's continuation.
+- [ ] On both tmux and herdr, a `cafleet-ask` member's shell permission form produces one `interaction_opened` event with the review instruction, and Director-auto allow and deny through `permission respond` reach the original request, close the episode `not_visible` and show the native result. After allow the member continues on its own; after deny OpenCode shows `Step interrupted` and the member continues on the Director's ordinary continuation message.
 - [ ] On one multiplexer, a user-sourced response, a user-executed complete bound command and a manual original-surface answer each reach the original request, with zero Director response bytes before the user's permission.
 - [ ] Every affected `docs/` page, `SPEC.md`, skill reference and preset describes the shipped `cafleet-ask` policy, the OpenCode profile and its limits, and `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build` pass.
 
@@ -116,7 +116,7 @@ The profile is keyed by backend and native version, like the Claude and Codex pr
 
 | Capability | Status | Declaration |
 |---|---|---|
-| Detection | `tested` | Rule `opencode-shell-permission`: the native `mini` shell permission form on the primary screen, from its `△ Permission required` heading to its `⇆ select  enter confirm  esc reject` control line within 24 rows, with the single-line `$ ` operation, the focused choice, the `Allow once` and `Reject` choices, and the cursor inside the form |
+| Detection | `tested` | Rule `opencode-shell-permission`: the native `mini` shell permission form on the primary screen, from its `△ Permission required` heading to its `⇆ select  enter confirm  esc reject` control line within 24 rows, with the single-line `$ ` operation, the focused choice and the `Allow once` and `Reject` choices; the cursor is hidden and its position is not part of the match |
 | Allow answer | `tested` | Answer rule `opencode-shell-allow-once`: one focus-gated stage, Enter (`0d`) while `Allow once` is focused, as `allow-once` |
 | Deny answer | `tested` | Answer rule `opencode-shell-deny-once`: three gated stages, `h` (`68`) while `Allow once` is focused, Enter (`0d`) while `Reject` is focused, then Enter (`0d`) while the continuation rule `opencode-reject-reason` shows the rejection-reason dialog with an empty reason, as `deny-once` |
 | Empty-composer observation | `tested` | Rule `opencode-idle-composer`: the idle `mini` composer with the terminal cursor at the end of its prompt prefix; a verified non-interaction boundary |
@@ -139,15 +139,15 @@ Each stage cites one pre-stage fixture that proves its `required_rule_id` (`open
 
 Rule requirements, pinned to exact patterns from the captures in Step 3:
 
-- **Live region.** Start and end patterns anchor on the form's own heading line `△ Permission required` and closing control line `⇆ select  enter confirm  esc reject`, as the `opencode-cells-001` capture shows, not on absolute rows. `cursor` is `inside`. Text outside that region, including transcript lines and scrollback, cannot open a request.
+- **Live region.** Start and end patterns anchor on the form's own heading line `△ Permission required` and closing control line `⇆ select  enter confirm  esc reject`, as the `opencode-cells-001` capture shows, not on absolute rows. The choices share the control line's row. `cursor` is `any`: `mini` hides the cursor while the form shows, and its recorded position varies. The fixtures show it at the pending-wrap position on the row below the form ([22,120]) and inside the choice row ([21,38], [21,29]). Text outside that region, including transcript lines and scrollback, cannot open a request.
 - **Required matchers.** Ids `heading`, `operation`, `focus`, `allow` and `deny`, as in the Claude and Codex rules: the heading, the operation line, a focused-choice line and the allow-once and reject-once choice lines, each bound to the same live region. The operation matcher captures the displayed single-line command without its prefix decoration. Model-authored descriptive text the form shows is required where present but excluded from the request identity.
 - **Focus.** The `focus` matcher declares `focus_style: "background"` and resolves the focused choice to exactly one choice id (§ Focus-gated answer stages), because the form marks focus by cell background only. A focus on `Always allow`, or a focus the matcher cannot resolve, resolves to no choice, so no gate holds.
 - **Choices.** `allow-once` and `deny-once` with scope `single_request`, labels captured from their choice lines; the rule matches both the three-option (`Allow once` / `Always allow` / `Reject`) and the two-option layout. An "always" or session-wide choice has no answer plan and no choice entry. `native_request_id` is null.
-- **Rejection-reason continuation.** Rule `opencode-reject-reason`, kind `permission_continuation`, with `continues_rule_id` `opencode-shell-permission` and `continues_choice_id` `deny-once`. It matches from the `△ Reject permission` heading to the `enter confirm  esc cancel` control line, requires the `Tell OpenCode what to do differently` prompt and an empty reason textarea, and has the cursor inside the dialog. It declares no operation, choices or answers; its exact patterns come from the `opencode-2.1.4-deny-pre-stage-3` capture.
+- **Rejection-reason continuation.** Rule `opencode-reject-reason`, kind `permission_continuation`, with `continues_rule_id` `opencode-shell-permission` and `continues_choice_id` `deny-once`. It matches from the `△ Reject permission` heading to the `enter confirm  esc cancel` control line, requires the `Tell OpenCode what to do differently` prompt, and identifies an empty reason textarea by its placeholder. The textarea span on the control-line row must equal the placeholder `Tell OpenCode what to do differently` exactly; typed text replaces the placeholder. `cursor` is `any`, as for the form. It declares no operation, choices or answers; its exact patterns come from the `opencode-2.1.4-deny-pre-stage-3` capture.
 - **Composer.** The idle composer rule anchors on the prompt prefix with cursor `at_end` and `verified_noninteraction: true`; a draft composer or a working screen does not match it.
 - **Sensitivity.** `sensitive: false`; metadata and redacted evidence policies apply unchanged.
 
-`mini` renders the form on the primary screen, as the `opencode-cells-001` capture shows, so an answered form may remain visible as transcript text; the live-region, cursor and closing-line requirements must reject it, and a test replays a native post-answer screen to prove it.
+`mini` renders the form on the primary screen, as the `opencode-cells-001` capture shows. An answered form or dialog leaves no transcript text: it disappears, and the transcript shows the member's report after allow or `Step interrupted` after deny, followed by the idle composer. The false-positive tests therefore use the idle-composer fixture, which is the screen after an answer, plus synthetic screens that carry form text outside a live region. No native post-answer grid is required.
 
 ### Answer stages
 
@@ -158,9 +158,16 @@ The OpenCode 2.1.4 permission dialog binds `left`/`h` and `right`/`l` (cycling f
 | Allow | 1 | `0d` (Enter) | Focus `allow-once` | Selects `Allow once`; OpenCode runs the command once |
 | Deny | 1 | `68` (`h`) | Focus `allow-once` | Cycles focus from the first option to the last, `Reject`, in both the two- and three-option layouts |
 | Deny | 2 | `0d` (Enter) | Focus `deny-once` | Selects `Reject`; OpenCode opens the rejection-reason dialog |
-| Deny | 3 | `0d` (Enter) | Screen `opencode-reject-reason` with an empty reason | Submits the empty reason; OpenCode reports the request rejected |
+| Deny | 3 | `0d` (Enter) | Screen `opencode-reject-reason` with an empty reason | Submits the empty reason; OpenCode rejects the request without running it |
 
 The deny answer always submits an empty reason, so CAFleet types no text into the dialog. No plan contains Escape.
+
+The native decision evidence is:
+
+| Answer | Evidence on the native surface | Continuation |
+|---|---|---|
+| Allow | The hint area briefly shows `Waiting for permission event…`, the form disappears without transcript text, the command runs, and the member prints its own report, a `<agent> · <model> · <duration>` line and the idle composer | The member continues on its own |
+| Deny | After the final Enter the hint area briefly shows `Waiting for permission event…`, the dialog disappears, and the transcript shows `Step interrupted`, a `<agent> · <model> · <duration>` line and the idle composer; nothing runs | OpenCode does not continue after a rejection; the Director continues the member with an ordinary message, as after Claude's `Interrupted · What should Claude do instead?` |
 
 Step 3 stops at a blocker when a measurement contradicts this table. Each of these outcomes requires a Programmer blocker marker at `paragraph-Implementation > Step 3`, paired with a `blocked (paragraph-Implementation > Step 3)` message to the Director, because the user-required acceptance includes both Director-auto allow and deny:
 
@@ -265,8 +272,8 @@ The driver's member prompt gains an OpenCode branch, because the generic branch 
 1. Build the capture binary with the `cafleet-ask` policy and the OpenCode cases. Write `presets/opencode/cafleet-ask.md` to `<private dir>/agents/cafleet-ask.md` under a private `OPENCODE_CONFIG_DIR` set for the driver invocation, so the operator's installed presets and skills stay untouched, and confirm the child loads the `cafleet-ask` agent.
 2. Run `opencode-cells-001` and read the form, its choice keys, its screen and how it marks the focused option (text or cell styling, from the `capture-pane -e` output), which selects the focus mechanism in § Focus-gated answer stages.
 3. Apply the blocker table in § Answer stages, then record the stage bytes above in the answer-stage cases as a reviewed registry edit.
-4. Run `opencode-ans-allow-001`, `opencode-ans-deny-001`, `opencode-ans-deny-002`, `opencode-ans-deny-003`, `opencode-focus-always-002` and `opencode-idle-001`. Before every byte, capture the pane and confirm that stage's gate: the focused option, or the rejection-reason dialog with an empty reason. The answer-stage post-stage screens supply the post-answer screen for the transcript false-positive test.
-5. Review masking (home paths, account, model or plan text) and confirm every rule region lies in unmasked rows. Add the fixtures to the native fixture directory and record their SHA-256 digests in the catalog; the Director commits them.
+4. Run `opencode-ans-allow-001`, `opencode-ans-deny-001`, `opencode-ans-deny-002`, `opencode-ans-deny-003`, `opencode-focus-always-002` and `opencode-idle-001`. Before every byte, capture the pane and confirm that stage's gate: the focused option, or the rejection-reason dialog with an empty reason. The post-stage screens supply the decision evidence.
+5. Review masking (home paths, account, model or plan text) and confirm every rule region lies in unmasked rows. The reviewed mask is row 35. The idle-composer capture shows the OpenCode default public model name (`Big Pickle`) and a context-usage counter in rows 9 and 13; neither is an account, plan or path, so the masking review accepts them unmasked. Add the fixtures to the native fixture directory and record their SHA-256 digests in the catalog; the Director commits them.
 
 Record the CAFleet commit, OpenCode version, model, terminal geometry and masking review with the execution evidence.
 
@@ -281,7 +288,7 @@ Run every case with the shipping release build, a private database and a dedicat
 | Case | Multiplexers | Required evidence |
 |---|---|---|
 | Director-auto allow | tmux and herdr | `interaction_opened` with the review instruction; `accepted`/`submitted`; the marker exists; OpenCode's allow evidence; `interaction_closed` `not_visible`; the member continues |
-| Director-auto deny | tmux and herdr | The same event; `accepted`/`submitted`; no marker; OpenCode's reject evidence; `interaction_closed` `not_visible`; the member continues |
+| Director-auto deny | tmux and herdr | The same event; `accepted`/`submitted`; no marker; OpenCode's `Step interrupted` and idle composer; `interaction_closed` `not_visible`; the member continues on the Director's ordinary continuation message |
 | User-sourced response (`--decision-source user`) | One of tmux or herdr | Zero response bytes before the user's permission; `accepted`/`submitted`; native result and closure |
 | User-executed complete bound command | Same multiplexer | The user runs the presented `permission respond` command; zero Director response bytes; native result and closure |
 | Manual original-surface answer | Same multiplexer | The user answers in the native pane; closure follows; a later respond with the earlier token is refused before any byte |
@@ -297,6 +304,7 @@ Record detection-to-inbox latency, the CAFleet commit, versions, geometry and ev
 | Focus moved by input other than the plan | A focus change before the response invalidates its request token; one between stages fails the response without further bytes (`uncertain`), and the form is answered manually on the native surface |
 | A rejection with a reason | A CAFleet deny always submits an empty reason; a reason is typed and submitted manually on the native surface |
 | A rejection-reason dialog reached by human input | The dialog keeps the episode open but offers no request token, so it is completed manually; a dialog with text never satisfies the deny stage-3 gate |
+| A typed reason identical to the placeholder | The fixture-backed matcher reads the placeholder text and cannot tell a typed copy of it from an empty textarea; such typing is human input, which fails the stage-3 gate inside a response |
 | Non-shell `ask` forms | The preset never asks for non-shell permissions; any other form is outside the profile |
 | OpenCode versions other than 2.1.4 | `coverage=unknown`; `cafleet-ask` still launches, its forms are answered manually |
 | Compound shell commands and MCP tools | Their permission matching remains unverified on OpenCode 2.1.4; the existing caveats apply to both presets |
@@ -337,18 +345,18 @@ Record detection-to-inbox latency, the CAFleet commit, versions, geometry and ev
 
 - [x] Add the `opencode-cells-001` and `opencode-idle-001` driver cases and the OpenCode prompt branch, run `opencode-cells-001`, and confirm the screen `mini` uses, the live-region anchors, the choice keys and the focus indicator. <!-- completed: 2026-10-28T11:56 -->
 - [x] Apply the blocker table in § Answer stages, then add `prefix_hex` to the case binding and the answer-stage cases of § Native capture procedure with their stage bytes, and run them with `opencode-idle-001`, recording the pre-stage and post-stage screens and OpenCode's decision evidence. <!-- completed: 2026-10-28T12:33 -->
-- [ ] Review masking for every capture, convert each capture into a fixture with its `cell_backgrounds` runs, add the fixtures to the native fixture directory with their SHA-256 digests, and keep a post-answer screen for the transcript false-positive test. <!-- completed: -->
+- [ ] Review masking for every capture, convert each capture into a fixture with its `cell_backgrounds` runs, add the fixtures to the native fixture directory with their SHA-256 digests, and record the masking review. <!-- completed: -->
 
 ### Step 4: Document the OpenCode profile
 
-- [ ] Document the focus-gated answer-stage contract of § Focus-gated answer stages in `docs/docs/spec/member-runtime.md` and `SPEC.md`: the optional focus and screen gates, catalog validation including the Escape-free invariant, `focus_style` focused-choice resolution, the focus value in the request identity, the expected focus transition, `permission_continuation` rules (episode continuity, succession binding, no inspection token), waiting and failure reporting, and the native fixture's optional `cell_backgrounds`. <!-- completed: -->
-- [ ] Add the OpenCode 2.1.4 profile section to `docs/docs/spec/member-runtime.md` and `SPEC.md` with the captured anchors, answer keys, decision evidence and limits, and update the OpenCode limits in `docs/docs/spec/coding-agent-backends.md` and the skill references. <!-- completed: -->
+- [x] Document the focus-gated answer-stage contract of § Focus-gated answer stages in `docs/docs/spec/member-runtime.md` and `SPEC.md`: the optional focus and screen gates, catalog validation including the Escape-free invariant, `focus_style` focused-choice resolution, the focus value in the request identity, the expected focus transition, `permission_continuation` rules (episode continuity, succession binding, no inspection token), waiting and failure reporting, and the native fixture's optional `cell_backgrounds`. <!-- completed: 2026-10-28T12:37 -->
+- [x] Add the OpenCode 2.1.4 profile section to `docs/docs/spec/member-runtime.md` and `SPEC.md` with the captured anchors, answer keys, decision evidence and limits, and update the OpenCode limits in `docs/docs/spec/coding-agent-backends.md` and the skill references. <!-- completed: 2026-10-28T12:40 -->
 
 ### Step 5: Implement the profile
 
 - [ ] Write synthetic engine tests: catalog validation of gates (unknown choice, partial gating, final gate on another choice, a screen gate on an unknown or unrelated continuation rule or without its `continues_choice_id` stage before it, a continuation rule with operation or choices, a `1b` byte in any backend's stage), continuation screens (keeping the active episode open and `Visible` with no event or obscured timer, an unknown screen without an active episode, no inspection token, the succession binding and its rejection after human input, a gap or a different episode, a non-empty reason never satisfying the gate, the episode closing before the final stage failing as `uncertain`), `focus_style` resolution (one, none, several, an option without a choice entry and a different theme's colours), a styling-only focus change starting a new request generation, `cell_backgrounds` loading (geometry, masked rows, overlap, colour shape, absent key) and replay, a gated stage never written while its gate is unmet, the expected focus transition rebinding the selection without a new token, every other change between stages failing as `uncertain` with no further byte, waiting while the previous focus persists until the deadline, and unchanged ungated Claude and Codex plans. <!-- completed: -->
 - [ ] Implement the optional `required_focus_choice_id` and `required_screen_rule_id`, their catalog validation, `focus_style` resolution and the resolved focus in the request identity, the `permission_continuation` rule kind in the detector and episode tracker, the fixture's optional `cell_backgrounds` in the loader and replay, and the runner's per-stage gate, expected focus transition and continuation binding. <!-- completed: -->
-- [ ] Write fixture-backed tests: detection on the form fixture, each answer stage's gate holding on its pre-stage fixture (the stage-3 continuation on the empty rejection-reason dialog), no gate holding on the `Always allow`-focused fixture, the idle composer as a verified non-interaction boundary, no detection on the idle composer and post-answer screens, no answer plan for an "always" choice, and catalog capability results for OpenCode 2.1.4 and for another OpenCode version. <!-- completed: -->
+- [ ] Write fixture-backed tests: detection on the form fixture, each answer stage's gate holding on its pre-stage fixture (the stage-3 continuation on the empty rejection-reason dialog), no gate holding on the `Always allow`-focused fixture, the idle composer as a verified non-interaction boundary, no detection on the idle-composer fixture and on synthetic screens that carry form or dialog text outside a live region, no answer plan for an "always" choice, and catalog capability results for OpenCode 2.1.4 and for another OpenCode version. <!-- completed: -->
 - [ ] Add the native fixtures and profile `opencode-2.1.4-cafleet-ask-1` to the bundled catalog and its embedded fixture table. <!-- completed: -->
 - [ ] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck`. <!-- completed: -->
 
