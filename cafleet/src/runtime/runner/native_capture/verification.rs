@@ -108,7 +108,7 @@ const DRIVER_FULL_SIZE: TerminalSize = TerminalSize {
     rows: 36,
     cols: 120,
 };
-const DRIVER_WRAPPED_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 64 };
+const DRIVER_WRAPPED_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 52 };
 const APPROVED_CASES: [ApprovedCase; 12] = [
     ApprovedCase {
         id: "cells-002",
