@@ -11,6 +11,7 @@ type Result<T> = std::result::Result<T, CafleetError>;
 pub(crate) enum ObservationKind {
     Interaction(InteractionClass),
     PermissionDenied,
+    PermissionContinuation,
     Working,
     ComposerEmpty,
     ComposerDraft,
@@ -139,6 +140,8 @@ pub(super) mod inspection_tests {
                     .unwrap();
             }
         }
+        let backgrounds = background_rewrite(&screen, &terminal.snapshot());
+        terminal.feed(&backgrounds).unwrap();
         let (row, col) = cursor.unwrap_or((
             u16::try_from(screen["cursor_row"].as_u64().unwrap()).unwrap(),
             u16::try_from(screen["cursor_col"].as_u64().unwrap()).unwrap(),
@@ -147,6 +150,45 @@ pub(super) mod inspection_tests {
             .feed(format!("\x1b[{};{}H", row + 1, col + 1).as_bytes())
             .unwrap();
         terminal.snapshot()
+    }
+
+    /// Repaints each `cell_backgrounds` run over the already written text, so the replayed
+    /// cells keep their captured contents and gain the captured background.
+    pub(crate) fn background_rewrite(fixture: &Value, text: &ScreenSnapshot) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        let Some(runs) = fixture.get("cell_backgrounds") else {
+            return bytes;
+        };
+        for run in runs.as_array().unwrap() {
+            let row = u16::try_from(run["row"].as_u64().unwrap()).unwrap();
+            let start = u16::try_from(run["start_col"].as_u64().unwrap()).unwrap();
+            let end = u16::try_from(run["end_col"].as_u64().unwrap()).unwrap();
+            let bg = &run["bg"];
+            let sgr = match bg["kind"].as_str().unwrap() {
+                "rgb" => format!(
+                    "\x1b[48;2;{};{};{}m",
+                    bg["r"].as_u64().unwrap(),
+                    bg["g"].as_u64().unwrap(),
+                    bg["b"].as_u64().unwrap()
+                ),
+                "indexed" => format!("\x1b[48;5;{}m", bg["index"].as_u64().unwrap()),
+                other => panic!("unknown fixture colour kind {other}"),
+            };
+            bytes.extend(format!("\x1b[{};{}H{sgr}", row + 1, start + 1).into_bytes());
+            for col in start..end {
+                let cell = text.screen.cell(row, col).expect("run inside geometry");
+                if cell.is_wide_continuation() {
+                    continue;
+                }
+                if cell.has_contents() {
+                    bytes.extend(cell.contents().as_bytes());
+                } else {
+                    bytes.push(b' ');
+                }
+            }
+            bytes.extend(b"\x1b[0m");
+        }
+        bytes
     }
 
     fn allow_or_deny_plan(decision: PermissionDecision) -> AnswerPlan {
@@ -1231,6 +1273,7 @@ impl ObservationKind {
             "update" => Self::Interaction(InteractionClass::Update),
             "unknown_interaction" => Self::Interaction(InteractionClass::UnknownInteraction),
             "permission_denied" => Self::PermissionDenied,
+            "permission_continuation" => Self::PermissionContinuation,
             "working" => Self::Working,
             "composer_empty" => Self::ComposerEmpty,
             "composer_draft" => Self::ComposerDraft,
@@ -1242,6 +1285,7 @@ impl ObservationKind {
         match self {
             Self::Interaction(class) => class.as_str(),
             Self::PermissionDenied => "permission_denied",
+            Self::PermissionContinuation => "permission_continuation",
             Self::Working => "working",
             Self::ComposerEmpty => "composer_empty",
             Self::ComposerDraft => "composer_draft",
@@ -1280,6 +1324,7 @@ pub(crate) struct ScreenObservation {
     pub verified_noninteraction: bool,
     pub native_correlation: Option<String>,
     pub output_seq: u64,
+    pub continues_rule_id: Option<String>,
 }
 pub(crate) struct Detector {
     backend: CodingAgent,
@@ -1292,9 +1337,13 @@ pub(crate) struct AnswerMatch {
     semantic: SemanticFingerprint,
     choices: Vec<String>,
     focus: String,
+    focused_choice: Option<String>,
     output_seq: u64,
 }
 impl AnswerMatch {
+    pub(crate) fn focused_choice_id(&self) -> Option<&str> {
+        self.focused_choice.as_deref()
+    }
     pub(crate) fn plan(&self) -> &AnswerPlan {
         &self.plan
     }
@@ -1381,6 +1430,7 @@ struct Matched {
     native: Option<String>,
     excerpt: String,
     focuses: BTreeMap<String, String>,
+    label_cells: Vec<(String, Vec<(u16, u16)>)>,
 }
 fn captured(
     reference: &Capture,
@@ -1452,6 +1502,7 @@ fn match_rule(rule: &Rule, screen: &ScreenSnapshot, lines: &[LogicalLine]) -> Op
         .join("\n");
     let mut values = BTreeMap::new();
     let mut focuses = BTreeMap::new();
+    let mut spans = BTreeMap::new();
     for matcher in &rule.matchers {
         let texts = if matcher.scope == "region" {
             vec![region_text.as_str()]
@@ -1459,35 +1510,51 @@ fn match_rule(rule: &Rule, screen: &ScreenSnapshot, lines: &[LogicalLine]) -> Op
             selected.iter().map(|line| line.text.as_str()).collect()
         };
         let mut captured_values = Vec::new();
-        for text in texts {
+        for (line_index, text) in texts.into_iter().enumerate() {
             for captures in matcher.regex.captures_iter(text) {
+                let mut located = BTreeMap::new();
                 let named = matcher
                     .regex
                     .capture_names()
                     .flatten()
                     .filter_map(|name| {
-                        captures
-                            .name(name)
-                            .map(|v| (name.into(), v.as_str().into()))
+                        captures.name(name).map(|v| {
+                            located.insert(name.to_owned(), (line_index, v.start(), v.end()));
+                            (name.into(), v.as_str().into())
+                        })
                     })
                     .collect::<BTreeMap<String, String>>();
                 let full = captures
                     .get(0)
                     .expect("regex match has full capture")
                     .as_str();
-                captured_values.push((named, full.to_owned()));
+                captured_values.push((named, full.to_owned(), located));
             }
         }
         if captured_values.len() != 1 {
             return None;
         }
-        let (named, full) = captured_values.pop().expect("single matcher capture");
+        let (named, full, located) = captured_values.pop().expect("single matcher capture");
         focuses.insert(
             matcher.id.clone(),
             serde_json::to_string(&(&matcher.id, &full, &named)).expect("focus strings serialize"),
         );
+        if matcher.scope == "line" {
+            spans.insert(matcher.id.clone(), located);
+        }
         values.insert(matcher.id.clone(), named);
     }
+    let label_cells = rule
+        .choices
+        .iter()
+        .filter_map(|choice| {
+            let &(line, start, end) = spans.get(&choice.label.matcher)?.get(&choice.label.name)?;
+            let boundaries = &selected[line].boundaries;
+            let mut cells = boundaries[start..end].to_vec();
+            cells.dedup();
+            Some((choice.id.clone(), cells))
+        })
+        .collect();
     let operation = match &rule.operation {
         Some(reference) => {
             let value = captured(reference, &values)?;
@@ -1519,7 +1586,32 @@ fn match_rule(rule: &Rule, screen: &ScreenSnapshot, lines: &[LogicalLine]) -> Op
         native,
         excerpt: region_text,
         focuses,
+        label_cells,
     })
+}
+/// The focused choice is the one label painted on a single background that differs from its
+/// row's background at the region's left edge, with no other label carrying such a background.
+fn background_focus(screen: &ScreenSnapshot, matched: &Matched) -> Option<String> {
+    let mut focused = Vec::new();
+    for (choice, cells) in &matched.label_cells {
+        let &(row, _) = cells.first()?;
+        let row_background = screen.screen.cell(row, matched.region.left)?.bgcolor();
+        let backgrounds = cells
+            .iter()
+            .map(|&(row, col)| screen.screen.cell(row, col).map(|cell| cell.bgcolor()))
+            .collect::<Option<Vec<_>>>()?;
+        if backgrounds.iter().all(|bg| *bg == row_background) {
+            continue;
+        }
+        if backgrounds.iter().any(|bg| *bg != backgrounds[0]) {
+            return None;
+        }
+        focused.push(choice);
+    }
+    match focused.as_slice() {
+        [choice] => Some((*choice).clone()),
+        _ => None,
+    }
 }
 impl Detector {
     pub(crate) fn match_answer(
@@ -1566,11 +1658,25 @@ impl Detector {
         let Some(matched) = match_rule(rule, screen, &logical_lines(screen)?) else {
             return Ok(None);
         };
-        let focus = matched
+        let capture = matched
             .focuses
             .get(plan.focus_matcher_id())
             .expect("validated focus matcher")
             .clone();
+        let background = rule
+            .matchers
+            .iter()
+            .find(|matcher| matcher.id == plan.focus_matcher_id())
+            .expect("validated focus matcher")
+            .background_focus;
+        let focused_choice = background
+            .then(|| background_focus(screen, &matched))
+            .flatten();
+        let focus = if background {
+            serde_json::to_string(&(&capture, &focused_choice)).expect("focus strings serialize")
+        } else {
+            capture
+        };
         Ok(Some(AnswerMatch {
             plan: plan.clone(),
             semantic: observed
@@ -1578,6 +1684,7 @@ impl Detector {
                 .expect("complete permission fingerprint"),
             choices: matched.choices,
             focus,
+            focused_choice,
             output_seq: screen.screen_seq,
         }))
     }
@@ -1605,6 +1712,7 @@ impl Detector {
             verified_noninteraction: false,
             native_correlation: None,
             output_seq: screen.screen_seq,
+            continues_rule_id: None,
         };
         let Some(profile) = &self.profile else {
             return Ok(observation);
@@ -1614,10 +1722,11 @@ impl Detector {
             .rules
             .iter()
             .filter(|rule| {
-                [profile.detection.as_ref(), profile.composer.as_ref()]
-                    .into_iter()
-                    .flatten()
-                    .any(|cap| !cap.fixtures.is_empty() && cap.rules.contains(&rule.id))
+                rule.continuation.is_some()
+                    || [profile.detection.as_ref(), profile.composer.as_ref()]
+                        .into_iter()
+                        .flatten()
+                        .any(|cap| !cap.fixtures.is_empty() && cap.rules.contains(&rule.id))
             })
             .filter_map(|rule| match_rule(rule, screen, &lines))
             .collect::<Vec<_>>();
@@ -1663,6 +1772,13 @@ impl Detector {
         observation.matched_region = Some(best.region);
         observation.verified_noninteraction = !conflict && best.rule.verified;
         observation.native_correlation = if conflict { None } else { best.native.clone() };
+        if observation.kind == ObservationKind::PermissionContinuation {
+            observation.continues_rule_id = best
+                .rule
+                .continuation
+                .as_ref()
+                .map(|continuation| continuation.rule_id.clone());
+        }
         observation.raw_evidence["rule_id"] = json!(best.rule.id);
         let operation = if conflict {
             None
@@ -1682,7 +1798,9 @@ impl Detector {
         observation.raw_evidence["sensitive"] = json!(matched.iter().any(|m| m.rule.sensitive));
         if matches!(
             observation.kind,
-            ObservationKind::Interaction(_) | ObservationKind::PermissionDenied
+            ObservationKind::Interaction(_)
+                | ObservationKind::PermissionDenied
+                | ObservationKind::PermissionContinuation
         ) {
             observation.fingerprint = Some(SemanticFingerprint { parts });
         }

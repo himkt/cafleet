@@ -68,6 +68,7 @@ pub(crate) struct TransportProgress {
     pub outer_eof: bool,
     pub child_bytes: usize,
     pub human_bytes: usize,
+    pub forwarded_bytes: usize,
     pub display_bytes: usize,
     pub observation_error: Option<String>,
     pub observation_failure: Option<ObservationFailure>,
@@ -193,21 +194,12 @@ impl Transport {
         observer: &mut impl ScreenObserver,
     ) -> Result<TransportProgress> {
         self.invalidate_input_drain();
-        let mut progress = TransportProgress::default();
-        if !self.outer_eof
-            && let Some(bytes) = read_available(
-                human,
-                (self.limits.input_bytes - self.input.len()).min(self.limits.bytes_per_tick),
-            )
-            .map_err(io_error)?
-        {
-            self.outer_eof = bytes.is_empty();
-            progress.human_bytes = bytes.len();
-            self.retain_human(bytes);
-        }
-        write_pending(&mut self.input, self.limits.bytes_per_tick, |bytes| {
-            pty.try_write(bytes)
-        })?;
+        let mut progress = TransportProgress {
+            human_bytes: self.drain_outer(human)?,
+            ..TransportProgress::default()
+        };
+        progress.forwarded_bytes =
+            write_pending(&mut self.input, usize::MAX, |bytes| pty.try_write(bytes))?;
         if let Some(bytes) = self.read_child(pty)? {
             self.child_eof = bytes.is_empty();
             progress.child_bytes = bytes.len();
@@ -249,6 +241,23 @@ impl Transport {
         progress.outer_eof = self.outer_eof;
         progress.child_eof = self.child_eof;
         Ok(progress)
+    }
+    /// One outer-terminal read returns at most the line discipline's buffer, so
+    /// a longer terminal reply must reach the child within the same tick: a
+    /// child that sees only its first part may parse the rest as keys.
+    fn drain_outer(&mut self, human: &mut impl ByteInput) -> Result<usize> {
+        let mut forwarded = 0;
+        while !self.outer_eof {
+            let capacity =
+                (self.limits.input_bytes - self.input.len()).min(self.limits.bytes_per_tick);
+            let Some(bytes) = read_available(human, capacity).map_err(io_error)? else {
+                break;
+            };
+            self.outer_eof = bytes.is_empty();
+            forwarded += bytes.len();
+            self.retain_human(bytes);
+        }
+        Ok(forwarded)
     }
     fn read_child(&mut self, pty: &mut impl PtyIo) -> Result<Option<Vec<u8>>> {
         #[cfg(test)]
@@ -496,6 +505,7 @@ mod tests {
     struct Pty {
         output: Bytes,
         input: Vec<u8>,
+        offers: Vec<usize>,
         blocked: bool,
         max_write: usize,
         sizes: Vec<TerminalSize>,
@@ -507,6 +517,7 @@ mod tests {
             Self {
                 output: Bytes::new(output, width),
                 input: Vec::new(),
+                offers: Vec::new(),
                 blocked: false,
                 max_write: usize::MAX,
                 sizes: Vec::new(),
@@ -526,6 +537,7 @@ mod tests {
             if self.blocked {
                 return Err(ErrorKind::WouldBlock.into());
             }
+            self.offers.push(bytes.len());
             let count = bytes.len().min(self.max_write);
             self.input.extend_from_slice(&bytes[..count]);
             Ok(count)
@@ -607,6 +619,169 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    fn service_transport() -> Transport {
+        Transport::new(
+            TerminalSize { rows: 24, cols: 80 },
+            TransportLimits {
+                input_bytes: 65536,
+                display_bytes: 65536,
+                bytes_per_tick: 16384,
+            },
+        )
+        .unwrap()
+    }
+
+    fn patterned(len: usize, salt: usize) -> Vec<u8> {
+        (0..len)
+            .map(|index| u8::try_from((index + salt) % 251).unwrap())
+            .collect()
+    }
+
+    fn reads(sizes: &[usize]) -> (Bytes, Vec<u8>) {
+        let mut all = Vec::new();
+        let mut chunks = VecDeque::new();
+        for (salt, &size) in sizes.iter().enumerate() {
+            let chunk = patterned(size, salt * 7);
+            all.extend_from_slice(&chunk);
+            chunks.push_back(chunk);
+        }
+        (Bytes { chunks, eof: false }, all)
+    }
+
+    fn unread(input: &Bytes) -> usize {
+        input.chunks.iter().map(Vec::len).sum()
+    }
+
+    fn one_tick(transport: &mut Transport, human: &mut Bytes, pty: &mut Pty) -> TransportProgress {
+        transport
+            .tick(human, pty, &mut Output::default(), &mut Observer::default())
+            .unwrap()
+    }
+
+    #[test]
+    fn runner_transport_one_tick_drains_a_split_outer_reply_and_writes_it_in_one_offer() {
+        let mut transport = service_transport();
+        let (mut human, reply) = reads(&[4096, 3600]);
+        let mut pty = Pty::new(b"", 1);
+        let generation = transport.human_generation();
+        let progress = one_tick(&mut transport, &mut human, &mut pty);
+        assert_eq!(
+            unread(&human),
+            0,
+            "the tick reads until the outer input would block"
+        );
+        assert_eq!(pty.input, reply, "all 7696 bytes reach the child in order");
+        assert_eq!(
+            pty.offers,
+            [7696],
+            "the whole queue is offered in one write"
+        );
+        assert_eq!(transport.pending_input_bytes(), 0);
+        assert_eq!(progress.human_bytes, 7696);
+        assert_eq!(progress.forwarded_bytes, 7696);
+        assert!(!progress.outer_eof);
+        assert_eq!(transport.human_generation(), generation + 7696);
+    }
+
+    #[test]
+    fn runner_transport_outer_reads_stop_at_the_full_input_queue_and_resume_next_tick() {
+        let mut transport = service_transport();
+        let (mut human, payload) = reads(&[16384, 16384, 16384, 16384, 16384]);
+        let mut pty = Pty::new(b"", 1);
+        let first = one_tick(&mut transport, &mut human, &mut pty);
+        assert_eq!(first.human_bytes, 65536);
+        assert_eq!(transport.human_generation(), 65536);
+        assert_eq!(
+            unread(&human),
+            16384,
+            "reads stop once the queue holds 65536 bytes"
+        );
+        assert_eq!(pty.input, payload[..65536]);
+        let second = one_tick(&mut transport, &mut human, &mut pty);
+        assert_eq!(
+            second.human_bytes, 16384,
+            "the remaining reply is read on the next tick"
+        );
+        assert_eq!(unread(&human), 0);
+        assert_eq!(pty.input, payload);
+        assert_eq!(transport.human_generation(), 81920);
+    }
+
+    #[test]
+    fn runner_transport_blocked_master_keeps_the_full_queue_and_reads_nothing_more() {
+        let mut transport = service_transport();
+        let (mut human, payload) = reads(&[16384, 16384, 16384, 16384, 16384]);
+        let mut pty = Pty::new(b"", 1);
+        pty.blocked = true;
+        one_tick(&mut transport, &mut human, &mut pty);
+        assert_eq!(transport.pending_input_bytes(), 65536);
+        assert_eq!(unread(&human), 16384);
+        let held = one_tick(&mut transport, &mut human, &mut pty);
+        assert_eq!(held.human_bytes, 0, "a full queue admits no further read");
+        assert_eq!(
+            held.forwarded_bytes, 0,
+            "the blocked master accepted none of the queued input"
+        );
+        assert_eq!(transport.pending_input_bytes(), 65536);
+        assert_eq!(unread(&human), 16384);
+        pty.blocked = false;
+        for _ in 0..3 {
+            one_tick(&mut transport, &mut human, &mut pty);
+        }
+        assert_eq!(pty.input, payload);
+        assert_eq!(transport.human_generation(), 81920);
+    }
+
+    #[test]
+    fn runner_transport_forwards_data_read_before_outer_eof_and_reports_eof() {
+        let mut transport = service_transport();
+        let (mut human, reply) = reads(&[4096, 12]);
+        human.eof = true;
+        let mut pty = Pty::new(b"", 1);
+        let progress = one_tick(&mut transport, &mut human, &mut pty);
+        assert_eq!(pty.input, reply);
+        assert!(progress.outer_eof);
+        assert_eq!(progress.human_bytes, 4108);
+        assert_eq!(transport.human_generation(), 4108);
+    }
+
+    #[test]
+    fn runner_transport_partial_master_write_keeps_the_remainder_queued_in_order() {
+        let mut transport = service_transport();
+        let (mut human, reply) = reads(&[4096, 3600]);
+        let mut pty = Pty::new(b"", 1);
+        pty.max_write = 5000;
+        one_tick(&mut transport, &mut human, &mut pty);
+        assert_eq!(pty.input, reply[..5000]);
+        assert_eq!(transport.pending_input_bytes(), 2696);
+        let later = patterned(10, 99);
+        human.chunks.push_back(later.clone());
+        one_tick(&mut transport, &mut human, &mut pty);
+        let mut expected = reply.clone();
+        expected.extend_from_slice(&later);
+        assert_eq!(pty.input, expected, "queued bytes precede later reads");
+        assert_eq!(pty.offers, [7696, 2706]);
+        assert_eq!(transport.pending_input_bytes(), 0);
+    }
+
+    #[test]
+    fn runner_transport_passes_escape_sequences_unframed() {
+        let mut transport = service_transport();
+        let reply =
+            b"\x1b]4;0;rgb:0000/0000/0000\x1b\\\x1b]11;rgb:afaf/d7d7/8787\x07\x1b[".to_vec();
+        let mut human = Bytes {
+            chunks: VecDeque::from([reply.clone()]),
+            eof: false,
+        };
+        let mut pty = Pty::new(b"", 1);
+        one_tick(&mut transport, &mut human, &mut pty);
+        assert_eq!(
+            pty.input, reply,
+            "an unterminated sequence is forwarded, not held"
+        );
+        assert_eq!(transport.pending_input_bytes(), 0);
     }
 
     #[test]

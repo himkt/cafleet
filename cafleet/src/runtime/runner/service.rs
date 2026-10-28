@@ -3,6 +3,7 @@ pub(super) use super::control::request;
 use super::input::{InertInputHooks, InputCoordinator, InputServices, RequestTokenSource};
 use super::input_clock::{RealInputDeadlineClock, receive_input_expiration};
 use super::input_protocol::{ServiceControlRequest, decode_service_request, encode_input_reply};
+use super::transport::TransportProgress;
 use super::writer::EventWriter;
 use super::*;
 
@@ -571,6 +572,7 @@ fn run_service(
     let loop_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
         || -> Result<ShutdownClock> {
             loop {
+                let mut tick_progress = TransportProgress::default();
                 if terminate.load(Ordering::Acquire) {
                     return Ok(ShutdownClock::new(Instant::now()));
                 }
@@ -1027,6 +1029,7 @@ fn run_service(
                     if progress.outer_eof {
                         return Ok(ShutdownClock::new(Instant::now()));
                     }
+                    tick_progress = progress;
                     if let Some(exit) = pty.try_wait()? {
                         native_exit = Some(exit);
                         controller.child_exited(
@@ -1103,13 +1106,11 @@ fn run_service(
                         }
                     }
                 }
-                let sleep = controller
-                    .status()
-                    .next_deadline
-                    .map_or(Duration::from_millis(2), |at| {
-                        Duration::from_millis(2).min(at.saturating_duration_since(Instant::now()))
-                    });
-                std::thread::sleep(sleep);
+                std::thread::sleep(tick_sleep(
+                    &tick_progress,
+                    controller.status().next_deadline,
+                    Instant::now(),
+                ));
             }
         },
     ));
@@ -1218,6 +1219,88 @@ fn run_service(
         outcome.native_exit,
         outcome.cleanup_state == CleanupState::Complete,
     )
+}
+
+const IDLE_TICK_SLEEP: Duration = Duration::from_millis(2);
+
+fn tick_sleep(
+    progress: &TransportProgress,
+    next_deadline: Option<Instant>,
+    now: Instant,
+) -> Duration {
+    if progress.human_bytes > 0 || progress.forwarded_bytes > 0 {
+        return Duration::ZERO;
+    }
+    next_deadline.map_or(IDLE_TICK_SLEEP, |at| {
+        IDLE_TICK_SLEEP.min(at.saturating_duration_since(now))
+    })
+}
+
+#[cfg(test)]
+mod pacing_tests {
+    use super::*;
+    use crate::runtime::runner::transport::TransportProgress;
+
+    fn progress(human_bytes: usize, forwarded_bytes: usize) -> TransportProgress {
+        TransportProgress {
+            human_bytes,
+            forwarded_bytes,
+            ..TransportProgress::default()
+        }
+    }
+
+    #[test]
+    fn pacing_starts_the_next_tick_at_once_while_outer_input_moves() {
+        let now = Instant::now();
+        for (case, human_bytes, forwarded_bytes) in [
+            ("outer bytes read", 4096, 0),
+            ("positive master write", 0, 2696),
+            ("both", 1, 1),
+        ] {
+            for next_deadline in [None, Some(now + Duration::from_secs(1))] {
+                assert_eq!(
+                    tick_sleep(&progress(human_bytes, forwarded_bytes), next_deadline, now),
+                    Duration::ZERO,
+                    "{case}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn pacing_keeps_the_idle_sleep_without_outer_input() {
+        let now = Instant::now();
+        let mut child_only = progress(0, 0);
+        child_only.child_bytes = 512;
+        child_only.display_bytes = 512;
+        for idle in [progress(0, 0), child_only] {
+            assert_eq!(tick_sleep(&idle, None, now), Duration::from_millis(2));
+            assert_eq!(
+                tick_sleep(&idle, Some(now + Duration::from_secs(1)), now),
+                Duration::from_millis(2)
+            );
+            assert_eq!(
+                tick_sleep(&idle, Some(now + Duration::from_micros(500)), now),
+                Duration::from_micros(500),
+                "an earlier observation deadline still shortens the idle sleep"
+            );
+            assert_eq!(
+                tick_sleep(&idle, Some(now - Duration::from_millis(1)), now),
+                Duration::ZERO
+            );
+        }
+    }
+
+    #[test]
+    fn pacing_keeps_the_idle_sleep_when_a_blocked_master_accepted_no_queued_input() {
+        let now = Instant::now();
+        let blocked = progress(0, 0);
+        assert_eq!(tick_sleep(&blocked, None, now), Duration::from_millis(2));
+        assert_eq!(
+            tick_sleep(&blocked, Some(now + Duration::from_micros(500)), now),
+            Duration::from_micros(500)
+        );
+    }
 }
 
 #[cfg(test)]

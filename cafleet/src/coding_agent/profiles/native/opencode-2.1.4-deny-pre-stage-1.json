@@ -1,0 +1,235 @@
+{
+  "schema_version": 1,
+  "fixture_id": "opencode-2.1.4-deny-pre-stage-1",
+  "provenance": "native",
+  "backend": "opencode",
+  "native_version": "2.1.4",
+  "rows": 36,
+  "cols": 120,
+  "alternate_screen": false,
+  "screen_seq": 14832,
+  "cursor_row": 22,
+  "cursor_col": 120,
+  "lines": [
+    "",
+    "",
+    "",
+    "▪ oc mini v2.1.4 · /tmp/cafleet-194/opencode-ans-deny-001",
+    "",
+    "› Use the shell tool to run exactly /tmp/cafleet-194/opencode-ans-deny-001/permission-probe deny as one command. ",
+    "Preserve any native permission request for the operator. After the native decision, report the actual result and stop. ",
+    "Keep work inside this disposable operation.",
+    "                                                                                                                        ",
+    "                                                                                                                        ",
+    "  △ Permission required                                                                                                 ",
+    "                                                                                                                        ",
+    "   # Shell command                                                                                                  █   ",
+    "                                                                                                                    █   ",
+    "  $ /tmp/cafleet-194/opencode-ans-deny-001/permission-probe deny                                                    █   ",
+    "                                                                                                                    █   ",
+    "                                                                                                                    █   ",
+    "                                                                                                                    █   ",
+    "                                                                                                                    █   ",
+    "                                                                                                                        ",
+    "                                                                                                                        ",
+    "   Allow once   Always allow   Reject                                             ⇆ select  enter confirm  esc reject   ",
+    "                                                                                                                        ",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "masked_rows": [
+    {
+      "row": 35,
+      "reason": "reviewed_privacy"
+    }
+  ],
+  "cell_backgrounds": [
+    {
+      "row": 9,
+      "start_col": 0,
+      "end_col": 120,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 10,
+      "start_col": 0,
+      "end_col": 120,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 11,
+      "start_col": 0,
+      "end_col": 120,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 12,
+      "start_col": 0,
+      "end_col": 120,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 13,
+      "start_col": 0,
+      "end_col": 120,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 14,
+      "start_col": 0,
+      "end_col": 120,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 15,
+      "start_col": 0,
+      "end_col": 120,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 16,
+      "start_col": 0,
+      "end_col": 120,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 17,
+      "start_col": 0,
+      "end_col": 120,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 18,
+      "start_col": 0,
+      "end_col": 120,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 19,
+      "start_col": 0,
+      "end_col": 120,
+      "bg": {
+        "kind": "rgb",
+        "r": 20,
+        "g": 20,
+        "b": 20
+      }
+    },
+    {
+      "row": 20,
+      "start_col": 0,
+      "end_col": 120,
+      "bg": {
+        "kind": "rgb",
+        "r": 30,
+        "g": 30,
+        "b": 30
+      }
+    },
+    {
+      "row": 21,
+      "start_col": 0,
+      "end_col": 2,
+      "bg": {
+        "kind": "rgb",
+        "r": 30,
+        "g": 30,
+        "b": 30
+      }
+    },
+    {
+      "row": 21,
+      "start_col": 2,
+      "end_col": 14,
+      "bg": {
+        "kind": "rgb",
+        "r": 250,
+        "g": 178,
+        "b": 131
+      }
+    },
+    {
+      "row": 21,
+      "start_col": 14,
+      "end_col": 120,
+      "bg": {
+        "kind": "rgb",
+        "r": 30,
+        "g": 30,
+        "b": 30
+      }
+    },
+    {
+      "row": 22,
+      "start_col": 0,
+      "end_col": 120,
+      "bg": {
+        "kind": "rgb",
+        "r": 30,
+        "g": 30,
+        "b": 30
+      }
+    }
+  ]
+}

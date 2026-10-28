@@ -1,7 +1,7 @@
 use super::{
     ControlIdentity, DrainedInput, InputControlOperation, InputControlReply, InputControlRequest,
-    InputDrain, InputEligibility, ObservationController, ProgrammaticWrite, PtyIo,
-    SubmissionResult, SubmissionStatus, Visibility, canonical_json, validate_operation_key,
+    InputDrain, InputEligibility, ObservationController, ObservedContinuation, ProgrammaticWrite,
+    PtyIo, SubmissionResult, SubmissionStatus, Visibility, canonical_json, validate_operation_key,
 };
 use super::{
     InputFailure, ProcessIdentity, Result, RunLock, SubmissionStage, Transport, check_deadline,
@@ -16,7 +16,7 @@ use crate::broker::members::db_err;
 use crate::broker::records::{MemberKind, Placement};
 use crate::broker::runtime::{self as storage, OwnerKind, RunRecord, RunStatus};
 use crate::coding_agent::{
-    AnswerMatch, AnswerPlan, AnswerStage, ProfileCatalog, SemanticFingerprint,
+    AnswerMatch, AnswerPlan, AnswerStage, ProfileCatalog, SemanticFingerprint, StageGate,
 };
 use crate::coding_agent::{ComposerOperation, coding_agent};
 use crate::error::CafleetError;
@@ -35,9 +35,12 @@ mod permission_inspection_contracts {
     };
     use super::*;
     use crate::broker::runtime::{Coverage, InteractionClass, PermissionDecision};
-    use crate::coding_agent::{inspection_fixture_definition, inspection_fixture_form};
+    use crate::coding_agent::{
+        background_rewrite, inspection_fixture_definition, inspection_fixture_form,
+    };
     use crate::runtime::runner::{
-        MissingEvidence, PermissionInspectInput, PermissionInspection, RuntimePaths,
+        MissingEvidence, PermissionInspectInput, PermissionInspection, RuntimePaths, TerminalSize,
+        TerminalState,
     };
     use rusqlite::OptionalExtension;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -113,6 +116,13 @@ mod permission_inspection_contracts {
                 bytes.extend(format!("\x1b[{};1H{line}", row + 1).into_bytes());
             }
         }
+        let mut written = TerminalState::new(TerminalSize {
+            rows: u16::try_from(screen["rows"].as_u64().unwrap()).unwrap(),
+            cols: u16::try_from(screen["cols"].as_u64().unwrap()).unwrap(),
+        })
+        .unwrap();
+        written.feed(&bytes).unwrap();
+        bytes.extend(background_rewrite(&screen, &written.snapshot()));
         bytes.extend(
             format!(
                 "\x1b[{};{}H",
@@ -141,6 +151,41 @@ mod permission_inspection_contracts {
                     cols: 120,
                 },
                 screen: native_screen_bytes(CLAUDE_IDLE_SCREEN),
+            },
+            |h| with_counted_tokens(h, body),
+        );
+    }
+
+    pub(super) const OPENCODE_IDLE_SCREEN: &str =
+        include_str!("../../coding_agent/profiles/native/opencode-2.1.4-idle-composer-1.json");
+    pub(super) const OPENCODE_ALLOW_SCREEN: &str =
+        include_str!("../../coding_agent/profiles/native/opencode-2.1.4-allow-pre-stage-1.json");
+    pub(super) const OPENCODE_DENY_1_SCREEN: &str =
+        include_str!("../../coding_agent/profiles/native/opencode-2.1.4-deny-pre-stage-1.json");
+    pub(super) const OPENCODE_DENY_2_SCREEN: &str =
+        include_str!("../../coding_agent/profiles/native/opencode-2.1.4-deny-pre-stage-2.json");
+    pub(super) const OPENCODE_DENY_3_SCREEN: &str =
+        include_str!("../../coding_agent/profiles/native/opencode-2.1.4-deny-pre-stage-3.json");
+    pub(super) const OPENCODE_ALWAYS_SCREEN: &str =
+        include_str!("../../coding_agent/profiles/native/opencode-2.1.4-focus-always-1.json");
+
+    pub(super) fn with_opencode_inspection(
+        body: impl FnOnce(&mut Host, Arc<AtomicUsize>, Arc<AtomicBool>),
+    ) {
+        with_profile_host(
+            ProfileCatalog::bundled().unwrap(),
+            b"\r".to_vec(),
+            HostProfile {
+                policy: storage::evidence::EvidencePolicy::metadata(),
+                event_evidence: "metadata",
+                backend: crate::coding_agent::CodingAgent::Opencode,
+                native_version: "2.1.4",
+                profile_version: "opencode-2.1.4-cafleet-ask-1",
+                size: crate::runtime::runner::TerminalSize {
+                    rows: 36,
+                    cols: 120,
+                },
+                screen: native_screen_bytes(OPENCODE_IDLE_SCREEN),
             },
             |h| with_counted_tokens(h, body),
         );
@@ -3018,6 +3063,580 @@ mod permission_response_contracts {
             assert_eq!(h.pty.offers.len(), 2);
         });
     }
+
+    mod gated {
+        use super::super::permission_inspection_contracts::{
+            OPENCODE_ALLOW_SCREEN, OPENCODE_ALWAYS_SCREEN, OPENCODE_DENY_1_SCREEN,
+            OPENCODE_DENY_2_SCREEN, OPENCODE_DENY_3_SCREEN, with_opencode_inspection,
+        };
+        use super::*;
+        use crate::coding_agent::{
+            gated_fixture_definition, gated_fixture_form, gated_reason_dialog,
+        };
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        const IDLE_COMPOSER: &[u8] = b"\x1b[0m\x1b[2J\x1b[23;1HSynthetic state\r\nState end";
+        const OPERATION: &str = "PRIVATE_GATED_OPERATION";
+        type Outcome = std::result::Result<Option<PermissionResponseResult>, InputFailure>;
+
+        fn with_gated(body: impl FnOnce(&mut Host, Arc<AtomicUsize>)) {
+            with_definition(gated_fixture_definition(), b"\r".to_vec(), |h, calls, _| {
+                body(h, calls)
+            });
+        }
+
+        fn show(h: &mut Host, bytes: Vec<u8>) {
+            h.pty.child.bytes.extend(bytes);
+            h.drain();
+        }
+
+        fn gated_form(h: &mut Host, focus: &str) -> (i64, i64, i64, i64) {
+            show(h, gated_fixture_form(OPERATION, focus));
+            settled_ids(h)
+        }
+
+        fn handle_until(
+            h: &mut Host,
+            input: &PermissionRespondInput,
+            deadline: Instant,
+        ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
+            let mut request = h.request("unused-gated-response-key");
+            request.operation = InputControlOperation::PermissionRespond(copy(input));
+            h.coordinator.handle_received(
+                &mut h.fixture.conn,
+                &h.fixture.run,
+                request,
+                &h.controller,
+                deadline,
+            )
+        }
+
+        fn admit(
+            h: &mut Host,
+            ids: (i64, i64, i64, i64),
+            key: &str,
+            decision: PermissionDecision,
+            deadline: Instant,
+        ) -> PermissionRespondInput {
+            let inspected = inspect(h, ids);
+            let input = command(h, &inspected, key, decision);
+            assert!(handle_until(h, &input, deadline).unwrap().is_none());
+            input
+        }
+
+        fn write_stage(h: &mut Host, before: usize) -> i64 {
+            let id = arm_stage(h, before);
+            h.drain();
+            assert!(
+                h.advance().is_none(),
+                "a nonfinal stage keeps the response open"
+            );
+            assert_eq!(h.hooks.count("after"), before);
+            id
+        }
+
+        // Drives the pending response until it ends or `until` passes; `None` means still open.
+        fn settle(h: &mut Host, until: Instant) -> Outcome {
+            loop {
+                h.drain();
+                match advance(h) {
+                    Ok(None) if Instant::now() >= until => return Ok(None),
+                    Ok(None) => std::thread::sleep(Duration::from_millis(2)),
+                    Ok(Some(reply)) => return Ok(Some(response(reply))),
+                    Err(failure) => return Err(failure),
+                }
+            }
+        }
+
+        fn assert_uncertain(h: &Host, id: i64, outcome: Outcome) {
+            match outcome {
+                Err(failure) => assert_eq!(failure.input_id, Some(id)),
+                Ok(Some(result)) => {
+                    assert_eq!(result.submission.status, SubmissionStatus::Uncertain)
+                }
+                Ok(None) => panic!("the response ends instead of waiting"),
+            }
+            assert_eq!(
+                storage::get_input(&h.fixture.conn, id).unwrap().state,
+                storage::InputState::Uncertain
+            );
+        }
+
+        fn opened(h: &Host) -> i64 {
+            h.fixture
+                .conn
+                .query_row(
+                    "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='interaction_opened'",
+                    [h.fixture.run.run_id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        }
+
+        fn events(h: &Host) -> i64 {
+            h.fixture
+                .conn
+                .query_row(
+                    "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1",
+                    [h.fixture.run.run_id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        }
+
+        fn interaction_open(h: &Host, interaction_id: i64) -> bool {
+            h.fixture
+                .conn
+                .query_row(
+                    "SELECT closed_at IS NULL FROM member_interactions WHERE interaction_id=?1",
+                    [interaction_id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        }
+
+        fn offers(values: &[&[u8]]) -> Vec<Vec<u8>> {
+            values.iter().map(|value| value.to_vec()).collect()
+        }
+
+        fn soon(millis: u64) -> Instant {
+            Instant::now() + Duration::from_millis(millis)
+        }
+
+        // Writes deny stages one and two on the synthetic form, leaving the response open.
+        fn deny_through_stage_two(
+            h: &mut Host,
+            key: &str,
+            deadline: Instant,
+        ) -> (PermissionRespondInput, i64) {
+            let ids = gated_form(h, "allow");
+            let input = admit(h, ids, key, PermissionDecision::Deny, deadline);
+            let id = write_stage(h, 1);
+            show(h, gated_fixture_form(OPERATION, "deny"));
+            write_stage(h, 2);
+            assert_eq!(h.pty.offers, offers(&[b"h", b"\r"]));
+            (input, id)
+        }
+
+        #[test]
+        fn gated_allow_writes_its_stage_on_the_matching_focus() {
+            with_gated(|h, _| {
+                let ids = gated_form(h, "allow");
+                let input = admit(
+                    h,
+                    ids,
+                    "response:gated-allow",
+                    PermissionDecision::Allow,
+                    h.until,
+                );
+                let id = arm_stage(h, 1);
+                h.drain();
+                let result = response(h.advance().expect("the single gated stage completes"));
+                assert_eq!(
+                    (result.submission.status, result.submission.stage),
+                    (SubmissionStatus::Accepted, SubmissionStage::Submitted)
+                );
+                assert_eq!(h.pty.offers, offers(&[b"\r"]));
+                assert_eq!(
+                    audit(h, id, &input, "synthetic-gated-allow").input.state,
+                    storage::InputState::Accepted
+                );
+            });
+        }
+
+        #[test]
+        fn gated_deny_rebinds_each_expected_transition_without_a_new_token() {
+            with_gated(|h, calls| {
+                let ids = gated_form(h, "allow");
+                let input = admit(
+                    h,
+                    ids,
+                    "response:gated-deny",
+                    PermissionDecision::Deny,
+                    h.until,
+                );
+                let minted = calls.load(Ordering::SeqCst);
+                let id = write_stage(h, 1);
+                let point = h.coordinator.retained_checkpoint(id).unwrap();
+                assert_eq!(
+                    (point.stage, point.written_bytes),
+                    (SubmissionStage::Partial, 1)
+                );
+                assert_eq!(
+                    storage::get_input(&h.fixture.conn, id).unwrap().state,
+                    storage::InputState::InProgress
+                );
+                show(h, gated_fixture_form(OPERATION, "deny"));
+                write_stage(h, 2);
+                assert_eq!(h.pty.offers, offers(&[b"h", b"\r"]));
+                let before = events(h);
+                show(h, gated_reason_dialog(None));
+                assert_eq!(events(h), before, "the continuation emits no event");
+                assert!(interaction_open(h, ids.1));
+                arm_stage(h, 3);
+                h.drain();
+                let result = response(h.advance().expect("the continuation stage completes"));
+                assert_eq!(
+                    (result.submission.status, result.submission.stage),
+                    (SubmissionStatus::Accepted, SubmissionStage::Submitted)
+                );
+                assert_eq!(h.pty.offers, offers(&[b"h", b"\r", b"\r"]));
+                assert_eq!(
+                    h.coordinator.retained_checkpoint(id).unwrap().written_bytes,
+                    3
+                );
+                assert_eq!(
+                    calls.load(Ordering::SeqCst),
+                    minted,
+                    "rebinding between stages mints no request token"
+                );
+                assert_eq!(opened(h), 1, "every stage stays in the original episode");
+                assert_eq!(
+                    audit(h, id, &input, "synthetic-gated-deny").input.state,
+                    storage::InputState::Accepted
+                );
+            });
+        }
+
+        #[test]
+        fn gated_first_stage_is_never_written_while_its_focus_gate_is_unmet() {
+            with_gated(|h, _| {
+                let ids = gated_form(h, "deny");
+                let deadline = soon(600);
+                let inspected = inspect(h, ids);
+                let input = command(
+                    h,
+                    &inspected,
+                    "response:gated-unmet",
+                    PermissionDecision::Allow,
+                );
+                let outcome = match handle_until(h, &input, deadline) {
+                    Ok(None) => settle(h, deadline + Duration::from_millis(400)),
+                    Ok(Some(reply)) => Ok(Some(response(reply))),
+                    Err(refused) => Err(refused),
+                };
+                assert!(h.pty.offers.is_empty(), "an unmet gate writes no byte");
+                assert!(h.pty.program.is_empty());
+                if let Ok(Some(result)) = &outcome {
+                    assert_ne!(result.submission.status, SubmissionStatus::Accepted);
+                }
+                if h.hooks.count("reserved") > 0 {
+                    assert_eq!(
+                        storage::get_input(&h.fixture.conn, h.hooks.input_id())
+                            .unwrap()
+                            .state,
+                        storage::InputState::Ready,
+                        "a response that wrote no byte stays ready"
+                    );
+                }
+            });
+        }
+
+        #[test]
+        fn gated_stage_waits_while_the_previous_focus_persists_until_the_deadline() {
+            with_gated(|h, _| {
+                let ids = gated_form(h, "allow");
+                let deadline = soon(900);
+                admit(
+                    h,
+                    ids,
+                    "response:gated-wait",
+                    PermissionDecision::Deny,
+                    deadline,
+                );
+                let id = write_stage(h, 1);
+                let waiting = settle(h, deadline - Duration::from_millis(150));
+                assert!(
+                    matches!(waiting, Ok(None)),
+                    "the unchanged previous focus keeps the response waiting"
+                );
+                assert_eq!(h.pty.offers, offers(&[b"h"]));
+                assert_eq!(
+                    h.hooks.count("before"),
+                    1,
+                    "no later stage reaches BeforeWrite"
+                );
+                assert_eq!(
+                    storage::get_input(&h.fixture.conn, id).unwrap().state,
+                    storage::InputState::InProgress
+                );
+                let ended = settle(h, deadline + Duration::from_millis(500));
+                assert_uncertain(h, id, ended);
+                assert_eq!(h.pty.offers, offers(&[b"h"]));
+            });
+        }
+
+        #[test]
+        fn gated_unexpected_change_between_stages_fails_uncertain_without_another_byte() {
+            for (case, screen) in [
+                (
+                    "focus on an option without a choice",
+                    gated_fixture_form(OPERATION, "always"),
+                ),
+                (
+                    "focus resolved to no choice",
+                    gated_fixture_form(OPERATION, "none"),
+                ),
+                (
+                    "a different operation",
+                    gated_fixture_form("PRIVATE_OTHER_OPERATION", "deny"),
+                ),
+                ("an unexpected continuation", gated_reason_dialog(None)),
+            ] {
+                with_gated(|h, _| {
+                    let ids = gated_form(h, "allow");
+                    let deadline = soon(3000);
+                    admit(
+                        h,
+                        ids,
+                        "response:gated-change",
+                        PermissionDecision::Deny,
+                        deadline,
+                    );
+                    let id = write_stage(h, 1);
+                    show(h, screen);
+                    let outcome = settle(h, deadline);
+                    assert_uncertain(h, id, outcome);
+                    assert_eq!(h.pty.offers, offers(&[b"h"]), "{case}");
+                });
+            }
+        }
+
+        #[test]
+        fn gated_human_input_between_stages_fails_uncertain_without_another_stage() {
+            with_gated(|h, _| {
+                let ids = gated_form(h, "allow");
+                let deadline = soon(3000);
+                admit(
+                    h,
+                    ids,
+                    "response:gated-human",
+                    PermissionDecision::Deny,
+                    deadline,
+                );
+                let id = write_stage(h, 1);
+                h.human.bytes.push_back(b'l');
+                show(h, gated_fixture_form(OPERATION, "deny"));
+                let outcome = settle(h, deadline);
+                assert_uncertain(h, id, outcome);
+                assert_eq!(h.pty.offers, offers(&[b"h", b"l"]));
+            });
+        }
+
+        #[test]
+        fn gated_continuation_binds_only_by_succession_in_the_same_episode() {
+            type Disturbance = fn(&mut Host);
+            let cases: [(&str, Disturbance); 4] = [
+                ("human input", |h| {
+                    h.human.bytes.push_back(b'x');
+                    h.drain();
+                }),
+                ("an observation gap", |h| {
+                    h.controller
+                        .observer_failed(
+                            super::super::super::ObservationFailure::Parser,
+                            &super::super::super::RealObservationClock,
+                        )
+                        .unwrap();
+                }),
+                ("the episode closing", |h| {
+                    show(h, IDLE_COMPOSER.to_vec());
+                    std::thread::sleep(Duration::from_millis(300));
+                    h.drain();
+                }),
+                ("a different episode", |h| {
+                    show(h, gated_fixture_form("PRIVATE_OTHER_OPERATION", "deny"));
+                    std::thread::sleep(Duration::from_millis(150));
+                    h.drain();
+                }),
+            ];
+            for (case, disturb) in cases {
+                with_gated(|h, _| {
+                    let deadline = soon(2500);
+                    let (_, id) = deny_through_stage_two(h, "response:gated-succession", deadline);
+                    disturb(h);
+                    show(h, gated_reason_dialog(None));
+                    let outcome = settle(h, deadline);
+                    assert_uncertain(h, id, outcome);
+                    assert_eq!(
+                        h.pty
+                            .offers
+                            .iter()
+                            .filter(|offer| offer.as_slice() == b"\r")
+                            .count(),
+                        1,
+                        "{case}: the continuation stage is never written"
+                    );
+                });
+            }
+        }
+
+        #[test]
+        fn gated_continuation_with_a_reason_never_satisfies_the_screen_gate() {
+            with_gated(|h, _| {
+                let deadline = soon(1500);
+                let (_, id) = deny_through_stage_two(h, "response:gated-reason", deadline);
+                show(h, gated_reason_dialog(Some("typed reason")));
+                let outcome = settle(h, deadline + Duration::from_millis(500));
+                assert_uncertain(h, id, outcome);
+                assert_eq!(h.pty.offers, offers(&[b"h", b"\r"]));
+            });
+        }
+
+        #[test]
+        fn gated_inspection_of_a_continuation_offers_no_token_and_keeps_the_episode() {
+            with_gated(|h, _| {
+                let ids = gated_form(h, "deny");
+                let token = inspect(h, ids).request_token;
+                assert!(token.is_some());
+                let before = events(h);
+                show(h, gated_reason_dialog(None));
+                std::thread::sleep(Duration::from_millis(150));
+                h.drain();
+                let reason = blocked_reason(h, ids);
+                assert!(!reason.is_empty());
+                assert_eq!(events(h), before, "the continuation emits no event");
+                assert!(interaction_open(h, ids.1));
+                assert_eq!(opened(h), 1);
+                assert!(h.pty.offers.is_empty());
+            });
+        }
+
+        #[test]
+        fn gated_styling_only_focus_change_starts_a_new_request_generation() {
+            with_gated(|h, _| {
+                let ids = gated_form(h, "allow");
+                let first = inspect(h, ids);
+                let stale = command(h, &first, "response:gated-stale", PermissionDecision::Deny);
+                let generation = h.controller.request_generation();
+                let moved = gated_form(h, "deny");
+                assert_eq!(moved, ids, "a focus move keeps the episode");
+                assert!(h.controller.request_generation() > generation);
+                let second = inspect(h, ids);
+                assert!(second.request_token.is_some());
+                assert_ne!(second.request_token, first.request_token);
+                assert!(handle(h, &stale).is_err(), "the pre-move token is revoked");
+                assert_eq!(opened(h), 1);
+                assert!(h.pty.offers.is_empty());
+            });
+        }
+
+        fn opencode_screen(fixture: &str, lines_from: &str) -> Vec<u8> {
+            let mut screen: serde_json::Value = serde_json::from_str(fixture).unwrap();
+            let source: serde_json::Value = serde_json::from_str(lines_from).unwrap();
+            screen["lines"] = source["lines"].clone();
+            native_screen_bytes(&screen.to_string())
+        }
+
+        #[test]
+        fn opencode_allow_enters_on_the_focused_allow_once() {
+            with_opencode_inspection(|h, _, _| {
+                show(h, native_screen_bytes(OPENCODE_ALLOW_SCREEN));
+                let ids = settled_ids(h);
+                let inspected = inspect(h, ids);
+                assert!(inspected.request_token.is_some());
+                assert_eq!(
+                    inspected.supported_decisions,
+                    [PermissionDecision::Allow, PermissionDecision::Deny]
+                );
+                let input = command(
+                    h,
+                    &inspected,
+                    "response:opencode-allow",
+                    PermissionDecision::Allow,
+                );
+                assert!(handle(h, &input).unwrap().is_none());
+                arm_stage(h, 1);
+                h.drain();
+                let result = response(h.advance().expect("the allow stage completes"));
+                assert_eq!(result.submission.status, SubmissionStatus::Accepted);
+                assert_eq!(h.pty.offers, offers(&[b"\r"]));
+            });
+        }
+
+        #[test]
+        fn opencode_deny_moves_the_focus_selects_reject_and_submits_the_empty_reason() {
+            with_opencode_inspection(|h, calls, _| {
+                show(h, native_screen_bytes(OPENCODE_DENY_1_SCREEN));
+                let ids = settled_ids(h);
+                let inspected = inspect(h, ids);
+                let input = command(
+                    h,
+                    &inspected,
+                    "response:opencode-deny",
+                    PermissionDecision::Deny,
+                );
+                assert!(handle(h, &input).unwrap().is_none());
+                let minted = calls.load(Ordering::SeqCst);
+                write_stage(h, 1);
+                assert_eq!(h.pty.offers, offers(&[b"h"]));
+                show(
+                    h,
+                    opencode_screen(OPENCODE_DENY_2_SCREEN, OPENCODE_DENY_1_SCREEN),
+                );
+                write_stage(h, 2);
+                assert_eq!(h.pty.offers, offers(&[b"h", b"\r"]));
+                show(h, native_screen_bytes(OPENCODE_DENY_3_SCREEN));
+                assert!(interaction_open(h, ids.1));
+                arm_stage(h, 3);
+                h.drain();
+                let result = response(h.advance().expect("the empty-reason stage completes"));
+                assert_eq!(
+                    (result.submission.status, result.submission.stage),
+                    (SubmissionStatus::Accepted, SubmissionStage::Submitted)
+                );
+                assert_eq!(h.pty.offers, offers(&[b"h", b"\r", b"\r"]));
+                assert_eq!(calls.load(Ordering::SeqCst), minted);
+                assert_eq!(opened(h), 1);
+            });
+        }
+
+        #[test]
+        fn opencode_focus_on_always_allow_after_the_first_deny_stage_fails_uncertain() {
+            with_opencode_inspection(|h, _, _| {
+                show(h, native_screen_bytes(OPENCODE_DENY_1_SCREEN));
+                let ids = settled_ids(h);
+                let deadline = soon(3000);
+                let input = admit(
+                    h,
+                    ids,
+                    "response:opencode-always",
+                    PermissionDecision::Deny,
+                    deadline,
+                );
+                let id = write_stage(h, 1);
+                show(
+                    h,
+                    opencode_screen(OPENCODE_ALWAYS_SCREEN, OPENCODE_DENY_1_SCREEN),
+                );
+                let outcome = settle(h, deadline);
+                assert_uncertain(h, id, outcome);
+                assert_eq!(h.pty.offers, offers(&[b"h"]));
+                assert_eq!(
+                    storage::get_permission_response(&h.fixture.conn, id)
+                        .unwrap()
+                        .input
+                        .operation_key,
+                    input.operation_key
+                );
+            });
+        }
+
+        #[test]
+        fn opencode_reject_dialog_reached_by_human_input_offers_no_token() {
+            with_opencode_inspection(|h, _, _| {
+                show(h, native_screen_bytes(OPENCODE_DENY_1_SCREEN));
+                let ids = settled_ids(h);
+                assert!(inspect(h, ids).request_token.is_some());
+                show(h, native_screen_bytes(OPENCODE_DENY_3_SCREEN));
+                std::thread::sleep(Duration::from_millis(150));
+                h.drain();
+                blocked_reason(h, ids);
+                assert!(interaction_open(h, ids.1));
+                assert_eq!(opened(h), 1);
+            });
+        }
+    }
 }
 
 pub(crate) trait RequestTokenSource: Send {
@@ -3197,8 +3816,17 @@ enum InputPhase {
 struct PermissionSelection {
     request: storage::NewPermissionResponse,
     binding: CurrentRequest,
+    continuation: Option<ObservedContinuation>,
+    gap_count: u64,
     plan: AnswerPlan,
 }
+enum StageGateProgress {
+    Ready,
+    Waiting,
+}
+// A gate still unmet this close to the response deadline fails now, so the written stages'
+// uncertainty is persisted within the original budget.
+const GATE_FINALIZATION_RESERVE: std::time::Duration = std::time::Duration::from_millis(100);
 
 enum RetainedSelection {
     Composer,
@@ -3695,6 +4323,16 @@ impl InputCoordinator {
             .as_ref()
             .ok_or_else(|| error("current permission token unavailable"))?;
         let bound = &selection.binding;
+        if let Some(continuation) = &selection.continuation {
+            return ensure(
+                token == &selection.request.metadata.request_token
+                    && self.manual_generation == bound.manual_generation
+                    && observation.gap_count() == selection.gap_count
+                    && observation.request_generation() == continuation.request_generation
+                    && observation.current_continuation() == Some(continuation),
+                "permission continuation binding changed",
+            );
+        }
         let observed = observation
             .current_request()
             .ok_or_else(|| error("current permission request unavailable"))?;
@@ -3729,6 +4367,166 @@ impl InputCoordinator {
             "selected permission plan changed",
         )?;
         Ok(())
+    }
+
+    /// Before each gated stage, holds the plan until the observation shows that stage's gate.
+    /// After a complete earlier stage it accepts exactly the transition the gate names and
+    /// rebinds the in-flight selection to it without minting a token.
+    fn advance_stage_gate(
+        &mut self,
+        observation: &ObservationController,
+    ) -> Result<StageGateProgress> {
+        let Some(pending) = self.pending.as_ref() else {
+            return Ok(StageGateProgress::Ready);
+        };
+        let Some(selection) = pending.permission.clone() else {
+            return Ok(StageGateProgress::Ready);
+        };
+        let id = pending
+            .input_id
+            .ok_or_else(|| error("permission reservation absent"))?;
+        let RetainedSelection::Permission { next_stage, .. } = &self
+            .operations
+            .get(&id)
+            .ok_or_else(|| error("retained permission selection absent"))?
+            .selection
+        else {
+            return Err(error("permission stage target changed"));
+        };
+        let next_stage = *next_stage;
+        let Some(gate) = selected_answer_stage(&selection.plan, next_stage)?
+            .gate()
+            .cloned()
+        else {
+            return Ok(StageGateProgress::Ready);
+        };
+        let bound = &selection.binding;
+        let bound_focus = || {
+            bound
+                .answer_matches
+                .iter()
+                .find(|matched| matched.plan() == &selection.plan)
+                .and_then(AnswerMatch::focused_choice_id)
+        };
+        let holds = match (&gate, &selection.continuation) {
+            (StageGate::Focus(choice), None) => bound_focus() == Some(choice.as_str()),
+            (StageGate::Screen(rule), Some(continuation)) => &continuation.rule_id == rule,
+            _ => false,
+        };
+        if holds {
+            return Ok(StageGateProgress::Ready);
+        }
+        ensure(next_stage > 0, "the first stage's gate does not hold")?;
+        ensure(
+            self.manual_generation == bound.manual_generation
+                && !self.manual_accounting_failed
+                && !self.input_fenced
+                && self.observation_blocker.is_none()
+                && observation.status().diagnostic.is_none()
+                && observation.gap_count() == selection.gap_count,
+            "input or observation changed between answer stages",
+        )?;
+        ensure(
+            observation.active_episode_seq() == Some(bound.episode_seq),
+            "the permission episode changed between answer stages",
+        )?;
+        let deadline = self
+            .pending
+            .as_ref()
+            .expect("validated pending permission")
+            .deadline;
+        let waiting = || {
+            ensure(
+                Instant::now() + GATE_FINALIZATION_RESERVE < deadline,
+                "the next stage's gate did not hold before the response deadline",
+            )
+            .map(|()| StageGateProgress::Waiting)
+        };
+        let observed = observation.current_request();
+        let unchanged = observed.is_some_and(|observed| {
+            selection.continuation.is_none()
+                && observed.request_generation == bound.request_generation
+                && observed.focus == bound.focus
+        });
+        let rebound = match &gate {
+            StageGate::Focus(choice) => {
+                ensure(
+                    observation.current_continuation().is_none(),
+                    "an unexpected continuation screen appeared between answer stages",
+                )?;
+                let Some(observed) = observed.filter(|_| !unchanged) else {
+                    return waiting();
+                };
+                let focused = observed
+                    .answer_matches
+                    .iter()
+                    .find(|matched| matched.plan() == &selection.plan)
+                    .and_then(AnswerMatch::focused_choice_id);
+                ensure(
+                    observed.episode_seq == bound.episode_seq
+                        && observed.request_rule_id == bound.request_rule_id
+                        && observed.semantic == bound.semantic
+                        && observed.choices == bound.choices
+                        && observed.native_correlation == bound.native_correlation
+                        && focused == Some(choice.as_str()),
+                    "the request changed other than to the next stage's focus",
+                )?;
+                PermissionSelection {
+                    request: selection.request.clone(),
+                    binding: CurrentRequest {
+                        request_generation: observed.request_generation,
+                        focus: observed.focus.clone(),
+                        output_seq: observed.output_seq,
+                        answer_matches: observed.answer_matches.clone(),
+                        ..bound.clone()
+                    },
+                    continuation: None,
+                    gap_count: selection.gap_count,
+                    plan: selection.plan.clone(),
+                }
+            }
+            StageGate::Screen(rule) => {
+                let Some(continuation) = observation.current_continuation() else {
+                    ensure(
+                        observed.is_none() || unchanged,
+                        "the request changed instead of opening its continuation",
+                    )?;
+                    return waiting();
+                };
+                ensure(
+                    &continuation.rule_id == rule && continuation.episode_seq == bound.episode_seq,
+                    "a different continuation screen appeared",
+                )?;
+                PermissionSelection {
+                    request: selection.request.clone(),
+                    binding: bound.clone(),
+                    continuation: Some(continuation.clone()),
+                    gap_count: selection.gap_count,
+                    plan: selection.plan.clone(),
+                }
+            }
+        };
+        let rebound = Arc::new(rebound);
+        if rebound.continuation.is_none() {
+            let (_, token) = self
+                .current_request
+                .take()
+                .ok_or_else(|| error("current permission token unavailable"))?;
+            self.current_request = Some((rebound.binding.clone(), token));
+        }
+        let retained = self
+            .operations
+            .get_mut(&id)
+            .expect("validated retained permission selection");
+        let RetainedSelection::Permission { selection, .. } = &mut retained.selection else {
+            unreachable!("validated permission selection");
+        };
+        *selection = rebound.clone();
+        self.pending
+            .as_mut()
+            .expect("validated pending permission")
+            .permission = Some(rebound);
+        Ok(StageGateProgress::Ready)
     }
 
     fn validate_permission_association(
@@ -3896,6 +4694,8 @@ impl InputCoordinator {
                     },
                 },
                 binding: binding.clone(),
+                continuation: None,
+                gap_count: observation.gap_count(),
                 plan,
             });
             if let Some(receipt) = &history {
@@ -5075,6 +5875,9 @@ impl InputCoordinator {
                 .and_then(|pending| pending.input_id)
                 .ok_or_else(|| error("input writer has no reservation"))?;
             if phase == InputPhase::AwaitBeforeWrite {
+                if let StageGateProgress::Waiting = self.advance_stage_gate(observation)? {
+                    return Ok(None);
+                }
                 let Some(output_seq) = self.fresh_drain(transport, observation, effective)? else {
                     return Ok(None);
                 };

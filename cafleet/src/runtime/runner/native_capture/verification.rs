@@ -98,7 +98,8 @@ struct ApprovedCase {
     permission_mode: &'static str,
     mode: DriverMode,
     decision: Option<&'static str>,
-    stage_hex: Option<&'static str>,
+    prefix_hex: &'static [&'static str],
+    stage_hex: &'static [&'static str],
     probe_argument: Option<&'static str>,
     database: &'static str,
     socket: &'static str,
@@ -110,14 +111,28 @@ const DRIVER_FULL_SIZE: TerminalSize = TerminalSize {
 };
 const DRIVER_WRAPPED_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 52 };
 const DRIVER_BOXED_WRAP_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 89 };
-const APPROVED_CASES: [ApprovedCase; 14] = [
+const DRIVER_HERDR_ENV_SIZE: TerminalSize = TerminalSize {
+    rows: 36,
+    cols: 166,
+};
+// tmux sets its own TERM and TERM_PROGRAM in every pane, so the herdr terminal identity reaches the
+// native child only as spawn overrides; the values are those the live herdr child carried.
+const DRIVER_HERDR_CHILD_ENVIRONMENT: [(&str, &str); 5] = [
+    ("TERM", "xterm-256color"),
+    ("COLORTERM", "truecolor"),
+    ("TERM_PROGRAM", "herdr"),
+    ("TERM_PROGRAM_VERSION", "0.9.5"),
+    ("HERDR_ENV", "1"),
+];
+const APPROVED_CASES: [ApprovedCase; 23] = [
     ApprovedCase {
         id: "cells-002",
         backend: CodingAgent::Claude,
         permission_mode: "default",
         mode: DriverMode::NoAnswer,
         decision: None,
-        stage_hex: None,
+        prefix_hex: &[],
+        stage_hex: &[],
         probe_argument: Some("allow"),
         database: "nc02.db",
         socket: "tc02",
@@ -129,7 +144,8 @@ const APPROVED_CASES: [ApprovedCase; 14] = [
         permission_mode: "default",
         mode: DriverMode::AnswerStage,
         decision: Some("allow"),
-        stage_hex: Some("31"),
+        prefix_hex: &[],
+        stage_hex: &["31"],
         probe_argument: Some("allow"),
         database: "na01.db",
         socket: "ta01",
@@ -141,7 +157,8 @@ const APPROVED_CASES: [ApprovedCase; 14] = [
         permission_mode: "default",
         mode: DriverMode::AnswerStage,
         decision: Some("deny"),
-        stage_hex: Some("34"),
+        prefix_hex: &[],
+        stage_hex: &["34"],
         probe_argument: Some("deny"),
         database: "nd01.db",
         socket: "td01",
@@ -153,7 +170,8 @@ const APPROVED_CASES: [ApprovedCase; 14] = [
         permission_mode: "default",
         mode: DriverMode::NoAnswer,
         decision: None,
-        stage_hex: None,
+        prefix_hex: &[],
+        stage_hex: &[],
         probe_argument: None,
         database: "ni01.db",
         socket: "ti01",
@@ -165,7 +183,8 @@ const APPROVED_CASES: [ApprovedCase; 14] = [
         permission_mode: "on-request",
         mode: DriverMode::NoAnswer,
         decision: None,
-        stage_hex: None,
+        prefix_hex: &[],
+        stage_hex: &[],
         probe_argument: None,
         database: "xt01.db",
         socket: "xt01",
@@ -177,7 +196,8 @@ const APPROVED_CASES: [ApprovedCase; 14] = [
         permission_mode: "on-request",
         mode: DriverMode::NoAnswer,
         decision: None,
-        stage_hex: None,
+        prefix_hex: &[],
+        stage_hex: &[],
         probe_argument: Some("allow"),
         database: "xc01.db",
         socket: "xc01",
@@ -189,7 +209,8 @@ const APPROVED_CASES: [ApprovedCase; 14] = [
         permission_mode: "on-request",
         mode: DriverMode::AnswerStage,
         decision: Some("allow"),
-        stage_hex: Some("79"),
+        prefix_hex: &[],
+        stage_hex: &["79"],
         probe_argument: Some("allow"),
         database: "xa01.db",
         socket: "xa01",
@@ -201,7 +222,8 @@ const APPROVED_CASES: [ApprovedCase; 14] = [
         permission_mode: "on-request",
         mode: DriverMode::AnswerStage,
         decision: Some("deny"),
-        stage_hex: Some("33"),
+        prefix_hex: &[],
+        stage_hex: &["33"],
         probe_argument: Some("deny"),
         database: "xd01.db",
         socket: "xd01",
@@ -213,7 +235,8 @@ const APPROVED_CASES: [ApprovedCase; 14] = [
         permission_mode: "on-request",
         mode: DriverMode::NoAnswer,
         decision: None,
-        stage_hex: None,
+        prefix_hex: &[],
+        stage_hex: &[],
         probe_argument: None,
         database: "xi01.db",
         socket: "xi01",
@@ -225,7 +248,8 @@ const APPROVED_CASES: [ApprovedCase; 14] = [
         permission_mode: "default",
         mode: DriverMode::NoAnswer,
         decision: None,
-        stage_hex: None,
+        prefix_hex: &[],
+        stage_hex: &[],
         probe_argument: Some("allow"),
         database: "nwc1.db",
         socket: "twc1",
@@ -237,7 +261,8 @@ const APPROVED_CASES: [ApprovedCase; 14] = [
         permission_mode: "default",
         mode: DriverMode::AnswerStage,
         decision: Some("allow"),
-        stage_hex: Some("31"),
+        prefix_hex: &[],
+        stage_hex: &["31"],
         probe_argument: Some("allow"),
         database: "nwa1.db",
         socket: "twa1",
@@ -249,7 +274,8 @@ const APPROVED_CASES: [ApprovedCase; 14] = [
         permission_mode: "default",
         mode: DriverMode::AnswerStage,
         decision: Some("deny"),
-        stage_hex: Some("34"),
+        prefix_hex: &[],
+        stage_hex: &["34"],
         probe_argument: Some("deny"),
         database: "nwd1.db",
         socket: "twd1",
@@ -261,7 +287,8 @@ const APPROVED_CASES: [ApprovedCase; 14] = [
         permission_mode: "default",
         mode: DriverMode::NoAnswer,
         decision: None,
-        stage_hex: None,
+        prefix_hex: &[],
+        stage_hex: &[],
         probe_argument: Some("allow"),
         database: "nb89.db",
         socket: "tb89",
@@ -273,11 +300,129 @@ const APPROVED_CASES: [ApprovedCase; 14] = [
         permission_mode: "default",
         mode: DriverMode::NoAnswer,
         decision: None,
-        stage_hex: None,
+        prefix_hex: &[],
+        stage_hex: &[],
         probe_argument: Some("allow"),
         database: "nb12.db",
         socket: "tb12",
         size: DRIVER_FULL_SIZE,
+    },
+    ApprovedCase {
+        id: "opencode-cells-001",
+        backend: CodingAgent::Opencode,
+        permission_mode: "cafleet-ask",
+        mode: DriverMode::NoAnswer,
+        decision: None,
+        prefix_hex: &[],
+        stage_hex: &[],
+        probe_argument: Some("allow"),
+        database: "oc01.db",
+        socket: "oc01",
+        size: DRIVER_FULL_SIZE,
+    },
+    ApprovedCase {
+        id: "opencode-ans-allow-001",
+        backend: CodingAgent::Opencode,
+        permission_mode: "cafleet-ask",
+        mode: DriverMode::AnswerStage,
+        decision: Some("allow"),
+        prefix_hex: &[],
+        stage_hex: &["0d"],
+        probe_argument: Some("allow"),
+        database: "oa01.db",
+        socket: "oa01",
+        size: DRIVER_FULL_SIZE,
+    },
+    ApprovedCase {
+        id: "opencode-ans-deny-001",
+        backend: CodingAgent::Opencode,
+        permission_mode: "cafleet-ask",
+        mode: DriverMode::AnswerStage,
+        decision: Some("deny"),
+        prefix_hex: &[],
+        stage_hex: &["68", "0d"],
+        probe_argument: Some("deny"),
+        database: "od01.db",
+        socket: "od01",
+        size: DRIVER_FULL_SIZE,
+    },
+    ApprovedCase {
+        id: "opencode-ans-deny-002",
+        backend: CodingAgent::Opencode,
+        permission_mode: "cafleet-ask",
+        mode: DriverMode::AnswerStage,
+        decision: Some("deny"),
+        prefix_hex: &["68"],
+        stage_hex: &["0d", "0d"],
+        probe_argument: Some("deny"),
+        database: "od02.db",
+        socket: "od02",
+        size: DRIVER_FULL_SIZE,
+    },
+    ApprovedCase {
+        id: "opencode-ans-deny-003",
+        backend: CodingAgent::Opencode,
+        permission_mode: "cafleet-ask",
+        mode: DriverMode::AnswerStage,
+        decision: Some("deny"),
+        prefix_hex: &["68", "0d"],
+        stage_hex: &["0d"],
+        probe_argument: Some("deny"),
+        database: "od03.db",
+        socket: "od03",
+        size: DRIVER_FULL_SIZE,
+    },
+    ApprovedCase {
+        id: "opencode-focus-always-001",
+        backend: CodingAgent::Opencode,
+        permission_mode: "cafleet-ask",
+        mode: DriverMode::AnswerStage,
+        decision: Some("deny"),
+        prefix_hex: &["6c"],
+        stage_hex: &[],
+        probe_argument: Some("deny"),
+        database: "of01.db",
+        socket: "of01",
+        size: DRIVER_FULL_SIZE,
+    },
+    ApprovedCase {
+        id: "opencode-focus-always-002",
+        backend: CodingAgent::Opencode,
+        permission_mode: "cafleet-ask",
+        mode: DriverMode::AnswerStage,
+        decision: Some("deny"),
+        prefix_hex: &["6c"],
+        stage_hex: &[],
+        probe_argument: Some("deny"),
+        database: "of02.db",
+        socket: "of02",
+        size: DRIVER_FULL_SIZE,
+    },
+    ApprovedCase {
+        id: "opencode-idle-001",
+        backend: CodingAgent::Opencode,
+        permission_mode: "cafleet-ask",
+        mode: DriverMode::NoAnswer,
+        decision: None,
+        prefix_hex: &[],
+        stage_hex: &[],
+        probe_argument: None,
+        database: "oi01.db",
+        socket: "oi01",
+        size: DRIVER_FULL_SIZE,
+    },
+    ApprovedCase {
+        id: "opencode-herdr-env-cells-001",
+        backend: CodingAgent::Opencode,
+        permission_mode: "cafleet-ask",
+        mode: DriverMode::NoAnswer,
+        decision: None,
+        prefix_hex: &[],
+        stage_hex: &[],
+        probe_argument: Some("allow"),
+        database: "oh01.db",
+        socket: "oh01",
+        size: DRIVER_HERDR_ENV_SIZE,
     },
 ];
 impl ApprovedCase {
@@ -286,6 +431,16 @@ impl ApprovedCase {
             .iter()
             .find(|approved| approved.id == case.case_id)
             .ok_or_else(|| error("unreviewed native case"))?;
+        ensure(
+            (approved.mode == DriverMode::NoAnswer)
+                == (approved.prefix_hex.is_empty() && approved.stage_hex.is_empty())
+                && approved
+                    .prefix_hex
+                    .iter()
+                    .chain(approved.stage_hex)
+                    .all(|stage| stage.as_bytes().chunks(2).all(|byte| byte != b"1b")),
+            "reviewed case stages differ from its driver mode or contain Escape",
+        )?;
         let (mode, window) = match approved.mode {
             DriverMode::NoAnswer => ("no_answer", 0),
             DriverMode::AnswerStage => ("answer_stage", DRIVER_ANSWER_WINDOW_MS),
@@ -294,11 +449,18 @@ impl ApprovedCase {
             case.mode == mode
                 && case.answer_window_ms == window
                 && case.decision.as_deref() == approved.decision
-                && case.stage_hex.as_deref() == approved.stage_hex
+                && case.prefix_hex == approved.prefix_hex
+                && case.stage_hex == approved.stage_hex
                 && case.probe_argument.as_deref() == approved.probe_argument,
             "case decision, stage or probe binding differs from its reviewed case",
         )?;
         Ok(approved)
+    }
+    fn child_environment(&self) -> &'static [(&'static str, &'static str)] {
+        match self.id {
+            "opencode-herdr-env-cells-001" => &DRIVER_HERDR_CHILD_ENVIRONMENT,
+            _ => &[],
+        }
     }
     fn member_name(&self) -> String {
         format!("cafleet-194-{}", self.id)
@@ -316,7 +478,11 @@ impl ApprovedCase {
                 "Use the shell tool to run exactly {} {argument} as one command with sandbox_permissions set to require_escalated and the justification \"CAFleet permission probe\". Preserve any native approval request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation.",
                 helper.display()
             ),
-            (Some(argument), _) => format!(
+            (Some(argument), CodingAgent::Opencode) => format!(
+                "Use the shell tool to run exactly {} {argument} as one command. Preserve any native permission request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation.",
+                helper.display()
+            ),
+            (Some(argument), CodingAgent::Claude) => format!(
                 "Use Bash to attempt exactly {} {argument} as one command. Preserve any native permission request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation.",
                 helper.display()
             ),
@@ -371,7 +537,8 @@ struct DriverCase {
     mode: String,
     answer_window_ms: u64,
     decision: Option<String>,
-    stage_hex: Option<String>,
+    prefix_hex: Vec<String>,
+    stage_hex: Vec<String>,
     probe_argument: Option<String>,
     case_nonce: String,
     expires_at_mono_ns: u64,
@@ -855,7 +1022,14 @@ fn driver_prepare(
     let spawn = SpawnSpec {
         argv,
         cwd: case.cwd.clone(),
-        environment: vec![("CAFLEET_DATABASE_URL".into(), case.database_url.clone())],
+        environment: std::iter::once(("CAFLEET_DATABASE_URL".into(), case.database_url.clone()))
+            .chain(
+                approved
+                    .child_environment()
+                    .iter()
+                    .map(|&(name, value)| (name.into(), value.into())),
+            )
+            .collect(),
         evidence_policy: json!({"mode":"redacted","config":config}),
         size: approved.size,
     };
@@ -930,7 +1104,7 @@ fn driver_post_stage(
         None
     };
     Ok(
-        json!({"decision":approved.decision,"stage_hex":approved.stage_hex,
+        json!({"decision":approved.decision,"prefix_hex":approved.prefix_hex,"stage_hex":approved.stage_hex,
         "output_seq_at_arm":armed_output_seq,
         "output_seq_at_stop":stop_output_seq.as_ref().ok(),
         "output_seq_error":stop_output_seq.as_ref().err().map(|e|e.message().into_owned()),

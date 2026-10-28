@@ -166,7 +166,7 @@ Evidence: Codex CLI 0.162.1 stream probes established one retained session/proce
 | Placeholder | Value |
 |---|---|
 | `{decision_surface}` | a Director-relayed operator message |
-| `{permission_flags}` | `--agent cafleet` |
+| `{permission_flags}` | `--agent cafleet`; `--agent cafleet-ask` when `--permission-mode cafleet-ask` is selected |
 | `{pane_title}` | no `--name` analog |
 | `{skill_loader}` | reading each requested skill core, own backend section and role-required references by the absolute paths the spawn prompt provides |
 | `{effort_levels}` | unsupported — omit `--effort` |
@@ -405,13 +405,15 @@ Source: [OpenCode Go](https://opencode.ai/v2/docs/console/go).
 |---|---|
 | A member routes concrete questions to the Director and receives the operator's answer as a message. | `{decision_surface}`; [user relay](supervision.md#user-delegation-protocol) |
 | Members perform assignments using the selected provider/model, workspace reads/edits, permitted tools and broker communication. A host satisfying the [Director requirements](#role-requirements) without a verified native stream adapter uses explicit manual `poll`/finite `wait` and states that reception limit. | [Director wake](supervision.md#director-wake) |
-| `OPENCODE_CONFIG_DIR` adds a preset search directory alongside default home configuration. Same-name agent definitions can merge across sources; inspect the effective configuration when customizing a preset. | `{permission_flags}`; preset discovery |
+| OpenCode 2.1.4 loads presets from `~/.config/opencode`, the default preset base, and from `OPENCODE_CONFIG_DIR`. `member create` forwards a set `OPENCODE_CONFIG_DIR` into the member's environment, so the member loads the preset setup installed and spawn checked. Same-name agent definitions can merge across sources; inspect the effective configuration when customizing a preset. | `{permission_flags}`; preset discovery; member spawn |
 | The preset uses the last matching permission rule, so specific denies for Director-owned explicit pane-input commands, including `member press`, win over the broad `cafleet *` allow. Denied member commands receive no permission prompt, while permitted broker commands run normally. | `{permission_flags}`; [member routing](prompt-routing.md#member-side-reconsider-then-route) |
 | MCP tools' participation in preset permission evaluation and compound-shell permission matching are unverified on opencode 2.1.4. Keep loaded configurations free of MCP servers and submit one command per invocation. | `{permission_flags}`; [command isolation](../SKILL.md#one-shot-command-isolation) |
-| Each pane runs `opencode mini --standalone --agent cafleet` with `--prompt`, optional model selection and a private server. | `{permission_flags}`; member spawn |
+| Each pane runs `opencode mini --standalone --agent <mode>` with `--prompt`, optional model selection and a private server; `<mode>` is `cafleet` or the selected `cafleet-ask`, and spawn requires only that mode's installed preset. | `{permission_flags}`; member spawn |
 | Mini receives pushed notifications and direct prompts as submitted user turns. Captures can expose only the status bar; inspect retained session records for omitted input/output and broker poll/ACK for message consumption. | [Push notifications](runtime/spec/multiplexer-backends.md#push-notifications); prompt dispatch |
 | Leading-`!` input runs a native shell command in `mini`. Preserve Director authorization and member-tool permissions because the native path's effective boundary and any second permission check remain unestablished. | [Native dispatch](prompt-routing.md#director-side-dispatch) |
-| The `cafleet` preset allows its declared workspace/broker tools and denies unmatched shell commands; route a required denied command. A permission popup is an issue to capture and relay. | `{permission_flags}`; [member routing](prompt-routing.md#member-side-reconsider-then-route) |
+| The `cafleet` preset allows its declared workspace/broker tools and denies unmatched shell commands; route a required denied command. A permission popup under `cafleet` is an issue to capture and relay. | `{permission_flags}`; [member routing](prompt-routing.md#member-side-reconsider-then-route) |
+| The `cafleet-ask` preset keeps the same allowlist and Director-only denies and asks for every other shell command. Its native permission form is a runtime decision: the member waits while the Director answers it through the [runtime procedure](member-runtime.md), then continues from the result OpenCode returns. | `{permission_flags}`; [runtime procedure](member-runtime.md#consume-observed-interactions) |
+| On OpenCode 2.1.4 a deny submits an empty rejection reason and ends the member's turn with `Step interrupted`; CAFleet holds a Director message because prompt submission is `unknown`, so after verifying that nothing ran the member continues from input on its native surface. A wrapped command, a reason to give, or another OpenCode version is answered manually on the native surface. | [Runtime procedure](member-runtime.md#consume-observed-interactions) step 7 |
 
 ## Template
 

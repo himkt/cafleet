@@ -4,7 +4,7 @@ CAFleet runs new members inside an owned PTY runner. The runner observes native 
 
 ## Choose a native policy
 
-Set `member create --permission-mode MODE` for the selected backend. Omission preserves that backend's launch default. The [policy contract](../spec/member-runtime.md#launch-policy-and-capability-registry) owns choices and coverage; member launch mode is independent of the Director's decision policy.
+Set `member create --permission-mode MODE` for the selected backend. Omission preserves that backend's launch default. The [policy contract](../spec/member-runtime.md#launch-policy-and-capability-registry) owns choices and coverage; member launch mode is independent of the Director's decision policy. An interactive policy shows native permission forms: Claude's native `default`, Codex's native `on-request`, and OpenCode's `cafleet-ask`, whose agent preset asks for every shell command outside its allowlist instead of denying it.
 
 Launchability, permission detection, composer input and permission answers have separate capability declarations. An unknown profile permits manual terminal use, emits a coverage notification and holds generated input. A tested detector supplies no answer capability by itself. Native and managed rules remain authoritative.
 

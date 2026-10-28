@@ -24,7 +24,17 @@ pub fn opencode_skills_base(home: &Path) -> PathBuf {
 }
 
 pub fn opencode_preset_base(env: EnvLookup, home: &Path) -> Result<ResolvedDir, CafleetError> {
-    resolve("OPENCODE_CONFIG_DIR", env, home.join(".opencode"))
+    resolve("OPENCODE_CONFIG_DIR", env, opencode_skills_base(home))
+}
+
+pub fn require_absolute(var: &str, value: &str) -> Result<(), CafleetError> {
+    if Path::new(value).is_absolute() {
+        Ok(())
+    } else {
+        Err(CafleetError::App(format!(
+            "{var} must be an absolute path (got '{value}')"
+        )))
+    }
 }
 
 fn resolve(
@@ -34,12 +44,12 @@ fn resolve(
 ) -> Result<ResolvedDir, CafleetError> {
     match env(var) {
         None => Ok(ResolvedDir { path: default }),
-        Some(value) if Path::new(&value).is_absolute() => Ok(ResolvedDir {
-            path: PathBuf::from(value),
-        }),
-        Some(value) => Err(CafleetError::App(format!(
-            "{var} must be an absolute path (got '{value}')"
-        ))),
+        Some(value) => {
+            require_absolute(var, &value)?;
+            Ok(ResolvedDir {
+                path: PathBuf::from(value),
+            })
+        }
     }
 }
 
@@ -55,7 +65,11 @@ mod tests {
     const ENV_RESOLVERS: [(Resolver, &str, &str); 3] = [
         (claude_config_dir, "CLAUDE_CONFIG_DIR", ".claude"),
         (codex_home, "CODEX_HOME", ".codex"),
-        (opencode_preset_base, "OPENCODE_CONFIG_DIR", ".opencode"),
+        (
+            opencode_preset_base,
+            "OPENCODE_CONFIG_DIR",
+            ".config/opencode",
+        ),
     ];
 
     fn home() -> PathBuf {
@@ -118,6 +132,19 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn opencode_preset_base_defaults_to_the_skills_base_the_native_cli_reads() {
+        let home = home();
+        assert_eq!(
+            opencode_preset_base(&|_| None, &home).unwrap().path,
+            opencode_skills_base(&home)
+        );
+        assert_ne!(
+            opencode_preset_base(&|_| None, &home).unwrap().path,
+            home.join(".opencode")
+        );
     }
 
     #[test]

@@ -5,7 +5,7 @@ use crate::broker::runtime::Coverage;
 use crate::error::CafleetError;
 use regex::Regex;
 use serde_json::{Map, Value};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 type Result<T> = std::result::Result<T, CafleetError>;
 fn invalid(message: impl Into<String>) -> CafleetError {
     CafleetError::Usage(format!("invalid native profile: {}", message.into()))
@@ -71,6 +71,120 @@ pub(super) mod inspection_tests {
 
     pub(crate) fn inspection_fixture_form(operation: &str, focus: &str) -> Vec<u8> {
         format!("\x1b[2J\x1b[19;1HSynthetic permission request\r\nOperation: {operation}\r\n> Allow once\r\n  Deny once\r\nRequest form: {focus}\r\nSelection: ").into_bytes()
+    }
+
+    pub(crate) const GATED_RULE: &str = "synthetic-gated";
+    pub(crate) const GATED_REASON_RULE: &str = "synthetic-reason";
+    pub(crate) const GATED_REASON_FIXTURE: &str = "synthetic-reason-native-1";
+    pub(crate) const FOCUS_SGR: &str = "\x1b[48;2;250;178;131m";
+
+    pub(crate) fn gated_fixture_definition() -> Value {
+        let mut value: Value = serde_json::from_str(include_str!(
+            "../../runtime/runner_tests/fixtures/synthetic-profile.json"
+        ))
+        .unwrap();
+        let mut native = value["fixtures"][0].clone();
+        native["id"] = json!(GATED_REASON_FIXTURE);
+        native["kind"] = json!("native");
+        value["fixtures"].as_array_mut().unwrap().push(native);
+        value["profiles"][0]["rules"] = json!([
+            {
+                "id":GATED_RULE,"priority":100,"observation":"permission_request",
+                "region":{"screen":"either","start_pattern":"^Synthetic gated request$","end_pattern":"^Selection: $","max_rows":8,"cursor":"any"},
+                "matchers":[
+                    {"id":"heading","scope":"line","pattern":"^Synthetic gated request$"},
+                    {"id":"operation","scope":"line","pattern":"^Operation: (?P<operation>.+)$"},
+                    {"id":"focus","scope":"line","pattern":"^  Allow once   (?:Always allow   )?Deny once$","focus_style":"background"},
+                    {"id":"allow","scope":"line","pattern":"^  (?P<label>Allow once)   "},
+                    {"id":"deny","scope":"line","pattern":"   (?P<label>Deny once)$"}
+                ],
+                "extract":{"operation":{"matcher_id":"operation","capture":"operation"},"choices":[
+                    {"id":"allow-once","label":{"matcher_id":"allow","capture":"label"},"scope":"single_request"},
+                    {"id":"deny-once","label":{"matcher_id":"deny","capture":"label"},"scope":"single_request"}
+                ],"native_request_id":null},
+                "verified_noninteraction":false,"sensitive":false
+            },
+            {
+                "id":GATED_REASON_RULE,"priority":100,"observation":"permission_continuation",
+                "region":{"screen":"either","start_pattern":"^Synthetic reject reason$","end_pattern":"^Confirm: enter$","max_rows":4,"cursor":"any"},
+                "matchers":[
+                    {"id":"heading","scope":"line","pattern":"^Synthetic reject reason$"},
+                    {"id":"empty","scope":"line","pattern":"^Reason: \\(empty\\)$"}
+                ],
+                "extract":{"operation":null,"choices":[],"native_request_id":null},
+                "verified_noninteraction":false,"sensitive":false,
+                "continues_rule_id":GATED_RULE,"continues_choice_id":"deny-once",
+                "fixture_ids":[GATED_REASON_FIXTURE]
+            }
+        ]);
+        value["profiles"][0]["capabilities"]["detection"]["rule_ids"] = json!([GATED_RULE]);
+        value["profiles"][0]["capabilities"]["answers"] = json!([
+            {
+                "decision":"allow","request_rule_id":GATED_RULE,"answer_rule_id":"synthetic-gated-allow",
+                "choice_id":"allow-once","focus_matcher_id":"focus","fixture_ids":["synthetic-permission-1"],
+                "stages":[
+                    {"bytes_hex":"0d","required_rule_id":GATED_RULE,"required_choice_id":"allow-once","required_focus_choice_id":"allow-once"}
+                ]
+            },
+            {
+                "decision":"deny","request_rule_id":GATED_RULE,"answer_rule_id":"synthetic-gated-deny",
+                "choice_id":"deny-once","focus_matcher_id":"focus","fixture_ids":["synthetic-permission-1"],
+                "stages":[
+                    {"bytes_hex":"68","required_rule_id":GATED_RULE,"required_choice_id":"deny-once","required_focus_choice_id":"allow-once"},
+                    {"bytes_hex":"0d","required_rule_id":GATED_RULE,"required_choice_id":"deny-once","required_focus_choice_id":"deny-once"},
+                    {"bytes_hex":"0d","required_rule_id":GATED_RULE,"required_choice_id":"deny-once","required_screen_rule_id":GATED_REASON_RULE}
+                ]
+            }
+        ]);
+        value
+    }
+
+    /// `focused` names the labels painted with `focus_sgr`; the rest of the choice row keeps
+    /// `row_sgr`, which is the row background the detector compares against.
+    pub(crate) fn gated_fixture_form_styled(
+        operation: &str,
+        always: bool,
+        focused: &[&str],
+        row_sgr: &str,
+        focus_sgr: &str,
+    ) -> Vec<u8> {
+        let labels: &[&str] = if always {
+            &["Allow once", "Always allow", "Deny once"]
+        } else {
+            &["Allow once", "Deny once"]
+        };
+        let mut row = format!("{row_sgr}  ");
+        for (index, label) in labels.iter().enumerate() {
+            if index > 0 {
+                row.push_str("   ");
+            }
+            if focused.contains(label) {
+                row.push_str(&format!("{focus_sgr}{label}\x1b[0m{row_sgr}"));
+            } else {
+                row.push_str(label);
+            }
+        }
+        row.push_str("\x1b[0m");
+        format!("\x1b[0m\x1b[2J\x1b[19;1HSynthetic gated request\r\nOperation: {operation}\r\n{row}\r\nSelection: ").into_bytes()
+    }
+
+    pub(crate) fn gated_fixture_form(operation: &str, focused: &str) -> Vec<u8> {
+        let focused: &[&str] = match focused {
+            "allow" => &["Allow once"],
+            "deny" => &["Deny once"],
+            "always" => &["Always allow"],
+            "none" => &[],
+            _ => panic!("known synthetic focus"),
+        };
+        gated_fixture_form_styled(operation, true, focused, "", FOCUS_SGR)
+    }
+
+    pub(crate) fn gated_reason_dialog(reason: Option<&str>) -> Vec<u8> {
+        let reason = reason.unwrap_or("(empty)");
+        format!(
+            "\x1b[0m\x1b[2J\x1b[19;1HSynthetic reject reason\r\nReason: {reason}\r\nConfirm: enter"
+        )
+        .into_bytes()
     }
 
     #[test]
@@ -275,6 +389,13 @@ pub(super) struct Matcher {
     pub id: String,
     pub scope: String,
     pub regex: Regex,
+    pub background_focus: bool,
+}
+#[derive(Clone)]
+pub(super) struct Continuation {
+    pub rule_id: String,
+    pub choice_id: String,
+    pub fixtures: Vec<String>,
 }
 #[derive(Clone)]
 pub(super) struct Region {
@@ -296,6 +417,7 @@ pub(super) struct Rule {
     pub native: Option<Capture>,
     pub verified: bool,
     pub sensitive: bool,
+    pub continuation: Option<Continuation>,
 }
 #[derive(Clone)]
 pub(super) struct Capability {
@@ -319,6 +441,12 @@ pub(crate) struct AnswerStage {
     bytes: Vec<u8>,
     required_rule_id: String,
     required_choice_id: String,
+    gate: Option<StageGate>,
+}
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) enum StageGate {
+    Focus(String),
+    Screen(String),
 }
 impl AnswerStage {
     pub(crate) fn bytes(&self) -> &[u8] {
@@ -329,6 +457,22 @@ impl AnswerStage {
     }
     pub(crate) fn required_choice_id(&self) -> &str {
         &self.required_choice_id
+    }
+    pub(crate) fn gate(&self) -> Option<&StageGate> {
+        self.gate.as_ref()
+    }
+    pub(crate) fn required_focus_choice_id(&self) -> Option<&str> {
+        match &self.gate {
+            Some(StageGate::Focus(choice)) => Some(choice),
+            _ => None,
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn required_screen_rule_id(&self) -> Option<&str> {
+        match &self.gate {
+            Some(StageGate::Screen(rule)) => Some(rule),
+            _ => None,
+        }
     }
 }
 
@@ -454,34 +598,58 @@ fn operation_capture(value: &Value, matchers: &[Matcher]) -> Result<Option<Captu
         ..capture(&Value::Object(plain), matchers)?
     }))
 }
+const RULE_FIELDS: [&str; 8] = [
+    "id",
+    "priority",
+    "observation",
+    "region",
+    "matchers",
+    "extract",
+    "verified_noninteraction",
+    "sensitive",
+];
+const CONTINUATION_FIELDS: [&str; 3] = ["continues_rule_id", "continues_choice_id", "fixture_ids"];
 fn compile_rule(value: &Value) -> Result<Rule> {
-    let m = object(
-        value,
-        &[
-            "id",
-            "priority",
-            "observation",
-            "region",
-            "matchers",
-            "extract",
-            "verified_noninteraction",
-            "sensitive",
-        ],
-    )?;
+    let kind = ObservationKind::parse(&text(
+        value
+            .get("observation")
+            .ok_or_else(|| invalid("rule observation required"))?,
+    )?)?;
+    let continues = kind == ObservationKind::PermissionContinuation;
+    let fields = if continues {
+        RULE_FIELDS
+            .iter()
+            .chain(&CONTINUATION_FIELDS)
+            .copied()
+            .collect()
+    } else {
+        RULE_FIELDS.to_vec()
+    };
+    let m = object(value, &fields)?;
     let id = text(&m["id"])?;
     let priority = m["priority"]
         .as_i64()
         .ok_or_else(|| invalid("integer priority required"))?;
-    let kind = ObservationKind::parse(&text(&m["observation"])?)?;
     let verified = boolean(&m["verified_noninteraction"])?;
     require(
         !verified
             || !matches!(
                 kind,
-                ObservationKind::Interaction(_) | ObservationKind::Unknown
+                ObservationKind::Interaction(_)
+                    | ObservationKind::Unknown
+                    | ObservationKind::PermissionContinuation
             ),
-        "interaction/unknown cannot verify noninteraction",
+        "interaction/unknown/continuation cannot verify noninteraction",
     )?;
+    let continuation = if continues {
+        Some(Continuation {
+            rule_id: text(&m["continues_rule_id"])?,
+            choice_id: text(&m["continues_choice_id"])?,
+            fixtures: texts(&m["fixture_ids"])?,
+        })
+    } else {
+        None
+    };
     let r = object(
         &m["region"],
         &[
@@ -502,13 +670,22 @@ fn compile_rule(value: &Value) -> Result<Rule> {
     let mut ids = BTreeSet::new();
     let mut matchers = Vec::new();
     for v in array(&m["matchers"])? {
-        let m = object(v, &["id", "scope", "pattern"])?;
+        let background_focus = v.get("focus_style").is_some();
+        let m = if background_focus {
+            object(v, &["id", "scope", "pattern", "focus_style"])?
+        } else {
+            object(v, &["id", "scope", "pattern"])?
+        };
+        if background_focus {
+            one_of(&m["focus_style"], &["background"])?;
+        }
         let id = text(&m["id"])?;
         unique(&mut ids, &id)?;
         matchers.push(Matcher {
             id,
             scope: one_of(&m["scope"], &["line", "region"])?,
             regex: expression(&m["pattern"])?,
+            background_focus,
         });
     }
     require(!matchers.is_empty(), "required matchers cannot be empty")?;
@@ -528,6 +705,10 @@ fn compile_rule(value: &Value) -> Result<Rule> {
             scope: one_of(&c["scope"], &["single_request", "session", "persistent"])?,
         });
     }
+    require(
+        !continues || (ex["operation"].is_null() && choices.is_empty()),
+        "continuation declares no operation or choices",
+    )?;
     Ok(Rule {
         id,
         priority,
@@ -539,7 +720,157 @@ fn compile_rule(value: &Value) -> Result<Rule> {
         matchers,
         verified,
         sensitive: boolean(&m["sensitive"])?,
+        continuation,
     })
+}
+const STAGE_FIELDS: [&str; 3] = ["bytes_hex", "required_rule_id", "required_choice_id"];
+fn stage_fields(value: &Value) -> Result<(&Map<String, Value>, Option<StageGate>)> {
+    let focus = value.get("required_focus_choice_id").is_some();
+    let screen = value.get("required_screen_rule_id").is_some();
+    require(!(focus && screen), "a stage declares at most one gate")?;
+    let gate_field = if focus {
+        Some("required_focus_choice_id")
+    } else if screen {
+        Some("required_screen_rule_id")
+    } else {
+        None
+    };
+    let fields = STAGE_FIELDS
+        .iter()
+        .copied()
+        .chain(gate_field)
+        .collect::<Vec<_>>();
+    let map = object(value, &fields)?;
+    let gate = match gate_field {
+        Some(field) => {
+            let id = text(&map[field])?;
+            Some(if focus {
+                StageGate::Focus(id)
+            } else {
+                StageGate::Screen(id)
+            })
+        }
+        None => None,
+    };
+    Ok((map, gate))
+}
+fn validate_gates(
+    stages: &[AnswerStage],
+    request: &Rule,
+    rules: &[Rule],
+    choice_id: &str,
+    focus_matcher: &str,
+) -> Result<()> {
+    if stages.iter().all(|stage| stage.gate.is_none()) {
+        return Ok(());
+    }
+    require(
+        stages.iter().all(|stage| stage.gate.is_some()),
+        "a gated plan gates every stage",
+    )?;
+    let continuation = |id: &str| {
+        rules
+            .iter()
+            .find(|rule| rule.id == id)
+            .and_then(|rule| rule.continuation.as_ref())
+            .ok_or_else(|| invalid("screen gate names no continuation rule"))
+    };
+    let mut focus_gated = false;
+    for (index, stage) in stages.iter().enumerate() {
+        match stage.gate.as_ref().expect("every stage is gated") {
+            StageGate::Focus(choice) => {
+                focus_gated = true;
+                require(
+                    request.choices.iter().any(|c| &c.id == choice),
+                    "focus gate names no choice of the request rule",
+                )?;
+            }
+            StageGate::Screen(rule) => {
+                let continuation = continuation(rule)?;
+                require(
+                    continuation.rule_id == request.id,
+                    "screen gate continues another request rule",
+                )?;
+                let previous = index
+                    .checked_sub(1)
+                    .and_then(|previous| stages[previous].required_focus_choice_id());
+                require(
+                    previous == Some(continuation.choice_id.as_str()),
+                    "screen gate follows the stage selecting its continued choice",
+                )?;
+            }
+        }
+    }
+    let final_choice = match stages.last().and_then(AnswerStage::gate) {
+        Some(StageGate::Focus(choice)) => choice.as_str(),
+        Some(StageGate::Screen(rule)) => continuation(rule)?.choice_id.as_str(),
+        None => unreachable!("validated gated final stage"),
+    };
+    require(
+        final_choice == choice_id,
+        "a gated plan ends on its own choice",
+    )?;
+    if focus_gated {
+        let matcher = request
+            .matchers
+            .iter()
+            .find(|matcher| matcher.id == focus_matcher)
+            .expect("validated focus matcher");
+        require(
+            matcher.background_focus,
+            "a focus-gated plan needs a focus_style matcher",
+        )?;
+        for choice in &request.choices {
+            let label = request
+                .matchers
+                .iter()
+                .find(|matcher| matcher.id == choice.label.matcher)
+                .expect("validated choice label matcher");
+            require(
+                label.scope == "line",
+                "focus-gated choice labels are line-scoped",
+            )?;
+        }
+    }
+    Ok(())
+}
+fn validate_continuation(
+    rule: &Rule,
+    rules: &[Rule],
+    backend: CodingAgent,
+    versions: &[String],
+    fixtures: &[Fixture],
+) -> Result<()> {
+    let Some(continuation) = &rule.continuation else {
+        return Ok(());
+    };
+    let continued = rules
+        .iter()
+        .find(|candidate| candidate.id == continuation.rule_id)
+        .ok_or_else(|| invalid("continuation names an unknown rule"))?;
+    require(
+        continued.kind
+            == ObservationKind::Interaction(
+                crate::broker::runtime::InteractionClass::PermissionRequest,
+            ),
+        "continuation continues a permission request rule",
+    )?;
+    require(
+        continued
+            .choices
+            .iter()
+            .any(|choice| choice.id == continuation.choice_id),
+        "continuation names an unknown continued choice",
+    )?;
+    provenance(&continuation.fixtures, backend, versions, fixtures)?;
+    require(
+        continuation.fixtures.iter().all(|id| {
+            fixtures
+                .iter()
+                .any(|fixture| &fixture.id == id && fixture.kind == "native")
+        }),
+        "continuation cites native fixtures",
+    )
 }
 fn provenance(
     ids: &[String],
@@ -741,6 +1072,34 @@ const BUNDLED_FIXTURES: &[(&str, &[u8])] = &[
         "native/codex-0.163.0-idle-composer-1.json",
         include_bytes!("native/codex-0.163.0-idle-composer-1.json"),
     ),
+    (
+        "native/opencode-2.1.4-ask-permission-1.json",
+        include_bytes!("native/opencode-2.1.4-ask-permission-1.json"),
+    ),
+    (
+        "native/opencode-2.1.4-allow-pre-stage-1.json",
+        include_bytes!("native/opencode-2.1.4-allow-pre-stage-1.json"),
+    ),
+    (
+        "native/opencode-2.1.4-deny-pre-stage-1.json",
+        include_bytes!("native/opencode-2.1.4-deny-pre-stage-1.json"),
+    ),
+    (
+        "native/opencode-2.1.4-deny-pre-stage-2.json",
+        include_bytes!("native/opencode-2.1.4-deny-pre-stage-2.json"),
+    ),
+    (
+        "native/opencode-2.1.4-deny-pre-stage-3.json",
+        include_bytes!("native/opencode-2.1.4-deny-pre-stage-3.json"),
+    ),
+    (
+        "native/opencode-2.1.4-focus-always-1.json",
+        include_bytes!("native/opencode-2.1.4-focus-always-1.json"),
+    ),
+    (
+        "native/opencode-2.1.4-idle-composer-1.json",
+        include_bytes!("native/opencode-2.1.4-idle-composer-1.json"),
+    ),
 ];
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -769,24 +1128,13 @@ fn verify_native_screen(entry: &Value, embedded: &[(&str, &[u8])]) -> Result<()>
     )?;
     let screen: Value = serde_json::from_slice(bytes)
         .map_err(|cause| invalid(format!("bundled fixture: {cause}")))?;
-    let m = object(
-        &screen,
-        &[
-            "schema_version",
-            "fixture_id",
-            "provenance",
-            "backend",
-            "native_version",
-            "rows",
-            "cols",
-            "alternate_screen",
-            "screen_seq",
-            "cursor_row",
-            "cursor_col",
-            "lines",
-            "masked_rows",
-        ],
-    )?;
+    let backgrounds = screen.get("cell_backgrounds").is_some();
+    let fields = SCREEN_FIELDS
+        .iter()
+        .copied()
+        .chain(backgrounds.then_some("cell_backgrounds"))
+        .collect::<Vec<_>>();
+    let m = object(&screen, &fields)?;
     require(
         m["schema_version"].as_u64() == Some(1)
             && text(&m["fixture_id"])? == id
@@ -833,6 +1181,72 @@ fn verify_native_screen(entry: &Value, embedded: &[(&str, &[u8])]) -> Result<()>
         require(
             lines[row].as_str().is_some_and(str::is_empty),
             "masked row must be empty",
+        )?;
+    }
+    if backgrounds {
+        verify_cell_backgrounds(&m["cell_backgrounds"], rows, cols, &masked)?;
+    }
+    Ok(())
+}
+const SCREEN_FIELDS: [&str; 13] = [
+    "schema_version",
+    "fixture_id",
+    "provenance",
+    "backend",
+    "native_version",
+    "rows",
+    "cols",
+    "alternate_screen",
+    "screen_seq",
+    "cursor_row",
+    "cursor_col",
+    "lines",
+    "masked_rows",
+];
+fn verify_cell_backgrounds(
+    value: &Value,
+    rows: u16,
+    cols: u16,
+    masked: &BTreeSet<usize>,
+) -> Result<()> {
+    let index = |value: &Value, bound: u64| {
+        value
+            .as_u64()
+            .filter(|n| *n <= bound)
+            .ok_or_else(|| invalid("background run coordinate outside its geometry"))
+    };
+    let mut spans = BTreeMap::<u64, Vec<(u64, u64)>>::new();
+    for run in array(value)? {
+        let run = object(run, &["row", "start_col", "end_col", "bg"])?;
+        let row = index(&run["row"], u64::from(rows) - 1)?;
+        let start = index(&run["start_col"], u64::from(cols))?;
+        let end = index(&run["end_col"], u64::from(cols))?;
+        require(start < end, "background run requires start below end")?;
+        require(
+            !masked.contains(&usize::try_from(row).expect("bounded row")),
+            "background run inside a masked row",
+        )?;
+        let bg = &run["bg"];
+        match bg.get("kind").and_then(Value::as_str) {
+            Some("indexed") => {
+                let m = object(bg, &["kind", "index"])?;
+                index(&m["index"], 255)?;
+            }
+            Some("rgb") => {
+                let m = object(bg, &["kind", "r", "g", "b"])?;
+                for channel in ["r", "g", "b"] {
+                    index(&m[channel], 255)?;
+                }
+            }
+            _ => return Err(invalid("background run requires a non-default colour")),
+        }
+        spans.entry(row).or_default().push((start, end));
+    }
+    for runs in spans.values_mut() {
+        runs.sort_unstable();
+        require(
+            runs.windows(2).all(|pair| pair[0].1 <= pair[1].0),
+            "background runs overlap",
         )?;
     }
     Ok(())
@@ -945,6 +1359,9 @@ impl ProfileCatalog {
             for rule in &rules {
                 unique(&mut rule_ids, &rule.id)?;
             }
+            for rule in &rules {
+                validate_continuation(rule, &rules, backend, &versions, &fixtures)?;
+            }
             let c = object(&m["capabilities"], &["detection", "composer", "answers"])?;
             let detection = capability(
                 &c["detection"],
@@ -1011,7 +1428,7 @@ impl ProfileCatalog {
                 )?;
                 let mut compiled_stages = Vec::new();
                 for v in stages {
-                    let s = object(v, &["bytes_hex", "required_rule_id", "required_choice_id"])?;
+                    let (s, gate) = stage_fields(v)?;
                     let bytes = text(&s["bytes_hex"])?;
                     require(
                         (2..=512).contains(&bytes.len())
@@ -1019,10 +1436,13 @@ impl ProfileCatalog {
                             && lower_hex(&bytes),
                         "one to 256 lowercase hexadecimal stage bytes required",
                     )?;
+                    let bytes = decoded_hex(&bytes);
+                    require(!bytes.contains(&0x1b), "answer stages never contain Escape")?;
                     compiled_stages.push(AnswerStage {
-                        bytes: decoded_hex(&bytes),
+                        bytes,
                         required_rule_id: request.clone(),
                         required_choice_id: choice_id.clone(),
+                        gate,
                     });
                     require(
                         text(&s["required_rule_id"])? == request
@@ -1030,6 +1450,7 @@ impl ProfileCatalog {
                         "answer stage request/decision mismatch",
                     )?;
                 }
+                validate_gates(&compiled_stages, rule, &rules, &choice_id, &focus)?;
                 let fixture_ids = texts(&a["fixture_ids"])?;
                 provenance(&fixture_ids, backend, &versions, &fixtures)?;
                 answers.push(Answer {

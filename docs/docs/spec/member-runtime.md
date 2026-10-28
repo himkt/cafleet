@@ -10,15 +10,15 @@ This contract describes runner-managed member launch, terminal observations, dur
 |---|---|---|
 | Claude | `dontAsk` | Use the native permission-mode value through `--permission-mode`; retain broker-tool allowance, prompt suggestions, name and model/effort boundaries. |
 | Codex | `never` with `workspace-write` | Map native approval-policy values through `--ask-for-approval`; retain the explicit workspace sandbox. |
-| OpenCode | Existing `cafleet` preset | Accept exactly `cafleet`, preserving the fixed preset; explicit `cafleet` records `mode_source=explicit`. |
+| OpenCode | `cafleet` preset | Map `cafleet` and `cafleet-ask` to `--agent <mode>`, selecting the agent preset of that name; explicit `cafleet` records `mode_source=explicit`. |
 
-The bundled backend policy catalog is the single source of truth for each backend's launch-policy catalog, default, exact argv mapping, native-version eligibility and detector/composer/answer profiles. Help and usage errors report choices from that catalog. Claude accepts native `--permission-mode` values verified from installed help and parser evidence, including documented aliases, recorded by its version-qualified adapter. Claude Code 2.1.302 accepts canonical `default` and its `manual` alias; help displays `manual`, while the [official permission-mode reference](https://code.claude.com/docs/en/permission-modes) documents both. Preserve the explicitly requested spelling in argv and launch intent. Codex accepts the native `--ask-for-approval` values read from the installed `codex --help` and recorded the same way. OpenCode accepts exactly the token `cafleet`; every other explicit token fails with usage exit `2`.
+The bundled backend policy catalog is the single source of truth for each backend's launch-policy catalog, default, exact argv mapping, native-version eligibility and detector/composer/answer profiles. Help and usage errors report choices from that catalog. Claude accepts native `--permission-mode` values verified from installed help and parser evidence, including documented aliases, recorded by its version-qualified adapter. Claude Code 2.1.302 accepts canonical `default` and its `manual` alias; help displays `manual`, while the [official permission-mode reference](https://code.claude.com/docs/en/permission-modes) documents both. Preserve the explicitly requested spelling in argv and launch intent. Codex accepts the native `--ask-for-approval` values read from the installed `codex --help` and recorded the same way. OpenCode accepts `cafleet` and `cafleet-ask` for every native version, because both select an agent preset rather than a native permission flag; every other explicit token fails with usage exit `2`. The `cafleet` preset resolves every shell check to `allow` or `deny`; the `cafleet-ask` preset asks for every shell command outside its allowlist and its Director-only denies, so OpenCode opens a native permission form.
 
 Creation success establishes that the child was spawned, not that its native policy was accepted. A fast native exit after spawning, including policy rejection, produces `runner_exited` with the actual code/signal and a Director inbox event; the runner preserves the chosen mode rather than retrying with another one. An error from the spawn operation itself still fails creation and follows compensation. There is no post-spawn liveness window.
 
 Record `requested_mode` as nullable text, `resolved_mode` as required text, `mode_source` as `default` or `explicit`, and the exact non-secret permission/sandbox argv in the run record. These fields state launch intent. `effective_policy_json` remains null unless an actual native observation supplies it; an installed version, argv or selected profile alone proves no effective authorization decision.
 
-Keep launch, detection, empty-composer observation, prompt submission, native-exec submission and request-bound answer capabilities separate. Answer profiles declare support for each semantic decision independently. Profiles declare exact backend versions, rule-set version and capability-specific fixture provenance; bundled tested declarations require matching native captures and measured single-request answer stages for the capability claimed. Synthetic fixtures exercise rule and capability validation while unverified components remain unknown or unsupported. A missing version/profile yields `coverage=unknown`, an initial coverage notification and held programmatic input; it still permits manual terminal operation and records the selected mode. Automatic/fixed policies remain useful even where screen detection is unknown. The default OpenCode preset's returned denials continue through member evidence routing; returned tool responses are observable only when the native terminal exposes them.
+Keep launch, detection, empty-composer observation, prompt submission, native-exec submission and request-bound answer capabilities separate. Answer profiles declare support for each semantic decision independently. Profiles declare exact backend versions, rule-set version and capability-specific fixture provenance; bundled tested declarations require matching native captures and measured single-request answer stages for the capability claimed. Synthetic fixtures exercise rule and capability validation while unverified components remain unknown or unsupported. A missing version/profile yields `coverage=unknown`, an initial coverage notification and held programmatic input; it still permits manual terminal operation and records the selected mode. Automatic/fixed policies remain useful even where screen detection is unknown. The `cafleet` OpenCode preset's returned denials continue through member evidence routing; returned tool responses are observable only when the native terminal exposes them.
 
 ### Native executable resolution {#native-executable-resolution}
 
@@ -30,7 +30,16 @@ The version probe below runs that exact path, and the same path is `argv[0]` of 
 
 `member create` records the installed native version of the resolved backend. After launch-policy validation and the backend availability check, and before registration, it runs the [resolved executable](#native-executable-resolution) with exactly the argument `--version`, so `claude`, `codex` and `opencode` each report their own version. The probe has null stdin and captures at most 4096 bytes each of stdout and stderr. It ends within two seconds, and those two seconds belong to the command's existing ten-second creation budget, which starts before the probe. A probe still running at its bound is killed.
 
-The probe yields a version only when it exits with status `0` and the first stdout line has exactly one whitespace-separated token matching `^[0-9]+(\.[0-9]+)+([-+][0-9A-Za-z.]+)?$`. That token is recorded verbatim as the run's `native_version`; for example `2.1.302 (Claude Code)` yields `2.1.302` and `codex-cli 0.163.0` yields `0.163.0`. The bundled catalog entry for that backend and exact version then supplies `profile_version`, and `coverage` is `tested` when that profile declares detection. A version without a bundled profile records `profile_version` null and `coverage=unknown`.
+The probe yields a version only when it exits with status `0` and the first stdout line has exactly one whitespace-separated token matching `^v?[0-9]+(\.[0-9]+)+([-+][0-9A-Za-z.]+)?$`. That token, without a leading `v`, is recorded as the run's `native_version`:
+
+| First stdout line | Recorded `native_version` |
+|---|---|
+| `2.1.302 (Claude Code)` | `2.1.302` |
+| `codex-cli 0.163.0` | `0.163.0` |
+| `opencode v2.1.4` | `2.1.4` |
+| `v2.1.4 2.1.5` | Probe failure: several version tokens |
+
+The bundled catalog entry for that backend and exact version then supplies `profile_version`, and `coverage` is `tested` when that profile declares detection. A version without a bundled profile records `profile_version` null and `coverage=unknown`.
 
 A probe that cannot start, times out, exits nonzero, prints non-UTF-8 output or has zero or several version tokens records `native_version` null, `profile_version` null and `coverage=unknown`. Creation continues. The command writes one stderr line, `Warning: native version unavailable for BACKEND: CAUSE; coverage unknown.`, and leaves its stdout text and JSON unchanged. The probed version identifies the installed binary only; it establishes no effective native policy.
 
@@ -77,7 +86,44 @@ Codex CLI `0.163.0` launched with `--ask-for-approval on-request --sandbox works
 
 The rules anchor on the live form's heading and closing lines rather than on absolute rows, and the reason line is model-authored text that the rule requires but excludes from the request identity. The deny answer uses the choice's digit because that choice displays only `esc` as its shortcut, and CAFleet never sends a lone Escape to a held form. Choice 2, which approves a command prefix persistently, has no answer plan. The native captures showed the decision on the native surface: after allow, Codex printed `✔ You approved codex to run <command> this time` and ran the command; after deny, it printed `✗ You canceled the request to run <command>` and `■ Conversation interrupted`, and ran nothing. These lines are decision evidence for the Director's continuation check, not bundled rules. A Codex configuration that routes approvals to its automatic reviewer (`approvals_reviewer`) answers escalations without any native form, so detection observes no request. The detection covers a single-line command; a command that wraps in a narrow pane yields no detection, so no `interaction_opened` event is produced, programmatic input stays held, and the request is answered manually on the native surface.
 
-A native screen fixture records one captured terminal screen with exactly these fields:
+OpenCode `2.1.4` `mini`, profile `opencode-2.1.4-cafleet-ask-1`, applies under either OpenCode launch policy; only `cafleet-ask` shows permission forms:
+
+| Capability | Status | Declaration |
+|---|---|---|
+| Detection | `tested` | Rule `opencode-shell-permission`: the shell permission form on the primary screen, from its `△ Permission required` heading to its `⇆ select  enter confirm  esc reject` control line within 24 rows, with the single-line `$ ` operation, the focused choice and the `Allow once` and `Reject` choices |
+| Allow answer | `tested` | One gated stage: byte `0d` (Enter) while `Allow once` is focused, as `allow-once` |
+| Deny answer | `tested` | Three gated stages: `68` (`h`) while `Allow once` is focused, `0d` while `Reject` is focused, then `0d` on the empty rejection-reason dialog, as `deny-once` |
+| Empty-composer observation | `tested` | The idle `┃` composer line with the terminal cursor immediately after the prefix; a verified non-interaction boundary |
+| Prompt submission | `unknown` | — |
+| Native-exec submission | `unknown` | — |
+
+The form offers no focus-independent key: `h`/`l` cycle the focus, Enter selects the focused option and Escape rejects. Focus starts on `Allow once`, and `h` from there wraps to the last option, `Reject`, in both the three-option (`Allow once` / `Always allow` / `Reject`) and the two-option layout. The form marks the focused option by cell background only, so the `focus` matcher uses `focus_style: "background"` ([focused-choice resolution](#focused-choice-resolution)). In the captures the focused label sits on rgb(250,178,131) and the other labels on the row background rgb(30,30,30), but the rule compares backgrounds rather than these colours. `Always allow`, which approves persistently, has no choice entry or answer plan, so a focus on it satisfies no gate.
+
+The choices share the control line's row. `mini` hides the cursor while a form or dialog shows, and its recorded position varies, including the pending-wrap position on the row below the form. Both OpenCode permission rules therefore match with cursor `any` and rely on their heading and control-line anchors.
+
+| Stage | Bytes | Gate | Native effect |
+|---|---|---|---|
+| Allow 1 | `0d` | Focus `allow-once` | Selects `Allow once`; OpenCode runs the command once |
+| Deny 1 | `68` | Focus `allow-once` | Moves the focus to `Reject` |
+| Deny 2 | `0d` | Focus `deny-once` | Selects `Reject`; OpenCode opens the rejection-reason dialog and keeps the request pending |
+| Deny 3 | `0d` | Screen `opencode-reject-reason` | Submits an empty reason; OpenCode rejects the request without running it |
+
+The continuation rule `opencode-reject-reason` ([continuation screens](#continuation-screens)) continues `opencode-shell-permission` after `deny-once`. It matches the `△ Reject permission` dialog with its `Tell OpenCode what to do differently` prompt and the `enter confirm  esc cancel` control line. It recognises an empty reason by the textarea span on the control-line row equalling the placeholder `Tell OpenCode what to do differently` exactly; typed text replaces the placeholder and fails the gate. CAFleet never types a reason and never sends Escape to the dialog.
+
+The native captures showed this decision evidence:
+
+| Answer | Native surface | Continuation |
+|---|---|---|
+| Allow | The hint area briefly shows `Waiting for permission event…`, then the form disappears without transcript text, the command runs and the member prints its report, a `<agent> · <model> · <duration>` line and the idle composer | The member continues on its own |
+| Deny | After the final Enter the hint area briefly shows `Waiting for permission event…`, then the dialog disappears and the transcript shows `Step interrupted`, a `<agent> · <model> · <duration>` line and the idle composer; nothing runs | OpenCode does not continue after a rejection; CAFleet holds the Director's message because OpenCode prompt submission is `unknown`, and the member continues from input on its native surface |
+
+These lines are decision evidence for the Director's continuation check, not bundled rules. Because an answered form or dialog leaves no transcript text, the false-positive guard rests on the live-region anchors. The fixtures are native 36x120 captures with only row 35 masked; the visible default public model name and context-usage counter are neither account, plan nor path text. The OpenCode limits apply as follows:
+
+- A command that wraps in the form yields no detection, so the request is answered manually.
+- Non-shell permissions never ask under the `cafleet-ask` preset.
+- A typed reason identical to the placeholder cannot be told from an empty textarea, but such typing is human input, which fails the deny stage-3 gate inside a response.
+
+A native screen fixture records one captured terminal screen with exactly these fields, of which only `cell_backgrounds` is optional:
 
 | Field | Requirement |
 |---|---|
@@ -89,6 +135,9 @@ A native screen fixture records one captured terminal screen with exactly these 
 | `alternate_screen`, `screen_seq`, `cursor_row`, `cursor_col` | Measured screen state; `cursor_row` is below `rows`, and `cursor_col` is at most `cols`, where `cursor_col` equal to `cols` records the terminal's pending-wrap position after the last column |
 | `lines` | Exactly `rows` captured row texts, in viewport order |
 | `masked_rows` | Unique zero-based row indices, each `{"row":N,"reason":"reviewed_privacy"}`; the corresponding `lines` entry is the empty string |
+| `cell_backgrounds` | Optional runs `{"row":N,"start_col":C,"end_col":E,"bg":COLOUR}`, one per maximal run of cells in an unmasked row that share one non-default background, `end_col` exclusive; `COLOUR` is `{"kind":"indexed","index":I}` or `{"kind":"rgb","r":R,"g":G,"b":B}`. An absent key means every cell has the default background. |
+
+The capture-to-fixture conversion derives `cell_backgrounds` from the capture grid's per-cell `bg`, and fixture replay sets each run's background before writing its row text, so a fixture reproduces the focus styling a `focus_style` matcher reads.
 
 Masking applies only to rows removed by the reviewed capture privacy policy, such as home paths and account, model or plan text. Every other row keeps its captured text exactly, including trailing spaces. The detection region of every rule citing the fixture lies entirely in unmasked rows, and a masked fixture keeps `provenance` `native`.
 
@@ -99,6 +148,7 @@ The bundled catalog fails to load unless each bundled fixture satisfies all of t
 - It declares `native` provenance.
 - It matches the entry's backend, version and geometry.
 - Every row declared in `masked_rows` is in range and empty.
+- Every `cell_backgrounds` run lies inside the geometry and outside masked rows, has `start_col` below `end_col`, overlaps no other run and carries a valid non-default colour.
 
 A synthetic fixture, an undeclared alteration or a digest mismatch therefore rejects the bundled catalog. Synthetic fixtures remain available to explicitly selected test catalogs.
 
@@ -110,20 +160,44 @@ Keep detection, empty-composer observation, prompt submission, native-exec submi
 
 NativeCapabilities reports empty-composer observation through `composer`, executable prompt submission through `prompt_submission`, and executable native-shell submission through `native_exec_submission`. Each operation field is `tested` exactly when the selected backend/exact native version has a validated executable definition for that operation; otherwise it is `unknown`. A catalog selected explicitly by test services describes its fixture coverage; production declarations additionally require accepted native evidence. Observation coverage and support for another operation leave each operation field independent.
 
-An answer definition retains its validated single-request `choice_id`, `focus_matcher_id` and ordered `stages`, in addition to its decision/request/rule/provenance fields. Each stage has exactly `bytes_hex,required_rule_id,required_choice_id`; the required rule and choice equal the answer's request and selected single-request choice. The top-level focus matcher applies before every supported stage. A plan requiring a different intermediate focus requires its own reviewed profile representation and native evidence.
+An answer definition retains its validated single-request `choice_id`, `focus_matcher_id` and ordered `stages`, in addition to its decision/request/rule/provenance fields. Each stage has `bytes_hex`, `required_rule_id` and `required_choice_id`, where the required rule and choice equal the answer's request and selected single-request choice, and at most one optional gate, checked on the fresh observation immediately before the runner writes that stage:
+
+| Gate | Holds when |
+|---|---|
+| `required_focus_choice_id` | The plan's focus matcher resolves this choice id as focused on the request form |
+| `required_screen_rule_id` | This `permission_continuation` rule matches as the continuation of the bound request ([continuation screens](#continuation-screens)) |
+
+A stage without a gate is focus-independent; the bundled Claude and Codex stages are ungated. The catalog fails to load unless:
+
+- every focus gate names a choice of the request rule;
+- every screen gate names a `permission_continuation` rule whose `continues_rule_id` is the answer's request rule, and the stage immediately before it is gated on that rule's `continues_choice_id`;
+- a plan with any gated stage gates every stage, and its final stage is gated either on the answer's own `choice_id` or on a continuation rule whose `continues_choice_id` is that choice;
+- a plan with a focus gate has a focus matcher that declares `focus_style`, and every choice label it compares is captured by a line-scoped matcher;
+- a `permission_continuation` rule declares no operation, choices or answers and cites a native fixture.
+
+#### Focused-choice resolution {#focused-choice-resolution}
+
+A focus matcher with `focus_style: "background"` resolves the focused choice from cell styling, without depending on the theme:
+
+1. Locate each choice label's cells through its line's cell boundaries.
+2. Take the choice row background from the choice line's cell at the live region's left edge.
+3. Resolve the focused choice as the one choice whose label cells all carry a single background that differs from the row background, provided no other choice label carries a differing background.
+
+A focus on an option without a choice entry, on several options or on none resolves to no choice, and a gate that does not hold is never written. The focus text alone does not change when a styling-only focus moves. The focus value compared in the observed request, the answer match and the write-time binding is therefore the resolved focused choice id (or none) together with the matcher's capture, so a styling-only focus change starts a new request generation.
 
 The existing composer object has required `rule_ids,fixture_ids` and optional `submission`. When present, `submission` has exactly `prompt,exec`, each null or an object with exactly `prefix_hex,submit_hex,fixture_ids`. Prompt has an empty prefix; exec has prefix `2120`, the UTF-8 bytes of `! `, with independently tested native-shell coverage. Every plan's fixture references resolve to the same backend and every declared exact native version, and establish the complete composer/work boundary for that operation. Unknown fields and incomplete or incompatible provenance fail validation.
 
 | Plan property | Inclusive limit or required representation |
 |---|---|
 | Answer stages | 1–16 ordered stages. |
+| Escape | No stage contains the byte `1b`, for every backend. |
 | Answer bytes | 1–256 decoded bytes per stage; at most 4096 decoded bytes per plan. |
 | Composer submit key | 1–32 decoded bytes. |
 | Composer prefix | Zero bytes for prompt; exactly two bytes for exec as specified above. |
 | Encoded native ordinary submission | At most 65536 bytes for prefix, unchanged literal UTF-8 and submit key together; the complete control JSON must independently satisfy its frame limit. |
 | Hex byte definitions | Even-length lowercase hexadecimal, with nonempty bytes wherever the domain above requires them. |
 
-Validate the complete shape, reference set, hex form and byte/stage bounds before decoding and constructing an executable plan. Keep selected native bytes and live semantic identity in memory, outside ordinary errors, Debug output and persistence. An ordinary submission attempts its complete encoded payload as one stage; a positive short write stops remaining bytes and records partial uncertainty. Before any positive ordinary write, WouldBlock or Interrupted yields and requires fresh input/output/state validation before another attempt. Answer stages follow their independently measured order and revalidate request, choice and focus before each stage; a positive short stage stops the remaining plan with uncertainty.
+Validate the complete shape, reference set, hex form and byte/stage bounds before decoding and constructing an executable plan. Keep selected native bytes and live semantic identity in memory, outside ordinary errors, Debug output and persistence. An ordinary submission attempts its complete encoded payload as one stage; a positive short write stops remaining bytes and records partial uncertainty. Before any positive ordinary write, WouldBlock or Interrupted yields and requires fresh input/output/state validation before another attempt. Answer stages follow their independently measured order and revalidate request, choice, focus and the stage's gate before each stage; a positive short stage stops the remaining plan with uncertainty.
 
 ## Runner boundary and creation transaction
 
@@ -170,6 +244,18 @@ Until `start`, the runner exits if its creator disconnects or the handshake expi
 
 The runner relays terminal input and child output as bytes, with the outer terminal in raw mode under a restoration guard. Preserve interactive control sequences, UTF-8 fragments, bracketed paste and alternate-screen transitions. Size the PTY from the outer terminal, propagate resize to both PTY and parser, and preserve the native child's cwd, intended environment and exit status. Keep child bytes and runner diagnostics on separate logical channels; diagnostics must not become child input or detector evidence.
 
+Forward outer-terminal input so that a burst spanning several reads reaches the child together. One read of the raw-mode outer terminal returns at most the line discipline's 4096-byte buffer, and a longer terminal reply that reaches the child a tick late can be parsed as keys:
+
+| Concern | Contract |
+|---|---|
+| Read | Each tick repeats the non-blocking outer read until it would block, reaches EOF or fills the 65536-byte input queue |
+| Write | The tick then writes the whole queue to the PTY master in one write; unaccepted bytes stay queued, in order, for the next tick |
+| EOF | Bytes read before EOF are forwarded before outer EOF is reported |
+| Pacing | A tick that moved input bytes, by reading outer bytes or writing a positive count to the PTY master, is followed immediately by the next tick; every other tick, including one whose queued input the master did not accept, keeps the loop's idle sleep |
+| Framing | None: bytes pass unchanged and in order, with no escape-sequence parsing, holding or timeout |
+
+Every read advances the manual-input generation by its byte count, as specified for manual input.
+
 The PTY-reader path updates terminal state before publishing the same bytes to display and passes immutable observations to the classifier. Track cursor/cell state, primary/alternate screens, OSC title and a monotonic output sequence. Keep scrollback out of live-prompt matching. Terminal queries and replies continue through the terminal transport, and parser callbacks must not synthesize a second reply to a query already handled by the outer terminal.
 
 Separate terminal transport, classification and event storage. Database waits, Director receiver loss and event-spool retries must not stop draining child output or accepting a human's native answer. Use bounded byte buffers and ordinary terminal backpressure for a slow outer display; a broken outer terminal triggers owned-child cleanup. Classification may coalesce intermediate working-screen snapshots, but it processes every potential interaction transition from the ordered parser stream before such coalescing. This is an observation contract for output actually rendered/read, not a guarantee to capture a dialog opened and closed between observable states.
@@ -205,12 +291,13 @@ Each detector consumes a reconstructed screen, title, cursor/input-region eviden
 |---|---|---|
 | `permission_request` | A backend-specific live permission heading/operation and its choice/input region | An observed request awaiting a native decision; title text alone is insufficient. |
 | `permission_denied` | A tested permission-specific returned-result region | A displayed refusal, not an arbitrary nonzero exit and not proof the user refused. |
+| `permission_continuation` | A tested screen the native agent shows for a pending request after one of its choices is selected, such as a rejection-reason dialog | A continuation of the active permission episode; it never opens an episode ([continuation screens](#continuation-screens)). |
 | `question` | A tested general input/question form | Human input is required without establishing a tool-permission request. |
 | `trust` / `update` | A tested startup trust or update form | A distinct native interaction, preserving its own consequences. |
 | `unknown_interaction` | A live interactive form without enough evidence for a more precise type | Hold programmatic input and request inspection. |
 | `working` / `composer_empty` / `unknown` | The corresponding tested activity/composer rule, or lack of one | Input eligibility is evaluated separately; absence of permission text is not an empty composer. |
 
-The exact persisted episode-class domain is `permission_request`, `question`, `trust`, `update`, `unknown_interaction`; `trust` and `update` are distinct values. `permission_denied` is a returned-result observation recorded only through `permission_denied_observed`, with a nullable episode link. `working`, `composer_empty` and `unknown` are input-eligibility states and create no interaction row.
+The exact persisted episode-class domain is `permission_request`, `question`, `trust`, `update`, `unknown_interaction`; `trust` and `update` are distinct values. `permission_denied` is a returned-result observation recorded only through `permission_denied_observed`, with a nullable episode link. `permission_continuation`, `working`, `composer_empty` and `unknown` create no interaction row.
 
 A title such as `Action Required`, a quoted approval transcript, a transcript viewer and an old permission line cannot independently create `permission_request`. Profiles must bind controls to the same live region, distinguish general questions/startup forms, and remain explicit about wrapping, layout changes and competing rules. Conflicting strongest classifications yield `unknown_interaction` and preserve the screen. Unsupported versions advertise unknown coverage; missing matches never imply that all requests were observed.
 
@@ -226,6 +313,17 @@ The fingerprint contains backend/profile, interaction class, visible operation a
 | Different interaction replaces the active form | Require two compatible observations at least 100 ms apart, then close with `superseded` and open the next episode in order. |
 | Child exits or exclusive recovery confirms observer loss | Close with `process_exited` or `monitor_lost`; a suspect/unreachable observer leaves the episode open and approval outcome remains unknown. |
 | Returned permission refusal appears | Require two compatible observations at least 100 ms apart and emit `permission_denied_observed` once per stable result. Link an episode only through native correlation evidence. |
+| Continuation screen of the active permission episode | Keep the episode open and `Visible` with input held for the interaction. Emit no event, start no obscured timer and keep the stored request evidence. |
+
+### Continuation screens {#continuation-screens}
+
+A `permission_continuation` rule declares `continues_rule_id`, the permission rule it continues, and `continues_choice_id`, the choice whose selection opens it. It shows no operation, so it cannot identify a request by itself; it is bound to one by episode continuity and succession:
+
+| Concern | Contract |
+|---|---|
+| Episode | While a permission episode of its `continues_rule_id` is active, a continuation observation keeps that episode open as the transition table states. Without such an active episode it is an `unknown` screen. |
+| Request binding | Inside a response, a continuation qualifies for the next stage only as the first fresh quiescent observation after the complete write of the stage gated on its `continues_choice_id`, with the episode, manual-input generation and runner ownership unchanged and no observation gap or degradation in between. The runner then rebinds the in-flight selection to the continuation's rule id and match fingerprint within the same episode. |
+| Inspection | `permission inspect` on a continuation offers no request token or answer capability, so a continuation reached by human input is completed manually. |
 
 A returned refusal resets its deduplication identity only after a profile-verified noninteraction boundary lasting 250 ms. Temporary uncertainty resets pending stability while retaining the previous deduplication identity; a generic working screen establishes a boundary only when its profile verifies the result region's disappearance.
 
@@ -541,13 +639,23 @@ The runner issues one current random token bound in memory to the complete datab
 
 A cursor transit is the one incompatible frame that leaves the generation unchanged. It is a frame that yields no current request while a request is current, is not a verified non-interaction, and keeps every row of the current request's matched live region identical in text to the frame that established the request; typically the native CLI moves the cursor outside the form to redraw another part of the screen. During a transit the request is not current, so inspection returns no token and a response is blocked. A following frame with the same request restores it under the unchanged generation and token. A changed region row, a different request fingerprint, closure, `interaction_obscured`, an observation gap, child exit and positive manual input still invalidate immediately.
 
+A gated plan changes the request between its stages, so the runner accepts exactly one change after each complete nonfinal stage: the transition the next stage's gate names. For a focus gate, a fresh quiescent observation qualifies when its episode, rule, semantic fingerprint, choices, native correlation and manual-input generation are unchanged and its resolved focus equals the gate. For a screen gate, the [continuation binding](#continuation-screens) applies. The runner rebinds the in-flight selection to the qualifying observation, with its new request generation, and writes the next stage. It mints no token, because the reservation already consumed the request token.
+
+The next stage waits for its gate within the responding invocation's deadline, and an observation that still shows the previous stage's screen and focus keeps waiting. These end the response with the failure reporting below (`uncertain` once a byte was written), and the native surface stays for manual input with no further byte:
+
+- a focus on any other option;
+- a screen other than the expected continuation after a stage that opens one;
+- the episode closing before the final stage;
+- any other identity change, human input or a degraded observation;
+- the deadline expiring.
+
 Inspection exposes the selected current post-policy evidence independently of private request/match/plan state. Missing facts follow the [permission inspection projection](cli-options.md#permission-commands); neither operation text nor private plan eligibility substitutes for a disclosed structured fact. A proved `single_request` choice establishes answer eligibility independently of whether public evidence states the choice scope. Keep transient raw semantics, focus and plan bytes in memory; inspection preserves the existing evidence schema and persists no token or pre-policy digest.
 
 Validate a retained operation key against its recorded database/run, response identity and canonical digest before any current-request eligibility check, pane lock or live-owner probe. A matching retained receipt returns its stored result after token revocation, interaction closure, deregistration or owner exit, sending zero bytes; conflicting reuse fails. Validate historical audit relationships against recorded ownership while preserving closed/inactive history. Only an absent key or a positively recorded ready zero-byte attempt enters current live-request validation. The durable-only response projection preserves the immutable audit epoch and uses a null output sequence under the [permission CLI contract](cli-options.md#permission-commands); a consumed retry's zero-byte stage describes that retry while retaining original disposition and claim uncertainty.
 
 Inspection reports the shared answer-profile version. Its answer_rule_id is the common rule only when every supported decision resolves to that same rule; one supported decision reports its actual rule, and differing rules yield null. Respond selects the requested decision's actual rule internally and retains that required rule in its immutable audit/digest. A blocked or unsupported request retains the empty-decision/null-token representation.
 
-Use versioned control operations `permission_inspect` and `permission_respond` and the existing receipt query/retire boundary. A five-second command deadline covers locking, database work and socket exchange. Before the first byte, the serialized runner resolves pending manual input and unread output, revalidates the current visible stable permission request/token and tested answer profile, and commits the response receipt, audit and episode claim atomically under the current ownership epoch. Other interaction classes, uncertain state, stale identity or unavailable storage receive zero-byte rejection. Write only the profile's single-request answer plan, rechecking relevant state before each stage; partial writes or ambiguous state retain durable uncertainty. The CLI accepts semantic allow/deny decisions, not arbitrary key sequences.
+Use versioned control operations `permission_inspect` and `permission_respond` and the existing receipt query/retire boundary. A five-second command deadline covers locking, database work and socket exchange. Before the first byte, the serialized runner resolves pending manual input and unread output, revalidates the current visible stable permission request/token and tested answer profile, and commits the response receipt, audit and episode claim atomically under the current ownership epoch. Other interaction classes, uncertain state, stale identity or unavailable storage receive zero-byte rejection. Write only the profile's single-request answer plan, rechecking relevant state and each stage's gate before that stage; partial writes or ambiguous state retain durable uncertainty. The CLI accepts semantic allow/deny decisions, not arbitrary key sequences.
 
 Track answer progress as cumulative actual positive byte counts across ordered stages. A complete nonfinal stage retains `partial` progress and durable `in_progress`; only complete final-stage submission establishes `submitted`, followed by durable `accepted` before returning acceptance. A stage syscall returning WouldBlock or Interrupted with zero bytes may yield within the same attempt and original expiration. Retain the untouched next-stage index and any cumulative `partial` progress, then retry only that stage after fresh actual drain, current token/request/choice/focus/plan, manual-generation, owner and immediate-transaction validation through a newly consumed guard. Completed stages remain completed. This continuation supplies neither a new invocation nor a ready-state rearm.
 

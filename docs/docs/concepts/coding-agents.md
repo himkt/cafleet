@@ -23,7 +23,7 @@ The flag means slightly different things per command:
   and is recorded as placement metadata. When the flag is omitted, the member inherits the spawning Director's placement backend (an explicit
   value still wins).
 
-New members run through the CAFleet PTY runner with a declared detection-coverage state. Select native permission behavior with `--permission-mode`; omission retains the backend default. Interactive native policies are eligible, with request-bound Director/user decisions under the Director session’s effective mode or manual original-surface input. Detector, composer and answer coverage are independent; unknown coverage holds generated input. Broker access remains supplied by each backend’s launch configuration, subject to native and managed rules. [Member permission events](member-permission-events.md) explains the workflow, and [Spawn argv](../spec/coding-agent-backends.md#spawn-argv) specifies child arguments and sandbox boundaries.
+New members run through the CAFleet PTY runner with a declared detection-coverage state. Select native permission behavior with `--permission-mode`; omission retains the backend default. Interactive native policies are eligible on every backend — OpenCode's through its `cafleet-ask` agent preset — with request-bound Director/user decisions under the Director session’s effective mode or manual original-surface input. Detector, composer and answer coverage are independent; unknown coverage holds generated input. Broker access remains supplied by each backend’s launch configuration, subject to native and managed rules. [Member permission events](member-permission-events.md) explains the workflow, and [Spawn argv](../spec/coding-agent-backends.md#spawn-argv) specifies child arguments and sandbox boundaries.
 
 ## cafleet usage from a member pane
 
@@ -32,8 +32,10 @@ member through its spawn prompt: `cafleet member create` renders four identity
 placeholders to literals, so the member reads its ids as plain text lines
 (e.g. `FLEET ID: 1`, `YOUR MEMBER ID: 4`) and passes them explicitly on every
 command. Each placeholder and its label line is in
-[CLI options § Spawn-prompt substitution](../spec/cli-options.md#spawn-prompt-substitution). The only environment variable forwarded into the pane is
-`CAFLEET_DATABASE_URL`.
+[CLI options § Spawn-prompt substitution](../spec/cli-options.md#spawn-prompt-substitution). The member environment carries
+`CAFLEET_DATABASE_URL` and the selected backend's config-location variable
+when the creator sets it — see
+[CLI options § Member environment](../spec/cli-options.md#member-environment).
 Each backend honors a leading-`!` shell shortcut on the coding agent's input line,
 including opencode `mini`; backend-specific permission limits are in
 [Coding-agent backends](../spec/coding-agent-backends.md).
@@ -126,7 +128,7 @@ accepted levels, forwarding forms, and rejection strings are in
 |---|---|---|---|
 | Reasoning effort | supported | supported | not supported |
 | Pane title | supported, via `--name` | not supported | not supported |
-| Sandbox isolation | not supported — the operator's allow list is the safety floor | supported — OS-level, kernel-enforced | not supported — a deny-by-default shell allowlist |
+| Sandbox isolation | not supported — the operator's allow list is the safety floor | supported — OS-level, kernel-enforced | not supported — a shell allowlist that denies or, under `cafleet-ask`, asks for every other command |
 
 `--effort` with the `opencode` backend exits 2 with
 `opencode does not support reasoning effort.` before any side effect. Because
