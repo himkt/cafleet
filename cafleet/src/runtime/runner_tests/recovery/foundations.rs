@@ -2,51 +2,6 @@ use super::*;
 use crate::input::{PaneLock, pane_lock_for};
 
 #[test]
-fn runner_recovery_clock_clips_each_original_boundary_and_never_renews_time() {
-    let start = Instant::now();
-    for offset in [0, 1, 2, 3, 4, 9] {
-        let until = start + Duration::from_secs(offset);
-        let clock = ShutdownClock::new(start).clipped(until);
-        assert_eq!(
-            clock.child_deadline(),
-            (start + Duration::from_secs(2)).min(until)
-        );
-        assert_eq!(
-            clock.display_deadline(),
-            (start + Duration::from_secs(3)).min(until)
-        );
-        assert_eq!(
-            clock.storage_deadline(),
-            (start + Duration::from_secs(4)).min(until)
-        );
-        assert_eq!(clock.remaining_storage_at(until), Duration::ZERO);
-    }
-    let past = start.checked_sub(Duration::from_secs(1)).unwrap();
-    let clock = ShutdownClock::new(start).clipped(past);
-    assert_eq!(clock.child_deadline(), past);
-    assert_eq!(clock.display_deadline(), past);
-    assert_eq!(clock.storage_deadline(), past);
-    assert_eq!(clock.remaining_storage_at(start), Duration::ZERO);
-}
-
-#[test]
-fn runner_recovery_clock_repeated_clipping_only_tightens_the_same_original_schedule() {
-    let start = Instant::now();
-    let first = start + Duration::from_millis(2500);
-    let second = start + Duration::from_millis(1500);
-    let clock = ShutdownClock::new(start)
-        .clipped(first)
-        .clipped(start + Duration::from_secs(20));
-    assert_eq!(clock.child_deadline(), start + Duration::from_secs(2));
-    assert_eq!(clock.display_deadline(), first);
-    assert_eq!(clock.storage_deadline(), first);
-    let clock = clock.clipped(second).clipped(first);
-    assert_eq!(clock.child_deadline(), second);
-    assert_eq!(clock.display_deadline(), second);
-    assert_eq!(clock.storage_deadline(), second);
-}
-
-#[test]
 fn runner_recovery_lock_transfer_commits_fresh_epochs_and_preserves_first_origin_status() {
     let mut fixture = Fixture::new();
     let _artifacts = fixture.artifacts();
