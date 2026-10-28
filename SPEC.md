@@ -1070,6 +1070,27 @@ Render null values as `-` and append `Reason: REASON` when nonnull. Accepted mea
 
 Exit 0 means accepted submission or its matching prior submitted receipt. A structured held/rejected/uncertain reply prints the response in the selected text/JSON form and exits 1, with stderr `Error: permission response STATUS for interaction INTERACTION_ID: REASON`; append ` (input_id=INPUT_ID)` when known. This structured-response stdout is the exception to ordinary application errors being stderr-only. Pre-reply operational failures retain their ordinary error category and include known run/interaction/input context; usage failures exit 2.
 
+A new attempt against a blocked current request fails before any receipt, audit, claim or byte. It exits 1 with the primary stderr line `Error: runner control: permission request is blocked: REASON`, followed by the known run/interaction/operation-key context. Respond checks the blocker at admission, after its admission drain, and again before each answer stage. `REASON` is the same bounded explanation that `permission inspect` returns as `capability_reason` for that state, so a blocked inspection shows a null token, an empty decision set and the reason a response would report:
+
+| Reason | Blocking state |
+|---|---|
+| `permission input is fenced` | Programmatic input is fenced for shutdown, ownership loss or recovery. |
+| `manual input accounting failed` | The runner could not account for actual manual input. |
+| `observation degraded: CODE` | The observer recorded a gap or degradation with diagnostic `CODE`. |
+| `observation transitions pending` | Observed transitions await persistence. |
+| `observation evidence pending` | An interaction evidence refresh awaits persistence. |
+| `observation update pending` | A retained transition, draft or evidence update has not completed. |
+| `observation incomplete` | Child output was read but its observation has not completed. |
+| `observation health unavailable` | The observer reported no input health. |
+| `terminal input interrupted` | A terminal read was interrupted during the drain. |
+| `outer terminal closed` | The outer terminal reached end of input. |
+| `native output closed` | The native child's output reached end of file. |
+| `terminal output still arriving` | The drain's bounded rounds ended before human and child input were quiet. |
+| `permission request is not visible` | The request is obscured, closed or not observed as visible. |
+| `permission request is not the current interaction` | Input eligibility is not held for the current permission interaction. |
+
+A retained operation key is resolved before the admission drain, so its stored result returns without typing even when the current request is blocked.
+
 The CLI takes semantic decisions. For a new attempt, the pinned runner validates the current stable permission request, token, profile, manual input and output state, atomically reserves its audit/claim/receipt, and sends only a tested single-request native choice. Same-key retries return the prior receipt; a conflicting decision/digest or another key bypassing the episode claim fails. Unknown capability preserves manual native input. `member prompt`, `member exec`, message previews, receipt settlement and recovery remain separate operations.
 
 ##### Permission-response audit output
@@ -1735,12 +1756,13 @@ Each exposes two read-only properties and three methods:
   / `"codex"` / `"opencode"`). This MUST equal both the persisted
   `placement.coding_agent` value used to look the backend up and the key under
   which it is registered.
-- **`binary_name`** — the executable resolved against `PATH` (`"claude"` /
+- **`binary_name`** — the executable name resolved against `PATH` (`"claude"` /
   `"codex"` / `"opencode"`).
 - **`ensure_available()`** — raises if any spawn precondition is unmet: the
   binary resolves on `PATH` and (for backends with bundled presets) the preset
-  file exists on disk. A shared helper resolves `binary_name` against `PATH`
-  and, on a miss, raises `binary {binary_name} not found on PATH`.
+  file exists on disk. A shared helper resolves `binary_name` to an absolute
+  executable path per § Native executable resolution and, on a miss, raises
+  `binary {binary_name} not found on PATH`.
   Preconditions read the host environment through a **spawn-probe seam**
   (`SpawnProbe`): binary lookup plus `env_var(name) -> optional string`. The
   system implementation reads the process environment; the test fake carries
@@ -1760,7 +1782,9 @@ Each exposes two read-only properties and three methods:
   message (§6.3).
 - **`build_spawn_argv(prompt, display_name, model, effort)`** —
   returns the full argv vector (binary + flags + prompt) for the multiplexer's
-  window-split.
+  window-split. Its leading token is `binary_name`; `member create` launches
+  the absolute path from § Native executable resolution as `argv[0]`, the same
+  path the version probe ran, and keeps every later token unchanged.
 
 **Ordering invariant:** the consumer (`member create`) MUST call them in the
 order **`validate_model` → `validate_effort` → `ensure_available` →
@@ -2072,9 +2096,15 @@ Record `requested_mode` as nullable text, `resolved_mode` as required text, `mod
 
 Keep launch, detection, empty-composer observation, prompt submission, native-exec submission and request-bound answer capabilities separate. Answer profiles declare support for each semantic decision independently. Profiles declare exact backend versions, rule-set version and capability-specific fixture provenance; bundled tested declarations require matching native captures and measured single-request answer stages for the capability claimed. Synthetic fixtures exercise rule and capability validation while unverified components remain unknown or unsupported. A missing version/profile yields `coverage=unknown`, an initial coverage notification and held programmatic input; it still permits manual terminal operation and records the selected mode. Automatic/fixed policies remain useful even where screen detection is unknown. The default OpenCode preset's returned denials continue through member evidence routing; returned tool responses are observable only when the native terminal exposes them.
 
+##### Native executable resolution
+
+`member create` resolves the backend's binary to one absolute executable path during the backend availability check, using the creator process's `PATH`. It searches the absolute `PATH` entries in order, skipping empty and relative entries, and selects the first `<entry>/<binary>` that is a regular file with an execute permission bit after following symbolic links. The selected path is used as found, without symbolic-link resolution, so a link or wrapper keeps its own name. When no entry matches, creation fails before registration with exit 1 and `Error: binary <name> not found on PATH`.
+
+The version probe below runs that exact path, and the same path is `argv[0]` of the runner's literal child argv. The probed binary and the launched binary are therefore the same path on every multiplexer; the pane's own `PATH` and shell configuration play no part in selecting the native executable.
+
 ##### Native version probe
 
-`member create` records the installed native version of the resolved backend. After launch-policy validation and the backend availability check, and before registration, it runs that backend's binary from `PATH` with exactly the argument `--version`, so `claude`, `codex` and `opencode` each report their own version. The probe has null stdin and captures at most 4096 bytes each of stdout and stderr. It ends within two seconds, and those two seconds belong to the command's existing ten-second creation budget, which starts before the probe. A probe still running at its bound is killed.
+`member create` records the installed native version of the resolved backend. After launch-policy validation and the backend availability check, and before registration, it runs the resolved executable (§ Native executable resolution) with exactly the argument `--version`, so `claude`, `codex` and `opencode` each report their own version. The probe has null stdin and captures at most 4096 bytes each of stdout and stderr. It ends within two seconds, and those two seconds belong to the command's existing ten-second creation budget, which starts before the probe. A probe still running at its bound is killed.
 
 The probe yields a version only when it exits with status `0` and the first stdout line has exactly one whitespace-separated token matching `^[0-9]+(\.[0-9]+)+([-+][0-9A-Za-z.]+)?$`. That token is recorded verbatim as the run's `native_version`; for example `2.1.302 (Claude Code)` yields `2.1.302` and `codex-cli 0.163.0` yields `0.163.0`. The bundled catalog entry for that backend and exact version then supplies `profile_version`, and `coverage` is `tested` when that profile declares detection. A version without a bundled profile records `profile_version` null and `coverage=unknown`.
 

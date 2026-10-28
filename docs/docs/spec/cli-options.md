@@ -958,6 +958,27 @@ Render null values as `-` and append `Reason: REASON` when nonnull. Accepted mea
 
 Exit 0 means accepted submission or its matching prior submitted receipt. A structured held/rejected/uncertain reply prints the response in the selected text/JSON form and exits 1, with stderr `Error: permission response STATUS for interaction INTERACTION_ID: REASON`; append ` (input_id=INPUT_ID)` when known. This structured-response stdout is the exception to ordinary application errors being stderr-only. Pre-reply operational failures retain their ordinary error category and include known run/interaction/input context; usage failures exit 2.
 
+A new attempt against a blocked current request fails before any receipt, audit, claim or byte. It exits 1 with the primary stderr line `Error: runner control: permission request is blocked: REASON`, followed by the known run/interaction/operation-key context. Respond checks the blocker at admission, after its admission drain, and again before each answer stage. `REASON` is the same bounded explanation that `permission inspect` returns as `capability_reason` for that state, so a blocked inspection shows a null token, an empty decision set and the reason a response would report:
+
+| Reason | Blocking state |
+|---|---|
+| `permission input is fenced` | Programmatic input is fenced for shutdown, ownership loss or recovery. |
+| `manual input accounting failed` | The runner could not account for actual manual input. |
+| `observation degraded: CODE` | The observer recorded a gap or degradation with diagnostic `CODE`. |
+| `observation transitions pending` | Observed transitions await persistence. |
+| `observation evidence pending` | An interaction evidence refresh awaits persistence. |
+| `observation update pending` | A retained transition, draft or evidence update has not completed. |
+| `observation incomplete` | Child output was read but its observation has not completed. |
+| `observation health unavailable` | The observer reported no input health. |
+| `terminal input interrupted` | A terminal read was interrupted during the drain. |
+| `outer terminal closed` | The outer terminal reached end of input. |
+| `native output closed` | The native child's output reached end of file. |
+| `terminal output still arriving` | The drain's bounded rounds ended before human and child input were quiet. |
+| `permission request is not visible` | The request is obscured, closed or not observed as visible. |
+| `permission request is not the current interaction` | Input eligibility is not held for the current permission interaction. |
+
+A retained operation key is resolved before the admission drain, so its stored result returns without typing even when the current request is blocked.
+
 The CLI takes semantic decisions. For a new attempt, the pinned runner validates the current stable permission request, token, profile, manual input and output state, atomically reserves its audit/claim/receipt, and sends only a tested single-request native choice. Same-key retries return the prior receipt; a conflicting decision/digest or another key bypassing the episode claim fails. Unknown capability preserves manual native input. `member prompt`, `member exec`, message previews, receipt settlement and recovery remain separate operations.
 
 ### Permission-response audit output

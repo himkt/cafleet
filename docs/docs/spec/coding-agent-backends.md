@@ -20,7 +20,7 @@ Goal support is a host capability; preserve supplied activation, pause, completi
 
 ## Spawn argv {#spawn-argv}
 
-These are the child argv with omitted permission selection. The multiplexer starts the CAFleet PTY runner, which preserves the literal child argv, cwd and required environment. Explicit selection changes only the native permission argument through the [launch-policy contract](member-runtime.md#launch-policy-and-capability-registry).
+These are the child argv with omitted permission selection. The leading token names the backend binary; the launched `argv[0]` is the absolute path chosen by [native executable resolution](member-runtime.md#native-executable-resolution), the same path the version probe ran. The multiplexer starts the CAFleet PTY runner, which preserves the literal child argv, cwd and required environment. Explicit selection changes only the native permission argument through the [launch-policy contract](member-runtime.md#launch-policy-and-capability-registry).
 
 | Backend | Spawn argv |
 |---|---|
