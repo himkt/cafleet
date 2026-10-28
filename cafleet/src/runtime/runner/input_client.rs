@@ -878,17 +878,17 @@ pub(crate) fn validate_permission_attribution(
         "director-auto requires auto mode",
     )
 }
-fn invalid(description: &str) -> CafleetError {
-    CafleetError::InvalidStoredValue {
-        field: "permission_response".into(),
-        value: description.into(),
-    }
-}
 fn selected_run(conn: &Connection, run_id: i64) -> Result<RunRecord> {
+    selected_run_reporting(conn, run_id, "permission_response")
+}
+fn selected_run_reporting(conn: &Connection, run_id: i64, field: &str) -> Result<RunRecord> {
     let identity = storage::database_identity(conn)?;
     let run = storage::get_run(conn, run_id)?;
     if identity != run.database_identity_json {
-        return Err(invalid("selected database identity mismatch"));
+        return Err(CafleetError::InvalidStoredValue {
+            field: field.into(),
+            value: "selected database identity mismatch".into(),
+        });
     }
     Ok(run)
 }
@@ -1287,8 +1287,27 @@ fn inspect_permission_with_host(
         let deadline = submission_deadline(conn, deadline)?;
         let (run, placement, original) = with_database_budget(conn, deadline, |conn| {
             let tx = conn.transaction().map_err(db_err)?;
+            let interaction_exists = tx
+                .query_row(
+                    "SELECT 1 FROM member_interactions WHERE interaction_id=?1",
+                    [input.interaction_id],
+                    |_| Ok(()),
+                )
+                .optional()
+                .map_err(db_err)?
+                .is_some();
+            if !interaction_exists {
+                return Err(CafleetError::App(format!(
+                    "Interaction {} not found",
+                    input.interaction_id
+                )));
+            }
             let view = storage::get_event(&tx, input.event_id)?;
-            let run = selected_run(&tx, view.event.run_id)?;
+            let run = selected_run_reporting(
+                &tx,
+                view.event.run_id,
+                "member_runs.database_identity_json",
+            )?;
             context.run_id = Some(run.run_id);
             let placement = crate::broker::get_member(&tx, run.member_id, run.fleet_id)?
                 .and_then(|member| member.placement)

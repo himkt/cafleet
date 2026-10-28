@@ -455,14 +455,13 @@ fn apply_interaction(
         "interaction_id",
         "episode is closed or classification changed",
     )?;
-    let closed_at = transition
-        .close_reason
-        .map(|_| transition.observed_at.as_str());
-    conn.execute(
-        "UPDATE member_interactions SET evidence_digest=?1,evidence_json=?2,closed_at=?3,close_reason=?4 WHERE interaction_id=?5",
-        params![transition.evidence_json["evidence_digest"].as_str().expect("validated digest"),
-            transition.evidence_json.to_string(),closed_at,transition.close_reason.map(|reason| reason.as_str()),id],
-    ).map_err(db_err)?;
+    if let Some(reason) = transition.close_reason {
+        conn.execute(
+            "UPDATE member_interactions SET closed_at=?1,close_reason=?2 WHERE interaction_id=?3",
+            params![transition.observed_at, reason.as_str(), id],
+        )
+        .map_err(db_err)?;
+    }
     Ok(Some(id))
 }
 

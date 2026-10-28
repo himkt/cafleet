@@ -29,8 +29,10 @@ fn evidence_reference(value: &str) -> Result<String, String> {
 pub enum EventCommand {
     /// Read a durable runtime event and its current run/interaction state.
     Show {
+        /// The runtime event to read.
         #[arg(value_parser = positive_id)]
         event_id: i64,
+        /// Output in JSON format.
         #[arg(long)]
         json: bool,
     },
@@ -47,19 +49,25 @@ pub enum Disposition {
 pub enum InputCommand {
     /// Read a durable programmatic-input receipt.
     Show {
+        /// The programmatic-input receipt to read.
         #[arg(value_parser = positive_id)]
         input_id: i64,
+        /// Output in JSON format.
         #[arg(long)]
         json: bool,
     },
     /// Record an evidence-based input disposition under synchronized ownership.
     Reconcile {
+        /// The programmatic-input receipt to settle.
         #[arg(value_parser = positive_id)]
         input_id: i64,
+        /// The observed input disposition to record.
         #[arg(long, value_enum)]
         disposition: Disposition,
+        /// Reference to the Director's recorded evidence for the disposition.
         #[arg(long, value_parser = evidence_reference)]
         evidence_ref: String,
+        /// Output in JSON format.
         #[arg(long)]
         json: bool,
     },

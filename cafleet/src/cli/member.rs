@@ -44,16 +44,22 @@ pub(crate) struct ExecBodyArgs {
 pub enum MemberCommand {
     /// Reconcile a recorded member run under exclusive ownership.
     Recover {
+        /// The member whose recorded run is reconciled.
         #[arg(index = 1, value_name = "MEMBER_ID", value_parser = clap::value_parser!(i64).range(1..))]
         member_id: i64,
+        /// Attest that the inspected owner and startup processes have terminated.
         #[arg(long, requires_all = ["expected_run_id", "expected_owner_epoch", "evidence_ref"])]
         owner_terminated: bool,
+        /// Run ID from the inspected registry snapshot the attestation binds to.
         #[arg(long, requires = "owner_terminated", value_parser = clap::value_parser!(i64).range(1..))]
         expected_run_id: Option<i64>,
+        /// Owner epoch from the inspected registry snapshot the attestation binds to.
         #[arg(long, requires = "owner_terminated", value_parser = clap::value_parser!(i64).range(1..))]
         expected_owner_epoch: Option<i64>,
+        /// Reference to the operator's recorded termination evidence.
         #[arg(long, requires = "owner_terminated", value_parser = recovery_reference)]
         evidence_ref: Option<String>,
+        /// Output in JSON format.
         #[arg(long)]
         json: bool,
     },
@@ -130,7 +136,9 @@ pub enum MemberCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Submit a native shell command to a member's pane, Escape first.
+    /// Submit a native shell command to a member's pane: wrapped members receive it through
+    /// their runner without Escape; unwrapped members keep Escape-first input.
+    #[command(override_usage = "cafleet member exec [OPTIONS] <MEMBER_ID> <COMMAND|--file <PATH>>")]
     Exec {
         /// The target member.
         #[arg(value_name = "MEMBER_ID")]
@@ -143,10 +151,13 @@ pub enum MemberCommand {
     },
     /// Send an ordered vector of explicit native keys to a member pane.
     Press {
+        /// The target member.
         #[arg(index = 1, value_name = "MEMBER_ID", value_parser = clap::value_parser!(i64).range(1..))]
         member_id: i64,
+        /// One to 64 keys sent in order, with no implicit Escape or Enter.
         #[arg(index = 2, value_name = "KEY", num_args = 1..=64, required = true)]
         keys: Vec<String>,
+        /// Output in JSON format.
         #[arg(long)]
         json: bool,
     },
