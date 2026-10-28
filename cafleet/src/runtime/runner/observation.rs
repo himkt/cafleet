@@ -336,12 +336,40 @@ pub(crate) struct ObservationController {
     request_generation: u64,
     request_generation_failed: bool,
     current_request: Option<ObservedRequest>,
+    transit_request: Option<ObservedRequest>,
+    request_region: Option<RequestRegion>,
     current_classification: Option<storage::InteractionClass>,
     pending_error: Option<CafleetError>,
     #[cfg(test)]
     capture: Option<NativeCapturePort>,
     #[cfg(test)]
     observation_hooks: Option<std::sync::Arc<dyn ObservationHooks>>,
+}
+struct RequestRegion {
+    top: usize,
+    rows: Vec<String>,
+}
+impl RequestRegion {
+    fn of(screen: &ScreenSnapshot, top: u16, bottom: u16) -> Self {
+        let top = usize::from(top);
+        Self {
+            top,
+            rows: screen
+                .screen
+                .rows(0, screen.cols)
+                .skip(top)
+                .take(usize::from(bottom) - top)
+                .collect(),
+        }
+    }
+    fn unchanged(&self, screen: &ScreenSnapshot) -> bool {
+        screen
+            .screen
+            .rows(0, screen.cols)
+            .skip(self.top)
+            .take(self.rows.len())
+            .eq(self.rows.iter().cloned())
+    }
 }
 pub(crate) struct ObservedRequest {
     pub(super) request_generation: u64,
@@ -452,6 +480,8 @@ impl ObservationController {
             request_generation: 0,
             request_generation_failed: false,
             current_request: None,
+            transit_request: None,
+            request_region: None,
             current_classification: None,
             pending_error: None,
             #[cfg(test)]
@@ -474,6 +504,8 @@ impl ObservationController {
     }
     fn invalidate_request(&mut self) -> Result<()> {
         self.current_request = None;
+        self.transit_request = None;
+        self.request_region = None;
         match self.request_generation.checked_add(1) {
             Some(next) if !self.request_generation_failed => {
                 self.request_generation = next;
@@ -548,19 +580,46 @@ impl ObservationController {
                 answer_matches,
             }))
         })()?;
-        let same = match (&self.current_request, &next) {
+        if next.is_none() && self.cursor_transit(screen, observed) {
+            if let Some(request) = self.current_request.take() {
+                self.transit_request = Some(request);
+            }
+            return Ok(());
+        }
+        let resumed = self.transit_request.take();
+        let same = match (self.current_request.as_ref().or(resumed.as_ref()), &next) {
             (Some(old), Some(new)) => old.same_request(new),
             (None, None) => true,
             _ => false,
         };
         if !same {
             self.invalidate_request()?;
+            if next.is_some() {
+                let region = observed
+                    .matched_region
+                    .as_ref()
+                    .expect("a complete permission match has its live region");
+                self.request_region = Some(RequestRegion::of(screen, region.top, region.bottom));
+            }
         }
         self.current_request = next.map(|mut request| {
             request.request_generation = self.request_generation;
             request
         });
         Ok(())
+    }
+    fn cursor_transit(&self, screen: &ScreenSnapshot, observed: &ScreenObservation) -> bool {
+        (self.current_request.is_some() || self.transit_request.is_some())
+            && !observed.verified_noninteraction
+            && !matches!(observed.kind, ObservationKind::Interaction(_))
+            && self
+                .pending
+                .as_ref()
+                .is_none_or(|pending| pending.update.transitions.is_empty())
+            && self
+                .request_region
+                .as_ref()
+                .is_some_and(|region| region.unchanged(screen))
     }
     fn moment(&mut self, clock: &dyn ObservationClock) -> Result<ObservationMoment> {
         let now = clock.sample();
