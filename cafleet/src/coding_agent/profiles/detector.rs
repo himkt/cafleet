@@ -536,22 +536,30 @@ pub(super) mod inspection_tests {
 
     #[test]
     fn bundled_claude_synthetic_boxed_operation_rows_reassemble_with_one_space() {
-        let unwrapped = claude_observation(&unwrapped_rendering(WRAPPED_OPERATION));
-        for rows in [
-            &[
-                " │ /tmp/cafleet-194/claude-wrap-cells-001/permission-probe",
-                " │ allow",
-            ][..],
-            &[
-                " │ /tmp/cafleet-194/claude-wrap-cells-001",
-                " │ permission-probe",
-                " │ allow",
-            ][..],
+        let several_words =
+            "/tmp/cafleet-194/claude-wrap-cells-001/permission-probe allow --reason boxed";
+        for (operation, rows) in [
+            (
+                WRAPPED_OPERATION,
+                &[
+                    " │ /tmp/cafleet-194/claude-wrap-cells-001/permission-probe",
+                    " │ allow",
+                ][..],
+            ),
+            (
+                several_words,
+                &[
+                    " │ /tmp/cafleet-194/claude-wrap-cells-001/permission-probe",
+                    " │ allow --reason",
+                    " │ boxed",
+                ][..],
+            ),
         ] {
             let boxed = claude_observation(&native_with_operation_rows(rows));
-            assert_claude_request(&boxed, WRAPPED_OPERATION);
+            assert_claude_request(&boxed, operation);
             assert!(
-                boxed.fingerprint == unwrapped.fingerprint,
+                boxed.fingerprint
+                    == claude_observation(&unwrapped_rendering(operation)).fingerprint,
                 "{} boxed rows keep the unwrapped identity",
                 rows.len()
             );
