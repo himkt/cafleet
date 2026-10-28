@@ -2727,7 +2727,14 @@ mod contract_tests {
             include_bytes!("profiles/native/claude-2.1.302-wrapped-deny-pre-stage-1.json");
         const WRAPPED_FIXTURES: [&str; 3] =
             [WRAPPED_FIXTURE, WRAPPED_ALLOW_FIXTURE, WRAPPED_DENY_FIXTURE];
-        pub(super) const FIXTURES: [(&str, &str, &[u8]); 7] = [
+        const BOXED_FIXTURE: &str = "claude-2.1.302-boxed-permission-1";
+        const BOXED_SINGLE_ROW_FIXTURE: &str = "claude-2.1.302-boxed-single-row-permission-1";
+        const BOXED_BYTES: &[u8] =
+            include_bytes!("profiles/native/claude-2.1.302-boxed-permission-1.json");
+        const BOXED_SINGLE_ROW_BYTES: &[u8] =
+            include_bytes!("profiles/native/claude-2.1.302-boxed-single-row-permission-1.json");
+        const BOXED_FIXTURES: [&str; 2] = [BOXED_FIXTURE, BOXED_SINGLE_ROW_FIXTURE];
+        pub(super) const FIXTURES: [(&str, &str, &[u8]); 9] = [
             (NATIVE_FIXTURE, NATIVE_SOURCE, NATIVE_BYTES),
             (
                 ALLOW_FIXTURE,
@@ -2758,6 +2765,16 @@ mod contract_tests {
                 WRAPPED_DENY_FIXTURE,
                 "native/claude-2.1.302-wrapped-deny-pre-stage-1.json",
                 WRAPPED_DENY_BYTES,
+            ),
+            (
+                BOXED_FIXTURE,
+                "native/claude-2.1.302-boxed-permission-1.json",
+                BOXED_BYTES,
+            ),
+            (
+                BOXED_SINGLE_ROW_FIXTURE,
+                "native/claude-2.1.302-boxed-single-row-permission-1.json",
+                BOXED_SINGLE_ROW_BYTES,
             ),
         ];
 
@@ -3389,7 +3406,127 @@ mod contract_tests {
         }
 
         #[test]
-        fn bundled_claude_detection_and_catalog_cite_the_unwrapped_and_wrapped_native_captures() {
+        fn bundled_claude_boxed_fixtures_match_their_catalog_entries_and_declare_masked_header_rows()
+         {
+            let mut value = definitions();
+            let path_089 =
+                "/tmp/cafleet-194/claude-boxed-cells-089-wide-operation-probe-01/permission-probe";
+            let path_120 =
+                "/tmp/cafleet-194/claude-boxed-cells-120-wide-operation-probe-01/permission-probe";
+            for (id, cols, sequence, cursor, heading, operation, closing) in [
+                (
+                    BOXED_FIXTURE,
+                    89,
+                    8800,
+                    (27, 1),
+                    17,
+                    vec![format!(" │ {path_089}"), " │ allow".to_owned()],
+                    34,
+                ),
+                (
+                    BOXED_SINGLE_ROW_FIXTURE,
+                    120,
+                    9055,
+                    (23, 1),
+                    14,
+                    vec![format!(" │ {path_120} allow")],
+                    29,
+                ),
+            ] {
+                let (source, bytes) = fixture(id);
+                assert_eq!(source, format!("native/{id}.json"));
+                assert_eq!(
+                    entry(&mut value, id),
+                    &json!({"id":id,"kind":"native","backend":"claude","native_version":CLAUDE_VERSION,
+                        "rows":36,"cols":cols,"source_ref":source,"sha256":digest(bytes)})
+                );
+                let screen: Value = serde_json::from_slice(bytes).unwrap();
+                assert_eq!(
+                    screen.as_object().unwrap().keys().collect::<BTreeSet<_>>(),
+                    native_screen()
+                        .as_object()
+                        .unwrap()
+                        .keys()
+                        .collect::<BTreeSet<_>>(),
+                    "{id} has exactly the documented fields"
+                );
+                assert_eq!(screen["schema_version"], 1);
+                assert_eq!(screen["fixture_id"], id);
+                assert_eq!(screen["provenance"], "native");
+                assert_eq!(screen["backend"], "claude");
+                assert_eq!(screen["native_version"], CLAUDE_VERSION);
+                assert_eq!(
+                    (screen["rows"].clone(), screen["cols"].clone()),
+                    (json!(36), json!(cols))
+                );
+                assert_eq!(screen["alternate_screen"], true, "{id}");
+                assert_eq!(screen["screen_seq"], sequence, "{id}");
+                assert_eq!(
+                    (screen["cursor_row"].clone(), screen["cursor_col"].clone()),
+                    (json!(cursor.0), json!(cursor.1)),
+                    "{id} cursor sits on the focused Yes row"
+                );
+                assert_eq!(
+                    screen["masked_rows"],
+                    json!(
+                        (0..12)
+                            .map(|row| json!({"row":row,"reason":"reviewed_privacy"}))
+                            .collect::<Vec<_>>()
+                    )
+                );
+                let rows = lines(bytes);
+                assert_eq!(rows.len(), 36);
+                for (row, line) in rows.iter().enumerate() {
+                    if row < 12 {
+                        assert_eq!(line, "", "{id} masked row {row} is empty");
+                    }
+                    assert!(
+                        line.chars().count() <= cols,
+                        "{id} row {row} fits {cols} columns"
+                    );
+                    for private in ["/Users/", "/root", "/development-pvc", "himkt", "Opus"] {
+                        assert!(
+                            !line.contains(private),
+                            "{id} row {row} carries {private:?}"
+                        );
+                    }
+                }
+                assert_eq!(rows[heading], " Bash command", "{id}");
+                let first_rule = heading + 3;
+                let last_rule = first_rule + operation.len() + 1;
+                for rule in [first_rule, last_rule] {
+                    assert!(rows[rule].starts_with('╌'), "{id} row {rule}");
+                    assert_eq!(rows[rule].chars().count(), cols, "{id} row {rule}");
+                }
+                assert_eq!(
+                    rows[first_rule + 1..last_rule],
+                    operation[..],
+                    "{id} boxed operation rows"
+                );
+                assert_eq!(rows[last_rule + 1], " This command requires approval");
+                assert_eq!(rows[last_rule + 3], " Do you want to proceed?");
+                assert_eq!(rows[cursor.0], " ❯ 1. Yes", "{id}");
+                assert_eq!(cursor.0, last_rule + 4);
+                assert_eq!(rows[closing], " Esc to cancel · Tab to amend", "{id}");
+                assert!(closing - heading < 24, "{id} form fits the 24-row bound");
+            }
+            let boxed = lines(BOXED_BYTES);
+            assert_eq!(boxed[21].chars().count(), 83, "short of the 88-cell edge");
+            assert_eq!(boxed[32], "   4. No");
+            assert_eq!(
+                boxed[33], "  ",
+                "two written spaces before the closing line"
+            );
+            assert_eq!(
+                lines(BOXED_SINGLE_ROW_BYTES)[18].chars().count(),
+                89,
+                "the single-row box follows the operation length"
+            );
+        }
+
+        #[test]
+        fn bundled_claude_detection_and_catalog_cite_the_unwrapped_wrapped_and_boxed_native_captures()
+         {
             let value = definitions();
             let profile = value["profiles"]
                 .as_array()
@@ -3400,8 +3537,18 @@ mod contract_tests {
             assert_eq!(profile["profile_version"], PROFILE_VERSION);
             assert_eq!(profile["native_versions"], json!([CLAUDE_VERSION]));
             assert_eq!(
-                profile["capabilities"]["detection"]["fixture_ids"],
-                json!([NATIVE_FIXTURE, WRAPPED_FIXTURE])
+                profile["capabilities"]["detection"]["fixture_ids"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|id| id.as_str().unwrap())
+                    .collect::<BTreeSet<_>>(),
+                BTreeSet::from([
+                    NATIVE_FIXTURE,
+                    WRAPPED_FIXTURE,
+                    BOXED_FIXTURE,
+                    BOXED_SINGLE_ROW_FIXTURE
+                ])
             );
             assert_eq!(
                 profile["capabilities"]["composer"]["fixture_ids"],
@@ -3419,9 +3566,9 @@ mod contract_tests {
         }
 
         #[test]
-        fn bundled_guard_accepts_the_wrapped_fixtures_and_rejects_altered_ones() {
+        fn bundled_guard_accepts_the_wrapped_and_boxed_fixtures_and_rejects_altered_ones() {
             assert!(ProfileCatalog::from_bundled_definitions(&definitions(), &embedded()).is_ok());
-            for id in WRAPPED_FIXTURES {
+            for id in WRAPPED_FIXTURES.into_iter().chain(BOXED_FIXTURES) {
                 assert!(guarded_fixture(id, |_| {}, |_| {}).is_ok(), "{id}");
                 assert!(
                     guarded_fixture(id, |d| entry(d, id)["kind"] = json!("synthetic"), |_| {})
@@ -3437,13 +3584,17 @@ mod contract_tests {
                     }),
                     ("backend", |s| s["backend"] = json!("codex")),
                     ("native version", |s| s["native_version"] = json!("2.1.301")),
-                    ("cols differ from the entry", |s| s["cols"] = json!(120)),
+                    ("cols differ from the entry", |s| {
+                        s["cols"] = json!(s["cols"].as_u64().unwrap() + 1)
+                    }),
                     ("rows", |s| s["rows"] = json!(35)),
                     ("line count", |s| {
                         s["lines"].as_array_mut().unwrap().pop();
                     }),
                     ("extra field", |s| s["note"] = json!("unreviewed")),
-                    ("cursor past the geometry", |s| s["cursor_col"] = json!(53)),
+                    ("cursor past the geometry", |s| {
+                        s["cursor_col"] = json!(s["cols"].as_u64().unwrap() + 1)
+                    }),
                 ];
                 for (case, change) in screen_changes {
                     assert!(

@@ -631,6 +631,82 @@ pub(super) mod inspection_tests {
         assert!(plain.fingerprint == unwrapped_plain.fingerprint);
     }
 
+    const BOXED_SCREEN: &str = include_str!("native/claude-2.1.302-boxed-permission-1.json");
+    const BOXED_SINGLE_ROW_SCREEN: &str =
+        include_str!("native/claude-2.1.302-boxed-single-row-permission-1.json");
+    const BOXED_PATH: &str =
+        "/tmp/cafleet-194/claude-boxed-cells-089-wide-operation-probe-01/permission-probe";
+    const BOXED_SINGLE_ROW_OPERATION: &str =
+        "/tmp/cafleet-194/claude-boxed-cells-120-wide-operation-probe-01/permission-probe allow";
+
+    #[test]
+    fn bundled_claude_detects_the_native_boxed_form_and_keeps_its_row_boundary_as_a_line_break() {
+        let screen = replay_native_fixture(BOXED_SCREEN, |_| {}, true, None);
+        assert_eq!((screen.rows, screen.cols), (36, 89));
+        assert_eq!((screen.cursor_row, screen.cursor_col), (27, 1));
+        let observation = claude_observation(&screen);
+        assert_claude_request(&observation, &format!("{BOXED_PATH}\nallow"));
+        let region = observation
+            .matched_region
+            .expect("a boxed permission match locates its live region");
+        assert_eq!((region.top, region.bottom), (17, 35), "{region:?}");
+        assert!(
+            observation.fingerprint
+                != claude_observation(&unwrapped_rendering(&format!("{BOXED_PATH} allow")))
+                    .fingerprint,
+            "a boxed wrap is width-dependent"
+        );
+    }
+
+    #[test]
+    fn bundled_claude_boxed_form_tolerates_the_written_spaces_before_its_closing_line() {
+        let fixture = serde_json::from_str::<Value>(BOXED_SCREEN).unwrap();
+        assert_eq!(fixture["lines"][32], "   4. No");
+        assert_eq!(
+            fixture["lines"][33], "  ",
+            "the native row holds two spaces"
+        );
+        assert_eq!(fixture["lines"][34], " Esc to cancel · Tab to amend");
+        let operation = format!("{BOXED_PATH}\nallow");
+        let cleared = claude_observation(&replay_native_fixture(
+            BOXED_SCREEN,
+            |lines| lines[33].clear(),
+            true,
+            None,
+        ));
+        assert_claude_request(&cleared, &operation);
+        assert!(
+            cleared.fingerprint
+                == claude_observation(&replay_native_fixture(BOXED_SCREEN, |_| {}, true, None))
+                    .fingerprint
+        );
+    }
+
+    #[test]
+    fn bundled_claude_detects_the_native_single_row_box_without_its_gutter() {
+        let screen = replay_native_fixture(BOXED_SINGLE_ROW_SCREEN, |_| {}, true, None);
+        assert_eq!((screen.rows, screen.cols), (36, 120));
+        assert_eq!((screen.cursor_row, screen.cursor_col), (23, 1));
+        let observation = claude_observation(&screen);
+        assert_claude_request(&observation, BOXED_SINGLE_ROW_OPERATION);
+        assert!(
+            !observation.raw_evidence["operation"]
+                .as_str()
+                .unwrap()
+                .contains('│'),
+            "the operation omits the box gutter"
+        );
+        let region = observation
+            .matched_region
+            .expect("a single-row box locates its live region");
+        assert_eq!((region.top, region.bottom), (14, 30), "{region:?}");
+        assert!(
+            observation.fingerprint
+                == claude_observation(&unwrapped_rendering(BOXED_SINGLE_ROW_OPERATION)).fingerprint,
+            "a single-row box and a plain row of one command share its identity"
+        );
+    }
+
     #[test]
     fn bundled_claude_wrapped_form_keeps_the_false_positive_guards() {
         let permission = ObservationKind::Interaction(InteractionClass::PermissionRequest);
