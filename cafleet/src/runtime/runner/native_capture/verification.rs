@@ -109,7 +109,8 @@ const DRIVER_FULL_SIZE: TerminalSize = TerminalSize {
     cols: 120,
 };
 const DRIVER_WRAPPED_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 52 };
-const APPROVED_CASES: [ApprovedCase; 12] = [
+const DRIVER_HERDR_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 89 };
+const APPROVED_CASES: [ApprovedCase; 14] = [
     ApprovedCase {
         id: "cells-002",
         backend: CodingAgent::Claude,
@@ -253,6 +254,30 @@ const APPROVED_CASES: [ApprovedCase; 12] = [
         database: "nwd1.db",
         socket: "twd1",
         size: DRIVER_WRAPPED_SIZE,
+    },
+    ApprovedCase {
+        id: "claude-boxed-cells-089-wide-operation-probe-01",
+        backend: CodingAgent::Claude,
+        permission_mode: "default",
+        mode: DriverMode::NoAnswer,
+        decision: None,
+        stage_hex: None,
+        probe_argument: Some("allow"),
+        database: "nb89.db",
+        socket: "tb89",
+        size: DRIVER_HERDR_SIZE,
+    },
+    ApprovedCase {
+        id: "claude-boxed-cells-120-wide-operation-probe-01",
+        backend: CodingAgent::Claude,
+        permission_mode: "default",
+        mode: DriverMode::NoAnswer,
+        decision: None,
+        stage_hex: None,
+        probe_argument: Some("allow"),
+        database: "nb12.db",
+        socket: "tb12",
+        size: DRIVER_FULL_SIZE,
     },
 ];
 impl ApprovedCase {
