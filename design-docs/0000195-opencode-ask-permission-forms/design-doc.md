@@ -1,7 +1,7 @@
 # OpenCode Ask Permission Forms
 
 **Status**: Approved
-**Progress**: 5/20 tasks complete
+**Progress**: 7/20 tasks complete
 **Last Updated**: 2026-10-28
 
 ## Overview
@@ -252,17 +252,20 @@ Add these OpenCode cases, all with backend `opencode`, permission mode `cafleet-
 | `opencode-ans-deny-001` | `answer_stage` | `deny` | — | `68`, then `0d` | `deny` | `od01.db` | `od01` | The deny stage-1 pre-stage fixture, the screen after `h`, and the rejection-reason dialog after Enter (captured; stopped before any third byte) |
 | `opencode-ans-deny-002` | `answer_stage` | `deny` | `68` | `0d`, then `0d` | `deny` | `od02.db` | `od02` | The deny stage-2 pre-stage fixture, the dialog after the second stage, and deny decision evidence |
 | `opencode-ans-deny-003` | `answer_stage` | `deny` | `68`, then `0d` | `0d` | `deny` | `od03.db` | `od03` | The deny stage-3 pre-stage fixture (the empty rejection-reason dialog) and deny decision evidence |
-| `opencode-focus-always-001` | `answer_stage` | `deny` | `6c` | — | `deny` | `of01.db` | `of01` | The `Always allow`-focused fixture; no confirming byte is sent |
+| `opencode-focus-always-001` | `answer_stage` | `deny` | `6c` | — | `deny` | `of01.db` | `of01` | Stopped before its capture published; no fixture |
+| `opencode-focus-always-002` | `answer_stage` | `deny` | `6c` | — | `deny` | `of02.db` | `of02` | The `Always allow`-focused fixture; no confirming byte is sent |
 | `opencode-idle-001` | `no_answer` | — | — | — | — | `oi01.db` | `oi01` | The idle-composer fixture |
 
-`opencode-focus-always-001` sends only the measured `l` and never Enter, so both markers stay absent and the form is closed by member cleanup.
+`opencode-focus-always-002` sends only the measured `l` and never Enter, so both markers stay absent and the form is closed by member cleanup.
+
+A capture's two samples come from the runner's quiet-timer polling, so a static screen needs no output after arming. The runner does cancel an unpublished capture when its case stops, and a stage byte sent before the second sample enters the pre-stage fixture. The driver's `arm` therefore returns only after the capture manifest is published, and `stop` refuses an armed case whose manifest is not yet published.
 
 The driver's member prompt gains an OpenCode branch, because the generic branch names Claude's Bash tool: `Use the shell tool to run exactly <helper> <argument> as one command. Preserve any native permission request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation.` The tool-free prompt serves the idle case unchanged.
 
 1. Build the capture binary with the `cafleet-ask` policy and the OpenCode cases. Write `presets/opencode/cafleet-ask.md` to `<private dir>/agents/cafleet-ask.md` under a private `OPENCODE_CONFIG_DIR` set for the driver invocation, so the operator's installed presets and skills stay untouched, and confirm the child loads the `cafleet-ask` agent.
 2. Run `opencode-cells-001` and read the form, its choice keys, its screen and how it marks the focused option (text or cell styling, from the `capture-pane -e` output), which selects the focus mechanism in § Focus-gated answer stages.
 3. Apply the blocker table in § Answer stages, then record the stage bytes above in the answer-stage cases as a reviewed registry edit.
-4. Run `opencode-ans-allow-001`, `opencode-ans-deny-001`, `opencode-ans-deny-002`, `opencode-ans-deny-003`, `opencode-focus-always-001` and `opencode-idle-001`. Before every byte, capture the pane and confirm that stage's gate: the focused option, or the rejection-reason dialog with an empty reason. The answer-stage post-stage screens supply the post-answer screen for the transcript false-positive test.
+4. Run `opencode-ans-allow-001`, `opencode-ans-deny-001`, `opencode-ans-deny-002`, `opencode-ans-deny-003`, `opencode-focus-always-002` and `opencode-idle-001`. Before every byte, capture the pane and confirm that stage's gate: the focused option, or the rejection-reason dialog with an empty reason. The answer-stage post-stage screens supply the post-answer screen for the transcript false-positive test.
 5. Review masking (home paths, account, model or plan text) and confirm every rule region lies in unmasked rows. Add the fixtures to the native fixture directory and record their SHA-256 digests in the catalog; the Director commits them.
 
 Record the CAFleet commit, OpenCode version, model, terminal geometry and masking review with the execution evidence.
@@ -332,8 +335,8 @@ Record detection-to-inbox latency, the CAFleet commit, versions, geometry and ev
 
 ### Step 3: Capture native OpenCode 2.1.4 evidence
 
-- [ ] Add the `opencode-cells-001` and `opencode-idle-001` driver cases and the OpenCode prompt branch, run `opencode-cells-001`, and confirm the screen `mini` uses, the live-region anchors, the choice keys and the focus indicator. <!-- completed: -->
-- [ ] Apply the blocker table in § Answer stages, then add `prefix_hex` to the case binding and the answer-stage cases of § Native capture procedure with their stage bytes, and run them with `opencode-idle-001`, recording the pre-stage and post-stage screens and OpenCode's decision evidence. <!-- completed: -->
+- [x] Add the `opencode-cells-001` and `opencode-idle-001` driver cases and the OpenCode prompt branch, run `opencode-cells-001`, and confirm the screen `mini` uses, the live-region anchors, the choice keys and the focus indicator. <!-- completed: 2026-10-28T11:56 -->
+- [x] Apply the blocker table in § Answer stages, then add `prefix_hex` to the case binding and the answer-stage cases of § Native capture procedure with their stage bytes, and run them with `opencode-idle-001`, recording the pre-stage and post-stage screens and OpenCode's decision evidence. <!-- completed: 2026-10-28T12:33 -->
 - [ ] Review masking for every capture, convert each capture into a fixture with its `cell_backgrounds` runs, add the fixtures to the native fixture directory with their SHA-256 digests, and keep a post-answer screen for the transcript false-positive test. <!-- completed: -->
 
 ### Step 4: Document the OpenCode profile
