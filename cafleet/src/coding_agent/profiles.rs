@@ -2659,6 +2659,8 @@ mod contract_tests {
                 .expect("bundled catalog cites the cells-002 native fixture")
         }
 
+        type ScreenChange = (&'static str, fn(&mut Value));
+
         fn guarded(
             change_definitions: impl FnOnce(&mut Value),
             change_screen: impl FnOnce(&mut Value),
@@ -2811,7 +2813,7 @@ mod contract_tests {
                 ProfileCatalog::from_bundled_definitions(&definitions(), &[]).is_err(),
                 "cited fixture is embedded"
             );
-            let screen_changes: [(&str, fn(&mut Value)); 13] = [
+            let screen_changes: [ScreenChange; 13] = [
                 ("synthetic provenance", |s| {
                     s["provenance"] = json!("synthetic")
                 }),
