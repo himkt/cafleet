@@ -258,15 +258,11 @@ pub(super) struct Fixture {
     pub backend: CodingAgent,
     pub version: String,
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum Reassembly {
-    EdgeJoinedRows,
-}
 #[derive(Clone)]
 pub(super) struct Capture {
     pub matcher: String,
     pub name: String,
-    pub reassembly: Option<Reassembly>,
+    pub row_margin: Option<String>,
 }
 #[derive(Clone)]
 pub(super) struct Choice {
@@ -432,7 +428,7 @@ fn capture(value: &Value, matchers: &[Matcher]) -> Result<Capture> {
     Ok(Capture {
         matcher,
         name,
-        reassembly: None,
+        row_margin: None,
     })
 }
 fn optional_capture(value: &Value, matchers: &[Matcher]) -> Result<Option<Capture>> {
@@ -443,17 +439,18 @@ fn optional_capture(value: &Value, matchers: &[Matcher]) -> Result<Option<Captur
     }
 }
 fn operation_capture(value: &Value, matchers: &[Matcher]) -> Result<Option<Capture>> {
-    let Some(reassembly) = value.get("reassembly") else {
+    let Some(row_margin) = value.get("row_margin") else {
         return optional_capture(value, matchers);
     };
-    let reassembly = match one_of(reassembly, &["edge_joined_rows"])?.as_str() {
-        "edge_joined_rows" => Reassembly::EdgeJoinedRows,
-        _ => unreachable!("validated reassembly enum"),
-    };
-    let mut plain = object(value, &["matcher_id", "capture", "reassembly"])?.clone();
-    plain.remove("reassembly");
+    let row_margin = row_margin
+        .as_str()
+        .filter(|margin| !margin.is_empty() && !margin.contains('\n'))
+        .ok_or_else(|| invalid("nonempty single-row margin required"))?
+        .to_owned();
+    let mut plain = object(value, &["matcher_id", "capture", "row_margin"])?.clone();
+    plain.remove("row_margin");
     Ok(Some(Capture {
-        reassembly: Some(reassembly),
+        row_margin: Some(row_margin),
         ..capture(&Value::Object(plain), matchers)?
     }))
 }

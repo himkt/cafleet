@@ -186,6 +186,7 @@ pub fn get_event(conn: &Connection, event_id: i64) -> Result<RuntimeEventView, C
                     interaction.as_ref().map(|episode| episode.classification),
                     event.event_id,
                     event.interaction_id,
+                    &payload["evidence"],
                 )?),
             "director_action",
             "invalid bound review action",
@@ -492,6 +493,7 @@ fn payload(
         transition.classification,
         event_id,
         interaction_id,
+        &transition.evidence_json,
     )?;
     Ok(payload)
 }
@@ -656,12 +658,20 @@ pub(crate) fn persist_transition_in_transaction(
 }
 
 const REVIEW_INSTRUCTION: &str = "Verify this event and the current request. Evaluate the operation and its risk. In the Director session's effective auto mode, decide allow or deny; otherwise obtain the user's permission. Submit the selected answer through the request-bound CAFleet response command, or give that complete command to the user. Inspect the native result and continuation afterward.";
+const MULTI_ROW_INSTRUCTION: &str = "The operation is shown as its displayed rows, where a row break may be a wrap or a line break in the command, so confirm the command against the excerpt before deciding.";
+fn review_instruction(evidence: &Value) -> String {
+    match evidence["operation_rows"].as_u64() {
+        Some(rows) if rows > 1 => format!("{REVIEW_INSTRUCTION} {MULTI_ROW_INSTRUCTION}"),
+        _ => REVIEW_INSTRUCTION.to_owned(),
+    }
+}
 fn director_action(
     run: &RunRecord,
     kind: RuntimeEventKind,
     classification: Option<InteractionClass>,
     event_id: i64,
     interaction_id: Option<i64>,
+    evidence: &Value,
 ) -> Result<Value, CafleetError> {
     if kind != RuntimeEventKind::InteractionOpened
         || classification != Some(InteractionClass::PermissionRequest)
@@ -680,7 +690,7 @@ fn director_action(
         "allocated positive action identities required",
     )?;
     Ok(
-        json!({"kind":"review_permission_request","instruction":REVIEW_INSTRUCTION,
+        json!({"kind":"review_permission_request","instruction":review_instruction(evidence),
         "inspect_argv":["cafleet","permission","inspect",interaction_id.to_string(),"--event-id",event_id.to_string(),"--from-member-id",run.director_member_id.to_string(),"--json"]}),
     )
 }

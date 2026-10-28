@@ -159,7 +159,7 @@
             {"id": "deny", "scope": "line", "pattern": "^ [❯ ] 4\\. (?P<label>No)$"}
           ],
           "extract": {
-            "operation": {"matcher_id": "operation", "capture": "operation", "reassembly": "edge_joined_rows"},
+            "operation": {"matcher_id": "operation", "capture": "operation", "row_margin": " "},
             "choices": [
               {"id": "allow-once", "label": {"matcher_id": "allow", "capture": "label"}, "scope": "single_request"},
               {"id": "deny-once", "label": {"matcher_id": "deny", "capture": "label"}, "scope": "single_request"}

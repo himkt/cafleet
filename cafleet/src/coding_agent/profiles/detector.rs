@@ -1,5 +1,5 @@
 use super::CodingAgent;
-use super::catalog::{Capture, Profile, ProfileCatalog, Reassembly, Rule};
+use super::catalog::{Capture, Profile, ProfileCatalog, Rule};
 use crate::broker::runtime::InteractionClass;
 use crate::coding_agent::AnswerPlan;
 use crate::error::CafleetError;
@@ -1323,38 +1323,6 @@ struct LogicalLine {
     end: u16,
     boundaries: Vec<(u16, u16)>,
 }
-impl LogicalLine {
-    fn end_col(&self) -> u16 {
-        self.boundaries.last().expect("line has initial boundary").1
-    }
-}
-/// `None` when the captured rows are not whole lines with a plain or boxed prefix.
-fn reassemble_edge_joined_rows(rows: &str, lines: &[LogicalLine], cols: u16) -> Option<String> {
-    let rows = rows.split('\n').collect::<Vec<_>>();
-    if rows.len() > lines.len() {
-        return None;
-    }
-    let mut operation = String::new();
-    let mut joins_next_directly = true;
-    for (row, line) in rows.into_iter().zip(lines) {
-        if row != line.text {
-            return None;
-        }
-        if !joins_next_directly {
-            operation.push('\n');
-        }
-        // Only a plain row filled to the last usable column is an observed wrap; a boxed break at
-        // a space is indistinguishable from a line break in the command itself.
-        if let Some(content) = row.strip_prefix(" │ ") {
-            operation.push_str(content);
-            joins_next_directly = false;
-        } else {
-            operation.push_str(row.strip_prefix(' ')?);
-            joins_next_directly = line.end_col() + 1 >= cols;
-        }
-    }
-    Some(operation)
-}
 fn logical_lines(screen: &ScreenSnapshot) -> Result<Vec<LogicalLine>> {
     let mut lines = Vec::new();
     let mut current: Option<LogicalLine> = None;
@@ -1483,7 +1451,6 @@ fn match_rule(rule: &Rule, screen: &ScreenSnapshot, lines: &[LogicalLine]) -> Op
         .collect::<Vec<_>>()
         .join("\n");
     let mut values = BTreeMap::new();
-    let mut first_lines = BTreeMap::new();
     let mut focuses = BTreeMap::new();
     for matcher in &rule.matchers {
         let texts = if matcher.scope == "region" {
@@ -1492,7 +1459,7 @@ fn match_rule(rule: &Rule, screen: &ScreenSnapshot, lines: &[LogicalLine]) -> Op
             selected.iter().map(|line| line.text.as_str()).collect()
         };
         let mut captured_values = Vec::new();
-        for (index, text) in texts.into_iter().enumerate() {
+        for text in texts {
             for captures in matcher.regex.captures_iter(text) {
                 let named = matcher
                     .regex
@@ -1504,46 +1471,33 @@ fn match_rule(rule: &Rule, screen: &ScreenSnapshot, lines: &[LogicalLine]) -> Op
                             .map(|v| (name.into(), v.as_str().into()))
                     })
                     .collect::<BTreeMap<String, String>>();
-                let named_lines = matcher
-                    .regex
-                    .capture_names()
-                    .flatten()
-                    .filter_map(|name| {
-                        captures.name(name).map(|v| {
-                            (
-                                name.to_owned(),
-                                index + text[..v.start()].matches('\n').count(),
-                            )
-                        })
-                    })
-                    .collect::<BTreeMap<String, usize>>();
                 let full = captures
                     .get(0)
                     .expect("regex match has full capture")
                     .as_str();
-                captured_values.push((named, named_lines, full.to_owned()));
+                captured_values.push((named, full.to_owned()));
             }
         }
         if captured_values.len() != 1 {
             return None;
         }
-        let (named, named_lines, full) = captured_values.pop().expect("single matcher capture");
+        let (named, full) = captured_values.pop().expect("single matcher capture");
         focuses.insert(
             matcher.id.clone(),
             serde_json::to_string(&(&matcher.id, &full, &named)).expect("focus strings serialize"),
         );
         values.insert(matcher.id.clone(), named);
-        first_lines.insert(matcher.id.clone(), named_lines);
     }
     let operation = match &rule.operation {
         Some(reference) => {
             let value = captured(reference, &values)?;
-            Some(match reference.reassembly {
+            Some(match &reference.row_margin {
                 None => value,
-                Some(Reassembly::EdgeJoinedRows) => {
-                    let first = first_lines[&reference.matcher][&reference.name];
-                    reassemble_edge_joined_rows(&value, &selected[first..], screen.cols)?
-                }
+                Some(margin) => value
+                    .split('\n')
+                    .map(|row| row.strip_prefix(margin.as_str()))
+                    .collect::<Option<Vec<_>>>()?
+                    .join("\n"),
             })
         }
         None => None,
@@ -1646,7 +1600,7 @@ impl Detector {
             rule_id: "unmatched-screen".into(),
             match_evidence: MatchEvidence::Absent,
             matched_region: None,
-            raw_evidence: json!({"backend":self.backend.name(),"native_version":self.version,"profile_version":profile_version,"rule_id":"unmatched-screen","screen_seq":screen.screen_seq,"operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false}),
+            raw_evidence: json!({"backend":self.backend.name(),"native_version":self.version,"profile_version":profile_version,"rule_id":"unmatched-screen","screen_seq":screen.screen_seq,"operation":null,"operation_rows":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false}),
             fingerprint: None,
             verified_noninteraction: false,
             native_correlation: None,
@@ -1710,11 +1664,14 @@ impl Detector {
         observation.verified_noninteraction = !conflict && best.rule.verified;
         observation.native_correlation = if conflict { None } else { best.native.clone() };
         observation.raw_evidence["rule_id"] = json!(best.rule.id);
-        observation.raw_evidence["operation"] = if conflict {
-            Value::Null
+        let operation = if conflict {
+            None
         } else {
-            json!(best.operation)
+            best.operation.as_deref()
         };
+        observation.raw_evidence["operation"] = json!(operation);
+        observation.raw_evidence["operation_rows"] =
+            json!(operation.map(|text| text.split('\n').count()));
         observation.raw_evidence["choices"] = if conflict {
             Value::Null
         } else {

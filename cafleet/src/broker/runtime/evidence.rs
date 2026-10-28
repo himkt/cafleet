@@ -109,7 +109,18 @@ impl EvidencePolicy {
                 self.transform(value, &mut truncated)?
             };
             result.insert(field.into(), value);
+            if field == "operation" {
+                let rows = if metadata {
+                    Value::Null
+                } else {
+                    raw.get("operation_rows")
+                        .ok_or_else(|| invalid("operation_rows", "required screen field"))?
+                        .clone()
+                };
+                result.insert("operation_rows".into(), rows);
+            }
         }
+        validate_operation_rows(&result)?;
         if let Some(choices) = result["choices"].as_array_mut()
             && choices.len() > 128
         {
@@ -234,6 +245,22 @@ pub(super) fn digest(value: &Value) -> String {
         .collect()
 }
 
+fn validate_operation_rows(object: &Map<String, Value>) -> Result<(), CafleetError> {
+    let rows = object
+        .get("operation_rows")
+        .ok_or_else(|| invalid("operation_rows", "required nullable field"))?;
+    let consistent = match object.get("operation") {
+        Some(Value::String(_)) => rows.as_u64().is_some_and(|count| count > 0),
+        Some(Value::Null) => rows.is_null(),
+        _ => false,
+    };
+    require(
+        consistent,
+        "operation_rows",
+        "a positive row count exactly when an operation is present",
+    )
+}
+
 pub(crate) fn validate(value: &Value) -> Result<(), CafleetError> {
     let object = value
         .as_object()
@@ -290,6 +317,7 @@ pub(crate) fn validate(value: &Value) -> Result<(), CafleetError> {
         "truncated",
         "evidence_policy",
         "operation",
+        "operation_rows",
         "choices",
         "native_request_id",
         "excerpt",
@@ -323,6 +351,7 @@ pub(crate) fn validate(value: &Value) -> Result<(), CafleetError> {
             )?;
         }
     }
+    validate_operation_rows(object)?;
     require(
         value.to_string().len() <= EVIDENCE_LIMIT,
         "evidence_json",

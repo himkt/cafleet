@@ -109,7 +109,7 @@ const DRIVER_FULL_SIZE: TerminalSize = TerminalSize {
     cols: 120,
 };
 const DRIVER_WRAPPED_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 52 };
-const DRIVER_HERDR_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 89 };
+const DRIVER_BOXED_WRAP_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 89 };
 const APPROVED_CASES: [ApprovedCase; 14] = [
     ApprovedCase {
         id: "cells-002",
@@ -265,7 +265,7 @@ const APPROVED_CASES: [ApprovedCase; 14] = [
         probe_argument: Some("allow"),
         database: "nb89.db",
         socket: "tb89",
-        size: DRIVER_HERDR_SIZE,
+        size: DRIVER_BOXED_WRAP_SIZE,
     },
     ApprovedCase {
         id: "claude-boxed-cells-120-wide-operation-probe-01",
