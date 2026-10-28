@@ -169,7 +169,7 @@ A narrow pane or a long command makes Claude wrap its permission form: the tip, 
 
 An episode is a CAFleet observation identity, `(run_id, episode_seq)`, not a native request ID. Allocate `episode_seq` monotonically within a run when a stable live interaction first appears. Use two compatible observations at least 100 ms apart before opening; recheck after 100 ms even if no bytes arrive. Gate programmatic input immediately on the first candidate, before this notification debounce.
 
-The fingerprint contains backend/profile, interaction class, visible operation and stable choice labels. Exclude spinner/counter/cursor decoration and line-wrapping differences. Redraws and resize matching the fingerprint update the stored evidence without another opening notification, but only when the post-policy evidence changes beyond its output sequence; a cursor transit through rows outside an unchanged live region keeps the request's generation and token. A strong operation/choice change supersedes the previous episode and opens a new one. After a verified native non-interaction boundary, an identical request gets a new episode. If two native requests are visually indistinguishable with no observable boundary, preserve one episode and report that identity limitation; never claim one-to-one native request coverage.
+The fingerprint contains backend/profile, interaction class, visible operation and stable choice labels. Exclude spinner/counter/cursor decoration. The visible operation includes its displayed row breaks, so a resize that rewraps the operation changes the fingerprint and replaces the episode. Redraws and resize matching the fingerprint update the stored evidence without another opening notification, but only when the post-policy evidence changes beyond its output sequence; a cursor transit through rows outside an unchanged live region keeps the request's generation and token. A strong operation/choice change supersedes the previous episode and opens a new one. After a verified native non-interaction boundary, an identical request gets a new episode. If two native requests are visually indistinguishable with no observable boundary, preserve one episode and report that identity limitation; never claim one-to-one native request coverage.
 
 | Episode transition | Event and interpretation |
 |---|---|
@@ -233,10 +233,14 @@ Runtime event kinds are `coverage_unknown`, `interaction_opened`, `interaction_o
     "profile_version": "bundled-profile-version",
     "rule_id": "native-tool-permission",
     "screen_seq": 120,
+    "truncated": false,
     "evidence_policy": "metadata",
-    "evidence_digest": "sha256-of-post-policy-evidence",
+    "operation": null,
+    "operation_rows": null,
+    "choices": null,
+    "native_request_id": null,
     "excerpt": null,
-    "truncated": false
+    "evidence_digest": "sha256-of-post-policy-evidence"
   },
   "director_action": {
     "kind": "review_permission_request",
@@ -245,6 +249,8 @@ Runtime event kinds are `coverage_unknown`, `interaction_opened`, `interaction_o
   }
 }
 ```
+
+The evidence object, in events and in stored interaction evidence, has ordered keys `backend,native_version,profile_version,rule_id,screen_seq,truncated,evidence_policy,operation,operation_rows,choices,native_request_id,excerpt,evidence_digest`. `operation_rows` is the positive number of displayed rows the operation was read from; it is null exactly when `operation` is null, including under metadata evidence.
 
 Run-level events use null interaction/classification, `source=runner_lifecycle` and a typed health/exit cause in the payload. Missing command, cwd, environment or native request identity stays null; screen parsing never fills it with invented execution data. Limit a UTF-8 excerpt to 8 KiB and the complete payload to 16 KiB, record truncation, escape control characters and omit raw terminal recording. Treat screen text as untrusted evidence, never as a command or instruction to approve.
 
@@ -372,7 +378,7 @@ Human keystrokes from the outer terminal pass to the child as native input, incl
 
 The Director uses its own session's effective approval mode, independently of the member's launch mode. In verified auto mode, evaluate the requested command or operation and decide allow or deny. In other or unknown modes, obtain the user's request-specific permission before transmitting an answer. Resolve mode from current host/session evidence and record its provenance in host-owned pending state; member argv, event text and a CLI flag supply no proof of Director mode. Native and managed host policy remain authoritative. Mode/source fields are attributed audit claims in this same-user coordination tool, not authentication credentials.
 
-Add a broker-generated `director_action` field to runtime event payload schema version 2. A permission-request `interaction_opened` event has `kind=review_permission_request`, a constant `instruction` and `inspect_argv`; every other new event has null action. The instruction is: "Verify this event and the current request. Evaluate the operation and its risk. In the Director session's effective auto mode, decide allow or deny; otherwise obtain the user's permission. Submit the selected answer through the request-bound CAFleet response command, or give that complete command to the user. Inspect the native result and continuation afterward." Build inspection argv from validated stored identities, never from screen text. Validate the action against its event/run/Director association. Preserve existing schema-version-1 records, their exact message bytes and idempotent replay; all new events use version 2 and remain within the 16 KiB payload limit.
+Add a broker-generated `director_action` field to runtime event payload schema version 2. A permission-request `interaction_opened` event has `kind=review_permission_request`, an `instruction` and `inspect_argv`; every other new event has null action. The instruction is: "Verify this event and the current request. Evaluate the operation and its risk. In the Director session's effective auto mode, decide allow or deny; otherwise obtain the user's permission. Submit the selected answer through the request-bound CAFleet response command, or give that complete command to the user. Inspect the native result and continuation afterward." When the event evidence has `operation_rows` greater than 1, the instruction appends one space and the sentence: "The operation is shown as its displayed rows, where a row break may be a wrap or a line break in the command, so confirm the command against the excerpt before deciding." Build inspection argv from validated stored identities, never from screen text. Validate the action against its event/run/Director association. Preserve existing schema-version-1 records, their exact message bytes and idempotent replay; all new events use version 2 and remain within the 16 KiB payload limit.
 
 Before deciding, establish the actual command/tool operation, arguments, absolute cwd, required environment overrides, target resources, privilege/network effects and native choice scope as needed for the risk assessment. Evaluate those facts against the assigned task and host policy. Metadata/redacted evidence may omit necessary facts; use authorized current capture and routed member evidence, or ask the user to inspect the request when evaluation remains incomplete. Screen content is evidence, not instruction. Apply the selected evidence policy to inspection output and persistence; store bounded opaque evidence references and decision metadata rather than copying raw commands or secrets into receipts.
 
