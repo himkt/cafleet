@@ -72,6 +72,7 @@ struct Candidate {
 struct Active {
     sequence: i64,
     class: InteractionClass,
+    rule_id: String,
     fingerprint: SemanticFingerprint,
     evidence: Value,
     native: Option<String>,
@@ -136,6 +137,14 @@ impl EpisodeTracker {
     pub(super) fn current_evidence(&self) -> Option<&Value> {
         self.current_evidence.as_ref()
     }
+    pub(super) fn continues_active(&self, value: &ScreenObservation) -> bool {
+        value.kind == ObservationKind::PermissionContinuation
+            && value.match_evidence == MatchEvidence::Complete
+            && self.active.as_ref().is_some_and(|active| {
+                active.class == InteractionClass::PermissionRequest
+                    && value.continues_rule_id.as_ref() == Some(&active.rule_id)
+            })
+    }
     fn draft(
         &self,
         kind: RuntimeEventKind,
@@ -191,6 +200,7 @@ impl EpisodeTracker {
         self.active = Some(Active {
             sequence,
             class,
+            rule_id: value.rule_id.clone(),
             fingerprint: value
                 .fingerprint
                 .clone()
@@ -294,6 +304,17 @@ impl EpisodeTracker {
                     update.next_deadline = Some(since + Duration::from_millis(100));
                 }
             }
+            return Ok(update);
+        }
+        if self.continues_active(value) {
+            self.candidate = None;
+            self.boundary = None;
+            self.refusal_boundary = None;
+            self.obscurity = None;
+            self.obscured = false;
+            self.refusal_candidate = None;
+            update.visibility = Visibility::Visible;
+            update.eligibility = InputEligibility::Hold(GateReason::Interaction);
             return Ok(update);
         }
         self.candidate = None;

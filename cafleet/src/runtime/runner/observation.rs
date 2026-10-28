@@ -336,6 +336,7 @@ pub(crate) struct ObservationController {
     request_generation: u64,
     request_generation_failed: bool,
     current_request: Option<ObservedRequest>,
+    current_continuation: Option<ObservedContinuation>,
     transit_request: Option<ObservedRequest>,
     request_region: Option<RequestRegion>,
     current_classification: Option<storage::InteractionClass>,
@@ -403,6 +404,13 @@ impl ObservedRequest {
                 .zip(&other.answer_matches)
                 .all(|(a, b)| a.same_request(b))
     }
+}
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct ObservedContinuation {
+    pub(super) request_generation: u64,
+    pub(super) episode_seq: i64,
+    pub(super) rule_id: String,
+    pub(super) fingerprint: SemanticFingerprint,
 }
 pub(crate) struct OrderedObservation<'a> {
     controller: &'a mut ObservationController,
@@ -480,6 +488,7 @@ impl ObservationController {
             request_generation: 0,
             request_generation_failed: false,
             current_request: None,
+            current_continuation: None,
             transit_request: None,
             request_region: None,
             current_classification: None,
@@ -493,6 +502,15 @@ impl ObservationController {
     pub(crate) fn current_request(&self) -> Option<&ObservedRequest> {
         self.current_request.as_ref()
     }
+    pub(super) fn current_continuation(&self) -> Option<&ObservedContinuation> {
+        self.current_continuation.as_ref()
+    }
+    pub(super) fn gap_count(&self) -> u64 {
+        self.gap_count
+    }
+    pub(super) fn active_episode_seq(&self) -> Option<i64> {
+        self.tracker.active_episode().map(|(sequence, _)| sequence)
+    }
     pub(super) fn request_generation(&self) -> u64 {
         self.request_generation
     }
@@ -504,6 +522,7 @@ impl ObservationController {
     }
     fn invalidate_request(&mut self) -> Result<()> {
         self.current_request = None;
+        self.current_continuation = None;
         self.transit_request = None;
         self.request_region = None;
         match self.request_generation.checked_add(1) {
@@ -606,6 +625,20 @@ impl ObservationController {
             request.request_generation = self.request_generation;
             request
         });
+        self.current_continuation = match (&self.current_request, self.tracker.active_episode()) {
+            (None, Some((episode_seq, _))) if self.tracker.continues_active(observed) => {
+                Some(ObservedContinuation {
+                    request_generation: self.request_generation,
+                    episode_seq,
+                    rule_id: observed.rule_id.clone(),
+                    fingerprint: observed
+                        .fingerprint
+                        .clone()
+                        .expect("a continuation observation has its fingerprint"),
+                })
+            }
+            _ => None,
+        };
         Ok(())
     }
     fn cursor_transit(&self, screen: &ScreenSnapshot, observed: &ScreenObservation) -> bool {

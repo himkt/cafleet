@@ -5,11 +5,11 @@ pub(crate) use native_version::version_token;
 mod policy;
 pub use policy::LaunchPolicySelection;
 mod profiles;
-pub(crate) use profiles::AnswerStage;
 #[cfg(test)]
 pub(crate) use profiles::ScreenRegion;
 pub use profiles::{AnswerCapability, NativeCapabilities, ProfileCatalog};
 pub(crate) use profiles::{AnswerMatch, AnswerPlan};
+pub(crate) use profiles::{AnswerStage, StageGate};
 #[cfg_attr(
     not(test),
     expect(

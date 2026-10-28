@@ -130,6 +130,76 @@
       "cols": 120,
       "source_ref": "native/codex-0.163.0-idle-composer-1.json",
       "sha256": "f7337eae171edcce09eafad4750e7b2fa6354b680adff0c3089ec435be5c5a2b"
+    },
+    {
+      "id": "opencode-2.1.4-ask-permission-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/opencode-2.1.4-ask-permission-1.json",
+      "sha256": "f8606322a6faf5df5e6ffdb25f21d690df3a0ec5e91a5aa4c63e3f52d2bbe128"
+    },
+    {
+      "id": "opencode-2.1.4-allow-pre-stage-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/opencode-2.1.4-allow-pre-stage-1.json",
+      "sha256": "6cd2660312def5f7b98ca721b21b496363a8e144626232da7501d934c3c3a48c"
+    },
+    {
+      "id": "opencode-2.1.4-deny-pre-stage-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/opencode-2.1.4-deny-pre-stage-1.json",
+      "sha256": "9fedaa45eea2926a64f670f8a3b4dddca1f7e0bbe016945f9b3db126f7a101a6"
+    },
+    {
+      "id": "opencode-2.1.4-deny-pre-stage-2",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/opencode-2.1.4-deny-pre-stage-2.json",
+      "sha256": "ccd905bf5281e118a63d91113bf1ad3b52af467f0628fec37cf9523e249b5453"
+    },
+    {
+      "id": "opencode-2.1.4-deny-pre-stage-3",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/opencode-2.1.4-deny-pre-stage-3.json",
+      "sha256": "3798bcc074effaac341626c326ee75b5af94615a41e6a9891118332d13910369"
+    },
+    {
+      "id": "opencode-2.1.4-focus-always-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/opencode-2.1.4-focus-always-1.json",
+      "sha256": "db4f7af2265b56b88f0a334a9ea9e911a81a718ba04546224e752dc1866c691b"
+    },
+    {
+      "id": "opencode-2.1.4-idle-composer-1",
+      "kind": "native",
+      "backend": "opencode",
+      "native_version": "2.1.4",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/opencode-2.1.4-idle-composer-1.json",
+      "sha256": "452104eb3591416d73d5cdab317c78df7de3980c062be2695c52be5ebe2b9be5"
     }
   ],
   "profiles": [
@@ -322,6 +392,128 @@
               {"bytes_hex": "33", "required_rule_id": "codex-exec-approval", "required_choice_id": "deny-once"}
             ],
             "fixture_ids": ["codex-0.163.0-deny-pre-stage-1"]
+          }
+        ]
+      }
+    },
+    {
+      "backend": "opencode",
+      "native_versions": ["2.1.4"],
+      "profile_version": "opencode-2.1.4-cafleet-ask-1",
+      "rules": [
+        {
+          "id": "opencode-shell-permission",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "primary",
+            "start_pattern": "^  △ Permission required\\s*$",
+            "end_pattern": "  ⇆ select  enter confirm  esc reject\\s*$",
+            "max_rows": 24,
+            "cursor": "any"
+          },
+          "matchers": [
+            {"id": "heading", "scope": "line", "pattern": "^  △ Permission required\\s*$"},
+            {"id": "shell", "scope": "line", "pattern": "^   # Shell command(?:\\s|$)"},
+            {"id": "operation", "scope": "line", "pattern": "^  \\$ (?P<operation>\\S.*?)\\s*(?:█\\s*)?$"},
+            {"id": "focus", "scope": "line", "pattern": "^   Allow once   (?:Always allow   )?Reject +⇆ select  enter confirm  esc reject\\s*$", "focus_style": "background"},
+            {"id": "allow", "scope": "line", "pattern": "^   (?P<label>Allow once)   "},
+            {"id": "deny", "scope": "line", "pattern": "(?:Allow once|Always allow)   (?P<label>Reject) "}
+          ],
+          "extract": {
+            "operation": {"matcher_id": "operation", "capture": "operation"},
+            "choices": [
+              {"id": "allow-once", "label": {"matcher_id": "allow", "capture": "label"}, "scope": "single_request"},
+              {"id": "deny-once", "label": {"matcher_id": "deny", "capture": "label"}, "scope": "single_request"}
+            ],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "opencode-reject-reason",
+          "priority": 100,
+          "observation": "permission_continuation",
+          "region": {
+            "screen": "primary",
+            "start_pattern": "^  △ Reject permission\\s*$",
+            "end_pattern": "  enter confirm  esc cancel\\s*$",
+            "max_rows": 24,
+            "cursor": "any"
+          },
+          "matchers": [
+            {"id": "heading", "scope": "line", "pattern": "^  △ Reject permission\\s*$"},
+            {"id": "prompt", "scope": "line", "pattern": "^  Tell OpenCode what to do differently\\s*$"},
+            {"id": "empty", "scope": "line", "pattern": "^  Tell OpenCode what to do differently {2,}enter confirm  esc cancel\\s*$"}
+          ],
+          "extract": {
+            "operation": null,
+            "choices": [],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false,
+          "continues_rule_id": "opencode-shell-permission",
+          "continues_choice_id": "deny-once",
+          "fixture_ids": ["opencode-2.1.4-deny-pre-stage-3"]
+        },
+        {
+          "id": "opencode-idle-composer",
+          "priority": 50,
+          "observation": "composer_empty",
+          "region": {
+            "screen": "primary",
+            "start_pattern": "^┃ ",
+            "end_pattern": "^┃ ",
+            "max_rows": 1,
+            "cursor": "at_end"
+          },
+          "matchers": [
+            {"id": "prompt", "scope": "line", "pattern": "^┃ "}
+          ],
+          "extract": {
+            "operation": null,
+            "choices": [],
+            "native_request_id": null
+          },
+          "verified_noninteraction": true,
+          "sensitive": false
+        }
+      ],
+      "capabilities": {
+        "detection": {
+          "rule_ids": ["opencode-shell-permission"],
+          "fixture_ids": ["opencode-2.1.4-ask-permission-1"]
+        },
+        "composer": {
+          "rule_ids": ["opencode-idle-composer"],
+          "fixture_ids": ["opencode-2.1.4-idle-composer-1"]
+        },
+        "answers": [
+          {
+            "decision": "allow",
+            "request_rule_id": "opencode-shell-permission",
+            "answer_rule_id": "opencode-shell-allow-once",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {"bytes_hex": "0d", "required_rule_id": "opencode-shell-permission", "required_choice_id": "allow-once", "required_focus_choice_id": "allow-once"}
+            ],
+            "fixture_ids": ["opencode-2.1.4-allow-pre-stage-1"]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "opencode-shell-permission",
+            "answer_rule_id": "opencode-shell-deny-once",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {"bytes_hex": "68", "required_rule_id": "opencode-shell-permission", "required_choice_id": "deny-once", "required_focus_choice_id": "allow-once"},
+              {"bytes_hex": "0d", "required_rule_id": "opencode-shell-permission", "required_choice_id": "deny-once", "required_focus_choice_id": "deny-once"},
+              {"bytes_hex": "0d", "required_rule_id": "opencode-shell-permission", "required_choice_id": "deny-once", "required_screen_rule_id": "opencode-reject-reason"}
+            ],
+            "fixture_ids": ["opencode-2.1.4-deny-pre-stage-1", "opencode-2.1.4-deny-pre-stage-2", "opencode-2.1.4-deny-pre-stage-3"]
           }
         ]
       }

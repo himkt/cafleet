@@ -1,7 +1,7 @@
 # OpenCode Ask Permission Forms
 
 **Status**: Approved
-**Progress**: 9/20 tasks complete
+**Progress**: 11/20 tasks complete
 **Last Updated**: 2026-10-28
 
 ## Overview
@@ -355,9 +355,9 @@ Record detection-to-inbox latency, the CAFleet commit, versions, geometry and ev
 ### Step 5: Implement the profile
 
 - [ ] Write synthetic engine tests: catalog validation of gates (unknown choice, partial gating, final gate on another choice, a screen gate on an unknown or unrelated continuation rule or without its `continues_choice_id` stage before it, a continuation rule with operation or choices, a `1b` byte in any backend's stage), continuation screens (keeping the active episode open and `Visible` with no event or obscured timer, an unknown screen without an active episode, no inspection token, the succession binding and its rejection after human input, a gap or a different episode, a non-empty reason never satisfying the gate, the episode closing before the final stage failing as `uncertain`), `focus_style` resolution (one, none, several, an option without a choice entry and a different theme's colours), a styling-only focus change starting a new request generation, `cell_backgrounds` loading (geometry, masked rows, overlap, colour shape, absent key) and replay, a gated stage never written while its gate is unmet, the expected focus transition rebinding the selection without a new token, every other change between stages failing as `uncertain` with no further byte, waiting while the previous focus persists until the deadline, and unchanged ungated Claude and Codex plans. <!-- completed: -->
-- [ ] Implement the optional `required_focus_choice_id` and `required_screen_rule_id`, their catalog validation, `focus_style` resolution and the resolved focus in the request identity, the `permission_continuation` rule kind in the detector and episode tracker, the fixture's optional `cell_backgrounds` in the loader and replay, and the runner's per-stage gate, expected focus transition and continuation binding. <!-- completed: -->
+- [x] Implement the optional `required_focus_choice_id` and `required_screen_rule_id`, their catalog validation, `focus_style` resolution and the resolved focus in the request identity, the `permission_continuation` rule kind in the detector and episode tracker, the fixture's optional `cell_backgrounds` in the loader and replay, and the runner's per-stage gate, expected focus transition and continuation binding. <!-- completed: 2026-10-28T13:19 -->
 - [ ] Write fixture-backed tests: detection on the form fixture, each answer stage's gate holding on its pre-stage fixture (the stage-3 continuation on the empty rejection-reason dialog), no gate holding on the `Always allow`-focused fixture, the idle composer as a verified non-interaction boundary, no detection on the idle-composer fixture and on synthetic screens that carry form or dialog text outside a live region, no answer plan for an "always" choice, and catalog capability results for OpenCode 2.1.4 and for another OpenCode version. <!-- completed: -->
-- [ ] Add the native fixtures and profile `opencode-2.1.4-cafleet-ask-1` to the bundled catalog and its embedded fixture table. <!-- completed: -->
+- [x] Add the native fixtures and profile `opencode-2.1.4-cafleet-ask-1` to the bundled catalog and its embedded fixture table. <!-- completed: 2026-10-28T13:19 -->
 - [ ] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck`. <!-- completed: -->
 
 ### Step 6: Accept natively

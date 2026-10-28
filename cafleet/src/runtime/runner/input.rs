@@ -1,7 +1,7 @@
 use super::{
     ControlIdentity, DrainedInput, InputControlOperation, InputControlReply, InputControlRequest,
-    InputDrain, InputEligibility, ObservationController, ProgrammaticWrite, PtyIo,
-    SubmissionResult, SubmissionStatus, Visibility, canonical_json, validate_operation_key,
+    InputDrain, InputEligibility, ObservationController, ObservedContinuation, ProgrammaticWrite,
+    PtyIo, SubmissionResult, SubmissionStatus, Visibility, canonical_json, validate_operation_key,
 };
 use super::{
     InputFailure, ProcessIdentity, Result, RunLock, SubmissionStage, Transport, check_deadline,
@@ -16,7 +16,7 @@ use crate::broker::members::db_err;
 use crate::broker::records::{MemberKind, Placement};
 use crate::broker::runtime::{self as storage, OwnerKind, RunRecord, RunStatus};
 use crate::coding_agent::{
-    AnswerMatch, AnswerPlan, AnswerStage, ProfileCatalog, SemanticFingerprint,
+    AnswerMatch, AnswerPlan, AnswerStage, ProfileCatalog, SemanticFingerprint, StageGate,
 };
 use crate::coding_agent::{ComposerOperation, coding_agent};
 use crate::error::CafleetError;
@@ -3739,8 +3739,17 @@ enum InputPhase {
 struct PermissionSelection {
     request: storage::NewPermissionResponse,
     binding: CurrentRequest,
+    continuation: Option<ObservedContinuation>,
+    gap_count: u64,
     plan: AnswerPlan,
 }
+enum StageGateProgress {
+    Ready,
+    Waiting,
+}
+// A gate still unmet this close to the response deadline fails now, so the written stages'
+// uncertainty is persisted within the original budget.
+const GATE_FINALIZATION_RESERVE: std::time::Duration = std::time::Duration::from_millis(100);
 
 enum RetainedSelection {
     Composer,
@@ -4237,6 +4246,16 @@ impl InputCoordinator {
             .as_ref()
             .ok_or_else(|| error("current permission token unavailable"))?;
         let bound = &selection.binding;
+        if let Some(continuation) = &selection.continuation {
+            return ensure(
+                token == &selection.request.metadata.request_token
+                    && self.manual_generation == bound.manual_generation
+                    && observation.gap_count() == selection.gap_count
+                    && observation.request_generation() == continuation.request_generation
+                    && observation.current_continuation() == Some(continuation),
+                "permission continuation binding changed",
+            );
+        }
         let observed = observation
             .current_request()
             .ok_or_else(|| error("current permission request unavailable"))?;
@@ -4271,6 +4290,166 @@ impl InputCoordinator {
             "selected permission plan changed",
         )?;
         Ok(())
+    }
+
+    /// Before each gated stage, holds the plan until the observation shows that stage's gate.
+    /// After a complete earlier stage it accepts exactly the transition the gate names and
+    /// rebinds the in-flight selection to it without minting a token.
+    fn advance_stage_gate(
+        &mut self,
+        observation: &ObservationController,
+    ) -> Result<StageGateProgress> {
+        let Some(pending) = self.pending.as_ref() else {
+            return Ok(StageGateProgress::Ready);
+        };
+        let Some(selection) = pending.permission.clone() else {
+            return Ok(StageGateProgress::Ready);
+        };
+        let id = pending
+            .input_id
+            .ok_or_else(|| error("permission reservation absent"))?;
+        let RetainedSelection::Permission { next_stage, .. } = &self
+            .operations
+            .get(&id)
+            .ok_or_else(|| error("retained permission selection absent"))?
+            .selection
+        else {
+            return Err(error("permission stage target changed"));
+        };
+        let next_stage = *next_stage;
+        let Some(gate) = selected_answer_stage(&selection.plan, next_stage)?
+            .gate()
+            .cloned()
+        else {
+            return Ok(StageGateProgress::Ready);
+        };
+        let bound = &selection.binding;
+        let bound_focus = || {
+            bound
+                .answer_matches
+                .iter()
+                .find(|matched| matched.plan() == &selection.plan)
+                .and_then(AnswerMatch::focused_choice_id)
+        };
+        let holds = match (&gate, &selection.continuation) {
+            (StageGate::Focus(choice), None) => bound_focus() == Some(choice.as_str()),
+            (StageGate::Screen(rule), Some(continuation)) => &continuation.rule_id == rule,
+            _ => false,
+        };
+        if holds {
+            return Ok(StageGateProgress::Ready);
+        }
+        ensure(next_stage > 0, "the first stage's gate does not hold")?;
+        ensure(
+            self.manual_generation == bound.manual_generation
+                && !self.manual_accounting_failed
+                && !self.input_fenced
+                && self.observation_blocker.is_none()
+                && observation.status().diagnostic.is_none()
+                && observation.gap_count() == selection.gap_count,
+            "input or observation changed between answer stages",
+        )?;
+        ensure(
+            observation.active_episode_seq() == Some(bound.episode_seq),
+            "the permission episode changed between answer stages",
+        )?;
+        let deadline = self
+            .pending
+            .as_ref()
+            .expect("validated pending permission")
+            .deadline;
+        let waiting = || {
+            ensure(
+                Instant::now() + GATE_FINALIZATION_RESERVE < deadline,
+                "the next stage's gate did not hold before the response deadline",
+            )
+            .map(|()| StageGateProgress::Waiting)
+        };
+        let observed = observation.current_request();
+        let unchanged = observed.is_some_and(|observed| {
+            selection.continuation.is_none()
+                && observed.request_generation == bound.request_generation
+                && observed.focus == bound.focus
+        });
+        let rebound = match &gate {
+            StageGate::Focus(choice) => {
+                ensure(
+                    observation.current_continuation().is_none(),
+                    "an unexpected continuation screen appeared between answer stages",
+                )?;
+                let Some(observed) = observed.filter(|_| !unchanged) else {
+                    return waiting();
+                };
+                let focused = observed
+                    .answer_matches
+                    .iter()
+                    .find(|matched| matched.plan() == &selection.plan)
+                    .and_then(AnswerMatch::focused_choice_id);
+                ensure(
+                    observed.episode_seq == bound.episode_seq
+                        && observed.request_rule_id == bound.request_rule_id
+                        && observed.semantic == bound.semantic
+                        && observed.choices == bound.choices
+                        && observed.native_correlation == bound.native_correlation
+                        && focused == Some(choice.as_str()),
+                    "the request changed other than to the next stage's focus",
+                )?;
+                PermissionSelection {
+                    request: selection.request.clone(),
+                    binding: CurrentRequest {
+                        request_generation: observed.request_generation,
+                        focus: observed.focus.clone(),
+                        output_seq: observed.output_seq,
+                        answer_matches: observed.answer_matches.clone(),
+                        ..bound.clone()
+                    },
+                    continuation: None,
+                    gap_count: selection.gap_count,
+                    plan: selection.plan.clone(),
+                }
+            }
+            StageGate::Screen(rule) => {
+                let Some(continuation) = observation.current_continuation() else {
+                    ensure(
+                        observed.is_none() || unchanged,
+                        "the request changed instead of opening its continuation",
+                    )?;
+                    return waiting();
+                };
+                ensure(
+                    &continuation.rule_id == rule && continuation.episode_seq == bound.episode_seq,
+                    "a different continuation screen appeared",
+                )?;
+                PermissionSelection {
+                    request: selection.request.clone(),
+                    binding: bound.clone(),
+                    continuation: Some(continuation.clone()),
+                    gap_count: selection.gap_count,
+                    plan: selection.plan.clone(),
+                }
+            }
+        };
+        let rebound = Arc::new(rebound);
+        if rebound.continuation.is_none() {
+            let (_, token) = self
+                .current_request
+                .take()
+                .ok_or_else(|| error("current permission token unavailable"))?;
+            self.current_request = Some((rebound.binding.clone(), token));
+        }
+        let retained = self
+            .operations
+            .get_mut(&id)
+            .expect("validated retained permission selection");
+        let RetainedSelection::Permission { selection, .. } = &mut retained.selection else {
+            unreachable!("validated permission selection");
+        };
+        *selection = rebound.clone();
+        self.pending
+            .as_mut()
+            .expect("validated pending permission")
+            .permission = Some(rebound);
+        Ok(StageGateProgress::Ready)
     }
 
     fn validate_permission_association(
@@ -4438,6 +4617,8 @@ impl InputCoordinator {
                     },
                 },
                 binding: binding.clone(),
+                continuation: None,
+                gap_count: observation.gap_count(),
                 plan,
             });
             if let Some(receipt) = &history {
@@ -5617,6 +5798,9 @@ impl InputCoordinator {
                 .and_then(|pending| pending.input_id)
                 .ok_or_else(|| error("input writer has no reservation"))?;
             if phase == InputPhase::AwaitBeforeWrite {
+                if let StageGateProgress::Waiting = self.advance_stage_gate(observation)? {
+                    return Ok(None);
+                }
                 let Some(output_seq) = self.fresh_drain(transport, observation, effective)? else {
                     return Ok(None);
                 };

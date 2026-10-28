@@ -11,7 +11,7 @@ pub(crate) use catalog::inspection_tests::{
     gated_fixture_form_styled, gated_reason_dialog, inspection_fixture_definition,
     inspection_fixture_form,
 };
-pub(crate) use catalog::{AnswerPlan, AnswerStage};
+pub(crate) use catalog::{AnswerPlan, AnswerStage, StageGate};
 pub use catalog::{NativeCapabilities, ProfileCatalog};
 pub(crate) use composer::{ComposerOperation, ComposerPlan};
 pub(crate) use detector::*;
