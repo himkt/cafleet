@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "fixtures": [
+    {
+      "id": "claude-2.1.302-default-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude-2.1.302-default-permission-1.json",
+      "sha256": "be7c9c5c62f7fd73939d7838c7b6457c1db47d238956bc25e48da58cb7e95c8f"
+    }
+  ],
+  "profiles": [
+    {
+      "backend": "claude",
+      "native_versions": ["2.1.302"],
+      "profile_version": "claude-2.1.302-default-1",
+      "rules": [
+        {
+          "id": "claude-bash-permission",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^ Bash command$",
+            "end_pattern": "^ Esc to cancel · Tab to amend$",
+            "max_rows": 16,
+            "cursor": "inside"
+          },
+          "matchers": [
+            {"id": "heading", "scope": "line", "pattern": "^ Bash command$"},
+            {"id": "operation", "scope": "region", "pattern": "(?m)^╌{3,}\\n (?P<operation>[^\\n]+)\\n╌{3,}$"},
+            {"id": "approval", "scope": "line", "pattern": "^ This command requires approval$"},
+            {"id": "question", "scope": "line", "pattern": "^ Do you want to proceed\\?$"},
+            {"id": "focus", "scope": "line", "pattern": "^ ❯ [1-9]\\. "},
+            {"id": "allow", "scope": "line", "pattern": "^ [❯ ] 1\\. (?P<label>Yes)$"},
+            {"id": "deny", "scope": "line", "pattern": "^ [❯ ] 4\\. (?P<label>No)$"}
+          ],
+          "extract": {
+            "operation": {"matcher_id": "operation", "capture": "operation"},
+            "choices": [
+              {"id": "allow-once", "label": {"matcher_id": "allow", "capture": "label"}, "scope": "single_request"},
+              {"id": "deny-once", "label": {"matcher_id": "deny", "capture": "label"}, "scope": "single_request"}
+            ],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        }
+      ],
+      "capabilities": {
+        "detection": {
+          "rule_ids": ["claude-bash-permission"],
+          "fixture_ids": ["claude-2.1.302-default-permission-1"]
+        },
+        "composer": null,
+        "answers": []
+      }
+    }
+  ]
+}

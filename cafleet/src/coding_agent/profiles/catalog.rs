@@ -4,7 +4,7 @@ use super::{AnswerCapability, CodingAgent, PermissionDecision};
 use crate::broker::runtime::Coverage;
 use crate::error::CafleetError;
 use regex::Regex;
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 use std::collections::BTreeSet;
 type Result<T> = std::result::Result<T, CafleetError>;
 fn invalid(message: impl Into<String>) -> CafleetError {
@@ -14,6 +14,7 @@ fn invalid(message: impl Into<String>) -> CafleetError {
 #[cfg(test)]
 pub(super) mod inspection_tests {
     use super::*;
+    use serde_json::json;
 
     pub(crate) fn inspection_fixture_definition() -> Value {
         let mut value: Value = serde_json::from_str(include_str!(
@@ -665,10 +666,121 @@ fn composer_submissions(
     ])
 }
 
+const BUNDLED_DEFINITIONS: &str = include_str!("bundled.json");
+const BUNDLED_FIXTURES: &[(&str, &[u8])] = &[(
+    "native/claude-2.1.302-default-permission-1.json",
+    include_bytes!("native/claude-2.1.302-default-permission-1.json"),
+)];
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn verify_native_screen(entry: &Value, embedded: &[(&str, &[u8])]) -> Result<()> {
+    let id = text(&entry["id"])?;
+    require(
+        entry["kind"] == "native",
+        "bundled fixtures require native provenance",
+    )?;
+    let source = text(&entry["source_ref"])?;
+    let bytes = embedded
+        .iter()
+        .find(|(reference, _)| *reference == source)
+        .map(|(_, bytes)| *bytes)
+        .ok_or_else(|| invalid("bundled fixture bytes are not embedded"))?;
+    require(
+        sha256_hex(bytes) == text(&entry["sha256"])?,
+        "bundled fixture digest mismatch",
+    )?;
+    let screen: Value = serde_json::from_slice(bytes)
+        .map_err(|cause| invalid(format!("bundled fixture: {cause}")))?;
+    let m = object(
+        &screen,
+        &[
+            "schema_version",
+            "fixture_id",
+            "provenance",
+            "backend",
+            "native_version",
+            "rows",
+            "cols",
+            "alternate_screen",
+            "screen_seq",
+            "cursor_row",
+            "cursor_col",
+            "lines",
+            "masked_rows",
+        ],
+    )?;
+    require(
+        m["schema_version"].as_u64() == Some(1)
+            && text(&m["fixture_id"])? == id
+            && m["provenance"] == "native"
+            && m["backend"] == entry["backend"]
+            && m["native_version"] == entry["native_version"]
+            && m["rows"] == entry["rows"]
+            && m["cols"] == entry["cols"],
+        "bundled fixture identity differs from its catalog entry",
+    )?;
+    let rows = positive(&m["rows"])?;
+    let cols = positive(&m["cols"])?;
+    boolean(&m["alternate_screen"])?;
+    m["screen_seq"]
+        .as_u64()
+        .ok_or_else(|| invalid("fixture screen sequence required"))?;
+    require(
+        m["cursor_row"]
+            .as_u64()
+            .is_some_and(|row| row < u64::from(rows))
+            && m["cursor_col"]
+                .as_u64()
+                .is_some_and(|col| col < u64::from(cols)),
+        "fixture cursor outside its geometry",
+    )?;
+    let lines = array(&m["lines"])?;
+    require(
+        lines.len() == usize::from(rows) && lines.iter().all(Value::is_string),
+        "fixture lines must cover every row",
+    )?;
+    let mut masked = BTreeSet::new();
+    for mask in array(&m["masked_rows"])? {
+        let mask = object(mask, &["row", "reason"])?;
+        let row = mask["row"]
+            .as_u64()
+            .and_then(|row| usize::try_from(row).ok())
+            .filter(|row| *row < lines.len())
+            .ok_or_else(|| invalid("masked row outside fixture geometry"))?;
+        require(masked.insert(row), "duplicate masked row")?;
+        require(
+            mask["reason"] == "reviewed_privacy",
+            "masked rows require reviewed privacy",
+        )?;
+        require(
+            lines[row].as_str().is_some_and(str::is_empty),
+            "masked row must be empty",
+        )?;
+    }
+    Ok(())
+}
+
 impl ProfileCatalog {
     pub fn bundled() -> Result<Self> {
-        let catalog =
-            Self::from_definitions(&json!({"schema_version":1,"fixtures":[],"profiles":[]}))?;
+        let definitions: Value = serde_json::from_str(BUNDLED_DEFINITIONS)
+            .map_err(|cause| invalid(format!("bundled definitions: {cause}")))?;
+        Self::from_bundled_definitions(&definitions, BUNDLED_FIXTURES)
+    }
+    pub(crate) fn from_bundled_definitions(
+        definitions: &Value,
+        embedded: &[(&str, &[u8])],
+    ) -> Result<Self> {
+        let catalog = Self::from_definitions(definitions)?;
+        for entry in array(&definitions["fixtures"])? {
+            verify_native_screen(entry, embedded)?;
+        }
         require(
             catalog.profiles.iter().all(|profile| {
                 profile
