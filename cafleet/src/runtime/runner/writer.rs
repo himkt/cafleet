@@ -338,6 +338,10 @@ impl EventWriter {
         self.try_submit(transition)
             .map_err(|retained| retained.cause)
     }
+    #[cfg(test)]
+    pub(crate) fn joined(&self) -> bool {
+        self.thread.is_none()
+    }
     pub(crate) fn try_refresh(
         &self,
         update: InteractionEvidenceUpdate,
@@ -483,8 +487,6 @@ pub(super) mod contract_tests {
     use super::*;
     use crate::broker::runtime::*;
     use crate::runtime::runner_tests::Fixture;
-    mod controller;
-    mod input_drain;
     mod refresh {
         use super::worker::{Hooks, Release, committed, start, wait_until};
         use super::*;
@@ -695,30 +697,30 @@ pub(super) mod contract_tests {
             writer.finish(deadline());
         }
     }
-    mod support {
+    pub(in crate::runtime::runner) mod support {
         use super::*;
         use crate::coding_agent::ProfileCatalog;
         use crate::runtime::runner_tests::owned_child::OwnedChild;
         use std::process::{Command, Stdio};
 
-        pub(super) const VERSION: &str = "synthetic-0.0.1";
-        pub(super) const PROFILE: &str = "synthetic-profile-1";
-        pub(super) const NOW: &str = "2026-10-26T16:40:00.000000+00:00";
-        pub(super) fn definitions() -> Value {
+        pub(in crate::runtime::runner) const VERSION: &str = "synthetic-0.0.1";
+        pub(in crate::runtime::runner) const PROFILE: &str = "synthetic-profile-1";
+        pub(in crate::runtime::runner) const NOW: &str = "2026-10-26T16:40:00.000000+00:00";
+        pub(in crate::runtime::runner) fn definitions() -> Value {
             serde_json::from_str(include_str!(
                 "../runner_tests/fixtures/synthetic-profile.json"
             ))
             .unwrap()
         }
-        pub(super) fn catalog() -> ProfileCatalog {
+        pub(in crate::runtime::runner) fn catalog() -> ProfileCatalog {
             ProfileCatalog::from_definitions(&definitions()).unwrap()
         }
-        pub(super) fn configure(fixture: &mut WriterFixture) {
+        pub(in crate::runtime::runner) fn configure(fixture: &mut WriterFixture) {
             fixture.fixture.conn.execute("UPDATE member_runs SET native_version=?1,profile_version=?2,coverage='tested',runner_pid=owner_pid,runner_start_identity=owner_start_identity WHERE run_id=?3",rusqlite::params![VERSION,PROFILE,fixture.fixture.run.run_id]).unwrap();
             fixture.fixture.run =
                 storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
         }
-        pub(super) fn configure_redacted(fixture: &mut WriterFixture) {
+        pub(in crate::runtime::runner) fn configure_redacted(fixture: &mut WriterFixture) {
             configure(fixture);
             fixture
                 .fixture
@@ -731,18 +733,18 @@ pub(super) mod contract_tests {
             fixture.fixture.run =
                 storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
         }
-        pub(super) struct Clock {
+        pub(in crate::runtime::runner) struct Clock {
             origin: Instant,
             millis: AtomicU64,
         }
         impl Clock {
-            pub(super) fn new() -> Self {
+            pub(in crate::runtime::runner) fn new() -> Self {
                 Self {
                     origin: Instant::now(),
                     millis: AtomicU64::new(0),
                 }
             }
-            pub(super) fn set(&self, millis: u64) {
+            pub(in crate::runtime::runner) fn set(&self, millis: u64) {
                 self.millis.store(millis, Ordering::Release);
             }
         }
@@ -758,12 +760,15 @@ pub(super) mod contract_tests {
                 ObservationClockKind::Deterministic
             }
         }
-        pub(super) struct ChildGuard {
+        pub(in crate::runtime::runner) struct ChildGuard {
             pub child: OwnedChild,
             pub identity: ProcessIdentity,
         }
         impl ChildGuard {
-            pub(super) fn spawn(executable: &std::path::Path, arguments: &[String]) -> Self {
+            pub(in crate::runtime::runner) fn spawn(
+                executable: &std::path::Path,
+                arguments: &[String],
+            ) -> Self {
                 let child = OwnedChild::new(
                     Command::new(executable)
                         .args(arguments)
@@ -779,22 +784,25 @@ pub(super) mod contract_tests {
                 Self { child, identity }
             }
         }
-        pub(super) fn running(fixture: &mut WriterFixture, child: &ProcessIdentity) {
+        pub(in crate::runtime::runner) fn running(
+            fixture: &mut WriterFixture,
+            child: &ProcessIdentity,
+        ) {
             fixture.fixture.conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3 WHERE run_id=?4",rusqlite::params![child.pid,child.start_identity,NOW,fixture.fixture.run.run_id]).unwrap();
             fixture.fixture.run =
                 storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
         }
-        pub(super) fn form(operation: &str) -> Vec<u8> {
+        pub(in crate::runtime::runner) fn form(operation: &str) -> Vec<u8> {
             format!("\x1b[2J\x1b[19;1HSynthetic permission request\r\nOperation: {operation}\r\n> Allow once\r\n  Deny once\r\nRequest form: synthetic-only\r\nSelection: ").into_bytes()
         }
-        pub(super) fn detailed_form(operation: &str, detail: &str) -> Vec<u8> {
+        pub(in crate::runtime::runner) fn detailed_form(operation: &str, detail: &str) -> Vec<u8> {
             format!("\x1b[2J\x1b[18;1HSynthetic permission request\r\nOperation: {operation}\r\n> Allow once\r\n  Deny once\r\nRequest form: synthetic-only\r\nDetail: {detail}\r\nSelection: ").into_bytes()
         }
         // Rewrites only the non-fingerprint detail row of `detailed_form` and returns the cursor to the end of `Selection: `.
-        pub(super) fn detail_rewrite(detail: &str) -> Vec<u8> {
+        pub(in crate::runtime::runner) fn detail_rewrite(detail: &str) -> Vec<u8> {
             format!("\x1b[23;1H\x1b[2KDetail: {detail}\x1b[24;12H").into_bytes()
         }
-        pub(super) fn redacted_policy() -> storage::evidence::EvidencePolicy {
+        pub(in crate::runtime::runner) fn redacted_policy() -> storage::evidence::EvidencePolicy {
             storage::evidence::EvidencePolicy::redacted(
                 &serde_json::json!({"schema_version":1,"patterns":["synthetic-redaction-canary"],"sensitive_rules":[]}),
                 &["synthetic-permission"],
@@ -802,7 +810,7 @@ pub(super) mod contract_tests {
             .unwrap()
         }
     }
-    mod worker {
+    pub(in crate::runtime::runner) mod worker {
         use super::*;
         use std::sync::Condvar;
 
@@ -824,12 +832,12 @@ pub(super) mod contract_tests {
             ordinal: u64,
         }
         #[derive(Default)]
-        pub(super) struct Hooks {
+        pub(in crate::runtime::runner) struct Hooks {
             state: Mutex<HookState>,
             changed: Condvar,
         }
         impl Hooks {
-            pub(super) fn pause(&self, boundary: WriterBoundary) {
+            pub(in crate::runtime::runner) fn pause(&self, boundary: WriterBoundary) {
                 self.state.lock().unwrap().paused[index(boundary)] = true;
             }
             fn release_for_cleanup(&self) {
@@ -844,10 +852,10 @@ pub(super) mod contract_tests {
                 drop(state);
                 self.changed.notify_all();
             }
-            pub(super) fn fail_once(&self, boundary: WriterBoundary) {
+            pub(in crate::runtime::runner) fn fail_once(&self, boundary: WriterBoundary) {
                 self.state.lock().unwrap().failures[index(boundary)] += 1;
             }
-            pub(super) fn wait(&self, boundary: WriterBoundary, count: u64) {
+            pub(in crate::runtime::runner) fn wait(&self, boundary: WriterBoundary, count: u64) {
                 let slot = index(boundary);
                 let until = deadline();
                 let mut state = self.state.lock().unwrap();
@@ -861,7 +869,7 @@ pub(super) mod contract_tests {
                     state = self.changed.wait_timeout(state, remaining).unwrap().0;
                 }
             }
-            pub(super) fn calls(&self, boundary: WriterBoundary) -> u64 {
+            pub(in crate::runtime::runner) fn calls(&self, boundary: WriterBoundary) -> u64 {
                 self.state.lock().unwrap().calls[index(boundary)]
             }
         }
@@ -888,14 +896,17 @@ pub(super) mod contract_tests {
                 Ok(())
             }
         }
-        pub(super) struct Release(pub Arc<Hooks>);
+        pub(in crate::runtime::runner) struct Release(pub Arc<Hooks>);
         impl Drop for Release {
             fn drop(&mut self) {
                 self.0.release_for_cleanup();
             }
         }
 
-        pub(super) fn start(fixture: &WriterFixture, hooks: Arc<Hooks>) -> EventWriter {
+        pub(in crate::runtime::runner) fn start(
+            fixture: &WriterFixture,
+            hooks: Arc<Hooks>,
+        ) -> EventWriter {
             EventWriter::start_with_hooks(
                 format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()),
                 fixture.fixture.run.clone(),
@@ -905,10 +916,13 @@ pub(super) mod contract_tests {
             )
             .unwrap()
         }
-        pub(super) fn wait_until(condition: impl FnMut() -> bool) {
+        pub(in crate::runtime::runner) fn wait_until(condition: impl FnMut() -> bool) {
             wait_until_within(Duration::from_secs(2), condition);
         }
-        pub(super) fn wait_until_within(budget: Duration, mut condition: impl FnMut() -> bool) {
+        pub(in crate::runtime::runner) fn wait_until_within(
+            budget: Duration,
+            mut condition: impl FnMut() -> bool,
+        ) {
             let until = Instant::now() + budget;
             while !condition() {
                 assert!(
@@ -918,7 +932,7 @@ pub(super) mod contract_tests {
                 std::thread::sleep(Duration::from_millis(2));
             }
         }
-        pub(super) fn committed(fixture: &WriterFixture) -> i64 {
+        pub(in crate::runtime::runner) fn committed(fixture: &WriterFixture) -> i64 {
             fixture
                 .fixture
                 .conn

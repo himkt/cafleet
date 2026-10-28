@@ -1150,3 +1150,1309 @@ impl ObservationController {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod controller_tests {
+    use super::*;
+    use crate::broker::runtime::{self as storage, *};
+    use crate::coding_agent::ProfileCatalog;
+    use crate::runtime::runner::writer::contract_tests::support::*;
+    use crate::runtime::runner::writer::contract_tests::worker::{
+        Hooks, Release, committed, start, wait_until, wait_until_within,
+    };
+    use crate::runtime::runner::writer::contract_tests::{WriterFixture, deadline};
+    use std::os::unix::process::ExitStatusExt;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{Duration, Instant};
+
+    mod review {
+        use super::*;
+
+        mod observation_failures {
+            use super::*;
+            use std::sync::atomic::AtomicBool;
+
+            struct Fault {
+                site: ObservationSite,
+                armed: AtomicBool,
+                calls: AtomicU64,
+            }
+            impl Fault {
+                fn new(site: ObservationSite) -> Self {
+                    Self {
+                        site,
+                        armed: AtomicBool::new(false),
+                        calls: AtomicU64::new(0),
+                    }
+                }
+                fn arm(&self) {
+                    self.armed.store(true, Ordering::Release);
+                }
+            }
+            impl ObservationHooks for Fault {
+                fn before(
+                    &self,
+                    site: ObservationSite,
+                    operation: ObservationOperation,
+                ) -> Result<()> {
+                    if site == self.site && operation == ObservationOperation::Detector {
+                        self.calls.fetch_add(1, Ordering::AcqRel);
+                        if self.armed.swap(false, Ordering::AcqRel) {
+                            return Err(error("private detector failure review-canary-194"));
+                        }
+                    }
+                    Ok(())
+                }
+            }
+
+            #[test]
+            fn runner_review_r3_observation_hooks_install_once_before_the_matching_native_start() {
+                let mut fixture = WriterFixture::new();
+                configure(&mut fixture);
+                let mut controller = ObservationController::new(
+                    &fixture.fixture.run,
+                    &catalog(),
+                    storage::evidence::EvidencePolicy::metadata(),
+                    1..=256,
+                )
+                .unwrap();
+                controller
+                    .set_observation_hooks(Arc::new(Fault::new(ObservationSite::QuietTimer)))
+                    .unwrap();
+                assert!(
+                    controller
+                        .set_observation_hooks(Arc::new(Fault::new(ObservationSite::QuietTimer)))
+                        .is_err()
+                );
+                let mut case = LiveCase::new();
+                assert!(
+                    case.controller
+                        .set_observation_hooks(Arc::new(Fault::new(ObservationSite::QuietTimer)))
+                        .is_err()
+                );
+            }
+
+            #[test]
+            fn runner_review_r3_quiet_detector_failure_returns_typed_held_status_and_preserves_the_episode()
+             {
+                let fault = Arc::new(Fault::new(ObservationSite::QuietTimer));
+                let mut case = LiveCase::with_observation_hooks(Some(fault.clone()));
+                case.clock.set(200);
+                case.terminal
+                    .feed(&form("write candidate-after-open.txt"))
+                    .unwrap();
+                case.controller
+                    .observer(&case.writer, &case.clock)
+                    .observe(&case.terminal.snapshot())
+                    .unwrap();
+                let sequence = case.terminal.snapshot().screen_seq;
+                let calls = fault.calls.load(Ordering::Acquire);
+                fault.arm();
+                case.clock.set(300);
+                let status = case
+                    .controller
+                    .poll(&case.terminal.snapshot(), &case.writer, &case.clock)
+                    .expect("recoverable quiet detector failure preserves the live controller");
+                assert_eq!(fault.calls.load(Ordering::Acquire), calls + 1);
+                assert!(!fault.armed.load(Ordering::Acquire));
+                assert_eq!(status.diagnostic.as_deref(), Some("detector_unavailable"));
+                assert!(matches!(status.eligibility, InputEligibility::Hold(_)));
+                assert!(status.gap_count > 0);
+                assert_eq!(case.terminal.snapshot().screen_seq, sequence);
+                let active = case.events()[0].interaction.clone().unwrap();
+                assert_eq!(active.episode_seq, 1);
+                assert!(active.closed_at.is_none());
+                assert_eq!(
+                    case.fixture.fixture.conn.query_row(
+                        "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='interaction_opened'",
+                        [case.fixture.fixture.run.run_id],
+                        |row| row.get::<_, i64>(0),
+                    ).unwrap(),
+                    1
+                );
+                assert!(case.child.identity.matches().unwrap());
+            }
+
+            #[test]
+            fn runner_review_r3_ordered_adapter_preserves_detector_attribution_and_bounded_metadata()
+             {
+                let fault = Arc::new(Fault::new(ObservationSite::ChildOutput));
+                let mut case = LiveCase::with_observation_hooks(Some(fault.clone()));
+                fault.arm();
+                case.clock.set(200);
+                let calls = fault.calls.load(Ordering::Acquire);
+                let _attempt = case
+                    .controller
+                    .observer(&case.writer, &case.clock)
+                    .observe(&case.terminal.snapshot());
+                assert_eq!(fault.calls.load(Ordering::Acquire), calls + 1);
+                assert!(!fault.armed.load(Ordering::Acquire));
+                let status = case.controller.status();
+                assert_eq!(status.diagnostic.as_deref(), Some("detector_unavailable"));
+                assert!(matches!(status.eligibility, InputEligibility::Hold(_)));
+                assert!(status.gap_count > 0);
+                assert_eq!(
+                    case.fixture.fixture.conn.query_row(
+                        "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='interaction_opened'",
+                        [case.fixture.fixture.run.run_id],
+                        |row| row.get::<_, i64>(0),
+                    ).unwrap(),
+                    1
+                );
+                assert!(
+                    case.events()[0]
+                        .interaction
+                        .as_ref()
+                        .unwrap()
+                        .closed_at
+                        .is_none()
+                );
+                assert!(case.child.identity.matches().unwrap());
+            }
+
+            #[test]
+            fn runner_review_r3_clock_and_output_sequence_invariants_propagate_outside_recoverable_failures()
+             {
+                for invariant in ["clock", "sequence"] {
+                    let fault = Arc::new(Fault::new(ObservationSite::ChildOutput));
+                    let mut case = LiveCase::with_observation_hooks(Some(fault));
+                    let before = case.controller.status().gap_count;
+                    let result = if invariant == "clock" {
+                        case.clock.set(99);
+                        case.controller
+                            .poll(&case.terminal.snapshot(), &case.writer, &case.clock)
+                            .map(|_| ())
+                    } else {
+                        case.clock.set(200);
+                        let mut stale = case.terminal.snapshot();
+                        stale.screen_seq = 0;
+                        case.controller
+                            .observer(&case.writer, &case.clock)
+                            .observe(&stale)
+                    };
+                    let cause = result.expect_err(
+                        "clock/sequence corruption remains an explicit invariant error",
+                    );
+                    assert!(cause.message().contains("regress"), "{invariant}: {cause}");
+                    assert_eq!(case.controller.status().gap_count, before);
+                    assert_eq!(case.controller.status().diagnostic, None);
+                    assert!(
+                        case.events()[0]
+                            .interaction
+                            .as_ref()
+                            .unwrap()
+                            .closed_at
+                            .is_none()
+                    );
+                }
+            }
+        }
+
+        struct Timeline {
+            origin: Instant,
+            millis: AtomicU64,
+        }
+        impl Timeline {
+            fn new() -> Self {
+                Self {
+                    origin: Instant::now(),
+                    millis: AtomicU64::new(0),
+                }
+            }
+            fn set(&self, millis: u64) {
+                self.millis.store(millis, Ordering::Release);
+            }
+            fn timestamp(millis: u64) -> String {
+                let origin = chrono::DateTime::parse_from_rfc3339(NOW)
+                    .unwrap()
+                    .with_timezone(&chrono::Utc);
+                crate::time::format_utc(
+                    origin + chrono::Duration::milliseconds(i64::try_from(millis).unwrap()),
+                )
+            }
+        }
+        impl ObservationClock for Timeline {
+            fn sample(&self) -> ObservationMoment {
+                let millis = self.millis.load(Ordering::Acquire);
+                ObservationMoment {
+                    monotonic: self.origin + Duration::from_millis(millis),
+                    observed_at: Self::timestamp(millis),
+                }
+            }
+            fn kind(&self) -> ObservationClockKind {
+                ObservationClockKind::Deterministic
+            }
+        }
+
+        struct LiveCase {
+            writer: EventWriter,
+            controller: ObservationController,
+            hooks: Arc<Hooks>,
+            child: ChildGuard,
+            terminal: TerminalState,
+            clock: Timeline,
+            fixture: WriterFixture,
+        }
+        impl LiveCase {
+            fn new() -> Self {
+                Self::with_observation_hooks(None)
+            }
+            fn with_observation_hooks(
+                observation_hooks: Option<Arc<dyn ObservationHooks>>,
+            ) -> Self {
+                Self::build(
+                    observation_hooks,
+                    configure,
+                    storage::evidence::EvidencePolicy::metadata(),
+                    form("write terminal-order.txt"),
+                )
+            }
+            fn refreshable() -> Self {
+                Self::build(
+                    None,
+                    configure_redacted,
+                    redacted_policy(),
+                    detailed_form("write terminal-order.txt", "opened"),
+                )
+            }
+            fn build(
+                observation_hooks: Option<Arc<dyn ObservationHooks>>,
+                configure_run: fn(&mut WriterFixture),
+                policy: storage::evidence::EvidencePolicy,
+                opening: Vec<u8>,
+            ) -> Self {
+                let mut fixture = WriterFixture::new();
+                configure_run(&mut fixture);
+                let hooks = Arc::new(Hooks::default());
+                let writer = start(&fixture, hooks.clone());
+                let mut controller =
+                    ObservationController::new(&fixture.fixture.run, &catalog(), policy, 1..=256)
+                        .unwrap();
+                if let Some(hooks) = observation_hooks {
+                    controller.set_observation_hooks(hooks).unwrap();
+                }
+                let child = ChildGuard::spawn(std::path::Path::new("/bin/cat"), &[]);
+                running(&mut fixture, &child.identity);
+                let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
+                let clock = Timeline::new();
+                controller
+                    .started(&fixture.fixture.run, &terminal.snapshot(), &writer, &clock)
+                    .unwrap();
+                terminal
+                    .feed_observed(&opening, &mut controller.observer(&writer, &clock))
+                    .unwrap();
+                clock.set(100);
+                controller
+                    .poll(&terminal.snapshot(), &writer, &clock)
+                    .unwrap();
+                wait_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
+                Self {
+                    writer,
+                    controller,
+                    hooks,
+                    child,
+                    terminal,
+                    clock,
+                    fixture,
+                }
+            }
+            fn fail_refresh(&mut self) -> Release {
+                self.hooks.pause(WriterBoundary::Persist);
+                let release = Release(self.hooks.clone());
+                self.clock.set(200);
+                self.terminal
+                    .feed_observed(
+                        &detail_rewrite("refreshed"),
+                        &mut self.controller.observer(&self.writer, &self.clock),
+                    )
+                    .unwrap();
+                self.hooks.wait(WriterBoundary::Persist, 2);
+                wait_until(|| self.writer.status().degraded);
+                assert!(self.writer.status().pending_evidence);
+                assert_eq!(committed(&self.fixture), 1);
+                release
+            }
+            fn exit(&mut self, millis: u64) -> u64 {
+                assert!(self.child.identity.matches().unwrap());
+                nix::sys::signal::kill(
+                    nix::unistd::Pid::from_raw(i32::try_from(self.child.identity.pid).unwrap()),
+                    nix::sys::signal::Signal::SIGTERM,
+                )
+                .unwrap();
+                let until = deadline();
+                loop {
+                    if let Some(exit) = self.child.child.try_wait().unwrap() {
+                        assert_eq!(exit.signal(), Some(15));
+                        break;
+                    }
+                    assert!(Instant::now() < until, "owned child exit deadline");
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                self.clock.set(millis);
+                let sequence = self.terminal.snapshot().screen_seq;
+                self.controller
+                    .child_exited(
+                        ChildExit::Signal(15),
+                        &self.terminal.snapshot(),
+                        &self.writer,
+                        &self.clock,
+                    )
+                    .unwrap();
+                sequence
+            }
+            fn drain(&mut self, until: Instant) -> (u64, u64) {
+                self.writer.set_deadline(until);
+                while Instant::now() < until {
+                    self.controller
+                        .poll(&self.terminal.snapshot(), &self.writer, &self.clock)
+                        .unwrap();
+                    if !self.controller.has_pending() && self.writer.status().pending_count == 0 {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                self.writer.finish(until)
+            }
+            fn events(&self) -> Vec<storage::RuntimeEventView> {
+                let ids: Vec<i64> = self
+                    .fixture
+                    .fixture
+                    .conn
+                    .prepare(
+                        "SELECT event_id FROM member_runtime_events WHERE run_id=?1 ORDER BY event_seq",
+                    )
+                    .unwrap()
+                    .query_map([self.fixture.fixture.run.run_id], |row| row.get(0))
+                    .unwrap()
+                    .collect::<rusqlite::Result<_>>()
+                    .unwrap();
+                ids.into_iter()
+                    .map(|id| storage::get_event(&self.fixture.fixture.conn, id).unwrap())
+                    .collect()
+            }
+        }
+        impl Drop for LiveCase {
+            fn drop(&mut self) {
+                let unfinished = self
+                    .writer
+                    .finish(Instant::now() + Duration::from_millis(250));
+                if unfinished != (0, 0) {
+                    eprintln!("owned review fixture retained writer work: {unfinished:?}");
+                }
+            }
+        }
+
+        #[test]
+        fn runner_review_r1_degraded_exit_records_gap_before_original_closure_and_terminal_fence() {
+            let mut case = LiveCase::refreshable();
+            let release = case.fail_refresh();
+            let exit_sequence = case.exit(300);
+            assert!(case.controller.has_pending());
+            assert!(case.controller.unsaved_gap_count() > 0);
+            assert!(matches!(
+                case.controller.status().eligibility,
+                InputEligibility::Hold(_)
+            ));
+            case.clock.set(700);
+            drop(release);
+            let unfinished = case.drain(deadline());
+            let events = case.events();
+            let kinds: Vec<_> = events.iter().map(|view| view.event.kind).collect();
+            assert_eq!(
+                kinds,
+                [
+                    RuntimeEventKind::InteractionOpened,
+                    RuntimeEventKind::RunnerDegraded,
+                    RuntimeEventKind::RunnerDegraded,
+                    RuntimeEventKind::InteractionClosed,
+                    RuntimeEventKind::RunnerExited,
+                ]
+            );
+            assert_eq!(unfinished, (0, 0));
+            assert!(!case.controller.has_pending());
+            assert_eq!(case.controller.unsaved_gap_count(), 0);
+            assert_eq!(
+                events[1].event.payload_json["cause"]["kind"],
+                "storage_pressure"
+            );
+            assert_eq!(events[1].event.observed_at, Timeline::timestamp(300));
+            assert_eq!(
+                events[2].event.payload_json["cause"]["kind"],
+                "storage_recovered"
+            );
+            assert_eq!(events[2].event.observed_at, Timeline::timestamp(700));
+            for view in &events[3..] {
+                assert_eq!(view.event.observed_at, Timeline::timestamp(300));
+                assert_eq!(
+                    view.event.payload_json["evidence"]["screen_seq"],
+                    exit_sequence
+                );
+            }
+            assert_eq!(
+                events[3].event.payload_json["close_reason"],
+                "process_exited"
+            );
+            assert_eq!(events[4].event.payload_json["cause"]["exit_signal"], 15);
+            let run = storage::get_run(&case.fixture.fixture.conn, case.fixture.fixture.run.run_id)
+                .unwrap();
+            assert_eq!(run.status, RunStatus::Exited);
+            assert_eq!(run.exit_signal, Some(15));
+            for _ in 0..3 {
+                case.controller
+                    .poll(&case.terminal.snapshot(), &case.writer, &case.clock)
+                    .unwrap();
+            }
+            assert_eq!(case.events().len(), 5);
+            assert!(!case.controller.has_pending());
+        }
+
+        #[test]
+        fn runner_review_r1_expired_storage_budget_reports_unsaved_gap_and_pending_exit_work() {
+            let mut case = LiveCase::refreshable();
+            let _release = case.fail_refresh();
+            let until = Instant::now() + Duration::from_millis(120);
+            case.writer.set_deadline(until);
+            case.exit(300);
+            let begin = Instant::now();
+            let unfinished = case.drain(until);
+            assert!(begin.elapsed() < Duration::from_millis(500));
+            assert!(case.controller.has_pending() || unfinished.0 > 0);
+            assert!(case.controller.unsaved_gap_count() > 0 || unfinished.1 > 0);
+            assert_eq!(committed(&case.fixture), 1);
+            let run = storage::get_run(&case.fixture.fixture.conn, case.fixture.fixture.run.run_id)
+                .unwrap();
+            assert_eq!(run.status, RunStatus::Running);
+            assert!(case.child.child.try_wait().unwrap().is_some());
+            assert_eq!(
+                case.events()[0].event.kind,
+                RuntimeEventKind::InteractionOpened
+            );
+        }
+
+        #[test]
+        fn runner_review_r1_failure_after_terminal_enqueue_never_appends_a_live_post_terminal_gap()
+        {
+            let mut case = LiveCase::new();
+            case.hooks.pause(WriterBoundary::Persist);
+            let release = Release(case.hooks.clone());
+            case.exit(300);
+            case.hooks.wait(WriterBoundary::Persist, 2);
+            wait_until(|| case.writer.status().degraded);
+            case.clock.set(500);
+            case.controller
+                .poll(&case.terminal.snapshot(), &case.writer, &case.clock)
+                .unwrap();
+            case.clock.set(700);
+            drop(release);
+            let unfinished = case.drain(deadline());
+            let events = case.events();
+            assert_eq!(unfinished, (0, 0));
+            assert!(!case.controller.has_pending());
+            assert_eq!(case.controller.unsaved_gap_count(), 0);
+            assert_eq!(case.controller.status().gap_count, 0);
+            let run = storage::get_run(&case.fixture.fixture.conn, case.fixture.fixture.run.run_id)
+                .unwrap();
+            assert_eq!(run.observation_gap_count, 0);
+            assert_eq!(
+                events
+                    .iter()
+                    .map(|view| view.event.kind)
+                    .collect::<Vec<_>>(),
+                [
+                    RuntimeEventKind::InteractionOpened,
+                    RuntimeEventKind::InteractionClosed,
+                    RuntimeEventKind::RunnerExited,
+                ]
+            );
+            assert_eq!(
+                events.last().unwrap().event.kind,
+                RuntimeEventKind::RunnerExited
+            );
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|view| view.event.kind == RuntimeEventKind::RunnerExited)
+                    .count(),
+                1
+            );
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|view| view.event.kind == RuntimeEventKind::InteractionClosed)
+                    .count(),
+                1
+            );
+            assert_eq!(
+                events.last().unwrap().event.observed_at,
+                Timeline::timestamp(300)
+            );
+            for _ in 0..3 {
+                case.controller
+                    .poll(&case.terminal.snapshot(), &case.writer, &case.clock)
+                    .unwrap();
+            }
+            assert_eq!(case.events().len(), events.len());
+            assert!(!case.controller.has_pending());
+        }
+    }
+
+    // Draining 64 retained pressure transitions through SQLite exceeds the shared 2 s budget under a
+    // concurrent full suite on slower storage.
+    const PRESSURE_DRAIN_BUDGET: Duration = Duration::from_secs(10);
+
+    fn assert_retained_pressure<T>(attempt: Result<T>, status: ObservationStatus) {
+        if let Err(cause) = attempt {
+            assert!(
+                status.retained_transition || status.retained_draft || status.gap_count > 0,
+                "observer error requires retained work or a recorded gap: {cause}"
+            );
+            assert!(
+                matches!(status.eligibility, InputEligibility::Hold(_)),
+                "observer error holds eligibility: {cause}"
+            );
+        }
+    }
+
+    fn event_at(fixture: &WriterFixture, sequence: i64) -> storage::RuntimeEventView {
+        let id = fixture
+            .fixture
+            .conn
+            .query_row(
+                "SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND event_seq=?2",
+                rusqlite::params![fixture.fixture.run.run_id, sequence],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap();
+        storage::get_event(&fixture.fixture.conn, id).unwrap()
+    }
+
+    #[test]
+    fn runner_batch2_controller_accepts_only_the_exact_fresh_initial_committed_grant() {
+        let mut fixture = WriterFixture::new();
+        configure(&mut fixture);
+        let catalog = catalog();
+        assert!(
+            ObservationController::new(
+                &fixture.fixture.run,
+                &catalog,
+                storage::evidence::EvidencePolicy::metadata(),
+                1..=256
+            )
+            .is_ok()
+        );
+        for range in [0..=255, 1..=255, 2..=257, 257..=512] {
+            assert!(
+                ObservationController::new(
+                    &fixture.fixture.run,
+                    &catalog,
+                    storage::evidence::EvidencePolicy::metadata(),
+                    range
+                )
+                .is_err()
+            );
+        }
+        for field in [
+            "epoch",
+            "reservation",
+            "status",
+            "child",
+            "start",
+            "end",
+            "recovery",
+        ] {
+            let mut run = fixture.fixture.run.clone();
+            match field {
+                "epoch" => run.owner_epoch = 0,
+                "reservation" => run.event_seq_reserved_through = 512,
+                "status" => run.status = RunStatus::Running,
+                "child" => run.child_pid = Some(1),
+                "start" => run.started_at = Some(NOW.into()),
+                "end" => run.ended_at = Some(NOW.into()),
+                _ => run.recovery_origin_status = Some(RunStatus::Running),
+            }
+            assert!(
+                ObservationController::new(
+                    &run,
+                    &catalog,
+                    storage::evidence::EvidencePolicy::metadata(),
+                    1..=256
+                )
+                .is_err(),
+                "{field}"
+            );
+        }
+    }
+
+    #[test]
+    fn runner_batch2_controller_quiet_poll_opens_one_episode_with_the_unchanged_parser_sequence() {
+        let mut fixture = WriterFixture::new();
+        configure(&mut fixture);
+        let hooks = Arc::new(Hooks::default());
+        let mut writer = start(&fixture, hooks);
+        let clock = Clock::new();
+        let mut controller = ObservationController::new(
+            &fixture.fixture.run,
+            &catalog(),
+            storage::evidence::EvidencePolicy::metadata(),
+            1..=256,
+        )
+        .unwrap();
+        let child = ChildGuard::spawn(std::path::Path::new("/bin/cat"), &[]);
+        running(&mut fixture, &child.identity);
+        let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
+        controller
+            .started(&fixture.fixture.run, &terminal.snapshot(), &writer, &clock)
+            .unwrap();
+        terminal
+            .feed_observed(
+                &form("write disposable.txt"),
+                &mut controller.observer(&writer, &clock),
+            )
+            .unwrap();
+        let sequence = terminal.snapshot().screen_seq;
+        assert!(matches!(
+            controller.status().eligibility,
+            InputEligibility::Hold(GateReason::Candidate)
+        ));
+        clock.set(99);
+        controller
+            .poll(&terminal.snapshot(), &writer, &clock)
+            .unwrap();
+        assert_eq!(committed(&fixture), 0);
+        clock.set(100);
+        controller
+            .poll(&terminal.snapshot(), &writer, &clock)
+            .unwrap();
+        wait_until(|| committed(&fixture) == 1);
+        let view = storage::get_event(&fixture.fixture.conn, 1).unwrap();
+        let interaction = view
+            .interaction
+            .as_ref()
+            .expect("opening links its persisted episode");
+        assert_eq!(interaction.run_id, fixture.fixture.run.run_id);
+        assert_eq!(interaction.episode_seq, 1);
+        let event = &view.event;
+        assert_eq!(event.kind, RuntimeEventKind::InteractionOpened);
+        assert_eq!(event.interaction_id, Some(interaction.interaction_id));
+        assert_eq!(event.payload_json["evidence"]["screen_seq"], sequence);
+        assert_eq!(terminal.snapshot().screen_seq, sequence);
+        writer.finish(deadline());
+    }
+
+    #[test]
+    fn runner_batch2_controller_actual_adapter_observes_transient_form_before_clear_without_opening()
+     {
+        let mut fixture = WriterFixture::new();
+        configure(&mut fixture);
+        let hooks = Arc::new(Hooks::default());
+        let mut writer = start(&fixture, hooks);
+        let clock = Clock::new();
+        let mut controller = ObservationController::new(
+            &fixture.fixture.run,
+            &catalog(),
+            storage::evidence::EvidencePolicy::metadata(),
+            1..=256,
+        )
+        .unwrap();
+        let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
+        let child = ChildGuard::spawn(std::path::Path::new("/bin/cat"), &[]);
+        running(&mut fixture, &child.identity);
+        controller
+            .started(&fixture.fixture.run, &terminal.snapshot(), &writer, &clock)
+            .unwrap();
+        let mut bytes = form("write disposable.txt");
+        bytes.extend_from_slice(b"\x1b[2J\x1b[Hworking");
+        terminal
+            .feed_observed(&bytes, &mut controller.observer(&writer, &clock))
+            .unwrap();
+        clock.set(100);
+        let status = controller
+            .poll(&terminal.snapshot(), &writer, &clock)
+            .unwrap();
+        assert!(matches!(status.eligibility, InputEligibility::Hold(_)));
+        assert_eq!(committed(&fixture), 0);
+        assert!(!status.retained_transition);
+        assert!(!status.retained_draft);
+        writer.finish(deadline());
+    }
+
+    #[test]
+    fn runner_batch2_controller_typed_failures_keep_metadata_only_diagnostics_and_hold_input() {
+        for (reason, code) in [
+            (ObservationFailure::Parser, "parser_unavailable"),
+            (ObservationFailure::Detector, "detector_unavailable"),
+            (ObservationFailure::Sequence, "sequence_unavailable"),
+            (ObservationFailure::Sink, "sink_unavailable"),
+        ] {
+            let mut fixture = WriterFixture::new();
+            configure(&mut fixture);
+            let mut controller = ObservationController::new(
+                &fixture.fixture.run,
+                &catalog(),
+                storage::evidence::EvidencePolicy::metadata(),
+                1..=256,
+            )
+            .unwrap();
+            controller.observer_failed(reason, &Clock::new()).unwrap();
+            let status = controller.status();
+            assert!(matches!(status.eligibility, InputEligibility::Hold(_)));
+            assert_eq!(status.diagnostic.as_deref(), Some(code));
+            assert!(status.gap_count > 0);
+        }
+    }
+
+    #[test]
+    fn runner_batch2_controller_started_validates_current_identity_and_is_single_use() {
+        let mut fixture = WriterFixture::new();
+        configure(&mut fixture);
+        let hooks = Arc::new(Hooks::default());
+        let mut writer = start(&fixture, hooks);
+        let clock = Clock::new();
+        let mut controller = ObservationController::new(
+            &fixture.fixture.run,
+            &catalog(),
+            storage::evidence::EvidencePolicy::metadata(),
+            1..=256,
+        )
+        .unwrap();
+        let screen = TerminalState::new(TerminalSize { rows: 24, cols: 80 })
+            .unwrap()
+            .snapshot();
+        assert!(
+            controller
+                .started(&fixture.fixture.run, &screen, &writer, &clock)
+                .is_err()
+        );
+        let child = ChildGuard::spawn(std::path::Path::new("/bin/cat"), &[]);
+        running(&mut fixture, &child.identity);
+        let mut stale = fixture.fixture.run.clone();
+        stale.owner_epoch += 1;
+        assert!(
+            controller
+                .started(&stale, &screen, &writer, &clock)
+                .is_err()
+        );
+        controller
+            .started(&fixture.fixture.run, &screen, &writer, &clock)
+            .unwrap();
+        assert!(
+            controller
+                .started(&fixture.fixture.run, &screen, &writer, &clock)
+                .is_err()
+        );
+        writer.finish(deadline());
+    }
+
+    #[test]
+    fn runner_batch2_controller_exit_closes_the_open_episode_before_recording_the_real_native_signal()
+     {
+        let mut fixture = WriterFixture::new();
+        configure(&mut fixture);
+        let hooks = Arc::new(Hooks::default());
+        let mut writer = start(&fixture, hooks);
+        let clock = Clock::new();
+        let mut controller = ObservationController::new(
+            &fixture.fixture.run,
+            &catalog(),
+            storage::evidence::EvidencePolicy::metadata(),
+            1..=256,
+        )
+        .unwrap();
+        let mut child = ChildGuard::spawn(std::path::Path::new("/bin/cat"), &[]);
+        running(&mut fixture, &child.identity);
+        let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
+        controller
+            .started(&fixture.fixture.run, &terminal.snapshot(), &writer, &clock)
+            .unwrap();
+        terminal
+            .feed_observed(
+                &form("write disposable.txt"),
+                &mut controller.observer(&writer, &clock),
+            )
+            .unwrap();
+        clock.set(100);
+        controller
+            .poll(&terminal.snapshot(), &writer, &clock)
+            .unwrap();
+        wait_until(|| committed(&fixture) == 1);
+        assert!(child.identity.matches().unwrap());
+        nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(i32::try_from(child.identity.pid).unwrap()),
+            nix::sys::signal::Signal::SIGTERM,
+        )
+        .unwrap();
+        let until = deadline();
+        let exit = loop {
+            if let Some(exit) = child.child.try_wait().unwrap() {
+                break exit;
+            }
+            assert!(Instant::now() < until, "owned child signal exit");
+            std::thread::sleep(Duration::from_millis(2));
+        };
+        assert_eq!(exit.signal(), Some(15));
+        clock.set(200);
+        controller
+            .child_exited(ChildExit::Signal(15), &terminal.snapshot(), &writer, &clock)
+            .unwrap();
+        wait_until(|| committed(&fixture) == 3);
+        let kinds: Vec<String> = fixture
+            .fixture
+            .conn
+            .prepare("SELECT kind FROM member_runtime_events WHERE run_id=?1 ORDER BY event_seq")
+            .unwrap()
+            .query_map([fixture.fixture.run.run_id], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            kinds,
+            ["interaction_opened", "interaction_closed", "runner_exited"]
+        );
+        let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+        assert_eq!(run.exit_signal, Some(15));
+        assert_eq!(run.exit_code, None);
+        writer.finish(deadline());
+    }
+
+    #[test]
+    fn runner_batch2_controller_refills_shared_lifecycle_sequences_only_from_committed_worker_grants()
+     {
+        let until = Instant::now() + Duration::from_secs(15);
+        let mut fixture = WriterFixture::new();
+        configure(&mut fixture);
+        let mut writer = start(&fixture, Arc::new(Hooks::default()));
+        let clock = Clock::new();
+        let mut controller = ObservationController::new(
+            &fixture.fixture.run,
+            &catalog(),
+            storage::evidence::EvidencePolicy::metadata(),
+            1..=256,
+        )
+        .unwrap();
+        let child = ChildGuard::spawn(std::path::Path::new("/bin/cat"), &[]);
+        running(&mut fixture, &child.identity);
+        let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
+        controller
+            .started(&fixture.fixture.run, &terminal.snapshot(), &writer, &clock)
+            .unwrap();
+        let mut millis = 0u64;
+        let mut original_sequences = Vec::new();
+        for index in 0..130 {
+            assert!(Instant::now() < until, "bounded controller refill fixture");
+            clock.set(millis);
+            terminal
+                .feed_observed(
+                    &form(&format!("write range-{index}.txt")),
+                    &mut controller.observer(&writer, &clock),
+                )
+                .unwrap();
+            original_sequences.push(terminal.snapshot().screen_seq);
+            millis = millis.checked_add(100).unwrap();
+            clock.set(millis);
+            let attempt = controller.poll(&terminal.snapshot(), &writer, &clock);
+            assert_retained_pressure(attempt, controller.status());
+            wait_until(|| {
+                assert!(Instant::now() < until, "original refill fixture deadline");
+                millis = millis.checked_add(1).unwrap();
+                clock.set(millis);
+                let attempt = controller.poll(&terminal.snapshot(), &writer, &clock);
+                assert_retained_pressure(attempt, controller.status());
+                let openings:i64=fixture.fixture.conn.query_row("SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='interaction_opened'",[fixture.fixture.run.run_id],|row|row.get(0)).unwrap();
+                openings == i64::from(index + 1)
+                    && !controller.status().retained_transition
+                    && !controller.status().retained_draft
+            });
+            millis = millis.checked_add(100).unwrap();
+        }
+        wait_until(|| {
+            millis = millis.checked_add(1).unwrap();
+            clock.set(millis);
+            let attempt = controller.poll(&terminal.snapshot(), &writer, &clock);
+            assert_retained_pressure(attempt, controller.status());
+            writer.status().pending_count == 0
+                && !controller.status().retained_transition
+                && !controller.status().retained_draft
+                && controller.status().diagnostic.is_none()
+        });
+        let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+        assert!(run.event_seq_reserved_through >= 512);
+        assert_eq!(run.event_seq_reserved_through % 256, 0);
+        let ids: Vec<i64> = fixture
+            .fixture
+            .conn
+            .prepare(
+                "SELECT event_id FROM member_runtime_events WHERE run_id=?1 ORDER BY event_seq",
+            )
+            .unwrap()
+            .query_map([run.run_id], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            ids.iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            ids.len()
+        );
+        let mut last = 0;
+        let mut interactions = Vec::new();
+        let mut gap = false;
+        for id in ids {
+            let view = storage::get_event(&fixture.fixture.conn, id).unwrap();
+            let event = &view.event;
+            assert!(event.event_seq > last && event.event_seq <= run.event_seq_reserved_through);
+            last = event.event_seq;
+            match event.kind {
+                RuntimeEventKind::InteractionOpened => {
+                    let sequence = view.interaction.as_ref().unwrap().episode_seq;
+                    assert_eq!(
+                        event.payload_json["evidence"]["screen_seq"],
+                        original_sequences[usize::try_from(sequence - 1).unwrap()]
+                    );
+                    interactions.push((event.kind, sequence));
+                }
+                RuntimeEventKind::InteractionClosed => {
+                    assert_eq!(event.payload_json["close_reason"], "superseded");
+                    interactions.push((event.kind, view.interaction.as_ref().unwrap().episode_seq));
+                }
+                RuntimeEventKind::RunnerDegraded => {
+                    let cause = &event.payload_json["cause"];
+                    assert!(cause["gap_count"].as_u64().is_some());
+                    assert!(cause["gap_started_at"].is_string());
+                    let kind = cause["kind"].as_str().unwrap();
+                    if kind == "storage_recovered" {
+                        assert!(gap);
+                        assert!(cause["gap_ended_at"].is_string());
+                        gap = false;
+                    } else {
+                        assert!(matches!(kind, "storage_pressure" | "observer_error"));
+                        assert!(!gap);
+                        gap = true;
+                    }
+                }
+                other => panic!("unexpected refill event: {other:?}"),
+            }
+        }
+        let mut expected = Vec::new();
+        for episode in 1..=130 {
+            if episode > 1 {
+                expected.push((RuntimeEventKind::InteractionClosed, episode - 1));
+            }
+            expected.push((RuntimeEventKind::InteractionOpened, episode));
+        }
+        assert_eq!(interactions, expected);
+        assert!(!gap);
+        assert_eq!(
+            fixture
+                .fixture
+                .conn
+                .query_row(
+                    "SELECT COUNT(*) FROM member_interactions WHERE run_id=?1",
+                    [run.run_id],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            130
+        );
+        writer.finish(deadline());
+    }
+
+    #[test]
+    fn runner_batch2_controller_retains_both_superseded_originals_when_the_first_submit_hits_pressure()
+     {
+        let mut fixture = WriterFixture::new();
+        configure(&mut fixture);
+        let mut definitions = definitions();
+        let mut refusal = definitions["profiles"][0]["rules"][0].clone();
+        refusal["id"] = serde_json::json!("synthetic-refusal");
+        refusal["observation"] = serde_json::json!("permission_denied");
+        refusal["verified_noninteraction"] = serde_json::json!(true);
+        refusal["region"]["start_pattern"] = serde_json::json!("^Synthetic refusal result$");
+        definitions["profiles"][0]["rules"]
+            .as_array_mut()
+            .unwrap()
+            .push(refusal);
+        definitions["profiles"][0]["capabilities"]["detection"]["rule_ids"] =
+            serde_json::json!(["synthetic-permission", "synthetic-refusal"]);
+        let catalog = ProfileCatalog::from_definitions(&definitions).unwrap();
+        let hooks = Arc::new(Hooks::default());
+        hooks.pause(WriterBoundary::Receive);
+        let mut writer = start(&fixture, hooks.clone());
+        let release = Release(hooks.clone());
+        hooks.wait(WriterBoundary::Receive, 1);
+        let clock = Clock::new();
+        let mut controller = ObservationController::new(
+            &fixture.fixture.run,
+            &catalog,
+            storage::evidence::EvidencePolicy::metadata(),
+            1..=256,
+        )
+        .unwrap();
+        let child = ChildGuard::spawn(std::path::Path::new("/bin/cat"), &[]);
+        running(&mut fixture, &child.identity);
+        let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
+        controller
+            .started(&fixture.fixture.run, &terminal.snapshot(), &writer, &clock)
+            .unwrap();
+        let mut last_opening_sequence = 0;
+        for index in 0..32 {
+            clock.set(index * 200);
+            terminal
+                .feed(&form(&format!("write fixture-{index:02}.txt")))
+                .unwrap();
+            last_opening_sequence = terminal.snapshot().screen_seq;
+            controller
+                .observer(&writer, &clock)
+                .observe(&terminal.snapshot())
+                .unwrap();
+            clock.set(index * 200 + 100);
+            controller
+                .poll(&terminal.snapshot(), &writer, &clock)
+                .unwrap();
+            assert_eq!(writer.status().pending_count, index * 2 + 1);
+            assert!(!writer.status().pending_evidence);
+            assert!(!controller.has_pending());
+        }
+        assert_eq!(writer.status().pending_count, 63);
+        let refusal = String::from_utf8(form("write fixture-31.txt"))
+            .unwrap()
+            .replace("Synthetic permission request", "Synthetic refusal result");
+        clock.set(6400);
+        terminal.feed(refusal.as_bytes()).unwrap();
+        controller
+            .observer(&writer, &clock)
+            .observe(&terminal.snapshot())
+            .unwrap();
+        clock.set(6500);
+        controller
+            .poll(&terminal.snapshot(), &writer, &clock)
+            .unwrap();
+        assert_eq!(writer.status().pending_count, 64);
+        assert!(!writer.status().pending_evidence);
+        assert!(!writer.status().degraded);
+        assert!(!controller.has_pending());
+        assert_eq!(committed(&fixture), 0);
+        clock.set(6550);
+        terminal
+            .feed_observed(
+                &form("write fixture-31.txt"),
+                &mut controller.observer(&writer, &clock),
+            )
+            .unwrap();
+        clock.set(6600);
+        let replacement = form("write final-original.txt");
+        assert_eq!(replacement[0], 0x1b);
+        terminal
+            .feed_observed(&replacement[..1], &mut controller.observer(&writer, &clock))
+            .unwrap();
+        assert!(terminal.snapshot().screen_seq > last_opening_sequence);
+        terminal
+            .feed_observed(&replacement[1..], &mut controller.observer(&writer, &clock))
+            .unwrap();
+        clock.set(6700);
+        let attempt = controller.poll(&terminal.snapshot(), &writer, &clock);
+        assert_retained_pressure(attempt, controller.status());
+        let original_sequence = terminal.snapshot().screen_seq;
+        assert!(controller.status().retained_transition);
+        assert!(controller.status().retained_draft);
+        assert_eq!(writer.status().pending_count, 64);
+        assert!(matches!(
+            controller.status().eligibility,
+            InputEligibility::Hold(_)
+        ));
+        let attempt = terminal.feed_observed(
+            b"\x1b[2J\x1b[Hlater output during the gap",
+            &mut controller.observer(&writer, &clock),
+        );
+        assert_retained_pressure(attempt, controller.status());
+        assert!(terminal.snapshot().screen_seq > original_sequence);
+        assert!(controller.status().retained_transition);
+        assert!(controller.status().retained_draft);
+        drop(release);
+        wait_until_within(PRESSURE_DRAIN_BUDGET, || {
+            let attempt = controller.poll(&terminal.snapshot(), &writer, &clock);
+            assert_retained_pressure(attempt, controller.status());
+            committed(&fixture) >= 66
+        });
+        let closed = event_at(&fixture, 65);
+        let opened = event_at(&fixture, 66);
+        assert_eq!(closed.event.kind, RuntimeEventKind::InteractionClosed);
+        assert_eq!(closed.event.payload_json["close_reason"], "superseded");
+        for (view, sequence, episode, screen) in [
+            (&closed, 65, 32, last_opening_sequence),
+            (&opened, 66, 33, original_sequence),
+        ] {
+            let interaction = view.interaction.as_ref().unwrap();
+            assert_eq!(view.event.run_id, fixture.fixture.run.run_id);
+            assert_eq!(view.event.event_seq, sequence);
+            assert_eq!(view.event.interaction_id, Some(interaction.interaction_id));
+            assert_eq!(interaction.episode_seq, episode);
+            assert_eq!(view.event.observed_at, NOW);
+            assert_eq!(view.event.payload_json["evidence"]["screen_seq"], screen);
+        }
+        assert_eq!(opened.event.kind, RuntimeEventKind::InteractionOpened);
+        wait_until_within(PRESSURE_DRAIN_BUDGET, || {
+            let attempt = controller.poll(&terminal.snapshot(), &writer, &clock);
+            assert_retained_pressure(attempt, controller.status());
+            !controller.has_pending() && writer.status().pending_count == 0
+        });
+        assert_eq!(
+            writer.finish(Instant::now() + PRESSURE_DRAIN_BUDGET),
+            (0, 0)
+        );
+        assert_eq!(event_at(&fixture, 65).event, closed.event);
+        assert_eq!(event_at(&fixture, 66).event, opened.event);
+    }
+
+    #[test]
+    fn runner_batch2_controller_actual_adapter_retains_foreign_episode_refresh_and_holds_until_drain()
+     {
+        let mut fixture = WriterFixture::new();
+        configure_redacted(&mut fixture);
+        let hooks = Arc::new(Hooks::default());
+        hooks.pause(WriterBoundary::Receive);
+        let mut writer = start(&fixture, hooks.clone());
+        let release = Release(hooks.clone());
+        hooks.wait(WriterBoundary::Receive, 1);
+        let clock = Clock::new();
+        let mut controller = ObservationController::new(
+            &fixture.fixture.run,
+            &catalog(),
+            redacted_policy(),
+            1..=256,
+        )
+        .unwrap();
+        let child = ChildGuard::spawn(std::path::Path::new("/bin/cat"), &[]);
+        running(&mut fixture, &child.identity);
+        let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
+        controller
+            .started(&fixture.fixture.run, &terminal.snapshot(), &writer, &clock)
+            .unwrap();
+        let mut opening_sequences = Vec::new();
+        let mut first_refresh_sequence = 0;
+        for index in 0..2 {
+            clock.set(index * 200);
+            terminal
+                .feed_observed(
+                    &detailed_form(&format!("write collision-{index}.txt"), "opened"),
+                    &mut controller.observer(&writer, &clock),
+                )
+                .unwrap();
+            opening_sequences.push(terminal.snapshot().screen_seq);
+            clock.set(index * 200 + 100);
+            controller
+                .poll(&terminal.snapshot(), &writer, &clock)
+                .unwrap();
+            if index == 0 {
+                clock.set(150);
+                terminal
+                    .feed_observed(
+                        &detail_rewrite("refreshed"),
+                        &mut controller.observer(&writer, &clock),
+                    )
+                    .unwrap();
+                first_refresh_sequence = terminal.snapshot().screen_seq;
+                assert!(writer.status().pending_evidence);
+            }
+        }
+        assert_eq!(writer.status().pending_count, 3);
+        assert!(writer.status().pending_evidence);
+        assert!(!writer.status().degraded);
+        assert!(!controller.has_pending());
+        clock.set(400);
+        terminal
+            .feed_observed(b"\x1b", &mut controller.observer(&writer, &clock))
+            .unwrap();
+        assert!(
+            !controller.status().retained_evidence,
+            "a screen_seq-only redraw schedules no refresh"
+        );
+        assert!(!writer.status().degraded);
+        terminal
+            .feed_observed(
+                &detail_rewrite("collided"),
+                &mut controller.observer(&writer, &clock),
+            )
+            .unwrap();
+        let retained_sequence = terminal.snapshot().screen_seq;
+        let status = controller.status();
+        assert!(status.retained_evidence);
+        assert!(!status.retained_transition);
+        assert!(!status.retained_draft);
+        assert!(status.gap_count > 0);
+        assert_eq!(status.eligibility, InputEligibility::Hold(GateReason::Gap));
+        assert!(writer.status().pending_evidence);
+        assert!(writer.status().degraded);
+        assert!(
+            writer
+                .status()
+                .diagnostic
+                .as_deref()
+                .unwrap()
+                .contains("refresh episode collision")
+        );
+        terminal
+            .feed_observed(
+                &detailed_form("write later-unclassified.txt", "opened"),
+                &mut controller.observer(&writer, &clock),
+            )
+            .unwrap();
+        assert!(terminal.snapshot().screen_seq > retained_sequence);
+        assert!(controller.status().retained_evidence);
+        assert_eq!(
+            controller.status().eligibility,
+            InputEligibility::Hold(GateReason::Gap)
+        );
+        assert_eq!(writer.status().pending_count, 3);
+        assert_eq!(committed(&fixture), 0);
+        drop(release);
+        wait_until(|| {
+            controller
+                .poll(&terminal.snapshot(), &writer, &clock)
+                .unwrap();
+            !controller.has_pending()
+                && !writer.status().pending_evidence
+                && writer.status().pending_count == 0
+                && !writer.status().degraded
+        });
+        let first = event_at(&fixture, 1);
+        let closed = event_at(&fixture, 2);
+        let second = event_at(&fixture, 3);
+        assert_eq!(first.event.kind, RuntimeEventKind::InteractionOpened);
+        assert_eq!(closed.event.kind, RuntimeEventKind::InteractionClosed);
+        assert_eq!(closed.event.payload_json["close_reason"], "superseded");
+        assert_eq!(second.event.kind, RuntimeEventKind::InteractionOpened);
+        assert_eq!(first.interaction.as_ref().unwrap().episode_seq, 1);
+        assert_eq!(closed.interaction.as_ref().unwrap().episode_seq, 1);
+        assert_eq!(second.interaction.as_ref().unwrap().episode_seq, 2);
+        assert_eq!(
+            first.event.payload_json["evidence"]["screen_seq"],
+            opening_sequences[0]
+        );
+        assert_eq!(
+            closed.event.payload_json["evidence"]["screen_seq"],
+            first_refresh_sequence
+        );
+        assert_eq!(
+            second.event.payload_json["evidence"]["screen_seq"],
+            opening_sequences[1]
+        );
+        assert_eq!(
+            second.interaction.as_ref().unwrap().evidence_json["screen_seq"],
+            retained_sequence
+        );
+        let episodes: i64 = fixture
+            .fixture
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM member_interactions WHERE run_id=?1",
+                [fixture.fixture.run.run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(episodes, 2);
+        assert_eq!(writer.finish(deadline()), (0, 0));
+    }
+}
