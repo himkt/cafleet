@@ -1,7 +1,7 @@
 # Delivery-dismissed approval recovery
 
 **Status**: Approved
-**Progress**: 10/17 tasks complete
+**Progress**: 17/17 tasks complete
 **Last Updated**: 2026-10-28
 
 ## Overview
@@ -10,15 +10,15 @@ A legacy unwrapped member's Escape-first input (a preview, `member prompt` or `m
 
 ## Success Criteria
 
-- [ ] `skills/cafleet/reference/coding-agents.md` § `claude` → *Note → applies at* carries a row that states the rejection-recovery rule affirmatively, scopes each affected Claude prompt kind to the launch policy that exposes it, and binds the rule to member command execution, Director dispatch and the unwrapped preview contract.
-- [ ] The same table carries a row stating that the root Director and wrapped members receive no Escape from CAFleet, bound to Director wake and wrapped previews.
-- [ ] `skills/cafleet/roles/member.md` § Command execution specifies the backend-neutral member rule for all three Escape-first inputs: only a rejection followed by a `[cafleet msg …]` line ending with the Escape-dismissal clause is delivery-caused and the member re-issues the call or re-asks the question; a resume-clause-only preview leaves the rejection standing; a rejection followed by other submitted input is governed by that input.
-- [ ] `skills/cafleet/reference/prompt-routing.md` § Director-side dispatch and `skills/cafleet/roles/director.md` § Member Prompt require a pane check before `member exec` / `member prompt` to an explicitly unwrapped member.
-- [ ] `skills/cafleet/reference/supervision.md` § Director wake states that a tool rejection or dismissed decision in the Director's own pane never originates from CAFleet input. No Director-wake "re-issue" step is added.
-- [ ] `docs/docs/spec/coding-agent-backends.md` § Claude and `docs/docs/spec/multiplexer-backends.md` § Accepted trade-offs describe the same behavior for operators, with no cross-link between the agent reference and the operator page.
-- [ ] A Rust regression test proves that an ordinary member's drain, with messages pending in both directions, writes pane input only to that member's pane and never names the root Director's pane.
-- [ ] A Rust regression test proves that a wrapped preview submitted while a Claude permission form is visible is held with zero child bytes and leaves the native request, its token and its generation intact, for every bundled Claude permission-form fixture recorded at the inspection host's 36×120 geometry.
-- [ ] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build` pass.
+- [x] `skills/cafleet/reference/coding-agents.md` § `claude` → *Note → applies at* carries a row that states the rejection-recovery rule affirmatively, scopes each affected Claude prompt kind to the launch policy that exposes it, and binds the rule to member command execution, Director dispatch and the unwrapped preview contract.
+- [x] The same table carries a row stating that the root Director and wrapped members receive no Escape from CAFleet, bound to Director wake and wrapped previews.
+- [x] `skills/cafleet/roles/member.md` § Command execution specifies the backend-neutral member rule for all three Escape-first inputs: only a rejection followed by a `[cafleet msg …]` line ending with the Escape-dismissal clause is delivery-caused and the member re-issues the call or re-asks the question; a resume-clause-only preview leaves the rejection standing; a rejection followed by other submitted input is governed by that input.
+- [x] `skills/cafleet/reference/prompt-routing.md` § Director-side dispatch and `skills/cafleet/roles/director.md` § Member Prompt require a pane check before `member exec` / `member prompt` to an explicitly unwrapped member.
+- [x] `skills/cafleet/reference/supervision.md` § Director wake states that a tool rejection or dismissed decision in the Director's own pane never originates from CAFleet input. No Director-wake "re-issue" step is added.
+- [x] `docs/docs/spec/coding-agent-backends.md` § Claude and `docs/docs/spec/multiplexer-backends.md` § Accepted trade-offs describe the same behavior for operators, with no cross-link between the agent reference and the operator page.
+- [x] A Rust regression test proves that an ordinary member's drain, with messages pending in both directions, writes pane input only to that member's pane and never names the root Director's pane.
+- [x] A Rust regression test proves that a wrapped preview submitted while a Claude permission form is visible is held with zero child bytes and leaves the native request, its token and its generation intact, for every bundled Claude permission-form fixture recorded at the inspection host's 36×120 geometry.
+- [x] `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build` pass.
 
 ---
 
@@ -210,19 +210,19 @@ Existing coverage stays as is and needs no new test: `director_delivery_ends_bef
 
 ### Step 3: Root Director regression test
 
-- [ ] Add `a_worker_drain_with_both_directions_pending_never_names_the_root_directors_pane` to `cafleet/src/delivery.rs` tests per Specification <!-- completed: -->
-- [ ] Run `mise //cafleet:test a_worker_drain_with_both_directions_pending_never_names_the_root_directors_pane` and confirm it passes <!-- completed: -->
+- [x] Add `a_worker_drain_with_both_directions_pending_never_names_the_root_directors_pane` to `cafleet/src/delivery.rs` tests per Specification <!-- completed: 2026-10-28T13:53 -->
+- [x] Run `mise //cafleet:test a_worker_drain_with_both_directions_pending_never_names_the_root_directors_pane` and confirm it passes <!-- completed: 2026-10-28T13:53 -->
 
 ### Step 4: Wrapped hold regression test
 
-- [ ] Add `a_preview_during_a_visible_claude_permission_form_is_held_without_child_bytes` to `cafleet/src/runtime/runner/input.rs` tests per Specification <!-- completed: -->
-- [ ] Run `mise //cafleet:test a_preview_during_a_visible_claude_permission_form_is_held_without_child_bytes` and confirm it passes <!-- completed: -->
+- [x] Add `a_preview_during_a_visible_claude_permission_form_is_held_without_child_bytes` to `cafleet/src/runtime/runner/input.rs` tests per Specification <!-- completed: 2026-10-28T13:55 -->
+- [x] Run `mise //cafleet:test a_preview_during_a_visible_claude_permission_form_is_held_without_child_bytes` and confirm it passes <!-- completed: 2026-10-28T13:55 -->
 
 ### Step 5: Validation
 
-- [ ] Run `mise //cafleet:test` <!-- completed: -->
-- [ ] Run `mise //cafleet:lint` <!-- completed: -->
-- [ ] Run `mise //cafleet:typecheck` <!-- completed: -->
+- [x] Run `mise //cafleet:test` <!-- completed: 2026-10-28T13:57 -->
+- [x] Run `mise //cafleet:lint` <!-- completed: 2026-10-28T13:57 -->
+- [x] Run `mise //cafleet:typecheck` <!-- completed: 2026-10-28T13:57 -->
 
 ---
 
