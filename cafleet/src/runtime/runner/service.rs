@@ -1221,6 +1221,61 @@ fn run_service(
 }
 
 #[cfg(test)]
+mod pacing_tests {
+    use super::*;
+    use crate::runtime::runner::transport::TransportProgress;
+
+    fn progress(human_bytes: usize) -> TransportProgress {
+        TransportProgress {
+            human_bytes,
+            ..TransportProgress::default()
+        }
+    }
+
+    #[test]
+    fn pacing_starts_the_next_tick_at_once_while_outer_input_moves() {
+        let now = Instant::now();
+        for (case, human_bytes, pending_input) in [
+            ("outer bytes read", 4096, 0),
+            ("input still queued", 0, 2696),
+            ("both", 1, 1),
+        ] {
+            for next_deadline in [None, Some(now + Duration::from_secs(1))] {
+                assert_eq!(
+                    tick_sleep(&progress(human_bytes), pending_input, next_deadline, now),
+                    Duration::ZERO,
+                    "{case}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn pacing_keeps_the_idle_sleep_without_outer_input() {
+        let now = Instant::now();
+        let mut child_only = progress(0);
+        child_only.child_bytes = 512;
+        child_only.display_bytes = 512;
+        for idle in [progress(0), child_only] {
+            assert_eq!(tick_sleep(&idle, 0, None, now), Duration::from_millis(2));
+            assert_eq!(
+                tick_sleep(&idle, 0, Some(now + Duration::from_secs(1)), now),
+                Duration::from_millis(2)
+            );
+            assert_eq!(
+                tick_sleep(&idle, 0, Some(now + Duration::from_micros(500)), now),
+                Duration::from_micros(500),
+                "an earlier observation deadline still shortens the idle sleep"
+            );
+            assert_eq!(
+                tick_sleep(&idle, 0, Some(now - Duration::from_millis(1)), now),
+                Duration::ZERO
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod input_admission_tests {
     use super::*;
     use crate::runtime::runner::codec::AdmittedControlFrame;
