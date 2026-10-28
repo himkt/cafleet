@@ -42,6 +42,36 @@
       "sha256": "e606b8080d5fcd53505c0722c8922bb7943e3b39dd0b8a841f892c1505726bd4"
     },
     {
+      "id": "claude-2.1.302-wrapped-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 52,
+      "source_ref": "native/claude-2.1.302-wrapped-permission-1.json",
+      "sha256": "4d8f8f75fd1b318b3d4054eacaada7983e3413380d294646e1c6f0a74d9c76fd"
+    },
+    {
+      "id": "claude-2.1.302-wrapped-allow-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 52,
+      "source_ref": "native/claude-2.1.302-wrapped-allow-pre-stage-1.json",
+      "sha256": "dca8b4f19c4ce51a218f61aa4ab9a712962de9768b62cbce63c2c5e65818d5a8"
+    },
+    {
+      "id": "claude-2.1.302-wrapped-deny-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 52,
+      "source_ref": "native/claude-2.1.302-wrapped-deny-pre-stage-1.json",
+      "sha256": "3a671776c75c8f13cff4941954658d0b67d9978b13732e0c4f6a71b0b1f9c960"
+    },
+    {
       "id": "codex-0.163.0-on-request-permission-1",
       "kind": "native",
       "backend": "codex",
@@ -86,7 +116,7 @@
     {
       "backend": "claude",
       "native_versions": ["2.1.302"],
-      "profile_version": "claude-2.1.302-default-2",
+      "profile_version": "claude-2.1.302-default-3",
       "rules": [
         {
           "id": "claude-bash-permission",
@@ -96,12 +126,12 @@
             "screen": "alternate",
             "start_pattern": "^ Bash command$",
             "end_pattern": "^ Esc to cancel · Tab to amend$",
-            "max_rows": 16,
+            "max_rows": 24,
             "cursor": "inside"
           },
           "matchers": [
             {"id": "heading", "scope": "line", "pattern": "^ Bash command$"},
-            {"id": "operation", "scope": "region", "pattern": "(?m)^╌{3,}\\n (?P<operation>[^\\n]+)\\n╌{3,}$"},
+            {"id": "operation", "scope": "region", "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"},
             {"id": "approval", "scope": "line", "pattern": "^ This command requires approval$"},
             {"id": "question", "scope": "line", "pattern": "^ Do you want to proceed\\?$"},
             {"id": "focus", "scope": "line", "pattern": "^ ❯ [1-9]\\. "},
@@ -109,7 +139,7 @@
             {"id": "deny", "scope": "line", "pattern": "^ [❯ ] 4\\. (?P<label>No)$"}
           ],
           "extract": {
-            "operation": {"matcher_id": "operation", "capture": "operation"},
+            "operation": {"matcher_id": "operation", "capture": "operation", "reassembly": "edge_joined_rows"},
             "choices": [
               {"id": "allow-once", "label": {"matcher_id": "allow", "capture": "label"}, "scope": "single_request"},
               {"id": "deny-once", "label": {"matcher_id": "deny", "capture": "label"}, "scope": "single_request"}
@@ -145,7 +175,7 @@
       "capabilities": {
         "detection": {
           "rule_ids": ["claude-bash-permission"],
-          "fixture_ids": ["claude-2.1.302-default-permission-1"]
+          "fixture_ids": ["claude-2.1.302-default-permission-1", "claude-2.1.302-wrapped-permission-1"]
         },
         "composer": {
           "rule_ids": ["claude-idle-composer"],
@@ -161,7 +191,7 @@
             "stages": [
               {"bytes_hex": "31", "required_rule_id": "claude-bash-permission", "required_choice_id": "allow-once"}
             ],
-            "fixture_ids": ["claude-2.1.302-allow-pre-stage-1"]
+            "fixture_ids": ["claude-2.1.302-allow-pre-stage-1", "claude-2.1.302-wrapped-allow-pre-stage-1"]
           },
           {
             "decision": "deny",
@@ -172,7 +202,7 @@
             "stages": [
               {"bytes_hex": "34", "required_rule_id": "claude-bash-permission", "required_choice_id": "deny-once"}
             ],
-            "fixture_ids": ["claude-2.1.302-deny-pre-stage-1"]
+            "fixture_ids": ["claude-2.1.302-deny-pre-stage-1", "claude-2.1.302-wrapped-deny-pre-stage-1"]
           }
         ]
       }

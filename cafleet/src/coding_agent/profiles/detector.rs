@@ -1,5 +1,5 @@
 use super::CodingAgent;
-use super::catalog::{Capture, Profile, ProfileCatalog, Rule};
+use super::catalog::{Capture, Profile, ProfileCatalog, Reassembly, Rule};
 use crate::broker::runtime::InteractionClass;
 use crate::coding_agent::AnswerPlan;
 use crate::error::CafleetError;
@@ -1125,6 +1125,32 @@ struct LogicalLine {
     end: u16,
     boundaries: Vec<(u16, u16)>,
 }
+impl LogicalLine {
+    fn end_col(&self) -> u16 {
+        self.boundaries.last().expect("line has initial boundary").1
+    }
+}
+/// `None` when the captured rows are not whole lines with a plain or boxed prefix.
+fn reassemble_edge_joined_rows(rows: &str, lines: &[LogicalLine], cols: u16) -> Option<String> {
+    let rows = rows.split('\n').collect::<Vec<_>>();
+    if rows.len() > lines.len() {
+        return None;
+    }
+    let mut operation = String::new();
+    let mut previous_reached_edge = true;
+    for (row, line) in rows.into_iter().zip(lines) {
+        if row != line.text {
+            return None;
+        }
+        let content = row.strip_prefix(" │ ").or_else(|| row.strip_prefix(' '))?;
+        if !previous_reached_edge {
+            operation.push(' ');
+        }
+        operation.push_str(content);
+        previous_reached_edge = line.end_col() + 1 >= cols;
+    }
+    Some(operation)
+}
 fn logical_lines(screen: &ScreenSnapshot) -> Result<Vec<LogicalLine>> {
     let mut lines = Vec::new();
     let mut current: Option<LogicalLine> = None;
@@ -1253,6 +1279,7 @@ fn match_rule(rule: &Rule, screen: &ScreenSnapshot, lines: &[LogicalLine]) -> Op
         .collect::<Vec<_>>()
         .join("\n");
     let mut values = BTreeMap::new();
+    let mut first_lines = BTreeMap::new();
     let mut focuses = BTreeMap::new();
     for matcher in &rule.matchers {
         let texts = if matcher.scope == "region" {
@@ -1261,7 +1288,7 @@ fn match_rule(rule: &Rule, screen: &ScreenSnapshot, lines: &[LogicalLine]) -> Op
             selected.iter().map(|line| line.text.as_str()).collect()
         };
         let mut captured_values = Vec::new();
-        for text in texts {
+        for (index, text) in texts.into_iter().enumerate() {
             for captures in matcher.regex.captures_iter(text) {
                 let named = matcher
                     .regex
@@ -1273,25 +1300,48 @@ fn match_rule(rule: &Rule, screen: &ScreenSnapshot, lines: &[LogicalLine]) -> Op
                             .map(|v| (name.into(), v.as_str().into()))
                     })
                     .collect::<BTreeMap<String, String>>();
+                let named_lines = matcher
+                    .regex
+                    .capture_names()
+                    .flatten()
+                    .filter_map(|name| {
+                        captures.name(name).map(|v| {
+                            (
+                                name.to_owned(),
+                                index + text[..v.start()].matches('\n').count(),
+                            )
+                        })
+                    })
+                    .collect::<BTreeMap<String, usize>>();
                 let full = captures
                     .get(0)
                     .expect("regex match has full capture")
                     .as_str();
-                captured_values.push((named, full.to_owned()));
+                captured_values.push((named, named_lines, full.to_owned()));
             }
         }
         if captured_values.len() != 1 {
             return None;
         }
-        let (named, full) = captured_values.pop().expect("single matcher capture");
+        let (named, named_lines, full) = captured_values.pop().expect("single matcher capture");
         focuses.insert(
             matcher.id.clone(),
             serde_json::to_string(&(&matcher.id, &full, &named)).expect("focus strings serialize"),
         );
         values.insert(matcher.id.clone(), named);
+        first_lines.insert(matcher.id.clone(), named_lines);
     }
     let operation = match &rule.operation {
-        Some(reference) => Some(captured(reference, &values)?),
+        Some(reference) => {
+            let value = captured(reference, &values)?;
+            Some(match reference.reassembly {
+                None => value,
+                Some(Reassembly::EdgeJoinedRows) => {
+                    let first = first_lines[&reference.matcher][&reference.name];
+                    reassemble_edge_joined_rows(&value, &selected[first..], screen.cols)?
+                }
+            })
+        }
         None => None,
     };
     let native = match &rule.native {

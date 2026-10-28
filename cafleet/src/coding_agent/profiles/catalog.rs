@@ -258,10 +258,15 @@ pub(super) struct Fixture {
     pub backend: CodingAgent,
     pub version: String,
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Reassembly {
+    EdgeJoinedRows,
+}
 #[derive(Clone)]
 pub(super) struct Capture {
     pub matcher: String,
     pub name: String,
+    pub reassembly: Option<Reassembly>,
 }
 #[derive(Clone)]
 pub(super) struct Choice {
@@ -424,7 +429,11 @@ fn capture(value: &Value, matchers: &[Matcher]) -> Result<Capture> {
             .any(|candidate| candidate == name),
         "unknown named capture",
     )?;
-    Ok(Capture { matcher, name })
+    Ok(Capture {
+        matcher,
+        name,
+        reassembly: None,
+    })
 }
 fn optional_capture(value: &Value, matchers: &[Matcher]) -> Result<Option<Capture>> {
     if value.is_null() {
@@ -432,6 +441,21 @@ fn optional_capture(value: &Value, matchers: &[Matcher]) -> Result<Option<Captur
     } else {
         capture(value, matchers).map(Some)
     }
+}
+fn operation_capture(value: &Value, matchers: &[Matcher]) -> Result<Option<Capture>> {
+    let Some(reassembly) = value.get("reassembly") else {
+        return optional_capture(value, matchers);
+    };
+    let reassembly = match one_of(reassembly, &["edge_joined_rows"])?.as_str() {
+        "edge_joined_rows" => Reassembly::EdgeJoinedRows,
+        _ => unreachable!("validated reassembly enum"),
+    };
+    let mut plain = object(value, &["matcher_id", "capture", "reassembly"])?.clone();
+    plain.remove("reassembly");
+    Ok(Some(Capture {
+        reassembly: Some(reassembly),
+        ..capture(&Value::Object(plain), matchers)?
+    }))
 }
 fn compile_rule(value: &Value) -> Result<Rule> {
     let m = object(
@@ -512,7 +536,7 @@ fn compile_rule(value: &Value) -> Result<Rule> {
         priority,
         kind,
         region,
-        operation: optional_capture(&ex["operation"], &matchers)?,
+        operation: operation_capture(&ex["operation"], &matchers)?,
         native: optional_capture(&ex["native_request_id"], &matchers)?,
         choices,
         matchers,
@@ -683,6 +707,18 @@ const BUNDLED_FIXTURES: &[(&str, &[u8])] = &[
     (
         "native/claude-2.1.302-idle-composer-1.json",
         include_bytes!("native/claude-2.1.302-idle-composer-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-wrapped-permission-1.json",
+        include_bytes!("native/claude-2.1.302-wrapped-permission-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-wrapped-allow-pre-stage-1.json",
+        include_bytes!("native/claude-2.1.302-wrapped-allow-pre-stage-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-wrapped-deny-pre-stage-1.json",
+        include_bytes!("native/claude-2.1.302-wrapped-deny-pre-stage-1.json"),
     ),
     (
         "native/codex-0.163.0-on-request-permission-1.json",
