@@ -111,7 +111,20 @@ const DRIVER_FULL_SIZE: TerminalSize = TerminalSize {
 };
 const DRIVER_WRAPPED_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 52 };
 const DRIVER_BOXED_WRAP_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 89 };
-const APPROVED_CASES: [ApprovedCase; 22] = [
+const DRIVER_HERDR_ENV_SIZE: TerminalSize = TerminalSize {
+    rows: 36,
+    cols: 166,
+};
+// tmux sets its own TERM and TERM_PROGRAM in every pane, so the herdr terminal identity reaches the
+// native child only as spawn overrides; the values are those the live herdr child carried.
+const DRIVER_HERDR_CHILD_ENVIRONMENT: [(&str, &str); 5] = [
+    ("TERM", "xterm-256color"),
+    ("COLORTERM", "truecolor"),
+    ("TERM_PROGRAM", "herdr"),
+    ("TERM_PROGRAM_VERSION", "0.9.5"),
+    ("HERDR_ENV", "1"),
+];
+const APPROVED_CASES: [ApprovedCase; 23] = [
     ApprovedCase {
         id: "cells-002",
         backend: CodingAgent::Claude,
@@ -398,6 +411,19 @@ const APPROVED_CASES: [ApprovedCase; 22] = [
         socket: "oi01",
         size: DRIVER_FULL_SIZE,
     },
+    ApprovedCase {
+        id: "opencode-herdr-env-cells-001",
+        backend: CodingAgent::Opencode,
+        permission_mode: "cafleet-ask",
+        mode: DriverMode::NoAnswer,
+        decision: None,
+        prefix_hex: &[],
+        stage_hex: &[],
+        probe_argument: Some("allow"),
+        database: "oh01.db",
+        socket: "oh01",
+        size: DRIVER_HERDR_ENV_SIZE,
+    },
 ];
 impl ApprovedCase {
     fn select(case: &DriverCase) -> Result<&'static Self> {
@@ -429,6 +455,12 @@ impl ApprovedCase {
             "case decision, stage or probe binding differs from its reviewed case",
         )?;
         Ok(approved)
+    }
+    fn child_environment(&self) -> &'static [(&'static str, &'static str)] {
+        match self.id {
+            "opencode-herdr-env-cells-001" => &DRIVER_HERDR_CHILD_ENVIRONMENT,
+            _ => &[],
+        }
     }
     fn member_name(&self) -> String {
         format!("cafleet-194-{}", self.id)
@@ -990,7 +1022,14 @@ fn driver_prepare(
     let spawn = SpawnSpec {
         argv,
         cwd: case.cwd.clone(),
-        environment: vec![("CAFLEET_DATABASE_URL".into(), case.database_url.clone())],
+        environment: std::iter::once(("CAFLEET_DATABASE_URL".into(), case.database_url.clone()))
+            .chain(
+                approved
+                    .child_environment()
+                    .iter()
+                    .map(|&(name, value)| (name.into(), value.into())),
+            )
+            .collect(),
         evidence_policy: json!({"mode":"redacted","config":config}),
         size: approved.size,
     };
