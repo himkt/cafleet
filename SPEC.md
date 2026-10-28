@@ -2070,7 +2070,18 @@ A probe that cannot start, times out, exits nonzero, prints non-UTF-8 output or 
 
 ##### Bundled profiles and native screen fixtures
 
-The bundled catalog is embedded in the CAFleet binary together with the native screen fixtures that its declarations cite. It currently declares one profile: detection of the Claude Code `2.1.302` native `default` permission form, backed by native screen fixtures from accepted captures. That profile's composer, prompt submission, native-exec submission and answer capabilities remain `unknown` until their own native evidence is accepted. Every other backend and native version yields `coverage=unknown`.
+The bundled catalog is embedded in the CAFleet binary together with the native screen fixtures that its declarations cite. It currently declares one profile, for Claude Code `2.1.302`, whose capabilities rest on accepted native captures:
+
+| Capability | Status | Declaration |
+|---|---|---|
+| Detection | `tested` | The native `default` Bash permission form (`Bash command` heading, approval text, proceed question, focused choice and the `Yes`/`No` single-request choices) in the alternate screen |
+| Allow answer | `tested` | One stage, byte `31` (digit `1`), selecting `Yes` as `allow-once` |
+| Deny answer | `tested` | One stage, byte `34` (digit `4`), selecting `No` as `deny-once` |
+| Empty-composer observation | `tested` | The idle prompt line with the terminal cursor immediately after the prompt prefix; a verified non-interaction boundary |
+| Prompt submission | `unknown` | — |
+| Native-exec submission | `unknown` | — |
+
+Both answers select their choice by its number, so they do not depend on which choice is focused. The broadened choices 2 and 3 have no answer plan. The empty-composer observation reads the composer as empty only when the cursor sits at the end of the prompt prefix; a draft whose cursor was moved back to the prefix reads as empty. Every other backend and native version yields `coverage=unknown`.
 
 A native screen fixture records one captured terminal screen with exactly these fields:
 
