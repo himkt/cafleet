@@ -134,7 +134,7 @@ impl Fixture {
                 "workspace-write"
             ]),
             event_evidence: EventEvidence::Metadata,
-            native_version: Some("0.163.0".into()),
+            native_version: Some("0.162.0".into()),
             profile_version: None,
             coverage: Coverage::Unknown,
             owner_pid: process.pid,

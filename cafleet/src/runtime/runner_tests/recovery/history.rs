@@ -213,7 +213,11 @@ fn runner_recovery_preserves_latest_evidence_receipts_response_audits_and_episod
     .unwrap();
     let capability = AnswerCapability::fixture(
         CodingAgent::Codex,
-        "0.163.0",
+        case.fixture
+            .run
+            .native_version
+            .as_deref()
+            .expect("fixture run records its native version"),
         "answer-fixture-v1",
         "recovery-fixture",
         "single-request-choice",
