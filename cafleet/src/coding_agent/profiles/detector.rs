@@ -476,7 +476,8 @@ pub(super) mod inspection_tests {
     }
 
     #[test]
-    fn bundled_claude_wrapped_operation_joins_at_the_display_cell_edge_and_spaces_shorter_rows() {
+    fn bundled_claude_plain_operation_joins_at_the_display_cell_edge_and_keeps_shorter_row_breaks()
+    {
         let short = claude_observation(&wrapped_screen(
             |lines| {
                 lines[22] = " /tmp/cafleet-194/claude-wrap-cells-001".into();
@@ -486,9 +487,17 @@ pub(super) mod inspection_tests {
         ));
         assert_claude_request(
             &short,
-            "/tmp/cafleet-194/claude-wrap-cells-001 permission-probe allow",
+            "/tmp/cafleet-194/claude-wrap-cells-001\npermission-probe allow",
         );
-        for (filler, separator) in [(28, ""), (27, " ")] {
+        assert!(
+            short.fingerprint
+                != claude_observation(&unwrapped_rendering(
+                    "/tmp/cafleet-194/claude-wrap-cells-001 permission-probe allow"
+                ))
+                .fingerprint,
+            "a plain break after a shorter row is width-dependent"
+        );
+        for (filler, separator) in [(28, ""), (27, "\n")] {
             let row = format!(" /tmp/cafleet-194/界界/{}", "a".repeat(filler));
             assert_eq!(
                 row.chars().count() + 2,
@@ -535,19 +544,17 @@ pub(super) mod inspection_tests {
     }
 
     #[test]
-    fn bundled_claude_synthetic_boxed_operation_rows_reassemble_with_one_space() {
-        let several_words =
-            "/tmp/cafleet-194/claude-wrap-cells-001/permission-probe allow --reason boxed";
+    fn bundled_claude_synthetic_boxed_operation_rows_keep_each_boundary_as_a_line_break() {
         for (operation, rows) in [
             (
-                WRAPPED_OPERATION,
+                "/tmp/cafleet-194/claude-wrap-cells-001/permission-probe\nallow",
                 &[
                     " │ /tmp/cafleet-194/claude-wrap-cells-001/permission-probe",
                     " │ allow",
                 ][..],
             ),
             (
-                several_words,
+                "/tmp/cafleet-194/claude-wrap-cells-001/permission-probe\nallow --reason\nboxed",
                 &[
                     " │ /tmp/cafleet-194/claude-wrap-cells-001/permission-probe",
                     " │ allow --reason",
@@ -559,21 +566,21 @@ pub(super) mod inspection_tests {
             assert_claude_request(&boxed, operation);
             assert!(
                 boxed.fingerprint
-                    == claude_observation(&unwrapped_rendering(operation)).fingerprint,
-                "{} boxed rows keep the unwrapped identity",
+                    != claude_observation(&unwrapped_rendering(&operation.replace('\n', " ")))
+                        .fingerprint,
+                "a boxed wrap of {} rows is width-dependent",
                 rows.len()
             );
         }
     }
 
     #[test]
-    fn bundled_claude_boxed_row_reaching_the_last_usable_column_still_joins_with_one_space() {
+    fn bundled_claude_boxed_row_reaching_the_last_usable_column_keeps_its_line_break() {
         let wide_path = format!("/tmp/cafleet-194/{}/permission-probe", "w".repeat(82));
         let wide_row = format!(" │ {wide_path}");
         assert_eq!(wide_row.chars().count(), 119, "reaches column 119 of 120");
-        let wide_operation = format!("{wide_path} allow");
         let wide = claude_observation(&native_with_operation_rows(&[&wide_row, " │ allow"]));
-        assert_claude_request(&wide, &wide_operation);
+        assert_claude_request(&wide, &format!("{wide_path}\nallow"));
         let narrow_row = " │ /tmp/cafleet-194/claude-wrap-cells-001/probe-box";
         assert_eq!(narrow_row.chars().count(), 51, "reaches column 51 of 52");
         let narrow = claude_observation(&wrapped_screen(
@@ -583,12 +590,45 @@ pub(super) mod inspection_tests {
             },
             true,
         ));
-        let narrow_operation = "/tmp/cafleet-194/claude-wrap-cells-001/probe-box allow";
-        assert_claude_request(&narrow, narrow_operation);
-        assert!(
-            narrow.fingerprint
-                == claude_observation(&unwrapped_rendering(narrow_operation)).fingerprint
+        assert_claude_request(
+            &narrow,
+            "/tmp/cafleet-194/claude-wrap-cells-001/probe-box\nallow",
         );
+    }
+
+    #[test]
+    fn bundled_claude_multi_line_operation_keeps_its_lines_in_the_plain_and_boxed_shapes() {
+        let multi_line = "echo ok # cleanup\nrm -rf ~/x";
+        let plain = claude_observation(&wrapped_screen(
+            |lines| {
+                lines[22] = " echo ok # cleanup".into();
+                lines[23] = " rm -rf ~/x".into();
+            },
+            true,
+        ));
+        let boxed = claude_observation(&native_with_operation_rows(&[
+            " │ echo ok # cleanup",
+            " │ rm -rf ~/x",
+        ]));
+        let unwrapped_plain = claude_observation(&native_with_operation_rows(&[
+            " echo ok # cleanup",
+            " rm -rf ~/x",
+        ]));
+        for (shape, observation) in [
+            ("plain at 52 columns", &plain),
+            ("boxed at 120 columns", &boxed),
+            ("plain at 120 columns", &unwrapped_plain),
+        ] {
+            assert_claude_request(observation, multi_line);
+            assert!(
+                observation.fingerprint
+                    != claude_observation(&unwrapped_rendering("echo ok # cleanup rm -rf ~/x"))
+                        .fingerprint,
+                "{shape} never reads as one commented-out line"
+            );
+        }
+        assert!(plain.fingerprint == boxed.fingerprint);
+        assert!(plain.fingerprint == unwrapped_plain.fingerprint);
     }
 
     #[test]
