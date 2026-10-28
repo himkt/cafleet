@@ -2125,7 +2125,9 @@ A probe that cannot start, times out, exits nonzero, prints non-UTF-8 output or 
 
 ##### Bundled profiles and native screen fixtures
 
-The bundled catalog is embedded in the CAFleet binary together with the native screen fixtures that its declarations cite. It currently declares one profile, for Claude Code `2.1.302`, whose capabilities rest on accepted native captures:
+The bundled catalog is embedded in the CAFleet binary together with the native screen fixtures that its declarations cite. Each profile's capabilities rest on accepted native captures of its exact native version.
+
+Claude Code `2.1.302`, profile `claude-2.1.302-default-2`:
 
 | Capability | Status | Declaration |
 |---|---|---|
@@ -2136,9 +2138,22 @@ The bundled catalog is embedded in the CAFleet binary together with the native s
 | Prompt submission | `unknown` | — |
 | Native-exec submission | `unknown` | — |
 
-Both answers select their choice by its number, so they do not depend on which choice is focused. The broadened choices 2 and 3 have no answer plan. The empty-composer observation reads the composer as empty only when the cursor sits at the end of the prompt prefix; a draft whose cursor was moved back to the prefix reads as empty. Every other backend and native version yields `coverage=unknown`.
+Both answers select their choice by its number, so they do not depend on which choice is focused. The broadened choices 2 and 3 have no answer plan. The empty-composer observation reads the composer as empty only when the cursor sits at the end of the prompt prefix; a draft whose cursor was moved back to the prefix reads as empty. Every backend and native version without a bundled profile yields `coverage=unknown`.
 
 Detection covers the permission form only when it renders within 16 rows from its `Bash command` heading to its `Esc to cancel · Tab to amend` line, with the operation on a single line between the dashed rules. A narrow pane or a long command makes Claude wrap the form: the operation becomes boxed `│` rows and the choice labels continue on further rows. A wrapped form yields no detection, so no `interaction_opened` event is produced, programmatic input stays held, and the request is answered manually on the native surface.
+
+Codex CLI `0.163.0` launched with `--ask-for-approval on-request --sandbox workspace-write`, profile `codex-0.163.0-on-request-1`:
+
+| Capability | Status | Declaration |
+|---|---|---|
+| Detection | `tested` | The native command-approval form in the alternate screen, from its `Would you like to run the following command?` heading to its `Press enter to confirm or esc to cancel` line within 24 rows: the `Environment:` and `Reason:` lines, the single-line `$ ` command, the focused `›` choice and the `1. Yes, proceed (y)` / `3. No, and tell Codex what to do differently (esc)` single-request choices, with the cursor inside the form |
+| Allow answer | `tested` | One stage, byte `79` (`y`), selecting `Yes, proceed` as `allow-once` |
+| Deny answer | `tested` | One stage, byte `33` (digit `3`), selecting `No, and tell Codex what to do differently` as `deny-once` |
+| Empty-composer observation | `tested` | The idle `› ` composer line with the terminal cursor immediately after the prefix, its placeholder text shown; a verified non-interaction boundary |
+| Prompt submission | `unknown` | — |
+| Native-exec submission | `unknown` | — |
+
+The rules anchor on the live form's heading and closing lines rather than on absolute rows, and the reason line is model-authored text that the rule requires but excludes from the request identity. The deny answer uses the choice's digit because that choice displays only `esc` as its shortcut, and CAFleet never sends a lone Escape to a held form. Choice 2, which approves a command prefix persistently, has no answer plan. The native captures showed the decision on the native surface: after allow, Codex printed `✔ You approved codex to run <command> this time` and ran the command; after deny, it printed `✗ You canceled the request to run <command>` and `■ Conversation interrupted`, and ran nothing. These lines are decision evidence for the Director's continuation check, not bundled rules. A Codex configuration that routes approvals to its automatic reviewer (`approvals_reviewer`) answers escalations without any native form, so detection observes no request. The detection covers a single-line command; a command that wraps in a narrow pane yields no detection, as for the Claude form.
 
 A native screen fixture records one captured terminal screen with exactly these fields:
 
@@ -2149,7 +2164,7 @@ A native screen fixture records one captured terminal screen with exactly these 
 | `provenance` | `native` |
 | `backend`, `native_version` | Equal the catalog fixture entry |
 | `rows`, `cols` | Positive measured geometry, equal to the catalog fixture entry |
-| `alternate_screen`, `screen_seq`, `cursor_row`, `cursor_col` | Measured screen state; the cursor lies within the geometry |
+| `alternate_screen`, `screen_seq`, `cursor_row`, `cursor_col` | Measured screen state; `cursor_row` is below `rows`, and `cursor_col` is at most `cols`, where `cursor_col` equal to `cols` records the terminal's pending-wrap position after the last column |
 | `lines` | Exactly `rows` captured row texts, in viewport order |
 | `masked_rows` | Unique zero-based row indices, each `{"row":N,"reason":"reviewed_privacy"}`; the corresponding `lines` entry is the empty string |
 
@@ -2164,6 +2179,8 @@ The bundled catalog fails to load unless each bundled fixture satisfies all of t
 - Every row declared in `masked_rows` is in range and empty.
 
 A synthetic fixture, an undeclared alteration or a digest mismatch therefore rejects the bundled catalog. Synthetic fixtures remain available to explicitly selected test catalogs.
+
+A rule's cursor condition treats a pending-wrap cursor as standing on the last cell of its row, both in fixtures and on live screens. A region spanning the full width therefore counts a cursor at column `cols` on one of its rows as inside the region.
 
 ##### Executable native plans
 

@@ -99,7 +99,7 @@ the broker commands, the operator's settings are therefore the member's allow
 list; the recommended profiles are in
 [Claude Code configuration](../quickstart.md#claude-code).
 
-Launch-policy evidence is pinned to Claude Code 2.1.302 and Codex CLI 0.163.0. The inspected Claude parser accepts canonical `default` and alias `manual`, although help renders the canonical mode as `manual`; explicit argv preserves the selected spelling. [Claude’s permission-mode reference](https://code.claude.com/docs/en/permission-modes) documents the alias. Codex help confirms `on-request` and `never` with the explicit workspace sandbox retained. These observations establish launch-policy eligibility; detector/composer coverage remains unverified until the exact-version acceptance gates pass.
+Launch-policy evidence is pinned to Claude Code 2.1.302 and Codex CLI 0.163.0. The inspected Claude parser accepts canonical `default` and alias `manual`, although help renders the canonical mode as `manual`; explicit argv preserves the selected spelling. [Claude’s permission-mode reference](https://code.claude.com/docs/en/permission-modes) documents the alias. Codex help confirms `on-request` and `never` with the explicit workspace sandbox retained. These observations establish launch-policy eligibility. Detection, empty-composer and answer coverage for exactly these versions comes from their [bundled profiles](member-runtime.md#bundled-profiles-and-native-screen-fixtures); every other version records `coverage=unknown`.
 
 ### Spawn-time allow rules {#spawn-time-allow-rules}
 
