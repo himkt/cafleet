@@ -1108,6 +1108,87 @@ mod runtime_parser_tests {
     }
 
     #[test]
+    fn help_describes_every_argument_of_the_runtime_read_input_press_and_recover_commands() {
+        use clap::CommandFactory;
+        let command = CliArgs::command();
+        for path in [
+            &["event", "show"][..],
+            &["input", "show"],
+            &["input", "reconcile"],
+            &["member", "press"],
+            &["member", "recover"],
+        ] {
+            let mut selected = &command;
+            for name in path {
+                selected = selected
+                    .find_subcommand(name)
+                    .unwrap_or_else(|| panic!("registered subcommand {name}"));
+            }
+            let mut described = 0;
+            for argument in selected.get_arguments() {
+                let id = argument.get_id().as_str();
+                if ["help", "version"].contains(&id) {
+                    continue;
+                }
+                let help = argument
+                    .get_help()
+                    .map(|help| help.to_string())
+                    .unwrap_or_default();
+                assert!(
+                    !help.trim().is_empty(),
+                    "{path:?} argument {id} has a help description"
+                );
+                described += 1;
+            }
+            assert!(described > 0, "{path:?} declares its arguments");
+        }
+    }
+
+    #[test]
+    fn member_exec_help_describes_wrapped_and_unwrapped_input_and_orders_member_before_command() {
+        use clap::CommandFactory;
+        let help = subcommand_help(&["member", "exec"]);
+        let lower = help.to_lowercase();
+        for term in ["unwrapped", "escape"] {
+            assert!(
+                lower.contains(term),
+                "member exec help mentions {term}: {help}"
+            );
+        }
+        assert!(
+            lower
+                .split("unwrapped")
+                .next()
+                .is_some_and(|before| before.contains("wrapped")),
+            "member exec help describes wrapped members before the unwrapped exception: {help}"
+        );
+        let mut command = CliArgs::command();
+        let usage = flattened(
+            command
+                .find_subcommand_mut("member")
+                .unwrap()
+                .find_subcommand_mut("exec")
+                .unwrap()
+                .render_usage(),
+        );
+        let member = usage.find("MEMBER_ID").expect("usage names MEMBER_ID");
+        let body = usage.find("COMMAND").expect("usage names COMMAND");
+        assert!(member < body, "MEMBER_ID precedes COMMAND: {usage}");
+        match CliArgs::try_parse_from(["cafleet", "member", "exec", "17", "printf ok"])
+            .unwrap()
+            .command
+        {
+            crate::cli::Command::Member(crate::cli::member::MemberCommand::Exec {
+                member_id,
+                ..
+            }) => {
+                assert_eq!(member_id, 17)
+            }
+            _ => panic!("member exec parses MEMBER_ID then COMMAND"),
+        }
+    }
+
+    #[test]
     fn help_describes_command_groups_and_derives_choices_from_their_registries() {
         use crate::coding_agent::CodingAgent;
         use clap::CommandFactory;

@@ -3481,6 +3481,46 @@ mod runtime_contract_tests {
     }
 
     #[test]
+    fn closing_transition_keeps_the_request_evidence_and_reports_the_closing_frame_in_its_event() {
+        let mut fixture = Fixture::new();
+        let owner = fixture.activate();
+        let opened = fixture.open(&owner);
+        let request = storage::get_event(&fixture.conn, opened.event_id)
+            .unwrap()
+            .interaction
+            .unwrap();
+        let mut raw = raw_evidence(SECRET);
+        raw["screen_seq"] = json!(121);
+        let closing_frame = evidence::EvidencePolicy::metadata().apply(&raw).unwrap();
+        assert_ne!(closing_frame, request.evidence_json);
+        let closed = storage::persist_transition(
+            &mut fixture.conn,
+            &owner,
+            &ObservedTransition {
+                evidence_json: closing_frame.clone(),
+                ..closure(owner.run_id, 2, 1)
+            },
+            PersistenceMode::Live,
+        )
+        .unwrap();
+        assert_eq!(closed.payload_json["evidence"], closing_frame);
+        let stored = storage::get_event(&fixture.conn, closed.event_id)
+            .unwrap()
+            .interaction
+            .unwrap();
+        assert_eq!(
+            stored.close_reason,
+            Some(InteractionCloseReason::NotVisible)
+        );
+        assert!(stored.closed_at.is_some());
+        assert_eq!(
+            stored.evidence_json, request.evidence_json,
+            "the stored interaction keeps the evidence of the request"
+        );
+        assert_eq!(stored.evidence_digest, request.evidence_digest);
+    }
+
+    #[test]
     fn archived_recovery_selects_the_lifecycle_reason_without_fabricating_an_inbox() {
         for (damage, reason) in [
             ("member", "member_inactive"),

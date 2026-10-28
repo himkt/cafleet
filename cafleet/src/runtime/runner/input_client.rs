@@ -5228,6 +5228,102 @@ pub(super) mod permission_history {
         }
     }
 
+    mod inspect_errors {
+        use super::*;
+        use crate::runtime::runner::{PermissionInspectInput, inspect_permission};
+
+        fn opened(case: &Case) -> (i64, i64) {
+            case.fixture
+                .conn
+                .query_row(
+                    "SELECT event_id,interaction_id FROM member_runtime_events WHERE run_id=?1 AND kind='interaction_opened'",
+                    [case.fixture.run.run_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap()
+        }
+
+        fn copied(case: &Case) -> (Settings, Connection) {
+            let path = case.fixture._dir.path().join("copied-inspection.db");
+            std::fs::copy(case.fixture.conn.path().unwrap(), &path).unwrap();
+            let settings = Settings {
+                database_url: format!("sqlite:///{}", path.display()),
+                max_text_len: 200,
+                multiplexer: None,
+            };
+            let conn = crate::db::connect(&settings.database_url).unwrap();
+            (settings, conn)
+        }
+
+        fn inspect(
+            conn: &mut Connection,
+            settings: &Settings,
+            event_id: i64,
+            interaction_id: i64,
+            director_member_id: i64,
+        ) -> CafleetError {
+            match inspect_permission(
+                conn,
+                settings,
+                &PermissionInspectInput {
+                    event_id,
+                    interaction_id,
+                    director_member_id,
+                },
+                Deadline::until(Instant::now() + Duration::from_secs(1)),
+            ) {
+                Err(failure) => failure.source,
+                Ok(_) => panic!("this inspection is refused"),
+            }
+        }
+
+        #[test]
+        fn permission_inspect_reports_a_missing_interaction_before_event_run_or_identity_checks() {
+            let case = Case::new(Retained::Accepted);
+            let (event_id, interaction_id) = opened(&case);
+            let director = case.fixture.run.director_member_id;
+            let missing = interaction_id + 1000;
+            let (settings, mut conn) = copied(&case);
+            for (event, label) in [
+                (event_id, "an existing event"),
+                (event_id + 1000, "a missing event"),
+            ] {
+                let error = inspect(&mut conn, &settings, event, missing, director);
+                assert_eq!(
+                    error.message(),
+                    format!("Interaction {missing} not found"),
+                    "{label} with a foreign database identity"
+                );
+                assert_eq!(error.exit_code(), 1);
+            }
+        }
+
+        #[test]
+        fn permission_inspect_names_the_run_database_identity_field_on_a_mismatch() {
+            let case = Case::new(Retained::Accepted);
+            let (event_id, interaction_id) = opened(&case);
+            let (settings, mut conn) = copied(&case);
+            let error = inspect(
+                &mut conn,
+                &settings,
+                event_id,
+                interaction_id,
+                case.fixture.run.director_member_id,
+            );
+            assert!(
+                matches!(&error, CafleetError::InvalidStoredValue { field, value }
+                    if field == "member_runs.database_identity_json"
+                        && value == "selected database identity mismatch"),
+                "{error:?}"
+            );
+            assert_eq!(
+                error.message(),
+                "invalid stored value for member_runs.database_identity_json: selected database identity mismatch"
+            );
+            assert_eq!(error.exit_code(), 1);
+        }
+    }
+
     mod entry {
         use super::*;
         use crate::runtime::runner::{
