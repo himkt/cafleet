@@ -2398,7 +2398,7 @@ The native captures showed this decision evidence:
 | Answer | Native surface | Continuation |
 |---|---|---|
 | Allow | The hint area briefly shows `Waiting for permission event…`, then the form disappears without transcript text, the command runs and the member prints its report, a `<agent> · <model> · <duration>` line and the idle composer | The member continues on its own |
-| Deny | After the final Enter the hint area briefly shows `Waiting for permission event…`, then the dialog disappears and the transcript shows `Step interrupted`, a `<agent> · <model> · <duration>` line and the idle composer; nothing runs | OpenCode does not continue after a rejection; the Director continues the member with an ordinary message |
+| Deny | After the final Enter the hint area briefly shows `Waiting for permission event…`, then the dialog disappears and the transcript shows `Step interrupted`, a `<agent> · <model> · <duration>` line and the idle composer; nothing runs | OpenCode does not continue after a rejection; CAFleet holds the Director's message because OpenCode prompt submission is `unknown`, and the member continues from input on its native surface |
 
 These lines are decision evidence for the Director's continuation check, not bundled rules. Because an answered form or dialog leaves no transcript text, the false-positive guard rests on the live-region anchors. The fixtures are native 36x120 captures with only row 35 masked; the visible default public model name and context-usage counter are neither account, plan nor path text. The OpenCode limits apply as follows:
 

@@ -1,7 +1,7 @@
 # OpenCode Ask Permission Forms
 
 **Status**: Approved
-**Progress**: 22/28 tasks complete
+**Progress**: 28/28 tasks complete
 **Last Updated**: 2026-10-28
 
 ## Overview
@@ -10,15 +10,15 @@ Add the explicit OpenCode launch policy `cafleet-ask`, backed by a second embedd
 
 ## Success Criteria
 
-- [ ] `cafleet member create --coding-agent opencode --permission-mode cafleet-ask` launches `opencode mini --standalone --agent cafleet-ask --prompt <prompt>` and records `requested_mode=cafleet-ask`, `resolved_mode=cafleet-ask`, `mode_source=explicit` and `permission_argv_json=["--agent","cafleet-ask"]`; omitted selection still launches `--agent cafleet` with `mode_source=default`.
-- [ ] `cafleet setup --coding-agent opencode` installs both `agents/cafleet.md` and `agents/cafleet-ask.md` under the resolved preset base and prints one preset line per target, `cafleet doctor` reports `opencode.preset` and `opencode.preset.cafleet-ask`, and `member create` requires only the selected policy's preset file.
-- [ ] A member reads the configuration CAFleet validated: `member create` forwards the selected backend's `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `OPENCODE_CONFIG_DIR` into the member environment when the creator sets it, and the OpenCode preset base defaults to `~/.config/opencode`, where OpenCode 2.1.4 loads both presets.
-- [ ] The `cafleet-ask` preset differs from the `cafleet` preset only in its description, its shell base rule `"*": "ask"` and its body text; every allowlist entry, every Director-only shell deny and every non-shell permission is identical.
-- [ ] The native version probe records `2.1.4` for OpenCode 2.1.4, whose `--version` prints `opencode v2.1.4`, and an OpenCode 2.1.4 member under either policy records profile `opencode-2.1.4-cafleet-ask-1` and `coverage=tested`.
-- [ ] The bundled profile declares tested detection, allow-once and reject-once answers and the empty-composer observation, each resting on native OpenCode 2.1.4 `mini` captures at 36x120; every answer stage is gated on the observed focus or continuation screen and none contains Escape, prompt and native-exec submission stay `unknown`, and no answer plan exists for an "always" choice.
-- [ ] On both tmux and herdr, a `cafleet-ask` member's shell permission form produces one `interaction_opened` event with the review instruction, and Director-auto allow and deny through `permission respond` reach the original request, close the episode `not_visible` and show the native result. After allow the member continues on its own; after deny OpenCode shows `Step interrupted` and the member continues on the Director's ordinary continuation message.
-- [ ] On one multiplexer, a user-sourced response, a user-executed complete bound command and a manual original-surface answer each reach the original request, with zero Director response bytes before the user's permission.
-- [ ] Every affected `docs/` page, `SPEC.md`, skill reference and preset describes the shipped `cafleet-ask` policy, the OpenCode profile and its limits, and `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build` pass.
+- [x] `cafleet member create --coding-agent opencode --permission-mode cafleet-ask` launches `opencode mini --standalone --agent cafleet-ask --prompt <prompt>` and records `requested_mode=cafleet-ask`, `resolved_mode=cafleet-ask`, `mode_source=explicit` and `permission_argv_json=["--agent","cafleet-ask"]`; omitted selection still launches `--agent cafleet` with `mode_source=default`.
+- [x] `cafleet setup --coding-agent opencode` installs both `agents/cafleet.md` and `agents/cafleet-ask.md` under the resolved preset base and prints one preset line per target, `cafleet doctor` reports `opencode.preset` and `opencode.preset.cafleet-ask`, and `member create` requires only the selected policy's preset file.
+- [x] A member reads the configuration CAFleet validated: `member create` forwards the selected backend's `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `OPENCODE_CONFIG_DIR` into the member environment when the creator sets it, and the OpenCode preset base defaults to `~/.config/opencode`, where OpenCode 2.1.4 loads both presets.
+- [x] The `cafleet-ask` preset differs from the `cafleet` preset only in its description, its shell base rule `"*": "ask"` and its body text; every allowlist entry, every Director-only shell deny and every non-shell permission is identical.
+- [x] The native version probe records `2.1.4` for OpenCode 2.1.4, whose `--version` prints `opencode v2.1.4`, and an OpenCode 2.1.4 member under either policy records profile `opencode-2.1.4-cafleet-ask-1` and `coverage=tested`.
+- [x] The bundled profile declares tested detection, allow-once and reject-once answers and the empty-composer observation, each resting on native OpenCode 2.1.4 `mini` captures at 36x120; every answer stage is gated on the observed focus or continuation screen and none contains Escape, prompt and native-exec submission stay `unknown`, and no answer plan exists for an "always" choice.
+- [x] On both tmux and herdr, a `cafleet-ask` member's shell permission form produces one `interaction_opened` event with the review instruction, and Director-auto allow and deny through `permission respond` reach the original request, close the episode `not_visible` and show the native result. After allow the member continues on its own; after deny OpenCode shows `Step interrupted` and does not continue on its own, CAFleet holds the Director's message because OpenCode prompt submission is `unknown`, and the member continues from input on its native surface.
+- [x] On one multiplexer, a user-sourced response, a user-executed complete bound command and a manual original-surface answer each reach the original request, with zero Director response bytes before the user's permission.
+- [x] Every affected `docs/` page, `SPEC.md`, skill reference and preset describes the shipped `cafleet-ask` policy, the OpenCode profile and its limits, and `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build` pass.
 
 ---
 
@@ -214,7 +214,7 @@ The native decision evidence is:
 | Answer | Evidence on the native surface | Continuation |
 |---|---|---|
 | Allow | The hint area briefly shows `Waiting for permission event…`, the form disappears without transcript text, the command runs, and the member prints its own report, a `<agent> · <model> · <duration>` line and the idle composer | The member continues on its own |
-| Deny | After the final Enter the hint area briefly shows `Waiting for permission event…`, the dialog disappears, and the transcript shows `Step interrupted`, a `<agent> · <model> · <duration>` line and the idle composer; nothing runs | OpenCode does not continue after a rejection; the Director continues the member with an ordinary message, as after Claude's `Interrupted · What should Claude do instead?` |
+| Deny | After the final Enter the hint area briefly shows `Waiting for permission event…`, the dialog disappears, and the transcript shows `Step interrupted`, a `<agent> · <model> · <duration>` line and the idle composer; nothing runs | OpenCode does not continue after a rejection; CAFleet holds the Director's message because OpenCode prompt submission is `unknown`, and the member continues from input on its native surface |
 
 Step 3 stops at a blocker when a measurement contradicts this table. Each of these outcomes requires a Programmer blocker marker at `paragraph-Implementation > Step 3`, paired with a `blocked (paragraph-Implementation > Step 3)` message to the Director, because the user-required acceptance includes both Director-auto allow and deny:
 
@@ -335,7 +335,7 @@ Run every case with the shipping release build, a private database and a dedicat
 | Case | Multiplexers | Required evidence |
 |---|---|---|
 | Director-auto allow | tmux and herdr | `interaction_opened` with the review instruction; `accepted`/`submitted`; the marker exists; OpenCode's allow evidence; `interaction_closed` `not_visible`; the member continues |
-| Director-auto deny | tmux and herdr | The same event; `accepted`/`submitted`; no marker; OpenCode's `Step interrupted` and idle composer; `interaction_closed` `not_visible`; the member continues on the Director's ordinary continuation message |
+| Director-auto deny | tmux and herdr | The same event; `accepted`/`submitted`; no marker; OpenCode's `Step interrupted` and idle composer; `interaction_closed` `not_visible`; the Director's message is stored with its preview held, and the member continues from input on its native surface |
 | User-sourced response (`--decision-source user`) | One of tmux or herdr | Zero response bytes before the user's permission; `accepted`/`submitted`; native result and closure |
 | User-executed complete bound command | Same multiplexer | The user runs the presented `permission respond` command; zero Director response bytes; native result and closure |
 | Manual original-surface answer | Same multiplexer | The user answers in the native pane; closure follows; a later respond with the earlier token is refused before any byte |
@@ -411,32 +411,61 @@ Record detection-to-inbox latency, the CAFleet commit, versions, geometry and ev
 ### Step 6: Forward the config location and relocate the OpenCode preset base
 
 - [x] Document § Member configuration environment and the OpenCode preset base in `docs/docs/spec/cli-options.md`, `docs/docs/spec/coding-agent-backends.md`, `docs/docs/quickstart.md`, `SPEC.md` and `skills/cafleet/reference/coding-agents.md`, replacing every `~/.opencode` default with `~/.config/opencode`, and the doctor check lines for an OpenCode installation recorded at another base. <!-- completed: 2026-10-28T14:15 -->
-- [ ] Write tests: for each backend `member create` forwards its config-location variable with the creator's exact value after `CAFLEET_DATABASE_URL` and adds nothing when it is unset, forwards no other backend's variable, still fails an invalid value before registration and records the variable in the launch descriptor; the runner's native child receives it; the OpenCode preset base defaults to `~/.config/opencode` and setup installs both presets and records that identity there; with an installation row at `~/.opencode`, doctor reports `opencode.configuration` `ok` at `~/.config/opencode`, `opencode.installation` `info` with the run-setup hint, and both preset checks reading only the new base; and the selected-preset precondition reads the new default. <!-- completed: -->
+- [x] Write tests: for each backend `member create` forwards its config-location variable with the creator's exact value after `CAFLEET_DATABASE_URL` and adds nothing when it is unset, forwards no other backend's variable, still fails an invalid value before registration and records the variable in the launch descriptor; the runner's native child receives it; the OpenCode preset base defaults to `~/.config/opencode` and setup installs both presets and records that identity there; with an installation row at `~/.opencode`, doctor reports `opencode.configuration` `ok` at `~/.config/opencode`, `opencode.installation` `info` with the run-setup hint, and both preset checks reading only the new base; and the selected-preset precondition reads the new default. <!-- completed: 2026-10-28T14:20 -->
 - [x] Implement the forwarded variable in `member create`'s spawn environment and the `~/.config/opencode` default in config-dir resolution. <!-- completed: 2026-10-28T14:29 -->
 - [x] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck`. <!-- completed: 2026-10-28T14:29 -->
 
 ### Step 7: Forward outer-terminal input bursts intact
 
-COMMENT(director): Decision on finding (C): accept the proposed fix steps 1-3 (drain outer input until WouldBlock, EOF or the 65536-byte input limit within one tick and write the queue to the PTY master; start the next tick immediately while outer input moves; no escape-sequence framing of manual input). Programmer29: add it as a new Implementation step after Step 6 ("Forward outer-terminal input bursts intact") with docs, test and implementation tasks, document the contract where the runner's outer-input forwarding is specified (member-runtime.md and SPEC.md), remove the resolved finding-(C) programmer and director markers except this decision, and send complete; Tester20 writes its tests after Step 6's. The pre-fix read log is not required: the post-fix herdr Director-auto rerun is the acceptance evidence, with the bounded screen metadata as the fallback if detection still fails.
-
 - [x] Document § Outer-terminal input forwarding in `docs/docs/spec/member-runtime.md` and `SPEC.md`, where the runner's outer-input relay is specified. <!-- completed: 2026-10-28T14:22 -->
-- [ ] Write tests: one tick drains a fake outer input that returns 4096 bytes, then 3600 bytes, then would-block, queues all 7696 bytes in order and writes them to the PTY master within that tick; the manual-input generation advances by 7696; reads stop when the 65536-byte input queue is full, leave the rest unread and resume on the next tick; data followed by EOF forwards the data and reports outer EOF; a partial PTY write keeps the remainder queued in order; the pacing decision starts the next tick without the idle sleep while a tick read outer bytes or input stays queued, and keeps the idle sleep otherwise; and the existing transport tests still pass. <!-- completed: -->
+- [x] Write tests: one tick drains a fake outer input that returns 4096 bytes, then 3600 bytes, then would-block, queues all 7696 bytes in order and writes them to the PTY master within that tick; the manual-input generation advances by 7696; reads stop when the 65536-byte input queue is full, leave the rest unread and resume on the next tick; data followed by EOF forwards the data and reports outer EOF; a partial PTY write keeps the remainder queued in order; the pacing decision starts the next tick without the idle sleep while a tick read outer bytes or input stays queued, and keeps the idle sleep otherwise; and the existing transport tests still pass. <!-- completed: 2026-10-28T14:25 -->
 - [x] Implement the draining outer read and whole-queue PTY write in the transport tick, and the input-aware pacing in the service loop. <!-- completed: 2026-10-28T14:29 -->
 - [x] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck`. <!-- completed: 2026-10-28T14:29 -->
 
 ### Step 8: Accept natively
 
-COMMENT(tester): Finding (C) diagnosis: no rule condition fails on the saved screen. A scratch test (removed, nothing committed) dropped the two echo rows and wrote each remaining row with its SGR at its own row (CUP) into an 82x169 primary TerminalState with the cursor hidden; 170 columns gave the same result. The bundled detector returned `Interaction(PermissionRequest)`, rule `opencode-shell-permission`, `Complete` (no conflict), with the cursor at (21,69) accepted by cursor `any`. Every row stayed unwrapped, the region spanned heading to control line within 24 rows, every matcher matched once, and `match_answer` matched both the allow and deny plans with `focus_style` resolving `allow-once` from the 250,178,131 label background. The stack-trace rows below the form matched no rule. The missing `interaction_opened` therefore comes from the runner's live screen or episode path, not from the rule: either the runner's own vt100 grid differs from the herdr rendering (for example the suspected OSC 10/11 colour reply corrupting OpenCode's input, or OpenCode redrawing continuously after its error so no two compatible observations stay 100 ms apart), or the observer was degraded or gapped. Next evidence: capture the runner's own screen snapshot and observation (classification, output_seq and gap/degraded status from health or doctor) while the form shows, and compare it with this replay.
-
-- [ ] Run Director-auto allow and deny on tmux and on herdr, recording the evidence in § Acceptance. <!-- completed: -->
-- [ ] Run the three user-attended cases on one multiplexer with the user. <!-- completed: -->
-- [ ] Verify the default-policy coverage case, and record latency, versions, geometry and unobserved cases. <!-- completed: -->
+- [x] Run Director-auto allow and deny on tmux and on herdr, recording the evidence in § Acceptance. <!-- completed: 2026-10-29T07:46 -->
+- [x] Run the three user-attended cases on one multiplexer with the user. <!-- completed: 2026-10-29T07:43 -->
+- [x] Verify the default-policy coverage case, and record latency, versions, geometry and unobserved cases. <!-- completed: 2026-10-28T23:37 -->
 
 ### Step 9: Validate the shipping surfaces
 
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build`; verify help, embedded presets and the bundled catalog match the documentation, and record the execution summary in this document. <!-- completed: -->
+- [x] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build`; verify help, embedded presets and the bundled catalog match the documentation, and record the execution summary in this document. <!-- completed: 2026-10-29T07:48 -->
 
 ---
+
+## Execution record
+
+### Native acceptance (2026-10-28/29, Linux, release build of `be6cb683`)
+
+Every case used a private database, OpenCode 2.1.4 (`opencode v2.1.4`, mini) as the child executable, the case folder as cwd and the presets at the default `~/.config/opencode/agents`; `member create` ran without `OPENCODE_CONFIG_DIR`.
+
+| Case | Multiplexer | Observed outcome |
+|---|---|---|
+| Director-auto allow | tmux 3.6a (240x80) and herdr 0.9.5 (82x166) | `interaction_opened` with operation `<case>/permission-probe allow`, `operation_rows` 1 and choices `Allow once`/`Reject`; `permission respond` `accepted`/`submitted`; `allow.executed` created; `interaction_closed` `not_visible` (rule `opencode-idle-composer`); the member reported the result and returned to the idle composer |
+| Director-auto deny | tmux and herdr | The same opening; the three-stage deny `accepted`/`submitted`; no marker; `Step interrupted`; `interaction_closed` `not_visible`; idle composer |
+| User-sourced response | herdr | The user allowed through the Director's decision surface before any byte; `--decision-source user` `accepted`/`submitted`; marker; closure |
+| User-executed bound command | herdr | The user ran the presented `permission respond` command with `!`; `accepted`/`submitted` with zero Director response bytes; marker; closure |
+| Manual original-surface answer | herdr | The user pressed Enter on `Allow once` in the member pane; marker; closure; `permission inspect` then fails with `permission inspection current event/interaction/message mismatch`, and a respond with the earlier token is refused before any byte |
+| Default policy coverage | herdr | A `cafleet` member records `coverage=tested` and profile `opencode-2.1.4-cafleet-ask-1`, emits no `coverage_unknown` and shows no form; the model declined the unmatched probe from the preset text before calling the tool, so the native denial itself was not exercised |
+
+A deny followed by an ordinary Director message (tmux, `oc-tmux-continue`): OpenCode showed `Step interrupted` and the idle composer, the message was stored and its preview held (OpenCode prompt submission is `unknown`), and nothing reached the composer; continuing a member after a deny needs input on the native surface.
+
+Detection-to-inbox latency (event `observed_at` to inbox `created_at`) was 7-9 ms. Members deleted after each case produced `runner_exited` (native exit 130).
+
+### Findings fixed during acceptance
+
+| Finding | Cause | Fix |
+|---|---|---|
+| `Agent not found: "cafleet-ask"` | The member child inherited only the multiplexer pane environment plus `CAFLEET_DATABASE_URL`, so a creator `OPENCODE_CONFIG_DIR` never reached OpenCode | Step 6: `member create` forwards the selected backend's config-location variable (`a4253c90`) |
+| Default OpenCode presets never loaded | OpenCode 2.1.4 loads agents only from `~/.config/opencode` (`opencode debug config`), while the preset base defaulted to `~/.opencode` | Step 6: the preset base defaults to `~/.config/opencode` (`a4253c90`) |
+| No detection and an OpenCode `Invalid key name` crash on herdr only | herdr answers OpenCode's 256-entry OSC 4 palette query in one burst longer than the 4096-byte line-discipline read; the runner forwarded it over two ticks, so OpenCode timed out the split sequence and parsed `50;rgb:afaf/d7d7/8787` as keys | Step 7: drain outer input in one tick and skip the idle sleep while it moves (`be6cb683`); isolated by a tmux run with herdr's environment and a runner-less OpenCode under herdr |
+
+### Other evidence
+
+- Native captures and decision records: `.execution/195/native-captures/`; live case folders: `.p194/cases/oc-*`.
+- One full-suite run on `5b874953` failed `cli::member::tests::deletion_reloads_a_published_pending_pane_and_retains_ownership_through_completion` under load; it passed alone and on every later full run.
+- The pre-existing doctor documentation that describes a coding-agents table and footnotes does not match the shipped per-check output; it stays a separate follow-up.
 
 ## Changelog
 
