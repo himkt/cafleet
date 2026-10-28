@@ -721,6 +721,14 @@ const BUNDLED_FIXTURES: &[(&str, &[u8])] = &[
         include_bytes!("native/claude-2.1.302-wrapped-deny-pre-stage-1.json"),
     ),
     (
+        "native/claude-2.1.302-boxed-permission-1.json",
+        include_bytes!("native/claude-2.1.302-boxed-permission-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-boxed-single-row-permission-1.json",
+        include_bytes!("native/claude-2.1.302-boxed-single-row-permission-1.json"),
+    ),
+    (
         "native/codex-0.163.0-on-request-permission-1.json",
         include_bytes!("native/codex-0.163.0-on-request-permission-1.json"),
     ),

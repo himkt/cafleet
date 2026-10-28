@@ -72,6 +72,26 @@
       "sha256": "3a671776c75c8f13cff4941954658d0b67d9978b13732e0c4f6a71b0b1f9c960"
     },
     {
+      "id": "claude-2.1.302-boxed-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 89,
+      "source_ref": "native/claude-2.1.302-boxed-permission-1.json",
+      "sha256": "c9d97c8b92b38546a7aee55db404af97e4872fdcbbf84b1ea7b992694dd5f2cf"
+    },
+    {
+      "id": "claude-2.1.302-boxed-single-row-permission-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude-2.1.302-boxed-single-row-permission-1.json",
+      "sha256": "0a701f94912057b13c5775c74e2574683dd861787a205424dc5a991e9699b062"
+    },
+    {
       "id": "codex-0.163.0-on-request-permission-1",
       "kind": "native",
       "backend": "codex",
@@ -175,7 +195,12 @@
       "capabilities": {
         "detection": {
           "rule_ids": ["claude-bash-permission"],
-          "fixture_ids": ["claude-2.1.302-default-permission-1", "claude-2.1.302-wrapped-permission-1"]
+          "fixture_ids": [
+            "claude-2.1.302-default-permission-1",
+            "claude-2.1.302-wrapped-permission-1",
+            "claude-2.1.302-boxed-permission-1",
+            "claude-2.1.302-boxed-single-row-permission-1"
+          ]
         },
         "composer": {
           "rule_ids": ["claude-idle-composer"],
