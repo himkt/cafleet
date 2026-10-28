@@ -1243,9 +1243,10 @@ mod pacing_tests {
     use super::*;
     use crate::runtime::runner::transport::TransportProgress;
 
-    fn progress(human_bytes: usize) -> TransportProgress {
+    fn progress(human_bytes: usize, forwarded_bytes: usize) -> TransportProgress {
         TransportProgress {
             human_bytes,
+            forwarded_bytes,
             ..TransportProgress::default()
         }
     }
@@ -1253,13 +1254,14 @@ mod pacing_tests {
     #[test]
     fn pacing_starts_the_next_tick_at_once_while_outer_input_moves() {
         let now = Instant::now();
-        for (case, human_bytes, pending_input) in [
+        for (case, human_bytes, forwarded_bytes) in [
             ("outer bytes read", 4096, 0),
-            ("outer bytes read with input still queued", 1, 1),
+            ("positive master write", 0, 2696),
+            ("both", 1, 1),
         ] {
             for next_deadline in [None, Some(now + Duration::from_secs(1))] {
                 assert_eq!(
-                    tick_sleep(&progress(human_bytes), pending_input, next_deadline, now),
+                    tick_sleep(&progress(human_bytes, forwarded_bytes), next_deadline, now),
                     Duration::ZERO,
                     "{case}"
                 );
@@ -1270,22 +1272,22 @@ mod pacing_tests {
     #[test]
     fn pacing_keeps_the_idle_sleep_without_outer_input() {
         let now = Instant::now();
-        let mut child_only = progress(0);
+        let mut child_only = progress(0, 0);
         child_only.child_bytes = 512;
         child_only.display_bytes = 512;
-        for idle in [progress(0), child_only] {
-            assert_eq!(tick_sleep(&idle, 0, None, now), Duration::from_millis(2));
+        for idle in [progress(0, 0), child_only] {
+            assert_eq!(tick_sleep(&idle, None, now), Duration::from_millis(2));
             assert_eq!(
-                tick_sleep(&idle, 0, Some(now + Duration::from_secs(1)), now),
+                tick_sleep(&idle, Some(now + Duration::from_secs(1)), now),
                 Duration::from_millis(2)
             );
             assert_eq!(
-                tick_sleep(&idle, 0, Some(now + Duration::from_micros(500)), now),
+                tick_sleep(&idle, Some(now + Duration::from_micros(500)), now),
                 Duration::from_micros(500),
                 "an earlier observation deadline still shortens the idle sleep"
             );
             assert_eq!(
-                tick_sleep(&idle, 0, Some(now - Duration::from_millis(1)), now),
+                tick_sleep(&idle, Some(now - Duration::from_millis(1)), now),
                 Duration::ZERO
             );
         }
@@ -1294,23 +1296,12 @@ mod pacing_tests {
     #[test]
     fn pacing_keeps_the_idle_sleep_when_a_blocked_master_accepted_no_queued_input() {
         let now = Instant::now();
-        let blocked = progress(0);
-        for pending_input in [1, 2696, 65536] {
-            assert_eq!(
-                tick_sleep(&blocked, pending_input, None, now),
-                Duration::from_millis(2),
-                "{pending_input} queued bytes the master did not accept"
-            );
-            assert_eq!(
-                tick_sleep(
-                    &blocked,
-                    pending_input,
-                    Some(now + Duration::from_micros(500)),
-                    now
-                ),
-                Duration::from_micros(500)
-            );
-        }
+        let blocked = progress(0, 0);
+        assert_eq!(tick_sleep(&blocked, None, now), Duration::from_millis(2));
+        assert_eq!(
+            tick_sleep(&blocked, Some(now + Duration::from_micros(500)), now),
+            Duration::from_micros(500)
+        );
     }
 }
 
