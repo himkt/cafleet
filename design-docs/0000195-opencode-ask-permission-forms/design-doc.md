@@ -1,7 +1,7 @@
 # OpenCode Ask Permission Forms
 
 **Status**: Approved
-**Progress**: 17/24 tasks complete
+**Progress**: 18/28 tasks complete
 **Last Updated**: 2026-10-28
 
 ## Overview
@@ -46,6 +46,7 @@ Member automatic approval ([#502](https://github.com/himkt/cafleet/issues/502)) 
 | Bundled profile `opencode-2.1.4-cafleet-ask-1`: shell permission detection, allow-once and reject-once answers, empty-composer observation | `ask` for non-shell permissions (`edit`, `external_directory`, `webfetch`, `websearch` and the other preset keys) |
 | OpenCode 2.1.4 `cafleet` members moving from `coverage=unknown` (with its `coverage_unknown` notification) to `coverage=tested` with the empty-composer boundary | Prompt and native-exec composer submission plans |
 | Gated multi-stage answer plans: per-stage focus and continuation-screen gates, the expected transition between stages and the Escape-free stage invariant (§ Focus-gated answer stages) | Answer stages without an observed focus gate in a navigation plan; any stage containing Escape |
+| Forwarding outer-terminal input bursts to the child within one tick (§ Outer-terminal input forwarding) | Escape-sequence framing or buffering of manual input |
 | Native acceptance on tmux and herdr | Wrapped or narrow-pane permission forms; OpenCode versions other than 2.1.4 |
 
 The runner, event, inspection, response, receipt and Director-workflow contracts of 0000194 apply unchanged, except for the answer-plan extension in § Focus-gated answer stages, which leaves the Claude and Codex plans and their behavior unchanged. The `director_action` instruction, including its multi-row sentence rule, is backend-neutral; a single-line OpenCode operation always has `operation_rows` 1.
@@ -127,6 +128,21 @@ The skills base stays the fixed `~/.config/opencode/skills`, so with the variabl
 - An OpenCode `member create` fails its selected-preset precondition with `cannot read opencode agent preset at ~/.config/opencode/agents/<mode>.md: <cause>; run 'cafleet setup --coding-agent opencode' first`.
 
 Rerunning setup installs both presets at the new base and leaves files at the former base in place.
+
+### Outer-terminal input forwarding
+
+The runner forwards outer-terminal input to the native child as manual input. One read of the runner's raw-mode stdin returns at most the line discipline's 4096-byte buffer, so a longer terminal reply arrives in several reads. One example is herdr's answer to OpenCode's 256-entry OSC 4 palette query. The shipped tick reads once, writes once and the loop then sleeps up to 2 ms. The child therefore receives the first 4096 bytes alone, a tick before the rest. When that gap exceeds OpenCode's incomplete-sequence timeout, OpenCode parses the remainder as keys and fails with `Invalid key name: key name cannot be empty`. Its screen then diverges from a normal form, so no `interaction_opened` arrives under herdr. OpenCode run directly under herdr meets the same 4096-byte boundary without the gap.
+
+| Concern | Contract |
+|---|---|
+| Read | Each tick repeats the non-blocking outer read until it would block, reaches EOF or fills the 65536-byte input queue; each read keeps the existing per-read capacity |
+| Write | The tick then writes the whole queue to the PTY master in one write; bytes the master does not accept stay queued, in order, for the next tick |
+| EOF | Bytes read before EOF are forwarded; EOF is then reported as today |
+| Pacing | When a tick read outer bytes or leaves input queued, the service loop starts the next tick without its idle sleep; otherwise the idle sleep is unchanged |
+| Framing | None: bytes pass unchanged and in order, with no escape-sequence parsing, holding or timeout |
+| Manual accounting | Unchanged: every read advances the manual-input generation by its byte count |
+
+A reply longer than the 65536-byte queue still spans ticks, but with no idle sleep between them.
 
 ### Native version probe
 
@@ -394,74 +410,33 @@ Record detection-to-inbox latency, the CAFleet commit, versions, geometry and ev
 
 ### Step 6: Forward the config location and relocate the OpenCode preset base
 
+COMMENT(tester): The doctor footnote item is untestable as written: the shipped `cafleet doctor` (`cli/doctor.rs`) emits `<status> <name>: <detail>` checks and has no coding-agents table, `– cafleet setup --coding-agent <agent>` cell or `note: <agent> was previously set up at <path>` footnote; the documented table layout is pre-existing drift that this step does not implement. The Step 6 tests therefore assert the shipped equivalent: with an `asset_installs` row at `~/.opencode`, `opencode.configuration` is `ok` at `~/.config/opencode`, `opencode.installation` is `info` with `no installation recorded at <home>/.config/opencode; run 'cafleet setup --coding-agent opencode'`, and both preset checks read only the new base. Decide whether this step must also render the documented footnote (a new doctor renderer, with its own tests) or whether the shipped checks satisfy it.
+
+COMMENT(director): Decision: the shipped doctor checks satisfy Step 6; no new doctor renderer. Programmer29: in this step's docs, describe the ~/.opencode case with the shipped check lines (opencode.configuration ok at ~/.config/opencode, opencode.installation info with the run-setup hint, both preset checks at the new base) instead of the coding-agents table footnote, and correct the Step 6 test task wording to match; the pre-existing table/footnote drift elsewhere in the doctor docs stays a separate follow-up. Remove this marker and the tester marker with the fix.
+
 - [x] Document § Member configuration environment and the OpenCode preset base in `docs/docs/spec/cli-options.md`, `docs/docs/spec/coding-agent-backends.md`, `docs/docs/quickstart.md`, `SPEC.md` and `skills/cafleet/reference/coding-agents.md`, replacing every `~/.opencode` default with `~/.config/opencode`. <!-- completed: 2026-10-28T14:15 -->
 - [ ] Write tests: for each backend `member create` forwards its config-location variable with the creator's exact value after `CAFLEET_DATABASE_URL` and adds nothing when it is unset, forwards no other backend's variable, still fails an invalid value before registration and records the variable in the launch descriptor; the runner's native child receives it; the OpenCode preset base defaults to `~/.config/opencode` and setup installs both presets and records that identity there; doctor reports a `~/.opencode` row as a footnote with `– cafleet setup --coding-agent opencode`; and the selected-preset precondition reads the new default. <!-- completed: -->
 - [ ] Implement the forwarded variable in `member create`'s spawn environment and the `~/.config/opencode` default in config-dir resolution. <!-- completed: -->
 - [ ] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck`. <!-- completed: -->
 
-### Step 7: Accept natively
+### Step 7: Forward outer-terminal input bursts intact
 
-COMMENT(director): Live finding on 5b874953 (herdr, OpenCode 2.1.4 mini, cafleet-ask, release build). (A) Agent not found: member create validates <config>/agents/<mode>.md from the creator environment, but the member child inherits only the herdr pane environment plus CAFLEET_DATABASE_URL (cli/member.rs SpawnSpec.environment, runner/creation.rs split_runner), so OPENCODE_CONFIG_DIR set for the creator never reaches OpenCode; CLAUDE_CONFIG_DIR and CODEX_HOME have the same gap. (B) OpenCode 2.1.4 reads configuration only from ~/.config/opencode (`opencode debug config` lists only that directory), while CAFleet resolves the OpenCode preset base to ~/.opencode when OPENCODE_CONFIG_DIR is absent, so the default `cafleet` and `cafleet-ask` presets are never loaded. The user chose to fix both in this PR. (C) With presets placed in ~/.config/opencode/agents and OPENCODE_CONFIG_DIR=/root/.config/opencode for the creator, the form appears (member 4, pane w2:p1V, 82x169) but no interaction_opened arrives; member show reports current_interaction_id null, status running, coverage tested. The pane also shows an OpenCode stack trace below the form (`at <anonymous> … emitWithPriority`); in the agent-not-found runs the composer showed `50;rgb:afaf/d7d7/8787` and OpenCode failed with `Invalid key name: key name cannot be empty`, which suggests an outer-terminal colour reply (OSC 10/11) reaching OpenCode as keystrokes. The herdr screen of the undetected form is saved with ANSI at .execution/195/live/herdr-undetected-form.ansi (first two rows are the herdr launch echo, not the runner screen).
+COMMENT(director): Decision on finding (C): accept the proposed fix steps 1-3 (drain outer input until WouldBlock, EOF or the 65536-byte input limit within one tick and write the queue to the PTY master; start the next tick immediately while outer input moves; no escape-sequence framing of manual input). Programmer29: add it as a new Implementation step after Step 6 ("Forward outer-terminal input bursts intact") with docs, test and implementation tasks, document the contract where the runner's outer-input forwarding is specified (member-runtime.md and SPEC.md), remove the resolved finding-(C) programmer and director markers except this decision, and send complete; Tester20 writes its tests after Step 6's. The pre-fix read log is not required: the post-fix herdr Director-auto rerun is the acceptance evidence, with the bounded screen metadata as the fallback if detection still fails.
+
+- [x] Document § Outer-terminal input forwarding in `docs/docs/spec/member-runtime.md` and `SPEC.md`, where the runner's outer-input relay is specified. <!-- completed: 2026-10-28T14:22 -->
+- [ ] Write tests: one tick drains a fake outer input that returns 4096 bytes, then 3600 bytes, then would-block, queues all 7696 bytes in order and writes them to the PTY master within that tick; the manual-input generation advances by 7696; reads stop when the 65536-byte input queue is full, leave the rest unread and resume on the next tick; data followed by EOF forwards the data and reports outer EOF; a partial PTY write keeps the remainder queued in order; the pacing decision starts the next tick without the idle sleep while a tick read outer bytes or input stays queued, and keeps the idle sleep otherwise; and the existing transport tests still pass. <!-- completed: -->
+- [ ] Implement the draining outer read and whole-queue PTY write in the transport tick, and the input-aware pacing in the service loop. <!-- completed: -->
+- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck`. <!-- completed: -->
+
+### Step 8: Accept natively
 
 COMMENT(tester): Finding (C) diagnosis: no rule condition fails on the saved screen. A scratch test (removed, nothing committed) dropped the two echo rows and wrote each remaining row with its SGR at its own row (CUP) into an 82x169 primary TerminalState with the cursor hidden; 170 columns gave the same result. The bundled detector returned `Interaction(PermissionRequest)`, rule `opencode-shell-permission`, `Complete` (no conflict), with the cursor at (21,69) accepted by cursor `any`. Every row stayed unwrapped, the region spanned heading to control line within 24 rows, every matcher matched once, and `match_answer` matched both the allow and deny plans with `focus_style` resolving `allow-once` from the 250,178,131 label background. The stack-trace rows below the form matched no rule. The missing `interaction_opened` therefore comes from the runner's live screen or episode path, not from the rule: either the runner's own vt100 grid differs from the herdr rendering (for example the suspected OSC 10/11 colour reply corrupting OpenCode's input, or OpenCode redrawing continuously after its error so no two compatible observations stay 100 ms apart), or the observer was degraded or gapped. Next evidence: capture the runner's own screen snapshot and observation (classification, output_seq and gap/degraded status from health or doctor) while the form shows, and compare it with this replay.
-
-COMMENT(director): tmux isolation for finding (C) on 5b874953 (release build, dedicated tmux 3.6a server, 240x80 window, OpenCode 2.1.4 mini, cafleet-ask, presets in ~/.config/opencode/agents with OPENCODE_CONFIG_DIR=/root/.config/opencode for the creator only). Director-auto allow: interaction_opened about 7 s after create with operation `<case>/permission-probe allow`, operation_rows 1, choices Allow once/Reject; permission respond accepted/submitted; allow.executed created; interaction_closed not_visible (rule opencode-idle-composer); the member reported the result and returned to the idle composer. Director-auto deny: interaction_opened, respond accepted/submitted (three stages), no marker, `Step interrupted`, interaction_closed not_visible, idle composer. So (C) is herdr-specific; no OpenCode crash or colour-reply text appeared on tmux. Records: .p194/cases/oc-tmux-allow and oc-tmux-deny.
-
-COMMENT(programmer): Finding (C) diagnosis, from a read-only `health` probe of the live run 3 (a scratch libtest calling `probe_health`, removed afterwards).
-
-**Observed state.** While the form is displayed the runner reports `visibility: not_visible`, `eligibility: hold/unknown`, `gap_count: 0`, `degraded: false`, `diagnostic: null`, `pending_count: 0`, `output_seq: 24824`. The run records `native_version 2.1.4`, `profile_version opencode-2.1.4-cafleet-ask-1` and `coverage tested`. The run has no `member_runtime_events` rows.
-
-**Ruled out.**
-
-| Suspected cause | Why it does not explain the state |
-|---|---|
-| Debounce instability | The tracker reports `visible` with `hold/candidate` for an unstable candidate. `not_visible` with `hold/unknown` and no active episode means the current observation is not an interaction at all. |
-| Observer gap or degradation | `gap_count` is 0 and `degraded` is false. |
-| Manual-input accounting (OSC 10/11 replies included) | `observe_manual` only clears the request token and advances the manual generation. It never touches the tracker, so it cannot suppress `interaction_opened`. |
-| Grid size | The child PTY (`PtySession::prepare`) and the runner parser (`Transport::new`) both take the runner's own stdin size, and SIGWINCH resizes both. |
-
-**Cause.** The detector classifies the runner's own vt100 grid as unmatched, although the herdr rendering of the same byte stream matches. The Tester's replay rebuilt the grid from herdr's rendered rows, one CUP per row, so it cannot show a parser-level difference. Ranked candidates:
-
-1. **Alternate screen.** The runner's grid is on the alternate screen. `opencode-shell-permission` requires `screen: primary`, and a herdr render dump does not show the screen mode.
-2. **Parser divergence.** OpenCode emits, only under herdr, sequences that the vt100 crate renders differently from herdr. The capability or colour replies herdr gives can change what OpenCode emits, and the tmux captures parsed correctly.
-3. **Layout after the crash.** The crash output after the injected colour reply (`Invalid key name`, the stack trace) lands differently in the two emulators.
-
-**Proposed fix.**
-
-1. **Make the cause observable.** Add bounded screen metadata to the runner's `health` observation: alternate-screen flag, rows×cols, cursor, and the last observation's `rule_id` and match evidence, with no screen text. Expose it through `member show --json`, so a live run states why nothing matched.
-2. **Separate tmux from herdr.** Rerun the same release-build case on tmux. A tmux detection points to herdr-specific output and keeps the profile intact. A tmux miss points to the live runner path.
-3. **Fix by cause.**
-
-| Confirmed cause | Fix |
-|---|---|
-| Alternate screen | Set the OpenCode rules to `screen: either` and add an alternate-screen fixture |
-| Parser divergence | Identify the sequence with the step-1 metadata plus a byte capture, then fix the parser handling |
-| Colour-reply injection | Deliver each outer-terminal reply to the child as one write, so OpenCode parses it as a reply rather than as keys |
-
-COMMENT(director): Plain OpenCode under herdr (no runner): `opencode mini --standalone --agent cafleet-ask` started directly in a herdr pane (w2, 86 rows) rendered the normal permission form for the probe with no crash, no colour-reply text and no stack trace; the tab was closed without answering (no marker). With the herdr-environment capture also detecting, finding (C) is the runner's outer-input path under herdr: herdr's terminal replies reach OpenCode through the runner in a form OpenCode misparses as keys, OpenCode errors (`Invalid key name`), and its output diverges from a normal form. Next: record the runner's outer-input reads under herdr (byte counts and timing, no content) and compare with what OpenCode receives; fix the runner so an outer terminal reply reaches the child intact. The replacement Programmer takes this over together with Step 6 (config-dir propagation and the OpenCode preset base).
-
-COMMENT(programmer): The herdr terminal identity is not the cause of finding (C); the bundled detector matches the runner's own grid under it. Analysis is offline, on `opencode-herdr-env-cells-001` (36x166; tmux outer terminal; child environment `TERM=xterm-256color`, `COLORTERM=truecolor`, `TERM_PROGRAM=herdr`, `TERM_PROGRAM_VERSION=0.9.5`, `HERDR_ENV=1`). I used a scratch libtest, removed afterwards with the tree clean, that rebuilds each capture sample cell by cell (text and background) into a 36x166 primary `TerminalState`.
-
-**Result, identical for samples 0 and 1.**
-
-- **The screen.** The grid is the primary screen, the cursor sits at the pending wrap of row 21 (21,166), and no row is soft-wrapped. The form occupies rows 9–20: `△ Permission required` (9), `# Shell command` (11), `$ …/opencode-herdr-env-cells-001/permission-probe allow` (13), and the choices with the control line (20).
-- **The detector.** `observe` returns `Interaction(PermissionRequest)`, rule `opencode-shell-permission`, `Complete`, region rows 9–21. Every matcher matches exactly one row: heading 9, shell 11, operation 13, and focus, allow and deny 20.
-- **The answer plans.** `match_answer` matches both the allow and deny plans, with `focus_style` resolving `allow-once`.
-- **No other rule.** The reject-reason and idle-composer rules match nothing.
-
-**What this leaves.** The environment that differs from tmux does not change OpenCode's output for the runner. The remaining difference on the live herdr run is herdr itself as the outer terminal: its replies to OpenCode's terminal queries reach OpenCode through the runner's stdin. That fits the herdr-only `Invalid key name` crash and the stack trace on the live screen. The runner forwards outer input to the child as human bytes, so a reply herdr sends in pieces, or in a form OpenCode misparses, becomes keystrokes. After the crash, OpenCode's output stream, and with it the runner's grid, no longer matches what herdr renders.
-
-**Proposed next evidence (Director-run).**
-
-1. **Isolate OpenCode from the runner.** Run plain `opencode mini --standalone --agent cafleet-ask` with no runner in a herdr pane, and trigger the same probe. A crash there makes it an OpenCode-with-herdr incompatibility, which CAFleet records as a herdr limit for OpenCode. No crash points at the runner's input path.
-2. **If no crash, record the input path.** Add a scratch log of the runner's human-input reads (byte count and timing, no content), captured during the live herdr startup. That shows whether herdr's replies arrive split across reads. If they do, the fix is for the runner to forward each outer read to the child in a single write without delay.
-3. **Capture the live herdr grid either way.** Add a herdr launch host to the native-capture driver, which is tmux-only today, and capture the crashed screen. The capture yields the runner grid the live run produced and the exact failing condition.
 
 - [ ] Run Director-auto allow and deny on tmux and on herdr, recording the evidence in § Acceptance. <!-- completed: -->
 - [ ] Run the three user-attended cases on one multiplexer with the user. <!-- completed: -->
 - [ ] Verify the default-policy coverage case, and record latency, versions, geometry and unobserved cases. <!-- completed: -->
 
-### Step 8: Validate the shipping surfaces
+### Step 9: Validate the shipping surfaces
 
 - [ ] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build`; verify help, embedded presets and the bundled catalog match the documentation, and record the execution summary in this document. <!-- completed: -->
 
@@ -475,3 +450,4 @@ COMMENT(programmer): The herdr terminal identity is not the cause of finding (C)
 | 2026-10-28 | Focus-gated multi-stage answers: OpenCode 2.1.4 has no focus-independent answer key, so allow is Enter on `Allow once` and deny is `h` then Enter on `Reject`, each stage gated on the observed focus; adds the engine extension, the revised blocker table, the per-stage capture cases and fixtures, and the engine tasks |
 | 2026-10-28 | Empty-reason rejection: Enter on `Reject` opens a rejection-reason dialog in `mini`, so deny gains a third stage, Enter gated on the `permission_continuation` rule `opencode-reject-reason` with an empty reason; adds screen gates, continuation-screen episode and binding rules, the `opencode-ans-deny-003` case and the stage-3 fixture |
 | 2026-10-28 | Live herdr acceptance findings: `member create` forwards the selected backend's config-location variable into the member environment, and the OpenCode preset base defaults to `~/.config/opencode`, the only directory OpenCode 2.1.4 loads agents from; adds Step 6 and renumbers acceptance and validation to Steps 7 and 8 |
+| 2026-10-28 | Herdr reply split: an outer-terminal reply longer than 4096 bytes reached OpenCode a tick apart and was parsed as keys, so the runner drains outer input within one tick, writes the whole queue and skips the idle sleep while input moves; adds § Outer-terminal input forwarding and Step 7, and renumbers acceptance and validation to Steps 8 and 9 |
