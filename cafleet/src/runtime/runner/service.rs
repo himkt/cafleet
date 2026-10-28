@@ -1226,11 +1226,11 @@ const IDLE_TICK_SLEEP: Duration = Duration::from_millis(2);
 
 fn tick_sleep(
     progress: &TransportProgress,
-    pending_input: usize,
+    _pending_input: usize,
     next_deadline: Option<Instant>,
     now: Instant,
 ) -> Duration {
-    if progress.human_bytes > 0 || pending_input > 0 {
+    if progress.human_bytes > 0 || progress.forwarded_bytes > 0 {
         return Duration::ZERO;
     }
     next_deadline.map_or(IDLE_TICK_SLEEP, |at| {

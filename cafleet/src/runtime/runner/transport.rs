@@ -68,6 +68,7 @@ pub(crate) struct TransportProgress {
     pub outer_eof: bool,
     pub child_bytes: usize,
     pub human_bytes: usize,
+    pub forwarded_bytes: usize,
     pub display_bytes: usize,
     pub observation_error: Option<String>,
     pub observation_failure: Option<ObservationFailure>,
@@ -197,7 +198,8 @@ impl Transport {
             human_bytes: self.drain_outer(human)?,
             ..TransportProgress::default()
         };
-        write_pending(&mut self.input, usize::MAX, |bytes| pty.try_write(bytes))?;
+        progress.forwarded_bytes =
+            write_pending(&mut self.input, usize::MAX, |bytes| pty.try_write(bytes))?;
         if let Some(bytes) = self.read_child(pty)? {
             self.child_eof = bytes.is_empty();
             progress.child_bytes = bytes.len();
