@@ -100,8 +100,11 @@ pub(super) fn start(fixture: &WriterFixture, hooks: Arc<Hooks>) -> EventWriter {
     )
     .unwrap()
 }
-pub(super) fn wait_until(mut condition: impl FnMut() -> bool) {
-    let until = deadline();
+pub(super) fn wait_until(condition: impl FnMut() -> bool) {
+    wait_until_within(Duration::from_secs(2), condition);
+}
+pub(super) fn wait_until_within(budget: Duration, mut condition: impl FnMut() -> bool) {
+    let until = Instant::now() + budget;
     while !condition() {
         assert!(
             Instant::now() < until,

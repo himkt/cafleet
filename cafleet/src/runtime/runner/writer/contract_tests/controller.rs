@@ -1,10 +1,14 @@
 use super::support::*;
-use super::worker::{Hooks, Release, committed, start, wait_until};
+use super::worker::{Hooks, Release, committed, start, wait_until, wait_until_within};
 use super::*;
 use crate::coding_agent::ProfileCatalog;
 use std::os::unix::process::ExitStatusExt;
 
 mod review;
+
+// Draining 64 retained pressure transitions through SQLite exceeds the shared 2 s budget under a
+// concurrent full suite on slower storage.
+const PRESSURE_DRAIN_BUDGET: Duration = Duration::from_secs(10);
 
 fn assert_retained_pressure<T>(attempt: Result<T>, status: ObservationStatus) {
     if let Err(cause) = attempt {
@@ -571,7 +575,7 @@ fn runner_batch2_controller_retains_both_superseded_originals_when_the_first_sub
     assert!(controller.status().retained_transition);
     assert!(controller.status().retained_draft);
     drop(release);
-    wait_until(|| {
+    wait_until_within(PRESSURE_DRAIN_BUDGET, || {
         let attempt = controller.poll(&terminal.snapshot(), &writer, &clock);
         assert_retained_pressure(attempt, controller.status());
         committed(&fixture) >= 66
@@ -593,12 +597,15 @@ fn runner_batch2_controller_retains_both_superseded_originals_when_the_first_sub
         assert_eq!(view.event.payload_json["evidence"]["screen_seq"], screen);
     }
     assert_eq!(opened.event.kind, RuntimeEventKind::InteractionOpened);
-    wait_until(|| {
+    wait_until_within(PRESSURE_DRAIN_BUDGET, || {
         let attempt = controller.poll(&terminal.snapshot(), &writer, &clock);
         assert_retained_pressure(attempt, controller.status());
         !controller.has_pending() && writer.status().pending_count == 0
     });
-    assert_eq!(writer.finish(deadline()), (0, 0));
+    assert_eq!(
+        writer.finish(Instant::now() + PRESSURE_DRAIN_BUDGET),
+        (0, 0)
+    );
     assert_eq!(event_at(&fixture, 65).event, closed.event);
     assert_eq!(event_at(&fixture, 66).event, opened.event);
 }

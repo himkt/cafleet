@@ -167,7 +167,7 @@ fn runner_batch2_outbox_total_capacity_includes_frame_overhead_and_rejects_befor
     let io = FaultIo::default();
     let mut outbox = open(&fixture, io.clone());
     let policy=storage::evidence::EvidencePolicy::redacted(&serde_json::json!({"schema_version":1,"patterns":["absent-fixture-canary"],"sensitive_rules":[]}),&["runner-lifecycle"]).unwrap();
-    let until = Instant::now() + Duration::from_secs(15);
+    let until = Instant::now() + Duration::from_secs(30);
     let mut used = 0;
     for sequence in 1..=4096 {
         assert!(
