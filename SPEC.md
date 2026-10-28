@@ -2170,9 +2170,9 @@ Detection and both answers rest on native captures of the form at 120 columns, w
 | Plain | One space | At the row's last usable column, one column before the pane's right edge, even inside a token | Captures at 52 columns |
 | Boxed | ` │ ` | At a space | A screen observed on herdr at about 89 columns |
 
-Claude positions every row explicitly, so the terminal records no soft wrap for the rule to follow. The rule reassembles the operation before extracting it: it removes each row's prefix, joins a row that reaches the last usable column directly to the next row, and joins a shorter row to the next row with one space. The reassembled operation equals the unwrapped one, so the request identity does not depend on the pane width, and a resize that rewraps the same request keeps its episode.
+Claude positions every row explicitly, so the terminal records no soft wrap for the rule to follow. The rule reassembles the operation before extracting it: it removes each row's prefix and joins each row to the next according to its shape. A boxed row joins the next row with one space, whatever its width. A plain row that reaches the last usable column joins the next row directly, and a shorter plain row joins it with one space. The reassembled operation equals the unwrapped one, so the request identity does not depend on the pane width, and a resize that rewraps the same request keeps its episode.
 
-Reassembly cannot tell a break at a space from a break inside a token when the row before a break at a space reaches the last usable column. Such a command reassembles without that space, so its identity differs from the unwrapped form of the same command, and a resize between the two renderings replaces the episode. The boxed shape's break of a token longer than its row is unobserved.
+In the plain shape, reassembly cannot tell a break at a space from a break inside a token when the row before a break at a space reaches the last usable column. Such a command reassembles without that space, so its identity differs from the unwrapped form of the same command, and a resize between the two renderings replaces the episode. The boxed shape's break of a token longer than its row is unobserved.
 
 Codex CLI `0.163.0` launched with `--ask-for-approval on-request --sandbox workspace-write`, profile `codex-0.163.0-on-request-1`:
 
