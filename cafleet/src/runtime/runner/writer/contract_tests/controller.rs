@@ -496,11 +496,13 @@ fn runner_batch2_controller_retains_both_superseded_originals_when_the_first_sub
     controller
         .started(&fixture.fixture.run, &terminal.snapshot(), &writer, &clock)
         .unwrap();
+    let mut last_opening_sequence = 0;
     for index in 0..32 {
         clock.set(index * 200);
         terminal
             .feed(&form(&format!("write fixture-{index:02}.txt")))
             .unwrap();
+        last_opening_sequence = terminal.snapshot().screen_seq;
         controller
             .observer(&writer, &clock)
             .observe(&terminal.snapshot())
@@ -545,7 +547,7 @@ fn runner_batch2_controller_retains_both_superseded_originals_when_the_first_sub
     terminal
         .feed_observed(&replacement[..1], &mut controller.observer(&writer, &clock))
         .unwrap();
-    let closing_sequence = terminal.snapshot().screen_seq;
+    assert!(terminal.snapshot().screen_seq > last_opening_sequence);
     terminal
         .feed_observed(&replacement[1..], &mut controller.observer(&writer, &clock))
         .unwrap();
@@ -579,7 +581,7 @@ fn runner_batch2_controller_retains_both_superseded_originals_when_the_first_sub
     assert_eq!(closed.event.kind, RuntimeEventKind::InteractionClosed);
     assert_eq!(closed.event.payload_json["close_reason"], "superseded");
     for (view, sequence, episode, screen) in [
-        (&closed, 65, 32, closing_sequence),
+        (&closed, 65, 32, last_opening_sequence),
         (&opened, 66, 33, original_sequence),
     ] {
         let interaction = view.interaction.as_ref().unwrap();
@@ -591,6 +593,11 @@ fn runner_batch2_controller_retains_both_superseded_originals_when_the_first_sub
         assert_eq!(view.event.payload_json["evidence"]["screen_seq"], screen);
     }
     assert_eq!(opened.event.kind, RuntimeEventKind::InteractionOpened);
+    wait_until(|| {
+        let attempt = controller.poll(&terminal.snapshot(), &writer, &clock);
+        assert_retained_pressure(attempt, controller.status());
+        !controller.has_pending() && writer.status().pending_count == 0
+    });
     assert_eq!(writer.finish(deadline()), (0, 0));
     assert_eq!(event_at(&fixture, 65).event, closed.event);
     assert_eq!(event_at(&fixture, 66).event, opened.event);
@@ -599,20 +606,16 @@ fn runner_batch2_controller_retains_both_superseded_originals_when_the_first_sub
 #[test]
 fn runner_batch2_controller_actual_adapter_retains_foreign_episode_refresh_and_holds_until_drain() {
     let mut fixture = WriterFixture::new();
-    configure(&mut fixture);
+    configure_redacted(&mut fixture);
     let hooks = Arc::new(Hooks::default());
     hooks.pause(WriterBoundary::Receive);
     let mut writer = start(&fixture, hooks.clone());
     let release = Release(hooks.clone());
     hooks.wait(WriterBoundary::Receive, 1);
     let clock = Clock::new();
-    let mut controller = ObservationController::new(
-        &fixture.fixture.run,
-        &catalog(),
-        storage::evidence::EvidencePolicy::metadata(),
-        1..=256,
-    )
-    .unwrap();
+    let mut controller =
+        ObservationController::new(&fixture.fixture.run, &catalog(), redacted_policy(), 1..=256)
+            .unwrap();
     let child = ChildGuard::spawn(std::path::Path::new("/bin/cat"), &[]);
     running(&mut fixture, &child.identity);
     let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
@@ -620,11 +623,12 @@ fn runner_batch2_controller_actual_adapter_retains_foreign_episode_refresh_and_h
         .started(&fixture.fixture.run, &terminal.snapshot(), &writer, &clock)
         .unwrap();
     let mut opening_sequences = Vec::new();
+    let mut first_refresh_sequence = 0;
     for index in 0..2 {
         clock.set(index * 200);
         terminal
             .feed_observed(
-                &form(&format!("write collision-{index}.txt")),
+                &detailed_form(&format!("write collision-{index}.txt"), "opened"),
                 &mut controller.observer(&writer, &clock),
             )
             .unwrap();
@@ -633,6 +637,17 @@ fn runner_batch2_controller_actual_adapter_retains_foreign_episode_refresh_and_h
         controller
             .poll(&terminal.snapshot(), &writer, &clock)
             .unwrap();
+        if index == 0 {
+            clock.set(150);
+            terminal
+                .feed_observed(
+                    &detail_rewrite("refreshed"),
+                    &mut controller.observer(&writer, &clock),
+                )
+                .unwrap();
+            first_refresh_sequence = terminal.snapshot().screen_seq;
+            assert!(writer.status().pending_evidence);
+        }
     }
     assert_eq!(writer.status().pending_count, 3);
     assert!(writer.status().pending_evidence);
@@ -641,6 +656,17 @@ fn runner_batch2_controller_actual_adapter_retains_foreign_episode_refresh_and_h
     clock.set(400);
     terminal
         .feed_observed(b"\x1b", &mut controller.observer(&writer, &clock))
+        .unwrap();
+    assert!(
+        !controller.status().retained_evidence,
+        "a screen_seq-only redraw schedules no refresh"
+    );
+    assert!(!writer.status().degraded);
+    terminal
+        .feed_observed(
+            &detail_rewrite("collided"),
+            &mut controller.observer(&writer, &clock),
+        )
         .unwrap();
     let retained_sequence = terminal.snapshot().screen_seq;
     let status = controller.status();
@@ -661,7 +687,7 @@ fn runner_batch2_controller_actual_adapter_retains_foreign_episode_refresh_and_h
     );
     terminal
         .feed_observed(
-            &form("write later-unclassified.txt"),
+            &detailed_form("write later-unclassified.txt", "opened"),
             &mut controller.observer(&writer, &clock),
         )
         .unwrap();
@@ -699,7 +725,7 @@ fn runner_batch2_controller_actual_adapter_retains_foreign_episode_refresh_and_h
     );
     assert_eq!(
         closed.event.payload_json["evidence"]["screen_seq"],
-        opening_sequences[0] + 1
+        first_refresh_sequence
     );
     assert_eq!(
         second.event.payload_json["evidence"]["screen_seq"],

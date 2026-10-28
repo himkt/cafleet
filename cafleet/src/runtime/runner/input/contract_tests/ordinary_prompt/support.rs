@@ -210,18 +210,29 @@ pub(in crate::runtime::runner::input) struct Host {
 
 impl Host {
     pub fn new() -> Self {
-        Self::build(catalog, encoded(), Instant::now() + Duration::from_secs(5))
+        Self::build(
+            catalog,
+            encoded(),
+            (storage::evidence::EvidencePolicy::metadata(), "metadata"),
+            Instant::now() + Duration::from_secs(5),
+        )
     }
-    fn with_catalog(catalog: ProfileCatalog, expected_program: Vec<u8>) -> Self {
+    fn with_catalog(
+        catalog: ProfileCatalog,
+        expected_program: Vec<u8>,
+        policy: (storage::evidence::EvidencePolicy, &'static str),
+    ) -> Self {
         Self::build(
             || catalog,
             expected_program,
+            policy,
             Instant::now() + Duration::from_secs(5),
         )
     }
     fn build(
         catalog: impl FnOnce() -> ProfileCatalog,
         expected_program: Vec<u8>,
+        (policy, event_evidence): (storage::evidence::EvidencePolicy, &'static str),
         until: Instant,
     ) -> Self {
         assert!(
@@ -250,15 +261,10 @@ impl Host {
         let coverage = catalog
             .capabilities(crate::coding_agent::CodingAgent::Codex, Some(VERSION))
             .detection;
-        fixture.conn.execute("UPDATE member_runs SET native_version=?1,profile_version=?2,coverage=?3 WHERE run_id=?4",rusqlite::params![VERSION,PROFILE,coverage.as_str(),fixture.run.run_id]).unwrap();
+        fixture.conn.execute("UPDATE member_runs SET native_version=?1,profile_version=?2,coverage=?3,event_evidence=?4 WHERE run_id=?5",rusqlite::params![VERSION,PROFILE,coverage.as_str(),event_evidence,fixture.run.run_id]).unwrap();
         fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-        let mut controller = ObservationController::new(
-            &fixture.run,
-            &catalog,
-            storage::evidence::EvidencePolicy::metadata(),
-            1..=256,
-        )
-        .unwrap();
+        let mut controller =
+            ObservationController::new(&fixture.run, &catalog, policy, 1..=256).unwrap();
         let url = format!("sqlite:///{}", fixture.conn.path().unwrap());
         let mut writer = EventWriter::start(
             url.clone(),
@@ -480,14 +486,35 @@ pub(in crate::runtime::runner::input) fn with_host_until(
     until: Instant,
     body: impl FnOnce(&mut Host),
 ) {
-    with_owned_host(Host::build(catalog, encoded(), until), body);
+    with_owned_host(
+        Host::build(
+            catalog,
+            encoded(),
+            (storage::evidence::EvidencePolicy::metadata(), "metadata"),
+            until,
+        ),
+        body,
+    );
 }
 pub(in crate::runtime::runner::input) fn with_catalog_host(
     catalog: ProfileCatalog,
     expected_program: Vec<u8>,
     body: impl FnOnce(&mut Host),
 ) {
-    with_owned_host(Host::with_catalog(catalog, expected_program), body);
+    with_catalog_policy_host(
+        catalog,
+        expected_program,
+        (storage::evidence::EvidencePolicy::metadata(), "metadata"),
+        body,
+    );
+}
+pub(in crate::runtime::runner::input) fn with_catalog_policy_host(
+    catalog: ProfileCatalog,
+    expected_program: Vec<u8>,
+    policy: (storage::evidence::EvidencePolicy, &'static str),
+    body: impl FnOnce(&mut Host),
+) {
+    with_owned_host(Host::with_catalog(catalog, expected_program, policy), body);
 }
 fn with_owned_host(mut host: Host, body: impl FnOnce(&mut Host)) {
     let primary = catch_unwind(AssertUnwindSafe(|| body(&mut host)));

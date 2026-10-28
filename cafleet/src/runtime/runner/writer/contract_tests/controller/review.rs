@@ -52,17 +52,33 @@ impl LiveCase {
         Self::with_observation_hooks(None)
     }
     fn with_observation_hooks(observation_hooks: Option<Arc<dyn ObservationHooks>>) -> Self {
+        Self::build(
+            observation_hooks,
+            configure,
+            storage::evidence::EvidencePolicy::metadata(),
+            form("write terminal-order.txt"),
+        )
+    }
+    fn refreshable() -> Self {
+        Self::build(
+            None,
+            configure_redacted,
+            redacted_policy(),
+            detailed_form("write terminal-order.txt", "opened"),
+        )
+    }
+    fn build(
+        observation_hooks: Option<Arc<dyn ObservationHooks>>,
+        configure_run: fn(&mut WriterFixture),
+        policy: storage::evidence::EvidencePolicy,
+        opening: Vec<u8>,
+    ) -> Self {
         let mut fixture = WriterFixture::new();
-        configure(&mut fixture);
+        configure_run(&mut fixture);
         let hooks = Arc::new(Hooks::default());
         let writer = start(&fixture, hooks.clone());
-        let mut controller = ObservationController::new(
-            &fixture.fixture.run,
-            &catalog(),
-            storage::evidence::EvidencePolicy::metadata(),
-            1..=256,
-        )
-        .unwrap();
+        let mut controller =
+            ObservationController::new(&fixture.fixture.run, &catalog(), policy, 1..=256).unwrap();
         if let Some(hooks) = observation_hooks {
             controller.set_observation_hooks(hooks).unwrap();
         }
@@ -74,10 +90,7 @@ impl LiveCase {
             .started(&fixture.fixture.run, &terminal.snapshot(), &writer, &clock)
             .unwrap();
         terminal
-            .feed_observed(
-                &form("write terminal-order.txt"),
-                &mut controller.observer(&writer, &clock),
-            )
+            .feed_observed(&opening, &mut controller.observer(&writer, &clock))
             .unwrap();
         clock.set(100);
         controller
@@ -100,7 +113,7 @@ impl LiveCase {
         self.clock.set(200);
         self.terminal
             .feed_observed(
-                b"\x1b",
+                &detail_rewrite("refreshed"),
                 &mut self.controller.observer(&self.writer, &self.clock),
             )
             .unwrap();
@@ -182,7 +195,7 @@ impl Drop for LiveCase {
 
 #[test]
 fn runner_review_r1_degraded_exit_records_gap_before_original_closure_and_terminal_fence() {
-    let mut case = LiveCase::new();
+    let mut case = LiveCase::refreshable();
     let release = case.fail_refresh();
     let exit_sequence = case.exit(300);
     assert!(case.controller.has_pending());
@@ -246,7 +259,7 @@ fn runner_review_r1_degraded_exit_records_gap_before_original_closure_and_termin
 
 #[test]
 fn runner_review_r1_expired_storage_budget_reports_unsaved_gap_and_pending_exit_work() {
-    let mut case = LiveCase::new();
+    let mut case = LiveCase::refreshable();
     let _release = case.fail_refresh();
     let until = Instant::now() + Duration::from_millis(120);
     case.writer.set_deadline(until);

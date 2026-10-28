@@ -20,6 +20,19 @@ pub(super) fn configure(fixture: &mut WriterFixture) {
     fixture.fixture.run =
         storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
 }
+pub(super) fn configure_redacted(fixture: &mut WriterFixture) {
+    configure(fixture);
+    fixture
+        .fixture
+        .conn
+        .execute(
+            "UPDATE member_runs SET event_evidence='redacted' WHERE run_id=?1",
+            [fixture.fixture.run.run_id],
+        )
+        .unwrap();
+    fixture.fixture.run =
+        storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+}
 pub(super) struct Clock {
     origin: Instant,
     millis: AtomicU64,
@@ -74,4 +87,18 @@ pub(super) fn running(fixture: &mut WriterFixture, child: &ProcessIdentity) {
 }
 pub(super) fn form(operation: &str) -> Vec<u8> {
     format!("\x1b[2J\x1b[19;1HSynthetic permission request\r\nOperation: {operation}\r\n> Allow once\r\n  Deny once\r\nRequest form: synthetic-only\r\nSelection: ").into_bytes()
+}
+pub(super) fn detailed_form(operation: &str, detail: &str) -> Vec<u8> {
+    format!("\x1b[2J\x1b[18;1HSynthetic permission request\r\nOperation: {operation}\r\n> Allow once\r\n  Deny once\r\nRequest form: synthetic-only\r\nDetail: {detail}\r\nSelection: ").into_bytes()
+}
+// Rewrites only the non-fingerprint detail row of `detailed_form` and returns the cursor to the end of `Selection: `.
+pub(super) fn detail_rewrite(detail: &str) -> Vec<u8> {
+    format!("\x1b[23;1H\x1b[2KDetail: {detail}\x1b[24;12H").into_bytes()
+}
+pub(super) fn redacted_policy() -> storage::evidence::EvidencePolicy {
+    storage::evidence::EvidencePolicy::redacted(
+        &serde_json::json!({"schema_version":1,"patterns":["synthetic-redaction-canary"],"sensitive_rules":[]}),
+        &["synthetic-permission"],
+    )
+    .unwrap()
 }

@@ -34,7 +34,7 @@ mod contract_tests;
 #[cfg(test)]
 mod permission_inspection_contracts {
     use super::contract_tests::ordinary_prompt::support::{
-        Host, catalog_definition, with_catalog_host,
+        Host, catalog_definition, with_catalog_policy_host,
     };
     use super::*;
     use crate::broker::runtime::{Coverage, InteractionClass, PermissionDecision};
@@ -68,9 +68,39 @@ mod permission_inspection_contracts {
             body,
         );
     }
+    pub(super) fn with_redacted_inspection(
+        body: impl FnOnce(&mut Host, Arc<AtomicUsize>, Arc<AtomicBool>),
+    ) {
+        with_definition_policy(
+            inspection_fixture_definition(),
+            b"unused-program~".to_vec(),
+            (
+                storage::evidence::EvidencePolicy::redacted(
+                    &serde_json::json!({"schema_version":1,"patterns":["synthetic-redaction-canary"],"sensitive_rules":[]}),
+                    &["synthetic-permission"],
+                )
+                .unwrap(),
+                "redacted",
+            ),
+            body,
+        );
+    }
     pub(super) fn with_definition(
+        definition: serde_json::Value,
+        expected_program: Vec<u8>,
+        body: impl FnOnce(&mut Host, Arc<AtomicUsize>, Arc<AtomicBool>),
+    ) {
+        with_definition_policy(
+            definition,
+            expected_program,
+            (storage::evidence::EvidencePolicy::metadata(), "metadata"),
+            body,
+        );
+    }
+    fn with_definition_policy(
         mut definition: serde_json::Value,
         expected_program: Vec<u8>,
+        policy: (storage::evidence::EvidencePolicy, &'static str),
         body: impl FnOnce(&mut Host, Arc<AtomicUsize>, Arc<AtomicBool>),
     ) {
         let composer = catalog_definition();
@@ -84,9 +114,10 @@ mod permission_inspection_contracts {
             .push(composer["profiles"][0]["rules"][0].clone());
         definition["profiles"][0]["capabilities"]["composer"] =
             composer["profiles"][0]["capabilities"]["composer"].clone();
-        with_catalog_host(
+        with_catalog_policy_host(
             ProfileCatalog::from_definitions(&definition).unwrap(),
             expected_program,
+            policy,
             |h| {
                 let calls = Arc::new(AtomicUsize::new(0));
                 let fail = Arc::new(AtomicBool::new(false));
@@ -116,6 +147,20 @@ mod permission_inspection_contracts {
 
     pub(super) fn stable_form(h: &mut Host) -> (i64, i64, i64, i64) {
         form(h, "PRIVATE_INSPECTION_OPERATION", "synthetic-only");
+        settled_ids(h)
+    }
+    // The detail row is inside the request region but outside its fingerprint and answer focus.
+    pub(super) fn stable_detailed_form(h: &mut Host, detail: &str) -> (i64, i64, i64, i64) {
+        h.pty.child.bytes.extend(
+            format!("\x1b[2J\x1b[18;1HSynthetic permission request\r\nOperation: PRIVATE_INSPECTION_OPERATION\r\n> Allow once\r\n  Deny once\r\nRequest form: synthetic-only\r\nDetail: {detail}\r\nSelection: ").into_bytes(),
+        );
+        h.drain();
+        settled_ids(h)
+    }
+    pub(super) fn detail_rewrite(detail: &str) -> Vec<u8> {
+        format!("\x1b[23;1H\x1b[2KDetail: {detail}\x1b[24;12H").into_bytes()
+    }
+    fn settled_ids(h: &mut Host) -> (i64, i64, i64, i64) {
         loop {
             h.drain();
             if h.controller.current_request().is_some()
@@ -587,8 +632,9 @@ mod permission_inspection_contracts {
 mod permission_response_contracts {
     use super::contract_tests::ordinary_prompt::support::{Host, Pty};
     use super::permission_inspection_contracts::{
-        counts, form, inspect, inspect_request, request as inspection_target, stable_form,
-        with_definition, with_inspection,
+        counts, detail_rewrite, form, inspect, inspect_request, request as inspection_target,
+        stable_detailed_form, stable_form, with_definition, with_inspection,
+        with_redacted_inspection,
     };
     use super::*;
     use crate::broker::runtime::{DecisionSource, DirectorMode, PermissionDecision};
@@ -798,13 +844,8 @@ mod permission_response_contracts {
             let output_seq = h.transport.snapshot().screen_seq;
             let lock = Connection::open(h.fixture.conn.path().unwrap()).unwrap();
             lock.execute_batch("BEGIN IMMEDIATE").unwrap();
-            h.pty
-                .child
-                .bytes
-                .extend(crate::coding_agent::inspection_fixture_form(
-                    "PRIVATE_INSPECTION_OPERATION",
-                    "synthetic-only",
-                ));
+            // Every frame of this output keeps the identical cells and the cursor at the request end.
+            h.pty.child.bytes.extend(b"\x1b[?25l\x1b[0m\x1b[?25h");
             let drained = h
                 .coordinator
                 .progress_with_manual(&mut h.transport, |transport| {
@@ -868,8 +909,8 @@ mod permission_response_contracts {
     #[test]
     fn permission_response_fresh_admission_rejects_revoked_token_then_reserves_selected_deny_plan()
     {
-        with_inspection(|h, _, _| {
-            let ids = stable_form(h);
+        with_redacted_inspection(|h, _, _| {
+            let ids = stable_detailed_form(h, "opened");
             let inspected = inspect(h, ids);
             let stale = command(h, &inspected, "response:stale", PermissionDecision::Allow);
             h.human.bytes.push_back(b'!');
@@ -899,7 +940,7 @@ mod permission_response_contracts {
             );
             h.fixture.conn.execute_batch("CREATE TRIGGER reject_response_refresh BEFORE UPDATE OF evidence_json ON member_interactions BEGIN SELECT RAISE(ABORT,'owned response refresh failure'); END").unwrap();
             let generation = h.controller.request_generation();
-            h.pty.child.bytes.extend(b"\x1b[?25l");
+            h.pty.child.bytes.extend(detail_rewrite("refreshed"));
             h.coordinator
                 .progress_with_manual(&mut h.transport, |transport| {
                     transport.quiesce_for_input(

@@ -1327,11 +1327,15 @@ mod contract_tests {
                 .unwrap();
             assert!(returned.transitions.is_empty());
             assert!(matches!(returned.visibility, Visibility::Visible));
-            assert_eq!(returned.latest_evidence.unwrap().episode_seq, 1);
+            assert!(matches!(
+                returned.eligibility,
+                InputEligibility::Hold(GateReason::Interaction)
+            ));
+            assert!(returned.latest_evidence.is_none());
         }
 
         #[test]
-        fn runtime_episode_equivalent_redraw_refreshes_evidence_without_another_opening() {
+        fn runtime_episode_equivalent_redraw_schedules_no_refresh_and_no_opening() {
             let origin = Instant::now();
             let mut tracker = tracker();
             open(
@@ -1346,22 +1350,90 @@ mod contract_tests {
                 ),
                 2,
             );
-            let update = tracker
-                .observe(&redraw, origin + Duration::from_millis(200), NOW)
+            for (sequence, millis) in [(2, 200), (3, 300)] {
+                let update = tracker
+                    .observe(
+                        &sequenced(redraw.clone(), sequence),
+                        origin + Duration::from_millis(millis),
+                        NOW,
+                    )
+                    .unwrap();
+                assert!(update.transitions.is_empty());
+                assert!(matches!(update.visibility, Visibility::Visible));
+                assert!(update.latest_evidence.is_none());
+            }
+        }
+
+        fn detailed(detail: &str, sequence: u64) -> ScreenObservation {
+            let mut rows = lines("write disposable.txt");
+            rows.insert(5, format!("Detail: {detail}"));
+            sequenced(
+                observation(&definitions(), &terminal(&rows, 80, false).snapshot()),
+                sequence,
+            )
+        }
+
+        #[test]
+        fn runtime_episode_excerpt_only_change_refreshes_policy_evidence_without_another_opening() {
+            let secret = "synthetic-secret-194";
+            let policy = EvidencePolicy::redacted(
+                &json!({"schema_version":1,"patterns":[secret],"sensitive_rules":[]}),
+                &[RULE],
+            )
+            .unwrap();
+            let mut tracker = EpisodeTracker::new(1, 1, policy).unwrap();
+            let origin = Instant::now();
+            let first = detailed("first", 1);
+            assert!(first.fingerprint == detailed("second", 1).fingerprint);
+            open(&mut tracker, &first, origin);
+            let unchanged = tracker
+                .observe(
+                    &detailed("first", 2),
+                    origin + Duration::from_millis(200),
+                    NOW,
+                )
                 .unwrap();
-            assert!(update.transitions.is_empty());
-            let refresh = update.latest_evidence.unwrap();
+            assert!(unchanged.transitions.is_empty());
+            assert!(unchanged.latest_evidence.is_none());
+            let changed = tracker
+                .observe(
+                    &detailed("second", 3),
+                    origin + Duration::from_millis(300),
+                    NOW,
+                )
+                .unwrap();
+            assert!(changed.transitions.is_empty());
+            let refresh = changed.latest_evidence.unwrap();
             assert_eq!(
                 (refresh.run_id, refresh.episode_seq, refresh.output_seq),
-                (1, 1, 2)
+                (1, 1, 3)
             );
-            assert_eq!(refresh.evidence_json["screen_seq"], 2);
-            assert!(refresh.evidence_json["operation"].is_null());
-            let identical = tracker
-                .observe(&redraw, origin + Duration::from_millis(300), NOW)
+            assert_eq!(refresh.evidence_json["screen_seq"], 3);
+            assert!(
+                refresh.evidence_json["excerpt"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Detail: second")
+            );
+            let secret_detail = tracker
+                .observe(
+                    &detailed(secret, 4),
+                    origin + Duration::from_millis(400),
+                    NOW,
+                )
                 .unwrap();
-            assert!(identical.transitions.is_empty());
-            assert!(identical.latest_evidence.is_none());
+            assert!(secret_detail.transitions.is_empty());
+            let refresh = secret_detail.latest_evidence.unwrap();
+            assert_eq!(refresh.evidence_json["excerpt"], json!("[redacted]"));
+            assert!(!refresh.evidence_json.to_string().contains(secret));
+            let settled = tracker
+                .observe(
+                    &detailed(secret, 5),
+                    origin + Duration::from_millis(500),
+                    NOW,
+                )
+                .unwrap();
+            assert!(settled.latest_evidence.is_none());
         }
 
         #[test]
@@ -1802,18 +1874,16 @@ mod contract_tests {
                     }
                 );
                 let redraw = secret_observation(secret, sensitive, 100, 2);
-                let refresh = tracker
+                let update = tracker
                     .observe(&redraw, origin + Duration::from_millis(200), NOW)
-                    .unwrap()
-                    .latest_evidence
                     .unwrap();
-                assert!(!refresh.evidence_json.to_string().contains(secret));
+                assert!(update.transitions.is_empty());
+                assert!(update.latest_evidence.is_none());
             }
         }
 
         #[test]
-        fn runtime_episode_metadata_removes_each_screen_field_before_materializing_events_or_refreshes()
-         {
+        fn runtime_episode_metadata_removes_each_screen_field_and_leaves_no_redraw_refresh() {
             let secret = "synthetic-secret-194";
             let origin = Instant::now();
             let mut tracker = tracker();
@@ -1832,19 +1902,19 @@ mod contract_tests {
             pool.supply(1..=256).unwrap();
             let event = pool.materialize(&opened.transitions[0]).unwrap();
             assert!(!serde_json::to_string(&event).unwrap().contains(secret));
-            let redraw = tracker
-                .observe(
-                    &secret_observation(secret, false, 100, 2),
-                    origin + Duration::from_millis(200),
-                    NOW,
-                )
-                .unwrap()
-                .latest_evidence
-                .unwrap();
-            for field in ["operation", "choices", "native_request_id", "excerpt"] {
-                assert!(redraw.evidence_json[field].is_null());
+            for (sequence, detail) in [(2, "first"), (3, secret)] {
+                let mut redraw = secret_observation(secret, false, 100, sequence);
+                redraw.raw_evidence["excerpt"] = json!(format!("Detail: {detail}"));
+                let update = tracker
+                    .observe(
+                        &redraw,
+                        origin + Duration::from_millis(100 + sequence * 100),
+                        NOW,
+                    )
+                    .unwrap();
+                assert!(update.transitions.is_empty());
+                assert!(update.latest_evidence.is_none());
             }
-            assert!(!redraw.evidence_json.to_string().contains(secret));
         }
 
         #[test]

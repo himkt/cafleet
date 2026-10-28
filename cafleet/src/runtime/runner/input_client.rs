@@ -2473,61 +2473,58 @@ mod tests {
         let previous = original.interaction.as_ref().unwrap().evidence_json["screen_seq"]
             .as_u64()
             .unwrap();
-        let master = fixture.master.try_clone().unwrap();
         let process = ProcessIdentity::read(run.owner_pid).unwrap().unwrap();
         assert_eq!(process.start_identity, run.owner_start_identity);
-        let database = settings.database_url.clone();
-        host.after_health = Some(Box::new(move || {
-            assert!(process.matches().unwrap(), "generation-bound owned runner");
-            rustix::termios::tcsetwinsize(
-                &master,
-                rustix::termios::Winsize {
-                    ws_row: 24,
-                    ws_col: 81,
-                    ws_xpixel: 0,
-                    ws_ypixel: 0,
+        assert!(process.matches().unwrap(), "generation-bound owned runner");
+        rustix::termios::tcsetwinsize(
+            &fixture.master,
+            rustix::termios::Winsize {
+                ws_row: 24,
+                ws_col: 81,
+                ws_xpixel: 0,
+                ws_ypixel: 0,
+            },
+        )
+        .unwrap();
+        nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(i32::try_from(process.pid).unwrap()),
+            nix::sys::signal::Signal::SIGWINCH,
+        )
+        .unwrap();
+        let resized = loop {
+            let current = inspect_permission(
+                &mut fixture.fixture.conn,
+                &settings,
+                &PermissionInspectInput {
+                    event_id: input.event_id,
+                    interaction_id: input.interaction_id,
+                    director_member_id: run.director_member_id,
                 },
+                Deadline::until(until),
             )
             .unwrap();
-            nix::sys::signal::kill(
-                nix::unistd::Pid::from_raw(i32::try_from(process.pid).unwrap()),
-                nix::sys::signal::Signal::SIGWINCH,
-            )
-            .unwrap();
-            let mut conn = crate::db::connect(&database).unwrap();
-            loop {
-                let current = with_database_budget(&mut conn, Deadline::until(until), |conn| {
-                    storage::get_event(conn, original.event.event_id)
-                })
-                .unwrap();
-                let after = current.interaction.as_ref().unwrap();
-                let sequence = after.evidence_json["screen_seq"].as_u64().unwrap();
-                if sequence > previous {
-                    assert_eq!(current.event, original.event);
-                    let mut expected = original.interaction.as_ref().unwrap().clone();
-                    expected.evidence_json = after.evidence_json.clone();
-                    expected.evidence_digest = after.evidence_digest.clone();
-                    assert_eq!(*after, expected);
-                    assert_ne!(
-                        after.evidence_digest,
-                        original.interaction.as_ref().unwrap().evidence_digest
-                    );
-                    assert!(after.closed_at.is_none());
-                    eprintln!(
-                        "response compatible refresh: interaction_id={}; screen_seq={previous}->{sequence}; opening unchanged",
-                        after.interaction_id
-                    );
-                    break;
-                }
-                assert!(
-                    Instant::now() < until,
-                    "actual writer commits resize evidence under the original command budget"
-                );
-                std::thread::sleep(
-                    Duration::from_millis(2).min(until.saturating_duration_since(Instant::now())),
-                );
+            if current.output_seq > previous {
+                break current;
             }
-        }));
+            assert!(
+                Instant::now() < until,
+                "actual runner observes the resize under the original command budget"
+            );
+            std::thread::sleep(
+                Duration::from_millis(2).min(until.saturating_duration_since(Instant::now())),
+            );
+        };
+        assert_eq!(
+            resized.request_token.as_deref(),
+            Some(input.request_token.as_str()),
+            "an equivalent resize keeps the request token"
+        );
+        let after_resize = storage::get_event(&fixture.fixture.conn, input.event_id).unwrap();
+        assert_eq!(after_resize.event, original.event);
+        assert_eq!(
+            after_resize.interaction, original.interaction,
+            "an equivalent resize schedules no evidence refresh"
+        );
         let result = respond_permission_with_host(
             &mut fixture.fixture.conn,
             &settings,
@@ -2538,7 +2535,7 @@ mod tests {
         assert_eq!(
             host.calls,
             [1, 1, 1],
-            "compatible actual refresh permits one exchange: {:?}",
+            "the retained token after an equivalent resize permits one exchange: {:?}",
             result.as_ref().err()
         );
         let result = result.unwrap();
