@@ -144,7 +144,6 @@ The runner forwards outer-terminal input to the native child as manual input. On
 
 A reply longer than the 65536-byte queue still spans ticks, but with no idle sleep between them.
 
-
 ### Native version probe
 
 The version-token pattern becomes `^v?[0-9]+(\.[0-9]+)+([-+][0-9A-Za-z.]+)?$`, and a leading `v` is removed from the recorded `native_version`. The exactly-one-token rule and every other probe rule are unchanged.
@@ -298,7 +297,7 @@ Captures use the existing native-capture driver that produced the Claude and Cod
 
 The capture harness records one armed capture per case, so a pre-stage fixture for a later stage needs its own case whose earlier stage is sent before arming. The registry binding therefore splits the stage bytes into `prefix_hex` (the measured stages the Director sends before arming) and `stage_hex` (the stages sent after arming, in order). The Director sends each stage as one `tmux send-keys -H` command only after a fresh pane capture shows that stage's gate.
 
-Add these OpenCode cases, all with backend `opencode`, permission mode `cafleet-ask` and the 36x120 full size:
+Add these OpenCode cases, all with backend `opencode` and permission mode `cafleet-ask`, at the 36x120 full size unless the row states another size:
 
 | Case ID | Driver mode | Decision | Prefix bytes | Stage bytes | Probe argument | Database | Socket | Supplies |
 |---|---|---|---|---|---|---|---|---|
@@ -310,9 +309,11 @@ Add these OpenCode cases, all with backend `opencode`, permission mode `cafleet-
 | `opencode-focus-always-001` | `answer_stage` | `deny` | `6c` | — | `deny` | `of01.db` | `of01` | Stopped before its capture published; no fixture |
 | `opencode-focus-always-002` | `answer_stage` | `deny` | `6c` | — | `deny` | `of02.db` | `of02` | The `Always allow`-focused fixture; no confirming byte is sent |
 | `opencode-idle-001` | `no_answer` | — | — | — | — | `oi01.db` | `oi01` | The idle-composer fixture |
-| `opencode-herdr-env-cells-001` | `no_answer` | — | — | — | `allow` | `oh01.db` | `oh01` | The runner grid under herdr's terminal identity at 36`opencode-herdr-env-cells-001` uses 36x166, the live herdr width, and is the only case with a child-environment override: the harness passes `TERM=xterm-256color`, `COLORTERM=truecolor`, `TERM_PROGRAM=herdr`, `TERM_PROGRAM_VERSION=0.9.5` and `HERDR_ENV=1` to its native child and exports the same identity into its dedicated tmux server.iew record for that registry, yet it lists neither the case nor the override mechanism. Add the case row and one sentence specifying the child-environment override and the case it applies to. -->
+| `opencode-herdr-env-cells-001` | `no_answer` | — | — | — | `allow` | `oh01.db` | `oh01` | The runner grid under herdr's terminal identity at 36x166; no fixture |
 
+`opencode-focus-always-002` sends only the measured `l` and never Enter, so both markers stay absent and the form is closed by member cleanup.
 
+`opencode-herdr-env-cells-001` is the only case with a child-environment override: the harness passes `TERM=xterm-256color`, `COLORTERM=truecolor`, `TERM_PROGRAM=herdr`, `TERM_PROGRAM_VERSION=0.9.5` and `HERDR_ENV=1` to its native child and exports the same identity into its dedicated tmux server.
 
 A capture's two samples come from the runner's quiet-timer polling, so a static screen needs no output after arming. The runner does cancel an unpublished capture when its case stops, and a stage byte sent before the second sample enters the pre-stage fixture. The driver's `arm` therefore returns only after the capture manifest is published, and `stop` refuses an armed case whose manifest is not yet published.
 
