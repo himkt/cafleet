@@ -154,7 +154,7 @@ fn runner_batch2_refresh_closure_follows_earlier_evidence_and_rejects_late_old_e
     assert!(writer.try_refresh(update(&fixture, 4), deadline()).is_err());
     drop(release);
     wait_until(|| committed(&fixture) == 2 && !writer.status().pending_evidence);
-    assert_eq!(latest(&fixture), close.evidence_json);
+    assert_eq!(latest(&fixture), update(&fixture, 2).evidence_json);
     writer.finish(deadline());
 }
 
