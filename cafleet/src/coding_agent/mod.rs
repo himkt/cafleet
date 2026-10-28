@@ -23,7 +23,7 @@ pub(crate) use profiles::{
 };
 #[cfg(test)]
 pub(crate) use profiles::{
-    gated_fixture_definition, gated_fixture_form, gated_reason_dialog,
+    background_rewrite, gated_fixture_definition, gated_fixture_form, gated_reason_dialog,
     inspection_fixture_definition, inspection_fixture_form,
 };
 

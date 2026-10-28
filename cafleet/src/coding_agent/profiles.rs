@@ -14,6 +14,8 @@ pub(crate) use catalog::inspection_tests::{
 pub(crate) use catalog::{AnswerPlan, AnswerStage, StageGate};
 pub use catalog::{NativeCapabilities, ProfileCatalog};
 pub(crate) use composer::{ComposerOperation, ComposerPlan};
+#[cfg(test)]
+pub(crate) use detector::inspection_tests::background_rewrite;
 pub(crate) use detector::*;
 
 #[cfg(test)]

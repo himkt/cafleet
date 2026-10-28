@@ -154,10 +154,7 @@ pub(super) mod inspection_tests {
 
     /// Repaints each `cell_backgrounds` run over the already written text, so the replayed
     /// cells keep their captured contents and gain the captured background.
-    pub(in crate::coding_agent) fn background_rewrite(
-        fixture: &Value,
-        text: &ScreenSnapshot,
-    ) -> Vec<u8> {
+    pub(crate) fn background_rewrite(fixture: &Value, text: &ScreenSnapshot) -> Vec<u8> {
         let mut bytes = Vec::new();
         let Some(runs) = fixture.get("cell_backgrounds") else {
             return bytes;

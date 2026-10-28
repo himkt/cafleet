@@ -35,9 +35,12 @@ mod permission_inspection_contracts {
     };
     use super::*;
     use crate::broker::runtime::{Coverage, InteractionClass, PermissionDecision};
-    use crate::coding_agent::{inspection_fixture_definition, inspection_fixture_form};
+    use crate::coding_agent::{
+        background_rewrite, inspection_fixture_definition, inspection_fixture_form,
+    };
     use crate::runtime::runner::{
-        MissingEvidence, PermissionInspectInput, PermissionInspection, RuntimePaths,
+        MissingEvidence, PermissionInspectInput, PermissionInspection, RuntimePaths, TerminalSize,
+        TerminalState,
     };
     use rusqlite::OptionalExtension;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -113,7 +116,13 @@ mod permission_inspection_contracts {
                 bytes.extend(format!("\x1b[{};1H{line}", row + 1).into_bytes());
             }
         }
-        bytes.extend(background_runs(&screen, &bytes));
+        let mut written = TerminalState::new(TerminalSize {
+            rows: u16::try_from(screen["rows"].as_u64().unwrap()).unwrap(),
+            cols: u16::try_from(screen["cols"].as_u64().unwrap()).unwrap(),
+        })
+        .unwrap();
+        written.feed(&bytes).unwrap();
+        bytes.extend(background_rewrite(&screen, &written.snapshot()));
         bytes.extend(
             format!(
                 "\x1b[{};{}H",
@@ -122,52 +131,6 @@ mod permission_inspection_contracts {
             )
             .into_bytes(),
         );
-        bytes
-    }
-
-    // Repaints each captured background run over the written text with the cells' own contents.
-    fn background_runs(screen: &serde_json::Value, text: &[u8]) -> Vec<u8> {
-        use super::super::{TerminalSize, TerminalState};
-        let mut bytes = Vec::new();
-        let Some(runs) = screen.get("cell_backgrounds") else {
-            return bytes;
-        };
-        let mut scratch = TerminalState::new(TerminalSize {
-            rows: u16::try_from(screen["rows"].as_u64().unwrap()).unwrap(),
-            cols: u16::try_from(screen["cols"].as_u64().unwrap()).unwrap(),
-        })
-        .unwrap();
-        scratch.feed(text).unwrap();
-        let written = scratch.snapshot();
-        for run in runs.as_array().unwrap() {
-            let row = u16::try_from(run["row"].as_u64().unwrap()).unwrap();
-            let start = u16::try_from(run["start_col"].as_u64().unwrap()).unwrap();
-            let end = u16::try_from(run["end_col"].as_u64().unwrap()).unwrap();
-            let bg = &run["bg"];
-            let sgr = match bg["kind"].as_str().unwrap() {
-                "rgb" => format!(
-                    "\x1b[48;2;{};{};{}m",
-                    bg["r"].as_u64().unwrap(),
-                    bg["g"].as_u64().unwrap(),
-                    bg["b"].as_u64().unwrap()
-                ),
-                "indexed" => format!("\x1b[48;5;{}m", bg["index"].as_u64().unwrap()),
-                other => panic!("unknown fixture colour kind {other}"),
-            };
-            bytes.extend(format!("\x1b[{};{}H{sgr}", row + 1, start + 1).into_bytes());
-            for col in start..end {
-                let cell = written.screen.cell(row, col).expect("run inside geometry");
-                if cell.is_wide_continuation() {
-                    continue;
-                }
-                if cell.has_contents() {
-                    bytes.extend(cell.contents().as_bytes());
-                } else {
-                    bytes.push(b' ');
-                }
-            }
-            bytes.extend(b"\x1b[0m");
-        }
         bytes
     }
 

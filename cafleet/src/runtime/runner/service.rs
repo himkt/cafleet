@@ -1255,8 +1255,7 @@ mod pacing_tests {
         let now = Instant::now();
         for (case, human_bytes, pending_input) in [
             ("outer bytes read", 4096, 0),
-            ("input still queued", 0, 2696),
-            ("both", 1, 1),
+            ("outer bytes read with input still queued", 1, 1),
         ] {
             for next_deadline in [None, Some(now + Duration::from_secs(1))] {
                 assert_eq!(
@@ -1288,6 +1287,28 @@ mod pacing_tests {
             assert_eq!(
                 tick_sleep(&idle, 0, Some(now - Duration::from_millis(1)), now),
                 Duration::ZERO
+            );
+        }
+    }
+
+    #[test]
+    fn pacing_keeps_the_idle_sleep_when_a_blocked_master_accepted_no_queued_input() {
+        let now = Instant::now();
+        let blocked = progress(0);
+        for pending_input in [1, 2696, 65536] {
+            assert_eq!(
+                tick_sleep(&blocked, pending_input, None, now),
+                Duration::from_millis(2),
+                "{pending_input} queued bytes the master did not accept"
+            );
+            assert_eq!(
+                tick_sleep(
+                    &blocked,
+                    pending_input,
+                    Some(now + Duration::from_micros(500)),
+                    now
+                ),
+                Duration::from_micros(500)
             );
         }
     }
