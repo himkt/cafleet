@@ -111,7 +111,7 @@ const DRIVER_FULL_SIZE: TerminalSize = TerminalSize {
 };
 const DRIVER_WRAPPED_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 52 };
 const DRIVER_BOXED_WRAP_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 89 };
-const APPROVED_CASES: [ApprovedCase; 21] = [
+const APPROVED_CASES: [ApprovedCase; 22] = [
     ApprovedCase {
         id: "cells-002",
         backend: CodingAgent::Claude,
@@ -370,6 +370,19 @@ const APPROVED_CASES: [ApprovedCase; 21] = [
         probe_argument: Some("deny"),
         database: "of01.db",
         socket: "of01",
+        size: DRIVER_FULL_SIZE,
+    },
+    ApprovedCase {
+        id: "opencode-focus-always-002",
+        backend: CodingAgent::Opencode,
+        permission_mode: "cafleet-ask",
+        mode: DriverMode::AnswerStage,
+        decision: Some("deny"),
+        prefix_hex: &["6c"],
+        stage_hex: &[],
+        probe_argument: Some("deny"),
+        database: "of02.db",
+        socket: "of02",
         size: DRIVER_FULL_SIZE,
     },
     ApprovedCase {
