@@ -567,6 +567,31 @@ pub(super) mod inspection_tests {
     }
 
     #[test]
+    fn bundled_claude_boxed_row_reaching_the_last_usable_column_still_joins_with_one_space() {
+        let wide_path = format!("/tmp/cafleet-194/{}/permission-probe", "w".repeat(82));
+        let wide_row = format!(" │ {wide_path}");
+        assert_eq!(wide_row.chars().count(), 119, "reaches column 119 of 120");
+        let wide_operation = format!("{wide_path} allow");
+        let wide = claude_observation(&native_with_operation_rows(&[&wide_row, " │ allow"]));
+        assert_claude_request(&wide, &wide_operation);
+        let narrow_row = " │ /tmp/cafleet-194/claude-wrap-cells-001/probe-box";
+        assert_eq!(narrow_row.chars().count(), 51, "reaches column 51 of 52");
+        let narrow = claude_observation(&wrapped_screen(
+            |lines| {
+                lines[22] = narrow_row.into();
+                lines[23] = " │ allow".into();
+            },
+            true,
+        ));
+        let narrow_operation = "/tmp/cafleet-194/claude-wrap-cells-001/probe-box allow";
+        assert_claude_request(&narrow, narrow_operation);
+        assert!(
+            narrow.fingerprint
+                == claude_observation(&unwrapped_rendering(narrow_operation)).fingerprint
+        );
+    }
+
+    #[test]
     fn bundled_claude_wrapped_form_keeps_the_false_positive_guards() {
         let permission = ObservationKind::Interaction(InteractionClass::PermissionRequest);
         let primary = claude_observation(&wrapped_screen(|_| {}, false));
