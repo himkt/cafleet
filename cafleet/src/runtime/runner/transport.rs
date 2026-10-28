@@ -193,21 +193,11 @@ impl Transport {
         observer: &mut impl ScreenObserver,
     ) -> Result<TransportProgress> {
         self.invalidate_input_drain();
-        let mut progress = TransportProgress::default();
-        if !self.outer_eof
-            && let Some(bytes) = read_available(
-                human,
-                (self.limits.input_bytes - self.input.len()).min(self.limits.bytes_per_tick),
-            )
-            .map_err(io_error)?
-        {
-            self.outer_eof = bytes.is_empty();
-            progress.human_bytes = bytes.len();
-            self.retain_human(bytes);
-        }
-        write_pending(&mut self.input, self.limits.bytes_per_tick, |bytes| {
-            pty.try_write(bytes)
-        })?;
+        let mut progress = TransportProgress {
+            human_bytes: self.drain_outer(human)?,
+            ..TransportProgress::default()
+        };
+        write_pending(&mut self.input, usize::MAX, |bytes| pty.try_write(bytes))?;
         if let Some(bytes) = self.read_child(pty)? {
             self.child_eof = bytes.is_empty();
             progress.child_bytes = bytes.len();
@@ -249,6 +239,23 @@ impl Transport {
         progress.outer_eof = self.outer_eof;
         progress.child_eof = self.child_eof;
         Ok(progress)
+    }
+    /// One outer-terminal read returns at most the line discipline's buffer, so
+    /// a longer terminal reply must reach the child within the same tick: a
+    /// child that sees only its first part may parse the rest as keys.
+    fn drain_outer(&mut self, human: &mut impl ByteInput) -> Result<usize> {
+        let mut forwarded = 0;
+        while !self.outer_eof {
+            let capacity =
+                (self.limits.input_bytes - self.input.len()).min(self.limits.bytes_per_tick);
+            let Some(bytes) = read_available(human, capacity).map_err(io_error)? else {
+                break;
+            };
+            self.outer_eof = bytes.is_empty();
+            forwarded += bytes.len();
+            self.retain_human(bytes);
+        }
+        Ok(forwarded)
     }
     fn read_child(&mut self, pty: &mut impl PtyIo) -> Result<Option<Vec<u8>>> {
         #[cfg(test)]

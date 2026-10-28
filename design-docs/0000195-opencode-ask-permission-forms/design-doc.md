@@ -1,7 +1,7 @@
 # OpenCode Ask Permission Forms
 
 **Status**: Approved
-**Progress**: 18/28 tasks complete
+**Progress**: 22/28 tasks complete
 **Last Updated**: 2026-10-28
 
 ## Overview
@@ -412,8 +412,8 @@ Record detection-to-inbox latency, the CAFleet commit, versions, geometry and ev
 
 - [x] Document § Member configuration environment and the OpenCode preset base in `docs/docs/spec/cli-options.md`, `docs/docs/spec/coding-agent-backends.md`, `docs/docs/quickstart.md`, `SPEC.md` and `skills/cafleet/reference/coding-agents.md`, replacing every `~/.opencode` default with `~/.config/opencode`, and the doctor check lines for an OpenCode installation recorded at another base. <!-- completed: 2026-10-28T14:15 -->
 - [ ] Write tests: for each backend `member create` forwards its config-location variable with the creator's exact value after `CAFLEET_DATABASE_URL` and adds nothing when it is unset, forwards no other backend's variable, still fails an invalid value before registration and records the variable in the launch descriptor; the runner's native child receives it; the OpenCode preset base defaults to `~/.config/opencode` and setup installs both presets and records that identity there; with an installation row at `~/.opencode`, doctor reports `opencode.configuration` `ok` at `~/.config/opencode`, `opencode.installation` `info` with the run-setup hint, and both preset checks reading only the new base; and the selected-preset precondition reads the new default. <!-- completed: -->
-- [ ] Implement the forwarded variable in `member create`'s spawn environment and the `~/.config/opencode` default in config-dir resolution. <!-- completed: -->
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck`. <!-- completed: -->
+- [x] Implement the forwarded variable in `member create`'s spawn environment and the `~/.config/opencode` default in config-dir resolution. <!-- completed: 2026-10-28T14:29 -->
+- [x] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck`. <!-- completed: 2026-10-28T14:29 -->
 
 ### Step 7: Forward outer-terminal input bursts intact
 
@@ -421,8 +421,8 @@ COMMENT(director): Decision on finding (C): accept the proposed fix steps 1-3 (d
 
 - [x] Document § Outer-terminal input forwarding in `docs/docs/spec/member-runtime.md` and `SPEC.md`, where the runner's outer-input relay is specified. <!-- completed: 2026-10-28T14:22 -->
 - [ ] Write tests: one tick drains a fake outer input that returns 4096 bytes, then 3600 bytes, then would-block, queues all 7696 bytes in order and writes them to the PTY master within that tick; the manual-input generation advances by 7696; reads stop when the 65536-byte input queue is full, leave the rest unread and resume on the next tick; data followed by EOF forwards the data and reports outer EOF; a partial PTY write keeps the remainder queued in order; the pacing decision starts the next tick without the idle sleep while a tick read outer bytes or input stays queued, and keeps the idle sleep otherwise; and the existing transport tests still pass. <!-- completed: -->
-- [ ] Implement the draining outer read and whole-queue PTY write in the transport tick, and the input-aware pacing in the service loop. <!-- completed: -->
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck`. <!-- completed: -->
+- [x] Implement the draining outer read and whole-queue PTY write in the transport tick, and the input-aware pacing in the service loop. <!-- completed: 2026-10-28T14:29 -->
+- [x] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck`. <!-- completed: 2026-10-28T14:29 -->
 
 ### Step 8: Accept natively
 
