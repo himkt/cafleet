@@ -4955,6 +4955,7 @@ mod contract_tests {
         const REASON_CONTROL: &str = "  Tell OpenCode what to do differently                                                      enter confirm  esc cancel";
 
         type ScreenChange = (&'static str, fn(&mut Value));
+        type LineChange = Box<dyn Fn(&mut Vec<String>)>;
 
         fn source(id: &str) -> &'static str {
             FIXTURES
@@ -5596,7 +5597,7 @@ mod contract_tests {
         fn bundled_opencode_detects_nothing_from_form_or_dialog_text_outside_a_live_region() {
             let form = lines(PERMISSION_BYTES);
             let dialog = lines(DENY_3_BYTES);
-            let cases: [(&str, Box<dyn Fn(&mut Vec<String>)>); 6] = [
+            let cases: [(&str, LineChange); 6] = [
                 ("idle screen", Box::new(|_| {})),
                 (
                     "quoted heading and command in the transcript",

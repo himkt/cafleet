@@ -3283,9 +3283,8 @@ mod permission_response_contracts {
                     storage::get_input(&h.fixture.conn, id).unwrap().state,
                     storage::InputState::InProgress
                 );
-                std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
-                let expired = settle(h, soon(500));
-                assert_uncertain(h, id, expired);
+                let ended = settle(h, deadline + Duration::from_millis(500));
+                assert_uncertain(h, id, ended);
                 assert_eq!(h.pty.offers, offers(&[b"h"]));
             });
         }
