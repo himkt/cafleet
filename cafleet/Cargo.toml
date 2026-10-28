@@ -27,3 +27,6 @@ libproc = "0.14"
 
 [dev-dependencies]
 tempfile = "3"
+
+[profile.dev.package."*"]
+opt-level = 2
