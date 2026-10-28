@@ -1,10 +1,8 @@
 # Member PTY Permission Events
 
-**Status**: In Progress
+**Status**: Complete
 **Progress**: 22/22 tasks complete
 **Last Updated**: 2026-10-28
-
-**Execution state**: Implementation and the release-minimum native acceptance are complete on branch `feat/0000194-member-pty-permission-events` (2026-10-28); the fresh Reviewer loop and user approval follow.
 
 ## Overview
 
