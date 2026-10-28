@@ -1085,14 +1085,9 @@ mod pane_lock_wait_tests {
         }
         drop(guard);
         assert_eq!(
-            delete_fleet(
-                &mut fixture.conn,
-                &fixture.settings,
-                fixture.member.fleet_id,
-                Deadline::new()
-            )
-            .unwrap()
-            .deregistered_count,
+            common::guarded_delete_fleet(&mut fixture.conn, fixture.member.fleet_id)
+                .unwrap()
+                .deregistered_count,
             before.len()
         );
     }

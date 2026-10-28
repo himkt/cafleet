@@ -5093,6 +5093,34 @@ pub(crate) mod tests {
             .member_id
     }
 
+    struct FixtureDeletionHost;
+
+    impl crate::input::DeletionHost for FixtureDeletionHost {
+        fn shutdown(
+            &mut self,
+            _: &mut Connection,
+            _: &super::runtime::RunRecord,
+            _: crate::input::Deadline,
+        ) -> Result<crate::runtime::runner::ShutdownOutcome, crate::error::CafleetError> {
+            unreachable!("broker fixtures register no member runs")
+        }
+
+        fn close_pane(
+            &mut self,
+            _: &super::records::Placement,
+            _: crate::input::Deadline,
+        ) -> Result<crate::multiplexer::PostCloseLayout, crate::error::CafleetError> {
+            Ok(crate::multiplexer::PostCloseLayout::None)
+        }
+
+        fn restore_layout(
+            &mut self,
+            _: crate::multiplexer::PostCloseLayout,
+        ) -> Result<(), crate::error::CafleetError> {
+            Ok(())
+        }
+    }
+
     pub fn guarded_delete_fleet(
         conn: &mut Connection,
         fleet: i64,
@@ -5109,6 +5137,12 @@ pub(crate) mod tests {
             (name == "CAFLEET_DATABASE_URL").then(|| url.clone())
         })
         .unwrap();
-        crate::input::delete_fleet(conn, &settings, fleet, crate::input::Deadline::new())
+        crate::input::delete_fleet_with_host(
+            conn,
+            &settings,
+            fleet,
+            crate::input::Deadline::new(),
+            &mut FixtureDeletionHost,
+        )
     }
 }

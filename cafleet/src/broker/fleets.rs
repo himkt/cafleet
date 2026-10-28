@@ -285,7 +285,7 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let mut conn = migrated_conn(&dir);
             let (fleet, director) = create_fleet(&mut conn, "alpha");
-            let worker = register(&mut conn, fleet, "worker", Some("%2"));
+            let worker = register(&mut conn, fleet, "worker", None);
             let message =
                 broker::send_message(&mut conn, director, worker, "retained history").unwrap();
             let before = get_fleet(&conn, fleet).unwrap();

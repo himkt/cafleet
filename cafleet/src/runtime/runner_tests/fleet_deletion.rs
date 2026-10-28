@@ -4,7 +4,8 @@ use super::*;
 use crate::broker::records::Placement;
 use crate::config::Settings;
 use crate::error::CafleetError;
-use crate::input::{Deadline, FleetDeletionHost, PaneLock, delete_fleet_with_host};
+use crate::input::{Deadline, DeletionHost, PaneLock, delete_fleet_with_host};
+use crate::multiplexer::PostCloseLayout;
 
 #[derive(Clone, Copy)]
 enum Mutation {
@@ -21,6 +22,8 @@ struct Host {
     calls: Vec<&'static str>,
     owners: Vec<(i64, i64)>,
     panes: Vec<Placement>,
+    failing_pane: Option<String>,
+    restored: usize,
 }
 
 fn settings(fixture: &Fixture) -> Settings {
@@ -41,6 +44,8 @@ impl Host {
             calls: Vec::new(),
             owners: Vec::new(),
             panes: Vec::new(),
+            failing_pane: None,
+            restored: 0,
         }
     }
 
@@ -53,7 +58,7 @@ impl Host {
     }
 }
 
-impl FleetDeletionHost for Host {
+impl DeletionHost for Host {
     fn shutdown(
         &mut self,
         conn: &mut Connection,
@@ -92,11 +97,14 @@ impl FleetDeletionHost for Host {
         &mut self,
         placement: &Placement,
         deadline: Deadline,
-    ) -> Result<(), CafleetError> {
+    ) -> Result<PostCloseLayout, CafleetError> {
         assert_eq!(deadline.instant(), self.deadline);
         self.assert_pane_owned(placement);
         self.calls.push("close");
         self.panes.push(placement.clone());
+        if self.failing_pane.is_some() && self.failing_pane == placement.mux_pane_id {
+            return Err(CafleetError::App("pane vanished".into()));
+        }
         if matches!(self.mutation, Mutation::AfterClose) {
             crate::db::connect(&self.settings.database_url)
                 .unwrap()
@@ -106,6 +114,12 @@ impl FleetDeletionHost for Host {
                 )
                 .unwrap();
         }
+        Ok(PostCloseLayout::None)
+    }
+
+    fn restore_layout(&mut self, layout: PostCloseLayout) -> Result<(), CafleetError> {
+        assert!(matches!(layout, PostCloseLayout::None));
+        self.restored += 1;
         Ok(())
     }
 }
@@ -355,4 +369,158 @@ fn runner_review_fleet_mutable_shutdown_evidence_keeps_one_deadline_and_unwrappe
                 .is_some()
         );
     }
+}
+
+fn fleet_deleted(fixture: &Fixture) -> bool {
+    crate::broker::get_fleet(&fixture.conn, fixture.run.fleet_id)
+        .unwrap()
+        .unwrap()
+        .deleted_at
+        .is_some()
+}
+
+fn outcomes(deleted: &crate::broker::records::DeletedFleet) -> Vec<(i64, String)> {
+    deleted
+        .members
+        .iter()
+        .map(|member| (member.member_id, member.pane_status.clone()))
+        .collect()
+}
+
+fn ordinary_placements_in_lock_order(
+    fixture: &Fixture,
+    settings: &Settings,
+) -> Vec<(i64, Placement)> {
+    let director = crate::broker::get_fleet(&fixture.conn, fixture.run.fleet_id)
+        .unwrap()
+        .unwrap()
+        .director_member_id
+        .unwrap();
+    let mut placements = crate::broker::list_members(&fixture.conn, fixture.run.fleet_id)
+        .unwrap()
+        .into_iter()
+        .filter(|activity| activity.member.member_id != director)
+        .filter_map(|activity| Some((activity.member.member_id, activity.member.placement?)))
+        .filter(|(_, placement)| placement.mux_pane_id.is_some())
+        .collect::<Vec<_>>();
+    placements.sort_by_key(|(_, placement)| {
+        crate::input::lock_path(&settings.database_url, placement).unwrap()
+    });
+    placements
+}
+
+#[test]
+fn fleet_deletion_ends_every_ordinary_member_and_keeps_the_director_pane() {
+    let mut fixture = Fixture::new();
+    let fleet = fixture.run.fleet_id;
+    let unwrapped = common::register(&mut fixture.conn, fleet, "unwrapped", Some("%5"));
+    let pending = common::register(&mut fixture.conn, fleet, "pending", None);
+    let placementless =
+        crate::broker::register_member(&mut fixture.conn, fleet, "bare", "assignment", None)
+            .unwrap()
+            .member_id;
+    let settings = settings(&fixture);
+    let deadline = Deadline::new();
+    let mut host = Host::new(settings.clone(), fixture.run.run_id, deadline);
+    let deleted =
+        delete_fleet_with_host(&mut fixture.conn, &settings, fleet, deadline, &mut host).unwrap();
+    assert_eq!(deleted.fleet_id, fleet);
+    assert_eq!(deleted.deregistered_count, 5);
+    let mut expected = vec![
+        (fixture.run.member_id, "%2 (killed)".to_owned()),
+        (unwrapped, "%5 (killed)".to_owned()),
+        (pending, "(pending — no pane)".to_owned()),
+        (placementless, "(no placement)".to_owned()),
+    ];
+    expected.sort();
+    assert_eq!(outcomes(&deleted), expected);
+    let mut closed = host
+        .panes
+        .iter()
+        .map(|placement| placement.mux_pane_id.clone().unwrap())
+        .collect::<Vec<_>>();
+    closed.sort();
+    assert_eq!(closed, ["%2", "%5"]);
+    assert_eq!(host.restored, 2);
+    assert!(fleet_deleted(&fixture));
+    assert!(
+        crate::broker::list_members(&fixture.conn, fleet)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn fleet_deletion_stops_at_the_first_failed_member_and_a_rerun_resumes() {
+    let mut fixture = Fixture::new();
+    let fleet = fixture.run.fleet_id;
+    for (name, pane) in [("first", "%5"), ("second", "%6"), ("third", "%7")] {
+        common::register(&mut fixture.conn, fleet, name, Some(pane));
+    }
+    let settings = settings(&fixture);
+    let order = ordinary_placements_in_lock_order(&fixture, &settings);
+    assert_eq!(order.len(), 4);
+    let failing = if order[1].0 == fixture.run.member_id {
+        2
+    } else {
+        1
+    };
+    let (failed, failed_placement) = order[failing].clone();
+    let failed_pane = failed_placement.mux_pane_id.clone().unwrap();
+    let deadline = Deadline::new();
+    let mut host = Host::new(settings.clone(), fixture.run.run_id, deadline);
+    host.failing_pane = Some(failed_pane.clone());
+    let error = delete_fleet_with_host(&mut fixture.conn, &settings, fleet, deadline, &mut host)
+        .unwrap_err();
+    let ended = order[..failing]
+        .iter()
+        .map(|(member, _)| member.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    assert_eq!(
+        error.message(),
+        format!(
+            "fleet {fleet} was not deleted: member {failed}: kill_pane failed for pane {failed_pane}: pane vanished. Verify with 'cafleet doctor'. Members already deleted: {ended}."
+        )
+    );
+    assert_eq!(host.panes.len(), failing + 1);
+    assert_eq!(host.restored, failing);
+    assert!(!fleet_deleted(&fixture));
+    for (member, _) in &order[..failing] {
+        assert!(
+            crate::broker::get_member(&fixture.conn, *member, fleet)
+                .unwrap()
+                .is_none()
+        );
+    }
+    for (member, placement) in &order[failing..] {
+        let current = crate::broker::get_member(&fixture.conn, *member, fleet)
+            .unwrap()
+            .unwrap();
+        assert_eq!(current.placement.as_ref(), Some(placement));
+        assert!(
+            PaneLock::try_acquire(&settings.database_url, placement)
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    let deadline = Deadline::new();
+    let mut rerun = Host::new(settings.clone(), fixture.run.run_id, deadline);
+    let deleted =
+        delete_fleet_with_host(&mut fixture.conn, &settings, fleet, deadline, &mut rerun).unwrap();
+    let mut expected = order[failing..]
+        .iter()
+        .map(|(member, placement)| {
+            (
+                *member,
+                format!("{} (killed)", placement.mux_pane_id.as_deref().unwrap()),
+            )
+        })
+        .collect::<Vec<_>>();
+    expected.sort();
+    assert_eq!(outcomes(&deleted), expected);
+    assert_eq!(deleted.deregistered_count, order.len() - failing + 1);
+    assert_eq!(rerun.panes.len(), order.len() - failing);
+    assert!(fleet_deleted(&fixture));
 }
