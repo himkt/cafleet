@@ -2060,6 +2060,35 @@ Record `requested_mode` as nullable text, `resolved_mode` as required text, `mod
 
 Keep launch, detection, empty-composer observation, prompt submission, native-exec submission and request-bound answer capabilities separate. Answer profiles declare support for each semantic decision independently. Profiles declare exact backend versions, rule-set version and capability-specific fixture provenance; bundled tested declarations require matching native captures and measured single-request answer stages for the capability claimed. Synthetic fixtures exercise rule and capability validation while unverified components remain unknown or unsupported. A missing version/profile yields `coverage=unknown`, an initial coverage notification and held programmatic input; it still permits manual terminal operation and records the selected mode. Automatic/fixed policies remain useful even where screen detection is unknown. The default OpenCode preset's returned denials continue through member evidence routing; returned tool responses are observable only when the native terminal exposes them.
 
+##### Bundled profiles and native screen fixtures
+
+The bundled catalog is embedded in the CAFleet binary together with the native screen fixtures that its declarations cite. It currently declares one profile: detection of the Claude Code `2.1.302` native `default` permission form, backed by native screen fixtures from accepted captures. That profile's composer, prompt submission, native-exec submission and answer capabilities remain `unknown` until their own native evidence is accepted. Every other backend and native version yields `coverage=unknown`.
+
+A native screen fixture records one captured terminal screen with exactly these fields:
+
+| Field | Requirement |
+|---|---|
+| `schema_version` | `1` |
+| `fixture_id` | Equals the catalog fixture `id` |
+| `provenance` | `native` |
+| `backend`, `native_version` | Equal the catalog fixture entry |
+| `rows`, `cols` | Positive measured geometry, equal to the catalog fixture entry |
+| `alternate_screen`, `screen_seq`, `cursor_row`, `cursor_col` | Measured screen state; the cursor lies within the geometry |
+| `lines` | Exactly `rows` captured row texts, in viewport order |
+| `masked_rows` | Unique zero-based row indices, each `{"row":N,"reason":"reviewed_privacy"}`; the corresponding `lines` entry is the empty string |
+
+Masking applies only to rows removed by the reviewed capture privacy policy, such as home paths and account, model or plan text. Every other row keeps its captured text exactly, including trailing spaces. The detection region of every rule citing the fixture lies entirely in unmasked rows, and a masked fixture keeps `provenance` `native`.
+
+The bundled catalog fails to load unless each bundled fixture satisfies all of these:
+
+- Its embedded bytes hash to the catalog entry's `sha256`.
+- It parses with exactly the fields above.
+- It declares `native` provenance.
+- It matches the entry's backend, version and geometry.
+- Every row declared in `masked_rows` is in range and empty.
+
+A synthetic fixture, an undeclared alteration or a digest mismatch therefore rejects the bundled catalog. Synthetic fixtures remain available to explicitly selected test catalogs.
+
 ##### Executable native plans
 
 Keep detection, empty-composer observation, prompt submission, native-exec submission and each semantic answer decision independently eligible for the exact backend/native version. Observing an empty composer supplies input-state evidence; executable submission additionally requires its measured literal/submit plan. Existing observation definitions without a submission plan retain their observation coverage and yield no executable composer capability. Production capabilities require accepted exact-version native evidence for the claimed operation; synthetic plans run only in explicitly selected test services.
