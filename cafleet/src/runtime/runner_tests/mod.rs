@@ -2,7 +2,6 @@ pub(crate) mod control_service;
 mod creation;
 mod fleet_deletion;
 pub(crate) mod owned_child;
-pub(in crate::runtime) mod permission_history;
 mod recovery;
 
 mod native_capture;

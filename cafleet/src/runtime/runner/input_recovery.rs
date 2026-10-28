@@ -706,7 +706,7 @@ pub(super) mod tests {
 
     #[test]
     fn exclusive_permission_ready_proof_and_claim_release_share_the_owner_transaction() {
-        use crate::runtime::runner_tests::permission_history::{Case, Retained};
+        use crate::runtime::runner::input_client::permission_history::{Case, Retained};
 
         let mut case = Case::new(Retained::InProgress);
         storage::record_input_state(
@@ -878,7 +878,7 @@ pub(super) mod tests {
 
     #[test]
     fn exclusive_permission_receipt_pins_original_audit_and_creation_after_snapshot() {
-        use crate::runtime::runner_tests::permission_history::{Case, Retained};
+        use crate::runtime::runner::input_client::permission_history::{Case, Retained};
         use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
 
