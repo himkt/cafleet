@@ -696,6 +696,20 @@ fn run_service(
                                     let coordinator = coordinator
                                         .as_mut()
                                         .ok_or_else(|| error("native input has not started"))?;
+                                    if response_context.is_some() {
+                                        coordinator
+                                            .progress_with_manual(&mut transport, |transport| {
+                                                transport.quiesce_for_input(
+                                                    &mut input,
+                                                    &mut pty,
+                                                    &mut output,
+                                                    &mut controller
+                                                        .observer(&writer, services.clock.as_ref()),
+                                                    deadline,
+                                                )
+                                            })
+                                            .map_err(CafleetError::from)?;
+                                    }
                                     let reply = coordinator
                                         .handle_received(
                                             &mut conn,

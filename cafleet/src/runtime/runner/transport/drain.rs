@@ -10,6 +10,21 @@ struct DrainBudget {
     display: usize,
 }
 
+fn unsettled_health(health: &ObservationHealth) -> Option<String> {
+    if health.degraded {
+        Some(match &health.diagnostic {
+            Some(code) => format!("observation degraded: {code}"),
+            None => "observation degraded".into(),
+        })
+    } else if health.pending_count != 0 {
+        Some("observation transitions pending".into())
+    } else if health.pending_evidence {
+        Some("observation evidence pending".into())
+    } else {
+        None
+    }
+}
+
 fn before_deadline(deadline: Instant) -> Result<()> {
     if Instant::now() >= deadline {
         Err(CafleetError::DeadlineExceeded)
@@ -135,9 +150,11 @@ impl Transport {
                 let Some(health) = health else {
                     return Ok(InputDrain::Pending);
                 };
-                if health.degraded || health.pending_count != 0 || health.pending_evidence {
+                if let Some(reason) = unsettled_health(&health) {
+                    self.drain_blocker = Some(reason);
                     return Ok(InputDrain::Pending);
                 }
+                self.drain_blocker = None;
                 let output_seq = self.terminal.snapshot().screen_seq;
                 before_deadline(deadline)?;
                 self.input_drain = Some(DrainedInput {

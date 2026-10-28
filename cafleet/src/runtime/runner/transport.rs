@@ -88,6 +88,7 @@ pub(crate) struct Transport {
     input_turn: u64,
     input_instance: Arc<()>,
     input_drain: Option<DrainedInput>,
+    drain_blocker: Option<String>,
     observation_complete: bool,
     #[cfg(test)]
     observation_hooks: Option<std::sync::Arc<dyn ObservationHooks>>,
@@ -174,6 +175,7 @@ impl Transport {
             input_turn: 0,
             input_instance: Arc::new(()),
             input_drain: None,
+            drain_blocker: None,
             observation_complete: true,
             #[cfg(test)]
             observation_hooks: None,
@@ -316,6 +318,9 @@ impl Transport {
     }
     pub(super) fn take_input_drain(&mut self) -> Option<DrainedInput> {
         self.input_drain.take()
+    }
+    pub(super) fn drain_blocker(&self) -> Option<&str> {
+        self.drain_blocker.as_deref()
     }
     pub(super) fn validate_input_drain(
         &self,

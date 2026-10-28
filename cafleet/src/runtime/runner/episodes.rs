@@ -5,6 +5,17 @@ use crate::broker::runtime::{
 };
 use std::ops::RangeInclusive;
 use std::time::{Duration, Instant};
+
+fn same_evidence_apart_from_sequence(stored: &Value, current: &Value) -> bool {
+    let stored = stored.as_object().expect("policy evidence is an object");
+    let current = current.as_object().expect("policy evidence is an object");
+    // evidence_digest covers screen_seq, so it changes whenever screen_seq does.
+    stored.len() == current.len()
+        && stored.iter().all(|(key, value)| {
+            matches!(key.as_str(), "screen_seq" | "evidence_digest")
+                || current.get(key) == Some(value)
+        })
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Visibility {
@@ -248,7 +259,7 @@ impl EpisodeTracker {
             {
                 self.candidate = None;
                 let active = self.active.as_mut().expect("matching active episode");
-                if active.evidence != evidence {
+                if !same_evidence_apart_from_sequence(&active.evidence, &evidence) {
                     update.latest_evidence = Some(InteractionEvidenceUpdate {
                         run_id: self.run_id,
                         episode_seq: active.sequence,

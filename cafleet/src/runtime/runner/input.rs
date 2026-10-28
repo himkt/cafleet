@@ -2529,6 +2529,7 @@ pub(crate) struct InputCoordinator {
     pending: Option<PendingInput>,
     current_request: Option<(CurrentRequest, String)>,
     input_fenced: bool,
+    observation_blocker: Option<String>,
 }
 
 #[derive(Clone)]
@@ -2964,7 +2965,7 @@ impl InputCoordinator {
                 };
                 let view = with_database_deadline(conn, deadline, |conn| {
                     let tx = conn.transaction().map_err(db_err)?;
-                    self.validate_live(&tx, run)?;
+                    self.validate_live_run(&tx, run)?;
                     let view = inspection_association(&tx, &self.run, &input)?;
                     check_deadline(Instant::now(), deadline)?;
                     tx.commit().map_err(db_err)?;
@@ -2998,8 +2999,15 @@ impl InputCoordinator {
                 let mut answer_profile_version = None;
                 let mut answer_rule_id = None;
                 let mut request_token = None;
-                let mut reason = Some("current executable permission request unavailable".into());
-                if fresh && let Some(observed) = observed {
+                let blocker = self.permission_blocker(observation);
+                let mut reason =
+                    Some(blocker.clone().unwrap_or_else(|| {
+                        "current executable permission request unavailable".into()
+                    }));
+                if fresh
+                    && blocker.is_none()
+                    && let Some(observed) = observed
+                {
                     ensure(
                         observed.episode_seq == interaction.episode_seq
                             && observed.classification == interaction.classification,
@@ -3105,11 +3113,34 @@ impl InputCoordinator {
         self.input_fenced = true;
         check_deadline(Instant::now(), deadline)
     }
+    fn permission_blocker(&self, observation: &ObservationController) -> Option<String> {
+        let status = observation.status();
+        if self.input_fenced {
+            Some("permission input is fenced".into())
+        } else if self.manual_accounting_failed {
+            Some("manual input accounting failed".into())
+        } else if let Some(reason) = &self.observation_blocker {
+            Some(reason.clone())
+        } else if let Some(code) = &status.diagnostic {
+            Some(format!("observation degraded: {code}"))
+        } else if status.retained_transition || status.retained_draft || status.retained_evidence {
+            Some("observation update pending".into())
+        } else if status.visibility != Visibility::Visible {
+            Some("permission request is not visible".into())
+        } else if status.eligibility != InputEligibility::Hold(super::GateReason::Interaction) {
+            Some("permission request is not the current interaction".into())
+        } else {
+            None
+        }
+    }
     fn validate_permission_binding(
         &self,
         selection: &PermissionSelection,
         observation: &ObservationController,
     ) -> Result<()> {
+        if let Some(reason) = self.permission_blocker(observation) {
+            return Err(error(format!("permission request is blocked: {reason}")));
+        }
         let (current, token) = self
             .current_request
             .as_ref()
@@ -3118,12 +3149,9 @@ impl InputCoordinator {
         let observed = observation
             .current_request()
             .ok_or_else(|| error("current permission request unavailable"))?;
-        let status = observation.status();
         ensure(
             token == &selection.request.metadata.request_token
                 && current.same_request(bound)
-                && !self.manual_accounting_failed
-                && !self.input_fenced
                 && self.manual_generation == bound.manual_generation
                 && observation.request_generation() == bound.request_generation
                 && observed.request_generation == bound.request_generation
@@ -3141,13 +3169,7 @@ impl InputCoordinator {
                     .answer_matches
                     .iter()
                     .zip(&bound.answer_matches)
-                    .all(|(a, b)| a.same_request(b))
-                && status.visibility == Visibility::Visible
-                && status.eligibility == InputEligibility::Hold(super::GateReason::Interaction)
-                && !status.retained_transition
-                && !status.retained_draft
-                && !status.retained_evidence
-                && status.diagnostic.is_none(),
+                    .all(|(a, b)| a.same_request(b)),
             "permission request token or current plan binding changed",
         )?;
         ensure(
@@ -3235,6 +3257,9 @@ impl InputCoordinator {
                     .map(|result| Some(InputControlReply::PermissionResponse(result)));
             }
             request.identity.validate(&self.run)?;
+            if let Some(reason) = self.permission_blocker(observation) {
+                return Err(error(format!("permission request is blocked: {reason}")));
+            }
             let (binding, token) = self
                 .current_request
                 .as_ref()
@@ -3396,6 +3421,10 @@ impl InputCoordinator {
             !self.manual_accounting_failed && !self.input_fenced,
             "manual accounting failure fenced input",
         )?;
+        self.validate_live_run(conn, expected)
+    }
+
+    fn validate_live_run(&self, conn: &Connection, expected: &RunRecord) -> Result<()> {
         ensure(
             stable_run_identity(expected) == stable_run_identity(&self.run),
             "input coordinator run identity changed",
@@ -4754,6 +4783,7 @@ impl InputCoordinator {
             manual_accounting_failed: false,
             current_request: None,
             input_fenced: false,
+            observation_blocker: None,
         })
     }
 
@@ -4764,6 +4794,7 @@ impl InputCoordinator {
     ) -> std::result::Result<T, InputFailure> {
         let before = transport.human_generation();
         let progress = step(transport);
+        self.observation_blocker = transport.drain_blocker().map(str::to_owned);
         let accounting = transport
             .human_generation()
             .checked_sub(before)
