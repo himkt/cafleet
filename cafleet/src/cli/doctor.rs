@@ -326,6 +326,7 @@ mod tests {
         assert_eq!(find(&checks, "opencode.executable").status, "info");
         for name in [
             "opencode.preset",
+            "opencode.preset.cafleet-ask",
             "opencode.installation",
             "claude.installation",
             "codex.installation",
@@ -373,6 +374,7 @@ mod tests {
                 .starts_with("no installation recorded")
         );
         assert_eq!(find(&checks, "opencode.preset").status, "error");
+        assert_eq!(find(&checks, "opencode.preset.cafleet-ask").status, "error");
         conn.execute(
             "UPDATE asset_installs SET cafleet_version=X'00' WHERE coding_agent='claude'",
             [],
@@ -386,5 +388,130 @@ mod tests {
             .status,
             "error"
         );
+    }
+
+    fn preset_checks(checks: &[Check]) -> Vec<&Check> {
+        checks
+            .iter()
+            .filter(|check| check.name.starts_with("opencode.preset"))
+            .collect()
+    }
+
+    #[test]
+    fn opencode_preset_checks_follow_catalog_order_with_the_default_name_unsuffixed() {
+        let home = tempfile::tempdir().unwrap();
+        let probe = Probe {
+            home: home.path().into(),
+            executable: true,
+            invalid: None,
+        };
+        let checks = agent_checks(None, &SchemaState::Missing, &probe, Ok(home.path()));
+        let names = checks
+            .iter()
+            .map(|check| check.name.as_str())
+            .collect::<Vec<_>>();
+        let executable = names
+            .iter()
+            .position(|name| *name == "opencode.executable")
+            .unwrap();
+        assert_eq!(
+            names[executable + 1..executable + 4],
+            [
+                "opencode.preset",
+                "opencode.preset.cafleet-ask",
+                "opencode.installation"
+            ]
+        );
+        assert_eq!(preset_checks(&checks).len(), 2);
+    }
+
+    #[test]
+    fn opencode_preset_checks_report_ok_with_each_installed_preset_path() {
+        let home = tempfile::tempdir().unwrap();
+        let agents = home.path().join(".opencode/agents");
+        std::fs::create_dir_all(&agents).unwrap();
+        std::fs::write(agents.join("cafleet.md"), "default").unwrap();
+        std::fs::write(agents.join("cafleet-ask.md"), "ask").unwrap();
+        let probe = Probe {
+            home: home.path().into(),
+            executable: true,
+            invalid: None,
+        };
+        let checks = agent_checks(None, &SchemaState::Missing, &probe, Ok(home.path()));
+        for (name, file) in [
+            ("opencode.preset", "cafleet.md"),
+            ("opencode.preset.cafleet-ask", "cafleet-ask.md"),
+        ] {
+            let check = find(&checks, name);
+            assert_eq!(check.status, "ok", "{name}");
+            assert_eq!(check.detail, agents.join(file).display().to_string());
+        }
+    }
+
+    #[test]
+    fn missing_cafleet_ask_preset_is_an_error_with_the_setup_remedy() {
+        let home = tempfile::tempdir().unwrap();
+        let agents = home.path().join(".opencode/agents");
+        std::fs::create_dir_all(&agents).unwrap();
+        std::fs::write(agents.join("cafleet.md"), "default").unwrap();
+        let probe = Probe {
+            home: home.path().into(),
+            executable: true,
+            invalid: None,
+        };
+        let checks = agent_checks(None, &SchemaState::Missing, &probe, Ok(home.path()));
+        assert_eq!(find(&checks, "opencode.preset").status, "ok");
+        let check = find(&checks, "opencode.preset.cafleet-ask");
+        assert_eq!(check.status, "error");
+        let cause = check
+            .detail
+            .strip_prefix(&format!("{}: ", agents.join("cafleet-ask.md").display()))
+            .and_then(|rest| rest.strip_suffix("; run 'cafleet setup --coding-agent opencode'"))
+            .unwrap_or_else(|| panic!("preset error detail: {}", check.detail));
+        assert!(!cause.is_empty());
+
+        std::fs::remove_file(agents.join("cafleet.md")).unwrap();
+        std::fs::write(agents.join("cafleet-ask.md"), "ask").unwrap();
+        let checks = agent_checks(None, &SchemaState::Missing, &probe, Ok(home.path()));
+        assert_eq!(find(&checks, "opencode.preset").status, "error");
+        assert!(
+            find(&checks, "opencode.preset")
+                .detail
+                .starts_with(&format!("{}: ", agents.join("cafleet.md").display()))
+        );
+        assert_eq!(find(&checks, "opencode.preset.cafleet-ask").status, "ok");
+    }
+
+    #[test]
+    fn opencode_preset_checks_are_info_when_configuration_fails_or_the_executable_is_absent() {
+        let home = tempfile::tempdir().unwrap();
+        let unconfigured = Probe {
+            home: home.path().into(),
+            executable: true,
+            invalid: Some("OPENCODE_CONFIG_DIR"),
+        };
+        let checks = agent_checks(None, &SchemaState::Missing, &unconfigured, Ok(home.path()));
+        assert_eq!(preset_checks(&checks).len(), 2);
+        for check in preset_checks(&checks) {
+            assert_eq!(check.status, "info", "{}", check.name);
+            assert!(
+                check
+                    .detail
+                    .starts_with("unavailable: configuration failed: "),
+                "{}",
+                check.detail
+            );
+        }
+        let absent = Probe {
+            home: home.path().into(),
+            executable: false,
+            invalid: None,
+        };
+        let checks = agent_checks(None, &SchemaState::Missing, &absent, Ok(home.path()));
+        for check in preset_checks(&checks) {
+            assert_eq!(check.status, "info", "{}", check.name);
+            assert_eq!(check.detail, "unavailable: executable is absent");
+        }
+        assert_eq!(preset_checks(&checks).len(), 2);
     }
 }

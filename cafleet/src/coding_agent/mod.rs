@@ -46,7 +46,7 @@ mod policy_contract_tests {
                 "--sandbox".into(),
                 "workspace-write".into(),
             ],
-            CodingAgent::Opencode => vec!["--agent".into(), "cafleet".into()],
+            CodingAgent::Opencode => vec!["--agent".into(), selected.into()],
         }
     }
 
@@ -123,7 +123,7 @@ mod policy_contract_tests {
                         "mini".into(),
                         "--standalone".into(),
                         "--agent".into(),
-                        "cafleet".into(),
+                        mode.clone(),
                     ],
                 };
                 expected.extend(["--model".into(), "provider/model".into()]);
@@ -187,7 +187,7 @@ mod policy_contract_tests {
     #[test]
     fn runtime_policy_fixed_preset_and_unknown_native_version_keep_launch_intent() {
         let backend = CodingAgent::Opencode;
-        assert_eq!(backend.policy_choices(None), ["cafleet"]);
+        assert_eq!(backend.policy_choices(None), ["cafleet", "cafleet-ask"]);
         assert_eq!(
             backend
                 .resolve_policy(None, Some("cafleet"))
@@ -201,6 +201,122 @@ mod policy_contract_tests {
             assert_eq!(unknown.resolved_mode, known.resolved_mode);
             assert_eq!(unknown.permission_argv, known.permission_argv);
         }
+    }
+
+    #[test]
+    fn runtime_policy_opencode_catalog_offers_cafleet_and_cafleet_ask_for_every_native_version() {
+        for native_version in [None, Some("2.1.4"), Some("2.1.3"), Some("9.0.0-beta.1")] {
+            assert_eq!(
+                CodingAgent::Opencode.policy_choices(native_version),
+                ["cafleet", "cafleet-ask"],
+                "{native_version:?}"
+            );
+            for mode in ["cafleet", "cafleet-ask"] {
+                let selection = CodingAgent::Opencode
+                    .resolve_policy(native_version, Some(mode))
+                    .unwrap();
+                assert_eq!(selection.permission_argv, ["--agent", mode]);
+            }
+        }
+    }
+
+    #[test]
+    fn runtime_policy_opencode_explicit_cafleet_ask_launches_its_agent_and_records_launch_intent() {
+        let selection = CodingAgent::Opencode
+            .resolve_policy(Some("2.1.4"), Some("cafleet-ask"))
+            .unwrap();
+        assert_eq!(selection.requested_mode.as_deref(), Some("cafleet-ask"));
+        assert_eq!(selection.resolved_mode, "cafleet-ask");
+        assert_eq!(selection.mode_source, ModeSource::Explicit);
+        assert_eq!(
+            serde_json::to_value(&selection.permission_argv).unwrap(),
+            serde_json::json!(["--agent", "cafleet-ask"])
+        );
+        assert_eq!(
+            CodingAgent::Opencode
+                .build_spawn_argv_with_policy("assignment", "worker", None, None, &selection)
+                .unwrap(),
+            [
+                "opencode",
+                "mini",
+                "--standalone",
+                "--agent",
+                "cafleet-ask",
+                "--prompt",
+                "assignment"
+            ]
+        );
+        assert_eq!(
+            CodingAgent::Opencode
+                .build_spawn_argv_with_policy(
+                    "assignment",
+                    "worker",
+                    Some("provider/model"),
+                    None,
+                    &selection
+                )
+                .unwrap(),
+            [
+                "opencode",
+                "mini",
+                "--standalone",
+                "--agent",
+                "cafleet-ask",
+                "--model",
+                "provider/model",
+                "--prompt",
+                "assignment"
+            ]
+        );
+    }
+
+    #[test]
+    fn runtime_policy_opencode_omitted_selection_keeps_the_cafleet_agent_as_default() {
+        let selection = CodingAgent::Opencode
+            .resolve_policy(Some("2.1.4"), None)
+            .unwrap();
+        assert_eq!(selection.requested_mode, None);
+        assert_eq!(selection.resolved_mode, "cafleet");
+        assert_eq!(selection.mode_source, ModeSource::Default);
+        assert_eq!(selection.permission_argv, ["--agent", "cafleet"]);
+        assert_eq!(
+            CodingAgent::Opencode
+                .build_spawn_argv_with_policy("assignment", "worker", None, None, &selection)
+                .unwrap(),
+            [
+                "opencode",
+                "mini",
+                "--standalone",
+                "--agent",
+                "cafleet",
+                "--prompt",
+                "assignment"
+            ]
+        );
+    }
+
+    #[test]
+    fn runtime_policy_opencode_unknown_choice_fails_with_the_exact_usage_error() {
+        for native_version in [None, Some("2.1.4")] {
+            let failure = CodingAgent::Opencode
+                .resolve_policy(native_version, Some("ask"))
+                .expect_err("unknown OpenCode policy must fail");
+            assert!(matches!(failure, CafleetError::Usage(_)));
+            assert_eq!(
+                failure.message(),
+                "--permission-mode for opencode must be one of cafleet, cafleet-ask (got 'ask')"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_policy_help_lists_both_opencode_choices_with_the_cafleet_default() {
+        assert!(
+            CodingAgent::permission_mode_help()
+                .contains("opencode: cafleet, cafleet-ask (default cafleet)"),
+            "{}",
+            CodingAgent::permission_mode_help()
+        );
     }
 
     #[test]
@@ -527,6 +643,7 @@ mod tests {
             for (output, expected) in [
                 ("2.1.302 (Claude Code)", "2.1.302"),
                 ("codex-cli 0.163.0", "0.163.0"),
+                ("opencode v2.1.4", "2.1.4"),
                 ("1.2.3-beta.1", "1.2.3-beta.1"),
             ] {
                 let path = stub(
@@ -545,6 +662,10 @@ mod tests {
                 ("nonzero exit", "printf '2.1.302\\n'; exit 1"),
                 ("no version token", "printf 'Claude Code\\n'"),
                 ("two version tokens", "printf '2.1.302 2.1.303\\n'"),
+                (
+                    "v-prefixed and plain version tokens",
+                    "printf 'v2.1.4 2.1.5\\n'",
+                ),
                 (
                     "version outside the first line",
                     "printf 'Claude Code\\n2.1.302\\n'",
@@ -632,6 +753,7 @@ mod tests {
     fn selected_preflight_checks_paths_then_binary_and_relocated_required_preset() {
         let dir = tempfile::tempdir().unwrap();
         for agent in CodingAgent::all() {
+            let mode = agent.resolve_policy(None, None).unwrap().resolved_mode;
             let mut probe = Probe {
                 agent: *agent,
                 home: dir.path().into(),
@@ -640,7 +762,7 @@ mod tests {
             };
             assert!(
                 agent
-                    .ensure_available(&probe)
+                    .ensure_available(&probe, &mode)
                     .unwrap_err()
                     .message()
                     .contains(agent.config_variable())
@@ -649,31 +771,109 @@ mod tests {
             probe.available = false;
             assert!(
                 agent
-                    .ensure_available(&probe)
+                    .ensure_available(&probe, &mode)
                     .unwrap_err()
                     .message()
                     .contains("not found on PATH")
             );
             probe.available = true;
             if *agent == CodingAgent::Opencode {
-                assert!(agent.ensure_available(&probe).is_err());
+                assert!(agent.ensure_available(&probe, &mode).is_err());
                 let preset =
                     PathBuf::from(probe.config.as_ref().unwrap()).join("agents/cafleet.md");
                 std::fs::create_dir_all(preset.parent().unwrap()).unwrap();
                 std::fs::write(&preset, "preset").unwrap();
-                agent.ensure_available(&probe).unwrap();
+                agent.ensure_available(&probe, &mode).unwrap();
                 std::fs::remove_file(&preset).unwrap();
                 std::fs::create_dir(&preset).unwrap();
-                assert!(agent.ensure_available(&probe).is_err());
+                assert!(agent.ensure_available(&probe, &mode).is_err());
             } else {
                 assert_eq!(
-                    agent.ensure_available(&probe).unwrap(),
+                    agent.ensure_available(&probe, &mode).unwrap(),
                     PathBuf::from("/fixture/bin").join(agent.binary_name())
                 );
             }
         }
         assert!(coding_agent("Claude").is_none());
         assert!(coding_agent("unknown").is_none());
+    }
+
+    #[test]
+    fn required_preset_is_the_selected_opencode_agent_file_and_absent_for_other_backends() {
+        let config = Path::new("/fixture/preset-base");
+        for mode in CodingAgent::Opencode.policy_choices(None) {
+            assert_eq!(
+                CodingAgent::Opencode.required_preset(config, &mode),
+                Some(config.join(format!("agents/{mode}.md")))
+            );
+        }
+        assert_eq!(
+            CodingAgent::Opencode.required_preset(config, "cafleet-ask"),
+            Some(PathBuf::from("/fixture/preset-base/agents/cafleet-ask.md"))
+        );
+        for agent in [CodingAgent::Claude, CodingAgent::Codex] {
+            for mode in agent.policy_choices(None) {
+                assert_eq!(agent.required_preset(config, &mode), None, "{mode}");
+            }
+        }
+    }
+
+    #[test]
+    fn selected_preflight_reads_only_the_selected_opencode_preset_with_the_shipped_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("preset-base");
+        let probe = Probe {
+            agent: CodingAgent::Opencode,
+            home: dir.path().into(),
+            config: Some(config.display().to_string()),
+            available: true,
+        };
+        let agents = config.join("agents");
+        std::fs::create_dir_all(&agents).unwrap();
+        let default_preset = agents.join("cafleet.md");
+        let ask_preset = agents.join("cafleet-ask.md");
+        let assert_missing = |mode: &str, preset: &Path| {
+            let failure = CodingAgent::Opencode
+                .ensure_available(&probe, mode)
+                .expect_err("a missing selected preset fails the preflight");
+            assert!(
+                matches!(failure, CafleetError::App(_)),
+                "exit 1: {}",
+                failure.message()
+            );
+            let text = failure.message();
+            let cause = text
+                .strip_prefix(&format!(
+                    "cannot read opencode agent preset at {}: ",
+                    preset.display()
+                ))
+                .and_then(|rest| {
+                    rest.strip_suffix("; run 'cafleet setup --coding-agent opencode' first")
+                })
+                .unwrap_or_else(|| panic!("shipped missing-preset error: {text}"));
+            assert!(!cause.is_empty(), "the read cause is carried: {text}");
+        };
+
+        std::fs::write(&default_preset, "default preset").unwrap();
+        CodingAgent::Opencode
+            .ensure_available(&probe, "cafleet")
+            .unwrap();
+        assert_missing("cafleet-ask", &ask_preset);
+
+        std::fs::remove_file(&default_preset).unwrap();
+        std::fs::write(&ask_preset, "ask preset").unwrap();
+        assert_eq!(
+            CodingAgent::Opencode
+                .ensure_available(&probe, "cafleet-ask")
+                .unwrap(),
+            PathBuf::from("/fixture/bin/opencode"),
+            "the unselected default preset is not consulted"
+        );
+        assert_missing("cafleet", &default_preset);
+
+        std::fs::remove_file(&ask_preset).unwrap();
+        std::fs::create_dir(&ask_preset).unwrap();
+        assert_missing("cafleet-ask", &ask_preset);
     }
 
     #[test]
@@ -708,10 +908,13 @@ mod tests {
         }
         let backend = CodingAgent::Claude;
         let resolved = backend
-            .ensure_available(&Resolved {
-                executable: executable.clone(),
-                home: dir.path().into(),
-            })
+            .ensure_available(
+                &Resolved {
+                    executable: executable.clone(),
+                    home: dir.path().into(),
+                },
+                "dontAsk",
+            )
             .unwrap();
         assert_eq!(resolved, executable);
         assert_eq!(

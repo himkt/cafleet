@@ -97,6 +97,7 @@ mod launch_policy_parser_tests {
             ("claude", "manual"),
             ("codex", "on-request"),
             ("opencode", "cafleet"),
+            ("opencode", "cafleet-ask"),
         ] {
             let mut arguments = create_arguments();
             arguments.extend([

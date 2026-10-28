@@ -139,3 +139,48 @@ pub(crate) fn version_token(line: &str) -> Result<&str, &'static str> {
         _ => Err("printed several version tokens"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn version_token_records_the_documented_first_lines_without_a_leading_v() {
+        for (line, expected) in [
+            ("2.1.302 (Claude Code)", "2.1.302"),
+            ("codex-cli 0.163.0", "0.163.0"),
+            ("opencode v2.1.4", "2.1.4"),
+            ("v1.2.3-beta.1", "1.2.3-beta.1"),
+        ] {
+            assert_eq!(version_token(line), Ok(expected), "{line}");
+        }
+    }
+
+    #[test]
+    fn version_token_counts_a_v_prefixed_token_toward_the_exactly_one_token_rule() {
+        assert_eq!(
+            version_token("v2.1.4 2.1.5"),
+            Err("printed several version tokens")
+        );
+        assert_eq!(
+            version_token("opencode v2.1.4 v2.1.5"),
+            Err("printed several version tokens")
+        );
+    }
+
+    #[test]
+    fn version_token_accepts_only_a_single_optional_leading_v() {
+        for line in [
+            "opencode vv2.1.4",
+            "opencode V2.1.4",
+            "opencode v",
+            "opencode v2",
+        ] {
+            assert_eq!(
+                version_token(line),
+                Err("printed no version token"),
+                "{line}"
+            );
+        }
+    }
+}
