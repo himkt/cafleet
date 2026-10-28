@@ -386,8 +386,8 @@ impl CodingAgent {
         }
     }
 
-    pub fn required_preset(self, config: &Path) -> Option<PathBuf> {
-        (self == Self::Opencode).then(|| config.join("agents/cafleet.md"))
+    pub fn required_preset(self, config: &Path, mode: &str) -> Option<PathBuf> {
+        (self == Self::Opencode).then(|| config.join(format!("agents/{mode}.md")))
     }
 
     pub fn validate_model(self, model: Option<&str>) -> Result<(), CafleetError> {
@@ -426,12 +426,16 @@ impl CodingAgent {
         }
     }
 
-    pub fn ensure_available(self, probe: &dyn SpawnProbe) -> Result<PathBuf, CafleetError> {
+    pub fn ensure_available(
+        self,
+        probe: &dyn SpawnProbe,
+        mode: &str,
+    ) -> Result<PathBuf, CafleetError> {
         let config = self.config_dir(&|name| probe.env_var(name), &probe.home_dir())?;
         let executable = probe.resolve_binary(self.binary_name()).ok_or_else(|| {
             CafleetError::App(format!("binary {} not found on PATH", self.binary_name()))
         })?;
-        if let Some(preset) = self.required_preset(&config.path) {
+        if let Some(preset) = self.required_preset(&config.path, mode) {
             std::fs::read(&preset).map_err(|error| CafleetError::App(format!(
                 "cannot read opencode agent preset at {}: {error}; run 'cafleet setup --coding-agent opencode' first", preset.display()
             )))?;

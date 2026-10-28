@@ -46,7 +46,7 @@ impl CodingAgent {
                 "plan",
             ],
             (Self::Codex, None | Some("0.163.0")) => &["on-request", "never"],
-            (Self::Opencode, _) => &["cafleet"],
+            (Self::Opencode, _) => &["cafleet", "cafleet-ask"],
             _ => &[],
         };
         choices.iter().map(|value| (*value).into()).collect()
@@ -60,7 +60,7 @@ impl CodingAgent {
                 "--sandbox".into(),
                 "workspace-write".into(),
             ],
-            Self::Opencode => vec!["--agent".into(), "cafleet".into()],
+            Self::Opencode => vec!["--agent".into(), mode.into()],
         }
     }
     pub fn resolve_policy(

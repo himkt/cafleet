@@ -407,7 +407,7 @@ fn create(
     let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
-    let executable = backend.ensure_available(&SystemProbe)?;
+    let executable = backend.ensure_available(&SystemProbe, &policy.resolved_mode)?;
     let context = mux
         .context_discovery()
         .map_err(|e| CafleetError::App(e.to_string()))?;

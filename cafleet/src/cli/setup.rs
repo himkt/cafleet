@@ -82,7 +82,7 @@ fn install_selected(
     for agent in CodingAgent::all() {
         if selected.is_empty() || selected.contains(agent) {
             let paths = agent_paths(env, home, *agent)?;
-            install_agent(conn, *agent, &paths, super::VERSION)?;
+            install_agent(conn, *agent, &paths, super::VERSION, &mut std::io::stdout())?;
         }
     }
     Ok(())

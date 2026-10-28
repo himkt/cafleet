@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
@@ -10,7 +11,7 @@ use crate::error::CafleetError;
 pub struct AgentPaths {
     pub identity: String,
     skills_dir: PathBuf,
-    preset: Option<(&'static str, PathBuf)>,
+    presets: Vec<(String, PathBuf)>,
 }
 
 pub fn agent_paths(
@@ -23,15 +24,27 @@ pub fn agent_paths(
         CodingAgent::Opencode => opencode_skills_base(home).join("skills"),
         _ => base.join("skills"),
     };
-    let preset = match agent {
-        CodingAgent::Claude => None,
-        CodingAgent::Codex => Some(("codex/cafleet.rules", base.join("rules/cafleet.rules"))),
-        CodingAgent::Opencode => Some(("opencode/cafleet.md", base.join("agents/cafleet.md"))),
+    let presets = match agent {
+        CodingAgent::Claude => vec![],
+        CodingAgent::Codex => vec![(
+            "codex/cafleet.rules".into(),
+            base.join("rules/cafleet.rules"),
+        )],
+        CodingAgent::Opencode => agent
+            .policy_choices(None)
+            .into_iter()
+            .map(|mode| {
+                let target = agent
+                    .required_preset(&base, &mode)
+                    .expect("OpenCode requires a preset for every launch policy");
+                (format!("opencode/{mode}.md"), target)
+            })
+            .collect(),
     };
     Ok(AgentPaths {
         identity: base.display().to_string(),
         skills_dir,
-        preset,
+        presets,
     })
 }
 
@@ -40,7 +53,12 @@ pub fn install_agent(
     agent: CodingAgent,
     paths: &AgentPaths,
     version: &str,
+    out: &mut dyn Write,
 ) -> Result<(), CafleetError> {
+    let mut report = |line: String| {
+        writeln!(out, "{line}")
+            .map_err(|error| CafleetError::App(format!("failed to write setup output: {error}")))
+    };
     let fail = |error: std::io::Error| {
         CafleetError::App(format!(
             "failed to install skills into {}: {error}",
@@ -68,7 +86,13 @@ pub fn install_agent(
             std::fs::write(target, bytes).map_err(fail)?;
         }
     }
-    if let Some((source, target)) = &paths.preset {
+    report(format!(
+        "{}: installed {} (v{version}) -> {}",
+        agent.name(),
+        roots.join(", "),
+        paths.skills_dir.display()
+    ))?;
+    for (source, target) in &paths.presets {
         let fail = |error: std::io::Error| {
             CafleetError::App(format!(
                 "failed to install preset into {}: {error}",
@@ -79,14 +103,13 @@ pub fn install_agent(
         std::fs::create_dir_all(target.parent().expect("preset has a parent")).map_err(fail)?;
         remove_existing_target(target).map_err(fail)?;
         std::fs::write(target, bytes).map_err(fail)?;
+        report(format!(
+            "{}: installed preset (v{version}) -> {}",
+            agent.name(),
+            target.display()
+        ))?;
     }
     crate::broker::record_asset_install(conn, agent.name(), &paths.identity, version)?;
-    println!(
-        "{}: installed {} (v{version}) -> {}",
-        agent.name(),
-        roots.join(", "),
-        paths.skills_dir.display()
-    );
     Ok(())
 }
 

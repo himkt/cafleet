@@ -9,7 +9,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 const OUTPUT_BYTES: u64 = 4096;
-const VERSION_TOKEN: &str = r"^[0-9]+(\.[0-9]+)+([-+][0-9A-Za-z.]+)?$";
+const VERSION_TOKEN: &str = r"^v?[0-9]+(\.[0-9]+)+([-+][0-9A-Za-z.]+)?$";
 
 pub(crate) struct NativeLaunchIdentity {
     pub native_version: Option<String>,
@@ -134,7 +134,7 @@ pub(crate) fn version_token(line: &str) -> Result<&str, &'static str> {
         .filter(|token| pattern.is_match(token))
         .collect::<Vec<_>>();
     match tokens.as_slice() {
-        [version] => Ok(version),
+        [version] => Ok(version.strip_prefix('v').unwrap_or(version)),
         [] => Err("printed no version token"),
         _ => Err("printed several version tokens"),
     }

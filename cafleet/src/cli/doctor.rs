@@ -6,6 +6,7 @@ use serde_json::json;
 
 use crate::coding_agent::{CodingAgent, SpawnProbe};
 use crate::config::Settings;
+use crate::config_dir::ResolvedDir;
 use crate::diagnosis::{self, SchemaState};
 use crate::error::CafleetError;
 use crate::runtime::system::SystemProbe;
@@ -189,36 +190,19 @@ fn agent_checks(
             },
         ));
         if *agent == CodingAgent::Opencode {
-            checks.push(match (&paths, available) {
-                (Err(cause), _) => Check::new(
-                    format!("{name}.preset"),
-                    "info",
-                    format!("unavailable: configuration failed: {cause}"),
-                ),
-                (_, false) => Check::new(
-                    format!("{name}.preset"),
-                    "info",
-                    "unavailable: executable is absent",
-                ),
-                (Ok(path), true) => {
-                    let preset = agent
-                        .required_preset(&path.path)
-                        .expect("OpenCode has a required preset");
-                    match std::fs::read(&preset) {
-                        Ok(_) => {
-                            Check::new(format!("{name}.preset"), "ok", preset.display().to_string())
-                        }
-                        Err(cause) => Check::new(
-                            format!("{name}.preset"),
-                            "error",
-                            format!(
-                                "{}: {cause}; run 'cafleet setup --coding-agent {name}'",
-                                preset.display()
-                            ),
-                        ),
-                    }
-                }
-            });
+            let default_mode = agent
+                .resolve_policy(None, None)
+                .expect("registered backend has a valid default policy")
+                .resolved_mode;
+            for mode in agent.policy_choices(None) {
+                checks.push(preset_check(
+                    *agent,
+                    &mode,
+                    mode == default_mode,
+                    &paths,
+                    available,
+                ));
+            }
         }
         let install_name = format!("{name}.installation");
         checks.push(match (&paths, schema) {
@@ -244,6 +228,45 @@ fn agent_checks(
         });
     }
     checks
+}
+
+fn preset_check(
+    agent: CodingAgent,
+    mode: &str,
+    is_default: bool,
+    paths: &Result<ResolvedDir, CafleetError>,
+    available: bool,
+) -> Check {
+    let name = agent.name();
+    let check_name = if is_default {
+        format!("{name}.preset")
+    } else {
+        format!("{name}.preset.{mode}")
+    };
+    match (paths, available) {
+        (Err(cause), _) => Check::new(
+            check_name,
+            "info",
+            format!("unavailable: configuration failed: {cause}"),
+        ),
+        (_, false) => Check::new(check_name, "info", "unavailable: executable is absent"),
+        (Ok(path), true) => {
+            let preset = agent
+                .required_preset(&path.path, mode)
+                .expect("OpenCode has a required preset for every launch policy");
+            match std::fs::read(&preset) {
+                Ok(_) => Check::new(check_name, "ok", preset.display().to_string()),
+                Err(cause) => Check::new(
+                    check_name,
+                    "error",
+                    format!(
+                        "{}: {cause}; run 'cafleet setup --coding-agent {name}'",
+                        preset.display()
+                    ),
+                ),
+            }
+        }
+    }
 }
 
 fn install_check(conn: &Connection, agent: CodingAgent, path: &Path) -> Check {

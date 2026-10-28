@@ -1,7 +1,7 @@
 # OpenCode Ask Permission Forms
 
 **Status**: Approved
-**Progress**: 2/17 tasks complete
+**Progress**: 5/17 tasks complete
 **Last Updated**: 2026-10-28
 
 ## Overview
@@ -240,9 +240,9 @@ Record detection-to-inbox latency, the CAFleet commit, versions, geometry and ev
 ### Step 2: Implement the policy, preset, setup and probe
 
 - [ ] Write tests: the OpenCode catalog accepts `cafleet` and `cafleet-ask` for any version, explicit/omitted argv and recorded launch intent, help and usage-error choices, setup installs both presets (including replace-on-install and failure recording) and prints the skills line then one preset line per target in install order for OpenCode and Codex, doctor emits `opencode.preset` and `opencode.preset.cafleet-ask` with `ok`, `error` and `info` outcomes, the precondition reads only the selected preset with the shipped error, the preset differs from `cafleet` only in description, shell base and body, and the probe records `2.1.4` from `opencode v2.1.4` while rejecting several tokens. <!-- completed: -->
-- [ ] Add `presets/opencode/cafleet-ask.md` and embed it; extend the OpenCode policy catalog and `--agent` mapping, setup's preset installation and success lines, the mode-aware `required_preset` used by the selected-preset precondition, and doctor's per-choice preset checks. <!-- completed: -->
-- [ ] Extend the version-token pattern with the optional leading `v` and remove it from the recorded version. <!-- completed: -->
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck`. <!-- completed: -->
+- [x] Add `presets/opencode/cafleet-ask.md` and embed it; extend the OpenCode policy catalog and `--agent` mapping, setup's preset installation and success lines, the mode-aware `required_preset` used by the selected-preset precondition, and doctor's per-choice preset checks. <!-- completed: 2026-10-28T11:47 -->
+- [x] Extend the version-token pattern with the optional leading `v` and remove it from the recorded version. <!-- completed: 2026-10-28T11:47 -->
+- [x] Run `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck`. <!-- completed: 2026-10-28T11:47 -->
 
 ### Step 3: Capture native OpenCode 2.1.4 evidence
 
