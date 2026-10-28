@@ -288,9 +288,10 @@ mod tests {
         invalid: Option<&'static str>,
     }
     impl SpawnProbe for Probe {
-        fn binary_on_path(&self, name: &str) -> bool {
+        fn resolve_binary(&self, name: &str) -> Option<PathBuf> {
             assert!(crate::coding_agent::coding_agent(name).is_some());
             self.executable
+                .then(|| PathBuf::from("/fixture/bin").join(name))
         }
         fn home_dir(&self) -> PathBuf {
             self.home.clone()

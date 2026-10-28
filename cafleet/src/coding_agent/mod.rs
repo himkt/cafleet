@@ -358,9 +358,10 @@ mod tests {
     }
 
     impl SpawnProbe for Probe {
-        fn binary_on_path(&self, name: &str) -> bool {
+        fn resolve_binary(&self, name: &str) -> Option<PathBuf> {
             assert_eq!(name, self.agent.binary_name());
             self.available
+                .then(|| PathBuf::from("/fixture/bin").join(name))
         }
         fn home_dir(&self) -> PathBuf {
             self.home.clone()
@@ -642,10 +643,94 @@ mod tests {
                 std::fs::create_dir(&preset).unwrap();
                 assert!(agent.ensure_available(&probe).is_err());
             } else {
-                agent.ensure_available(&probe).unwrap();
+                assert_eq!(
+                    agent.ensure_available(&probe).unwrap(),
+                    PathBuf::from("/fixture/bin").join(agent.binary_name())
+                );
             }
         }
         assert!(coding_agent("Claude").is_none());
         assert!(coding_agent("unknown").is_none());
+    }
+
+    #[test]
+    fn native_launch_probes_and_launches_the_same_resolved_executable() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::{Duration, Instant};
+        let dir = tempfile::tempdir().unwrap();
+        let executable = dir.path().join("versions/2.1.302/claude");
+        std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        std::fs::write(
+            &executable,
+            "#!/bin/sh\n[ \"$#\" -eq 1 ] && [ \"$1\" = --version ] || exit 3\nprintf '2.1.302 (Claude Code)\\n'\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        struct Resolved {
+            executable: PathBuf,
+            home: PathBuf,
+        }
+        impl SpawnProbe for Resolved {
+            fn resolve_binary(&self, name: &str) -> Option<PathBuf> {
+                assert_eq!(name, "claude");
+                Some(self.executable.clone())
+            }
+            fn home_dir(&self) -> PathBuf {
+                self.home.clone()
+            }
+            fn env_var(&self, name: &str) -> Option<String> {
+                assert_eq!(name, "CLAUDE_CONFIG_DIR");
+                Some(self.home.join("claude-config").display().to_string())
+            }
+        }
+        let backend = CodingAgent::Claude;
+        let resolved = backend
+            .ensure_available(&Resolved {
+                executable: executable.clone(),
+                home: dir.path().into(),
+            })
+            .unwrap();
+        assert_eq!(resolved, executable);
+        assert_eq!(
+            backend
+                .probe_native_version(&resolved, Instant::now() + Duration::from_secs(2))
+                .unwrap(),
+            "2.1.302",
+            "the probe runs the resolved executable"
+        );
+        let policy = backend.resolve_policy(None, None).unwrap();
+        let bare = backend
+            .build_spawn_argv_with_policy("assignment", "worker", None, Some("high"), &policy)
+            .unwrap();
+        assert_eq!(bare[0], "claude");
+        let launched = backend
+            .launch_argv(
+                &resolved,
+                "assignment",
+                "worker",
+                None,
+                Some("high"),
+                &policy,
+            )
+            .unwrap();
+        assert_eq!(
+            launched[0],
+            executable.to_str().unwrap(),
+            "argv[0] is the probed path"
+        );
+        assert_eq!(launched[1..], bare[1..]);
+        assert!(
+            backend
+                .launch_argv(
+                    Path::new("claude"),
+                    "assignment",
+                    "worker",
+                    None,
+                    None,
+                    &policy
+                )
+                .is_err(),
+            "a launched argv[0] is always an absolute path"
+        );
     }
 }

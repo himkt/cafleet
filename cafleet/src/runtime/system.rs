@@ -458,6 +458,81 @@ mod tests {
     // Concurrent process launches can exhaust a one-second deadline before sh starts.
     static PROCESS_FIXTURE_LOCK: Mutex<()> = Mutex::new(());
 
+    #[test]
+    fn native_executable_resolution_uses_the_first_absolute_path_entry_as_found() {
+        use std::ffi::OsString;
+        use std::os::unix::fs::PermissionsExt;
+        fn executable(path: &std::path::Path) {
+            std::fs::write(path, "#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        assert_eq!(std::env::current_dir().unwrap(), manifest);
+        let in_cwd = tempfile::Builder::new()
+            .prefix(".path-test-")
+            .tempfile_in(manifest)
+            .unwrap();
+        std::fs::set_permissions(in_cwd.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let name = in_cwd
+            .path()
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let relative = tempfile::Builder::new()
+            .prefix(".path-test-")
+            .tempdir_in(manifest)
+            .unwrap();
+        executable(&relative.path().join(&name));
+        let relative_entry = relative.path().file_name().unwrap().to_str().unwrap();
+        let absolute = tempfile::tempdir().unwrap();
+        let unusable = absolute.path().join("unusable");
+        let directory = absolute.path().join("directory");
+        let good = absolute.path().join("good");
+        let linked = absolute.path().join("linked");
+        let dangling = absolute.path().join("dangling");
+        for dir in [&unusable, &directory, &good, &linked, &dangling] {
+            std::fs::create_dir(dir).unwrap();
+        }
+        std::fs::write(unusable.join(&name), "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(unusable.join(&name), std::fs::Permissions::from_mode(0o644))
+            .unwrap();
+        std::fs::create_dir(directory.join(&name)).unwrap();
+        executable(&good.join(&name));
+        std::os::unix::fs::symlink(good.join(&name), linked.join(&name)).unwrap();
+        std::os::unix::fs::symlink(absolute.path().join("absent"), dangling.join(&name)).unwrap();
+        let search =
+            |entries: &[&str]| find_executable_in(&OsString::from(entries.join(":")), &name);
+        let good_entry = good.to_str().unwrap();
+        assert_eq!(
+            search(&[relative_entry, "", good_entry]),
+            Some(good.join(&name)),
+            "relative and empty entries are skipped even when they hold the binary"
+        );
+        assert_eq!(
+            search(&[good_entry, relative_entry, ""]),
+            Some(good.join(&name))
+        );
+        assert_eq!(search(&[relative_entry, ""]), None);
+        assert_eq!(
+            search(&[
+                dangling.to_str().unwrap(),
+                unusable.to_str().unwrap(),
+                directory.to_str().unwrap(),
+                good_entry,
+            ]),
+            Some(good.join(&name)),
+            "dangling links, non-executable files and directories are skipped"
+        );
+        assert_eq!(
+            search(&[linked.to_str().unwrap(), good_entry]),
+            Some(linked.join(&name)),
+            "a symbolic link is used as found"
+        );
+        assert_eq!(search(&[]), None);
+    }
+
     struct ProcessFixture {
         dir: TempDir,
         _serial: MutexGuard<'static, ()>,

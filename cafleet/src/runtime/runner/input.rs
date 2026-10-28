@@ -844,8 +844,12 @@ mod permission_response_contracts {
             let output_seq = h.transport.snapshot().screen_seq;
             let lock = Connection::open(h.fixture.conn.path().unwrap()).unwrap();
             lock.execute_batch("BEGIN IMMEDIATE").unwrap();
-            // Every frame of this output keeps the identical cells and the cursor at the request end.
-            h.pty.child.bytes.extend(b"\x1b[?25l\x1b[0m\x1b[?25h");
+            // Every observed frame keeps identical cells with the cursor at the request end: the
+            // observer runs after each control byte, so `[24;1HSelection: ` lands as one chunk.
+            h.pty
+                .child
+                .bytes
+                .extend(b"\x1b[?25l\x1b[0m\x1b[24;1HSelection: \x1b[?25h");
             let drained = h
                 .coordinator
                 .progress_with_manual(&mut h.transport, |transport| {
@@ -904,6 +908,219 @@ mod permission_response_contracts {
             arm_stage(h, 1);
             assert_eq!(counts(h), [1, 1, 1]);
         });
+    }
+
+    fn quiesce_once(h: &mut Host) -> InputDrain {
+        h.coordinator
+            .progress_with_manual(&mut h.transport, |transport| {
+                transport.quiesce_for_input(
+                    &mut h.human,
+                    &mut h.pty,
+                    &mut h.output,
+                    &mut h
+                        .controller
+                        .observer(&h.writer, &super::super::RealObservationClock),
+                    h.until,
+                )
+            })
+            .unwrap()
+    }
+
+    // One CSI sequence longer than the drain's per-tick child budget: it changes no cell or
+    // cursor and yields only two observed frames, so the drain ends with output still arriving.
+    fn neutral_output_flood(h: &mut Host) {
+        let mut bytes = b"\x1b[".to_vec();
+        bytes.extend(b"0;".repeat(2200));
+        bytes.push(b'm');
+        h.pty.child.bytes.extend(bytes);
+    }
+
+    const OUTPUT_ARRIVING: &str = "terminal output still arriving";
+
+    #[test]
+    fn permission_drain_reason_is_current_and_never_a_stale_earlier_reason() {
+        with_redacted_inspection(|h, _, _| {
+            let ids = stable_detailed_form(h, "opened");
+            let inspected = inspect(h, ids);
+            let input = command(
+                h,
+                &inspected,
+                "response:stale-reason",
+                PermissionDecision::Allow,
+            );
+            let lock = Connection::open(h.fixture.conn.path().unwrap()).unwrap();
+            lock.execute_batch("BEGIN IMMEDIATE").unwrap();
+            h.pty.child.bytes.extend(detail_rewrite("refreshed"));
+            assert!(matches!(quiesce_once(h), InputDrain::Pending));
+            assert_eq!(blocked_reason(h, ids), "observation evidence pending");
+            neutral_output_flood(h);
+            assert!(matches!(quiesce_once(h), InputDrain::Pending));
+            assert_eq!(
+                blocked_reason(h, ids),
+                OUTPUT_ARRIVING,
+                "inspection reports the latest drain's reason"
+            );
+            let refused = refused_reason(h, &input);
+            assert!(
+                refused.contains(&format!("permission request is blocked: {OUTPUT_ARRIVING}")),
+                "{refused:?}"
+            );
+            assert_eq!(counts(h), [0, 0, 0]);
+            lock.execute_batch("COMMIT").unwrap();
+            drop(lock);
+            h.drain();
+        });
+    }
+
+    #[test]
+    fn permission_pending_admission_drain_refuses_respond_before_any_receipt() {
+        with_inspection(|h, _, _| {
+            let ids = stable_form(h);
+            let inspected = inspect(h, ids);
+            let input = command(
+                h,
+                &inspected,
+                "response:pending-admission",
+                PermissionDecision::Allow,
+            );
+            neutral_output_flood(h);
+            assert!(matches!(quiesce_once(h), InputDrain::Pending));
+            let failure = handle(h, &input)
+                .err()
+                .expect("a Pending admission drain refuses the response");
+            assert!(
+                failure
+                    .source
+                    .message()
+                    .contains(&format!("permission request is blocked: {OUTPUT_ARRIVING}")),
+                "{:?}",
+                failure.source.message()
+            );
+            assert_eq!(
+                (failure.run_id, failure.interaction_id, failure.input_id),
+                (Some(h.fixture.run.run_id), Some(ids.1), None)
+            );
+            assert_eq!(counts(h), [0, 0, 0]);
+            assert!(h.pty.offers.is_empty());
+            let settled = inspect(h, ids);
+            assert_eq!(
+                settled.request_token, inspected.request_token,
+                "the neutral output changed no request state"
+            );
+            assert!(
+                handle(h, &input).unwrap().is_none(),
+                "a Quiescent admission drain admits the same response"
+            );
+        });
+    }
+
+    #[test]
+    fn permission_retained_key_replays_without_a_drain_or_typing_while_blocked() {
+        with_definition(inspection_fixture_definition(), b"y".to_vec(), |h, _, _| {
+            let ids = stable_form(h);
+            let inspected = inspect(h, ids);
+            let input = command(
+                h,
+                &inspected,
+                "response:retained",
+                PermissionDecision::Allow,
+            );
+            assert!(handle(h, &input).unwrap().is_none());
+            let id = arm_stage(h, 1);
+            h.drain();
+            assert!(h.advance().is_none());
+            arm_stage(h, 2);
+            h.drain();
+            let submitted = response(h.advance().expect("actual final response stage"));
+            assert_eq!(submitted.submission.input_id, Some(id));
+            let offers = h.pty.offers.clone();
+            h.coordinator.fence(h.until).unwrap();
+            h.pty.child.bytes.extend(b"\x1b[0m");
+            let lookup = |h: &mut Host, key: &str| {
+                let mut retained = copy(&input);
+                retained.operation_key = key.into();
+                let mut request = h.request("unused-response-key");
+                request.operation = InputControlOperation::PermissionRespond(retained);
+                h.coordinator.retained_permission_response(
+                    &mut h.fixture.conn,
+                    &h.fixture.run,
+                    &request,
+                    h.until,
+                )
+            };
+            let replay = response(
+                lookup(h, "response:retained")
+                    .unwrap()
+                    .expect("a retained key returns its recorded result"),
+            );
+            assert_eq!(
+                (
+                    replay.submission.status,
+                    replay.submission.stage,
+                    replay.submission.input_id
+                ),
+                (
+                    SubmissionStatus::Accepted,
+                    SubmissionStage::Submitted,
+                    Some(id)
+                )
+            );
+            assert_eq!(h.pty.offers, offers, "the replay types nothing");
+            assert_eq!(
+                h.pty.child.bytes.len(),
+                4,
+                "the replay performs no admission drain"
+            );
+            assert!(
+                lookup(h, "response:absent").unwrap().is_none(),
+                "an absent key proceeds to the admission drain"
+            );
+            assert_eq!(counts(h), [1, 1, 1]);
+        });
+    }
+
+    #[test]
+    fn permission_rearm_reports_the_named_blocked_reason_before_live_validation() {
+        for (block, reason) in [
+            (
+                (|h: &mut Host| h.coordinator.fence(h.until).unwrap()) as fn(&mut Host),
+                "permission input is fenced",
+            ),
+            (
+                |h: &mut Host| {
+                    h.coordinator.manual_generation = u64::MAX;
+                    assert!(h.coordinator.observe_manual(1).is_err());
+                    assert!(h.coordinator.manual_accounting_failed);
+                },
+                "manual input accounting failed",
+            ),
+        ] {
+            with_definition(inspection_fixture_definition(), b"y".to_vec(), |h, _, _| {
+                let (input, id) = terminal_zero(h, "response:rearm-blocked");
+                let original = storage::get_permission_response(&h.fixture.conn, id).unwrap();
+                assert!(
+                    handle(h, &input).unwrap().is_none(),
+                    "exact current Ready request enters live revalidation"
+                );
+                block(h);
+                h.drain();
+                let failure = advance(h).err().expect("a blocked rearm refuses its stage");
+                assert!(
+                    failure
+                        .source
+                        .message()
+                        .contains(&format!("permission request is blocked: {reason}")),
+                    "{reason}: {:?}",
+                    failure.source.message()
+                );
+                assert_eq!(failure.input_id, Some(id));
+                assert_eq!(
+                    storage::get_permission_response(&h.fixture.conn, id).unwrap(),
+                    original
+                );
+                assert_eq!(h.pty.offers, vec![b"y".to_vec()]);
+            });
+        }
     }
 
     #[test]
