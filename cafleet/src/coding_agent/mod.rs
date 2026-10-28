@@ -1,5 +1,7 @@
 mod native_version;
 pub(crate) use native_version::native_launch_identity;
+#[cfg(test)]
+pub(crate) use native_version::version_token;
 mod policy;
 pub use policy::LaunchPolicySelection;
 mod profiles;

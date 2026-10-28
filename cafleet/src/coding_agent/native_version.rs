@@ -121,15 +121,21 @@ impl CodingAgent {
             .lines()
             .next()
             .ok_or_else(|| fail("printed no output".into()))?;
-        let pattern = Regex::new(VERSION_TOKEN).expect("valid version token pattern");
-        let tokens = first
-            .split_whitespace()
-            .filter(|token| pattern.is_match(token))
-            .collect::<Vec<_>>();
-        match tokens.as_slice() {
-            [version] => Ok((*version).to_owned()),
-            [] => Err(fail("printed no version token".into())),
-            _ => Err(fail("printed several version tokens".into())),
-        }
+        version_token(first)
+            .map(str::to_owned)
+            .map_err(|cause| fail(cause.into()))
+    }
+}
+
+pub(crate) fn version_token(line: &str) -> Result<&str, &'static str> {
+    let pattern = Regex::new(VERSION_TOKEN).expect("valid version token pattern");
+    let tokens = line
+        .split_whitespace()
+        .filter(|token| pattern.is_match(token))
+        .collect::<Vec<_>>();
+    match tokens.as_slice() {
+        [version] => Ok(version),
+        [] => Err("printed no version token"),
+        _ => Err("printed several version tokens"),
     }
 }
