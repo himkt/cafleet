@@ -4,7 +4,7 @@
 **Progress**: 18/22 tasks complete
 **Last Updated**: 2026-10-28
 
-**Execution state**: Paused by the user on 2026-10-28 (~02:41 UTC) for transfer to a new session. Read [Session handoff (2026-10-28, fleet 25 pause)](#session-handoff-2026-10-28-fleet-25-pause) first; it supersedes every earlier handoff and assignment record. Committed and pushed baseline is efd48ed0 (draft PR #500); an uncommitted, failing respond-binding fix is preserved in the working tree.
+**Execution state**: Paused by the user on 2026-10-28 (~02:41 UTC) for transfer to a new session. Read [Session handoff (2026-10-28, fleet 25 pause)](#session-handoff-2026-10-28-fleet-25-pause) first; it supersedes every earlier handoff and assignment record. The accepted work is on the pushed feature branch (draft PR #500); the unfinished, failing respond-binding fix and the private native-capture harness are on the pushed branch `wip/0000194-respond-binding`. The next session starts in a new environment from Git alone.
 
 ## Overview
 
@@ -441,89 +441,120 @@ Record source/installed CAFleet version, native CLI version, native configuratio
 
 ### Session handoff (2026-10-28, fleet 25 pause)
 
-The user paused execution after asking that the session stop once the live `permission respond` defect was fixed. That fix is still unfinished: the next session resumes from it. This section is the authoritative state; the older handoffs below are history.
+The user paused execution after asking the session to stop once the live `permission respond` defect was fixed. The fix is unfinished; the next session resumes from it in a **new environment**. This section is self-contained: every fact needed to continue is here or in Git. Local-only material from the previous machine (`.execution/194/`, `.p194/`, `/private/tmp/cafleet-194/`, the live reproduction, fleet 25) is unavailable and was torn down. The older handoffs below are history only.
 
-#### Where things stand
+#### Git state
 
-| Item | State |
+| Ref | Content |
 |---|---|
-| Branch / HEAD | `feat/0000194-member-pty-permission-events` at `efd48ed0`, pushed; draft PR https://github.com/himkt/cafleet/pull/500 |
-| Last green full suite (committed tree) | `b25d94ed`+: 1119 passed / 0 failed / 7 ignored; lint, typecheck, `mise //docs:build` pass |
-| Progress | 18/22 tasks; no new task is checked. Step 5 task 2 (bound inspection/response) and Step 6 tasks 1–3 remain open. |
-| Protected binaries | Installed `5d6c1c70…` and `cafleet/target/release/cafleet` `49daf677…` verified unchanged; every build in this session used a separate target |
-| Fleet 25 | Director99 (Claude, herdr `w2Z:p16`); Programmer100 `w2Z:p44`, Tester101 `w2Z:p45`, Verifier102 `w2Z:p46`, all `claude-opus-5-5` high. All three members reported paused-ready with handoff files; no command is running. |
+| `feat/0000194-member-pty-permission-events` | Pushed; draft PR https://github.com/himkt/cafleet/pull/500. Contains every accepted, green change. Last green full suite: 1119 passed / 0 failed / 7 ignored, with lint, typecheck and `mise //docs:build` passing. |
+| `wip/0000194-respond-binding` | Pushed. It is the feature branch plus two commits, and is **not** accepted. `8db0a496` holds the unfinished, failing respond-binding fix. `4632b3c2` holds the private native-capture harness: `cafleet/src/runtime/runner/native_capture/verification.rs`, `cafleet/src/runtime/runner_tests/native_capture.rs`, and `design-docs/0000194-member-pty-permission-events/native-driver/` with the driver script, its reviewed redaction, capture-policy and environment-evidence inputs, and the run plans. |
 
-Delivered this session (all committed, tests before implementation):
+To resume, check out the WIP branch, finish the fix, then land the green result on the feature branch with separate test and implementation commits. Delete the WIP branch once its content is landed. The `native-driver/` folder and the harness remain private verification material; decide before finalization whether they stay out of the shipping branch.
 
-- Lifecycle shutdown fixture fork race fixed (`5de08432`).
-- macOS process start identity through one audited `kern.proc.pid` `sysctl` (`0b83178d`). `unsafe_code` is now `deny` crate-wide, with this single item-scoped exception (user decision). Root cause: `proc_pidinfo` returned `EPERM` for a setuid group member, and the first native case's runner failed 330 ms after spawn.
-- `degraded` run status when the runner fails with a live child (`66148ca1`).
-- Load-sensitive drain fixture budget (`226167a6`).
-- Native version probe at `member create`, selecting the bundled profile (`d121603f`).
-- The bundled Claude Code 2.1.302 profile `claude-2.1.302-default-2` (`093335ef`, `b25d94ed`). It covers:
-  - detection of the default Bash permission form;
-  - measured single-byte answers, allow `31` and deny `34`;
-  - the idle-composer verified non-interaction rule (cursor at the prefix end).
-  Its four native fixtures have masked header rows and neutral `/private/tmp` paths only.
-- Catalog-derived help text (`edcabc0e`).
+Progress stays 18/22. Open tasks: Step 5 task 2 (bound inspection/response with answer profiles) and Step 6 tasks 1-3. Success Criteria are unchecked.
 
-Native evidence collected, all with Claude 2.1.302 `default` on tmux, cleanup complete, Code 143 on owned stop:
+#### Delivered in this session (on the feature branch)
 
-| Case | Evidence |
+| Change | Commits | Notes |
+|---|---|---|
+| Lifecycle shutdown fixture fork race | `5de08432` | The fixture descendant `exec`s one TERM-ignoring process. Production `Incomplete` for a live unpinned member is truthful. |
+| macOS process start identity via `kern.proc.pid` | `09aeb8a0` test, `0b83178d` fix | `proc_pidinfo` returned `EPERM` for setuid group members (for example `/bin/ps`, `/usr/bin/su`), so the runner failed 330 ms after spawn. `unsafe_code` is `deny` crate-wide with one audited item-scoped `sysctl` exception (user decision). |
+| `degraded` status for a runner failure with a live child | `d58127fc`, `66148ca1` | Specified lifecycle row; recovery still finishes `lost`. |
+| Load-sensitive drain fixture budget | `226167a6` | Uses the fixture deadline instead of 64 turns. |
+| Native version probe at `member create` | `78010795` docs, `e229776f` test, `d121603f` impl | Runs `<binary> --version` within 2 s inside the 10 s creation budget. It records `native_version` and selects the bundled profile. Failure records null/`unknown` with a stderr warning. |
+| Bundled Claude Code 2.1.302 profile `claude-2.1.302-default-2` | `ec732cac`, `3a989b81`, `093335ef`, `c531a746`, `e3ccf252`, `b62562df`, `b25d94ed` | Detection of the default Bash permission form. Measured single-byte answers: allow `31` (digit 1, `allow-once`) and deny `34` (digit 4, `deny-once`). Idle-composer `composer_empty` verified non-interaction rule (cursor at the end of the prompt prefix). Four native fixtures under `cafleet/src/coding_agent/profiles/native/`, with masked header rows (`reviewed_privacy`) and neutral `/private/tmp` paths only. The bundled guard rejects synthetic or altered fixtures. |
+| Catalog-derived help text | `cccc5ea1` docs, `cf6a9a34` test, `edcabc0e` impl | Shows `--permission-mode` choices per backend and possible values for the permission enums. |
+| Respond-binding regressions | `005d9090` | `permission_inspection_and_response_name_the_same_blocking_conjunct` is red on the feature branch and green on the WIP branch. The second committed regression is replaced on the WIP branch (below). |
+
+**The feature branch therefore has 2 intentionally red tests from `005d9090`**: committed red regressions waiting for the fix. It is not green until the WIP fix lands.
+
+#### Native evidence obtained (Claude Code 2.1.302, `default` mode, tmux, owned stop, cleanup complete)
+
+| Case | Observation |
 |---|---|
-| cells-001, cells-002 | No-answer permission captures. cells-002 is the neutral-path source. |
-| ans-allow-001 | One byte `31` closed the form, `allow.executed` was created and Claude continued |
-| ans-deny-001 | One byte `34` closed the form, no marker was created, and Claude showed its native refusal |
-| idle-001 | Idle composer with the real cursor at (2, 31) |
+| cells-001 attempt 1 | The runner failed 330 ms after spawn on the setuid `EPERM` (fixed above). |
+| cells-002 | No-answer permission form capture. The source of the committed permission fixture. |
+| ans-allow-001 | One byte `31` sent to the blocked form closed it, `allow.executed` was created and Claude reported the result. |
+| ans-deny-001 | One byte `34` closed the form, no marker was created and Claude showed `Interrupted · What should Claude do instead?` before returning to idle. |
+| idle-001 | Idle composer; the real cursor was visible at column 2, row 31 of 120x36, right after `❯ `. |
 
-Evidence copies are under `.execution/194/native-fixtures/` (`/private/tmp` is cleared on reboot). Workspace-trust screens for each fresh `/private/tmp/cafleet-194/*` folder were answered `Down`+`Enter` under the user's authorization; trust answers are attributed manual input, never the measured stage.
+Facts learned that the next session must apply:
+
+- **Workspace trust.** A fresh, untrusted cwd makes Claude show a trust screen first ("Accessing workspace … Is this a project you created or one you trust?"). The bundled profile does not classify it. The user authorized trusting disposable case folders, answered as `Down` then `Enter` and recorded as manual input. Re-confirm that authorization in a new environment.
+- **Strip Director-session variables.** Start dedicated multiplexer servers for native cases with every `CLAUDECODE`, `CLAUDE_CODE_*`, `CLAUDE_EFFORT`, `CLAUDE_PID` and `HERDR_*` variable removed (`env -u …`). `CLAUDE_CODE_MESSAGING_TOKEN` is a Director-session credential. Verify by names only.
+- **Shell `cd` does not persist.** In Claude Code's Bash tool, `cd` into a case directory is reset, so `member create` used the repository root as the member cwd. Use absolute probe paths, or choose a cwd mechanism explicitly.
+- **Pane geometry.** Detection worked at 159x80 although the fixture is 120x36.
+- **Capture privacy.** Mask the header rows (account, model, plan and home path) with the reviewed capture policy, a `[0,12)` mask at 36 rows. Committed fixtures carry no home path or session id.
 
 #### The open defect (resume here)
 
-Shipping-CLI E2E with release binary `.execution/194/release-target-001/release/cafleet` (`07a14974`, HEAD `b25d94ed`):
+Shipping-CLI E2E, which passed up to the response:
 
-- Private DB `.p194/e2e-tmux.db` and dedicated tmux socket `.p194/te01`; that server was started with every `CLAUDE*`/`HERDR_*` variable removed.
-- Run every command with `CAFLEET_MULTIPLEXER=tmux TMUX=/Users/himkt/work/himkt/cafleet/.p194/te01,95328,0 TMUX_PANE=%0 CAFLEET_DATABASE_URL=sqlite:////Users/himkt/work/himkt/cafleet/.p194/e2e-tmux.db CODEX_HOME=/private/tmp/cafleet-194/e2e-home/codex`.
+1. On a separate-target release build, with a private DB, a private `CODEX_HOME` for the assets guard (run `setup --coding-agent codex` only) and a dedicated tmux server, `member create --coding-agent claude --permission-mode default --event-evidence redacted --event-redaction-file <reviewed file>` returned `runtime.coverage=tested`.
+2. Within 5.3 s, one `interaction_opened` v2 event and one Director inbox message arrived with `profile_version claude-2.1.302-default-2`, the redacted operation and `director_action.review_permission_request`.
+3. `event show` showed `notification_state=inbox`. The ACK succeeded.
+4. `permission inspect` returned `answer_capability=tested`, `supported_decisions ["allow","deny"]` and a 64-hex token.
 
-What passed: `member create --permission-mode default` gave `coverage=tested`. One `interaction_opened` event and Director inbox message arrived within 5.3 s. `event show`, ACK and `permission inspect` worked (`answer_capability=tested`, decisions allow/deny).
+Then every `permission respond … --decision allow --decision-source director-auto --director-mode auto` failed before any byte, with no input row, with `runner control: permission request token or current plan binding changed`. This happened even though two back-to-back inspections returned the same token and `output_seq`.
 
-What failed: every `permission respond` (director-auto allow, keys `e2e-tmux-allow-001/002`) was refused before any byte with `permission request token or current plan binding changed`. No input row was created. The member (fleet 1, member 2, run 1, interaction 1) is **still blocked as a live reproduction**; do not answer it manually.
+Diagnosis (accepted):
 
-Diagnosis (accepted, `step-6-respond-binding-diagnosis.md`): inspect issues tokens without the eight respond-only conjuncts of `validate_permission_binding`. Claude redraws a static form continuously, so evidence refreshes stay pending.
+- `inspect` issues or reuses tokens without the eight respond-only conjuncts of `validate_permission_binding` (`runtime/runner/input.rs`): visibility `Visible`, eligibility `Hold(Interaction)`, no retained transition/draft/evidence, no observation diagnostic, input not fenced, and manual accounting not failed. This contradicts the documented null token for a blocked request.
+- The live interaction's stored evidence `screen_seq` advanced continuously (7914 → 9354 while `output_seq` grew). Claude Code redraws a static form constantly, and each redraw scheduled an evidence refresh.
+- A diagnostic run then showed that consecutive refreshes differ **only** in `screen_seq` and the derived `evidence_digest` (the digest covers `screen_seq`).
 
 Decisions in force:
 
-1. One shared named-reason blocking predicate for inspect and respond.
-2. Settled respond admission (drain/quiesce like inspect).
-3. A redraw whose post-policy evidence differs only in `screen_seq` and its derived `evidence_digest` schedules no refresh. This is documented in the uncommitted `member-runtime.md`/`SPEC.md` sentence.
+1. One shared predicate returns a named reason per blocking conjunct, used by inspect and by respond. When blocked, inspect returns a null token, empty decisions, `answer_capability=unknown` and `capability_reason` = the reason. Respond fails with `permission request is blocked: <reason>` at admission and before each stage. Inspect validates the run with a variant (`validate_live_run`) that omits the fence and manual-accounting checks, so those states return named blocked results instead of errors.
+2. Respond admission drains manual input and quiesces observation the way inspect does.
+3. A redraw whose post-policy evidence differs from the stored latest evidence only in `screen_seq` and its derived `evidence_digest` schedules no refresh, and keeps the stored evidence and any issued token. Any other change still refreshes. This sentence is in `member-runtime.md`/`SPEC.md` on the WIP branch only.
 
-Uncommitted working tree:
+State of the WIP branch:
 
-- The patch is saved as `.execution/194/step-6-respond-binding-wip.patch` (sha256 `d84090e6…`).
-- Items 1 and 2 (`input.rs`, `transport.rs`, `transport/drain.rs`, `service.rs`) pass their regression `permission_inspection_and_response_name_the_same_blocking_conjunct`.
-- Item 3 (`episodes.rs`) breaks 10 existing tests, and the target regression `permission_screen_seq_only_redraw_schedules_no_refresh_and_keeps_the_settled_token` (uncommitted, in `input.rs`) still fails. Full run: 1111 / 11 / 7. The names are in `.execution/194/step-6-respond-binding-wip-full-run.txt`.
-- `input.rs` mixes Programmer production and Tester test edits, so commit it together once green.
+- Items 1 and 2 (`input.rs`, `transport.rs`, `transport/drain.rs`, `service.rs`) work: the named-reason regression passes.
+- Item 3 (`episodes.rs`, `same_evidence_apart_from_sequence`) breaks 10 existing tests.
+- The replacement regression `permission_screen_seq_only_redraw_schedules_no_refresh_and_keeps_the_settled_token` still fails.
+- The last full run on the WIP tree was 1111 passed / 11 failed / 7 ignored:
+  - `coding_agent::profiles::contract_tests::episodes::{runtime_episode_continuous_uncertainty_emits_one_obscured_event_at_two_seconds, runtime_episode_equivalent_redraw_refreshes_evidence_without_another_opening, runtime_episode_evidence_policy_precedes_every_transition_and_redraw_update, runtime_episode_metadata_removes_each_screen_field_before_materializing_events_or_refreshes}`
+  - `runtime::runner::writer::contract_tests::controller::{runner_batch2_controller_actual_adapter_retains_foreign_episode_refresh_and_holds_until_drain, runner_batch2_controller_retains_both_superseded_originals_when_the_first_submit_hits_pressure, review::runner_review_r1_degraded_exit_records_gap_before_original_closure_and_terminal_fence, review::runner_review_r1_expired_storage_budget_reports_unsaved_gap_and_pending_exit_work}`
+  - `runtime::runner::input_client::tests::permission_response_actual_service_returns_typed_durable_audit_and_one_selected_answer`
+  - `runtime::runner::input::permission_response_contracts::{permission_response_fresh_admission_rejects_revoked_token_then_reserves_selected_deny_plan, permission_screen_seq_only_redraw_schedules_no_refresh_and_keeps_the_settled_token}`
+- Before item 3 was added, the same tree had only the target regression failing, plus one concurrency flake.
 
-Read the member handoffs before editing: `step-6-respond-binding-programmer-handoff.md` (hypotheses: old refresh-every-frame expectations vs. the new rule; a cleared-screen intermediate frame invalidating the request), `step-6-tester-handoff.md` (classification of the 11 failures, press flake fix), `step-6-verifier-handoff.md`.
+Working hypotheses:
+
+- **(a)** Many of the 10 tests assert the old "every matching redraw refreshes the stored evidence" behavior, often by driving `screen_seq`-only redraws. Decide per test whether to update the expectation to rule 3, or change approach: rate-limit the refresh instead of skipping it, or keep refreshing but exclude a sequence-only pending refresh from the settled predicate.
+- **(b)** In the target regression, 15 drains first report `observation transitions pending` with `eligibility Hold(Gap)` and `pending_count 1` before the evidence-pending phase. A redraw that starts with a screen clear (`\x1b[2J`) may produce partial intermediate frames that observe as unknown and invalidate the request generation. Confirm with the first failing assertion. If confirmed, "an equivalent redraw keeps the token" conflicts with the spec's checked invalidation generation and needs a specification decision.
+
+Separate known flake: `runtime::press::contract_tests::step5_press_entry_rechecks_full_placement_and_original_expiry_after_actual_metadata` fails occasionally under full-suite load and passes alone. The accepted test-only fix is not yet applied:
+
+- replace the immediate post-refusal `PaneLock::try_acquire(...).is_some()` checks in its contract tests with a bounded `acquire_within` helper of 2 s;
+- raise its 1300 ms deadline to 2 s.
 
 #### First actions for the next session
 
-1. Verify `git status`/HEAD `efd48ed0` and the patch hash; read this section and the three member handoffs. Decide whether to reuse fleet 25 after `cafleet doctor` and `cafleet member list 25` confirm the bindings, or to start a fresh fleet. Never run old and new writers concurrently.
-2. Classify the 11 failures. Decide between three options: update the old expectations to the decided refresh rule; rate-limit instead of skip; or exclude a sequence-only pending refresh from the settled predicate. Then finish the fix with a green full suite, lint, typecheck and docs build.
-3. Rebuild into a separate target and rerun the blocked live reproduction (`permission inspect` then `permission respond` with a fresh token and a new operation key). Expect accepted/submitted, `allow.executed`, then `interaction_closed not_visible`.
-4. Continue the E2E plan `step-6-e2e-acceptance-plan.md`: the tmux deny member, then herdr allow/deny. Note that the Bash tool resets `cd`, so members inherit the repository root as cwd (absolute probe paths still work).
-5. Apply the accepted press flake test fix (`step-6-press-flake-tester101-proposal.md`).
+1. Check out `wip/0000194-respond-binding` and read this section. Run the full suite in a separate `CARGO_TARGET_DIR` to reproduce 1111 / 11 / 7. Keep every build out of `cafleet/target/release` and away from any installed `cafleet`.
+2. Classify the 11 failures under hypotheses (a) and (b), decide the refresh rule, finish the fix (tests first), and reach a green full suite, lint, typecheck and docs build. Land the result on the feature branch as separate test and implementation commits.
+3. Re-run the shipping-CLI E2E from scratch, using `native-driver/step-6-e2e-acceptance-plan.md` on the WIP branch as the command template. Adapt its absolute paths and binary identities to the new environment. The tmux allow and deny members must reach `permission respond` accepted/submitted, the correct marker state, `interaction_closed` with `not_visible`, and continuation. Then herdr.
+4. Apply the press flake fix.
 
 #### Remaining scope after the defect
 
-- Step 6 task 1: repository checks `step-6-repository-checks.md`. A1–A5 passed on `b25d94ed`; the B help checks surfaced the help gaps fixed in `edcabc0e`; C/D are not run.
-- Step 6 task 2: herdr runs. Codex `on-request`+`workspace-write` has no bundled profile; it needs its own capture, answer measurement, profile and E2E cycle. The user was told this is the largest item (2–4 h) and may choose to split Codex into a separate design.
-- User-required cases: a user-sourced response, a user-executed bound command, and a manual original-surface answer.
-- Step 6 task 3: fault-injection and latency evidence; 0000192 stays Aborted.
-- Remaining markers in Step 5/6: Verifier native-evidence test gaps, test relocation into inline owners (user direction), the two staged lint expectations, and the open respond-defect records.
-- Then the fresh Reviewer loop, user approval and PR finalization.
+- **Step 6 task 1** (repository checks): full suite, lint, typecheck and docs; a release build in a separate target; help/version checks; setup into a scratch DB/config; embedded-asset diffs; fixture digests.
+- **Step 6 task 2**: Claude on herdr. **Codex `on-request` + `workspace-write`** has no bundled profile and needs its own capture, answer measurement, profile and E2E cycle on both multiplexers; this is the largest remaining item (estimated 2–4 h). The user may choose to split it into a separate design.
+- **User-attended cases**: a user-sourced response (`--decision-source user`), a user-executed complete bound command, and a manual answer on the original native surface (afterwards the token must be revoked).
+- **Step 6 task 3**: fault-injection and latency evidence; confirm 0000192 stays Aborted.
+- **Release-gate coverage still unobserved**: an ordinary command failure after allow, an actual refusal returned to the member, stale tokens and epochs, redraw and resize, and deletion/recovery under native load.
+- **Remaining markers under Step 5/6**: Verifier native-evidence test gaps, test relocation into inline owners (user direction: required tests live inline in their implementation module), the two staged lint expectations, and the open respond-defect records.
+- **Finish**: the fresh Reviewer loop, user approval, and PR finalization.
 
-Standing constraints: Claude tool-approval rejections that arrive together with a `[cafleet msg …]` delivery are delivery-caused, so re-issue them (issue #499). The old Claude fixture PID 61759 stays untouched until final cleanup (user decision). `/private/tmp/cafleet-194` trust entries were added to the user's Claude configuration by authorization.
+#### Standing constraints
+
+- **Delivery-caused tool rejections.** A Claude tool-approval rejection that arrives together with a `[cafleet msg …]` delivery is caused by the delivery's Escape, not by the user; re-issue the call (issue https://github.com/himkt/cafleet/issues/499). A rejection without an accompanying delivery is a real user stop.
+- **Git.** The Director owns Git: single-line conventional commits, explicit staging, and test/implementation commits kept separate. The project rule requires committing the design doc with the feature.
+- **Native processes.** Never launch a native process, multiplexer server, capture arm or answer without an explicit Director dispatch. A trust answer is attributed manual input, never a measured stage. Never resume an old native Claude session that holds an unanswered request.
+- **Previous machine only.** The user decided to leave the historical Claude fixture (PID 61759) untouched until final cleanup. The user's Claude configuration there holds trust entries for `/private/tmp/cafleet-194/*`.
 
 ### Claude handoff (2026-10-28)
 
