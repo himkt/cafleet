@@ -467,7 +467,7 @@ Detection-to-inbox latency (event `observed_at` to inbox `created_at`) was 7-9 m
 ### Other evidence
 
 - Native captures and decision records: `.execution/195/native-captures/`; live case folders: `.p194/cases/oc-*`.
-- One full-suite run on `5b874953` failed `cli::member::tests::deletion_reloads_a_published_pending_pane_and_retains_ownership_through_completion` under load; it passed alone and on every later full run.
+- One full-suite run on `5b874953` failed `cli::member::tests::deletion_reloads_a_published_pending_pane_and_retains_ownership_through_completion` under load; it passed alone and on every later full run. During review a shutdown drain test failed once in a loaded full run and passed alone; both are load-sensitive tests outside this change.
 - The pre-existing doctor documentation that describes a coding-agents table and footnotes does not match the shipped per-check output; it stays a separate follow-up.
 
 ## Changelog
