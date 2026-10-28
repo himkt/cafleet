@@ -777,12 +777,25 @@ mod permission_response_contracts {
         assert_ne!(reasons[0], reasons[1], "each conjunct has its own reason");
     }
 
+    fn stored_evidence(h: &Host, interaction_id: i64) -> String {
+        h.fixture
+            .conn
+            .query_row(
+                "SELECT evidence_json FROM member_interactions WHERE interaction_id=?1",
+                [interaction_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
     #[test]
-    fn permission_admission_requires_a_settled_observation_and_survives_an_evidence_only_redraw() {
+    fn permission_screen_seq_only_redraw_schedules_no_refresh_and_keeps_the_settled_token() {
         with_inspection(|h, _, _| {
             let ids = stable_form(h);
             let inspected = inspect(h, ids);
             let input = command(h, &inspected, "response:redraw", PermissionDecision::Allow);
+            let evidence = stored_evidence(h, ids.1);
+            let output_seq = h.transport.snapshot().screen_seq;
             let lock = Connection::open(h.fixture.conn.path().unwrap()).unwrap();
             lock.execute_batch("BEGIN IMMEDIATE").unwrap();
             h.pty
@@ -792,7 +805,8 @@ mod permission_response_contracts {
                     "PRIVATE_INSPECTION_OPERATION",
                     "synthetic-only",
                 ));
-            h.coordinator
+            let drained = h
+                .coordinator
                 .progress_with_manual(&mut h.transport, |transport| {
                     transport.quiesce_for_input(
                         &mut h.human,
@@ -806,25 +820,42 @@ mod permission_response_contracts {
                 })
                 .unwrap();
             assert!(
-                h.controller.current_request().is_some(),
-                "the equivalent redraw keeps the observed request"
+                h.transport.snapshot().screen_seq > output_seq,
+                "the redraw produced new output"
             );
-            let reason = blocked_reason(h, ids);
-            assert_ne!(reason, UNAVAILABLE, "a pending observation update is named");
-            let refused = refused_reason(h, &input);
             assert!(
-                refused.contains(&reason),
-                "respond refuses an unsettled observation with {reason:?}, got {refused:?}"
+                matches!(drained, InputDrain::Quiescent { .. }),
+                "a screen_seq-only redraw needs no write, so it settles while the database is locked"
             );
-            assert_eq!(counts(h), [0, 0, 0]);
+            let status = h.controller.status();
+            assert!(
+                !status.retained_evidence,
+                "no evidence refresh is scheduled"
+            );
+            assert!(!status.retained_transition);
+            assert!(!h.controller.health(&h.writer).pending_evidence);
+            assert!(h.controller.current_request().is_some());
+            let while_locked = inspect_request(h, inspection_target(h, ids), h.until).unwrap();
+            assert_eq!(
+                while_locked.request_token, inspected.request_token,
+                "the settled request keeps its token without a database write"
+            );
             lock.execute_batch("COMMIT").unwrap();
             drop(lock);
             h.drain();
-            let settled = inspect(h, ids);
             assert_eq!(
-                settled.request_token, inspected.request_token,
-                "an evidence-only redraw keeps the issued token"
+                h.controller.status().gap_count,
+                0,
+                "no writer gap occurred, so no revocation applies"
             );
+            assert!(!h.writer.status().degraded);
+            assert_eq!(
+                stored_evidence(h, ids.1),
+                evidence,
+                "the stored latest evidence keeps the screen_seq of its last real change"
+            );
+            let settled = inspect(h, ids);
+            assert_eq!(settled.request_token, inspected.request_token);
             assert!(
                 handle(h, &input).unwrap().is_none(),
                 "the settled request accepts its original token"
