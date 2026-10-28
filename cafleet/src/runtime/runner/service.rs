@@ -1092,8 +1092,24 @@ fn run_service(
     let clock = match loop_result {
         Ok(clock) => clock,
         Err(cause) => {
-            failure = Some(cause.message().into_owned());
-            ShutdownClock::new(Instant::now())
+            let clock = ShutdownClock::new(Instant::now());
+            let mut message = cause.message().into_owned();
+            if started {
+                let degraded = with_database_deadline(
+                    &mut conn,
+                    clock.storage_deadline(),
+                    |conn| {
+                        lock.validate(conn, &owner)?;
+                        conn.execute("UPDATE member_runs SET status='degraded',last_health_at=?1 WHERE run_id=?2 AND owner_epoch=?3 AND status='running' AND child_pid IS NOT NULL",params![crate::time::format_utc(crate::time::now_utc()),run.run_id,owner.owner_epoch]).map_err(db_err)?;
+                        Ok(())
+                    },
+                );
+                if let Err(cause) = degraded {
+                    message.push_str(&format!("; degraded status: {}", cause.message()));
+                }
+            }
+            failure = Some(message);
+            clock
         }
     };
     if let Some(coordinator) = coordinator.as_mut() {
