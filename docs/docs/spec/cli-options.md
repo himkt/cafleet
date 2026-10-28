@@ -41,6 +41,18 @@ The default expands HOME once. An explicit URL has the form `sqlite:///<path>`; 
 
 `cafleet --version` prints `cafleet <version>` and exits 0 before dispatch.
 
+## Help text {#help-text}
+
+`--help` describes every visible command, subcommand and option with a one-line description. Command group descriptions state the purpose given in the [subcommand summary](#subcommand-summary). Help derives choice lists from the same registries that validate the values:
+
+| Option | Help shows | Source |
+|---|---|---|
+| `member create --permission-mode MODE` | Each backend's accepted modes and its omitted default, in backend registry order, as `BACKEND: MODE, MODE (default MODE)` joined by `; ` | The backend [policy catalog](member-runtime.md#launch-policy-and-capability-registry) |
+| `permission respond --decision`, `--decision-source`, `--director-mode` | Their possible values | The stored enum values of the [permission response storage](member-runtime.md#permission-response-storage) |
+| `input reconcile --disposition`, `member create --event-evidence` | Their possible values | Their command enums |
+
+An invalid value for an option with possible values exits 2 with a usage error that lists those values. `member create` resolves its backend at run time, so a `--permission-mode` value outside that backend's catalog keeps its run-time usage error `--permission-mode for BACKEND must be one of CHOICES (got 'VALUE')`, also with exit 2.
+
 ## Output shapes {#output-shapes}
 
 | Command | Text | JSON |
