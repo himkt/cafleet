@@ -1,3 +1,5 @@
+mod native_version;
+pub(crate) use native_version::native_launch_identity;
 mod policy;
 pub use policy::LaunchPolicySelection;
 mod profiles;

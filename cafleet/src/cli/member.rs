@@ -402,10 +402,18 @@ fn create(
         .context_discovery()
         .map_err(|e| CafleetError::App(e.to_string()))?;
 
-    use crate::broker::runtime::Coverage;
     use crate::runtime::runner;
     use std::io::{IsTerminal, Read};
     use std::time::{Duration, Instant};
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let probe = backend.probe_native_version(
+        Path::new(backend.binary_name()),
+        deadline.min(Instant::now() + Duration::from_secs(2)),
+    );
+    let native = crate::coding_agent::native_launch_identity(backend, probe, &catalog);
+    if let Some(warning) = &native.warning {
+        eprintln!("{warning}");
+    }
     crate::spawn_prompt::substitute_spawn_placeholders(
         &prompt_body,
         fleet_id,
@@ -458,11 +466,10 @@ fn create(
         permission_argv_json: serde_json::to_value(&policy.permission_argv)
             .expect("string argv serializes"),
         event_evidence,
-        native_version: None,
-        profile_version: None,
-        coverage: Coverage::Unknown,
+        native_version: native.native_version,
+        profile_version: native.profile_version,
+        coverage: native.coverage,
     };
-    let deadline = Instant::now() + Duration::from_secs(10);
     let mut host = runner::NativeLaunchHost::new(&mux, &context);
     let created = runner::create_registered(
         conn,
