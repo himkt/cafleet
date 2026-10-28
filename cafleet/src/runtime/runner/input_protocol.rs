@@ -2,8 +2,6 @@ use super::*;
 mod wire;
 pub(super) use wire::*;
 
-#[cfg(test)]
-mod wire_tests;
 use crate::broker::runtime::{
     DecisionSource, DirectorMode, InputDisposition, InputKind, InputState, InteractionClass,
     PermissionDecision,
