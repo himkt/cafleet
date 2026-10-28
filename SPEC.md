@@ -2150,11 +2150,11 @@ A probe that cannot start, times out, exits nonzero, prints non-UTF-8 output or 
 
 The bundled catalog is embedded in the CAFleet binary together with the native screen fixtures that its declarations cite. Each profile's capabilities rest on accepted native captures of its exact native version.
 
-Claude Code `2.1.302`, profile `claude-2.1.302-default-2`:
+Claude Code `2.1.302`, profile `claude-2.1.302-default-3`:
 
 | Capability | Status | Declaration |
 |---|---|---|
-| Detection | `tested` | The native `default` Bash permission form (`Bash command` heading, approval text, proceed question, focused choice and the `Yes`/`No` single-request choices) in the alternate screen |
+| Detection | `tested` | The native `default` Bash permission form (`Bash command` heading, approval text, proceed question, focused choice and the `Yes`/`No` single-request choices) in the alternate screen, unwrapped or wrapped, within 24 rows from its heading to its `Esc to cancel · Tab to amend` line |
 | Allow answer | `tested` | One stage, byte `31` (digit `1`), selecting `Yes` as `allow-once` |
 | Deny answer | `tested` | One stage, byte `34` (digit `4`), selecting `No` as `deny-once` |
 | Empty-composer observation | `tested` | The idle prompt line with the terminal cursor immediately after the prompt prefix; a verified non-interaction boundary |
@@ -2163,7 +2163,16 @@ Claude Code `2.1.302`, profile `claude-2.1.302-default-2`:
 
 Both answers select their choice by its number, so they do not depend on which choice is focused. The broadened choices 2 and 3 have no answer plan. The empty-composer observation reads the composer as empty only when the cursor sits at the end of the prompt prefix; a draft whose cursor was moved back to the prefix reads as empty. Every backend and native version without a bundled profile yields `coverage=unknown`.
 
-Detection covers the permission form only when it renders within 16 rows from its `Bash command` heading to its `Esc to cancel · Tab to amend` line, with the operation on a single line between the dashed rules. A narrow pane or a long command makes Claude wrap the form: the operation becomes boxed `│` rows and the choice labels continue on further rows. A wrapped form yields no detection, so no `interaction_opened` event is produced, programmatic input stays held, and the request is answered manually on the native surface.
+Detection and both answers rest on native captures of the form at 120 columns, where it renders unwrapped, and at 52 columns, where it wraps. A narrow pane or a long command makes Claude wrap the form: the tip, the description and the choice labels continue on further rows, and the operation between the dashed rules spans several rows. The operation rows take one of two native shapes:
+
+| Shape | Row prefix | Where Claude breaks the operation | Native evidence |
+|---|---|---|---|
+| Plain | One space | At the row's last usable column, one column before the pane's right edge, even inside a token | Captures at 52 columns |
+| Boxed | ` │ ` | At a space | A screen observed on herdr at about 89 columns |
+
+Claude positions every row explicitly, so the terminal records no soft wrap for the rule to follow. The rule reassembles the operation before extracting it: it removes each row's prefix, joins a row that reaches the last usable column directly to the next row, and joins a shorter row to the next row with one space. The reassembled operation equals the unwrapped one, so the request identity does not depend on the pane width, and a resize that rewraps the same request keeps its episode.
+
+Reassembly cannot tell a break at a space from a break inside a token when the row before a break at a space reaches the last usable column. Such a command reassembles without that space, so its identity differs from the unwrapped form of the same command, and a resize between the two renderings replaces the episode. The boxed shape's break of a token longer than its row is unobserved.
 
 Codex CLI `0.163.0` launched with `--ask-for-approval on-request --sandbox workspace-write`, profile `codex-0.163.0-on-request-1`:
 
@@ -2176,7 +2185,7 @@ Codex CLI `0.163.0` launched with `--ask-for-approval on-request --sandbox works
 | Prompt submission | `unknown` | — |
 | Native-exec submission | `unknown` | — |
 
-The rules anchor on the live form's heading and closing lines rather than on absolute rows, and the reason line is model-authored text that the rule requires but excludes from the request identity. The deny answer uses the choice's digit because that choice displays only `esc` as its shortcut, and CAFleet never sends a lone Escape to a held form. Choice 2, which approves a command prefix persistently, has no answer plan. The native captures showed the decision on the native surface: after allow, Codex printed `✔ You approved codex to run <command> this time` and ran the command; after deny, it printed `✗ You canceled the request to run <command>` and `■ Conversation interrupted`, and ran nothing. These lines are decision evidence for the Director's continuation check, not bundled rules. A Codex configuration that routes approvals to its automatic reviewer (`approvals_reviewer`) answers escalations without any native form, so detection observes no request. The detection covers a single-line command; a command that wraps in a narrow pane yields no detection, as for the Claude form.
+The rules anchor on the live form's heading and closing lines rather than on absolute rows, and the reason line is model-authored text that the rule requires but excludes from the request identity. The deny answer uses the choice's digit because that choice displays only `esc` as its shortcut, and CAFleet never sends a lone Escape to a held form. Choice 2, which approves a command prefix persistently, has no answer plan. The native captures showed the decision on the native surface: after allow, Codex printed `✔ You approved codex to run <command> this time` and ran the command; after deny, it printed `✗ You canceled the request to run <command>` and `■ Conversation interrupted`, and ran nothing. These lines are decision evidence for the Director's continuation check, not bundled rules. A Codex configuration that routes approvals to its automatic reviewer (`approvals_reviewer`) answers escalations without any native form, so detection observes no request. The detection covers a single-line command; a command that wraps in a narrow pane yields no detection, so no `interaction_opened` event is produced, programmatic input stays held, and the request is answered manually on the native surface.
 
 A native screen fixture records one captured terminal screen with exactly these fields:
 
