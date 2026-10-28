@@ -1,8 +1,8 @@
 # Delivery-dismissed approval recovery
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 17/17 tasks complete
-**Last Updated**: 2026-10-28
+**Last Updated**: 2026-10-29
 
 ## Overview
 
@@ -231,3 +231,5 @@ Existing coverage stays as is and needs no new test: `director_delivery_ends_bef
 | Date | Changes |
 |------|---------|
 | 2026-10-28 | Initial draft |
+| 2026-10-28 | Mirror the edited Accepted trade-offs bullet in SPEC.md |
+| 2026-10-29 | Implementation complete |
