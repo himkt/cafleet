@@ -2239,10 +2239,16 @@ mod runtime_contract_tests {
 
         const REVIEW_INSTRUCTION: &str = "Verify this event and the current request. Evaluate the operation and its risk. In the Director session's effective auto mode, decide allow or deny; otherwise obtain the user's permission. Submit the selected answer through the request-bound CAFleet response command, or give that complete command to the user. Inspect the native result and continuation afterward.";
 
+        const MULTI_ROW_SENTENCE: &str = "The operation is shown as its displayed rows, where a row break may be a wrap or a line break in the command, so confirm the command against the excerpt before deciding.";
+
         fn action(fixture: &Fixture, event: &RuntimeEventRecord) -> Value {
+            let instruction = match event.payload_json["evidence"]["operation_rows"].as_u64() {
+                Some(rows) if rows > 1 => format!("{REVIEW_INSTRUCTION} {MULTI_ROW_SENTENCE}"),
+                _ => REVIEW_INSTRUCTION.to_owned(),
+            };
             json!({
                 "kind":"review_permission_request",
-                "instruction":REVIEW_INSTRUCTION,
+                "instruction":instruction,
                 "inspect_argv":["cafleet","permission","inspect",event.interaction_id.unwrap().to_string(),"--event-id",event.event_id.to_string(),"--from-member-id",fixture.director.to_string(),"--json"],
             })
         }
@@ -2865,6 +2871,112 @@ mod runtime_contract_tests {
             );
         }
 
+        fn redacted_opening(
+            operation: Option<&str>,
+            rows: Option<u64>,
+        ) -> (Fixture, RuntimeEventRecord) {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            fixture.reserve(&owner);
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_runs SET event_evidence='redacted' WHERE run_id=?1",
+                    [owner.run_id],
+                )
+                .unwrap();
+            let mut raw = raw_evidence("visible nonsecret operation");
+            raw["operation"] = json!(operation);
+            raw["operation_rows"] = json!(rows);
+            let evidence = evidence::EvidencePolicy::redacted(
+                &json!({"schema_version":1,"patterns":[SECRET],"sensitive_rules":[]}),
+                &["native-tool-permission"],
+            )
+            .unwrap()
+            .apply(&raw)
+            .unwrap();
+            let event = storage::persist_transition(
+                &mut fixture.conn,
+                &owner,
+                &opening(owner.run_id, 1, 1, evidence),
+                PersistenceMode::Live,
+            )
+            .unwrap();
+            (fixture, event)
+        }
+
+        #[test]
+        fn runtime_payload_v2_multi_row_operation_appends_the_displayed_rows_sentence() {
+            let (fixture, event) = redacted_opening(Some("run a\nb allow"), Some(2));
+            assert_eq!(event.payload_json["evidence"]["operation_rows"], 2);
+            assert_eq!(
+                event.payload_json["director_action"]["instruction"],
+                format!("{REVIEW_INSTRUCTION} {MULTI_ROW_SENTENCE}")
+            );
+            assert_eq!(
+                event.payload_json["director_action"],
+                action(&fixture, &event)
+            );
+            assert_key_order(
+                &event.payload_json["director_action"],
+                &["kind", "instruction", "inspect_argv"],
+            );
+            let message =
+                crate::broker::get_message(&fixture.conn, event.message_id.unwrap()).unwrap();
+            assert_eq!(message.text, event.payload_json.to_string());
+            assert!(event.payload_json.to_string().len() <= 16 * 1024);
+        }
+
+        #[test]
+        fn runtime_payload_v2_single_row_and_metadata_operations_keep_the_constant_instruction() {
+            for (operation, rows) in [(Some("run allow"), Some(1)), (None, None)] {
+                let (fixture, event) = redacted_opening(operation, rows);
+                assert_eq!(
+                    event.payload_json["evidence"]["operation_rows"],
+                    json!(rows)
+                );
+                assert_eq!(
+                    event.payload_json["director_action"]["instruction"], REVIEW_INSTRUCTION,
+                    "{operation:?}"
+                );
+                assert_eq!(
+                    event.payload_json["director_action"],
+                    action(&fixture, &event)
+                );
+            }
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let event = fixture.open(&owner);
+            assert_eq!(
+                event.payload_json["evidence"]["operation_rows"],
+                Value::Null
+            );
+            assert_eq!(
+                event.payload_json["director_action"]["instruction"],
+                REVIEW_INSTRUCTION
+            );
+        }
+
+        #[test]
+        fn runtime_payload_v2_reader_rejects_an_instruction_that_disagrees_with_the_row_count() {
+            for (rows, forged) in [
+                (2, REVIEW_INSTRUCTION.to_owned()),
+                (1, format!("{REVIEW_INSTRUCTION} {MULTI_ROW_SENTENCE}")),
+            ] {
+                let operation = if rows > 1 { "run a\nb" } else { "run a b" };
+                let (mut fixture, event) = redacted_opening(Some(operation), Some(rows));
+                storage::get_event(&fixture.conn, event.event_id)
+                    .expect("the persisted event is readable");
+                let mut payload = event.payload_json.clone();
+                payload["director_action"]["instruction"] = json!(forged);
+                replace_public_payload(&mut fixture.conn, &event, payload);
+                assert!(
+                    storage::get_event(&fixture.conn, event.event_id).is_err(),
+                    "{rows} rows with a forged instruction"
+                );
+            }
+        }
+
         #[test]
         fn runtime_payload_v2_ack_consumes_only_the_notification() {
             let mut fixture = Fixture::new();
@@ -2994,7 +3106,7 @@ mod runtime_contract_tests {
         json!({
             "backend":"codex","native_version":"0.163.0","profile_version":"fixture-v1",
             "rule_id":"native-tool-permission","screen_seq":120,
-            "operation":format!("run {text}"),"choices":[format!("allow {text}"),"deny"],
+            "operation":format!("run {text}"),"operation_rows":1,"choices":[format!("allow {text}"),"deny"],
             "native_request_id":format!("native-{text}"),"excerpt":format!("request {text}"),
             "semantic_fingerprint":format!("fingerprint-{text}"),
             "truncated":false,"sensitive":false,
@@ -4020,6 +4132,162 @@ mod runtime_contract_tests {
         assert!(!first.to_string().contains(SECRET));
         assert!(first.get("semantic_fingerprint").is_none());
         assert_eq!(first["evidence_policy"], "metadata");
+    }
+
+    const EVIDENCE_KEYS: [&str; 13] = [
+        "backend",
+        "native_version",
+        "profile_version",
+        "rule_id",
+        "screen_seq",
+        "truncated",
+        "evidence_policy",
+        "operation",
+        "operation_rows",
+        "choices",
+        "native_request_id",
+        "excerpt",
+        "evidence_digest",
+    ];
+
+    fn redacting(sensitive_rules: Value) -> evidence::EvidencePolicy {
+        evidence::EvidencePolicy::redacted(
+            &json!({"schema_version":1,"patterns":[SECRET],"sensitive_rules":sensitive_rules}),
+            &["native-tool-permission"],
+        )
+        .unwrap()
+    }
+
+    fn independent_evidence_digest(value: &Value) -> String {
+        use sha2::{Digest, Sha256};
+        fn sorted(value: &Value) -> Value {
+            match value {
+                Value::Object(object) => {
+                    let mut keys = object.keys().collect::<Vec<_>>();
+                    keys.sort();
+                    Value::Object(
+                        keys.into_iter()
+                            .map(|key| (key.clone(), sorted(&object[key])))
+                            .collect(),
+                    )
+                }
+                Value::Array(values) => Value::Array(values.iter().map(sorted).collect()),
+                _ => value.clone(),
+            }
+        }
+        let mut value = value.clone();
+        value.as_object_mut().unwrap().remove("evidence_digest");
+        Sha256::digest(sorted(&value).to_string().as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    }
+
+    #[test]
+    fn evidence_orders_operation_rows_after_operation_and_nulls_it_with_the_operation() {
+        let mut raw = raw_evidence("visible");
+        raw["operation"] = json!("run a\nb");
+        raw["operation_rows"] = json!(2);
+        let metadata = evidence::EvidencePolicy::metadata().apply(&raw).unwrap();
+        assert_key_order(&metadata, &EVIDENCE_KEYS);
+        assert_eq!(metadata["operation"], Value::Null);
+        assert_eq!(metadata["operation_rows"], Value::Null);
+        let redacted = redacting(json!([])).apply(&raw).unwrap();
+        assert_key_order(&redacted, &EVIDENCE_KEYS);
+        assert_eq!(redacted["operation"], "run a\\x0ab");
+        assert_eq!(redacted["operation_rows"], 2);
+        raw["operation"] = json!(format!("run {SECRET}\nb"));
+        let matched = redacting(json!([])).apply(&raw).unwrap();
+        assert_eq!(matched["operation"], "[redacted]");
+        assert_eq!(
+            matched["operation_rows"], 2,
+            "a redacted operation keeps its displayed row count"
+        );
+        let sensitive = redacting(json!(["native-tool-permission"]))
+            .apply(&raw)
+            .unwrap();
+        assert_eq!(sensitive["operation"], Value::Null);
+        assert_eq!(sensitive["operation_rows"], Value::Null);
+        raw["operation"] = Value::Null;
+        raw["operation_rows"] = Value::Null;
+        let absent = redacting(json!([])).apply(&raw).unwrap();
+        assert_eq!(absent["operation"], Value::Null);
+        assert_eq!(absent["operation_rows"], Value::Null);
+        for value in [&metadata, &redacted, &matched, &sensitive, &absent] {
+            assert_eq!(
+                value["evidence_digest"],
+                independent_evidence_digest(value),
+                "the digest covers operation_rows"
+            );
+        }
+    }
+
+    #[test]
+    fn evidence_policy_rejects_a_row_count_that_disagrees_with_the_operation() {
+        for (operation, rows) in [
+            (json!("run a"), Value::Null),
+            (Value::Null, json!(1)),
+            (json!("run a"), json!(0)),
+            (json!("run a"), json!(-1)),
+            (json!("run a"), json!("1")),
+            (json!("run a"), json!(1.5)),
+        ] {
+            let mut raw = raw_evidence("visible");
+            raw["operation"] = operation.clone();
+            raw["operation_rows"] = rows.clone();
+            assert!(
+                redacting(json!([])).apply(&raw).is_err(),
+                "operation {operation} with rows {rows}"
+            );
+        }
+    }
+
+    #[test]
+    fn evidence_validation_binds_operation_rows_to_the_operation() {
+        let mut raw = raw_evidence("visible");
+        raw["operation"] = json!("run a\nb");
+        raw["operation_rows"] = json!(2);
+        let valid = redacting(json!([])).apply(&raw).unwrap();
+        evidence::validate(&valid).unwrap();
+        let redigest = |change: &dyn Fn(&mut Value)| {
+            let mut value = valid.clone();
+            change(&mut value);
+            value["evidence_digest"] = json!(independent_evidence_digest(&value));
+            value
+        };
+        evidence::validate(&redigest(&|value| value["operation_rows"] = json!(3)))
+            .expect("a consistent recomputed row count validates");
+        let metadata = evidence::EvidencePolicy::metadata().apply(&raw).unwrap();
+        evidence::validate(&metadata).unwrap();
+        for (label, change) in [
+            (
+                "missing",
+                &(|value: &mut Value| {
+                    value.as_object_mut().unwrap().remove("operation_rows");
+                }) as &dyn Fn(&mut Value),
+            ),
+            ("null with an operation", &|value| {
+                value["operation_rows"] = Value::Null
+            }),
+            ("zero", &|value| value["operation_rows"] = json!(0)),
+            ("negative", &|value| value["operation_rows"] = json!(-2)),
+            ("string", &|value| value["operation_rows"] = json!("2")),
+            ("count without an operation", &|value| {
+                value["operation"] = Value::Null
+            }),
+        ] {
+            assert!(
+                evidence::validate(&redigest(change)).is_err(),
+                "redacted evidence with operation_rows {label}"
+            );
+        }
+        let mut forged = metadata.clone();
+        forged["operation_rows"] = json!(2);
+        forged["evidence_digest"] = json!(independent_evidence_digest(&forged));
+        assert!(
+            evidence::validate(&forged).is_err(),
+            "metadata evidence carries no row count"
+        );
     }
 
     #[test]

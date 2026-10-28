@@ -225,6 +225,8 @@ pub(super) mod inspection_tests {
         assert_eq!(idle.match_evidence, MatchEvidence::Complete);
         assert!(idle.verified_noninteraction);
         assert_eq!(idle.rule_id, "claude-idle-composer");
+        assert_eq!(idle.raw_evidence["operation"], Value::Null);
+        assert_eq!(idle.raw_evidence["operation_rows"], Value::Null);
         let region = idle
             .matched_region
             .expect("the idle rule locates its composer");
@@ -286,6 +288,7 @@ pub(super) mod inspection_tests {
             observation.raw_evidence["operation"],
             "/private/tmp/cafleet-194/cells-002/permission-probe allow"
         );
+        assert_eq!(observation.raw_evidence["operation_rows"], 1);
         assert_eq!(observation.raw_evidence["choices"], json!(["Yes", "No"]));
         assert!(!observation.verified_noninteraction);
         assert!(observation.native_correlation.is_none());
@@ -306,6 +309,8 @@ pub(super) mod inspection_tests {
             .observe(&screen)
             .unwrap();
         assert_eq!(unprofiled.kind, ObservationKind::Unknown);
+        assert_eq!(unprofiled.raw_evidence["operation"], Value::Null);
+        assert_eq!(unprofiled.raw_evidence["operation_rows"], Value::Null);
     }
 
     #[test]
@@ -335,7 +340,9 @@ pub(super) mod inspection_tests {
         include_str!("native/claude-2.1.302-wrapped-allow-pre-stage-1.json");
     const WRAPPED_DENY_SCREEN: &str =
         include_str!("native/claude-2.1.302-wrapped-deny-pre-stage-1.json");
-    const WRAPPED_OPERATION: &str = "/tmp/cafleet-194/claude-wrap-cells-001/permission-probe allow";
+    const WRAPPED_OPERATION: &str =
+        "/tmp/cafleet-194/claude-wrap-cells-001/permission-\nprobe allow";
+    const WRAPPED_COMMAND: &str = "/tmp/cafleet-194/claude-wrap-cells-001/permission-probe allow";
     const NATIVE_OPERATION: &str = "/private/tmp/cafleet-194/cells-002/permission-probe allow";
 
     fn wrapped_screen(change: impl FnOnce(&mut Vec<String>), alternate: bool) -> ScreenSnapshot {
@@ -379,6 +386,11 @@ pub(super) mod inspection_tests {
             Some("claude-2.1.302-default-3")
         );
         assert_eq!(observation.raw_evidence["operation"], operation);
+        assert_eq!(
+            observation.raw_evidence["operation_rows"],
+            operation.split('\n').count(),
+            "each displayed operation row is one line: {operation}"
+        );
         assert_eq!(observation.raw_evidence["choices"], json!(["Yes", "No"]));
         assert!(observation.fingerprint.is_some());
         assert!(!observation.verified_noninteraction);
@@ -386,7 +398,7 @@ pub(super) mod inspection_tests {
     }
 
     #[test]
-    fn bundled_claude_detects_the_wrapped_native_form_and_reassembles_its_edge_broken_operation() {
+    fn bundled_claude_detects_the_wrapped_native_form_and_reports_its_displayed_operation_rows() {
         let screen = wrapped_screen(|_| {}, true);
         assert_eq!((screen.rows, screen.cols), (36, 52));
         assert_eq!((screen.cursor_row, screen.cursor_col), (28, 1));
@@ -403,15 +415,16 @@ pub(super) mod inspection_tests {
         for (fixture, operation) in [
             (
                 WRAPPED_ALLOW_SCREEN,
-                "/tmp/cafleet-194/claude-wrap-ans-allow-001/permission-probe allow",
+                "/tmp/cafleet-194/claude-wrap-ans-allow-001/permiss\nion-probe allow",
             ),
             (
                 WRAPPED_DENY_SCREEN,
-                "/tmp/cafleet-194/claude-wrap-ans-deny-001/permission-probe deny",
+                "/tmp/cafleet-194/claude-wrap-ans-deny-001/permissi\non-probe deny",
             ),
         ] {
             let pre_stage = claude_observation(&replay_native_fixture(fixture, |_| {}, true, None));
             assert_claude_request(&pre_stage, operation);
+            assert_eq!(pre_stage.raw_evidence["operation_rows"], 2);
         }
         let catalog = ProfileCatalog::bundled().unwrap();
         let unprofiled = Detector::new(&catalog, CodingAgent::Claude, Some("2.1.301"))
@@ -445,59 +458,81 @@ pub(super) mod inspection_tests {
     }
 
     #[test]
-    fn bundled_claude_wrapped_and_unwrapped_renderings_of_one_request_share_its_identity() {
+    fn bundled_claude_wrapped_identity_follows_the_displayed_rows_so_a_rewrap_replaces_it() {
         let wrapped = claude_observation(&wrapped_screen(|_| {}, true));
-        let unwrapped = claude_observation(&unwrapped_rendering(WRAPPED_OPERATION));
-        assert_claude_request(&unwrapped, WRAPPED_OPERATION);
+        let unwrapped = claude_observation(&unwrapped_rendering(WRAPPED_COMMAND));
+        assert_claude_request(&unwrapped, WRAPPED_COMMAND);
         assert!(
-            wrapped.fingerprint == unwrapped.fingerprint,
-            "the 52-column and 120-column renderings are one request"
+            wrapped.fingerprint != unwrapped.fingerprint,
+            "the 52-column and 120-column renderings display different rows"
+        );
+        assert!(
+            wrapped.fingerprint == claude_observation(&wrapped_screen(|_| {}, true)).fingerprint,
+            "a redraw of the same displayed rows keeps the identity"
         );
         let native = claude_observation(&native_screen(|_| {}, true));
-        assert!(native.fingerprint != wrapped.fingerprint);
-        let edge_row = " /private/tmp/cafleet-194/cells-002/permission-prob";
-        assert_eq!(
-            edge_row.chars().count(),
-            51,
-            "reaches the last usable column"
-        );
         let rewrapped = claude_observation(&wrapped_screen(
             |lines| {
-                lines[22] = edge_row.into();
+                lines[22] = " /private/tmp/cafleet-194/cells-002/permission-prob".into();
                 lines[23] = " e allow".into();
             },
             true,
         ));
-        assert_claude_request(&rewrapped, NATIVE_OPERATION);
+        assert_claude_request(
+            &rewrapped,
+            "/private/tmp/cafleet-194/cells-002/permission-prob\ne allow",
+        );
         assert!(
-            rewrapped.fingerprint == native.fingerprint,
-            "the native 120-column request rewrapped at 52 columns keeps its identity"
+            rewrapped.fingerprint != native.fingerprint,
+            "the native 120-column request rewrapped at 52 columns is a new episode"
+        );
+        let rows = [
+            " /tmp/cafleet-194/claude-wrap-cells-001",
+            " permission-probe allow",
+        ];
+        let narrow = claude_observation(&wrapped_screen(
+            |lines| {
+                lines[22] = rows[0].into();
+                lines[23] = rows[1].into();
+            },
+            true,
+        ));
+        let wide = claude_observation(&native_with_operation_rows(&rows));
+        assert_claude_request(
+            &narrow,
+            "/tmp/cafleet-194/claude-wrap-cells-001\npermission-probe allow",
+        );
+        assert!(
+            narrow.fingerprint == wide.fingerprint,
+            "the same displayed rows at 52 and 120 columns are one request"
         );
     }
 
     #[test]
-    fn bundled_claude_plain_operation_joins_at_the_display_cell_edge_and_keeps_shorter_row_breaks()
-    {
-        let short = claude_observation(&wrapped_screen(
-            |lines| {
-                lines[22] = " /tmp/cafleet-194/claude-wrap-cells-001".into();
-                lines[23] = " permission-probe allow".into();
-            },
-            true,
-        ));
-        assert_claude_request(
-            &short,
-            "/tmp/cafleet-194/claude-wrap-cells-001\npermission-probe allow",
-        );
-        assert!(
-            short.fingerprint
-                != claude_observation(&unwrapped_rendering(
-                    "/tmp/cafleet-194/claude-wrap-cells-001 permission-probe allow"
-                ))
-                .fingerprint,
-            "a plain break after a shorter row is width-dependent"
-        );
-        for (filler, separator) in [(28, ""), (27, "\n")] {
+    fn bundled_claude_plain_operation_rows_keep_their_line_break_wherever_a_row_ends() {
+        let full = " /tmp/cafleet-194/claude-wrap-cells-001/permission-";
+        assert_eq!(full.chars().count(), 51, "reaches the last usable column");
+        for (first, second) in [
+            (
+                " /tmp/cafleet-194/claude-wrap-cells-001",
+                " permission-probe allow",
+            ),
+            (full, " probe allow"),
+            (
+                " /tmp/cafleet-194/claude-wrap-cells-001/permission-probe",
+                " allow",
+            ),
+        ] {
+            let observation = claude_observation(&wrapped_screen(
+                |lines| {
+                    lines[22] = first.into();
+                    lines[23] = second.into();
+                },
+                true,
+            ));
+            assert_claude_request(&observation, &format!("{}\n{}", &first[1..], &second[1..]));
+        }
+        for filler in [28, 27] {
             let row = format!(" /tmp/cafleet-194/界界/{}", "a".repeat(filler));
             assert_eq!(
                 row.chars().count() + 2,
@@ -513,16 +548,30 @@ pub(super) mod inspection_tests {
             ));
             assert_claude_request(
                 &observation,
-                &format!(
-                    "/tmp/cafleet-194/界界/{}{separator}b allow",
-                    "a".repeat(filler)
-                ),
+                &format!("/tmp/cafleet-194/界界/{}\nb allow", "a".repeat(filler)),
             );
         }
     }
 
     #[test]
-    fn bundled_claude_edge_join_applies_only_between_the_dashed_rules() {
+    fn bundled_claude_operation_rows_remove_exactly_one_margin_space() {
+        for (rows, operation) in [
+            (
+                &["  indented continuation", " plain"][..],
+                " indented continuation\nplain",
+            ),
+            (
+                &[" │ echo plain bar", " │ next"][..],
+                "│ echo plain bar\n│ next",
+            ),
+        ] {
+            let observation = claude_observation(&native_with_operation_rows(rows));
+            assert_claude_request(&observation, operation);
+        }
+    }
+
+    #[test]
+    fn bundled_claude_operation_is_only_the_rows_between_the_dashed_rules() {
         let screen = serde_json::from_str::<Value>(WRAPPED_SCREEN).unwrap();
         let transcript = screen["lines"][13].as_str().unwrap();
         assert!(transcript.starts_with("  ⎿  $ "));
@@ -544,30 +593,29 @@ pub(super) mod inspection_tests {
     }
 
     #[test]
-    fn bundled_claude_synthetic_boxed_operation_rows_keep_each_boundary_as_a_line_break() {
-        for (operation, rows) in [
-            (
-                "/tmp/cafleet-194/claude-wrap-cells-001/permission-probe\nallow",
-                &[
-                    " │ /tmp/cafleet-194/claude-wrap-cells-001/permission-probe",
-                    " │ allow",
-                ][..],
-            ),
-            (
-                "/tmp/cafleet-194/claude-wrap-cells-001/permission-probe\nallow --reason\nboxed",
-                &[
-                    " │ /tmp/cafleet-194/claude-wrap-cells-001/permission-probe",
-                    " │ allow --reason",
-                    " │ boxed",
-                ][..],
-            ),
+    fn bundled_claude_synthetic_boxed_operation_rows_keep_their_gutter_and_each_line_break() {
+        for rows in [
+            &[
+                " │ /tmp/cafleet-194/claude-wrap-cells-001/permission-probe",
+                " │ allow",
+            ][..],
+            &[
+                " │ /tmp/cafleet-194/claude-wrap-cells-001/permission-probe",
+                " │ allow --reason",
+                " │ boxed",
+            ][..],
         ] {
+            let operation = rows
+                .iter()
+                .map(|row| row.strip_prefix(' ').unwrap())
+                .collect::<Vec<_>>()
+                .join("\n");
             let boxed = claude_observation(&native_with_operation_rows(rows));
-            assert_claude_request(&boxed, operation);
+            assert_claude_request(&boxed, &operation);
+            assert_eq!(boxed.raw_evidence["operation_rows"], rows.len());
+            let command = operation.replace("\n│ ", " ").replacen("│ ", "", 1);
             assert!(
-                boxed.fingerprint
-                    != claude_observation(&unwrapped_rendering(&operation.replace('\n', " ")))
-                        .fingerprint,
+                boxed.fingerprint != claude_observation(&unwrapped_rendering(&command)).fingerprint,
                 "a boxed wrap of {} rows is width-dependent",
                 rows.len()
             );
@@ -580,7 +628,7 @@ pub(super) mod inspection_tests {
         let wide_row = format!(" │ {wide_path}");
         assert_eq!(wide_row.chars().count(), 119, "reaches column 119 of 120");
         let wide = claude_observation(&native_with_operation_rows(&[&wide_row, " │ allow"]));
-        assert_claude_request(&wide, &format!("{wide_path}\nallow"));
+        assert_claude_request(&wide, &format!("│ {wide_path}\n│ allow"));
         let narrow_row = " │ /tmp/cafleet-194/claude-wrap-cells-001/probe-box";
         assert_eq!(narrow_row.chars().count(), 51, "reaches column 51 of 52");
         let narrow = claude_observation(&wrapped_screen(
@@ -592,13 +640,12 @@ pub(super) mod inspection_tests {
         ));
         assert_claude_request(
             &narrow,
-            "/tmp/cafleet-194/claude-wrap-cells-001/probe-box\nallow",
+            "│ /tmp/cafleet-194/claude-wrap-cells-001/probe-box\n│ allow",
         );
     }
 
     #[test]
     fn bundled_claude_multi_line_operation_keeps_its_lines_in_the_plain_and_boxed_shapes() {
-        let multi_line = "echo ok # cleanup\nrm -rf ~/x";
         let plain = claude_observation(&wrapped_screen(
             |lines| {
                 lines[22] = " echo ok # cleanup".into();
@@ -606,29 +653,43 @@ pub(super) mod inspection_tests {
             },
             true,
         ));
-        let boxed = claude_observation(&native_with_operation_rows(&[
-            " │ echo ok # cleanup",
-            " │ rm -rf ~/x",
-        ]));
         let unwrapped_plain = claude_observation(&native_with_operation_rows(&[
             " echo ok # cleanup",
             " rm -rf ~/x",
         ]));
-        for (shape, observation) in [
-            ("plain at 52 columns", &plain),
-            ("boxed at 120 columns", &boxed),
-            ("plain at 120 columns", &unwrapped_plain),
+        let boxed = claude_observation(&native_with_operation_rows(&[
+            " │ echo ok # cleanup",
+            " │ rm -rf ~/x",
+        ]));
+        let one_line = claude_observation(&unwrapped_rendering("echo ok # cleanup rm -rf ~/x"));
+        for (shape, observation, operation) in [
+            (
+                "plain at 52 columns",
+                &plain,
+                "echo ok # cleanup\nrm -rf ~/x",
+            ),
+            (
+                "plain at 120 columns",
+                &unwrapped_plain,
+                "echo ok # cleanup\nrm -rf ~/x",
+            ),
+            (
+                "boxed at 120 columns",
+                &boxed,
+                "│ echo ok # cleanup\n│ rm -rf ~/x",
+            ),
         ] {
-            assert_claude_request(observation, multi_line);
+            assert_claude_request(observation, operation);
             assert!(
-                observation.fingerprint
-                    != claude_observation(&unwrapped_rendering("echo ok # cleanup rm -rf ~/x"))
-                        .fingerprint,
+                observation.fingerprint != one_line.fingerprint,
                 "{shape} never reads as one commented-out line"
             );
         }
-        assert!(plain.fingerprint == boxed.fingerprint);
         assert!(plain.fingerprint == unwrapped_plain.fingerprint);
+        assert!(
+            plain.fingerprint != boxed.fingerprint,
+            "the boxed rows display their gutter"
+        );
     }
 
     const BOXED_SCREEN: &str = include_str!("native/claude-2.1.302-boxed-permission-1.json");
@@ -636,16 +697,17 @@ pub(super) mod inspection_tests {
         include_str!("native/claude-2.1.302-boxed-single-row-permission-1.json");
     const BOXED_PATH: &str =
         "/tmp/cafleet-194/claude-boxed-cells-089-wide-operation-probe-01/permission-probe";
-    const BOXED_SINGLE_ROW_OPERATION: &str =
+    const BOXED_SINGLE_ROW_COMMAND: &str =
         "/tmp/cafleet-194/claude-boxed-cells-120-wide-operation-probe-01/permission-probe allow";
 
     #[test]
-    fn bundled_claude_detects_the_native_boxed_form_and_keeps_its_row_boundary_as_a_line_break() {
+    fn bundled_claude_detects_the_native_boxed_form_and_reports_its_displayed_gutter_rows() {
         let screen = replay_native_fixture(BOXED_SCREEN, |_| {}, true, None);
         assert_eq!((screen.rows, screen.cols), (36, 89));
         assert_eq!((screen.cursor_row, screen.cursor_col), (27, 1));
         let observation = claude_observation(&screen);
-        assert_claude_request(&observation, &format!("{BOXED_PATH}\nallow"));
+        assert_claude_request(&observation, &format!("│ {BOXED_PATH}\n│ allow"));
+        assert_eq!(observation.raw_evidence["operation_rows"], 2);
         let region = observation
             .matched_region
             .expect("a boxed permission match locates its live region");
@@ -667,7 +729,7 @@ pub(super) mod inspection_tests {
             "the native row holds two spaces"
         );
         assert_eq!(fixture["lines"][34], " Esc to cancel · Tab to amend");
-        let operation = format!("{BOXED_PATH}\nallow");
+        let operation = format!("│ {BOXED_PATH}\n│ allow");
         let cleared = claude_observation(&replay_native_fixture(
             BOXED_SCREEN,
             |lines| lines[33].clear(),
@@ -683,27 +745,21 @@ pub(super) mod inspection_tests {
     }
 
     #[test]
-    fn bundled_claude_detects_the_native_single_row_box_without_its_gutter() {
+    fn bundled_claude_detects_the_native_single_row_box_and_keeps_its_gutter() {
         let screen = replay_native_fixture(BOXED_SINGLE_ROW_SCREEN, |_| {}, true, None);
         assert_eq!((screen.rows, screen.cols), (36, 120));
         assert_eq!((screen.cursor_row, screen.cursor_col), (23, 1));
         let observation = claude_observation(&screen);
-        assert_claude_request(&observation, BOXED_SINGLE_ROW_OPERATION);
-        assert!(
-            !observation.raw_evidence["operation"]
-                .as_str()
-                .unwrap()
-                .contains('│'),
-            "the operation omits the box gutter"
-        );
+        assert_claude_request(&observation, &format!("│ {BOXED_SINGLE_ROW_COMMAND}"));
+        assert_eq!(observation.raw_evidence["operation_rows"], 1);
         let region = observation
             .matched_region
             .expect("a single-row box locates its live region");
         assert_eq!((region.top, region.bottom), (14, 30), "{region:?}");
         assert!(
             observation.fingerprint
-                == claude_observation(&unwrapped_rendering(BOXED_SINGLE_ROW_OPERATION)).fingerprint,
-            "a single-row box and a plain row of one command share its identity"
+                != claude_observation(&unwrapped_rendering(BOXED_SINGLE_ROW_COMMAND)).fingerprint,
+            "a single-row box displays a different row from a plain row of one command"
         );
     }
 
@@ -930,6 +986,7 @@ pub(super) mod inspection_tests {
             observation.raw_evidence["operation"],
             "/tmp/cafleet-194/codex-cells-001/permission-probe allow"
         );
+        assert_eq!(observation.raw_evidence["operation_rows"], 1);
         assert_eq!(observation.raw_evidence["choices"], json!(CODEX_CHOICES));
         assert!(!observation.verified_noninteraction);
         assert!(observation.native_correlation.is_none());
