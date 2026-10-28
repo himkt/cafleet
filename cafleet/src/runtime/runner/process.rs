@@ -682,3 +682,80 @@ impl Drop for PtySession {
         }
     }
 }
+
+#[cfg(all(test, target_os = "macos"))]
+mod setuid_member_tests {
+    use super::*;
+    use std::os::unix::fs::MetadataExt;
+
+    const SETUID_HELPER: &str = "/usr/bin/su";
+
+    fn read_until(session: &mut PtySession, needles: &[&str]) -> String {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut output = Vec::new();
+        loop {
+            let mut bytes = [0u8; 1024];
+            match session.try_read(&mut bytes) {
+                Ok(count) => output.extend_from_slice(&bytes[..count]),
+                Err(cause) if cause.kind() == io::ErrorKind::WouldBlock => {}
+                Err(cause) => panic!("setuid fixture PTY read failed: {cause}"),
+            }
+            let text = String::from_utf8_lossy(&output).into_owned();
+            if needles.iter().all(|needle| text.contains(needle)) {
+                return text;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "setuid fixture output lacks {needles:?}: {text:?}"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn refresh_pins_a_live_setuid_root_group_member_and_cleanup_terminates_it() {
+        let helper = std::fs::metadata(SETUID_HELPER).unwrap();
+        assert!(
+            helper.uid() == 0 && helper.mode() & 0o4000 != 0,
+            "{SETUID_HELPER} must be setuid root for this fixture"
+        );
+        let mut session = PtySession::prepare(TerminalSize { rows: 24, cols: 80 }).unwrap();
+        let spec = SpawnSpec {
+            argv: vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                format!("{SETUID_HELPER} root </dev/tty & printf 'helper=%s\\n' \"$!\"; wait"),
+            ],
+            cwd: PathBuf::from("/"),
+            environment: Vec::new(),
+            evidence_policy: serde_json::json!({"mode":"metadata"}),
+            size: TerminalSize { rows: 24, cols: 80 },
+        };
+        let native = session.spawn(&spec).unwrap();
+        let output = read_until(&mut session, &["helper=", "Password:"]);
+        let pid = output
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("helper="))
+            .expect("fixture announces the helper PID")
+            .trim()
+            .parse::<i64>()
+            .unwrap();
+        assert_eq!(
+            session.try_wait().unwrap(),
+            None,
+            "a live setuid-root group member keeps the ownership refresh readable"
+        );
+        let helper = ProcessIdentity::read(pid)
+            .unwrap()
+            .expect("the prompting setuid helper is live");
+        assert_eq!(session.owned.get(&pid), Some(&helper));
+        assert_eq!(session.owned.get(&native.pid), Some(&native));
+        let outcome = session.shutdown(ShutdownClock::new(Instant::now()));
+        assert_eq!(outcome.cleanup_state, CleanupState::Complete, "{outcome:?}");
+        assert!(outcome.native_exit.is_some(), "{outcome:?}");
+        assert!(
+            ProcessIdentity::read(pid).unwrap().is_none() || stopped(pid).unwrap(),
+            "the setuid helper remains running after cleanup"
+        );
+    }
+}
