@@ -697,7 +697,15 @@ fn run_service(
                                         .as_mut()
                                         .ok_or_else(|| error("native input has not started"))?;
                                     if response_context.is_some() {
-                                        coordinator
+                                        if let Some(reply) = coordinator
+                                            .retained_permission_response(
+                                                &mut conn, &run, &request, deadline,
+                                            )
+                                            .map_err(CafleetError::from)?
+                                        {
+                                            return Ok(Some(reply));
+                                        }
+                                        let admission = coordinator
                                             .progress_with_manual(&mut transport, |transport| {
                                                 transport.quiesce_for_input(
                                                     &mut input,
@@ -709,6 +717,14 @@ fn run_service(
                                                 )
                                             })
                                             .map_err(CafleetError::from)?;
+                                        if matches!(admission, InputDrain::Pending) {
+                                            return Err(error(format!(
+                                                "permission request is blocked: {}",
+                                                transport
+                                                    .drain_blocker()
+                                                    .expect("a Pending drain names its reason")
+                                            )));
+                                        }
                                     }
                                     let reply = coordinator
                                         .handle_received(

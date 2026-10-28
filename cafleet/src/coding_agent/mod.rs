@@ -222,7 +222,7 @@ use crate::config_dir::{self, EnvLookup, ResolvedDir};
 use crate::error::CafleetError;
 
 pub trait SpawnProbe {
-    fn binary_on_path(&self, name: &str) -> bool;
+    fn resolve_binary(&self, name: &str) -> Option<PathBuf>;
     fn home_dir(&self) -> PathBuf;
     fn env_var(&self, name: &str) -> Option<String>;
 }
@@ -308,20 +308,41 @@ impl CodingAgent {
         }
     }
 
-    pub fn ensure_available(self, probe: &dyn SpawnProbe) -> Result<(), CafleetError> {
+    pub fn ensure_available(self, probe: &dyn SpawnProbe) -> Result<PathBuf, CafleetError> {
         let config = self.config_dir(&|name| probe.env_var(name), &probe.home_dir())?;
-        if !probe.binary_on_path(self.binary_name()) {
-            return Err(CafleetError::App(format!(
-                "binary {} not found on PATH",
-                self.binary_name()
-            )));
-        }
+        let executable = probe.resolve_binary(self.binary_name()).ok_or_else(|| {
+            CafleetError::App(format!("binary {} not found on PATH", self.binary_name()))
+        })?;
         if let Some(preset) = self.required_preset(&config.path) {
             std::fs::read(&preset).map_err(|error| CafleetError::App(format!(
                 "cannot read opencode agent preset at {}: {error}; run 'cafleet setup --coding-agent opencode' first", preset.display()
             )))?;
         }
-        Ok(())
+        Ok(executable)
+    }
+
+    pub fn launch_argv(
+        self,
+        executable: &Path,
+        prompt: &str,
+        display_name: &str,
+        model: Option<&str>,
+        effort: Option<&str>,
+        policy: &LaunchPolicySelection,
+    ) -> Result<Vec<String>, CafleetError> {
+        let program = executable
+            .to_str()
+            .filter(|_| executable.is_absolute())
+            .ok_or_else(|| {
+                CafleetError::App(format!(
+                    "native executable must be an absolute UTF-8 path (got {})",
+                    executable.display()
+                ))
+            })?;
+        let mut argv =
+            self.build_spawn_argv_with_policy(prompt, display_name, model, effort, policy)?;
+        argv[0] = program.into();
+        Ok(argv)
     }
 
     pub fn build_spawn_argv(

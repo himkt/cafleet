@@ -178,7 +178,7 @@ fn agent_checks(
             ),
             Err(cause) => Check::new(format!("{name}.configuration"), "error", cause.to_string()),
         });
-        let available = probe.binary_on_path(agent.binary_name());
+        let available = probe.resolve_binary(agent.binary_name()).is_some();
         checks.push(Check::new(
             format!("{name}.executable"),
             if available { "ok" } else { "info" },

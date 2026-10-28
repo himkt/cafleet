@@ -65,6 +65,7 @@ impl Transport {
         deadline: Instant,
     ) -> Result<InputDrain> {
         self.invalidate_input_drain();
+        self.drain_blocker = None;
         before_deadline(deadline)?;
         let mut remaining = DrainBudget {
             human: self.limits.bytes_per_tick,
@@ -134,8 +135,17 @@ impl Transport {
                 Err(cause) => return Err(io_error(cause)),
             }
             before_deadline(deadline)?;
-            if interrupted || self.outer_eof || self.child_eof {
-                return Ok(InputDrain::Pending);
+            let ended = if interrupted {
+                Some("terminal input interrupted")
+            } else if self.outer_eof {
+                Some("outer terminal closed")
+            } else if self.child_eof {
+                Some("native output closed")
+            } else {
+                None
+            };
+            if let Some(reason) = ended {
+                return Ok(self.pending(reason.into()));
             }
             if human_quiet
                 && child_quiet
@@ -143,18 +153,16 @@ impl Transport {
                 && self.display.len() < self.limits.display_bytes
             {
                 if !self.observation_complete {
-                    return Ok(InputDrain::Pending);
+                    return Ok(self.pending("observation incomplete".into()));
                 }
                 let health = observer.input_health();
                 before_deadline(deadline)?;
                 let Some(health) = health else {
-                    return Ok(InputDrain::Pending);
+                    return Ok(self.pending("observation health unavailable".into()));
                 };
                 if let Some(reason) = unsettled_health(&health) {
-                    self.drain_blocker = Some(reason);
-                    return Ok(InputDrain::Pending);
+                    return Ok(self.pending(reason));
                 }
-                self.drain_blocker = None;
                 let output_seq = self.terminal.snapshot().screen_seq;
                 before_deadline(deadline)?;
                 self.input_drain = Some(DrainedInput {
@@ -170,7 +178,12 @@ impl Transport {
                 });
             }
         }
-        Ok(InputDrain::Pending)
+        Ok(self.pending("terminal output still arriving".into()))
+    }
+
+    fn pending(&mut self, reason: String) -> InputDrain {
+        self.drain_blocker = Some(reason);
+        InputDrain::Pending
     }
 
     fn read_drain_child(&mut self, pty: &mut impl PtyIo, capacity: usize) -> Result<AvailableRead> {

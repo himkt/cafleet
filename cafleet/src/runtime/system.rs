@@ -6,7 +6,8 @@ use std::os::fd::{AsFd, BorrowedFd};
 
 use nix::fcntl::{FcntlArg, OFlag, fcntl};
 use nix::poll::{PollFd, PollFlags, poll};
-use std::path::PathBuf;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
@@ -17,24 +18,33 @@ use crate::multiplexer::{CommandRunner, RunError, TimedRunError};
 /// regular file.
 pub fn find_on_path(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
-        let candidate = dir.join(name);
-        let Ok(metadata) = candidate.metadata() else {
-            continue;
-        };
-        if !metadata.is_file() {
-            continue;
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if metadata.permissions().mode() & 0o111 == 0 {
-                continue;
-            }
-        }
-        return Some(candidate);
+    std::env::split_paths(&path)
+        .map(|dir| dir.join(name))
+        .find(|candidate| is_executable_file(candidate))
+}
+
+/// Resolve `name` to the first executable regular file under an absolute
+/// entry of `path`, returning the path as found without resolving links.
+pub fn find_executable_in(path: &OsStr, name: &str) -> Option<PathBuf> {
+    std::env::split_paths(path)
+        .filter(|dir| dir.is_absolute())
+        .map(|dir| dir.join(name))
+        .find(|candidate| is_executable_file(candidate))
+}
+
+fn is_executable_file(candidate: &Path) -> bool {
+    let Ok(metadata) = candidate.metadata() else {
+        return false;
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
     }
-    None
+    #[cfg(not(unix))]
+    {
+        metadata.is_file()
+    }
 }
 
 pub struct SystemRunner;
@@ -425,8 +435,8 @@ fn collect_timed(
 pub struct SystemProbe;
 
 impl SpawnProbe for SystemProbe {
-    fn binary_on_path(&self, name: &str) -> bool {
-        find_on_path(name).is_some()
+    fn resolve_binary(&self, name: &str) -> Option<PathBuf> {
+        find_executable_in(&std::env::var_os("PATH")?, name)
     }
 
     fn home_dir(&self) -> PathBuf {

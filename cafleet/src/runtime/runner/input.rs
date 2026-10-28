@@ -3464,6 +3464,85 @@ impl InputCoordinator {
         )
     }
 
+    fn permission_history(
+        &self,
+        conn: &mut Connection,
+        run: &RunRecord,
+        request: &InputControlRequest,
+        input: &super::PermissionRespondInput,
+        deadline: Instant,
+        known_id: &mut Option<i64>,
+    ) -> Result<Option<storage::PermissionReceipt>> {
+        check_deadline(Instant::now(), deadline)?;
+        super::input_client::validate_respond(input)?;
+        ensure(
+            request.protocol_version == super::CONTROL_PROTOCOL_VERSION,
+            "input protocol version mismatch",
+        )?;
+        let mut expected = ControlIdentity::from_run(&self.run);
+        expected.owner_epoch = input.expected_owner_epoch;
+        ensure(
+            request.identity == expected
+                && input.expected_run_id == self.run.run_id
+                && run.run_id == self.run.run_id,
+            "permission response fixed identity mismatch",
+        )?;
+        with_database_deadline(conn, deadline, |conn| {
+            let tx = conn.transaction().map_err(db_err)?;
+            ensure(
+                storage::database_identity(&tx)? == self.run.database_identity_json,
+                "input database identity changed",
+            )?;
+            let retained = super::input_client::response_lookup(&tx, &self.run, input, known_id)?;
+            if let Some(receipt) = &retained {
+                *known_id = Some(receipt.input.input_id);
+            }
+            check_deadline(Instant::now(), deadline)?;
+            tx.commit().map_err(db_err)?;
+            Ok(retained)
+        })
+    }
+
+    fn retained_projection(
+        &self,
+        history: &Option<storage::PermissionReceipt>,
+    ) -> Result<Option<InputControlReply>> {
+        match history {
+            Some(receipt) if receipt.input.state != storage::InputState::Ready => {
+                super::input_client::projection(&self.run, receipt.clone())
+                    .map(|result| Some(InputControlReply::PermissionResponse(result)))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    pub(super) fn retained_permission_response(
+        &self,
+        conn: &mut Connection,
+        run: &RunRecord,
+        request: &InputControlRequest,
+        deadline: Instant,
+    ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
+        let InputControlOperation::PermissionRespond(input) = &request.operation else {
+            unreachable!("retained permission lookup receives a response operation");
+        };
+        let mut known_id = None;
+        let result = (|| {
+            let deadline = inherited_database_deadline(conn)
+                .map_or(deadline, |bound| deadline.min(bound.instant()));
+            let history =
+                self.permission_history(conn, run, request, input, deadline, &mut known_id)?;
+            self.retained_projection(&history)
+        })();
+        result.map_err(|source| InputFailure {
+            source,
+            run_id: Some(self.run.run_id),
+            interaction_id: Some(input.interaction_id),
+            input_id: known_id,
+            operation_key: Some(input.operation_key.clone()),
+        })
+    }
+
     fn permission_received(
         &mut self,
         conn: &mut Connection,
@@ -3472,47 +3551,17 @@ impl InputCoordinator {
         observation: &ObservationController,
         deadline: Instant,
     ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
-        let InputControlOperation::PermissionRespond(input) = request.operation else {
+        let InputControlOperation::PermissionRespond(input) = &request.operation else {
             unreachable!("permission response route selects its semantic operation");
         };
         let mut known_id = None;
         let result = (|| {
             let deadline = inherited_database_deadline(conn)
                 .map_or(deadline, |bound| deadline.min(bound.instant()));
-            check_deadline(Instant::now(), deadline)?;
-            super::input_client::validate_respond(&input)?;
-            ensure(
-                request.protocol_version == super::CONTROL_PROTOCOL_VERSION,
-                "input protocol version mismatch",
-            )?;
-            let mut expected = ControlIdentity::from_run(&self.run);
-            expected.owner_epoch = input.expected_owner_epoch;
-            ensure(
-                request.identity == expected
-                    && input.expected_run_id == self.run.run_id
-                    && run.run_id == self.run.run_id,
-                "permission response fixed identity mismatch",
-            )?;
-            let history = with_database_deadline(conn, deadline, |conn| {
-                let tx = conn.transaction().map_err(db_err)?;
-                ensure(
-                    storage::database_identity(&tx)? == self.run.database_identity_json,
-                    "input database identity changed",
-                )?;
-                let retained =
-                    super::input_client::response_lookup(&tx, &self.run, &input, &mut known_id)?;
-                if let Some(receipt) = &retained {
-                    known_id = Some(receipt.input.input_id);
-                }
-                check_deadline(Instant::now(), deadline)?;
-                tx.commit().map_err(db_err)?;
-                Ok(retained)
-            })?;
-            if let Some(receipt) = &history
-                && receipt.input.state != storage::InputState::Ready
-            {
-                return super::input_client::projection(&self.run, receipt.clone())
-                    .map(|result| Some(InputControlReply::PermissionResponse(result)));
+            let history =
+                self.permission_history(conn, run, &request, input, deadline, &mut known_id)?;
+            if let Some(reply) = self.retained_projection(&history)? {
+                return Ok(Some(reply));
             }
             request.identity.validate(&self.run)?;
             if let Some(reason) = self.permission_blocker(observation) {
@@ -3622,7 +3671,7 @@ impl InputCoordinator {
             run_id: Some(self.run.run_id),
             interaction_id: Some(input.interaction_id),
             input_id: known_id,
-            operation_key: Some(input.operation_key),
+            operation_key: Some(input.operation_key.clone()),
         })
     }
 
@@ -3790,8 +3839,8 @@ impl InputCoordinator {
         deadline: Instant,
     ) -> Result<Option<InputGuard<'a>>> {
         let (transport, observation) = live;
-        self.validate_live(conn, run)?;
         self.validate_permission_binding(selection, observation)?;
+        self.validate_live(conn, run)?;
         self.validate_permission_association(conn, selection)?;
         ensure(
             self.pending.as_ref().is_some_and(|p| {

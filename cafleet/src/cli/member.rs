@@ -396,7 +396,7 @@ fn create(
     let mux = resolve_mux(settings).map_err(|e| CafleetError::App(e.to_string()))?;
     mux.ensure_available()
         .map_err(|e| CafleetError::App(e.to_string()))?;
-    backend.ensure_available(&SystemProbe)?;
+    let executable = backend.ensure_available(&SystemProbe)?;
     let context = mux
         .context_discovery()
         .map_err(|e| CafleetError::App(e.to_string()))?;
@@ -406,7 +406,7 @@ fn create(
     use std::time::{Duration, Instant};
     let deadline = Instant::now() + Duration::from_secs(10);
     let probe = backend.probe_native_version(
-        Path::new(backend.binary_name()),
+        &executable,
         deadline.min(Instant::now() + Duration::from_secs(2)),
     );
     let native = crate::coding_agent::native_launch_identity(backend, probe, &catalog);
@@ -484,8 +484,7 @@ fn create(
                 director_id,
                 agent_name,
             )?;
-            let argv =
-                backend.build_spawn_argv_with_policy(&prompt, name, model, effort, &policy)?;
+            let argv = backend.launch_argv(&executable, &prompt, name, model, effort, &policy)?;
             let spawn = runner::SpawnSpec {
                 argv,
                 cwd,
