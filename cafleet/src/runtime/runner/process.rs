@@ -909,6 +909,39 @@ mod mechanisms_tests {
     }
 
     #[test]
+    fn runner_real_pty_child_receives_the_forwarded_config_location() {
+        let fixture = Fixture::new();
+        let mut spec = fixture.spec();
+        let database_url = spec
+            .environment
+            .iter()
+            .find(|(key, _)| key == "CAFLEET_DATABASE_URL")
+            .map(|(_, value)| value.clone())
+            .expect("fixture spawn environment carries the database URL");
+        spec.environment = crate::coding_agent::CodingAgent::Opencode
+            .spawn_environment(&database_url, &|name| {
+                (name == "OPENCODE_CONFIG_DIR").then(|| "/cfg/open code".to_string())
+            })
+            .unwrap();
+        spec.argv = vec![
+            "/bin/sh".into(),
+            "-c".into(),
+            "printf 'config=%s\\n' \"$OPENCODE_CONFIG_DIR\"; printf 'database=%s\\n' \"$CAFLEET_DATABASE_URL\"".into(),
+        ];
+        let mut owned = OwnedPty::prepare(spec.size);
+        owned.session.spawn(&spec).unwrap();
+        let (output, status) = collect(&mut owned.session);
+        assert_eq!(owned.stop().cleanup_state, CleanupState::Complete);
+        let text = String::from_utf8(output).unwrap();
+        assert!(text.contains("config=/cfg/open code"), "{text:?}");
+        assert!(
+            text.contains(&format!("database={database_url}")),
+            "{text:?}"
+        );
+        assert_eq!(status, ChildExit::Code(0));
+    }
+
+    #[test]
     fn runner_real_pty_retains_the_numeric_native_signal_exit() {
         let fixture = Fixture::new();
         let mut spec = fixture.spec();

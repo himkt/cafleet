@@ -805,6 +805,134 @@ mod tests {
         assert!(coding_agent("unknown").is_none());
     }
 
+    const DATABASE_URL: &str = "sqlite:///fixture/db/registry.db";
+
+    fn every_config_variable(name: &str) -> Option<String> {
+        match name {
+            "CLAUDE_CONFIG_DIR" => Some("/cfg/claude dir/".into()),
+            "CODEX_HOME" => Some("/cfg/codex".into()),
+            "OPENCODE_CONFIG_DIR" => Some("/cfg/opencode".into()),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn spawn_environment_forwards_the_selected_config_variable_after_the_database_url() {
+        for &agent in CodingAgent::all() {
+            let expected = every_config_variable(agent.config_variable()).unwrap();
+            assert_eq!(
+                agent
+                    .spawn_environment(DATABASE_URL, &every_config_variable)
+                    .unwrap(),
+                vec![
+                    ("CAFLEET_DATABASE_URL".to_owned(), DATABASE_URL.to_owned()),
+                    (agent.config_variable().to_owned(), expected),
+                ],
+                "{agent:?} forwards only its own variable with the creator's exact value"
+            );
+        }
+    }
+
+    #[test]
+    fn spawn_environment_adds_nothing_when_the_config_variable_is_unset() {
+        for &agent in CodingAgent::all() {
+            let others = |name: &str| {
+                (name != agent.config_variable())
+                    .then(|| every_config_variable(name))
+                    .flatten()
+            };
+            assert_eq!(
+                agent.spawn_environment(DATABASE_URL, &others).unwrap(),
+                vec![("CAFLEET_DATABASE_URL".to_owned(), DATABASE_URL.to_owned())],
+                "{agent:?} forwards no default and no other backend's variable"
+            );
+        }
+    }
+
+    #[test]
+    fn spawn_environment_ignores_an_invalid_value_of_another_backend() {
+        for &agent in CodingAgent::all() {
+            let others_invalid = |name: &str| {
+                if name == agent.config_variable() {
+                    Some("/cfg/selected".to_string())
+                } else {
+                    Some("relative".to_string())
+                }
+            };
+            assert_eq!(
+                agent
+                    .spawn_environment(DATABASE_URL, &others_invalid)
+                    .unwrap(),
+                vec![
+                    ("CAFLEET_DATABASE_URL".to_owned(), DATABASE_URL.to_owned()),
+                    (
+                        agent.config_variable().to_owned(),
+                        "/cfg/selected".to_owned()
+                    ),
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn spawn_environment_rejects_an_invalid_selected_value_with_the_config_dir_error() {
+        for &agent in CodingAgent::all() {
+            for value in ["", "relative/cfg", "~/cfg"] {
+                let lookup =
+                    |name: &str| (name == agent.config_variable()).then(|| value.to_string());
+                let failure = agent
+                    .spawn_environment(DATABASE_URL, &lookup)
+                    .expect_err("an invalid config location fails before registration");
+                assert!(matches!(failure, CafleetError::App(_)));
+                assert_eq!(
+                    failure.message(),
+                    format!(
+                        "{} must be an absolute path (got '{value}')",
+                        agent.config_variable()
+                    )
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn selected_preflight_reads_the_native_opencode_config_directory_by_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let probe = Probe {
+            agent: CodingAgent::Opencode,
+            home: dir.path().into(),
+            config: None,
+            available: true,
+        };
+        let former = dir.path().join(".opencode/agents");
+        std::fs::create_dir_all(&former).unwrap();
+        for mode in ["cafleet", "cafleet-ask"] {
+            std::fs::write(former.join(format!("{mode}.md")), "former base").unwrap();
+            let failure = CodingAgent::Opencode
+                .ensure_available(&probe, mode)
+                .expect_err("a preset at the former base is not consulted");
+            let preset = dir
+                .path()
+                .join(format!(".config/opencode/agents/{mode}.md"));
+            assert!(
+                failure.message().starts_with(&format!(
+                    "cannot read opencode agent preset at {}: ",
+                    preset.display()
+                )),
+                "{}",
+                failure.message()
+            );
+            std::fs::create_dir_all(preset.parent().unwrap()).unwrap();
+            std::fs::write(&preset, "native base").unwrap();
+            assert_eq!(
+                CodingAgent::Opencode
+                    .ensure_available(&probe, mode)
+                    .unwrap(),
+                PathBuf::from("/fixture/bin/opencode")
+            );
+        }
+    }
+
     #[test]
     fn required_preset_is_the_selected_opencode_agent_file_and_absent_for_other_backends() {
         let config = Path::new("/fixture/preset-base");

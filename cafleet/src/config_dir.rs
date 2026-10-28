@@ -55,7 +55,11 @@ mod tests {
     const ENV_RESOLVERS: [(Resolver, &str, &str); 3] = [
         (claude_config_dir, "CLAUDE_CONFIG_DIR", ".claude"),
         (codex_home, "CODEX_HOME", ".codex"),
-        (opencode_preset_base, "OPENCODE_CONFIG_DIR", ".opencode"),
+        (
+            opencode_preset_base,
+            "OPENCODE_CONFIG_DIR",
+            ".config/opencode",
+        ),
     ];
 
     fn home() -> PathBuf {
@@ -118,6 +122,19 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn opencode_preset_base_defaults_to_the_skills_base_the_native_cli_reads() {
+        let home = home();
+        assert_eq!(
+            opencode_preset_base(&|_| None, &home).unwrap().path,
+            opencode_skills_base(&home)
+        );
+        assert_ne!(
+            opencode_preset_base(&|_| None, &home).unwrap().path,
+            home.join(".opencode")
+        );
     }
 
     #[test]

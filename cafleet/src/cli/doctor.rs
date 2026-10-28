@@ -449,9 +449,63 @@ mod tests {
     }
 
     #[test]
+    fn opencode_installation_at_the_former_base_is_not_the_resolved_installation() {
+        let home = tempfile::tempdir().unwrap();
+        let mut conn = crate::broker::tests::migrated_conn(&home);
+        let former = home.path().join(".opencode");
+        std::fs::create_dir_all(former.join("agents")).unwrap();
+        for preset in ["cafleet.md", "cafleet-ask.md"] {
+            std::fs::write(former.join("agents").join(preset), "former base").unwrap();
+        }
+        crate::broker::record_asset_install(
+            &mut conn,
+            "opencode",
+            &former.display().to_string(),
+            super::super::VERSION,
+        )
+        .unwrap();
+        let probe = Probe {
+            home: home.path().into(),
+            executable: true,
+            invalid: None,
+        };
+        let schema = SchemaState::Head {
+            version: crate::db::head_version(),
+        };
+        let checks = agent_checks(Some(&conn), &schema, &probe, Ok(home.path()));
+        let base = home.path().join(".config/opencode");
+        let configuration = find(&checks, "opencode.configuration");
+        assert_eq!(configuration.status, "ok");
+        assert_eq!(configuration.detail, base.display().to_string());
+        let installation = find(&checks, "opencode.installation");
+        assert_eq!(
+            installation.status, "info",
+            "a former-base row is never current"
+        );
+        assert_eq!(
+            installation.detail,
+            format!(
+                "no installation recorded at {}; run 'cafleet setup --coding-agent opencode'",
+                base.display()
+            )
+        );
+        for name in ["opencode.preset", "opencode.preset.cafleet-ask"] {
+            let check = find(&checks, name);
+            assert_eq!(check.status, "error", "{name} reads only the resolved base");
+            assert!(
+                check
+                    .detail
+                    .starts_with(&base.join("agents").display().to_string()),
+                "{}",
+                check.detail
+            );
+        }
+    }
+
+    #[test]
     fn opencode_preset_checks_report_ok_with_each_installed_preset_path() {
         let home = tempfile::tempdir().unwrap();
-        let agents = home.path().join(".opencode/agents");
+        let agents = home.path().join(".config/opencode/agents");
         std::fs::create_dir_all(&agents).unwrap();
         std::fs::write(agents.join("cafleet.md"), "default").unwrap();
         std::fs::write(agents.join("cafleet-ask.md"), "ask").unwrap();
@@ -474,7 +528,7 @@ mod tests {
     #[test]
     fn missing_cafleet_ask_preset_is_an_error_with_the_setup_remedy() {
         let home = tempfile::tempdir().unwrap();
-        let agents = home.path().join(".opencode/agents");
+        let agents = home.path().join(".config/opencode/agents");
         std::fs::create_dir_all(&agents).unwrap();
         std::fs::write(agents.join("cafleet.md"), "default").unwrap();
         let probe = Probe {

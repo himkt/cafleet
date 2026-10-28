@@ -668,6 +668,35 @@ mod tests {
     }
 
     #[test]
+    fn runner_descriptor_records_the_forwarded_config_location_in_order() {
+        let mut fixture = Fixture::new();
+        let artifacts = fixture.artifacts();
+        let mut spec = fixture.spec();
+        let database_url = spec.environment[0].1.clone();
+        for &agent in crate::coding_agent::CodingAgent::all() {
+            spec.environment = agent
+                .spawn_environment(&database_url, &|name| {
+                    (name == agent.config_variable()).then(|| format!("/cfg/{}", agent.name()))
+                })
+                .unwrap();
+            let descriptor = LaunchDescriptor::new(&fixture.run, spec.clone()).unwrap();
+            artifacts.write_descriptor(&descriptor).unwrap();
+            let read = load_descriptor(&fixture.conn, &artifacts.paths.descriptor).unwrap();
+            assert_eq!(
+                read.spawn.environment,
+                vec![
+                    ("CAFLEET_DATABASE_URL".to_owned(), database_url.clone()),
+                    (
+                        agent.config_variable().to_owned(),
+                        format!("/cfg/{}", agent.name())
+                    ),
+                ]
+            );
+            artifacts.remove_descriptor().unwrap();
+        }
+    }
+
+    #[test]
     fn runner_descriptor_load_rejects_malformed_or_identity_mismatched_input() {
         for damage in ["json", "nonce", "epoch", "run", "database"] {
             let mut fixture = Fixture::new();
