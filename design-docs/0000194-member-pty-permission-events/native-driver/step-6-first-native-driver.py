@@ -42,12 +42,18 @@ CASES = {
     "codex-idle-001": {"backend": "codex", "mode": "no_answer", "decision": None, "stage_hex": None,
                        "probe_argument": None, "database": "xi01.db", "socket": "xi01", "session": "cafleet194xi01"},
 }
-# The reviewed native executable per backend; its digest is supplied with --native-sha256 and checked.
+# The reviewed native executable and permission-probe helper per backend, pinned by digest.
 NATIVES = {
     "claude": {"path": Path("/root/.local/share/mise/installs/aqua-anthropics-claude-code/v2.1.302/claude"),
-               "version": "2.1.302"},
+               "sha256": "60d7eb7f12fbb28a52533fe8be5884097403562aa02dc73991a021c7067e29a5",
+               "version": "2.1.302",
+               "helper": BASE / ".execution/194/native-fixtures/claude-default-linux/permission-probe",
+               "helper_sha256": "de637bad7b3c569c448634f24ec3cb09d97d0a528e2eac27f3be544b5fbd03c0"},
     "codex": {"path": Path("/root/.local/share/mise/installs/aqua-openai-codex/v0.163.0/bin/codex"),
-              "version": "0.163.0"},
+              "sha256": "399ff69c431c066e40de318fba45c2b07f45a76b19939d247ee4828fc70c4215",
+              "version": "0.163.0",
+              "helper": BASE / ".execution/194/native-fixtures/codex-on-request-linux/permission-probe",
+              "helper_sha256": "a7368024d7452112753355570f3c64705f53996a6b7cdb0f2dbc7edcef0c9f8e"},
 }
 VERSION_TOKEN = re.compile(r"^[0-9]+(\.[0-9]+)+([-+][0-9A-Za-z.]+)?$")
 LIBTEST_ROOT = BASE / ".execution/194/native-target-002/debug/deps"
@@ -82,7 +88,9 @@ def version_token(line):
     tokens = [token for token in line.split() if VERSION_TOKEN.match(token)]
     require(len(tokens) == 1, "exactly one native version token required")
     return tokens[0]
-ENTRY ="runtime::runner::native_capture::verification::native_capture_prepare_start_driver"
+
+
+ENTRY = "runtime::runner::native_capture::verification::native_capture_prepare_start_driver"
 
 
 def require(condition, message):
@@ -405,10 +413,10 @@ def prepare_start_case(args):
     publish(CWD / "removed-environment.json", {"schema_version": 1,
             "removed_names": sorted(name for name in os.environ if server_removed(name))})
     pinned = native()
-    require(digest(pinned["path"]) == args.native_sha256, "pinned native executable changed")
-    helper_source = Path(args.helper).resolve(strict=True)
+    require(digest(pinned["path"]) == pinned["sha256"], "pinned native executable changed")
+    helper_source = pinned["helper"]
     helper_bytes = read_bytes(helper_source, 4096, private=False)
-    require(hashlib.sha256(helper_bytes).hexdigest() == args.helper_sha256, "reviewed helper differs")
+    require(hashlib.sha256(helper_bytes).hexdigest() == pinned["helper_sha256"], "reviewed helper differs")
     helper = CWD / "permission-probe"
     descriptor = os.open(helper, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o700)
     with os.fdopen(descriptor, "wb") as output:
@@ -419,7 +427,7 @@ def prepare_start_case(args):
     require(len(version_output.splitlines()) == 1 and version_token(version_output) == pinned["version"],
             "fresh same-file normalized version differs")
     version = CWD / "version-evidence.json"
-    publish(version, {"schema_version": 1, "executable": str(pinned["path"]), "sha256": args.native_sha256,
+    publish(version, {"schema_version": 1, "executable": str(pinned["path"]), "sha256": pinned["sha256"],
                      "argv": [str(pinned["path"]), "--version"], "stdout": version_output, "exit_code": 0})
     source = reference(Path(args.source_manifest).resolve(strict=True), "source-manifest.json")
     environment = reference(Path(args.environment_evidence).resolve(strict=True), "environment-evidence.json")
@@ -450,7 +458,7 @@ def prepare_start_case(args):
              "expires_at_mono_ns": until, "cleanup_reserve_ms": 4000,
              "database_url": f"sqlite:///{DATABASE}", "cwd": str(CWD), "output_directory": str(OUTPUT),
              "native_version": pinned["version"],
-             "native_executable": {"path": str(pinned["path"]), "sha256": args.native_sha256},
+             "native_executable": {"path": str(pinned["path"]), "sha256": pinned["sha256"]},
              "helper": {"path": str(helper), "sha256": digest(helper)},
              "libtest": {"path": str(libtest), "sha256": digest(libtest)},
              "source_manifest": source, "version_evidence": {"path": str(version), "sha256": digest(version)},
@@ -546,8 +554,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     modes = parser.add_subparsers(dest="mode", required=True)
     prepare = modes.add_parser("prepare-start")
-    for argument in ("libtest", "source-manifest", "environment-evidence", "redaction", "capture-policy",
-                     "native-sha256", "helper", "helper-sha256"):
+    for argument in ("libtest", "source-manifest", "environment-evidence", "redaction", "capture-policy"):
         prepare.add_argument("--" + argument, required=True)
     prepare.add_argument("--director-backend", required=True)
     prepare.set_defaults(action=prepare_start)
