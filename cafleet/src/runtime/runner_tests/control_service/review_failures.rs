@@ -294,6 +294,76 @@ fn runner_review_r3_resize_detector_failure_keeps_actual_resized_service_and_nat
 }
 
 #[test]
+fn runner_failure_with_a_live_native_child_persists_degraded_before_owned_cleanup_confirms_exit() {
+    let mut fixture = ServiceFixture::configured(false, |fixture, spec| {
+        synthetic(fixture, spec);
+        install_trap(spec, "");
+    });
+    let started = fixture.start_running();
+    assert!(started.child.matches().unwrap());
+    assert!(fixture.process.as_ref().unwrap().matches().unwrap());
+    let before = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+    assert_eq!(before.status, RunStatus::Running);
+    rustix::termios::tcsetwinsize(
+        &fixture.master,
+        rustix::termios::Winsize {
+            ws_row: 0,
+            ws_col: 0,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        },
+    )
+    .unwrap();
+    kill(
+        Pid::from_raw(i32::try_from(fixture.child.id()).unwrap()),
+        Signal::SIGWINCH,
+    )
+    .unwrap();
+    let until = Instant::now() + Duration::from_secs(5);
+    let during = loop {
+        let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+        if run.status != RunStatus::Running {
+            break run;
+        }
+        assert!(
+            Instant::now() < until,
+            "runner failure left the run running"
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    };
+    assert_eq!(during.status, RunStatus::Degraded);
+    assert_eq!(during.child_pid, Some(started.child.pid));
+    assert!(
+        started.child.matches().unwrap(),
+        "the TERM-immune native child is still live while the run is degraded"
+    );
+    let exit = fixture.wait();
+    let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+    let diagnostics = run
+        .cleanup_diagnostics_json
+        .as_ref()
+        .and_then(Value::as_array)
+        .expect("runner failure records cleanup diagnostics");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic
+            .as_str()
+            .is_some_and(|text| text.contains("terminal dimensions must be positive"))),
+        "{diagnostics:?}"
+    );
+    assert_eq!(run.status, RunStatus::Exited, "{diagnostics:?}");
+    assert_eq!(run.exit_signal, Some(9), "{diagnostics:?}");
+    assert_eq!(run.child_pid, Some(started.child.pid));
+    assert_eq!(
+        run.child_start_identity.as_deref(),
+        Some(started.child.start_identity.as_str())
+    );
+    assert_eq!(run.owner_epoch, before.owner_epoch);
+    assert_eq!(run.cleanup_state, CleanupState::Incomplete);
+    assert_eq!(exit.code(), Some(137));
+    assert!(!started.child.matches().unwrap());
+}
+
+#[test]
 fn runner_review_r3_child_output_parser_and_detector_failures_keep_transport_and_typed_metadata() {
     for (operation, fired, diagnostic) in [
         ("parser", "ChildOutput/Parser", "parser_unavailable"),
