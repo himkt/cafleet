@@ -103,7 +103,7 @@ struct ApprovedCase {
     database: &'static str,
     socket: &'static str,
 }
-const APPROVED_CASES: [ApprovedCase; 7] = [
+const APPROVED_CASES: [ApprovedCase; 9] = [
     ApprovedCase {
         id: "cells-002",
         backend: CodingAgent::Claude,
@@ -169,6 +169,28 @@ const APPROVED_CASES: [ApprovedCase; 7] = [
         probe_argument: Some("allow"),
         database: "xc01.db",
         socket: "xc01",
+    },
+    ApprovedCase {
+        id: "codex-ans-allow-001",
+        backend: CodingAgent::Codex,
+        permission_mode: "on-request",
+        mode: DriverMode::AnswerStage,
+        decision: Some("allow"),
+        stage_hex: Some("79"),
+        probe_argument: Some("allow"),
+        database: "xa01.db",
+        socket: "xa01",
+    },
+    ApprovedCase {
+        id: "codex-ans-deny-001",
+        backend: CodingAgent::Codex,
+        permission_mode: "on-request",
+        mode: DriverMode::AnswerStage,
+        decision: Some("deny"),
+        stage_hex: Some("33"),
+        probe_argument: Some("deny"),
+        database: "xd01.db",
+        socket: "xd01",
     },
     ApprovedCase {
         id: "codex-idle-001",

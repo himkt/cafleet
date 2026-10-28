@@ -16,7 +16,7 @@ import sys
 import tempfile
 import time
 
-BASE = Path(__file__).resolve().parents[2]
+BASE = Path(__file__).resolve().parents[3]
 if not BASE.is_absolute() or str(BASE) == "<unset>":
     raise RuntimeError("Error: BASE is <unset>; refusing to fall back to /tmp")
 # Committed native fixtures derive from these captures, so their visible paths must not name a home directory.
@@ -39,6 +39,12 @@ CASES = {
                         "probe_argument": None, "database": "xt01.db", "socket": "xt01", "session": "cafleet194xt01"},
     "codex-cells-001": {"backend": "codex", "mode": "no_answer", "decision": None, "stage_hex": None,
                         "probe_argument": "allow", "database": "xc01.db", "socket": "xc01", "session": "cafleet194xc01"},
+    "codex-ans-allow-001": {"backend": "codex", "mode": "answer_stage", "decision": "allow", "stage_hex": "79",
+                            "probe_argument": "allow", "database": "xa01.db", "socket": "xa01",
+                            "session": "cafleet194xa01"},
+    "codex-ans-deny-001": {"backend": "codex", "mode": "answer_stage", "decision": "deny", "stage_hex": "33",
+                           "probe_argument": "deny", "database": "xd01.db", "socket": "xd01",
+                           "session": "cafleet194xd01"},
     "codex-idle-001": {"backend": "codex", "mode": "no_answer", "decision": None, "stage_hex": None,
                        "probe_argument": None, "database": "xi01.db", "socket": "xi01", "session": "cafleet194xi01"},
 }
