@@ -667,10 +667,24 @@ fn composer_submissions(
 }
 
 const BUNDLED_DEFINITIONS: &str = include_str!("bundled.json");
-const BUNDLED_FIXTURES: &[(&str, &[u8])] = &[(
-    "native/claude-2.1.302-default-permission-1.json",
-    include_bytes!("native/claude-2.1.302-default-permission-1.json"),
-)];
+const BUNDLED_FIXTURES: &[(&str, &[u8])] = &[
+    (
+        "native/claude-2.1.302-default-permission-1.json",
+        include_bytes!("native/claude-2.1.302-default-permission-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-allow-pre-stage-1.json",
+        include_bytes!("native/claude-2.1.302-allow-pre-stage-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-deny-pre-stage-1.json",
+        include_bytes!("native/claude-2.1.302-deny-pre-stage-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-idle-composer-1.json",
+        include_bytes!("native/claude-2.1.302-idle-composer-1.json"),
+    ),
+];
 
 fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};

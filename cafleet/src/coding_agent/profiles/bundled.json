@@ -10,13 +10,43 @@
       "cols": 120,
       "source_ref": "native/claude-2.1.302-default-permission-1.json",
       "sha256": "be7c9c5c62f7fd73939d7838c7b6457c1db47d238956bc25e48da58cb7e95c8f"
+    },
+    {
+      "id": "claude-2.1.302-allow-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude-2.1.302-allow-pre-stage-1.json",
+      "sha256": "96ef6ca358b364ea097d9cc28d5fb25eee03ac0bb4d2d079659aed0a1bba098c"
+    },
+    {
+      "id": "claude-2.1.302-deny-pre-stage-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude-2.1.302-deny-pre-stage-1.json",
+      "sha256": "012ffa7d2bef37d65538e104e6b43452e9c4be86ce7c9c1e58aaf66dd987a060"
+    },
+    {
+      "id": "claude-2.1.302-idle-composer-1",
+      "kind": "native",
+      "backend": "claude",
+      "native_version": "2.1.302",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/claude-2.1.302-idle-composer-1.json",
+      "sha256": "e606b8080d5fcd53505c0722c8922bb7943e3b39dd0b8a841f892c1505726bd4"
     }
   ],
   "profiles": [
     {
       "backend": "claude",
       "native_versions": ["2.1.302"],
-      "profile_version": "claude-2.1.302-default-1",
+      "profile_version": "claude-2.1.302-default-2",
       "rules": [
         {
           "id": "claude-bash-permission",
@@ -48,6 +78,28 @@
           },
           "verified_noninteraction": false,
           "sensitive": false
+        },
+        {
+          "id": "claude-idle-composer",
+          "priority": 50,
+          "observation": "composer_empty",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^❯\\u{a0}",
+            "end_pattern": "^❯\\u{a0}",
+            "max_rows": 1,
+            "cursor": "at_end"
+          },
+          "matchers": [
+            {"id": "prompt", "scope": "line", "pattern": "^❯\\u{a0}"}
+          ],
+          "extract": {
+            "operation": null,
+            "choices": [],
+            "native_request_id": null
+          },
+          "verified_noninteraction": true,
+          "sensitive": false
         }
       ],
       "capabilities": {
@@ -55,8 +107,34 @@
           "rule_ids": ["claude-bash-permission"],
           "fixture_ids": ["claude-2.1.302-default-permission-1"]
         },
-        "composer": null,
-        "answers": []
+        "composer": {
+          "rule_ids": ["claude-idle-composer"],
+          "fixture_ids": ["claude-2.1.302-idle-composer-1"]
+        },
+        "answers": [
+          {
+            "decision": "allow",
+            "request_rule_id": "claude-bash-permission",
+            "answer_rule_id": "claude-bash-allow-digit",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {"bytes_hex": "31", "required_rule_id": "claude-bash-permission", "required_choice_id": "allow-once"}
+            ],
+            "fixture_ids": ["claude-2.1.302-allow-pre-stage-1"]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "claude-bash-permission",
+            "answer_rule_id": "claude-bash-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {"bytes_hex": "34", "required_rule_id": "claude-bash-permission", "required_choice_id": "deny-once"}
+            ],
+            "fixture_ids": ["claude-2.1.302-deny-pre-stage-1"]
+          }
+        ]
       }
     }
   ]
