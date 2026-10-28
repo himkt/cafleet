@@ -1025,6 +1025,108 @@ mod permission_response_contracts {
         settled_ids(h)
     }
 
+    const CLAUDE_BOXED_SINGLE_ROW_SCREEN: &str = include_str!(
+        "../../coding_agent/profiles/native/claude-2.1.302-boxed-single-row-permission-1.json"
+    );
+
+    fn claude_boxed_single_row_form(h: &mut Host) -> (i64, i64, i64, i64) {
+        h.pty
+            .child
+            .bytes
+            .extend(native_screen_bytes(CLAUDE_BOXED_SINGLE_ROW_SCREEN));
+        settled_ids(h)
+    }
+
+    type FormFeed = fn(&mut Host) -> (i64, i64, i64, i64);
+
+    #[test]
+    fn a_preview_during_a_visible_claude_permission_form_is_held_without_child_bytes() {
+        let forms: [(&str, FormFeed); 2] = [
+            ("claude-2.1.302-default-permission-1", claude_blocked_form),
+            (
+                "claude-2.1.302-boxed-single-row-permission-1",
+                claude_boxed_single_row_form,
+            ),
+        ];
+        for (fixture, feed_form) in forms {
+            with_claude_inspection(|h, _, _| {
+                let ids = feed_form(h);
+                let inspected = inspect(h, ids);
+                assert!(inspected.request_token.is_some(), "{fixture}");
+                let generation = h.controller.request_generation();
+                let offers = h.pty.offers.clone();
+                let program = h.pty.program.clone();
+                let run = h.fixture.run.clone();
+                let message = crate::broker::send_message(
+                    &mut h.fixture.conn,
+                    run.director_member_id,
+                    run.member_id,
+                    "preview during a permission form",
+                )
+                .unwrap();
+                let key = format!("preview:{}:{}", run.run_id, message.message_id);
+                let mut request = h.request(&key);
+                request.operation =
+                    InputControlOperation::SubmitPrompt(crate::runtime::runner::SubmitInput {
+                        operation_key: key.clone(),
+                        input_kind: storage::InputKind::Preview,
+                        message_id: Some(message.message_id),
+                        literal: "preview during a permission form".into(),
+                    });
+                let reply = h
+                    .coordinator
+                    .handle_received(
+                        &mut h.fixture.conn,
+                        &h.fixture.run,
+                        request,
+                        &h.controller,
+                        h.until,
+                    )
+                    .unwrap();
+                let Some(InputControlReply::Submission(held)) = reply else {
+                    panic!("{fixture}: a preview during a visible form returns a Submission reply")
+                };
+                assert_eq!(
+                    (held.status, held.stage, held.input_id),
+                    (SubmissionStatus::Held, SubmissionStage::ZeroBytes, None),
+                    "{fixture}"
+                );
+                assert!(h.coordinator.pending.is_none(), "{fixture}");
+                assert_eq!(
+                    h.pty.offers, offers,
+                    "{fixture}: no child byte, Escape included, is offered"
+                );
+                assert_eq!(
+                    h.pty.program, program,
+                    "{fixture}: no program byte is written"
+                );
+                assert!(
+                    storage::find_input(&h.fixture.conn, run.run_id, &key)
+                        .unwrap()
+                        .is_none(),
+                    "{fixture}"
+                );
+                let notified: Option<String> = h
+                    .fixture
+                    .conn
+                    .query_row(
+                        "SELECT notified_at FROM messages WHERE message_id=?1",
+                        [message.message_id],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(notified, None, "{fixture}");
+                assert!(h.controller.current_request().is_some(), "{fixture}");
+                assert_eq!(h.controller.request_generation(), generation, "{fixture}");
+                assert_eq!(
+                    inspect(h, ids).request_token,
+                    inspected.request_token,
+                    "{fixture}"
+                );
+            });
+        }
+    }
+
     #[test]
     fn permission_claude_blink_cursor_transit_keeps_generation_and_token_and_admits_respond() {
         assert_eq!(CLAUDE_BLINK.len(), 441);
