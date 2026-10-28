@@ -475,6 +475,133 @@ mod tests {
         assert!(CodingAgent::Opencode.validate_effort(Some("high")).is_err());
     }
 
+    mod native_version_probe {
+        use super::*;
+        use crate::broker::runtime::Coverage;
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::{Duration, Instant};
+
+        fn stub(dir: &Path, name: &str, body: &str) -> PathBuf {
+            let path = dir.join(name);
+            std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        }
+
+        fn probe(executable: &Path) -> Result<String, CafleetError> {
+            CodingAgent::Claude
+                .probe_native_version(executable, Instant::now() + Duration::from_secs(2))
+        }
+
+        #[test]
+        fn native_version_probe_records_the_single_version_token_of_a_version_only_invocation() {
+            let dir = tempfile::tempdir().unwrap();
+            let only_version =
+                "[ \"$#\" -eq 1 ] && [ \"$1\" = --version ] || exit 3\nread -r ignored || true";
+            for (output, expected) in [
+                ("2.1.302 (Claude Code)", "2.1.302"),
+                ("codex-cli 0.163.0", "0.163.0"),
+                ("1.2.3-beta.1", "1.2.3-beta.1"),
+            ] {
+                let path = stub(
+                    dir.path(),
+                    "native",
+                    &format!("{only_version}\nprintf '%s\\n' '{output}'\nprintf 'ignored\\n' >&2"),
+                );
+                assert_eq!(probe(&path).unwrap(), expected, "{output}");
+            }
+        }
+
+        #[test]
+        fn native_version_probe_rejects_failed_ambiguous_invalid_or_missing_versions() {
+            let dir = tempfile::tempdir().unwrap();
+            for (case, body) in [
+                ("nonzero exit", "printf '2.1.302\\n'; exit 1"),
+                ("no version token", "printf 'Claude Code\\n'"),
+                ("two version tokens", "printf '2.1.302 2.1.303\\n'"),
+                (
+                    "version outside the first line",
+                    "printf 'Claude Code\\n2.1.302\\n'",
+                ),
+                ("empty output", "exit 0"),
+                ("non-UTF-8 output", "printf '2.1.302 \\377\\n'"),
+            ] {
+                let path = stub(dir.path(), "native", body);
+                assert!(probe(&path).is_err(), "{case} must not yield a version");
+            }
+            assert!(
+                probe(&dir.path().join("absent")).is_err(),
+                "unstartable binary"
+            );
+        }
+
+        #[test]
+        fn native_version_probe_kills_and_reaps_a_probe_running_at_its_bound() {
+            let dir = tempfile::tempdir().unwrap();
+            let pid_file = dir.path().join("probe.pid");
+            let path = stub(
+                dir.path(),
+                "native",
+                &format!(
+                    "printf '%s' \"$$\" > '{}'\nexec /bin/sleep 30",
+                    pid_file.display()
+                ),
+            );
+            let start = Instant::now();
+            let result =
+                CodingAgent::Claude.probe_native_version(&path, start + Duration::from_millis(300));
+            assert!(result.is_err());
+            assert!(
+                start.elapsed() < Duration::from_secs(2),
+                "{:?}",
+                start.elapsed()
+            );
+            let pid: i32 = std::fs::read_to_string(&pid_file).unwrap().parse().unwrap();
+            assert_eq!(
+                nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None),
+                Err(nix::errno::Errno::ESRCH),
+                "the timed-out probe is killed and reaped"
+            );
+        }
+
+        #[test]
+        fn native_launch_identity_selects_the_bundled_profile_or_records_unknown_with_a_warning() {
+            let catalog = ProfileCatalog::bundled().unwrap();
+            let tested =
+                native_launch_identity(CodingAgent::Claude, Ok("2.1.302".into()), &catalog);
+            assert_eq!(tested.native_version.as_deref(), Some("2.1.302"));
+            assert_eq!(
+                tested.profile_version,
+                catalog
+                    .capabilities(CodingAgent::Claude, Some("2.1.302"))
+                    .profile_version
+            );
+            assert!(tested.profile_version.is_some());
+            assert_eq!(tested.coverage, Coverage::Tested);
+            assert_eq!(tested.warning, None);
+            let unprofiled =
+                native_launch_identity(CodingAgent::Claude, Ok("2.1.301".into()), &catalog);
+            assert_eq!(unprofiled.native_version.as_deref(), Some("2.1.301"));
+            assert_eq!(unprofiled.profile_version, None);
+            assert_eq!(unprofiled.coverage, Coverage::Unknown);
+            assert_eq!(unprofiled.warning, None);
+            let failed = native_launch_identity(
+                CodingAgent::Codex,
+                Err(CafleetError::App("probe exited with status 1".into())),
+                &catalog,
+            );
+            assert_eq!(failed.native_version, None);
+            assert_eq!(failed.profile_version, None);
+            assert_eq!(failed.coverage, Coverage::Unknown);
+            assert_eq!(
+                failed.warning.as_deref(),
+                Some(
+                    "Warning: native version unavailable for codex: probe exited with status 1; coverage unknown."
+                )
+            );
+        }
+    }
+
     #[test]
     fn selected_preflight_checks_paths_then_binary_and_relocated_required_preset() {
         let dir = tempfile::tempdir().unwrap();
