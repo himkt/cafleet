@@ -131,7 +131,7 @@ mod permission_inspection_contracts {
         }
     }
 
-    fn request(h: &Host, ids: (i64, i64, i64, i64)) -> InputControlRequest {
+    pub(super) fn request(h: &Host, ids: (i64, i64, i64, i64)) -> InputControlRequest {
         let mut request = h.request("unused-inspection-key");
         request.operation = InputControlOperation::PermissionInspect(PermissionInspectInput {
             event_id: ids.0,
@@ -141,7 +141,7 @@ mod permission_inspection_contracts {
         request
     }
 
-    fn inspect_request(
+    pub(super) fn inspect_request(
         h: &mut Host,
         request: InputControlRequest,
         until: Instant,
@@ -587,7 +587,8 @@ mod permission_inspection_contracts {
 mod permission_response_contracts {
     use super::contract_tests::ordinary_prompt::support::{Host, Pty};
     use super::permission_inspection_contracts::{
-        counts, form, inspect, stable_form, with_definition, with_inspection,
+        counts, form, inspect, inspect_request, request as inspection_target, stable_form,
+        with_definition, with_inspection,
     };
     use super::*;
     use crate::broker::runtime::{DecisionSource, DirectorMode, PermissionDecision};
@@ -718,6 +719,119 @@ mod permission_response_contracts {
             Some((input.interaction_id, id))
         );
         receipt
+    }
+
+    const UNAVAILABLE: &str = "current executable permission request unavailable";
+
+    fn blocked_reason(h: &mut Host, ids: (i64, i64, i64, i64)) -> String {
+        let target = inspection_target(h, ids);
+        let inspected = inspect_request(h, target, h.until)
+            .expect("a blocked request is an inspection result, not an error");
+        assert_eq!(inspected.request_token, None);
+        assert!(inspected.supported_decisions.is_empty());
+        assert_eq!(inspected.answer_capability, storage::Coverage::Unknown);
+        inspected
+            .capability_reason
+            .expect("a blocked request names its reason")
+    }
+
+    fn refused_reason(h: &mut Host, input: &PermissionRespondInput) -> String {
+        match handle(h, input) {
+            Err(failure) => failure.source.message().into_owned(),
+            Ok(_) => panic!("a blocked request refuses the response"),
+        }
+    }
+
+    #[test]
+    fn permission_inspection_and_response_name_the_same_blocking_conjunct() {
+        let mut reasons = Vec::new();
+        for (case, block) in [
+            (
+                "fenced input",
+                (|h: &mut Host| h.coordinator.fence(h.until).unwrap()) as fn(&mut Host),
+            ),
+            ("failed manual accounting", |h: &mut Host| {
+                h.coordinator.manual_generation = u64::MAX;
+                assert!(h.coordinator.observe_manual(1).is_err());
+                assert!(h.coordinator.manual_accounting_failed);
+            }),
+        ] {
+            with_inspection(|h, _, _| {
+                let ids = stable_form(h);
+                let inspected = inspect(h, ids);
+                let input = command(h, &inspected, "response:blocked", PermissionDecision::Allow);
+                block(h);
+                h.drain();
+                let reason = blocked_reason(h, ids);
+                assert_ne!(reason, UNAVAILABLE, "{case} names its own conjunct");
+                let refused = refused_reason(h, &input);
+                assert!(
+                    refused.contains(&reason),
+                    "{case}: respond reports the inspect reason {reason:?}, got {refused:?}"
+                );
+                assert_eq!(counts(h), [0, 0, 0]);
+                assert!(h.pty.program.is_empty());
+                reasons.push(reason);
+            });
+        }
+        assert_ne!(reasons[0], reasons[1], "each conjunct has its own reason");
+    }
+
+    #[test]
+    fn permission_admission_requires_a_settled_observation_and_survives_an_evidence_only_redraw() {
+        with_inspection(|h, _, _| {
+            let ids = stable_form(h);
+            let inspected = inspect(h, ids);
+            let input = command(h, &inspected, "response:redraw", PermissionDecision::Allow);
+            let lock = Connection::open(h.fixture.conn.path().unwrap()).unwrap();
+            lock.execute_batch("BEGIN IMMEDIATE").unwrap();
+            h.pty
+                .child
+                .bytes
+                .extend(crate::coding_agent::inspection_fixture_form(
+                    "PRIVATE_INSPECTION_OPERATION",
+                    "synthetic-only",
+                ));
+            h.coordinator
+                .progress_with_manual(&mut h.transport, |transport| {
+                    transport.quiesce_for_input(
+                        &mut h.human,
+                        &mut h.pty,
+                        &mut h.output,
+                        &mut h
+                            .controller
+                            .observer(&h.writer, &super::super::RealObservationClock),
+                        h.until,
+                    )
+                })
+                .unwrap();
+            assert!(
+                h.controller.current_request().is_some(),
+                "the equivalent redraw keeps the observed request"
+            );
+            let reason = blocked_reason(h, ids);
+            assert_ne!(reason, UNAVAILABLE, "a pending observation update is named");
+            let refused = refused_reason(h, &input);
+            assert!(
+                refused.contains(&reason),
+                "respond refuses an unsettled observation with {reason:?}, got {refused:?}"
+            );
+            assert_eq!(counts(h), [0, 0, 0]);
+            lock.execute_batch("COMMIT").unwrap();
+            drop(lock);
+            h.drain();
+            let settled = inspect(h, ids);
+            assert_eq!(
+                settled.request_token, inspected.request_token,
+                "an evidence-only redraw keeps the issued token"
+            );
+            assert!(
+                handle(h, &input).unwrap().is_none(),
+                "the settled request accepts its original token"
+            );
+            arm_stage(h, 1);
+            assert_eq!(counts(h), [1, 1, 1]);
+        });
     }
 
     #[test]
