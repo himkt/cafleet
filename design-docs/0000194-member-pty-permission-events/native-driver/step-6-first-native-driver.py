@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import shutil
 import sqlite3
@@ -19,20 +20,37 @@ BASE = Path(__file__).resolve().parents[2]
 if not BASE.is_absolute() or str(BASE) == "<unset>":
     raise RuntimeError("Error: BASE is <unset>; refusing to fall back to /tmp")
 # Committed native fixtures derive from these captures, so their visible paths must not name a home directory.
-NEUTRAL = Path("/private/tmp/cafleet-194")
-PRIVATE = BASE / ".p194"
+NEUTRAL = Path("/tmp/cafleet-194")
+# The repository mount reports root-created files as owned by another user, which the private
+# ownership checks refuse, so case databases and sockets live on the local filesystem.
+PRIVATE = Path("/tmp/cafleet-194-p")
 ANSWER_WINDOW_MS = 60_000
 # Mirrors APPROVED_CASES in verification.rs; the driver rejects any other binding.
 CASES = {
-    "cells-002": {"mode": "no_answer", "decision": None, "stage_hex": None, "probe_argument": "allow",
-                  "database": "nc02.db", "socket": "tc02", "session": "cafleet194nc02"},
-    "ans-allow-001": {"mode": "answer_stage", "decision": "allow", "stage_hex": "31", "probe_argument": "allow",
-                      "database": "na01.db", "socket": "ta01", "session": "cafleet194na01"},
-    "ans-deny-001": {"mode": "answer_stage", "decision": "deny", "stage_hex": "34", "probe_argument": "deny",
-                     "database": "nd01.db", "socket": "td01", "session": "cafleet194nd01"},
-    "idle-001": {"mode": "no_answer", "decision": None, "stage_hex": None, "probe_argument": None,
-                 "database": "ni01.db", "socket": "ti01", "session": "cafleet194ni01"},
+    "cells-002": {"backend": "claude", "mode": "no_answer", "decision": None, "stage_hex": None,
+                  "probe_argument": "allow", "database": "nc02.db", "socket": "tc02", "session": "cafleet194nc02"},
+    "ans-allow-001": {"backend": "claude", "mode": "answer_stage", "decision": "allow", "stage_hex": "31",
+                      "probe_argument": "allow", "database": "na01.db", "socket": "ta01", "session": "cafleet194na01"},
+    "ans-deny-001": {"backend": "claude", "mode": "answer_stage", "decision": "deny", "stage_hex": "34",
+                     "probe_argument": "deny", "database": "nd01.db", "socket": "td01", "session": "cafleet194nd01"},
+    "idle-001": {"backend": "claude", "mode": "no_answer", "decision": None, "stage_hex": None,
+                 "probe_argument": None, "database": "ni01.db", "socket": "ti01", "session": "cafleet194ni01"},
+    "codex-trust-001": {"backend": "codex", "mode": "no_answer", "decision": None, "stage_hex": None,
+                        "probe_argument": None, "database": "xt01.db", "socket": "xt01", "session": "cafleet194xt01"},
+    "codex-cells-001": {"backend": "codex", "mode": "no_answer", "decision": None, "stage_hex": None,
+                        "probe_argument": "allow", "database": "xc01.db", "socket": "xc01", "session": "cafleet194xc01"},
+    "codex-idle-001": {"backend": "codex", "mode": "no_answer", "decision": None, "stage_hex": None,
+                       "probe_argument": None, "database": "xi01.db", "socket": "xi01", "session": "cafleet194xi01"},
 }
+# The reviewed native executable per backend; its digest is supplied with --native-sha256 and checked.
+NATIVES = {
+    "claude": {"path": Path("/root/.local/share/mise/installs/aqua-anthropics-claude-code/v2.1.302/claude"),
+               "version": "2.1.302"},
+    "codex": {"path": Path("/root/.local/share/mise/installs/aqua-openai-codex/v0.163.0/bin/codex"),
+              "version": "0.163.0"},
+}
+VERSION_TOKEN = re.compile(r"^[0-9]+(\.[0-9]+)+([-+][0-9A-Za-z.]+)?$")
+LIBTEST_ROOT = BASE / ".execution/194/native-target-002/debug/deps"
 CASE_ID = CWD = OUTPUT = SOCKET = DATABASE = SESSION = SELECTED = None
 
 
@@ -54,9 +72,17 @@ def answer_window_ms():
 def forbidden_markers():
     allowed = "allow.executed" if SELECTED["decision"] == "allow" else None
     return [marker for marker in ("allow.executed", "deny.executed") if marker != allowed]
-NATIVE = Path("/Users/himkt/.local/share/mise/installs/aqua-anthropics-claude-code/v2.1.302/claude")
-NATIVE_SHA = "5262ce9de86243fed0d21edc39b271555d56780d0112e2b194439fe1c6662d37"
-ENTRY = "runtime::runner::native_capture::verification::native_capture_prepare_start_driver"
+
+
+def native():
+    return NATIVES[SELECTED["backend"]]
+
+
+def version_token(line):
+    tokens = [token for token in line.split() if VERSION_TOKEN.match(token)]
+    require(len(tokens) == 1, "exactly one native version token required")
+    return tokens[0]
+ENTRY ="runtime::runner::native_capture::verification::native_capture_prepare_start_driver"
 
 
 def require(condition, message):
@@ -170,7 +196,8 @@ def command(argv, until_ns, cwd=None, environment=None):
     return result.decode("utf-8")
 
 
-SERVER_REMOVED_NAMES = ("CLAUDECODE", "CLAUDE_EFFORT", "CLAUDE_PID")
+# CODEX_HOME may select a private assets-guard home without credentials; the native child uses its own.
+SERVER_REMOVED_NAMES = ("CLAUDECODE", "CLAUDE_EFFORT", "CLAUDE_PID", "CODEX_HOME")
 SERVER_REMOVED_PREFIXES = ("CLAUDE_CODE_", "HERDR_")
 
 
@@ -198,6 +225,8 @@ class BSDInfo(ctypes.Structure):
 
 
 def process_identity(pid):
+    if sys.platform == "linux":
+        return linux_process_identity(pid)
     require(sys.platform == "darwin" and ctypes.sizeof(BSDInfo) == 136,
             "this case requires the reviewed macOS proc_bsdinfo layout")
     library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
@@ -211,6 +240,18 @@ def process_identity(pid):
         return None
     require(count == ctypes.sizeof(info), "complete process birth identity unavailable")
     return {"pid": pid, "start_identity": f"{info.start_seconds}:{info.start_microseconds}"}
+
+
+def linux_process_identity(pid):
+    # Matches ProcessIdentity::read on Linux: boot ID plus the stat start time (field 22).
+    try:
+        text = Path(f"/proc/{pid}/stat").read_text()
+    except FileNotFoundError:
+        return None
+    fields = text.rsplit(")", 1)[1].split()
+    require(len(fields) > 19, "malformed process stat")
+    boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    return {"pid": pid, "start_identity": f"{boot}:{fields[19]}"}
 
 
 def reference(source, name):
@@ -350,8 +391,7 @@ def prepare_start_case(args):
     require(not CWD.exists() and not OUTPUT.exists() and not DATABASE.exists() and not SOCKET.exists(),
             "fresh isolated resources required")
     libtest = Path(args.libtest).resolve(strict=True)
-    require(libtest.is_relative_to(BASE / ".execution/194/native-target-001/debug/deps"),
-            "reviewed separate-target libtest required")
+    require(libtest.is_relative_to(LIBTEST_ROOT), "reviewed separate-target libtest required")
     manifest = read_json(Path(args.source_manifest).resolve(strict=True))
     require((BASE / manifest["executable"]["path"]).resolve(strict=True) == libtest
             and digest(libtest) == manifest["executable"]["sha256"],
@@ -364,23 +404,23 @@ def prepare_start_case(args):
     private_directory(OUTPUT)
     publish(CWD / "removed-environment.json", {"schema_version": 1,
             "removed_names": sorted(name for name in os.environ if server_removed(name))})
-    require(digest(NATIVE) == NATIVE_SHA, "pinned native executable changed")
-    helper_source = BASE / ".execution/194/native-fixtures/claude-default-tmux/permission-probe"
+    pinned = native()
+    require(digest(pinned["path"]) == args.native_sha256, "pinned native executable changed")
+    helper_source = Path(args.helper).resolve(strict=True)
     helper_bytes = read_bytes(helper_source, 4096, private=False)
-    require(len(helper_bytes) == 407 and hashlib.sha256(helper_bytes).hexdigest() ==
-            "e1a2edc980a137060f888e36ee7780be076ab24bae487e368e8b35b085660dc4",
-            "original approved helper differs")
+    require(hashlib.sha256(helper_bytes).hexdigest() == args.helper_sha256, "reviewed helper differs")
     helper = CWD / "permission-probe"
     descriptor = os.open(helper, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o700)
     with os.fdopen(descriptor, "wb") as output:
         output.write(helper_bytes)
     require(digest(helper) == digest(helper_source), "helper changed")
-    version_output = command([NATIVE, "--version"], work_until, cwd=CWD, environment=native_environment())
-    require(len(version_output.splitlines()) == 1 and version_output.split()[0] == "2.1.302",
+    version_output = command([pinned["path"], "--version"], work_until, cwd=CWD,
+                             environment=native_environment())
+    require(len(version_output.splitlines()) == 1 and version_token(version_output) == pinned["version"],
             "fresh same-file normalized version differs")
     version = CWD / "version-evidence.json"
-    publish(version, {"schema_version": 1, "executable": str(NATIVE), "sha256": NATIVE_SHA,
-                     "argv": [str(NATIVE), "--version"], "stdout": version_output, "exit_code": 0})
+    publish(version, {"schema_version": 1, "executable": str(pinned["path"]), "sha256": args.native_sha256,
+                     "argv": [str(pinned["path"]), "--version"], "stdout": version_output, "exit_code": 0})
     source = reference(Path(args.source_manifest).resolve(strict=True), "source-manifest.json")
     environment = reference(Path(args.environment_evidence).resolve(strict=True), "environment-evidence.json")
     redaction = reference(Path(args.redaction).resolve(strict=True), "event-redaction.json")
@@ -409,7 +449,8 @@ def prepare_start_case(args):
              "case_nonce": secrets.token_hex(32),
              "expires_at_mono_ns": until, "cleanup_reserve_ms": 4000,
              "database_url": f"sqlite:///{DATABASE}", "cwd": str(CWD), "output_directory": str(OUTPUT),
-             "native_version": "2.1.302", "native_executable": {"path": str(NATIVE), "sha256": NATIVE_SHA},
+             "native_version": pinned["version"],
+             "native_executable": {"path": str(pinned["path"]), "sha256": args.native_sha256},
              "helper": {"path": str(helper), "sha256": digest(helper)},
              "libtest": {"path": str(libtest), "sha256": digest(libtest)},
              "source_manifest": source, "version_evidence": {"path": str(version), "sha256": digest(version)},
@@ -505,7 +546,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     modes = parser.add_subparsers(dest="mode", required=True)
     prepare = modes.add_parser("prepare-start")
-    for argument in ("libtest", "source-manifest", "environment-evidence", "redaction", "capture-policy"):
+    for argument in ("libtest", "source-manifest", "environment-evidence", "redaction", "capture-policy",
+                     "native-sha256", "helper", "helper-sha256"):
         prepare.add_argument("--" + argument, required=True)
     prepare.add_argument("--director-backend", required=True)
     prepare.set_defaults(action=prepare_start)

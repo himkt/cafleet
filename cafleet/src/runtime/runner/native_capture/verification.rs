@@ -1,5 +1,6 @@
 use super::*;
 use crate::broker::runtime as storage;
+use crate::coding_agent::CodingAgent;
 use crate::config::Settings;
 use crate::multiplexer::{CommandRunner, MultiplexerContext, resolve_multiplexer};
 use crate::runtime::system::SystemRunner;
@@ -79,7 +80,10 @@ pub(crate) fn run_native_capture_verification_with_export_hooks(
 }
 
 // Committed native fixtures derive from these captures, so their visible paths must not name a home directory.
-const DRIVER_NEUTRAL_ROOT: &str = "/private/tmp/cafleet-194";
+const DRIVER_NEUTRAL_ROOT: &str = "/tmp/cafleet-194";
+// The repository mount reports root-created files as owned by another user, which the private
+// ownership checks refuse, so case databases and sockets live on the local filesystem.
+const DRIVER_PRIVATE_ROOT: &str = "/tmp/cafleet-194-p";
 const DRIVER_ANSWER_WINDOW_MS: u64 = 60_000;
 const DRIVER_TOOL_FREE_PROMPT: &str = "Reply with the single word ready and then wait.";
 
@@ -90,6 +94,8 @@ enum DriverMode {
 }
 struct ApprovedCase {
     id: &'static str,
+    backend: CodingAgent,
+    permission_mode: &'static str,
     mode: DriverMode,
     decision: Option<&'static str>,
     stage_hex: Option<&'static str>,
@@ -97,9 +103,11 @@ struct ApprovedCase {
     database: &'static str,
     socket: &'static str,
 }
-const APPROVED_CASES: [ApprovedCase; 4] = [
+const APPROVED_CASES: [ApprovedCase; 7] = [
     ApprovedCase {
         id: "cells-002",
+        backend: CodingAgent::Claude,
+        permission_mode: "default",
         mode: DriverMode::NoAnswer,
         decision: None,
         stage_hex: None,
@@ -109,6 +117,8 @@ const APPROVED_CASES: [ApprovedCase; 4] = [
     },
     ApprovedCase {
         id: "ans-allow-001",
+        backend: CodingAgent::Claude,
+        permission_mode: "default",
         mode: DriverMode::AnswerStage,
         decision: Some("allow"),
         stage_hex: Some("31"),
@@ -118,6 +128,8 @@ const APPROVED_CASES: [ApprovedCase; 4] = [
     },
     ApprovedCase {
         id: "ans-deny-001",
+        backend: CodingAgent::Claude,
+        permission_mode: "default",
         mode: DriverMode::AnswerStage,
         decision: Some("deny"),
         stage_hex: Some("34"),
@@ -127,12 +139,47 @@ const APPROVED_CASES: [ApprovedCase; 4] = [
     },
     ApprovedCase {
         id: "idle-001",
+        backend: CodingAgent::Claude,
+        permission_mode: "default",
         mode: DriverMode::NoAnswer,
         decision: None,
         stage_hex: None,
         probe_argument: None,
         database: "ni01.db",
         socket: "ti01",
+    },
+    ApprovedCase {
+        id: "codex-trust-001",
+        backend: CodingAgent::Codex,
+        permission_mode: "on-request",
+        mode: DriverMode::NoAnswer,
+        decision: None,
+        stage_hex: None,
+        probe_argument: None,
+        database: "xt01.db",
+        socket: "xt01",
+    },
+    ApprovedCase {
+        id: "codex-cells-001",
+        backend: CodingAgent::Codex,
+        permission_mode: "on-request",
+        mode: DriverMode::NoAnswer,
+        decision: None,
+        stage_hex: None,
+        probe_argument: Some("allow"),
+        database: "xc01.db",
+        socket: "xc01",
+    },
+    ApprovedCase {
+        id: "codex-idle-001",
+        backend: CodingAgent::Codex,
+        permission_mode: "on-request",
+        mode: DriverMode::NoAnswer,
+        decision: None,
+        stage_hex: None,
+        probe_argument: None,
+        database: "xi01.db",
+        socket: "xi01",
     },
 ];
 impl ApprovedCase {
@@ -163,12 +210,16 @@ impl ApprovedCase {
             .map(|argument| format!("{argument}.executed"))
     }
     fn prompt(&self, helper: &Path) -> String {
-        match self.probe_argument {
-            Some(argument) => format!(
+        match (self.probe_argument, self.backend) {
+            (Some(argument), CodingAgent::Codex) => format!(
+                "Use the shell tool to run exactly {} {argument} as one command with sandbox_permissions set to require_escalated and the justification \"CAFleet permission probe\". Preserve any native approval request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation.",
+                helper.display()
+            ),
+            (Some(argument), _) => format!(
                 "Use Bash to attempt exactly {} {argument} as one command. Preserve any native permission request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation.",
                 helper.display()
             ),
-            None => DRIVER_TOOL_FREE_PROMPT.into(),
+            (None, _) => DRIVER_TOOL_FREE_PROMPT.into(),
         }
     }
     fn forbidden_markers(&self) -> Vec<&'static str> {
@@ -663,10 +714,11 @@ fn driver_prepare(
 ) -> Result<(RunArtifacts, SpawnSpec)> {
     let approved = ApprovedCase::select(case)?;
     let artifacts = RunArtifacts::create_with_deadline(conn, pending.run.run_id, until)?;
-    let policy = crate::coding_agent::CodingAgent::Claude
-        .resolve_policy(Some(&case.native_version), Some("default"))?;
+    let policy = approved
+        .backend
+        .resolve_policy(Some(&case.native_version), Some(approved.permission_mode))?;
     let prompt = approved.prompt(&case.helper.path);
-    let mut argv = crate::coding_agent::CodingAgent::Claude.build_spawn_argv_with_policy(
+    let mut argv = approved.backend.build_spawn_argv_with_policy(
         &prompt,
         &approved.member_name(),
         None,
@@ -934,11 +986,8 @@ fn run_native_capture_prepare_start(config_path: &Path) -> Result<()> {
             && case.case_nonce.len() == 64,
         "private case identity differs",
     )?;
-    let base = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("repository parent");
     let neutral = Path::new(DRIVER_NEUTRAL_ROOT);
-    let private = base.join(".p194");
+    let private = Path::new(DRIVER_PRIVATE_ROOT);
     ensure(
         case.cwd == neutral.join(approved.id)
             && case.database_url
@@ -1020,7 +1069,8 @@ fn run_native_capture_prepare_start(config_path: &Path) -> Result<()> {
                     "--version".into(),
                 ]
             && version.stdout.lines().count() == 1
-            && version.stdout.split_whitespace().next() == Some(case.native_version.as_str()),
+            && crate::coding_agent::version_token(&version.stdout)
+                == Ok(case.native_version.as_str()),
         "same-file actual version evidence differs",
     )?;
     ensure(
@@ -1078,12 +1128,11 @@ fn run_native_capture_prepare_start(config_path: &Path) -> Result<()> {
             &case.director_backend,
             "tmux",
         )?;
-        let policy = crate::coding_agent::CodingAgent::Claude
-            .resolve_policy(Some(&case.native_version), Some("default"))?;
-        let capabilities = ProfileCatalog::bundled()?.capabilities(
-            crate::coding_agent::CodingAgent::Claude,
-            Some(&case.native_version),
-        );
+        let policy = approved
+            .backend
+            .resolve_policy(Some(&case.native_version), Some(approved.permission_mode))?;
+        let capabilities =
+            ProfileCatalog::bundled()?.capabilities(approved.backend, Some(&case.native_version));
         let settings = RunSettings {
             database_identity_json: storage::database_identity(conn)?,
             creator: ownership.driver.clone(),
@@ -1106,7 +1155,7 @@ fn run_native_capture_prepare_start(config_path: &Path) -> Result<()> {
                 mux_session: context.session.clone(),
                 mux_window_id: context.window_id.clone(),
                 mux_pane_id: None,
-                coding_agent: "claude".into(),
+                coding_agent: approved.backend.name().into(),
             },
         };
         let launch_until = work_until.min(Instant::now() + Duration::from_secs(10));
