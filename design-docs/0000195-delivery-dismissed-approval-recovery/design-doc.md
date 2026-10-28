@@ -1,7 +1,7 @@
 # Delivery-dismissed approval recovery
 
 **Status**: Approved
-**Progress**: 5/16 tasks complete
+**Progress**: 10/17 tasks complete
 **Last Updated**: 2026-10-28
 
 ## Overview
@@ -43,7 +43,7 @@ Claude Code reports an Escape-cancelled prompt to the model as `The user doesn't
 
 The issue's Director-side proposals (a Director-wake re-issue rule, generalizing a wake "step 6") target an event that cannot occur in `main`: the root Director receives no pane input, and the current Director wake procedure has five steps. This design states that structural guarantee instead of a rule for absent behavior. The issue's proposal 3 (avoid the Escape while an approval is pending) is already the wrapped-member behavior.
 
-Release of `main` to users follows the normal release CI workflow and is outside this design. SPEC.md is unchanged: no CLI option, preview text, schema, error string or output layout changes.
+Release of `main` to users follows the normal release CI workflow and is outside this design. No CLI option, preview text, schema, error string or output layout changes; SPEC.md changes only where its Accepted trade-offs bullet mirrors the edited operator bullet.
 
 ---
 
@@ -146,6 +146,8 @@ CAFleet input cancels no Claude tool approval or `AskUserQuestion` in the root D
 - Where Escape dismisses an ordinary member's question, confirmation or approval prompt, the host can report a user rejection before the input arrives; Claude Code reports `The user doesn't want to proceed with this tool use.` The preview's dismissed-prompt clause marks that rejection as delivery-caused, and the member re-issues the required tool call or re-asks the question. `member prompt` and `member exec` input carries no clause; the Director checks the pane for an open prompt before that dispatch.
 ```
 
+`SPEC.md` § Accepted trade-offs carries the same bullet; replace it with the identical new bullet so the specification matches the operator page.
+
 The page is the symlink target of `skills/cafleet/reference/runtime/spec/multiplexer-backends.md`, so the agent reference link in the new Claude note row resolves to this edited section. `coding-agents.md` and `coding-agent-backends.md` stay independent: neither links the other.
 
 ### Regression tests
@@ -200,10 +202,11 @@ Existing coverage stays as is and needs no new test: `director_delivery_ends_bef
 
 ### Step 2: Operator documentation
 
-- [ ] Add the CAFleet-input paragraph to `docs/docs/spec/coding-agent-backends.md` § Claude <!-- completed: -->
-- [ ] Replace the dismissed-prompt bullet in `docs/docs/spec/multiplexer-backends.md` § Accepted trade-offs <!-- completed: -->
-- [ ] Confirm `coding-agents.md` and `coding-agent-backends.md` contain no link to each other and that no other page restates the new rule's attributes <!-- completed: -->
-- [ ] Run `mise //docs:build` and fix any broken link or anchor <!-- completed: -->
+- [x] Add the CAFleet-input paragraph to `docs/docs/spec/coding-agent-backends.md` § Claude <!-- completed: 2026-10-28T13:50 -->
+- [x] Replace the dismissed-prompt bullet in `docs/docs/spec/multiplexer-backends.md` § Accepted trade-offs <!-- completed: 2026-10-28T13:50 -->
+- [x] Confirm `coding-agents.md` and `coding-agent-backends.md` contain no link to each other and that no other page restates the new rule's attributes <!-- completed: 2026-10-28T13:50 -->
+- [x] Run `mise //docs:build` and fix any broken link or anchor <!-- completed: 2026-10-28T13:50 -->
+- [x] Replace the mirrored dismissed-prompt bullet in `SPEC.md` § Accepted trade-offs with the new operator bullet <!-- completed: 2026-10-28T13:52 -->
 
 ### Step 3: Root Director regression test
 

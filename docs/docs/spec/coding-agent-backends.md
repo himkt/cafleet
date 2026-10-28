@@ -88,6 +88,8 @@ A separate evaluator checks the session condition against the transcript; native
 
 Native shell probes displayed command/stdout/stderr followed by a model turn; the trigger and any second permission check were not established. The Director authorizes each routed command under its host rules.
 
+CAFleet input cancels no Claude tool approval or `AskUserQuestion` in the root Director's pane, which receives no automatic pane input, or in a runner-managed member's pane, where previews wait for an empty composer and send no Escape. A legacy unwrapped member runs `dontAsk`, so its open prompt is an `AskUserQuestion`; its Escape-first previews, `member prompt` and `member exec` input can cancel it, and Claude Code then reports a user rejection before the input arrives. The member treats a rejection followed by a `[cafleet msg …]` line ending with the Escape-dismissal clause as delivery-caused and re-asks the question or re-issues the call. A runner-managed member's preview ends with the resume clause only and arrives after the prompt closed, so a rejection before it stands. A rejection followed by Director prompt or native-command input follows that input, and the Director checks the pane for an open prompt before such dispatch. Recreating a legacy unwrapped member makes it runner-managed and removes the Escape lead.
+
 `--permission-mode dontAsk` is the omitted Claude member policy. Explicit native modes retain their own permission behavior. Under `dontAsk`, a member runs these calls without a prompt: its
 [spawn-time allow rules](#spawn-time-allow-rules), Claude Code's built-in
 read-only commands, file reads inside its working directory, and every tool
