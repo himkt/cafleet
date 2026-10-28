@@ -1,6 +1,6 @@
 # OpenCode Ask Permission Forms
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 28/28 tasks complete
 **Last Updated**: 2026-10-28
 
@@ -479,3 +479,4 @@ Detection-to-inbox latency (event `observed_at` to inbox `created_at`) was 7-9 m
 | 2026-10-28 | Empty-reason rejection: Enter on `Reject` opens a rejection-reason dialog in `mini`, so deny gains a third stage, Enter gated on the `permission_continuation` rule `opencode-reject-reason` with an empty reason; adds screen gates, continuation-screen episode and binding rules, the `opencode-ans-deny-003` case and the stage-3 fixture |
 | 2026-10-28 | Live herdr acceptance findings: `member create` forwards the selected backend's config-location variable into the member environment, and the OpenCode preset base defaults to `~/.config/opencode`, the only directory OpenCode 2.1.4 loads agents from; adds Step 6 and renumbers acceptance and validation to Steps 7 and 8 |
 | 2026-10-28 | Herdr reply split: an outer-terminal reply longer than 4096 bytes reached OpenCode a tick apart and was parsed as keys, so the runner drains outer input within one tick, writes the whole queue and skips the idle sleep while input moves; adds § Outer-terminal input forwarding and Step 7, and renumbers acceptance and validation to Steps 8 and 9 |
+| 2026-10-29 | Implementation complete: native acceptance on tmux and herdr, fresh Reviewer approval, PR #510 |
