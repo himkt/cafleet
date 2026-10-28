@@ -3121,9 +3121,15 @@ mod contract_tests {
             let idle = bundled_observation(IDLE_BYTES);
             assert_eq!(idle.rule_id, IDLE_RULE);
             assert!(idle.verified_noninteraction);
+            let at = |observation: &ScreenObservation, output_seq: u64| {
+                let mut replayed = observation.clone();
+                replayed.output_seq = output_seq;
+                replayed.raw_evidence["screen_seq"] = json!(output_seq);
+                replayed
+            };
             let origin = Instant::now();
             let mut tracker = tracker();
-            open(&mut tracker, &permission, origin);
+            open(&mut tracker, &at(&permission, 1), origin);
             let closed = |update: &EpisodeUpdate| {
                 update
                     .transitions
@@ -3133,22 +3139,26 @@ mod contract_tests {
                     .collect::<Vec<_>>()
             };
             let flash = tracker
-                .observe(&idle, origin + Duration::from_millis(200), NOW)
+                .observe(&at(&idle, 2), origin + Duration::from_millis(200), NOW)
                 .unwrap();
             assert!(closed(&flash).is_empty(), "idle shown for 0 ms stays open");
             let back = tracker
-                .observe(&permission, origin + Duration::from_millis(300), NOW)
+                .observe(
+                    &at(&permission, 3),
+                    origin + Duration::from_millis(300),
+                    NOW,
+                )
                 .unwrap();
             assert!(
                 closed(&back).is_empty(),
                 "an idle flash under 250 ms keeps the episode"
             );
             let first = tracker
-                .observe(&idle, origin + Duration::from_millis(400), NOW)
+                .observe(&at(&idle, 4), origin + Duration::from_millis(400), NOW)
                 .unwrap();
             assert!(closed(&first).is_empty());
             let held = tracker
-                .observe(&idle, origin + Duration::from_millis(650), NOW)
+                .observe(&at(&idle, 5), origin + Duration::from_millis(650), NOW)
                 .unwrap();
             let closes = closed(&held);
             assert_eq!(closes.len(), 1, "{:?}", held.transitions);
