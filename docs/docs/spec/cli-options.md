@@ -683,7 +683,7 @@ the placement.
 
 #### Creation failure compensation {#creation-failure-compensation}
 
-Member creation validates policy, evidence configuration and assignment, then registers a pending placement and run. The multiplexer starts a runner from a private descriptor; a `prepared` handshake precedes placement publication and `start`, and creation returns only after child spawn produces `started` within one handshake deadline. The [runner creation contract](member-runtime.md#runner-boundary-and-creation-transaction) owns descriptor cleanup and uncertain-launch compensation. The CLI owns a registration guard after successful
+Member creation validates policy, evidence configuration and assignment, and records the installed native version through the [native version probe](member-runtime.md#native-version-probe), then registers a pending placement and run. A failed probe adds the stderr line `Warning: native version unavailable for BACKEND: CAUSE; coverage unknown.` and creation continues with unknown coverage. The multiplexer starts a runner from a private descriptor; a `prepared` handshake precedes placement publication and `start`, and creation returns only after child spawn produces `started` within one handshake deadline. The [runner creation contract](member-runtime.md#runner-boundary-and-creation-transaction) owns descriptor cleanup and uncertain-launch compensation. The CLI owns a registration guard after successful
 registration and acquires a pane guard only when `split_window` succeeds.
 The backend owns the pane before that return; see
 [pane ownership](multiplexer-backends.md#pane-creation-ownership).
