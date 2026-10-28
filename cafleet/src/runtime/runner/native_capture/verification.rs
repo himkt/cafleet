@@ -110,7 +110,7 @@ const DRIVER_FULL_SIZE: TerminalSize = TerminalSize {
 };
 const DRIVER_WRAPPED_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 52 };
 const DRIVER_BOXED_WRAP_SIZE: TerminalSize = TerminalSize { rows: 36, cols: 89 };
-const APPROVED_CASES: [ApprovedCase; 14] = [
+const APPROVED_CASES: [ApprovedCase; 18] = [
     ApprovedCase {
         id: "cells-002",
         backend: CodingAgent::Claude,
@@ -279,6 +279,54 @@ const APPROVED_CASES: [ApprovedCase; 14] = [
         socket: "tb12",
         size: DRIVER_FULL_SIZE,
     },
+    ApprovedCase {
+        id: "opencode-cells-001",
+        backend: CodingAgent::Opencode,
+        permission_mode: "cafleet-ask",
+        mode: DriverMode::NoAnswer,
+        decision: None,
+        stage_hex: None,
+        probe_argument: Some("allow"),
+        database: "oc01.db",
+        socket: "oc01",
+        size: DRIVER_FULL_SIZE,
+    },
+    ApprovedCase {
+        id: "opencode-ans-allow-001",
+        backend: CodingAgent::Opencode,
+        permission_mode: "cafleet-ask",
+        mode: DriverMode::AnswerStage,
+        decision: Some("allow"),
+        stage_hex: None,
+        probe_argument: Some("allow"),
+        database: "oa01.db",
+        socket: "oa01",
+        size: DRIVER_FULL_SIZE,
+    },
+    ApprovedCase {
+        id: "opencode-ans-deny-001",
+        backend: CodingAgent::Opencode,
+        permission_mode: "cafleet-ask",
+        mode: DriverMode::AnswerStage,
+        decision: Some("deny"),
+        stage_hex: None,
+        probe_argument: Some("deny"),
+        database: "od01.db",
+        socket: "od01",
+        size: DRIVER_FULL_SIZE,
+    },
+    ApprovedCase {
+        id: "opencode-idle-001",
+        backend: CodingAgent::Opencode,
+        permission_mode: "cafleet-ask",
+        mode: DriverMode::NoAnswer,
+        decision: None,
+        stage_hex: None,
+        probe_argument: None,
+        database: "oi01.db",
+        socket: "oi01",
+        size: DRIVER_FULL_SIZE,
+    },
 ];
 impl ApprovedCase {
     fn select(case: &DriverCase) -> Result<&'static Self> {
@@ -286,6 +334,10 @@ impl ApprovedCase {
             .iter()
             .find(|approved| approved.id == case.case_id)
             .ok_or_else(|| error("unreviewed native case"))?;
+        ensure(
+            approved.mode == DriverMode::NoAnswer || approved.stage_hex.is_some(),
+            "answer-stage case has no measured stage bytes yet",
+        )?;
         let (mode, window) = match approved.mode {
             DriverMode::NoAnswer => ("no_answer", 0),
             DriverMode::AnswerStage => ("answer_stage", DRIVER_ANSWER_WINDOW_MS),
@@ -316,7 +368,11 @@ impl ApprovedCase {
                 "Use the shell tool to run exactly {} {argument} as one command with sandbox_permissions set to require_escalated and the justification \"CAFleet permission probe\". Preserve any native approval request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation.",
                 helper.display()
             ),
-            (Some(argument), _) => format!(
+            (Some(argument), CodingAgent::Opencode) => format!(
+                "Use the shell tool to run exactly {} {argument} as one command. Preserve any native permission request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation.",
+                helper.display()
+            ),
+            (Some(argument), CodingAgent::Claude) => format!(
                 "Use Bash to attempt exactly {} {argument} as one command. Preserve any native permission request for the operator. After the native decision, report the actual result and stop. Keep work inside this disposable operation.",
                 helper.display()
             ),
