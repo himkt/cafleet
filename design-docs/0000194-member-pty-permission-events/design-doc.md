@@ -1,7 +1,7 @@
 # Member PTY Permission Events
 
-**Status**: In Progress
-**Progress**: 26/30 tasks complete
+**Status**: Complete
+**Progress**: 30/30 tasks complete
 **Last Updated**: 2026-10-28
 
 ## Overview
@@ -467,7 +467,7 @@ The first shipping-CLI end-to-end run (fleet 25, Claude Code 2.1.302 `default`, 
 | Profile | Native evidence | Answer stages | Commits |
 |---|---|---|---|
 | `claude-2.1.302-default-2` | Permission form, allow and deny pre-stage forms, idle composer (captured on macOS, rows 0-11 masked) | allow `31` (digit 1), deny `34` (digit 4) | `ec732cac`, `3a989b81`, `093335ef`, `c531a746`, `e3ccf252`, `b62562df`, `b25d94ed` |
-| `claude-2.1.302-default-3` | The `default-2` evidence plus plain wrapped permission, allow and deny pre-stage forms (36x52) and boxed permission forms (36x89 over two rows, 36x120 on one row), all captured on Linux under the runner with rows 0-11 masked; a plain row that reaches the last usable column joins its continuation directly, and every other row boundary stays a line break | allow `31`, deny `34` on the plain wrapped form | `9cb167c8`, `37721848`, `7e64940f`, `153a03e1`, `86877b9e`, `23f91be1`, `de10020a`, `e832dbf4`, `39af75f2`, `c14619bc`, `073ed013`, `5a44f389`, `fa14688b`, `a0b56e25` |
+| `claude-2.1.302-default-3` | The `default-2` evidence plus plain wrapped permission, allow and deny pre-stage forms (36x52) and boxed permission forms (36x89 over two rows, 36x120 on one row), all captured on Linux under the runner with rows 0-11 masked; the operation is reported as its displayed rows with the one-space margin removed and the boxed gutter kept, with `operation_rows` and a multi-row review sentence | allow `31`, deny `34` on the plain wrapped form | `9cb167c8`, `37721848`, `153a03e1`, `073ed013`, `5a44f389`, `fa14688b`, `a0b56e25`, `3f639336`, `e952836b`, `6c474358`, `6e06968b` |
 | `codex-0.163.0-on-request-1` | Approval form, allow and deny pre-stage forms, idle composer (captured on Linux under the runner, 36x120, rows 0-11 masked; the form captures record the pending-wrap cursor at column 120) | allow `79` (`y`), deny `33` (digit 3, because the deny choice shows only `esc`) | `3cfb078b`, `0b03d52e`, `510f83d9`, `f1281ef4`, `e0de1d68`, `91c79928`, `8206ac1b`, `d6c61782` |
 
 The native version probe at `member create` (`78010795`, `e229776f`, `d121603f`) selects the bundled profile; catalog-derived help shows each backend's policy choices (`cccc5ea1`, `cf6a9a34`, `edcabc0e`). A fresh Codex case folder showed no trust screen under the explicit `on-request`/`workspace-write` flags.
@@ -483,7 +483,7 @@ Every case below used the shipping release build, a private database and a dedic
 | Claude 2.1.302 `default` | herdr (dedicated tab, short case path) | allow / deny | The same outcomes as tmux |
 | Codex 0.163.0 `on-request` + `workspace-write` | tmux (240x80) | allow / deny | allow: `✔ You approved codex to run <command> this time`, marker and gate created; deny: `✗ You canceled the request to run <command>`, no marker or gate; both closed `not_visible` |
 | Codex 0.163.0 `on-request` + `workspace-write` | herdr (about 89 columns, choice 2 wrapping its `(p)` row) | allow / deny | The same outcomes as tmux |
-| Claude 2.1.302 `default`, boxed wrapped form | herdr (dedicated tab, about 89 columns, long case path) | allow / deny (director-auto) | Detected by `claude-2.1.302-default-3`; allow created the marker and deny produced `Interrupted`, both closed `not_visible`. On `a0b56e25` the allow rerun reported the operation as `<path>/permission-probe`, a line break and `allow`. The earlier runs on `de10020a` joined the rows with a space, and the first run on `153a03e1` dropped it. |
+| Claude 2.1.302 `default`, boxed form | herdr (dedicated tab, long case path) | allow / deny (director-auto) | On `6e06968b`: one boxed row reported as `│ <path>/permission-probe allow` with `operation_rows` 1 and the base instruction, marker created; the same shape denied with `Interrupted`; a two-line command reported as two `│ ` rows with `operation_rows` 2 and the multi-row sentence, denied with `Interrupted`. All closed `not_visible`. Earlier runs on `153a03e1`, `de10020a` and `a0b56e25` used the superseded reassembly. |
 
 User-attended cases (Claude 2.1.302 on herdr):
 
@@ -507,14 +507,13 @@ Deleting each member produced `runner_exited` (native exit 143) with status `exi
 
 #### Test placement
 
-At the user's direction, the necessary unit tests live inline under `cfg(test)` in the implementation module they exercise. Task-introduced standalone test files were relocated group by group without assertion changes (`fd5235af`, `fbfdce7c`, `1797353e`, `bfb33897`, `0f8c905a`, `b1fac3fc`, `7a1c49e9`, `ea5d6c22`, `de7299d3`, `cadad73b`); genuine integration boundaries (creation, fleet deletion, control service and recovery) remain separate. Load-sensitive test budgets were corrected in `226167a6`, `d8816375` and `a260b348`. The final full run on `a0b56e25` was 1166 passed / 0 failed / 7 ignored, with lint, typecheck and the documentation build passing.
+At the user's direction, the necessary unit tests live inline under `cfg(test)` in the implementation module they exercise. Task-introduced standalone test files were relocated group by group without assertion changes (`fd5235af`, `fbfdce7c`, `1797353e`, `bfb33897`, `0f8c905a`, `b1fac3fc`, `7a1c49e9`, `ea5d6c22`, `de7299d3`, `cadad73b`); genuine integration boundaries (creation, fleet deletion, control service and recovery) remain separate. Load-sensitive test budgets were corrected in `226167a6`, `d8816375` and `a260b348`. The final full runs on `6e06968b` were 1173 passed / 0 failed / 7 ignored (one earlier run on the same commit, concurrent with live members, exited with a failure whose name was not captured, and two reruns passed), with lint, typecheck and the documentation build passing.
 
 #### Remaining limits
 
 | Limit | Status |
 |---|---|
-| Width-dependent identity of a wrapped Claude operation broken at a space | A boxed wrap and a plain break after a shorter row keep a line break, and a plain break after a full row loses the space, so the identity differs from the unwrapped rendering and a resize replaces the episode; documented |
-| Boxed Claude operation token longer than its row | Unobserved; documented |
+| Width-dependent identity of a multi-row Claude operation | The operation follows the displayed rows, so a resize that rewraps it replaces the episode; documented |
 | Codex command that wraps | Detection covers a single-line command only; documented |
 | Native trust and update screens | Classified only by synthetic fixtures; no bundled native rule |
 | Codex sandboxed (non-escalated) path | Not exercisable in this container |
@@ -572,7 +571,7 @@ The fault-condition-to-test map is recorded in `.execution/194/step-6-fault-late
 
 ### Step 8: Report wrapped operations as displayed rows
 
-- [ ] Document the displayed-row operation, the operation row count in the evidence and the multi-row Director instruction in the owning runtime, message-envelope and skill references and SPEC, replacing the reassembly rule and its limits. <!-- completed: -->
-- [ ] Write fixture-backed tests: every bundled wrapped and boxed fixture reports its displayed rows with the margin removed and the gutter kept, multi-line commands and rows ending at any column keep their line breaks, the row count and instruction appear only for a multi-row operation, and the unwrapped fixtures stay unchanged. <!-- completed: -->
-- [ ] Implement the displayed-row operation as a profile declaration, remove the edge-join reassembly, add the row count and instruction, and simplify capture bookkeeping; rename the 89-column harness geometry after its shape. <!-- completed: -->
-- [ ] Verify live on a narrow herdr pane that a boxed request reports its displayed rows and the instruction and is answered for allow and deny; rerun the repository checks. <!-- completed: -->
+- [x] Document the displayed-row operation, the operation row count in the evidence and the multi-row Director instruction in the owning runtime, message-envelope and skill references and SPEC, replacing the reassembly rule and its limits. <!-- completed: 2026-10-28T09:37 -->
+- [x] Write fixture-backed tests: every bundled wrapped and boxed fixture reports its displayed rows with the margin removed and the gutter kept, multi-line commands and rows ending at any column keep their line breaks, the row count and instruction appear only for a multi-row operation, and the unwrapped fixtures stay unchanged. <!-- completed: 2026-10-28T09:50 -->
+- [x] Implement the displayed-row operation as a profile declaration, remove the edge-join reassembly, add the row count and instruction, and simplify capture bookkeeping; rename the 89-column harness geometry after its shape. <!-- completed: 2026-10-28T09:53 -->
+- [x] Verify live on a narrow herdr pane that a boxed request reports its displayed rows and the instruction and is answered for allow and deny; rerun the repository checks. <!-- completed: 2026-10-28T09:58 -->
