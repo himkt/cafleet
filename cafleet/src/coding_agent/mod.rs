@@ -660,15 +660,18 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let only_version =
                 "[ \"$#\" -eq 1 ] && [ \"$1\" = --version ] || exit 3\nread -r ignored || true";
-            for (output, expected) in [
+            for (index, (output, expected)) in [
                 ("2.1.302 (Claude Code)", "2.1.302"),
                 ("codex-cli 0.163.0", "0.163.0"),
                 ("opencode v2.1.4", "2.1.4"),
                 ("1.2.3-beta.1", "1.2.3-beta.1"),
-            ] {
+            ]
+            .into_iter()
+            .enumerate()
+            {
                 let path = stub(
                     dir.path(),
-                    "native",
+                    &format!("native-{index}"),
                     &format!("{only_version}\nprintf '%s\\n' '{output}'\nprintf 'ignored\\n' >&2"),
                 );
                 assert_eq!(probe(&path).unwrap(), expected, "{output}");
@@ -678,7 +681,7 @@ mod tests {
         #[test]
         fn native_version_probe_rejects_failed_ambiguous_invalid_or_missing_versions() {
             let dir = tempfile::tempdir().unwrap();
-            for (case, body) in [
+            for (index, (case, body)) in [
                 ("nonzero exit", "printf '2.1.302\\n'; exit 1"),
                 ("no version token", "printf 'Claude Code\\n'"),
                 ("two version tokens", "printf '2.1.302 2.1.303\\n'"),
@@ -692,8 +695,11 @@ mod tests {
                 ),
                 ("empty output", "exit 0"),
                 ("non-UTF-8 output", "printf '2.1.302 \\377\\n'"),
-            ] {
-                let path = stub(dir.path(), "native", body);
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let path = stub(dir.path(), &format!("native-{index}"), body);
                 assert!(probe(&path).is_err(), "{case} must not yield a version");
             }
             assert!(
