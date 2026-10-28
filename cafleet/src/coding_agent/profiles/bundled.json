@@ -40,6 +40,46 @@
       "cols": 120,
       "source_ref": "native/claude-2.1.302-idle-composer-1.json",
       "sha256": "e606b8080d5fcd53505c0722c8922bb7943e3b39dd0b8a841f892c1505726bd4"
+    },
+    {
+      "id": "codex-0.163.0-on-request-permission-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex-0.163.0-on-request-permission-1.json",
+      "sha256": "e30e9533cb23f2adc95a3913467b79a8a286ad4a4b21d86ac447419818223dcd"
+    },
+    {
+      "id": "codex-0.163.0-allow-pre-stage-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex-0.163.0-allow-pre-stage-1.json",
+      "sha256": "d263d9bdb4328dc292c615603c38924fae86a263ccab76fe2b579d3eed4b6419"
+    },
+    {
+      "id": "codex-0.163.0-deny-pre-stage-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex-0.163.0-deny-pre-stage-1.json",
+      "sha256": "5e7fddce15a225b72a3eb0b705601c1d11e83f2eae687b9f8c6feee70f928a20"
+    },
+    {
+      "id": "codex-0.163.0-idle-composer-1",
+      "kind": "native",
+      "backend": "codex",
+      "native_version": "0.163.0",
+      "rows": 36,
+      "cols": 120,
+      "source_ref": "native/codex-0.163.0-idle-composer-1.json",
+      "sha256": "f7337eae171edcce09eafad4750e7b2fa6354b680adff0c3089ec435be5c5a2b"
     }
   ],
   "profiles": [
@@ -133,6 +173,100 @@
               {"bytes_hex": "34", "required_rule_id": "claude-bash-permission", "required_choice_id": "deny-once"}
             ],
             "fixture_ids": ["claude-2.1.302-deny-pre-stage-1"]
+          }
+        ]
+      }
+    },
+    {
+      "backend": "codex",
+      "native_versions": ["0.163.0"],
+      "profile_version": "codex-0.163.0-on-request-1",
+      "rules": [
+        {
+          "id": "codex-exec-approval",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^  Would you like to run the following command\\?\\s*$",
+            "end_pattern": "^  Press enter to confirm or esc to cancel\\s*$",
+            "max_rows": 24,
+            "cursor": "inside"
+          },
+          "matchers": [
+            {"id": "heading", "scope": "line", "pattern": "^  Would you like to run the following command\\?\\s*$"},
+            {"id": "environment", "scope": "line", "pattern": "^  Environment: \\S+\\s*$"},
+            {"id": "reason", "scope": "line", "pattern": "^  Reason: \\S"},
+            {"id": "operation", "scope": "line", "pattern": "^  \\$ (?P<operation>\\S.*?)\\s*$"},
+            {"id": "focus", "scope": "line", "pattern": "^› [1-9]\\. "},
+            {"id": "allow", "scope": "line", "pattern": "^[› ] 1\\. (?P<label>Yes, proceed) \\(y\\)\\s*$"},
+            {"id": "deny", "scope": "line", "pattern": "^[› ] 3\\. (?P<label>No, and tell Codex what to do differently) \\(esc\\)\\s*$"}
+          ],
+          "extract": {
+            "operation": {"matcher_id": "operation", "capture": "operation"},
+            "choices": [
+              {"id": "allow-once", "label": {"matcher_id": "allow", "capture": "label"}, "scope": "single_request"},
+              {"id": "deny-once", "label": {"matcher_id": "deny", "capture": "label"}, "scope": "single_request"}
+            ],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "codex-idle-composer",
+          "priority": 50,
+          "observation": "composer_empty",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^› ",
+            "end_pattern": "^› ",
+            "max_rows": 1,
+            "cursor": "at_end"
+          },
+          "matchers": [
+            {"id": "prompt", "scope": "line", "pattern": "^› "}
+          ],
+          "extract": {
+            "operation": null,
+            "choices": [],
+            "native_request_id": null
+          },
+          "verified_noninteraction": true,
+          "sensitive": false
+        }
+      ],
+      "capabilities": {
+        "detection": {
+          "rule_ids": ["codex-exec-approval"],
+          "fixture_ids": ["codex-0.163.0-on-request-permission-1"]
+        },
+        "composer": {
+          "rule_ids": ["codex-idle-composer"],
+          "fixture_ids": ["codex-0.163.0-idle-composer-1"]
+        },
+        "answers": [
+          {
+            "decision": "allow",
+            "request_rule_id": "codex-exec-approval",
+            "answer_rule_id": "codex-exec-allow-y",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {"bytes_hex": "79", "required_rule_id": "codex-exec-approval", "required_choice_id": "allow-once"}
+            ],
+            "fixture_ids": ["codex-0.163.0-allow-pre-stage-1"]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "codex-exec-approval",
+            "answer_rule_id": "codex-exec-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {"bytes_hex": "33", "required_rule_id": "codex-exec-approval", "required_choice_id": "deny-once"}
+            ],
+            "fixture_ids": ["codex-0.163.0-deny-pre-stage-1"]
           }
         ]
       }

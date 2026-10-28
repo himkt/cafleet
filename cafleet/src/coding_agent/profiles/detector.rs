@@ -874,9 +874,11 @@ fn match_rule(rule: &Rule, screen: &ScreenSnapshot, lines: &[LogicalLine]) -> Op
                 bottom: last.end + 1,
                 right: screen.cols,
             };
+            // A pending-wrap cursor (column == cols) stands on its row's last cell.
             let inside = screen.cursor_row >= region.top
                 && screen.cursor_row < region.bottom
-                && screen.cursor_col < region.right;
+                && (screen.cursor_col < region.right
+                    || (region.right == screen.cols && screen.cursor_col == screen.cols));
             let qualified = match rule.region.cursor.as_str() {
                 "at_end" => {
                     last.boundaries.get(found.end())

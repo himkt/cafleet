@@ -684,6 +684,22 @@ const BUNDLED_FIXTURES: &[(&str, &[u8])] = &[
         "native/claude-2.1.302-idle-composer-1.json",
         include_bytes!("native/claude-2.1.302-idle-composer-1.json"),
     ),
+    (
+        "native/codex-0.163.0-on-request-permission-1.json",
+        include_bytes!("native/codex-0.163.0-on-request-permission-1.json"),
+    ),
+    (
+        "native/codex-0.163.0-allow-pre-stage-1.json",
+        include_bytes!("native/codex-0.163.0-allow-pre-stage-1.json"),
+    ),
+    (
+        "native/codex-0.163.0-deny-pre-stage-1.json",
+        include_bytes!("native/codex-0.163.0-deny-pre-stage-1.json"),
+    ),
+    (
+        "native/codex-0.163.0-idle-composer-1.json",
+        include_bytes!("native/codex-0.163.0-idle-composer-1.json"),
+    ),
 ];
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -752,7 +768,7 @@ fn verify_native_screen(entry: &Value, embedded: &[(&str, &[u8])]) -> Result<()>
             .is_some_and(|row| row < u64::from(rows))
             && m["cursor_col"]
                 .as_u64()
-                .is_some_and(|col| col < u64::from(cols)),
+                .is_some_and(|col| col <= u64::from(cols)),
         "fixture cursor outside its geometry",
     )?;
     let lines = array(&m["lines"])?;
