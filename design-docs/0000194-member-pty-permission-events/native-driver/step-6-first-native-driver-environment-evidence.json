@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "kind": "reviewed_environment_references",
+  "case_ids": ["cells-002", "ans-allow-001", "ans-deny-001"],
+  "status": "proposal; Director review required before prepare-start",
+  "values_recorded": false,
+  "inheritance": {
+    "dedicated_tmux_server": "Global environment copied from the Director-invoked prepare-start process at server start, minus the removed_variables below; prepare-start verifies their absence with show-environment -g before any driver launch.",
+    "controller_pane": "Dedicated server environment plus the two explicit selections below; TMUX/TMUX_PANE are set by the dedicated server.",
+    "runner_pane": "Dedicated server environment plus the selections production split_window and the capture adapter pass with -e.",
+    "native_child": "Runner process environment plus the SpawnSpec CAFLEET_DATABASE_URL override; credentials and native/project/managed/provider configuration are inherited unchanged."
+  },
+  "explicit_selections": [
+    {
+      "name": "CAFLEET_DATABASE_URL",
+      "value": "sqlite:////Users/himkt/work/himkt/cafleet/.p194/<case database: nc02.db, na01.db or nd01.db>",
+      "applies_to": ["controller_pane", "runner_pane", "native_child"]
+    },
+    {
+      "name": "CAFLEET_NATIVE_CAPTURE_CONFIG",
+      "value": "/private/tmp/cafleet-194/<case id>/capture-config.json",
+      "applies_to": ["controller_pane", "runner_pane"],
+      "note": "The native child may inherit this runner-pane variable; it names a private case file and carries no credential."
+    }
+  ],
+  "inherited_native_configuration_references": [
+    "/Users/himkt/.claude/settings.json",
+    "/Users/himkt/.claude.json",
+    "/Users/himkt/work/himkt/cafleet/.claude/settings.json",
+    "/Users/himkt/work/himkt/cafleet/.claude/settings.local.json",
+    "/Library/Application Support/ClaudeCode/managed-settings.json"
+  ],
+  "inherited_configuration_note": "Paths are references only; existence, contents and effective policy are not recorded. Project settings above the case cwd may apply and can change the observed outcome, which is recorded as observed.",
+  "removed_variables": {
+    "names": ["CLAUDECODE", "CLAUDE_EFFORT", "CLAUDE_PID"],
+    "prefixes": ["CLAUDE_CODE_", "HERDR_"],
+    "scope": "Environment of every tmux client the script runs, so the client that starts the dedicated server never seeds them, and of the native --version evidence command.",
+    "reason": "A Claude Code Director's shell exports session markers, a Director-session messaging credential and herdr placement variables. Production member creation launches from the multiplexer server rather than the Director shell, so the case native launch omits them.",
+    "decision": "Director99 decisions (a) and F7, design-doc Step 6 marker, fleet 25.",
+    "actual_names_record": "prepare-start publishes the names it removed, never values, as removed-environment.json in the case cwd and requires show-environment -g to contain none of them before any driver launch.",
+    "guard_behavior": "Whether the native CLI refuses launch with these present remains unverified; removal is applied independently of that."
+  }
+}
