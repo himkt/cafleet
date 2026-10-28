@@ -77,8 +77,7 @@ pub enum MemberCommand {
         /// Reasoning-effort level (claude, codex only).
         #[arg(long)]
         effort: Option<String>,
-        /// Native permission policy for the selected backend.
-        #[arg(long)]
+        #[arg(long, value_name = "MODE", help = CodingAgent::permission_mode_help())]
         permission_mode: Option<String>,
         /// Persist metadata or explicitly redacted screen evidence.
         #[arg(long, default_value = "metadata", value_parser = ["metadata", "redacted"])]

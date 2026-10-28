@@ -19,6 +19,21 @@ impl CodingAgent {
             Self::Opencode => "cafleet",
         }
     }
+    pub fn permission_mode_help() -> String {
+        let catalog = Self::all()
+            .iter()
+            .map(|agent| {
+                format!(
+                    "{}: {} (default {})",
+                    agent.name(),
+                    agent.policy_choices(None).join(", "),
+                    agent.default_policy()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        format!("Launch-only native permission policy for the resolved backend — {catalog}")
+    }
     pub fn policy_choices(self, native_version: Option<&str>) -> Vec<String> {
         let choices: &[&str] = match (self, native_version) {
             (Self::Claude, None | Some("2.1.302")) => &[

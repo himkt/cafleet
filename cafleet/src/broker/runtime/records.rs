@@ -9,6 +9,7 @@ macro_rules! runtime_enum {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
         pub enum $name { $(#[serde(rename = $wire)] $variant),+ }
         impl $name {
+            pub const VALUES: &'static [&'static str] = &[$($wire),+];
             pub fn as_str(self) -> &'static str {
                 match self { $(Self::$variant => $wire),+ }
             }

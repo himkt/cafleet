@@ -1266,10 +1266,13 @@ enum Command {
     /// Durable point-to-point messages.
     #[command(subcommand)]
     Message(message::MessageCommand),
+    /// Read a durable runtime event and current state.
     #[command(subcommand)]
     Event(runtime::EventCommand),
+    /// Read / settle a durable input receipt.
     #[command(subcommand)]
     Input(runtime::InputCommand),
+    /// Inspect / answer the current native permission request.
     #[command(subcommand)]
     Permission(runtime::PermissionCommand),
 }

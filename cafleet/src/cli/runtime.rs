@@ -1,4 +1,5 @@
 use clap::Subcommand;
+use clap::builder::{PossibleValuesParser, TypedValueParser};
 use rusqlite::Connection;
 
 use super::helpers::emit;
@@ -131,53 +132,71 @@ fn operation_key(value: &str) -> Result<String, String> {
     crate::runtime::runner::validate_operation_key(value).map_err(|cause| cause.to_string())?;
     Ok(value.into())
 }
-fn decision(value: &str) -> Result<runtime::PermissionDecision, String> {
-    runtime::PermissionDecision::try_from(value).map_err(|cause| cause.to_string())
-}
-fn decision_source(value: &str) -> Result<runtime::DecisionSource, String> {
-    runtime::DecisionSource::try_from(value).map_err(|cause| cause.to_string())
-}
-fn director_mode(value: &str) -> Result<runtime::DirectorMode, String> {
-    runtime::DirectorMode::try_from(value).map_err(|cause| cause.to_string())
+fn stored_enum<T>(values: &'static [&'static str]) -> impl TypedValueParser<Value = T>
+where
+    T: for<'a> TryFrom<&'a str, Error = CafleetError> + Clone + Send + Sync + 'static,
+{
+    PossibleValuesParser::new(values.iter().copied()).map(|value| {
+        T::try_from(value.as_str()).expect("possible values are the stored enum values")
+    })
 }
 
 #[derive(Subcommand)]
 pub enum PermissionCommand {
+    /// Read the current native permission request and its answer capability.
     Inspect {
+        /// The interaction carrying the request.
         #[arg(value_parser = positive_id)]
         interaction_id: i64,
+        /// The runtime event delivered to the Director's inbox.
         #[arg(long, value_parser = positive_id)]
         event_id: i64,
+        /// The pinned Director's member ID.
         #[arg(long = "from-member-id", value_parser = positive_id)]
         director_member_id: i64,
+        /// Output in JSON format.
         #[arg(long)]
         json: bool,
     },
+    /// Answer the inspected native permission request with a semantic decision.
     Respond {
+        /// The interaction carrying the request.
         #[arg(value_parser = positive_id)]
         interaction_id: i64,
+        /// The runtime event delivered to the Director's inbox.
         #[arg(long, value_parser = positive_id)]
         event_id: i64,
+        /// The pinned Director's member ID.
         #[arg(long = "from-member-id", value_parser = positive_id)]
         director_member_id: i64,
+        /// The run ID reported by inspection.
         #[arg(long, value_parser = positive_id)]
         expected_run_id: i64,
+        /// The owner epoch reported by inspection.
         #[arg(long, value_parser = positive_id)]
         expected_owner_epoch: i64,
+        /// The request token reported by inspection.
         #[arg(long, value_parser = request_token)]
         request_token: String,
-        #[arg(long, value_parser = decision)]
+        /// The semantic answer.
+        #[arg(long, value_parser = stored_enum::<runtime::PermissionDecision>(runtime::PermissionDecision::VALUES))]
         decision: runtime::PermissionDecision,
-        #[arg(long, value_parser = decision_source)]
+        /// Who made the decision.
+        #[arg(long, value_parser = stored_enum::<runtime::DecisionSource>(runtime::DecisionSource::VALUES))]
         decision_source: runtime::DecisionSource,
-        #[arg(long, value_parser = director_mode)]
+        /// The Director session's effective approval mode.
+        #[arg(long, value_parser = stored_enum::<runtime::DirectorMode>(runtime::DirectorMode::VALUES))]
         director_mode: runtime::DirectorMode,
+        /// Evidence reference for the Director mode.
         #[arg(long, value_parser = permission_reference)]
         mode_evidence_ref: String,
+        /// Evidence reference for the decision.
         #[arg(long, value_parser = permission_reference)]
         decision_evidence_ref: String,
+        /// Idempotency key of this response.
         #[arg(long, value_parser = operation_key)]
         operation_key: String,
+        /// Output in JSON format.
         #[arg(long)]
         json: bool,
     },
