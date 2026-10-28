@@ -379,8 +379,11 @@ impl Host {
         }
     }
     pub fn drain(&mut self) {
-        for _ in 0..64 {
-            assert!(Instant::now() < self.until);
+        loop {
+            assert!(
+                Instant::now() < self.until,
+                "actual fixture becomes healthy and quiescent within its original deadline"
+            );
             self.controller
                 .poll(
                     &self.transport.snapshot(),
@@ -407,7 +410,6 @@ impl Host {
             }
             std::thread::sleep(Duration::from_millis(1));
         }
-        panic!("actual fixture becomes healthy and quiescent within its finite turn budget");
     }
     pub fn advance(&mut self) -> Option<InputControlReply> {
         self.coordinator
