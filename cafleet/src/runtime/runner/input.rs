@@ -1056,6 +1056,13 @@ mod permission_response_contracts {
                 let generation = h.controller.request_generation();
                 let offers = h.pty.offers.clone();
                 let program = h.pty.program.clone();
+                assert!(
+                    matches!(
+                        h.controller.health(&h.writer).eligibility,
+                        InputEligibility::Hold(_)
+                    ),
+                    "{fixture}: the visible form makes the composer ineligible"
+                );
                 let run = h.fixture.run.clone();
                 let message = crate::broker::send_message(
                     &mut h.fixture.conn,
@@ -1090,6 +1097,11 @@ mod permission_response_contracts {
                     (held.status, held.stage, held.input_id),
                     (SubmissionStatus::Held, SubmissionStage::ZeroBytes, None),
                     "{fixture}"
+                );
+                assert_eq!(
+                    held.reason.as_deref(),
+                    Some("ordinary composer input is held"),
+                    "{fixture}: the visible form, not a missing composer plan, holds the preview"
                 );
                 assert!(h.coordinator.pending.is_none(), "{fixture}");
                 assert_eq!(
