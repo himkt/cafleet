@@ -134,13 +134,13 @@ environment variable, falling back to the default when the variable is unset:
 | claude | `CLAUDE_CONFIG_DIR` | `$CLAUDE_CONFIG_DIR` | `~/.claude` | `<base>/skills` | — |
 | codex | `CODEX_HOME` | `$CODEX_HOME` | `~/.codex` | `<base>/skills` | `<base>/rules/cafleet.rules` |
 | opencode (skills) | — (fixed discovery path) | — | `~/.config/opencode` | `<base>/skills` | — |
-| opencode (preset) | `OPENCODE_CONFIG_DIR` | `$OPENCODE_CONFIG_DIR` | `~/.opencode` | — | `<base>/agents/cafleet.md`, `<base>/agents/cafleet-ask.md` |
+| opencode (preset) | `OPENCODE_CONFIG_DIR` | `$OPENCODE_CONFIG_DIR` | `~/.config/opencode` | — | `<base>/agents/cafleet.md`, `<base>/agents/cafleet-ask.md` |
 
-opencode splits by purpose: `agents/` is in `OPENCODE_CONFIG_DIR`'s
-documented search list, so the presets may relocate and remain valid
-`--agent <mode>` discovery paths; skills are not in that list — opencode
-discovers them only at fixed paths — so the skills install ignores the
-variable.
+opencode splits by purpose: opencode loads agent definitions from
+`~/.config/opencode` and from `OPENCODE_CONFIG_DIR`, so the presets follow the
+variable and remain valid `--agent <mode>` discovery paths; opencode discovers
+skills only at fixed paths, so the skills install ignores the variable. With
+the variable unset, skills and presets share the `~/.config/opencode` base.
 
 `OPENCODE_CONFIG_DIR` adds a preset search directory alongside default home configuration. Agent definitions with the same name can merge across these sources; inspect the effective configuration when customizing a preset.
 
@@ -161,7 +161,9 @@ spawn preconditions themselves read
 none of the three variables for claude and codex (PATH-check-only;
 opencode's resolves the preset base) — but the
 [stale-assets guard](#stale-assets-guard) fronting every fleet-scoped
-command, `member create` included, resolves all three identity paths. One
+command, `member create` included, resolves all three identity paths, and
+`member create` forwards the selected backend's validated value into the
+[member environment](#member-environment). One
 exception to strict lazy failure: `doctor` catches per-agent resolution
 errors and renders them as issues instead of aborting (see
 [doctor](#cafleet-doctor)).
@@ -177,7 +179,7 @@ validation):
 |---|---|
 | claude | The resolved claude config dir (`$CLAUDE_CONFIG_DIR` or `~/.claude`) |
 | codex | The resolved codex home (`$CODEX_HOME` or `~/.codex`) |
-| opencode | The resolved preset base (`$OPENCODE_CONFIG_DIR` or `~/.opencode`) — the only opencode root that can vary; the skills base is fixed and carries no identity |
+| opencode | The resolved preset base (`$OPENCODE_CONFIG_DIR` or `~/.config/opencode`) — the only opencode root that can vary; the skills base is fixed and carries no identity |
 
 
 ### Assets half {#assets-half}
@@ -191,8 +193,8 @@ preset of the agent, in this order:
 |---|---|---|
 | claude | — (skills only) | — |
 | codex | `presets/codex/cafleet.rules` | `<codex base>/rules/cafleet.rules` (default `~/.codex/rules/cafleet.rules`) |
-| opencode | `presets/opencode/cafleet.md` | `<preset base>/agents/cafleet.md` (default `~/.opencode/agents/cafleet.md`) |
-| opencode | `presets/opencode/cafleet-ask.md` | `<preset base>/agents/cafleet-ask.md` (default `~/.opencode/agents/cafleet-ask.md`) |
+| opencode | `presets/opencode/cafleet.md` | `<preset base>/agents/cafleet.md` (default `~/.config/opencode/agents/cafleet.md`) |
+| opencode | `presets/opencode/cafleet-ask.md` | `<preset base>/agents/cafleet-ask.md` (default `~/.config/opencode/agents/cafleet-ask.md`) |
 
 Each backend replaces the two embedded skills sequentially, removes a leftover
 `cafleet-research` entry, then replaces each of its presets in order. Existing targets
@@ -326,13 +328,13 @@ cafleet 0.22.0
 ✓ database
   schema 12 (head)
 ✗ coding agents
-  ┌──────────────┬──────────────┬────────────────────┬───────────────────────────────────────────────┐
-  │ coding agent │ path         │ source             │ setup                                         │
-  ├──────────────┼──────────────┼────────────────────┼───────────────────────────────────────────────┤
-  │ claude       │ ~/cfg/claude │ $CLAUDE_CONFIG_DIR │ ✓ 0.22.0                                      │
-  │ codex        │ ~/.codex     │ default            │ ✗ 0.21.0 → cafleet setup --coding-agent codex │
-  │ opencode     │ ~/.opencode  │ default            │ – cafleet setup --coding-agent opencode       │
-  └──────────────┴──────────────┴────────────────────┴───────────────────────────────────────────────┘
+  ┌──────────────┬────────────────────┬────────────────────┬───────────────────────────────────────────────┐
+  │ coding agent │ path               │ source             │ setup                                         │
+  ├──────────────┼────────────────────┼────────────────────┼───────────────────────────────────────────────┤
+  │ claude       │ ~/cfg/claude       │ $CLAUDE_CONFIG_DIR │ ✓ 0.22.0                                      │
+  │ codex        │ ~/.codex           │ default            │ ✗ 0.21.0 → cafleet setup --coding-agent codex │
+  │ opencode     │ ~/.config/opencode │ default            │ – cafleet setup --coding-agent opencode       │
+  └──────────────┴────────────────────┴────────────────────┴───────────────────────────────────────────────┘
   note: codex was previously set up at ~/.codex-old
 ✓ member permissions
   claude: no setting blocks the member broker commands
@@ -532,7 +534,7 @@ the detail text when `ok` is false, else `null`.
     "agents": [
       {"coding_agent": "claude", "path": "/Users/x/cfg/claude", "source": "CLAUDE_CONFIG_DIR", "recorded_version": "0.22.0", "installed_at": "2026-08-12T00:00:00.000000+00:00", "state": "ok", "error": null},
       {"coding_agent": "codex", "path": "/Users/x/.codex", "source": "default", "recorded_version": "0.21.0", "installed_at": "2026-08-01T00:00:00.000000+00:00", "state": "stale", "error": null},
-      {"coding_agent": "opencode", "path": "/Users/x/.opencode", "source": "default", "recorded_version": null, "installed_at": null, "state": "not_installed", "error": null}
+      {"coding_agent": "opencode", "path": "/Users/x/.config/opencode", "source": "default", "recorded_version": null, "installed_at": null, "state": "not_installed", "error": null}
     ],
     "superseded": [
       {"coding_agent": "codex", "path": "/Users/x/.codex-old", "recorded_version": "0.20.0", "installed_at": "2026-07-01T00:00:00.000000+00:00"}
@@ -715,6 +717,28 @@ one root Director by construction, so no override flag exists.
 The per-backend child argv and omitted permission defaults live in
 [Coding-agent backends](coding-agent-backends.md#spawn-argv).
 
+#### Member environment {#member-environment}
+
+The native child runs in the multiplexer pane's environment plus the spawn
+environment, which the runner applies to the child as overrides. The spawn
+environment holds `CAFLEET_DATABASE_URL`, followed by the selected backend's
+config-location variable with the creator's exact value when the creator's
+environment sets it:
+
+| Backend | Forwarded config-location variable |
+|---|---|
+| claude | `CLAUDE_CONFIG_DIR` |
+| codex | `CODEX_HOME` |
+| opencode | `OPENCODE_CONFIG_DIR` |
+
+The member therefore reads the configuration that `member create` validated
+and `setup` installed into ([Config-dir resolution](#config-dir-resolution)).
+Only the selected backend's variable is forwarded. An unset variable stays
+unset, so the member uses the native default, which equals the CAFleet default
+base. An invalid value fails `member create` before registration with the
+pinned validation error. The launch descriptor and launch evidence record the
+spawn environment; config locations are paths, not secrets.
+
 #### Spawn-prompt substitution
 
 `member create` renders its resolved spawn prompt body
@@ -727,9 +751,8 @@ with the same formatter, substituting exactly four placeholders:
 | `{director_member_id}` | The fleet's root Director id | `DIRECTOR MEMBER ID: <director_member_id>` |
 | `{coding_agent}` | The resolved backend name (`claude`, `codex`, or `opencode`) | `CODING AGENT: <coding_agent>` |
 
-Identity reaches the spawned member as literals rendered into its prompt; the
-only environment variable forwarded into the pane is `CAFLEET_DATABASE_URL`.
-The formatter accepts only the four exact names above and doubled literal
+Identity reaches the spawned member as literals rendered into its prompt, not
+through the environment. The formatter accepts only the four exact names above and doubled literal
 braces (`{{` / `}}`), not Python format specifications, conversions, or
 attribute/index access. An unknown placeholder or
 malformed brace expression exits 2. Member creation attempts deregistration;

@@ -32,8 +32,10 @@ member through its spawn prompt: `cafleet member create` renders four identity
 placeholders to literals, so the member reads its ids as plain text lines
 (e.g. `FLEET ID: 1`, `YOUR MEMBER ID: 4`) and passes them explicitly on every
 command. Each placeholder and its label line is in
-[CLI options § Spawn-prompt substitution](../spec/cli-options.md#spawn-prompt-substitution). The only environment variable forwarded into the pane is
-`CAFLEET_DATABASE_URL`.
+[CLI options § Spawn-prompt substitution](../spec/cli-options.md#spawn-prompt-substitution). The member environment carries
+`CAFLEET_DATABASE_URL` and the selected backend's config-location variable
+when the creator sets it — see
+[CLI options § Member environment](../spec/cli-options.md#member-environment).
 Each backend honors a leading-`!` shell shortcut on the coding agent's input line,
 including opencode `mini`; backend-specific permission limits are in
 [Coding-agent backends](../spec/coding-agent-backends.md).

@@ -33,6 +33,10 @@ An explicit `--permission-mode cafleet-ask` for `opencode` launches `opencode mi
 Shared contract:
 
 - Each omitted policy retains its existing command posture; an explicit interactive policy may display native approval prompts.
+- The native child receives the selected backend's config-location variable
+  when the creator's environment sets it, so the member reads the
+  configuration CAFleet validated and installed into — see
+  [Member environment](cli-options.md#member-environment).
 - Each backend honors the leading-`!` shell shortcut that
   [`cafleet member exec`](cli-options.md#member-exec) dispatches through.
 - Every member can run its broker commands from the moment it is spawned:
@@ -60,7 +64,7 @@ Per-backend capabilities:
 |---|---|---|---|---|
 | `claude` | none | yes, via `--name <member-name>` | Runs the broker commands under its spawn-time allow rules, read-only commands, and every command matching the operator's `permissions.allow`; a denied command routes to the Director | A permission profile in `~/.claude/settings.json` — a permission posture, not a spawn dependency ([Claude](#claude)) |
 | `codex` | kernel-enforced ([Codex](#codex)) | no — locate the pane through `cafleet member list` (`pane_id` is ground truth) | Runs commands its workspace/host rules permit; routes required denied commands | `~/.codex/rules/cafleet.rules` (`CODEX_HOME` relocates it), plus the `~/.codex/config.toml` settings and a trusted working directory — a permission posture, not a spawn dependency ([the rules file](#cafleet-rules-file)) |
-| `opencode` | none | no — locate the pane through `cafleet member list` | `cafleet`: deny-by-default allowlist, everything outside it routes to the Director; `cafleet-ask`: the same allowlist, everything else opens a native permission form | The selected policy's preset, `~/.opencode/agents/<mode>.md` (`OPENCODE_CONFIG_DIR` relocates it) — a spawn precondition ([the agent presets](#cafleet-agent-preset)) |
+| `opencode` | none | no — locate the pane through `cafleet member list` | `cafleet`: deny-by-default allowlist, everything outside it routes to the Director; `cafleet-ask`: the same allowlist, everything else opens a native permission form | The selected policy's preset, `~/.config/opencode/agents/<mode>.md` (`OPENCODE_CONFIG_DIR` relocates it) — a spawn precondition ([the agent presets](#cafleet-agent-preset)) |
 
 ## Director decision policy
 
@@ -332,12 +336,16 @@ Each OpenCode launch policy names an agent preset of the same name:
 
 | Policy | Spawn argument | Preset file | Embedded asset |
 |---|---|---|---|
-| `cafleet` (default) | `--agent cafleet` | `~/.opencode/agents/cafleet.md` | `presets/opencode/cafleet.md` |
-| `cafleet-ask` | `--agent cafleet-ask` | `~/.opencode/agents/cafleet-ask.md` | `presets/opencode/cafleet-ask.md` |
+| `cafleet` (default) | `--agent cafleet` | `~/.config/opencode/agents/cafleet.md` | `presets/opencode/cafleet.md` |
+| `cafleet-ask` | `--agent cafleet-ask` | `~/.config/opencode/agents/cafleet-ask.md` | `presets/opencode/cafleet-ask.md` |
 
-`OPENCODE_CONFIG_DIR` relocates the `~/.opencode` base — see
+`~/.config/opencode` is the directory OpenCode 2.1.4 loads agent definitions
+from by default. `OPENCODE_CONFIG_DIR` relocates that base — see
 [Config-dir resolution](cli-options.md#config-dir-resolution); the spawn
-precondition checks the same resolved path `setup` installs to. Both presets
+precondition checks the same resolved path `setup` installs to, and
+`member create` forwards a set `OPENCODE_CONFIG_DIR` into the
+[member environment](cli-options.md#member-environment), so the member's
+OpenCode loads the preset CAFleet checked. Both presets
 are embedded in the released binary. `cafleet setup` installs every preset
 offline, replacing any existing copy; rerun setup after upgrading CAFleet to
 refresh them. The selected policy's preset is a spawn precondition: `cafleet
