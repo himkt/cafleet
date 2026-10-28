@@ -18,7 +18,7 @@ pub(crate) enum ObservationKind {
 }
 
 #[cfg(test)]
-mod inspection_tests {
+pub(super) mod inspection_tests {
     use super::*;
     use crate::broker::runtime::PermissionDecision;
     use crate::coding_agent::{inspection_fixture_definition, inspection_fixture_form};
@@ -101,9 +101,21 @@ mod inspection_tests {
 
     const CLAUDE_VERSION: &str = "2.1.302";
     const NATIVE_SCREEN: &str = include_str!("native/claude-2.1.302-default-permission-1.json");
+    const ALLOW_SCREEN: &str = include_str!("native/claude-2.1.302-allow-pre-stage-1.json");
+    const DENY_SCREEN: &str = include_str!("native/claude-2.1.302-deny-pre-stage-1.json");
+    const IDLE_SCREEN: &str = include_str!("native/claude-2.1.302-idle-composer-1.json");
 
     fn native_screen(change: impl FnOnce(&mut Vec<String>), alternate: bool) -> ScreenSnapshot {
-        let screen: Value = serde_json::from_str(NATIVE_SCREEN).unwrap();
+        replay_native_fixture(NATIVE_SCREEN, change, alternate, None)
+    }
+
+    pub(in crate::coding_agent) fn replay_native_fixture(
+        fixture: &str,
+        change: impl FnOnce(&mut Vec<String>),
+        alternate: bool,
+        cursor: Option<(u16, u16)>,
+    ) -> ScreenSnapshot {
+        let screen: Value = serde_json::from_str(fixture).unwrap();
         let mut lines: Vec<String> = screen["lines"]
             .as_array()
             .unwrap()
@@ -127,14 +139,129 @@ mod inspection_tests {
                     .unwrap();
             }
         }
-        let cursor = (
-            screen["cursor_row"].as_u64().unwrap() + 1,
-            screen["cursor_col"].as_u64().unwrap() + 1,
-        );
+        let (row, col) = cursor.unwrap_or((
+            u16::try_from(screen["cursor_row"].as_u64().unwrap()).unwrap(),
+            u16::try_from(screen["cursor_col"].as_u64().unwrap()).unwrap(),
+        ));
         terminal
-            .feed(format!("\x1b[{};{}H", cursor.0, cursor.1).as_bytes())
+            .feed(format!("\x1b[{};{}H", row + 1, col + 1).as_bytes())
             .unwrap();
         terminal.snapshot()
+    }
+
+    fn allow_or_deny_plan(decision: PermissionDecision) -> AnswerPlan {
+        ProfileCatalog::bundled()
+            .unwrap()
+            .answer_plan(
+                CodingAgent::Claude,
+                CLAUDE_VERSION,
+                "claude-bash-permission",
+                decision,
+            )
+            .unwrap()
+            .expect("measured bundled answer plan")
+    }
+
+    fn claude_answer(screen: &ScreenSnapshot, plan: &AnswerPlan) -> Option<AnswerMatch> {
+        let catalog = ProfileCatalog::bundled().unwrap();
+        Detector::new(&catalog, CodingAgent::Claude, Some(CLAUDE_VERSION))
+            .unwrap()
+            .match_answer(screen, plan)
+            .unwrap()
+    }
+
+    #[test]
+    fn bundled_claude_answer_plans_match_their_measured_pre_stage_screens_and_bind_focus() {
+        for (decision, fixture, choice) in [
+            (PermissionDecision::Allow, ALLOW_SCREEN, "allow-once"),
+            (PermissionDecision::Deny, DENY_SCREEN, "deny-once"),
+        ] {
+            let plan = allow_or_deny_plan(decision);
+            let screen = replay_native_fixture(fixture, |_| {}, true, None);
+            let matched = claude_answer(&screen, &plan).expect("pre-stage form matches its plan");
+            assert_eq!(matched.choices(), &["Yes".to_owned(), "No".to_owned()]);
+            assert_eq!(matched.plan().choice_id(), choice);
+            assert!(!matched.focus().is_empty());
+            assert!(Some(matched.semantic()) == claude_observation(&screen).fingerprint.as_ref());
+            let moved = replay_native_fixture(
+                fixture,
+                |lines| {
+                    lines[23] = lines[23].replacen('❯', " ", 1);
+                    lines[24] = lines[24].replacen("   2.", " ❯ 2.", 1);
+                },
+                true,
+                Some((24, 1)),
+            );
+            let refocused =
+                claude_answer(&moved, &plan).expect("a moved focus still identifies the form");
+            assert!(refocused.semantic() == matched.semantic());
+            assert_ne!(
+                refocused.focus(),
+                matched.focus(),
+                "token binding sees the focus move"
+            );
+            let unfocused = replay_native_fixture(
+                fixture,
+                |lines| lines[23] = lines[23].replacen('❯', " ", 1),
+                true,
+                None,
+            );
+            assert!(
+                claude_answer(&unfocused, &plan).is_none(),
+                "{decision:?} without ❯"
+            );
+            let primary = replay_native_fixture(fixture, |_| {}, false, None);
+            assert!(
+                claude_answer(&primary, &plan).is_none(),
+                "{decision:?} primary screen"
+            );
+        }
+    }
+
+    #[test]
+    fn bundled_claude_idle_composer_is_a_verified_non_interaction_distinct_from_the_form() {
+        let idle = claude_observation(&replay_native_fixture(IDLE_SCREEN, |_| {}, true, None));
+        assert_eq!(idle.kind, ObservationKind::ComposerEmpty);
+        assert_eq!(idle.match_evidence, MatchEvidence::Complete);
+        assert!(idle.verified_noninteraction);
+        assert_eq!(idle.rule_id, "claude-idle-composer");
+        let region = idle
+            .matched_region
+            .expect("the idle rule locates its composer");
+        assert!(region.top >= 12, "{region:?}");
+        let form = claude_observation(&native_screen(|_| {}, true));
+        assert_eq!(form.rule_id, "claude-bash-permission");
+        assert_eq!(
+            form.kind,
+            ObservationKind::Interaction(InteractionClass::PermissionRequest)
+        );
+        assert_eq!(form.match_evidence, MatchEvidence::Complete);
+        assert!(!form.verified_noninteraction);
+    }
+
+    #[test]
+    fn bundled_claude_idle_rule_rejects_drafts_primary_copies_and_a_cursor_off_the_prefix_end() {
+        let draft = claude_observation(&replay_native_fixture(
+            IDLE_SCREEN,
+            |lines| lines[31] = "❯\u{a0}hello".into(),
+            true,
+            Some((31, 7)),
+        ));
+        assert_ne!(draft.kind, ObservationKind::ComposerEmpty, "typed draft");
+        assert!(!draft.verified_noninteraction);
+        let primary = claude_observation(&replay_native_fixture(IDLE_SCREEN, |_| {}, false, None));
+        assert!(!primary.verified_noninteraction, "primary-screen copy");
+        let away = claude_observation(&replay_native_fixture(
+            IDLE_SCREEN,
+            |_| {},
+            true,
+            Some((31, 0)),
+        ));
+        assert!(
+            !away.verified_noninteraction,
+            "cursor before the prefix end"
+        );
+        assert_ne!(away.kind, ObservationKind::ComposerEmpty);
     }
 
     fn claude_observation(screen: &ScreenSnapshot) -> ScreenObservation {
