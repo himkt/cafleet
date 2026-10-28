@@ -655,6 +655,9 @@ mod permission_inspection_contracts {
             serde_json::json!("[redacted]"),
         ] {
             let mut changed = raw.clone();
+            if operation.is_null() {
+                changed["operation_rows"] = serde_json::Value::Null;
+            }
             changed["operation"] = operation;
             assert_eq!(missing(&redacted.apply(&changed).unwrap()), unavailable);
         }

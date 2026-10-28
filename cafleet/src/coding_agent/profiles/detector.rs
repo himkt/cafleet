@@ -511,17 +511,17 @@ pub(super) mod inspection_tests {
     #[test]
     fn bundled_claude_plain_operation_rows_keep_their_line_break_wherever_a_row_ends() {
         let full = " /tmp/cafleet-194/claude-wrap-cells-001/permission-";
-        assert_eq!(full.chars().count(), 51, "reaches the last usable column");
+        let full_at_space = " /tmp/cafleet-194/claude-wrap-cells-001/probe-boxes";
+        for row in [full, full_at_space] {
+            assert_eq!(row.chars().count(), 51, "reaches the last usable column");
+        }
         for (first, second) in [
             (
                 " /tmp/cafleet-194/claude-wrap-cells-001",
                 " permission-probe allow",
             ),
             (full, " probe allow"),
-            (
-                " /tmp/cafleet-194/claude-wrap-cells-001/permission-probe",
-                " allow",
-            ),
+            (full_at_space, " allow"),
         ] {
             let observation = claude_observation(&wrapped_screen(
                 |lines| {

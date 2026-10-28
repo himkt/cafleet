@@ -3645,7 +3645,7 @@ mod contract_tests {
         }
 
         #[test]
-        fn bundled_claude_resize_between_wrapped_and_unwrapped_renderings_keeps_the_episode() {
+        fn bundled_claude_resize_between_wrapped_and_unwrapped_renderings_replaces_the_episode() {
             let wrapped = |output_seq| sequenced_replay(WRAPPED_BYTES, |_| {}, output_seq);
             let unwrapped = |output_seq| {
                 sequenced_replay(
@@ -3660,49 +3660,46 @@ mod contract_tests {
             let origin = Instant::now();
             let mut tracker = tracker();
             open(&mut tracker, &wrapped(1), origin);
-            for (millis, observation) in [
-                (200, unwrapped(2)),
-                (300, unwrapped(3)),
-                (700, unwrapped(4)),
-                (800, wrapped(5)),
-                (1200, wrapped(6)),
-            ] {
-                let update = tracker
-                    .observe(&observation, origin + Duration::from_millis(millis), NOW)
+            let mut episode = 1;
+            for (start, rendering) in [(200, unwrapped(2)), (800, wrapped(3))] {
+                let pending = tracker
+                    .observe(&rendering, origin + Duration::from_millis(start), NOW)
                     .unwrap();
                 assert!(
-                    update.transitions.is_empty(),
-                    "a rewrap at {millis} ms keeps the episode: {:?}",
-                    update.transitions
+                    pending.transitions.is_empty(),
+                    "the rewrap at {start} ms first awaits stability: {:?}",
+                    pending.transitions
                 );
-                assert!(matches!(update.visibility, Visibility::Visible));
-                assert!(update.latest_evidence.is_none());
+                let replaced = tracker
+                    .observe(&rendering, origin + Duration::from_millis(start + 100), NOW)
+                    .unwrap();
+                assert_eq!(replaced.transitions.len(), 2, "{:?}", replaced.transitions);
+                assert_eq!(
+                    replaced.transitions[0].kind,
+                    RuntimeEventKind::InteractionClosed
+                );
+                assert_eq!(
+                    replaced.transitions[0].close_reason,
+                    Some(InteractionCloseReason::Superseded),
+                    "the rewrap at {start} ms displays different operation rows"
+                );
+                assert_eq!(replaced.transitions[0].episode_seq, Some(episode));
+                assert_eq!(
+                    replaced.transitions[1].kind,
+                    RuntimeEventKind::InteractionOpened
+                );
+                episode += 1;
+                assert_eq!(replaced.transitions[1].episode_seq, Some(episode));
             }
-            let other = sequenced_replay(NATIVE_BYTES, |_| {}, 7);
-            assert!(
-                tracker
-                    .observe(&other, origin + Duration::from_millis(1300), NOW)
-                    .unwrap()
-                    .transitions
-                    .is_empty()
-            );
-            let replaced = tracker
-                .observe(
-                    &sequenced_replay(NATIVE_BYTES, |_| {}, 8),
-                    origin + Duration::from_millis(1400),
-                    NOW,
-                )
+            let redraw = tracker
+                .observe(&wrapped(4), origin + Duration::from_millis(1200), NOW)
                 .unwrap();
-            assert_eq!(replaced.transitions.len(), 2, "{:?}", replaced.transitions);
-            assert_eq!(
-                replaced.transitions[0].close_reason,
-                Some(InteractionCloseReason::Superseded),
-                "a different command still replaces the episode"
+            assert!(
+                redraw.transitions.is_empty(),
+                "a redraw of the same displayed rows keeps the episode: {:?}",
+                redraw.transitions
             );
-            assert_eq!(
-                replaced.transitions[1].kind,
-                RuntimeEventKind::InteractionOpened
-            );
+            assert!(matches!(redraw.visibility, Visibility::Visible));
         }
     }
 
