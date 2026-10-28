@@ -74,4 +74,4 @@ Authentication/precondition failure leaves the result local. Report exact push/P
 
 Verify final progress and marker resolution, set Status to Complete only when the required work and user gate are satisfied, and preserve existing historical artifacts. Commit only files allowed by host rules. Apply the recorded publication scope to any eligible final push.
 
-Drain/cancel native reception and observe its source-process exit before retirement. Delete every owned ordinary member, confirm the root-only roster, delete the fleet and verify its absence. Limit cleanup to owned resources.
+Drain/cancel native reception and observe its source-process exit before retirement. Delete the fleet, which ends every owned ordinary member and reports each pane outcome; resolve and rerun when it reports a member it could not end, then verify the fleet's absence. Limit cleanup to owned resources.

@@ -111,15 +111,7 @@ Inspect failed or uncertain input before authorizing any retry. [Command routing
 
 ### Close the fleet
 
-Consume the final inbox and complete approval gates. Delete each owned ordinary member, verify the remaining roster, then deregister:
-
-```bash
-cafleet member delete 3
-```
-
-```bash
-cafleet member list 1
-```
+Consume the final inbox and complete approval gates. Delete the fleet; it ends each remaining ordinary member, closing its pane and reporting the outcome, then deregisters the Director and the fleet:
 
 ```bash
 cafleet fleet delete 1
@@ -131,7 +123,7 @@ cafleet fleet list
 
 Collect the listener's fleet-deleted closure and native task exit before retiring its handle. To stop reception while the fleet stays live, use verified native cancellation with observed termination or stop renewal and drain its finite lease. Preserve pending messages for later reads.
 
-Fleet deletion retains history and closes no panes. Limit cleanup to the team you own.
+Fleet deletion retains history and leaves the Director's own pane open. When it reports a member it could not end, the fleet stays registered: resolve that member's cause and rerun `cafleet fleet delete`. Limit cleanup to the team you own.
 
 ## Backend variations
 

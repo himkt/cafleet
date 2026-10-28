@@ -23,7 +23,7 @@ CAFleet multiplexes independent coding-agent sessions in tmux or herdr. Use its 
 
 Use the literal IDs returned by the CLI. A fleet partitions routing within the local trust model; it supplies no authentication. Members of a fleet share the selected database URL. Cross-fleet sends fail with `members {from} and {to} are not in the same fleet.`; missing destinations fail with `Destination member not found: {to_id}`.
 
-Fleet creation atomically registers the calling Director and its current pane. You can create an ordinary member immediately afterward. The Director owns pane teardown and deletes its members before deregistering the fleet.
+Fleet creation atomically registers the calling Director and its current pane. You can create an ordinary member immediately afterward. The Director owns teardown: deleting the fleet ends each ordinary member and closes its pane before deregistering the fleet, leaving the Director's own pane open.
 
 ## Responsibilities
 
