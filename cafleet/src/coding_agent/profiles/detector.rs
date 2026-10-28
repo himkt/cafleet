@@ -99,6 +99,110 @@ mod inspection_tests {
         );
     }
 
+    const CLAUDE_VERSION: &str = "2.1.302";
+    const NATIVE_SCREEN: &str = include_str!("native/claude-2.1.302-default-permission-1.json");
+
+    fn native_screen(change: impl FnOnce(&mut Vec<String>), alternate: bool) -> ScreenSnapshot {
+        let screen: Value = serde_json::from_str(NATIVE_SCREEN).unwrap();
+        let mut lines: Vec<String> = screen["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|line| line.as_str().unwrap().to_owned())
+            .collect();
+        change(&mut lines);
+        let mut terminal = TerminalState::new(TerminalSize {
+            rows: 36,
+            cols: 120,
+        })
+        .unwrap();
+        if alternate {
+            terminal.feed(b"\x1b[?1049h").unwrap();
+        }
+        terminal.feed(b"\x1b[2J").unwrap();
+        for (row, line) in lines.iter().enumerate() {
+            if !line.is_empty() {
+                terminal
+                    .feed(format!("\x1b[{};1H{line}", row + 1).as_bytes())
+                    .unwrap();
+            }
+        }
+        let cursor = (
+            screen["cursor_row"].as_u64().unwrap() + 1,
+            screen["cursor_col"].as_u64().unwrap() + 1,
+        );
+        terminal
+            .feed(format!("\x1b[{};{}H", cursor.0, cursor.1).as_bytes())
+            .unwrap();
+        terminal.snapshot()
+    }
+
+    fn claude_observation(screen: &ScreenSnapshot) -> ScreenObservation {
+        let catalog = ProfileCatalog::bundled().unwrap();
+        Detector::new(&catalog, CodingAgent::Claude, Some(CLAUDE_VERSION))
+            .unwrap()
+            .observe(screen)
+            .unwrap()
+    }
+
+    #[test]
+    fn bundled_claude_detector_replays_the_native_permission_fixture_from_unmasked_rows() {
+        let screen = native_screen(|_| {}, true);
+        assert_eq!((screen.cursor_row, screen.cursor_col), (23, 1));
+        let observation = claude_observation(&screen);
+        assert_eq!(
+            observation.kind,
+            ObservationKind::Interaction(InteractionClass::PermissionRequest)
+        );
+        assert_eq!(observation.match_evidence, MatchEvidence::Complete);
+        assert_eq!(
+            observation.raw_evidence["operation"],
+            "/private/tmp/cafleet-194/cells-002/permission-probe allow"
+        );
+        assert_eq!(observation.raw_evidence["choices"], json!(["Yes", "No"]));
+        assert!(!observation.verified_noninteraction);
+        assert!(observation.native_correlation.is_none());
+        let region = observation
+            .matched_region
+            .expect("a permission match locates its live region");
+        assert!(
+            region.top >= 12,
+            "detection region lies below the masked header: {region:?}"
+        );
+        assert!(region.top <= 14 && region.bottom >= 26, "{region:?}");
+        let replay = claude_observation(&native_screen(|_| {}, true));
+        assert!(observation.fingerprint.is_some());
+        assert!(replay.fingerprint == observation.fingerprint);
+        let other_version = ProfileCatalog::bundled().unwrap();
+        let unprofiled = Detector::new(&other_version, CodingAgent::Claude, Some("2.1.301"))
+            .unwrap()
+            .observe(&screen)
+            .unwrap();
+        assert_eq!(unprofiled.kind, ObservationKind::Unknown);
+    }
+
+    #[test]
+    fn bundled_claude_detector_rejects_copies_that_are_not_the_live_permission_form() {
+        let permission = ObservationKind::Interaction(InteractionClass::PermissionRequest);
+        let primary = claude_observation(&native_screen(|_| {}, false));
+        assert_ne!(primary.kind, permission, "primary-screen transcript copy");
+        let unfocused = claude_observation(&native_screen(
+            |lines| lines[23] = lines[23].replace('❯', " "),
+            true,
+        ));
+        assert_ne!(unfocused.kind, permission, "form without a focus marker");
+        let broadened = claude_observation(&native_screen(
+            |lines| {
+                lines[23].clear();
+                lines[26].clear();
+            },
+            true,
+        ));
+        assert_ne!(broadened.kind, permission, "only broadened choices remain");
+        let headless = claude_observation(&native_screen(|lines| lines[14].clear(), true));
+        assert_ne!(headless.kind, permission, "form without its heading");
+    }
+
     #[test]
     fn permission_inspection_answer_matches_have_no_debug_or_serialized_representation() {
         trait AmbiguousIfImplemented<Marker> {

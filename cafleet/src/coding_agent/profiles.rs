@@ -2623,6 +2623,239 @@ mod contract_tests {
         }
     }
 
+    mod bundled_claude {
+        use super::*;
+        use sha2::{Digest, Sha256};
+        use std::collections::BTreeSet;
+
+        const CLAUDE_VERSION: &str = "2.1.302";
+        const NATIVE_FIXTURE: &str = "claude-2.1.302-default-permission-1";
+        const NATIVE_SOURCE: &str = "native/claude-2.1.302-default-permission-1.json";
+        const NATIVE_BYTES: &[u8] =
+            include_bytes!("profiles/native/claude-2.1.302-default-permission-1.json");
+        const DEFINITIONS: &str = include_str!("profiles/bundled.json");
+
+        fn digest(bytes: &[u8]) -> String {
+            Sha256::digest(bytes)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect()
+        }
+
+        fn definitions() -> Value {
+            serde_json::from_str(DEFINITIONS).unwrap()
+        }
+
+        fn native_screen() -> Value {
+            serde_json::from_slice(NATIVE_BYTES).unwrap()
+        }
+
+        fn native_entry(definitions: &mut Value) -> &mut Value {
+            definitions["fixtures"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|entry| entry["id"] == NATIVE_FIXTURE)
+                .expect("bundled catalog cites the cells-002 native fixture")
+        }
+
+        fn guarded(
+            change_definitions: impl FnOnce(&mut Value),
+            change_screen: impl FnOnce(&mut Value),
+        ) -> Result<ProfileCatalog, CafleetError> {
+            let mut screen = native_screen();
+            change_screen(&mut screen);
+            let bytes = serde_json::to_vec_pretty(&screen).unwrap();
+            let mut value = definitions();
+            native_entry(&mut value)["sha256"] = json!(digest(&bytes));
+            change_definitions(&mut value);
+            ProfileCatalog::from_bundled_definitions(&value, &[(NATIVE_SOURCE, &bytes)])
+        }
+
+        #[test]
+        fn bundled_claude_native_fixture_matches_its_catalog_entry_and_declares_masked_header_rows()
+        {
+            let mut value = definitions();
+            assert_eq!(
+                native_entry(&mut value),
+                &json!({"id":NATIVE_FIXTURE,"kind":"native","backend":"claude","native_version":CLAUDE_VERSION,
+                    "rows":36,"cols":120,"source_ref":NATIVE_SOURCE,"sha256":digest(NATIVE_BYTES)})
+            );
+            let screen = native_screen();
+            assert_eq!(
+                screen
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<BTreeSet<_>>(),
+                BTreeSet::from([
+                    "schema_version",
+                    "fixture_id",
+                    "provenance",
+                    "backend",
+                    "native_version",
+                    "rows",
+                    "cols",
+                    "alternate_screen",
+                    "screen_seq",
+                    "cursor_row",
+                    "cursor_col",
+                    "lines",
+                    "masked_rows",
+                ])
+            );
+            assert_eq!(screen["schema_version"], 1);
+            assert_eq!(screen["fixture_id"], NATIVE_FIXTURE);
+            assert_eq!(screen["provenance"], "native");
+            assert_eq!(screen["backend"], "claude");
+            assert_eq!(screen["native_version"], CLAUDE_VERSION);
+            assert_eq!(
+                (screen["rows"].clone(), screen["cols"].clone()),
+                (json!(36), json!(120))
+            );
+            assert_eq!(screen["alternate_screen"], true);
+            assert_eq!(screen["screen_seq"], 11424);
+            assert_eq!(
+                (screen["cursor_row"].clone(), screen["cursor_col"].clone()),
+                (json!(23), json!(1))
+            );
+            let lines = screen["lines"].as_array().unwrap();
+            assert_eq!(lines.len(), 36);
+            assert_eq!(
+                screen["masked_rows"],
+                json!(
+                    (0..12)
+                        .map(|row| json!({"row":row,"reason":"reviewed_privacy"}))
+                        .collect::<Vec<_>>()
+                )
+            );
+            for (row, line) in lines.iter().enumerate() {
+                let line = line.as_str().unwrap();
+                if row < 12 {
+                    assert_eq!(line, "", "masked row {row} is empty");
+                }
+                assert!(
+                    !line.contains("/Users/") && !line.contains("himkt"),
+                    "row {row} carries no personal path"
+                );
+            }
+            assert_eq!(lines[14], " Bash command");
+            assert_eq!(
+                lines[18],
+                " /private/tmp/cafleet-194/cells-002/permission-probe allow"
+            );
+            assert_eq!(lines[20], " This command requires approval");
+            assert_eq!(lines[22], " Do you want to proceed?");
+            assert_eq!(lines[23], " ❯ 1. Yes");
+            assert_eq!(lines[26], "   4. No");
+            assert_eq!(lines[28], " Esc to cancel · Tab to amend");
+            assert_eq!(lines[29], " ".repeat(17));
+        }
+
+        #[test]
+        fn bundled_claude_2_1_302_declares_tested_detection_only() {
+            let bundled = ProfileCatalog::bundled().unwrap();
+            let claude = bundled.capabilities(CodingAgent::Claude, Some(CLAUDE_VERSION));
+            assert_eq!(claude.backend, CodingAgent::Claude);
+            assert_eq!(claude.native_version.as_deref(), Some(CLAUDE_VERSION));
+            assert!(
+                claude
+                    .profile_version
+                    .as_deref()
+                    .is_some_and(|v| !v.is_empty())
+            );
+            assert_eq!(claude.detection, Coverage::Tested);
+            assert_eq!(claude.composer, Coverage::Unknown);
+            assert_eq!(claude.prompt_submission, Coverage::Unknown);
+            assert_eq!(claude.native_exec_submission, Coverage::Unknown);
+            assert!(claude.answer_decisions.is_empty());
+            for version in [None, Some("2.1.301"), Some("2.1.303")] {
+                let unknown = bundled.capabilities(CodingAgent::Claude, version);
+                assert_eq!(unknown.detection, Coverage::Unknown, "{version:?}");
+                assert!(unknown.answer_decisions.is_empty());
+                assert!(unknown.capability_reason.is_some());
+            }
+            for &backend in CodingAgent::all()
+                .iter()
+                .filter(|&&backend| backend != CodingAgent::Claude)
+            {
+                let other = bundled.capabilities(backend, Some(CLAUDE_VERSION));
+                assert_eq!(other.detection, Coverage::Unknown, "{backend:?}");
+                assert!(other.answer_decisions.is_empty());
+            }
+        }
+
+        #[test]
+        fn bundled_guard_accepts_declared_masks_and_rejects_synthetic_altered_or_mismatched_fixtures()
+         {
+            assert!(
+                ProfileCatalog::from_bundled_definitions(
+                    &definitions(),
+                    &[(NATIVE_SOURCE, NATIVE_BYTES)]
+                )
+                .is_ok()
+            );
+            assert!(guarded(|_| {}, |_| {}).is_ok());
+            let mut tampered = NATIVE_BYTES.to_vec();
+            tampered.push(b'\n');
+            assert!(
+                ProfileCatalog::from_bundled_definitions(
+                    &definitions(),
+                    &[(NATIVE_SOURCE, &tampered)]
+                )
+                .is_err(),
+                "digest mismatch"
+            );
+            assert!(
+                ProfileCatalog::from_bundled_definitions(&definitions(), &[]).is_err(),
+                "cited fixture is embedded"
+            );
+            let screen_changes: [(&str, fn(&mut Value)); 13] = [
+                ("synthetic provenance", |s| {
+                    s["provenance"] = json!("synthetic")
+                }),
+                ("extra field", |s| s["note"] = json!("unreviewed")),
+                ("missing masked rows", |s| {
+                    s.as_object_mut().unwrap().remove("masked_rows");
+                }),
+                ("nonempty masked row", |s| {
+                    s["lines"][3] = json!("restored header")
+                }),
+                ("masked row out of range", |s| {
+                    s["masked_rows"]
+                        .as_array_mut()
+                        .unwrap()
+                        .push(json!({"row":36,"reason":"reviewed_privacy"}))
+                }),
+                ("duplicate masked row", |s| {
+                    s["masked_rows"]
+                        .as_array_mut()
+                        .unwrap()
+                        .push(json!({"row":0,"reason":"reviewed_privacy"}))
+                }),
+                ("unreviewed mask reason", |s| {
+                    s["masked_rows"][0]["reason"] = json!("convenience")
+                }),
+                ("fixture id", |s| s["fixture_id"] = json!("other-fixture")),
+                ("backend", |s| s["backend"] = json!("codex")),
+                ("native version", |s| s["native_version"] = json!("2.1.301")),
+                ("rows", |s| s["rows"] = json!(35)),
+                ("line count", |s| {
+                    s["lines"].as_array_mut().unwrap().pop();
+                }),
+                ("cursor outside geometry", |s| s["cursor_row"] = json!(36)),
+            ];
+            for (case, change) in screen_changes {
+                assert!(guarded(|_| {}, change).is_err(), "{case} must be rejected");
+            }
+            assert!(
+                guarded(|d| native_entry(d)["kind"] = json!("synthetic"), |_| {}).is_err(),
+                "synthetic catalog fixture kind must be rejected"
+            );
+        }
+    }
+
     const VERSION: &str = "synthetic-0.0.1";
     const PROFILE: &str = "synthetic-profile-1";
     const RULE: &str = "synthetic-permission";
