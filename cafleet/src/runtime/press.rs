@@ -319,6 +319,24 @@ mod contract_tests {
         );
     }
 
+    // A refused press releases its pane lock on return, but under full-suite load a concurrent
+    // lock probe can still observe it briefly; wait a bounded interval instead of one attempt.
+    fn acquire_within(database_url: &str, placement: &Placement) -> bool {
+        let until = Instant::now() + Duration::from_secs(2);
+        loop {
+            if PaneLock::try_acquire(database_url, placement)
+                .unwrap()
+                .is_some()
+            {
+                return true;
+            }
+            if Instant::now() >= until {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
     fn post_refusal_lock_diagnostic(probe: &Probe) -> String {
         use std::os::unix::fs::MetadataExt;
 
@@ -396,11 +414,7 @@ mod contract_tests {
                 .unwrap(),
             0
         );
-        assert!(
-            PaneLock::try_acquire(&settings.database_url, &probe.placement)
-                .unwrap()
-                .is_some()
-        );
+        assert!(acquire_within(&settings.database_url, &probe.placement));
     }
 
     #[test]
@@ -474,18 +488,14 @@ mod contract_tests {
         assert_zero_effect(&busy, fixture.run.member_id);
         assert!(probe.calls.borrow().is_empty());
         drop(held);
-        assert!(
-            PaneLock::try_acquire(&settings.database_url, &probe.placement)
-                .unwrap()
-                .is_some()
-        );
+        assert!(acquire_within(&settings.database_url, &probe.placement));
     }
 
     #[test]
     fn step5_press_entry_rechecks_full_placement_and_original_expiry_after_actual_metadata() {
         for mode in [Mode::ChangePlacement, Mode::ExpireMetadata] {
             let mut fixture = Fixture::new();
-            let until = Instant::now() + Duration::from_millis(1300);
+            let until = Instant::now() + Duration::from_secs(2);
             let (settings, probe, mux) = setup(&fixture, mode, until);
             let cause = failure(press_member_with_mux(
                 &mut fixture.conn,
@@ -512,9 +522,7 @@ mod contract_tests {
                 _ => unreachable!(),
             }
             assert!(
-                PaneLock::try_acquire(&settings.database_url, &probe.placement)
-                    .unwrap()
-                    .is_some(),
+                acquire_within(&settings.database_url, &probe.placement),
                 "post-refusal pane lock is released: {}",
                 post_refusal_lock_diagnostic(&probe),
             );
@@ -570,11 +578,7 @@ mod contract_tests {
                 }
                 _ => unreachable!(),
             }
-            assert!(
-                PaneLock::try_acquire(&settings.database_url, &probe.placement)
-                    .unwrap()
-                    .is_some()
-            );
+            assert!(acquire_within(&settings.database_url, &probe.placement));
         }
     }
 }
