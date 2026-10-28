@@ -1,7 +1,7 @@
 # Member PTY Permission Events
 
-**Status**: Complete
-**Progress**: 22/22 tasks complete
+**Status**: In Progress
+**Progress**: 22/26 tasks complete
 **Last Updated**: 2026-10-28
 
 ## Overview
@@ -164,6 +164,8 @@ Each detector consumes a reconstructed screen, title, cursor/input-region eviden
 The exact SQL/Rust episode-class domain is `permission_request`, `question`, `trust`, `update`, `unknown_interaction`; `trust` and `update` are distinct values. `permission_denied` is a returned-result observation recorded only through `permission_denied_observed`, with a nullable episode link. `working`, `composer_empty` and `unknown` are input-eligibility states and create no interaction row.
 
 A title such as `Action Required`, a quoted approval transcript, a transcript viewer and an old permission line cannot independently create `permission_request`. Profiles must bind controls to the same live region, distinguish general questions/startup forms, and test wrapping, layout changes and competing rules. Conflicting strongest classifications yield `unknown_interaction` and preserve the screen. Unsupported versions advertise unknown coverage; missing matches never imply that all requests were observed.
+
+A narrow pane or a long command makes Claude wrap its permission form: the operation becomes one or more boxed `│` rows and choice labels continue on further rows. The Claude profile detects that wrapped shape as the same request: its live region still runs between exactly one heading line and one closing line with the cursor inside, within a row bound large enough for the wrapped form, and the boxed operation rows are normalized into one space-joined operation so the fingerprint is width-independent. A hard-wrapped token without a break space gains one space at its break; that changes evidence text only. Wrapped detection and answers are claimed only from native captures of the wrapped form at the profile's exact version, with the answer stages measured on that form.
 
 An episode is a CAFleet observation identity, `(run_id, episode_seq)`, not a native request ID. Allocate `episode_seq` monotonically within a run when a stable live interaction first appears. Use two compatible observations at least 100 ms apart before opening; recheck after 100 ms even if no bytes arrive. Gate programmatic input immediately on the first candidate, before this notification debounce.
 
@@ -557,3 +559,10 @@ The fault-condition-to-test map is recorded in `.execution/194/step-6-fault-late
 - [x] Run the appropriate repository-root Rust test/lint/typecheck tasks and documentation build; verify schema/JSON/help and embedded assets match shipping behavior. <!-- completed: 2026-10-28T06:30 -->
 - [x] Complete the mandatory Claude `default` and Codex `on-request` real-native cases on tmux and herdr, plus every additional claimed profile; pin versions and fail feature acceptance for a missing minimum detection/notification/continuation case. <!-- completed: 2026-10-28T06:30 -->
 - [x] Record fault-injection and detection/receiver latency evidence, unsupported/unobserved cases and reconciliation limits; confirm 0000192 stays Aborted and historical ledgers remain unchanged. <!-- completed: 2026-10-28T06:30 -->
+
+### Step 7: Detect wrapped Claude permission forms
+
+- [ ] Capture native Claude Code 2.1.302 `default` wrapped permission forms (no-answer form plus allow and deny pre-stage forms) at a width that boxes the operation, and measure the single-byte allow and deny stages on the wrapped form. <!-- completed: -->
+- [ ] Document the wrapped-form detection in the owning runtime reference and SPEC, replacing the shipped wrapped-form limit, then write fixture-backed tests for wrapped detection, width-independent identity, the unchanged false-positive guards and the wrapped answer plans. <!-- completed: -->
+- [ ] Implement the wrapped-form rule and operation normalization in the bundled Claude profile (`claude-2.1.302-default-3`) with its native fixtures, keeping the unwrapped form detected. <!-- completed: -->
+- [ ] Verify live on a narrow herdr pane that a wrapped request is detected, answered through `permission respond` for allow and deny, closes and continues; rerun the repository checks. <!-- completed: -->
