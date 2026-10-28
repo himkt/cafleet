@@ -24,7 +24,17 @@ pub fn opencode_skills_base(home: &Path) -> PathBuf {
 }
 
 pub fn opencode_preset_base(env: EnvLookup, home: &Path) -> Result<ResolvedDir, CafleetError> {
-    resolve("OPENCODE_CONFIG_DIR", env, home.join(".opencode"))
+    resolve("OPENCODE_CONFIG_DIR", env, opencode_skills_base(home))
+}
+
+pub fn require_absolute(var: &str, value: &str) -> Result<(), CafleetError> {
+    if Path::new(value).is_absolute() {
+        Ok(())
+    } else {
+        Err(CafleetError::App(format!(
+            "{var} must be an absolute path (got '{value}')"
+        )))
+    }
 }
 
 fn resolve(
@@ -34,12 +44,12 @@ fn resolve(
 ) -> Result<ResolvedDir, CafleetError> {
     match env(var) {
         None => Ok(ResolvedDir { path: default }),
-        Some(value) if Path::new(&value).is_absolute() => Ok(ResolvedDir {
-            path: PathBuf::from(value),
-        }),
-        Some(value) => Err(CafleetError::App(format!(
-            "{var} must be an absolute path (got '{value}')"
-        ))),
+        Some(value) => {
+            require_absolute(var, &value)?;
+            Ok(ResolvedDir {
+                path: PathBuf::from(value),
+            })
+        }
     }
 }
 

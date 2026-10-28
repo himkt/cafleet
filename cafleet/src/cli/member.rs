@@ -7,7 +7,7 @@ use super::helpers::{emit, resolve_body, resolve_command_body, resolve_mux};
 use crate::broker::records::MemberRecord;
 use crate::broker::{self, NewPlacement};
 use crate::capture::{CaptureSnapshot, MemberCapture, write_member_capture};
-use crate::coding_agent::{CodingAgent, ProfileCatalog, coding_agent};
+use crate::coding_agent::{CodingAgent, ProfileCatalog, SpawnProbe, coding_agent};
 use crate::config::Settings;
 use crate::error::CafleetError;
 
@@ -432,6 +432,15 @@ fn create(
         agent_name,
     )?;
     let identity = broker::runtime::database_identity(conn)?;
+    let environment = backend.spawn_environment(
+        &format!(
+            "sqlite:///{}",
+            identity["canonical_path"]
+                .as_str()
+                .expect("canonical database path")
+        ),
+        &|name| SystemProbe.env_var(name),
+    )?;
     let next_run: i64 = conn
         .query_row(
             "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='member_runs'),0)+1",
@@ -499,15 +508,7 @@ fn create(
             let spawn = runner::SpawnSpec {
                 argv,
                 cwd,
-                environment: vec![(
-                    "CAFLEET_DATABASE_URL".into(),
-                    format!(
-                        "sqlite:///{}",
-                        pending.run.database_identity_json["canonical_path"]
-                            .as_str()
-                            .expect("canonical database path")
-                    ),
-                )],
+                environment: environment.clone(),
                 evidence_policy,
                 size,
             };

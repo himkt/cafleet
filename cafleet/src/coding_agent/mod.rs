@@ -389,6 +389,19 @@ impl CodingAgent {
         }
     }
 
+    pub fn spawn_environment(
+        self,
+        database_url: &str,
+        env: EnvLookup<'_>,
+    ) -> Result<Vec<(String, String)>, CafleetError> {
+        let mut environment = vec![("CAFLEET_DATABASE_URL".to_owned(), database_url.to_owned())];
+        if let Some(value) = env(self.config_variable()) {
+            config_dir::require_absolute(self.config_variable(), &value)?;
+            environment.push((self.config_variable().to_owned(), value));
+        }
+        Ok(environment)
+    }
+
     pub fn required_preset(self, config: &Path, mode: &str) -> Option<PathBuf> {
         (self == Self::Opencode).then(|| config.join(format!("agents/{mode}.md")))
     }
