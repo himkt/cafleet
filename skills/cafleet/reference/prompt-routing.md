@@ -42,6 +42,8 @@ cafleet message ack <message-id>
 
 After lock and placement revalidation, the CLI routes wrapped input through the healthy runner’s tested native-shell composer profile, or uses the legacy Escape lead for an explicitly unwrapped member. It types `! ` plus the actual command once. It returns submission metadata. The host owns environment, permissions, execution and visible output.
 
+Escape-first input to an explicitly unwrapped member cancels an open tool approval or question in its pane. Capture that member's pane before `member exec` or `member prompt`; when the capture shows an open prompt, resolve it through the user relay first, or reach the member with `message send`, whose preview carries the dismissal clause.
+
 Inspect the result and terminal state:
 
 ```bash

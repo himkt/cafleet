@@ -24,7 +24,7 @@ Read every delivery, record any deferred action with its ID/artifact pointer in 
 
 ### Director wake
 
-Receive Director messages through broker reads and stdout only. Automatic reception sends no Escape, text, Enter or queued composer input to the Director, including on startup failure, receiver loss or missing native tools. Backend recipes own concrete tool calls; preserve the supplied host continuation state and user decision gates.
+Receive Director messages through broker reads and stdout only. Automatic reception sends no Escape, text, Enter or queued composer input to the Director, including on startup failure, receiver loss or missing native tools. A tool rejection or dismissed decision in the Director's own pane therefore comes from the operator or host, never from CAFleet input; follow it as reported. Backend recipes own concrete tool calls; preserve the supplied host continuation state and user decision gates.
 
 1. Retain one owned native handle while assignments or an authorized user-feedback phase remain outstanding. Store its pinned member/fleet IDs, receive status, incomplete JSONL and unfinished actions across context compaction.
 2. Consume complete `ready`, `message` and `closed` records from that handle. Preserve incomplete chunks for the next read. A healthy live read with no output keeps the same process; receiving a message supplies no reason to replace it.

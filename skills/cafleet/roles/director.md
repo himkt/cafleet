@@ -367,7 +367,7 @@ Authorize the required one-line command and call `cafleet member exec <member-id
 
 ## Member Prompt
 
-Use `cafleet member prompt <member-id> TEXT` for explicitly authorized composer input. Wrapped input requires a tested empty composer and reaches the child without Escape; unsafe input is rejected while the original native interaction stays intact. Explicitly unwrapped input retains Escape-first behavior, and both paths reject the Director’s own pane. Success means submission only.
+Use `cafleet member prompt <member-id> TEXT` for explicitly authorized composer input. Wrapped input requires a tested empty composer and reaches the child without Escape; unsafe input is rejected while the original native interaction stays intact. Explicitly unwrapped input retains Escape-first behavior, and both paths reject the Director’s own pane. Success means submission only. Before prompting an explicitly unwrapped member, run the open-prompt check in [Director-side dispatch](../reference/prompt-routing.md#director-side-dispatch).
 
 ## Member Press
 
