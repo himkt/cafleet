@@ -1,8 +1,10 @@
 # Coding-Agent Requirements by Role
 
-**Status**: Approved
+**Status**: Aborted
 **Progress**: 0/6 tasks complete
-**Last Updated**: 2026-10-26
+**Last Updated**: 2026-10-28
+
+Aborted at the user's request on 2026-10-28 and replanned through issue [#504](https://github.com/himkt/cafleet/issues/504). Design [0000194 — Member PTY Permission Events](../0000194-member-pty-permission-events/design-doc.md) shipped a § Role requirements section in both documentation homes (commit `bbd7a1c2`) with a Member requirement that differs from the one specified below. Preserve this document and its 0/6 task ledger as the record of the original plan.
 
 ## Overview
 
