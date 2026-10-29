@@ -43,6 +43,11 @@ mod policy_contract_tests {
     fn permission_argv(backend: CodingAgent, selected: &str) -> Vec<String> {
         match backend {
             CodingAgent::Claude => vec!["--permission-mode".into(), selected.into()],
+            CodingAgent::Codex if selected == "approve-for-me" => vec![
+                "--approve-for-me".into(),
+                "--sandbox".into(),
+                "workspace-write".into(),
+            ],
             CodingAgent::Codex => vec![
                 "--ask-for-approval".into(),
                 selected.into(),
@@ -54,12 +59,12 @@ mod policy_contract_tests {
     }
 
     #[test]
-    fn runtime_policy_omission_preserves_the_complete_existing_native_argv() {
+    fn runtime_policy_omission_selects_each_backends_automatic_default_argv() {
         for &backend in CodingAgent::all() {
             let selection = backend.resolve_policy(version(backend), None).unwrap();
             let expected_mode = match backend {
-                CodingAgent::Claude => "dontAsk",
-                CodingAgent::Codex => "never",
+                CodingAgent::Claude => "auto",
+                CodingAgent::Codex => "approve-for-me",
                 CodingAgent::Opencode => "cafleet",
             };
             assert_eq!(selection.requested_mode, None);
@@ -323,6 +328,214 @@ mod policy_contract_tests {
     }
 
     #[test]
+    fn runtime_policy_help_lists_every_catalog_with_the_automatic_defaults() {
+        assert_eq!(
+            CodingAgent::permission_mode_help(),
+            "Launch-only native permission policy for the resolved backend — claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet)"
+        );
+    }
+
+    #[test]
+    fn runtime_policy_codex_catalog_appends_approve_for_me_after_the_existing_choices() {
+        for native_version in [None, Some("0.163.0")] {
+            assert_eq!(
+                CodingAgent::Codex.policy_choices(native_version),
+                ["on-request", "never", "approve-for-me"],
+                "{native_version:?}"
+            );
+        }
+        for native_version in [None, Some("2.1.302")] {
+            assert_eq!(
+                CodingAgent::Claude.policy_choices(native_version),
+                [
+                    "default",
+                    "manual",
+                    "dontAsk",
+                    "acceptEdits",
+                    "auto",
+                    "bypassPermissions",
+                    "plan"
+                ],
+                "{native_version:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_policy_omitted_claude_launches_auto_and_records_default_launch_intent() {
+        for native_version in [Some("2.1.302"), None, Some("2.1.306")] {
+            let selection = CodingAgent::Claude
+                .resolve_policy(native_version, None)
+                .unwrap();
+            assert_eq!(selection.requested_mode, None, "{native_version:?}");
+            assert_eq!(selection.resolved_mode, "auto", "{native_version:?}");
+            assert_eq!(selection.mode_source, ModeSource::Default);
+            assert_eq!(
+                serde_json::to_value(&selection.permission_argv).unwrap(),
+                serde_json::json!(["--permission-mode", "auto"])
+            );
+            assert_eq!(
+                CodingAgent::Claude
+                    .build_spawn_argv_with_policy("assignment", "worker", None, None, &selection)
+                    .unwrap(),
+                [
+                    "claude",
+                    "--permission-mode",
+                    "auto",
+                    "--prompt-suggestions",
+                    "false",
+                    "--allowedTools",
+                    "Bash(cafleet message *)",
+                    "--name",
+                    "worker",
+                    "assignment"
+                ],
+                "{native_version:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_policy_omitted_codex_launches_approve_for_me_with_the_explicit_sandbox() {
+        for native_version in [Some("0.163.0"), None, Some("0.164.0")] {
+            let selection = CodingAgent::Codex
+                .resolve_policy(native_version, None)
+                .unwrap();
+            assert_eq!(selection.requested_mode, None, "{native_version:?}");
+            assert_eq!(
+                selection.resolved_mode, "approve-for-me",
+                "{native_version:?}"
+            );
+            assert_eq!(selection.mode_source, ModeSource::Default);
+            assert_eq!(
+                serde_json::to_value(&selection.permission_argv).unwrap(),
+                serde_json::json!(["--approve-for-me", "--sandbox", "workspace-write"])
+            );
+            assert_eq!(
+                CodingAgent::Codex
+                    .build_spawn_argv_with_policy("assignment", "worker", None, None, &selection)
+                    .unwrap(),
+                [
+                    "codex",
+                    "--approve-for-me",
+                    "--sandbox",
+                    "workspace-write",
+                    "assignment"
+                ],
+                "{native_version:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_policy_explicit_approve_for_me_records_explicit_launch_intent() {
+        for native_version in [Some("0.163.0"), None] {
+            let selection = CodingAgent::Codex
+                .resolve_policy(native_version, Some("approve-for-me"))
+                .unwrap();
+            assert_eq!(selection.requested_mode.as_deref(), Some("approve-for-me"));
+            assert_eq!(selection.resolved_mode, "approve-for-me");
+            assert_eq!(selection.mode_source, ModeSource::Explicit);
+            assert_eq!(
+                selection.permission_argv,
+                ["--approve-for-me", "--sandbox", "workspace-write"]
+            );
+            assert_eq!(
+                CodingAgent::Codex
+                    .build_spawn_argv_with_policy(
+                        "assignment",
+                        "worker",
+                        Some("provider/model"),
+                        Some("high"),
+                        &selection
+                    )
+                    .unwrap(),
+                [
+                    "codex",
+                    "--approve-for-me",
+                    "--sandbox",
+                    "workspace-write",
+                    "--model",
+                    "provider/model",
+                    "--config=model_reasoning_effort=high",
+                    "assignment"
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_policy_previous_defaults_remain_explicit_choices_with_unchanged_argv() {
+        for (backend, version, mode, argv) in [
+            (
+                CodingAgent::Claude,
+                "2.1.302",
+                "dontAsk",
+                &["--permission-mode", "dontAsk"][..],
+            ),
+            (
+                CodingAgent::Codex,
+                "0.163.0",
+                "on-request",
+                &[
+                    "--ask-for-approval",
+                    "on-request",
+                    "--sandbox",
+                    "workspace-write",
+                ][..],
+            ),
+            (
+                CodingAgent::Codex,
+                "0.163.0",
+                "never",
+                &[
+                    "--ask-for-approval",
+                    "never",
+                    "--sandbox",
+                    "workspace-write",
+                ][..],
+            ),
+            (
+                CodingAgent::Opencode,
+                "2.1.4",
+                "cafleet",
+                &["--agent", "cafleet"][..],
+            ),
+            (
+                CodingAgent::Opencode,
+                "2.1.4",
+                "cafleet-ask",
+                &["--agent", "cafleet-ask"][..],
+            ),
+        ] {
+            let selection = backend.resolve_policy(Some(version), Some(mode)).unwrap();
+            assert_eq!(selection.requested_mode.as_deref(), Some(mode));
+            assert_eq!(selection.resolved_mode, mode);
+            assert_eq!(selection.mode_source, ModeSource::Explicit);
+            assert_eq!(selection.permission_argv, argv, "{backend:?} {mode}");
+        }
+    }
+
+    #[test]
+    fn runtime_policy_codex_unknown_choice_fails_with_the_exact_usage_error() {
+        for native_version in [None, Some("0.163.0")] {
+            for value in ["auto", "untrusted", "approve_for_me"] {
+                let failure = CodingAgent::Codex
+                    .resolve_policy(native_version, Some(value))
+                    .expect_err("unknown Codex policy must fail");
+                assert!(matches!(failure, CafleetError::Usage(_)));
+                assert_eq!(failure.exit_code(), 2);
+                assert_eq!(
+                    failure.message(),
+                    format!(
+                        "--permission-mode for codex must be one of on-request, never, approve-for-me (got '{value}')"
+                    )
+                );
+            }
+        }
+    }
+
+    #[test]
     fn runtime_policy_foreign_selection_is_rejected_before_native_argv_construction() {
         let selected = CodingAgent::Claude
             .resolve_policy(Some("2.1.302"), Some("default"))
@@ -540,7 +753,7 @@ mod tests {
                 vec![
                     "claude",
                     "--permission-mode",
-                    "dontAsk",
+                    "auto",
                     "--prompt-suggestions",
                     "false",
                     "--allowedTools",
@@ -551,13 +764,7 @@ mod tests {
             ),
             (
                 CodingAgent::Codex,
-                vec![
-                    "codex",
-                    "--ask-for-approval",
-                    "never",
-                    "--sandbox",
-                    "workspace-write",
-                ],
+                vec!["codex", "--approve-for-me", "--sandbox", "workspace-write"],
             ),
             (
                 CodingAgent::Opencode,
