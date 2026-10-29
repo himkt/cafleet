@@ -1309,6 +1309,52 @@ pub(super) mod contract_tests {
             );
             blocking.execute_batch("ROLLBACK").unwrap();
         }
+
+        struct SlowCompaction {
+            calls: AtomicU64,
+        }
+        impl WriterHooks for SlowCompaction {
+            fn before(&self, boundary: WriterBoundary, _: Instant) -> Result<()> {
+                if matches!(boundary, WriterBoundary::Compact) {
+                    self.calls.fetch_add(1, Ordering::AcqRel);
+                    std::thread::sleep(Duration::from_millis(250));
+                }
+                Ok(())
+            }
+        }
+
+        #[test]
+        fn runner_batch2_worker_final_compaction_slower_than_one_work_slice_commits_before_the_shutdown_deadline()
+         {
+            let fixture = WriterFixture::new();
+            let hooks = Arc::new(SlowCompaction {
+                calls: AtomicU64::new(0),
+            });
+            let mut writer = EventWriter::start_with_hooks(
+                format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()),
+                fixture.fixture.run.clone(),
+                fixture.lock.clone(),
+                fixture.artifacts.paths.outbox.clone(),
+                hooks.clone(),
+            )
+            .unwrap();
+            assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
+            wait_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
+            let begin = Instant::now();
+            assert_eq!(writer.finish(begin + Duration::from_secs(3)), (0, 0));
+            assert!(
+                writer.joined(),
+                "the worker stops once its final compaction commits"
+            );
+            assert!(begin.elapsed() < Duration::from_secs(3));
+            assert!(
+                std::fs::read(&fixture.artifacts.paths.outbox)
+                    .unwrap()
+                    .is_empty(),
+                "the committed outbox is compacted"
+            );
+            assert!(hooks.calls.load(Ordering::Acquire) >= 1);
+        }
     }
 
     pub(in crate::runtime::runner) mod effective_policy {

@@ -1,7 +1,7 @@
 # Member Automatic Approval Modes
 
 **Status**: Approved
-**Progress**: 25/31 tasks complete
+**Progress**: 24/31 tasks complete
 **Last Updated**: 2026-10-29
 
 ## Overview
@@ -417,6 +417,9 @@ Each case records versions, mode, profile, profile match, multiplexer, terminal 
 - [x] Implement the effective policy writes and the shared runtime snapshot presentation. <!-- completed: 2026-10-29T11:03 -->
 
 ### Step 7: Validate and accept
+
+
+COMMENT(director): User decision: fix it in this PR with option (a) — give the final compaction its own budget bounded by the shutdown deadline instead of the 100 ms work slice. Programmer implements (a) and runs the full suite twice. Each removes their half; the last deletes this marker. Programmer findings: (probes added temporarily to `writer.rs` / `outbox.rs`, all reverted; no code change remains). Reproduced on 2 of 2 full branch runs; `runtime::runner::` alone (406 tests in parallel) and the test alone pass. The failing `(0, N)` comes from `writer.finish` with `joined=false` and diagnostic `operation exceeded its deadline` or `database error: interrupted`. The worker thread never stops within the 10 s budget because its final compaction never commits. Compaction of the test's 68 frames takes 77 ms alone against the worker's fixed 100 ms per-attempt `work_deadline`: 13 ms scanning frames and about 64 ms in the 68 per-frame `get_event` association checks. Under full-suite CPU load it overruns, and every retry repeats the same whole-outbox work, so it livelocks until the deadline. The branch does not change that path for this test: it has no annotations or policy items, so the frame bytes are identical, `try_submit_with_policy(_, None)` equals the old submit, `policies` stays 0 in the stop condition, and the bounded-update count is unchanged for primary drafts. The branch adds only negligible per-frame cost (one JSON parse plus a clone instead of two parses in `parse_frame_body`, and a null-record check in `get_run`). The likely difference from main is suite load, from the new CPU-heavy fixture-replay and `ProfileCatalog::bundled()` tests. I cannot run main myself (no worktree or checkout); a Director-side main run with the same compaction timing, or repeated full main runs, would confirm. Underlying defect (pre-existing, outside 0000197): any compaction whose whole-outbox validation cannot fit 100 ms can never complete. Fix options for a decision: (a) give compaction its own budget bounded by the shutdown deadline instead of the 100 ms work slice; (b) compact the committed prefix in bounded chunks. I recommend (a) as the smaller change.
 
 - [ ] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build`; verify help, JSON and embedded assets match the documentation. <!-- completed: -->
 - [ ] Run live acceptance for Claude on tmux and herdr: omitted-default launch, auto-approved, auto-refused with its event and Director handling, escalated form allow and deny, and unavailable where captured. <!-- completed: -->
