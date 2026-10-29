@@ -3604,10 +3604,11 @@ mod runtime_contract_tests {
                 let owner = fixture.activate();
                 fixture.reserve(&owner);
                 let observation = unavailable(None);
+                let transition = unavailable_transition(&fixture, 1);
                 let event = storage::persist_transition_with_effective_policy(
                     &mut fixture.conn,
                     &owner,
-                    &unavailable_transition(&fixture, 1),
+                    &transition,
                     &observation,
                     PersistenceMode::Live,
                 )
@@ -3779,11 +3780,12 @@ mod runtime_contract_tests {
                 let owner = fixture.activate();
                 fixture.reserve(&owner);
                 let before = durable_state(&fixture.conn);
+                let transition = unavailable_transition(&fixture, 1);
                 assert!(
                     storage::persist_transition_with_effective_policy(
                         &mut fixture.conn,
                         &owner,
-                        &unavailable_transition(&fixture, 1),
+                        &transition,
                         &unavailable(Some("auto")),
                         PersistenceMode::Live,
                     )
@@ -3803,10 +3805,11 @@ mod runtime_contract_tests {
                     let (mut fixture, owner) = redacted_running();
                     fixture.reserve(&owner);
                     let observation = unavailable(observed_mode);
+                    let transition = unavailable_transition(&fixture, 1);
                     let event = storage::persist_transition_with_effective_policy(
                         &mut fixture.conn,
                         &owner,
-                        &unavailable_transition(&fixture, 1),
+                        &transition,
                         &observation,
                         PersistenceMode::Live,
                     )
@@ -3857,10 +3860,11 @@ mod runtime_contract_tests {
                 let first = available(Some("auto"), NOW);
                 assert!(record_available(&mut fixture, &owner, &first).unwrap());
                 let lost = unavailable(Some("auto"));
+                let transition = unavailable_transition(&fixture, 1);
                 let event = storage::persist_transition_with_effective_policy(
                     &mut fixture.conn,
                     &owner,
-                    &unavailable_transition(&fixture, 1),
+                    &transition,
                     &lost,
                     PersistenceMode::Live,
                 )
