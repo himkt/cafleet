@@ -460,6 +460,7 @@ impl ObservationController {
         let capabilities = catalog.capabilities(backend, run.native_version.as_deref());
         ensure(
             capabilities.profile_version == run.profile_version
+                && capabilities.profile_match == run.profile_match
                 && capabilities.detection == run.coverage,
             "observer profile/coverage mismatch",
         )?;
