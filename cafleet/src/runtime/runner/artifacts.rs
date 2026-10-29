@@ -114,7 +114,7 @@ fn uid() -> u32 {
 fn identity(metadata: &fs::Metadata) -> Value {
     json!({"device":metadata.dev(),"inode":metadata.ino()})
 }
-fn private_metadata(
+pub(super) fn private_metadata(
     path: &Path,
     expected_uid: u32,
     mode: u32,

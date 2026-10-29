@@ -1,7 +1,7 @@
 # Codebase redundancy cleanup
 
 **Status**: Approved
-**Progress**: 30/56 tasks complete
+**Progress**: 33/56 tasks complete
 **Last Updated**: 2026-10-29
 
 ## Overview
@@ -597,9 +597,9 @@ Each step is one commit and leaves `mise //cafleet:test` and `mise //cafleet:lin
 
 ### Step 7: Fold the native-capture harness and delete the tracer
 
-- [ ] Inline `native_capture.rs` and `native_capture/{exporter,files,verification,review_service_tests}.rs` into `observation.rs` as `native_capture`, and move `runner_tests/native_capture*`, `review_collector.rs` and `review_export.rs` tests into it <!-- completed: -->
-- [ ] Apply OBS-08…11 and OBS-13 inside the harness <!-- completed: -->
-- [ ] Delete `process/ownership_diagnostics.rs`, its hooks and self-tests (SVC-01), and record them in the ledger <!-- completed: -->
+- [x] Inline `native_capture.rs` and `native_capture/{exporter,files,verification,review_service_tests}.rs` into `observation.rs` as `native_capture`, and move `runner_tests/native_capture*`, `review_collector.rs` and `review_export.rs` tests into it <!-- completed: 2026-10-29T17:04 -->
+- [x] Apply OBS-08…11 and OBS-13 inside the harness <!-- completed: 2026-10-29T17:10 -->
+- [x] Delete `process/ownership_diagnostics.rs`, its hooks and self-tests (SVC-01), and record them in the ledger <!-- completed: 2026-10-29T17:20 -->
 
 ### Step 8: Re-home mis-housed in-file test modules
 

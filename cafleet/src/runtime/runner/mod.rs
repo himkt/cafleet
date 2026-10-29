@@ -8,10 +8,6 @@ pub(crate) use input_clock::*;
 pub(crate) use input_recovery::ExclusiveReceiptGuard;
 mod input;
 pub(crate) use input::InputGuard;
-#[cfg(test)]
-mod native_capture;
-#[cfg(test)]
-pub(crate) use native_capture::*;
 mod observation;
 pub(crate) use observation::*;
 mod outbox;
