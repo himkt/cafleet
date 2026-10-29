@@ -152,7 +152,7 @@ impl Case {
         let held = match &self.held {
             Some(held) => held.as_ref(),
             None => {
-                acquired = RunLock::acquire(&self.fixture.conn, &run.owner())
+                acquired = RunLock::acquire_released(&self.fixture.conn, &run.owner())
                     .unwrap()
                     .expect("the actual current owner reacquires its original matching lock");
                 &acquired

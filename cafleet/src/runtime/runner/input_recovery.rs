@@ -645,7 +645,7 @@ pub(super) mod tests {
 
         fn assert_original_lock_available(&self) {
             let run = storage::get_run(&self.fixture.conn, self.input.run_id).unwrap();
-            let lock = RunLock::acquire(&self.fixture.conn, &run.owner())
+            let lock = RunLock::acquire_released(&self.fixture.conn, &run.owner())
                 .unwrap()
                 .expect("receipt-only ownership releases its original namespace on return");
             lock.validate(&self.fixture.conn, &run.owner()).unwrap();
@@ -824,7 +824,7 @@ pub(super) mod tests {
         assert!(host.calls.contains(&"after"));
         assert_eq!(rows(&case.fixture.conn, &[]), before);
         assert_eq!(spool(), original_spool);
-        let lock = RunLock::acquire(&case.fixture.conn, &run.owner())
+        let lock = RunLock::acquire_released(&case.fixture.conn, &run.owner())
             .unwrap()
             .unwrap();
         lock.validate(&case.fixture.conn, &run.owner()).unwrap();
@@ -869,7 +869,7 @@ pub(super) mod tests {
         assert_eq!(spool(), original_spool);
         held.validate_binding(&case.settings.database_url, &placement)
             .unwrap();
-        RunLock::acquire(&case.fixture.conn, &current.owner())
+        RunLock::acquire_released(&case.fixture.conn, &current.owner())
             .unwrap()
             .unwrap()
             .validate(&case.fixture.conn, &current.owner())
@@ -968,7 +968,7 @@ pub(super) mod tests {
                 expected
             );
             assert_eq!(rows(&case.fixture.conn, &[excluded]), before);
-            RunLock::acquire(&case.fixture.conn, &run.owner())
+            RunLock::acquire_released(&case.fixture.conn, &run.owner())
                 .unwrap()
                 .unwrap()
                 .validate(&case.fixture.conn, &run.owner())
@@ -1243,7 +1243,8 @@ pub(super) mod tests {
             match condition {
                 "held_lock" => {
                     original_lock =
-                        RunLock::acquire(&case.fixture.conn, &case.fixture.run.owner()).unwrap()
+                        RunLock::acquire_released(&case.fixture.conn, &case.fixture.run.owner())
+                            .unwrap()
                 }
                 "missing_lock" => std::fs::remove_file(&case.artifacts.paths.owner_lock).unwrap(),
                 "replaced_lock" => {

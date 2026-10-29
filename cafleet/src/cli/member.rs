@@ -1828,7 +1828,7 @@ mod tests {
             );
             drop(locked);
             assert!(
-                PaneLock::try_acquire(&settings.database_url, &placement)
+                PaneLock::acquire_released(&settings.database_url, &placement)
                     .unwrap()
                     .is_some()
             );

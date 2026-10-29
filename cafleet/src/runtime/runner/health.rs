@@ -614,7 +614,7 @@ mod tests {
                 &fixture,
                 "matching owner lock is currently available",
             );
-            let held = RunLock::acquire(&fixture.conn, &fixture.run.owner())
+            let held = RunLock::acquire_released(&fixture.conn, &fixture.run.owner())
                 .unwrap()
                 .expect("diagnosis releases its probe and preserves the original owner identity");
             assert_eq!(registry_snapshot(&fixture.conn), before_rows);

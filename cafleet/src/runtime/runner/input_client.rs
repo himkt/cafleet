@@ -2916,7 +2916,7 @@ mod tests {
             original
         );
         assert_eq!(health_records(&case.fixture.conn), records);
-        PaneLock::try_acquire(&case.settings.database_url, &placement)
+        PaneLock::acquire_released(&case.settings.database_url, &placement)
             .unwrap()
             .expect("failed live invocation releases its genuine pane guard")
             .validate_binding(&case.settings.database_url, &placement)
@@ -3039,13 +3039,13 @@ mod tests {
                 receipt
             );
             if !absent {
-                PaneLock::try_acquire(&case.settings.database_url, &placement)
+                PaneLock::acquire_released(&case.settings.database_url, &placement)
                     .unwrap()
                     .unwrap()
                     .validate_binding(&case.settings.database_url, &placement)
                     .unwrap();
             }
-            RunLock::acquire(&case.fixture.conn, &current.owner())
+            RunLock::acquire_released(&case.fixture.conn, &current.owner())
                 .unwrap()
                 .unwrap()
                 .validate(&case.fixture.conn, &current.owner())
@@ -3282,13 +3282,13 @@ mod tests {
             }
             assert_eq!(health_records(&fixture.conn), history);
             if !absent {
-                PaneLock::try_acquire(&settings.database_url, &placement)
+                PaneLock::acquire_released(&settings.database_url, &placement)
                     .unwrap()
                     .expect("the acquired pane guard is released on every routed outcome")
                     .validate_binding(&settings.database_url, &placement)
                     .unwrap();
             }
-            RunLock::acquire(&fixture.conn, &current.owner())
+            RunLock::acquire_released(&fixture.conn, &current.owner())
                 .unwrap()
                 .expect("the original namespace is released after settlement or refusal")
                 .validate(&fixture.conn, &current.owner())
@@ -4570,7 +4570,7 @@ mod tests {
             );
             drop(held);
             assert!(
-                PaneLock::try_acquire(&settings.database_url, &placement)
+                PaneLock::acquire_released(&settings.database_url, &placement)
                     .unwrap()
                     .is_some()
             );

@@ -453,6 +453,20 @@ impl RunLock {
             Err(TryLockError::Error(cause)) => Err(io_error(cause)),
         }
     }
+    /// The run-lock counterpart of [`crate::input::PaneLock::acquire_released`].
+    #[cfg(test)]
+    pub(crate) fn acquire_released(conn: &Connection, owner: &RunOwner) -> Result<Option<Self>> {
+        let until = Instant::now() + crate::input::RELEASED_LOCK_GRACE;
+        loop {
+            if let Some(lock) = Self::acquire(conn, owner)? {
+                return Ok(Some(lock));
+            }
+            if Instant::now() >= until {
+                return Ok(None);
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
     pub(crate) fn validate(&self, conn: &Connection, owner: &RunOwner) -> Result<()> {
         let run = storage::get_run(conn, owner.run_id)?;
         ensure(run.owner() == *owner, "stale runtime owner")?;
@@ -829,7 +843,11 @@ mod tests {
         held.validate(&fixture.conn, &next).unwrap();
         assert!(RunLock::acquire(&fixture.conn, &next).unwrap().is_none());
         drop(held);
-        assert!(RunLock::acquire(&fixture.conn, &next).unwrap().is_some());
+        assert!(
+            RunLock::acquire_released(&fixture.conn, &next)
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[test]
