@@ -1,7 +1,7 @@
 # Codebase redundancy cleanup
 
 **Status**: Approved
-**Progress**: 19/56 tasks complete
+**Progress**: 25/56 tasks complete
 **Last Updated**: 2026-10-29
 
 ## Overview
@@ -574,12 +574,12 @@ Each step is one commit and leaves `mise //cafleet:test` and `mise //cafleet:lin
 
 ### Step 4: Rules and maintainer surfaces
 
-- [ ] Add § Test placement to `.claude/rules/code-quality.md` and `## Tests` to `CLAUDE.md` with the exact § Test placement rule texts <!-- completed: -->
-- [ ] Rewrite `.claude/rules/documentation-maintenance.md`, `.claude/rules/coding-agent-overlay.md`, `.claude/rules/database-migrations.md` and `.claude/rules/commands.md` per § Rules and maintainer skills for the documentation model <!-- completed: -->
-- [ ] Rewrite `.claude/skills/update-readme/SKILL.md` and `.claude/skills/clean-docs/reference/review-format.md` per the same table <!-- completed: -->
-- [ ] Consolidate the clean-docs roles and SKILL.md (SKL-01, SKL-04, SKL-05) and apply SKL-23 to `.claude/skills/clean-docs/**` and `.claude/rules/git-workflow.md` <!-- completed: -->
-- [ ] Merge the CI jobs into a matrix with stable check names and SHA-pin actions (SKL-13) <!-- completed: -->
-- [ ] Apply SKL-19 (`.gitignore`) and CLI-16 (`rustfmt.toml`) under the verify-then-act protocol <!-- completed: -->
+- [x] Add § Test placement to `.claude/rules/code-quality.md` and `## Tests` to `CLAUDE.md` with the exact § Test placement rule texts <!-- completed: 2026-10-29T15:57 -->
+- [x] Rewrite `.claude/rules/documentation-maintenance.md`, `.claude/rules/coding-agent-overlay.md`, `.claude/rules/database-migrations.md` and `.claude/rules/commands.md` per § Rules and maintainer skills for the documentation model <!-- completed: 2026-10-29T15:58 -->
+- [x] Rewrite `.claude/skills/update-readme/SKILL.md` and `.claude/skills/clean-docs/reference/review-format.md` per the same table <!-- completed: 2026-10-29T15:59 -->
+- [x] Consolidate the clean-docs roles and SKILL.md (SKL-01, SKL-04, SKL-05) and apply SKL-23 to `.claude/skills/clean-docs/**` and `.claude/rules/git-workflow.md` <!-- completed: 2026-10-29T16:04 -->
+- [x] Merge the CI jobs into a matrix with stable check names and SHA-pin actions (SKL-13) <!-- completed: 2026-10-29T16:04 -->
+- [x] Apply SKL-19 (`.gitignore`) and CLI-16 (`rustfmt.toml`) under the verify-then-act protocol <!-- completed: 2026-10-29T16:07 -->
 
 ### Step 5: Crate-level test infrastructure
 
@@ -588,8 +588,6 @@ Each step is one commit and leaves `mise //cafleet:test` and `mise //cafleet:lin
 - [x] Create `catalog::test_support::synthetic_definitions()`/`synthetic_catalog()`; point every synthetic-profile reader at them; delete `runner_tests/fixtures/synthetic-profile.json` <!-- completed: 2026-10-29T15:39 -->
 
 ### Step 6: Dissolve `runtime/runner_tests/`
-
-COMMENT(programmer): Step 6 moves about 13,000 lines of tests verbatim. To move them mechanically instead of retyping them, I wrote `.tools/rsplice.py` under this folder (a Rust-aware item extractor/splicer that cuts named items or whole files and inserts them into a target's `mod tests`; rustfmt then reindents). The harness denies `python3 -I /development-pvc/work/himkt/cafleet/design-docs/0000198-codebase-redundancy-cleanup/.tools/rsplice.py <args>` in dontAsk mode. Please either add a host allow rule for `Bash(python3 -I /development-pvc/work/himkt/cafleet/design-docs/0000198-codebase-redundancy-cleanup/.tools/rsplice.py *)`, or tell me to proceed by hand-copying with Read/Write (much slower and riskier to the moved bytes). A related sequencing point: Step 6 task 5 deletes `runtime/runner_tests/`, but Step 7 task 1 moves `runner_tests/native_capture*`, `review_collector.rs` and `review_export.rs` into `observation.rs` `native_capture`. I plan to move those files in Step 6 into the current `runner/native_capture*` module files (their Step 7 home before inlining), so Step 7 becomes a pure inline; confirm or redirect.
 
 - [ ] Move `Fixture` to `runner/mod.rs` `test_support`, `OwnedChild` to `system.rs` `TestChild`, and the control-service harness to `service.rs` `test_support` with final names; delete the `runtime/mod.rs` re-export block <!-- completed: -->
 - [ ] Move `creation.rs`, `control_service.rs`, `input_service*`, `observation_*` and `review_failures.rs` tests to their targets <!-- completed: -->

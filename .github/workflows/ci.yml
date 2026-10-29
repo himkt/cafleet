@@ -7,36 +7,23 @@ on:
     branches: [main]
 
 jobs:
-  lint:
+  check:
+    name: ${{ matrix.task }}
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        task: [lint, test]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
         with:
           experimental: true
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             cafleet/target
-          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('cafleet/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-lint-
-      - run: mise //cafleet:lint
-
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
-        with:
-          experimental: true
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            cafleet/target
-          key: ${{ runner.os }}-cargo-test-${{ hashFiles('cafleet/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-test-
-      - run: mise //cafleet:test
+          key: ${{ runner.os }}-cargo-${{ matrix.task }}-${{ hashFiles('cafleet/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-${{ matrix.task }}-
+      - run: mise //cafleet:${{ matrix.task }}

@@ -22,8 +22,10 @@ One skill, three workflows — **residue**, **affirmative**, **simplification** 
 run as the same CAFleet team shape over the same per-run process. This page is
 the dispatcher and the single home of the **shared orchestration spine**; each
 workflow body (`<workflow>/<workflow>.md`) carries only its own trigger
-scenario, scan mechanics, artifact spec, and guarantees, citing the spine here
-rather than restating it.
+scenario, scan mechanics, Scanner obligations, Reviewer checks, artifact spec,
+and guarantees, citing the spine here rather than restating it. The shared
+member roles are [`roles/scanner.md`](roles/scanner.md) and
+[`roles/reviewer.md`](roles/reviewer.md).
 
 Resolve runtime tools from the executing agent's backend. For spawns, read the selected member backend's Model catalog and Role defaults under the CAFleet Director's model-selection policy; validate its effort and launch capabilities there.
 
@@ -112,8 +114,8 @@ User → /clean-docs (one workflow)
 | Role | Responsibility |
 |---|---|
 | **Director** | Resolve task-scoped `${BASE}`; register the current Director atomically and arm native reception; partition the in-scope tree into **disjoint file-ownership** slices (one file → one scanner, whole surfaces per scanner); merge partial artifacts into the run's canonical artifact; route it to the reviewer and **hold the apply until the reviewer's approval**; relay approval to scanners; apply a denied write through the full-file staging protocol; run verification; escalate observations to the user; close owned members before deregistering the fleet. |
-| **scanner** (×N) | For its slice: run the workflow's scan mechanics, propose actions per the workflow's rubric, record observations separately, write its partial artifact under `${BASE}`. After approval is relayed: apply its own slice's approved rows exactly as written, re-verify its diff, route harness-denied writes to the Director. |
-| **reviewer** | Validate the merged artifact **before** any edit, per the workflow's guarantees and guardrails. After apply: run the workflow verification (parameter table below). |
+| **scanner** (×N) | For its slice: run the workflow's scan mechanics and Scanner obligations, propose actions per the workflow's rubric, record observations separately, write its partial artifact under `${BASE}`. After approval is relayed: apply its own slice's approved rows exactly as written, re-verify its diff, route harness-denied writes to the Director. |
+| **reviewer** | Validate the merged artifact **before** any edit, per the workflow's Reviewer checks. After apply: run the workflow verification (parameter table below). |
 
 **Disjoint file-ownership is the concurrency contract.** No two scanners edit
 the same file, so parallel apply is safe without worktrees. **One scanner owns
@@ -137,13 +139,10 @@ extensions, since a run produces a run artifact, not a design document:
 
 ## Per-run process
 
-1. **Resolve `${BASE}`** — task-scoped per the `cafleet` skill's
-   `reference/base-dir.md`, convention
-   `researches/clean-docs-<workflow>-<UTC-compact>/` (gitignored, one folder
-   per run).
-2. **Bootstrap** — run `cafleet doctor`, then `cafleet fleet create --name <name> --coding-agent <backend> --json`; retain the returned literal IDs.
+1. **Resolve `${BASE}`** per § *`${BASE}` convention*.
+2. **Bootstrap** — run `cafleet doctor`, then `cafleet fleet create --name <name> --coding-agent <backend> --json`; retain the returned literal IDs, then follow [Director wake](../../../skills/cafleet/reference/supervision.md#director-wake).
 3. **Spawn workers** — scanners (one per disjoint slice, using the other-member defaults) and the reviewer
-   (`--model {reviewer_model}` with supported reviewer effort), each from a rendered prompt at
+   (`--model {reviewer_model}` with supported reviewer effort), each from a prompt rendered per § *Spawn deltas* at
    `${BASE}/.prompts/<role>-<UTC-compact>.md`.
 4. **Scan (fan-out)** — each scanner runs the workflow's **scan mechanics**
    (parameter table below) over its slice and writes its partial artifact under
@@ -154,8 +153,7 @@ extensions, since a run produces a run artifact, not a design document:
    `approved (<run pointer>)`.**
 6. **Apply** — the Director relays approval; each scanner applies its own
    slice's approved rows exactly as written. Use the full-file staging protocol for a denied write.
-7. **Verify** — `mise //cafleet:test`, `mise //cafleet:lint`,
-   `mise //cafleet:typecheck` green, plus the **workflow verification**
+7. **Verify** — the repository's Rust validation tasks (`.claude/rules/commands.md`) green, plus the **workflow verification**
    (parameter table below).
 8. **Report + teardown** — the Director reports the applied set and the
    escalated observations, commits only when the user asks, and tears down owned ordinary members, verifies the root-only roster and deregisters the fleet.
@@ -192,80 +190,16 @@ Task-scoped per the `cafleet` skill's `reference/base-dir.md`:
 run). Agent-only scratch is dot-prefixed: `.prompts/` (spawn-prompt renders),
 `.apply/` (staged harness-denied writes).
 
-## Spawn-prompt skeleton
+## Spawn deltas
 
-One skeleton for all three workflows, with the workflow named in the role line
-and the role-definition path pointing into `<workflow>/roles/`. The Director
-renders each `[INSERT …]` marker to a literal before writing; leaves the four
-`{fleet_id}` / `{member_id}` / `{director_member_id}` / `{coding_agent}`
-identity placeholders for the CLI's `str.format` at spawn; doubles every OTHER
-literal brace as `{{` / `}}`:
+Render each member prompt from the [canonical spawn skeleton](../../../skills/cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with the role file referenced by absolute path and this per-role delta. Each line in the IMPORTANT row is a separate prompt line, rendered verbatim with `<run pointer>` substituted.
 
-```
-You are the <role> in a clean-docs <workflow> team (CAFleet-native).
-
-ROLE DEFINITION: Open [INSERT abs path to <workflow>/roles/<role>.md] with an available text reader BEFORE any other action.
-
-Load these skills at startup:
-- the clean-docs skill — for the shared spine and your workflow's mechanics
-- the cafleet skill — for the broker primitives and command routing through the Director
-
-FLEET ID: {fleet_id}
-DIRECTOR MEMBER ID: {director_member_id}
-YOUR MEMBER ID: {member_id}
-BASE: [INSERT abs BASE path the Director resolved]
-CODING AGENT: {coding_agent}
-
-<role-specific assignment: the scanner's slice path list + partial-artifact path,
- or the reviewer's merged-artifact path>
-
-IMPORTANT: Read and follow .claude/rules/bash-tool.md (CAFleet-member Bash protocol) and ~/.claude/rules/bash-command.md (general Bash hygiene) for all Bash commands.
-Host-rule source: [INSERT equivalent session instructions for any absent optional host files]. Apply those supplied equivalents; route an essential unknown prerequisite to the Director before dependent work.
-IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.
-IMPORTANT: Do NOT edit any repository file until the Director relays the reviewer's approved (<run pointer>). The scan phase is read + propose only.
-IMPORTANT: Do NOT commit code or run git write operations — the Director handles all git.
-
-Use an available non-shell text reader for prerequisites; shell file reads may precede ready when shell is the only reader.
-
-On spawn, as your first operational broker shell command, send the ready signal: cafleet message send --from-member-id {member_id} --to-member-id {director_member_id} "ready"
-
-When you see cafleet message poll output with a message from the Director, act on those instructions.
-
-<start cue: scanner — begin the scan of your slice; reviewer — wait for ready (<run pointer>)>
-```
-
-## Backend-neutrality
-
-`SKILL.md`, the workflow bodies, and every `<workflow>/roles/*.md` are
-backend-neutral: they use `{reviewer_model}` /
-`{skill_loader}` / `{decision_surface}` / `{permission_flags}` tokens resolved
-from the executing agent's Runtime bindings or, for model placeholders, the selected spawn backend's Role defaults in `../../../skills/cafleet/reference/coding-agents.md`. Every member's spawn-prompt identity block carries a
-`CODING AGENT: {coding_agent}` line so the member resolves its overlay. Role
-files are referenced by absolute path in spawn prompts (never inlined); spawns
-use `--file`.
-
-## Skill file layout
-
-```
-.claude/skills/clean-docs/
-  SKILL.md                        # this file — dispatch + shared spine, backend-neutral
-  reference/
-    review-format.md              # shared by affirmative + simplification: row format, guardrails, verdict flow
-  residue/
-    residue.md                    # workflow body — sweep mechanics + completeness guarantee
-    roles/scanner.md              # sweep → hand-inspect → classify → apply own slice
-    roles/reviewer.md             # over-deletion / lost-coverage / R1 guard
-    reference/patterns.md         # pattern catalog + exempt-set exclusion — canonical
-  affirmative/
-    affirmative.md                # workflow body — P1/P2/P4 judgment review
-    roles/scanner.md              # full read → propose → apply own slice after the gate
-    roles/reviewer.md             # lost-meaning / lost-contract / behavior-change guard
-  simplification/
-    simplification.md             # workflow body — P3/P5 judgment review
-    roles/scanner.md
-    roles/reviewer.md
-```
-
-## Director wake
-
-Arm native reception before depending on member replies and retain one receiver through delegated work and authorized review. On every batch/wake, poll `cafleet message poll <director-member-id> --json`, reconcile replay, record deferred actions, ACK consumption and inspect roster/panes/artifacts. Follow [Director wake](../../../skills/cafleet/reference/supervision.md#director-wake) and the executing [backend recipe](../../../skills/cafleet/reference/coding-agents.md), preserving user gates and supplied host continuation controls.
+| Slot | Scanner | Reviewer |
+|---|---|---|
+| ROLE TITLE / TEAM | `a scanner` / `clean-docs <workflow>` | `the reviewer` / `clean-docs <workflow>` |
+| role-file | `roles/scanner.md` | `roles/reviewer.md` |
+| cafleet-load purpose | `for the broker primitives and command routing through the Director` | `for the broker primitives and command routing through the Director` |
+| EXTRA SKILL LOADS | `clean-docs` (the shared spine and your workflow's mechanics) | `clean-docs` (the shared spine and your workflow's mechanics) |
+| CONTEXT LINES | `WORKFLOW: [INSERT workflow]`, `YOUR SLICE: [INSERT the slice's path list]`, `OUTPUT FILE: [INSERT partial-artifact path]` | `WORKFLOW: [INSERT workflow]`, `MERGED ARTIFACT: [INSERT merged-artifact path]` |
+| IMPORTANT / ROLE-CONSTRAINT LINES (verbatim) | `IMPORTANT: Follow the CAFleet member Bash protocol (.claude/rules/bash-tool.md) and the host's Bash hygiene rule for all Bash commands.`, `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.`, `IMPORTANT: Do NOT edit any repository file until the Director relays the reviewer's approved (<run pointer>). The scan phase is read + propose only.`, `IMPORTANT: Do NOT commit code or run git write operations — the Director handles all git.`, `When you see cafleet message poll output with a message from the Director, act on those instructions.` | `IMPORTANT: Follow the CAFleet member Bash protocol (.claude/rules/bash-tool.md) and the host's Bash hygiene rule for all Bash commands.`, `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.`, `IMPORTANT: Do NOT edit any repository file; your writes are verdict annotations in the run artifact.`, `IMPORTANT: Do NOT commit code or run git write operations — the Director handles all git.`, `When you see cafleet message poll output with a message from the Director, act on those instructions.` |
+| start cue (verbatim) | `Begin the scan of your slice.` | `Wait for ready (<run pointer>) from the Director.` |

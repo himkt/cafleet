@@ -13,3 +13,7 @@ CAFleet multiplexes coding-agent sessions and coordinates them through durable p
 ## Commands
 
 Use repository-root mise full-path tasks. See `.claude/rules/commands.md` and the task registry for available operations.
+
+## Tests
+
+Write every Rust test as a unit test in a `#[cfg(test)] mod tests` block of the implementation file it exercises; never add a test-only file or folder. `.claude/rules/code-quality.md` § Test placement owns the convention.

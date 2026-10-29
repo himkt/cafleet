@@ -11,29 +11,18 @@ Write CAFleet base instructions so they read the same on every backend: family `
 3. **Model catalog**: exact spawn tokens, aliases, reviewed capability classes/order, prices, context notes, and official provenance.
 4. **Note → applies at**: constraints bound to their tokens and consuming instructions.
 
-Add a backend by copying `## Template` and supplying all four subsections. Keep each section complete for its own backend, with shared policy and supervision linked to their authoritative homes. Model selection belongs to `skills/cafleet/roles/director.md` § Model selection. The `cafleet-model-list-refresh` skill owns catalogs, provenance/context notes, Role defaults, and shared freshness metadata; runtime documentation maintenance owns the remaining subsections.
-
-## Reader contract
-
-Resolve by the subject of the action:
-
-| Purpose | Backend selector | Values |
-|---|---|---|
-| Execute current instructions | Executing agent's `CODING AGENT:` identity, or its own identity when standalone | Its Runtime bindings and bound notes, including local execution and decision tools. |
-| Select/configure a spawned member | Backend selected under Director policy | Its Model catalog and Role defaults; validate its effort and launch capabilities against Runtime bindings. |
-
-For example, a Codex Director selecting an OpenCode reviewer resolves the OpenCode reviewer default and effort capability while keeping Codex decision and execution tools. Ordinary members resolve their own runtime section without acquiring model-selection duties.
+Backend-specific `####` subsections, such as a native reception recipe, may follow Note → applies at. Add a backend by copying `## Template` and supplying all four subsections. Keep each section complete for its own backend, with shared policy and supervision linked to their authoritative homes. Model selection belongs to `skills/cafleet/roles/director.md` § Model selection. The `cafleet-model-list-refresh` skill owns catalogs, provenance/context notes, Role defaults, and shared freshness metadata; runtime documentation maintenance owns the remaining subsections.
 
 ## How the base and overlay connect
 
-Each reader entry point places its runtime overlay at **row #1 of the Required-reading block**, gated before action. Link `coding-agents.md#<name>`, substituting the reader's concrete backend anchor when used. The row requires **read-and-resolve**: identify the executing backend, read its Runtime bindings, and apply the core skill's resolution procedure before acting. Directors additionally read the selected spawn backend when selecting a member.
+Each reader entry point places its runtime overlay first in its Required-reading block — as the first table row or the first prose reference — gated before action. Link `coding-agents.md#<name>`, substituting the reader's concrete backend anchor when used. The reader resolves the overlay with the procedure in `skills/cafleet/SKILL.md` § Resolve your overlay, which owns the subject selection, materialization, note application, emission self-check and documented neutral defaults. Report a missing required supported-backend section, malformed table, or broken reference as a documentation defect.
 
-1. **Materialize values.** Use the five runtime bindings for the relevant operation and the selected spawn backend's model and effort Role defaults.
-2. **Apply notes.** Follow each caveat at the instruction named in Note → applies at.
-3. **Self-check at emission.** Emit concrete command and message values; resolve any remaining literal `{token}` first.
+## Three homes
 
-The canonical procedure and documented neutral defaults live in `skills/cafleet/SKILL.md` § Resolve your overlay. Use those defaults only for the explicitly allowed missing/unknown-backend cases. Report a missing required supported-backend section, malformed table, or broken reference as a documentation defect.
+| Home | Audience | Content |
+|---|---|---|
+| `SPEC.md` §6.7 Coding-agent backends | Everything (contract) | Backend argv, model/effort validation, permission posture, presets and host evidence |
+| `skills/cafleet/reference/coding-agents.md` | Agents | The runtime overlay above |
+| `docs/docs/concepts/coding-agents.md` | Users | How backends differ and how to choose and configure them |
 
-## Two independent homes
-
-Maintain the agent-facing reference (`skills/cafleet/reference/coding-agents.md`) and human-facing operator documentation (`docs/docs/spec/coding-agent-backends.md`) independently. State shared operational facts in each home for its audience; never cross-link these homes in either direction.
+State shared operational facts in each home for its audience. Skills never link `docs/` or `SPEC.md`, and `SPEC.md` never links `docs/`.

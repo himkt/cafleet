@@ -6,4 +6,4 @@ A deliberate format-family reset uses a new application identity and default dat
 
 Write future current-family migrations as contiguous hand-written `V<N>__<slug>.sql` files. Preserve valid existing data with in-place schema changes where supported. Setup applies compatible pending changes transactionally and refuses an ahead or incompatible format before either write path proceeds.
 
-The embedded chain guard lives in `cafleet/src/db/mod.rs`. Update its expected registry when the bundled head changes, retaining contiguous numbering and one baseline. Use the embedded registry as the source of truth.
+The chain guard in `cafleet/src/db/mod.rs` derives the registry from the embedded migrations and asserts contiguous numbering from one baseline, so the embedded registry is the source of truth. Add a successor test for each new `V<N>__<slug>.sql` that migrates the previous head to it and checks the new shape.

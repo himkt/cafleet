@@ -1,6 +1,6 @@
 # Git Workflow (Project-Specific Overrides)
 
-This file overrides the user's global `~/.claude/rules/git-workflow.md` for this project only. The global rules still apply except where explicitly contradicted here.
+This file overrides the host's Git Workflow rule for this project only. The host rule still applies except where explicitly contradicted here.
 
 ## design-docs/ is committed in this project
 

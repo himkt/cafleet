@@ -24,8 +24,9 @@ must survive an adversarial reviewer checking for lost meaning.
 ## KEEP guardrails (never propose)
 
 - **Contract detail**: SPEC.md's exact CLI options, error strings, schemas, key
-  order, and text layouts; `docs/docs/spec/` contract pages; command examples in any
-  skill or doc. The detail IS the contract — de-duplicate around it, never thin it.
+  order, and text layouts; the command facts in `skills/cafleet/reference/cli.md`;
+  command examples in any skill or doc. The detail IS the contract — de-duplicate
+  around it, never thin it.
 - **Behavioral-contract lines**: IMPORTANT lines, spawn-skeleton lossless-rule
   items, hard role constraints, start cues. These survive verbatim in meaning.
 - **Backend neutrality**: base skill files stay free of backend specifics

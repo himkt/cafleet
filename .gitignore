@@ -2,8 +2,6 @@
 
 !CLAUDE.md
 !.claude
-!.claude/skills
-!.claude/settings.json
 !.github
 !.bumpversion.toml
 
@@ -12,4 +10,3 @@
 /docs/doc_build/
 /docs/node_modules/
 /researches/
-/.prompts/

@@ -4,23 +4,34 @@ Rules for keeping the project's documentation in sync with its code. These apply
 to every change that touches a user- or contract-facing surface; the design-doc
 numbering/format rules live in the shared [design-document guidelines](../../skills/cafleet-design-doc/reference/guidelines.md#file-layout).
 
+## Three audiences
+
+| Audience | Home | Content |
+|---|---|---|
+| Everything (contract) | `SPEC.md` | Every contract: CLI, output, errors, environment, schema, runtime, multiplexer, backends, presets, wire |
+| Users | `docs/` site | Concepts, usage, setup and configuration steps a user performs; exact contract detail is a link to `SPEC.md` |
+| Agents | `skills/` | Necessary-and-sufficient instructions to drive cafleet, with command facts in `skills/cafleet/reference/cli.md` |
+
+Skills never link `docs/` or `SPEC.md`; they carry the facts they need. `SPEC.md` never links `docs/`.
+
 ## Implementation Order
 
-When implementing a design document, ALWAYS update documentation FIRST before writing any code: update every affected first-class documentation target per the table below — `docs/` pages first, then `README.md`, `SPEC.md`, the affected `skills/*/SKILL.md`, and project rules if needed. Only after documentation is complete should code implementation begin.
+When implementing a design document, ALWAYS update documentation FIRST before writing any code, in this order: `SPEC.md`, then `docs/` pages, then `README.md`, then the affected `skills/` files, then project rules if needed. Only after documentation is complete should code implementation begin.
 
 ## First-class documentation targets
 
-`docs/` is the primary home for all descriptive content — features, architecture, usage, configuration, and project structure land under `docs/` first. Every other target below is updated in the same design-doc cycle as the change that touches its surface, with the smallest edit that removes the drift. **Drift on any target below is a blocker for "documentation complete".**
+Every target below is updated in the same design-doc cycle as the change that touches its surface, with the smallest edit that removes the drift. **Drift on any target below is a blocker for "documentation complete".**
 
 | Target | Update trigger | Drift consequence |
 |---|---|---|
-| `docs/` | Any change to features, architecture, usage, or configuration (a new architectural axis gets its own Concepts page) | The primary documentation home goes stale |
-| `README.md` | The thin surface itself changes — the pitch drifts from `docs/docs/index.md`, the install commands change, or a docs-site section is added or removed (sync via the `/update-readme` skill) | The entry point misleads new users |
-| `SPEC.md` | Any change to its contract surfaces — CLI options, `CAFLEET_*` configuration, the SQLite schema, error strings, JSON key order, text layouts (maintained via the `/update-readme` skill) | The single authoritative reimplementation specification no longer matches the shipped contract |
-| `skills/*/SKILL.md` | Any change to CLI commands, flags, environment variables, required arguments, output formats, or the expected invocation workflow | Claude Code loads stale skills as ground truth and produces broken tool calls |
+| `SPEC.md` | Any change to a contract surface — CLI options, `CAFLEET_*` configuration, the SQLite schema, error strings, JSON key order, text layouts, runtime, multiplexer, backend or preset behavior (maintained via the `/update-readme` skill) | The single authoritative specification no longer matches the shipped contract |
+| `docs/` | Any change to features, architecture, usage, setup or configuration a user performs (a new architectural axis gets its own Concepts page) | The user documentation goes stale |
+| `README.md` | The thin entry point itself changes — the pitch drifts from `docs/docs/index.md`, the install commands change, or a docs-site section is added or removed (sync via the `/update-readme` skill) | The entry point misleads new users |
+| `skills/*/SKILL.md` and skill references | Any change to CLI commands, flags, environment variables, required arguments, output formats, or the expected invocation workflow | Agents load stale skills as ground truth and produce broken tool calls |
+| `skills/cafleet/reference/cli.md` | Any change to a `SPEC.md` fact that `cli.md` carries, updated in the same change | Agents run stale commands |
 | `.claude/rules/` | The project convention the rule captures changes | Agents follow outdated conventions |
 
-`SPEC.md` edits preserve its section structure and contract-level detail, and stay descriptive — specification only, no recommendations or implementation advice.
+`SPEC.md` edits preserve its section structure and contract-level detail, and stay descriptive — specification only, no recommendations or implementation advice. Paths that are part of a specified contract (embedded preset paths and their install targets, migration files) are `SPEC.md` content.
 
 ## Audiences and paths
 
@@ -36,9 +47,9 @@ user-visible artifacts, never in terms of where the implementation lives.
 - When a page needs to say where a protocol or catalog is defined, attribute
   it to the shipping artifact the reader has ("part of the cafleet skill",
   "bundled with every deployed skill replica") without the repo-internal file
-  path.
+  path, or link the owning `SPEC.md` section for an exact contract.
 - When removing a path mention, replace it with a self-contained explanation
-  of the behavior or a link to the docs page that owns the fact — never a bare
+  of the behavior or a link to the page that owns the fact — never a bare
   deletion that leaves the sentence emptier.
 
 ### Exemptions — where a concrete path is the content
@@ -46,7 +57,6 @@ user-visible artifacts, never in terms of where the implementation lives.
 | Surface | Why paths are legitimate there |
 |---|---|
 | `docs/docs/contributing.md` | Contributor instructions: paths stay where the path IS the instruction (project-structure table, dependency-edit recipes, design-doc layout). Incidental implementation pointers are still rewritten. |
-| Path-as-contract mentions in `docs/docs/spec/*` | Paths that are part of a specified contract (embedded preset paths and their install targets, the `SPEC.md` DDL source of truth). Incidental pointers are still rewritten. |
 | User-machine paths | `~/...` install and runtime locations describe the reader's own machine. |
 | Deliverable locations in the user's repo | e.g. `design-docs/NNNNNNN-<slug>/design-doc.md` as a workflow output layout. |
 

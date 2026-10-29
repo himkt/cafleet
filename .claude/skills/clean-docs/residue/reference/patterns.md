@@ -1,7 +1,7 @@
 # Sweep pattern catalog — residue workflow (canonical)
 
 The multi-pass sweep each scanner runs over its slice.
-[`../roles/scanner.md`](../roles/scanner.md) cites this page. The catalog is a
+The residue [Scanner obligations](../residue.md#scanner-obligations) cite this page. The catalog is a
 **floor, not a ceiling**: the scanner hand-inspects the surrounding context of
 every hit and may classify a hit no pattern named.
 
