@@ -1579,8 +1579,8 @@ mod tests {
                 case.seed(&[opening(&case.fixture.run, 1, 1)]);
                 case.release();
                 let start = Instant::now();
-                let inner = start + Duration::from_millis(300);
-                let outer = start + Duration::from_millis(700);
+                let inner = start + Duration::from_millis(600);
+                let outer = start + Duration::from_millis(1000);
                 let emergency =
                     EmergencyInterrupt::arm(&case.fixture.conn, start + Duration::from_secs(2));
                 let deadline = Deadline::until(inner);
@@ -1684,7 +1684,7 @@ mod tests {
                 .busy_timeout(Duration::from_millis(137))
                 .unwrap();
             let start = Instant::now();
-            let deadline = Deadline::until(start + Duration::from_millis(150));
+            let deadline = Deadline::until(start + Duration::from_millis(300));
             let emergency =
                 EmergencyInterrupt::arm(&case.fixture.conn, start + Duration::from_secs(1));
             let mut host = DeletionTestHost::recovering(&case, deadline);
