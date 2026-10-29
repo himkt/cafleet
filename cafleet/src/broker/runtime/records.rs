@@ -44,6 +44,7 @@ runtime_enum!(OwnerKind, "member_runs.owner_kind", { Creator => "creator", Runne
 runtime_enum!(Reachability, "member_runs.reachability", { Reachable => "reachable", Suspect => "suspect" });
 runtime_enum!(CleanupState, "member_runs.cleanup_state", { Complete => "complete", Incomplete => "incomplete" });
 runtime_enum!(Coverage, "member_runs.coverage", { Tested => "tested", Unknown => "unknown" });
+runtime_enum!(ProfileMatch, "member_runs.profile_match", { Exact => "exact", Fallback => "fallback" });
 runtime_enum!(EventEvidence, "member_runs.event_evidence", { Metadata => "metadata", Redacted => "redacted" });
 runtime_enum!(InteractionClass, "member_interactions.classification", {
     PermissionRequest => "permission_request", Question => "question", Trust => "trust",
@@ -102,6 +103,7 @@ pub struct NewRun {
     pub event_evidence: EventEvidence,
     pub native_version: Option<String>,
     pub profile_version: Option<String>,
+    pub profile_match: Option<ProfileMatch>,
     pub coverage: Coverage,
     pub owner_pid: i64,
     pub owner_start_identity: String,
@@ -127,6 +129,7 @@ pub struct RunRecord {
     pub created_at: String,
     pub native_version: Option<String>,
     pub profile_version: Option<String>,
+    pub profile_match: Option<ProfileMatch>,
     pub effective_policy_json: Option<Value>,
     pub owner_epoch: i64,
     pub owner_kind: OwnerKind,

@@ -1,5 +1,5 @@
 use super::{CodingAgent, ProfileCatalog};
-use crate::broker::runtime::Coverage;
+use crate::broker::runtime::{Coverage, ProfileMatch};
 use crate::error::CafleetError;
 use regex::Regex;
 use std::io::Read;
@@ -14,6 +14,7 @@ const VERSION_TOKEN: &str = r"^v?[0-9]+(\.[0-9]+)+([-+][0-9A-Za-z.]+)?$";
 pub(crate) struct NativeLaunchIdentity {
     pub native_version: Option<String>,
     pub profile_version: Option<String>,
+    pub profile_match: Option<ProfileMatch>,
     pub coverage: Coverage,
     pub warning: Option<String>,
 }
@@ -26,16 +27,25 @@ pub(crate) fn native_launch_identity(
     match probe {
         Ok(version) => {
             let capabilities = catalog.capabilities(backend, Some(&version));
+            let warning = match (capabilities.profile_match, &capabilities.profile_version) {
+                (Some(ProfileMatch::Fallback), Some(profile)) => Some(format!(
+                    "Warning: no bundled profile for {} {version}; using {profile} (profile_match=fallback).",
+                    backend.name()
+                )),
+                _ => None,
+            };
             NativeLaunchIdentity {
                 native_version: Some(version),
                 profile_version: capabilities.profile_version,
+                profile_match: capabilities.profile_match,
                 coverage: capabilities.detection,
-                warning: None,
+                warning,
             }
         }
         Err(cause) => NativeLaunchIdentity {
             native_version: None,
             profile_version: None,
+            profile_match: None,
             coverage: Coverage::Unknown,
             warning: Some(format!(
                 "Warning: native version unavailable for {}: {}; coverage unknown.",

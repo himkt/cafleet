@@ -24,6 +24,7 @@ pub(crate) struct RunSettings {
     pub event_evidence: EventEvidence,
     pub native_version: Option<String>,
     pub profile_version: Option<String>,
+    pub profile_match: Option<ProfileMatch>,
     pub coverage: Coverage,
 }
 pub(crate) struct PendingRegistration {
@@ -79,6 +80,7 @@ pub(crate) fn register_pending_run(
                 event_evidence: settings.event_evidence,
                 native_version: settings.native_version.clone(),
                 profile_version: settings.profile_version.clone(),
+                profile_match: settings.profile_match,
                 coverage: settings.coverage,
                 owner_pid: settings.creator.pid,
                 owner_start_identity: settings.creator.start_identity.clone(),

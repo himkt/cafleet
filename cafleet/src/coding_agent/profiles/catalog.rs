@@ -1,7 +1,7 @@
 use super::composer::{ComposerOperation, ComposerSubmission};
 use super::detector::ObservationKind;
 use super::{AnswerCapability, CodingAgent, PermissionDecision};
-use crate::broker::runtime::Coverage;
+use crate::broker::runtime::{Coverage, ProfileMatch};
 use crate::error::CafleetError;
 use regex::Regex;
 use serde_json::{Map, Value};
@@ -509,7 +509,60 @@ pub(super) struct Profile {
     pub submissions: [Option<ComposerSubmission>; 2],
     pub answers: Vec<Answer>,
 }
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum VersionComponent {
+    Number(u64),
+    Text(String),
+}
+#[derive(Debug, Clone)]
+struct DottedVersion(Vec<VersionComponent>);
+impl PartialEq for DottedVersion {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+impl Eq for DottedVersion {}
+impl DottedVersion {
+    fn parse(version: &str) -> Self {
+        Self(
+            version
+                .split('.')
+                .map(|part| {
+                    part.parse().map_or_else(
+                        |_| VersionComponent::Text(part.into()),
+                        VersionComponent::Number,
+                    )
+                })
+                .collect(),
+        )
+    }
+}
+impl Ord for DottedVersion {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        let missing = VersionComponent::Number(0);
+        (0..self.0.len().max(other.0.len()))
+            .map(|index| {
+                let left = self.0.get(index).unwrap_or(&missing);
+                let right = other.0.get(index).unwrap_or(&missing);
+                left.cmp(right)
+            })
+            .find(|ordering| ordering.is_ne())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    }
+}
+impl PartialOrd for DottedVersion {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
 impl Profile {
+    fn newest_version(&self) -> DottedVersion {
+        self.versions
+            .iter()
+            .map(|version| DottedVersion::parse(version))
+            .max()
+            .expect("catalog validation requires every profile to declare a native version")
+    }
     pub(super) fn answer_plan(
         &self,
         version: &str,
@@ -547,6 +600,7 @@ pub struct NativeCapabilities {
     pub backend: CodingAgent,
     pub native_version: Option<String>,
     pub profile_version: Option<String>,
+    pub profile_match: Option<ProfileMatch>,
     pub detection: Coverage,
     pub composer: Coverage,
     pub prompt_submission: Coverage,
@@ -1491,11 +1545,21 @@ impl ProfileCatalog {
         })
     }
     pub(super) fn matching(&self, backend: CodingAgent, version: Option<&str>) -> Option<&Profile> {
-        version.and_then(|v| {
-            self.profiles
-                .iter()
-                .find(|p| p.backend == backend && p.versions.iter().any(|s| s == v))
-        })
+        self.selection(backend, version).map(|(profile, _)| profile)
+    }
+    fn selection(
+        &self,
+        backend: CodingAgent,
+        version: Option<&str>,
+    ) -> Option<(&Profile, ProfileMatch)> {
+        let version = version?;
+        let candidates = || self.profiles.iter().filter(|p| p.backend == backend);
+        if let Some(exact) = candidates().find(|p| p.versions.iter().any(|s| s == version)) {
+            return Some((exact, ProfileMatch::Exact));
+        }
+        candidates()
+            .max_by(|a, b| a.newest_version().cmp(&b.newest_version()))
+            .map(|newest| (newest, ProfileMatch::Fallback))
     }
     pub fn rule_ids(&self) -> Vec<String> {
         self.profiles
@@ -1506,11 +1570,13 @@ impl ProfileCatalog {
             .collect()
     }
     pub fn capabilities(&self, backend: CodingAgent, version: Option<&str>) -> NativeCapabilities {
-        let profile = self.matching(backend, version);
+        let selection = self.selection(backend, version);
+        let profile = selection.map(|(profile, _)| profile);
         NativeCapabilities {
             backend,
             native_version: version.map(str::to_owned),
             profile_version: profile.map(|p| p.version.clone()),
+            profile_match: selection.map(|(_, profile_match)| profile_match),
             detection: if profile.is_some_and(|p| p.detection.is_some()) {
                 Coverage::Tested
             } else {
@@ -1539,7 +1605,7 @@ impl ProfileCatalog {
                 .map(|p| p.answers.iter().map(|a| a.decision).collect())
                 .unwrap_or_default(),
             capability_reason: if profile.is_none() {
-                Some("exact native profile unavailable".into())
+                Some("native profile unavailable".into())
             } else {
                 None
             },

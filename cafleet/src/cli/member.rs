@@ -484,6 +484,7 @@ fn create(
         event_evidence,
         native_version: native.native_version,
         profile_version: native.profile_version,
+        profile_match: native.profile_match,
         coverage: native.coverage,
     };
     let mut host = runner::NativeLaunchHost::new(&mux, &context);

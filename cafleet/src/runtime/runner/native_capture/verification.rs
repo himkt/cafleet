@@ -1430,6 +1430,7 @@ fn run_native_capture_prepare_start(config_path: &Path) -> Result<()> {
             event_evidence: storage::EventEvidence::Redacted,
             native_version: Some(case.native_version.clone()),
             profile_version: capabilities.profile_version,
+            profile_match: capabilities.profile_match,
             coverage: capabilities.detection,
         };
         let member = PendingMemberSpec {
