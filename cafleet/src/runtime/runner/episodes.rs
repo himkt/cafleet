@@ -346,7 +346,10 @@ impl EpisodeTracker {
                     self.annotations.unavailable_emitted.clear();
                     let mode = observed_mode()?;
                     let state = (AutomaticReview::Available, mode.clone());
-                    if !unavailable_policy && self.annotations.last_policy.as_ref() != Some(&state)
+                    // The worker may drop a queued available write, so each fresh emission of
+                    // the indicator resubmits it; the storage write keeps the change-only rule.
+                    if !unavailable_policy
+                        && (first || self.annotations.last_policy.as_ref() != Some(&state))
                     {
                         update.effective_policy = Some(EffectivePolicyObservation {
                             automatic_review: AutomaticReview::Available,
