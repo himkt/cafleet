@@ -1,7 +1,7 @@
 # Codebase redundancy cleanup
 
 **Status**: Approved
-**Progress**: 0/56 tasks complete
+**Progress**: 7/56 tasks complete
 **Last Updated**: 2026-10-29
 
 ## Overview
@@ -549,12 +549,12 @@ Each step is one commit and leaves `mise //cafleet:test` and `mise //cafleet:lin
 
 ### Step 1: Baseline and SPEC.md as the single specification
 
-- [ ] Record `tests-before.txt` and `help-before.txt` per § Test-change ledger, and create `test-ledger.md` with its header <!-- completed: -->
-- [ ] Absorb `cli-options.md`, `message-envelope.md` and `data-model.md` into SPEC §6.3, §6.4, §6.1 and §8 per § SPEC.md consolidation steps 1–2 <!-- completed: -->
-- [ ] Absorb `multiplexer-backends.md`, `coding-agent-backends.md` (contract parts) and `member-runtime.md` into SPEC §6.5, §6.7 and §6.9 <!-- completed: -->
-- [ ] Apply the stale corrections SPC-02, 03, 04, 05, 06, 10, 15, 19, 21, 22 <!-- completed: -->
-- [ ] Apply the single-owner actions SPC-07, 08, 09, 11, 12, 13, 20, 21 <!-- completed: -->
-- [ ] Replace SPEC's links into `docs/docs/` with internal `§` references and delete every `{#…}` heading suffix; confirm `git grep -n "docs/docs" -- SPEC.md` prints nothing <!-- completed: -->
+- [x] Record `tests-before.txt` and `help-before.txt` per § Test-change ledger, and create `test-ledger.md` with its header <!-- completed: 2026-10-29T15:10 -->
+- [x] Absorb `cli-options.md`, `message-envelope.md` and `data-model.md` into SPEC §6.3, §6.4, §6.1 and §8 per § SPEC.md consolidation steps 1–2 <!-- completed: 2026-10-29T15:10 -->
+- [x] Absorb `multiplexer-backends.md`, `coding-agent-backends.md` (contract parts) and `member-runtime.md` into SPEC §6.5, §6.7 and §6.9 <!-- completed: 2026-10-29T15:15 -->
+- [x] Apply the stale corrections SPC-02, 03, 04, 05, 06, 10, 15, 19, 21, 22 <!-- completed: 2026-10-29T15:24 -->
+- [x] Apply the single-owner actions SPC-07, 08, 09, 11, 12, 13, 20, 21 <!-- completed: 2026-10-29T15:28 -->
+- [x] Replace SPEC's links into `docs/docs/` with internal `§` references and delete every `{#…}` heading suffix; confirm `git grep -n "docs/docs" -- SPEC.md` prints nothing <!-- completed: 2026-10-29T15:32 -->
 
 ### Step 2: Docs site for users
 
@@ -583,7 +583,7 @@ Each step is one commit and leaves `mise //cafleet:test` and `mise //cafleet:lin
 
 ### Step 5: Crate-level test infrastructure
 
-- [ ] Add the `test_path!` and `assert_no_debug_or_serialize!` macros to `lib.rs` and the `child_path()` functions beside every re-exec child; replace every hard-coded child path literal <!-- completed: -->
+- [x] Add the `test_path!` and `assert_no_debug_or_serialize!` macros to `lib.rs` and the `child_path()` functions beside every re-exec child; replace every hard-coded child path literal <!-- completed: 2026-10-29T15:15 -->
 - [ ] Create the storage, config and broker homes from § Shared test-support homes (`db::test_support`, `Settings::for_database`, `fleets`/`members`/`records` helpers, `broker::runtime::test_support`); split `broker::tests` and update its 20 importers <!-- completed: -->
 - [ ] Create `catalog::test_support::synthetic_definitions()`/`synthetic_catalog()`; point every synthetic-profile reader at them; delete `runner_tests/fixtures/synthetic-profile.json` <!-- completed: -->
 
