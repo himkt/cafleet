@@ -1,6 +1,6 @@
 # Director Role
 
-You are a **Director** managing one or more members in a CAFleet team. Members run under their recorded launch policy, by default their backend's automatic approval mode: each runs host-permitted commands and routes returned denials and automatic refusals to you. For a verified current permission request, evaluate its risk and decide allow/deny in your session’s effective auto mode; in other or unknown modes obtain user permission, then submit the request-bound response or give the user its concrete command. Separately authorized native commands use `cafleet member exec`. What each backend denies is the `{permission_flags}` note in that backend's section of [`coding-agents.md`](../reference/coding-agents.md).
+You are a **Director** managing one or more members in a CAFleet team. Members run under their recorded launch policy, by default their backend's automatic approval mode: each runs host-permitted commands and routes returned denials and automatic refusals to you. A verified current permission request follows the mode-dependent decision in the [runtime procedure](../reference/member-runtime.md#consume-observed-interactions). Separately authorized native commands use `cafleet member exec`. What each backend denies is the `{permission_flags}` note in that backend's section of [`coding-agents.md`](../reference/coding-agents.md).
 
 This role owns Director selection, spawn, replacement and pane-action policy. Supervision owns orchestration, recovery and shutdown.
 
@@ -65,15 +65,7 @@ Substitute the literal integer ids for every angle-bracket token (the placeholde
 
 ## Director-only primitives
 
-You own member lifecycle, roster listing, pane capture and explicit pane-input commands, plus the backend-specific decision-relay primitive your overlay names. Ordinary members retain their broker reception and evidence-routing authority. The permission split between the pane primitives is canonical in
-[`reference/prompt-routing.md`](../reference/prompt-routing.md) § *The
-Director's pane primitives*. Full flags and behavior live in the command
-sections below; the routing exchange built on `member exec` is in
-[`reference/prompt-routing.md`](../reference/prompt-routing.md).
-
-## When you, as Director, want to run your own command
-
-Run your own commands directly via the Bash tool. Command routing runs one way: **member → Director**.
+You own member lifecycle, roster listing, pane capture and explicit pane-input commands, and run your own commands directly through your shell tool; [command routing](../reference/prompt-routing.md#the-directors-pane-primitives) owns the pane-primitive split and the one-way member → Director exchange.
 
 ## Authority and refusal
 
@@ -87,7 +79,7 @@ Silence breaks the workflow — the member ended its turn waiting for either the
 
 ## Member Create
 
-Register a new member and spawn a coding-agent pane in the Director's own tmux window. The command auto-resolves the Director from the fleet row, registers the member and pending placement, renders the spawn prompt, spawns the pane, and patches its real pane ID. Failed creation attempts owned-pane cleanup and deregistration; cleanup failures or an unknown pane ID are reported without claiming complete rollback.
+Register a new member and spawn a coding-agent pane in the Director's multiplexer window. The command auto-resolves the Director from the fleet row, registers the member and pending placement, renders the spawn prompt, spawns the pane, and patches its real pane ID. Failed creation attempts owned-pane cleanup and deregistration; cleanup failures or an unknown pane ID are reported without claiming complete rollback.
 
 ```bash
 cafleet member create --fleet-id <fleet-id> \
@@ -104,15 +96,15 @@ cafleet member create --fleet-id <fleet-id> \
 | `--name` | yes | Display name of the new member. |
 | `--description` | yes | One-sentence purpose |
 | `--coding-agent` | no | A CLI backend choice, recorded as `placement.coding_agent`. An explicit value wins; omission makes every role inherit **your** backend from your placement row. |
-| `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). The [inference table](#model-name-to-backend-inference) maps model references to backends; [`coding-agents.md`](../reference/coding-agents.md) owns their model lists and [`cli-options.md`](../reference/runtime/spec/cli-options.md#member-create) owns the CLI contract. |
-| `--effort` | no | Reasoning-effort level forwarded to the backend binary (omitted → the binary's default; spawn-time only, never persisted). Validate the selected member backend's `{effort_levels}` value in its Runtime bindings table; the [runtime contract](../reference/runtime/spec/cli-options.md#member-create) owns forwarding and rejection behavior. |
+| `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). The [inference table](#model-name-to-backend-inference) maps model references to backends; [`coding-agents.md`](../reference/coding-agents.md) owns their model lists and [`cli.md`](../reference/cli.md#member-create) owns the CLI contract. |
+| `--effort` | no | Reasoning-effort level forwarded to the backend binary (omitted → the binary's default; spawn-time only, never persisted). Validate the selected member backend's `{effort_levels}` value in its Runtime bindings table; the [CLI reference](../reference/cli.md#member-create) owns forwarding and rejection behavior. |
 | `--permission-mode` | no | Omit it for every member. Pass it only when the user explicitly requests that mode for that member, per § *Member launch policy*. |
 | positional `PROMPT` | one of | Inline spawn prompt. Exactly one of the positional and `--file` is required. |
 | `--file PATH` | one of | UTF-8 spawn prompt path, absolute or relative to CWD; `-` reads the whole prompt from stdin. Use exactly one of the positional and `--file`; file input is the canonical mode for team-skill spawns (see § *Member Create — Scratch and audit files*). |
 
-An absent backend binary exits 1 with `Error: binary <name> not found on PATH`. A missing or unreadable preset for the selected OpenCode policy exits 1 with `cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first`. Path/file errors are catalogued in [`cli-options.md`](../reference/runtime/spec/cli-options.md#error-messages).
+An absent backend binary exits 1 with `Error: binary <name> not found on PATH`. A missing or unreadable preset for the selected OpenCode policy exits 1 with `cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first`. Path/file errors are catalogued in [`cli.md`](../reference/cli.md#error-messages).
 
-The per-backend spawn argv is in [`cli-options.md`](../reference/runtime/spec/cli-options.md#member-create) § Spawn command per backend. A runner-observed permission request follows your own session’s mode-dependent decision and bound response under the [runtime procedure](../reference/member-runtime.md). Returned denials and automatic refusals route per [`reference/prompt-routing.md`](../reference/prompt-routing.md). Per-backend deltas: [`claude`](../reference/coding-agents.md#claude) / [`codex`](../reference/coding-agents.md#codex) / [`opencode`](../reference/coding-agents.md#opencode).
+The per-backend `--permission-mode`, `--model` and `--effort` rules are in [`cli.md`](../reference/cli.md#member-create). A runner-observed permission request follows your own session’s mode-dependent decision and bound response under the [runtime procedure](../reference/member-runtime.md). Returned denials and automatic refusals route per [`reference/prompt-routing.md`](../reference/prompt-routing.md). Per-backend deltas: [`claude`](../reference/coding-agents.md#claude) / [`codex`](../reference/coding-agents.md#codex) / [`opencode`](../reference/coding-agents.md#opencode).
 
 ### Member launch policy
 
@@ -126,17 +118,7 @@ Spawn every member with the omitted `--permission-mode`, which selects the backe
 
 Claude Code 2.1.302 in `auto` can show `Teach auto mode about your environment?` once per native configuration. It arrives as an `interaction_opened` event with classification `question` and has no answer plan: ask the user to answer it on the member's native surface, and send no answer yourself. Codex 0.163.0 `approve-for-me` shows no startup dialog. Any other first-launch dialog the native host shows, such as a folder-trust prompt, follows the existing held-interaction procedure.
 
-Handle the runtime events of automatic mode through your existing wake, `event show` verification, ACK and host-owned pending-action record:
-
-| Event | Procedure |
-|---|---|
-| `interaction_opened` in automatic mode | The permission-request procedure of the [runtime procedure](../reference/member-runtime.md), including `permission respond`. |
-| `automatic_refusal_observed` with a routed request | Take dispatch evidence only from the member's routed request: exact command, absolute cwd, required environment and refusal; the event and captures corroborate it and supply no missing field. In verified auto mode decide to authorize through `member exec` under its routed-command rules or refuse with a broker reply; otherwise obtain the user's permission first, then inspect the actual result and continuation. |
-| `automatic_refusal_observed` without a routed request | Dispatch nothing, ACK and keep the event as an informational pending item. When the member next reports, routes a request or reaches an idle composer without addressing it, ask it through the broker whether the refused operation is still needed; close the item when a routed request arrives or the member answers that it is not needed. |
-| Several `automatic_refusal_observed` events, then an idle member that sent no report | Codex 0.163.0 interrupts the turn after three consecutive automatic denials, so the member stops without routing a request. Treat the events as one pending item and ask the member through the broker whether the refused operations are still needed; the broker message resumes it. |
-| `automatic_review_unavailable` | Record the member as interactive in host-owned supervision state, expect native permission forms from it and tell the user that the selected automatic mode cannot apply. Send no answer. |
-
-A routed request that arrives with no event follows the existing refusal route.
+An `interaction_opened` permission request in automatic mode follows the [runtime procedure](../reference/member-runtime.md#consume-observed-interactions), and the automatic review events follow its [event table](../reference/member-runtime.md#consume-automatic-review-events). A routed request that arrives with no event follows the same refusal route.
 
 ### Model-name-to-backend inference
 
@@ -256,17 +238,13 @@ Preserve the operator's explicit provider: a reference that carries a provider p
 
 ### Model list
 
-Model availability, reviewed capability classes, standard token prices, and the official source links live in the model list at [`reference/coding-agents.md`](../reference/coding-agents.md), maintained via the `cafleet-model-list-refresh` skill. Consult the model list for the current model set and its spawn tokens; pass a listed model name or alias to `--model` exactly as written there.
+Pass a token exactly as listed in the selected backend's Model catalog in [`reference/coding-agents.md`](../reference/coding-agents.md).
 
-The routing rule above accepts any `<provider-id>/<model-id>` for the `opencode` backend, including direct-provider forms such as `anthropic/claude-sonnet-4-6` or `openai/gpt-5.5`.
-
-**Identity substitution (`str.format`)**: the four-placeholder `str.format` render, the brace-doubling rule, and the two error strings with their hint are canonical in the cafleet [`SKILL.md`](../SKILL.md) § *Spawned-member identity via `str.format` substitution*. Director-side delta: both errors (exit 2) attempt to deregister the just-registered member and report any cleanup failure after the primary error.
+**Identity substitution**: the cafleet [`SKILL.md`](../SKILL.md#spawned-member-identity-via-strformat-substitution) owns the four placeholders and their errors. Director-side delta: both errors (exit 2) fire before registration, so nothing needs cleanup.
 
 ### Spawn prompt size limit
 
 Use `--file` for templated identity blocks and compact role-by-path prompts. File input keeps the body out of the initial CAFleet invocation's argv; the resolved spawn prompt still enters downstream backend/multiplexer argv and remains subject to transport limits. A launch failure such as `tmux command failed: command too long` attempts deregistration and reports cleanup failures. Keep the inline positional `PROMPT` for trivial one-line ad-hoc spawns; no unmeasured size guarantees successful launch.
-
-**Long or multi-line message bodies**: the same `ARG_MAX` cliff applies to `message send` — pass such bodies via `--file`, per [`reference/supervision.md`](../reference/supervision.md) § Communication Model.
 
 Keep the prompt body focused (the skeleton below): the member opens its role through an available text reader on its first turn, so path-by-reference to the stable in-skill role docs is safe.
 
@@ -305,24 +283,18 @@ On spawn, as your first operational broker shell command, send the ready signal:
 
 Rendering is **two-stage**: the Director substitutes the values it already knows as literals before the call (`BASE`, the absolute role-file path, the cafleet-load purpose phrase), then the CLI substitutes the four identity placeholders shown in the skeleton above (`{member_id}` is the member's own newly-allocated id, which only the CLI can fill). The Director must leave **no stray single braces** other than those four. After spawn the member sees literal labeled lines — `FLEET ID: 24`, `DIRECTOR MEMBER ID: 84`, `YOUR MEMBER ID: 88`, `CODING AGENT: claude` — and uses those integers on every `cafleet` command. There is no `COMMUNICATION PROTOCOL` command-example block: the member learns poll/send/ack command shapes from the `cafleet` skill and its role file. The `CODING AGENT:` line keeps the spawned binary and the overlay selector in lockstep for every role: when `--coding-agent` is omitted at spawn, the CLI records — and `{coding_agent}` renders — the backend inherited from the Director's placement row.
 
-Use an available non-shell text reader for prerequisite files. When shell is the only text reader, prerequisite file-reading commands may precede ready; ready still precedes ordinary task work.
-
-The ready-signal line is part of the **fixed frame**, not a per-role delta slot: every skeleton render carries it, and no consuming skill repeats or varies it. Its `{member_id}` / `{director_member_id}` placeholders are two of the CLI's four identity placeholders, rendered to literal integers at spawn — the member receives a copy-pastable command.
-
-Per-role delta slots (each consuming skill's spawn section fills these):
+The `‹…›` markers are **spawn-skeleton slots**, filled from the consuming workflow's per-role delta table. They are distinct from the backend **runtime placeholders** (`{decision_surface}`, `{permission_flags}`, …), which resolve from [`coding-agents.md`](../reference/coding-agents.md), and from the four CLI identity placeholders.
 
 | Slot | Filled per role with |
 |---|---|
 | `‹ROLE TITLE›` / `‹TEAM NAME›` | e.g. `the Programmer` / `design document execution`; `the Drafter` / `design document creation`. |
 | `‹role›` + `‹ROLE-DEF SUFFIX›` | The `roles/<role>.md` filename, plus any addendum after "…role definition."; empty for most roles. A resume-mode example is `Follow the Resume Mode section in particular.`. |
 | `‹cafleet-load purpose›` + `‹EXTRA SKILL LOADS›` | The cafleet purpose phrase (`for communication with the Director`, or `for the broker primitives and command routing through the Director`), plus any extra startup skills — `cafleet-design-doc` (design-doc family). |
-| `‹CONTEXT LINES›` | Role inputs, one per line: `DESIGN DOCUMENT` / `OUTPUT PATH` / `CURRENT DATE` / `USER REQUEST` / `OUTPUT DIRECTORY` / `LANGUAGE` / `YOUR ASSIGNMENT` / `OUTPUT FILE` / `YOUR TASK ID` / `REPORT` / `SLIDE FILE` / `SERVER URL` / `ROUND`, etc. |
-| `‹IMPORTANT / ROLE-CONSTRAINT LINES›` | Every `IMPORTANT:` line and hard role constraint, verbatim (see lossless rule) — including each role's poll-handling line `When you see cafleet message poll output with a message from the Director, act on those instructions.`, plus each role's coordination constraints — each consuming skill's delta table is the authoritative inventory. |
+| `‹CONTEXT LINES›` | The role inputs the consuming workflow's delta table lists, one labeled line each. |
+| `‹IMPORTANT / ROLE-CONSTRAINT LINES›` | Every `IMPORTANT:` line and hard role constraint, verbatim (see lossless rule) — including each role's poll-handling line `When you see cafleet message poll output with a message from the Director, act on those instructions.`, plus each role's coordination constraints. |
 | `‹START CUE›` | The role's closing instruction — e.g. `Start by reading the design document. Then wait for the Director to assign your first step.`; `Read the design document, generate a numbered question list …`; `When complete, send the file path to the Director …`. The start cue follows the frame's ready-signal line and does not restate it. |
 
-Retain Bash hygiene and member-authority obligations when an optional host-rule file is absent. Record the source of equivalent instructions in the spawn context; an essential unknown rule is a concrete missing prerequisite to route before the dependent action.
-
-**Lossless rule (non-negotiable).** Render every `IMPORTANT:` line, hard role constraint and start cue from the consuming skill's per-role delta **verbatim**. The shared frame supplies reader portability, startup ordering and host-prerequisite handling. The delta preserves Programmer no-commit, Tester test-only, Verifier no-commit/no-modify, execute member-Bash and if-blocked obligations, and Drafter clarification constraints for each mode. Each consuming skill's delta table (`create/create.md`, `execute/execute.md`, …) is the authoritative inventory; reconstruction maps every hard line to that inventory.
+**Lossless rule (non-negotiable).** Render every `IMPORTANT:` line, hard role constraint and start cue from the consuming workflow's per-role delta table **verbatim**. The shared frame supplies reader portability, startup ordering and host-prerequisite handling; each workflow's delta table is the authoritative inventory of its roles' hard lines.
 
 ### Member Create — Scratch and audit files
 
@@ -333,9 +305,7 @@ Write spawn-related scratch under resolved `${BASE}` or the skill's explicit out
 
 **`${BASE} == <unset>` fallback**: when startup-time `${BASE}` resolution returned the `<unset>` sentinel, follow the guarded-skip protocol in [`reference/base-dir.md`](../reference/base-dir.md) § *No-bypass write protocol* — skip the `<BASE>/.prompts/<role>-<ts>.md` write, fall back to the inline positional-`PROMPT` form (keep it under ~2 KB, path-by-reference), and emit the anchorless status `audit-disabled no BASE in spawn prompt` once per spawn cycle. The spawn still proceeds.
 
-**Backtick caveat (harness-dependent)**: some environments (including this project) run a Bash-validator hook that rejects any backtick in a `Bash` invocation. When in play, strip backticks from spawn-prompt bodies (plain text instead of code spans); path-by-reference keeps the body short enough that this is easy.
-
-**Pane discovery**: discover a member's pane via `cafleet member list` (the `pane_id` column is ground truth for all backends). Pane title: {pane_title}. A failed spawn attempts to kill any pane whose id it owns and deregister the member, reporting cleanup failures after the primary error; a backend cleanup attempt is never repeated by the CLI. An unknown pane id leaves pane cleanup unconfirmed. Creation uses `-d` so the Director keeps focus. See [`member-lifecycle.md`](../reference/runtime/concepts/member-lifecycle.md).
+**Pane discovery**: discover a member's pane via `cafleet member list` (the `pane_id` column is ground truth for all backends). Pane title: {pane_title}. A failed spawn attempts to kill any pane whose id it owns and deregister the member, reporting cleanup failures after the primary error; a backend cleanup attempt is never repeated by the CLI. An unknown pane id leaves pane cleanup unconfirmed. Creation uses `-d` so the Director keeps focus. See [`cli.md`](../reference/cli.md#member-create).
 
 ## Model replacement
 
@@ -359,7 +329,7 @@ For a wrapped run, coordinate identity-pinned runner shutdown and bounded event 
 cafleet member delete <member-id>
 ```
 
-An unknown or inactive `MEMBER_ID` exits 1 (`Error: Member <member-id> not found`); deleting the root Director stays blocked by the root-Director guard. Exit codes and the output shape: [`cli-options.md`](../reference/runtime/spec/cli-options.md#member-delete).
+An unknown or inactive `MEMBER_ID` exits 1 (`Error: Member <member-id> not found`); deleting the root Director stays blocked by the root-Director guard. Exit codes and the output shape: [`cli.md`](../reference/cli.md#member-delete).
 
 ## Member List
 
@@ -367,15 +337,11 @@ An unknown or inactive `MEMBER_ID` exits 1 (`Error: Member <member-id> not found
 cafleet member list <fleet-id>
 ```
 
-One output shape: every **active** registry entry of the fleet, one row each — the column enumeration and the `--json` timestamp additions are canonical in [runtime Member list output](../reference/runtime/spec/cli-options.md#member-list-output). On every wake, use the `idle` column and overdue assignments instead of capturing every member — capture is reserved for the cases they flag.
-
-## Fleet Capture
-
-Use `cafleet fleet capture <fleet-id> [--lines N] [--ansi] [--json]` for one read-only roster snapshot. Inspect per-pane errors and retain unknown evidence.
+One output shape: every **active** registry entry of the fleet, one row each — the column enumeration and the `--json` timestamp additions are canonical in [Member list output](../reference/cli.md#member-list-output). On every wake, use the `idle` column and overdue assignments instead of capturing every member — capture is reserved for the cases they flag.
 
 ## Member Capture
 
-Capture the last N lines of a member's pane buffer (read-only). `--lines` defaults `20`; ANSI escapes are stripped and carriage returns de-fragmented by default (`--ansi` preserves escapes). Output is the raw buffer in text mode, `{member_id, pane_id, lines, content, captured_at, content_sha256}` in JSON. This is the targeted deeper-investigation primitive — scan for all, capture when one member needs a closer look.
+Capture the last N lines of a member's pane buffer (read-only); [`cli.md`](../reference/cli.md#member-capture) owns flags, defaults and output. This is the targeted deeper-investigation primitive — scan for all, capture when one member needs a closer look.
 
 ```bash
 cafleet member capture <member-id>
@@ -384,7 +350,7 @@ cafleet member capture <member-id> --lines 200
 
 ## Answering a member's relayed question
 
-A fleet member never talks to the user. When it needs a recorded user reaction (approve / choose / confirm / continue-or-abort), it relays the question to the Director via `cafleet message send`, and the Director asks the user through {decision_surface}. The Director forwards the user's answer back to the member as an ordinary `cafleet message send` (which the member consumes on its next poll) — not a pane keystroke. The question-shape taxonomy is a backend delta — see your overlay section (`coding-agents.md#<name>`). The canonical user-reaction rule is the `cafleet` skill § *Soliciting user reactions*.
+Ask the user through {decision_surface} under the [User Delegation Protocol](../reference/supervision.md#user-delegation-protocol), then forward the answer to the member as an ordinary `cafleet message send`, not a pane keystroke. Surface constraints are in your backend's decision-surface note.
 
 ## Member Exec
 
@@ -396,21 +362,14 @@ Use `cafleet member prompt <member-id> TEXT` for explicitly authorized composer 
 
 ## Member Press
 
-Use `cafleet member press <member-id> KEY...` for explicitly authorized ordered manual keys. Pass only the intended keys and use the ordinary `--` separator for literal punctuation; append neither Escape nor Enter. The [CLI contract](../reference/runtime/spec/cli-options.md#member-press) owns grammar, limits, exact output and error forms. The command holds the revalidated shared pane lock and sends one bounded backend request to the recorded outer pane, including wrapped members.
+Use `cafleet member press <member-id> KEY...` for explicitly authorized ordered manual keys. Pass only the intended keys and use the ordinary `--` separator for literal punctuation; append neither Escape nor Enter. The [CLI contract](../reference/cli.md#member-press) owns grammar, limits, exact output and error forms. The command holds the revalidated shared pane lock and sends one bounded backend request to the recorded outer pane, including wrapped members.
 
 Success establishes backend acknowledgment only. Inspect actual native effects and continuation independently; a started failure keeps delivery uncertain and requires a new explicit decision after inspection. Apply the existing host and request-specific user/Director decision policy before answering a native request. Use `permission respond` for the separately bound decision interface; selecting manual keys bypasses no host policy and supplies no permission to answer.
 
-## Cross-references
-
-- For command routing through `member exec`, see [`reference/prompt-routing.md`](../reference/prompt-routing.md).
-- Read [Recovery](../reference/supervision.md#recovery) before recovery and [Shutdown](../reference/supervision.md#shutdown) before teardown.
-- For the `--json` output switch, see [runtime JSON output](../reference/runtime/spec/cli-options.md#json-output).
-
 ## Director wake
 
-Follow [supervision](../reference/supervision.md#director-wake): arm native reception before member replies, retain one owned handle and apply the executing backend's receive lifecycle. Reconcile full broker records, record deferred actions and ACK consumption. On every batch/wake inspect roster, panes and artifacts, and consume the Director's own pending IDs through broker reads.
-
+Follow [Director wake](../reference/supervision.md#director-wake).
 
 ## Runtime events and recovery
 
-Follow the [member runtime procedure](../reference/member-runtime.md) for event consumption, host-evidenced mode/risk decisions, request-bound responses, manual native input and result-based continuation and explicit finite wait after consuming/ACKing available records. Keep the pending action after ACK. Use `event show` and `input show` to reconcile durable identities; only the Director owns `permission inspect/respond`, `input reconcile` and `member recover`, preserving ownership, snapshot-bound evidence and uncertainty.
+Follow the [member runtime procedure](../reference/member-runtime.md) for event consumption, mode-dependent decisions, request-bound responses, manual native input and continuation. Use `event show` and `input show` to reconcile durable identities; only the Director owns `permission inspect/respond`, `input reconcile` and `member recover`, preserving ownership, snapshot-bound evidence and uncertainty.

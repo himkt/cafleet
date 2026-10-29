@@ -29,7 +29,7 @@ Normalize research/design inputs to their task folder before resolving BASE. Age
 
 Render a compact role-by-path prompt to a unique `.prompts/<member>-<UTC-compact>.md` and preserve that pre-spawn audit input. Leave only `{fleet_id}`, `{member_id}`, `{director_member_id}` and `{coding_agent}` for CLI identity substitution; double other literal braces. A missing BASE follows its guarded inline transport branch.
 
-Send individually to selected recipients. Members poll after ready, before reporting and on each wake. Ordinary members receive pane previews; the Director retains native inbox reception through the shared supervision lifecycle. Record deferred actions and ACK consumption, preserving user gates and supplied host goal controls. The next send to an ordinary recipient retries pending previews. Native shell dispatch returns submission metadata; inspect output and explicitly continue after completion evidence if the host has not resumed the member.
+Send individually to selected recipients. Members poll after ready, before reporting and on each wake. Ordinary members receive pane previews; the Director follows [Director wake](../../../skills/cafleet/reference/supervision.md#director-wake). Native shell dispatch returns submission metadata; inspect output and explicitly continue after completion evidence if the host has not resumed the member.
 
 ## Worked example: summarize-pr
 
@@ -59,7 +59,7 @@ Receive that member's ready and ACK it. Dispatch its scope when inputs exist.
 
 ### Review and revisions
 
-Receive the Summarizer's report through the owned native handle. On every batch/wake run `cafleet message poll 8 --json`, reconcile replay and inspect roster/panes/artifacts.
+Receive the Summarizer's report under [Director wake](../../../skills/cafleet/reference/supervision.md#director-wake).
 
 Read and ACK the completed report, inspect the summary and present it. Record revisions as actionable markers at the artifact pointer and send `ready (doc)`. The member revises, removes the marker and sends `addressed (doc)`; keep the owned receiver through the review loop.
 

@@ -1,7 +1,7 @@
 # Codebase redundancy cleanup
 
 **Status**: Approved
-**Progress**: 13/56 tasks complete
+**Progress**: 19/56 tasks complete
 **Last Updated**: 2026-10-29
 
 ## Overview
@@ -565,12 +565,12 @@ Each step is one commit and leaves `mise //cafleet:test` and `mise //cafleet:lin
 
 ### Step 3: Skills for agents
 
-- [ ] Write `skills/cafleet/reference/cli.md` per § Agent CLI reference from SPEC.md <!-- completed: -->
-- [ ] Retarget every skill link into the mirror to `cli.md` anchors; delete the SPC-02 fleet-capture mentions from `skills/cafleet/SKILL.md`, `skills/cafleet/reference/supervision.md` and `skills/cafleet/roles/director.md` <!-- completed: -->
-- [ ] In one change, delete `skills/cafleet/reference/runtime/`, the `rerun-if-changed=../docs/docs` line in `cafleet/build.rs`, then `docs/docs/spec/` and its `docs/docs/_meta.json` entry. `cafleet/build.rs` embeds a dangling symlink as a file, so no symlink may outlive its target <!-- completed: -->
-- [ ] Apply SKL-06, 07, 08, 11, 12, 14, 15, 17, 18, 22 and 24 to the files each row names: `skills/cafleet/**`, `skills/cafleet-design-doc/**` (SKL-06, 18, 22, 24), `.claude/skills/skill-author/SKILL.md` (SKL-06) and `.claude/skills/cafleet-model-list-refresh/SKILL.md` (SKL-08) <!-- completed: -->
-- [ ] Apply SKL-02, 03, 09 and 10 to `skills/cafleet-design-doc/**` <!-- completed: -->
-- [ ] Add the create/execute per-role delta tables and the slot/placeholder wording in `skills/cafleet/roles/director.md` (§ Spawn delta tables, SKL-16) <!-- completed: -->
+- [x] Write `skills/cafleet/reference/cli.md` per § Agent CLI reference from SPEC.md <!-- completed: 2026-10-29T15:45 -->
+- [x] Retarget every skill link into the mirror to `cli.md` anchors; delete the SPC-02 fleet-capture mentions from `skills/cafleet/SKILL.md`, `skills/cafleet/reference/supervision.md` and `skills/cafleet/roles/director.md` <!-- completed: 2026-10-29T15:45 -->
+- [x] In one change, delete `skills/cafleet/reference/runtime/`, the `rerun-if-changed=../docs/docs` line in `cafleet/build.rs`, then `docs/docs/spec/` and its `docs/docs/_meta.json` entry. `cafleet/build.rs` embeds a dangling symlink as a file, so no symlink may outlive its target <!-- completed: 2026-10-29T15:45 -->
+- [x] Apply SKL-06, 07, 08, 11, 12, 14, 15, 17, 18, 22 and 24 to the files each row names: `skills/cafleet/**`, `skills/cafleet-design-doc/**` (SKL-06, 18, 22, 24), `.claude/skills/skill-author/SKILL.md` (SKL-06) and `.claude/skills/cafleet-model-list-refresh/SKILL.md` (SKL-08) <!-- completed: 2026-10-29T15:55 -->
+- [x] Apply SKL-02, 03, 09 and 10 to `skills/cafleet-design-doc/**` <!-- completed: 2026-10-29T15:54 -->
+- [x] Add the create/execute per-role delta tables and the slot/placeholder wording in `skills/cafleet/roles/director.md` (§ Spawn delta tables, SKL-16) <!-- completed: 2026-10-29T15:54 -->
 
 ### Step 4: Rules and maintainer surfaces
 
@@ -588,6 +588,8 @@ Each step is one commit and leaves `mise //cafleet:test` and `mise //cafleet:lin
 - [x] Create `catalog::test_support::synthetic_definitions()`/`synthetic_catalog()`; point every synthetic-profile reader at them; delete `runner_tests/fixtures/synthetic-profile.json` <!-- completed: 2026-10-29T15:39 -->
 
 ### Step 6: Dissolve `runtime/runner_tests/`
+
+COMMENT(programmer): Step 6 moves about 13,000 lines of tests verbatim. To move them mechanically instead of retyping them, I wrote `.tools/rsplice.py` under this folder (a Rust-aware item extractor/splicer that cuts named items or whole files and inserts them into a target's `mod tests`; rustfmt then reindents). The harness denies `python3 -I /development-pvc/work/himkt/cafleet/design-docs/0000198-codebase-redundancy-cleanup/.tools/rsplice.py <args>` in dontAsk mode. Please either add a host allow rule for `Bash(python3 -I /development-pvc/work/himkt/cafleet/design-docs/0000198-codebase-redundancy-cleanup/.tools/rsplice.py *)`, or tell me to proceed by hand-copying with Read/Write (much slower and riskier to the moved bytes). A related sequencing point: Step 6 task 5 deletes `runtime/runner_tests/`, but Step 7 task 1 moves `runner_tests/native_capture*`, `review_collector.rs` and `review_export.rs` into `observation.rs` `native_capture`. I plan to move those files in Step 6 into the current `runner/native_capture*` module files (their Step 7 home before inlining), so Step 7 becomes a pure inline; confirm or redirect.
 
 - [ ] Move `Fixture` to `runner/mod.rs` `test_support`, `OwnedChild` to `system.rs` `TestChild`, and the control-service harness to `service.rs` `test_support` with final names; delete the `runtime/mod.rs` re-export block <!-- completed: -->
 - [ ] Move `creation.rs`, `control_service.rs`, `input_service*`, `observation_*` and `review_failures.rs` tests to their targets <!-- completed: -->
