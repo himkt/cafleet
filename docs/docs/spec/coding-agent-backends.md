@@ -14,7 +14,7 @@ version/config requirements.
 | Director | A goal command or equivalent native goal lifecycle controls, plus background execution while supervision continues. |
 | Member | A compatible PTY lifecycle with an explicit detection-coverage declaration; launchability, detection and safe composer input are evaluated separately. |
 
-Evaluate each role independently. Interactive member policies are eligible under the runner contract; automatic review or fixed allow/deny capability may remain available without being the selected mode. Preserve native guards, managed policy, explicit denies and sandbox boundaries. A backend with unknown detector/composer coverage permits manual terminal work and holds generated input.
+Evaluate each role independently. A backend's native automatic review is its omitted member policy where the backend offers one; interactive and fixed allow/deny policies remain explicit choices under the runner contract. Preserve native guards, managed policy, explicit denies and sandbox boundaries. A backend with unknown detector/composer coverage permits manual terminal work and holds generated input.
 
 Goal support is a host capability; preserve supplied activation, pause, completion and budget authority. A verified native receive adapter is evaluated separately: a host satisfying both Director prerequisites may use explicit manual `poll` or finite `wait` when its native adapter is unavailable. Background execution alone establishes no unsolicited wake or per-record reception guarantee.
 
@@ -24,15 +24,22 @@ These are the child argv with omitted permission selection. The leading token na
 
 | Backend | Spawn argv |
 |---|---|
-| `claude` | `claude --permission-mode dontAsk --prompt-suggestions false --allowedTools <rule>... --name <member-name> <prompt>` |
-| `codex` | `codex --ask-for-approval never --sandbox workspace-write <prompt>` |
+| `claude` | `claude --permission-mode auto --prompt-suggestions false --allowedTools <rule>... --name <member-name> <prompt>` |
+| `codex` | `codex --approve-for-me --sandbox workspace-write <prompt>` |
 | `opencode` | `opencode mini --standalone --agent cafleet --prompt <prompt>` |
 
-An explicit `--permission-mode cafleet-ask` for `opencode` launches `opencode mini --standalone --agent cafleet-ask --prompt <prompt>`; the `--agent` value always equals the resolved mode.
+Explicit choices change only the permission tokens:
+
+| Backend | Explicit choice | Permission tokens |
+|---|---|---|
+| `claude` | Any other native mode, such as `default` or `dontAsk` | `--permission-mode <mode>` |
+| `codex` | `on-request` or `never` | `--ask-for-approval <mode> --sandbox workspace-write` |
+| `opencode` | `cafleet-ask` | `--agent cafleet-ask`; the `--agent` value always equals the resolved mode |
 
 Shared contract:
 
-- Each omitted policy retains its existing command posture; an explicit interactive policy may display native approval prompts.
+- The omitted claude and codex policies are each backend's native automatic approval mode: an automatic reviewer decides each operation that no native rule settles, and a refusal returns to the member, which routes a necessary refused command to the Director. The runner reports observed automatic refusals and unavailable automatic review to the Director as [automatic review events](member-runtime.md#automatic-review-events). An explicit interactive policy may display native approval prompts.
+- The explicit codex `on-request` and `never` choices inherit the user's Codex configuration, including an `approvals_reviewer` setting that can answer escalations without a native form.
 - The native child receives the selected backend's config-location variable
   when the creator's environment sets it, so the member reads the
   configuration CAFleet validated and installed into — see
@@ -62,8 +69,8 @@ Per-backend capabilities:
 
 | Backend | OS-level sandbox | Sets the pane title | Shell-command posture | Preset / config prerequisite |
 |---|---|---|---|---|
-| `claude` | none | yes, via `--name <member-name>` | Runs the broker commands under its spawn-time allow rules, read-only commands, and every command matching the operator's `permissions.allow`; a denied command routes to the Director | A permission profile in `~/.claude/settings.json` — a permission posture, not a spawn dependency ([Claude](#claude)) |
-| `codex` | kernel-enforced ([Codex](#codex)) | no — locate the pane through `cafleet member list` (`pane_id` is ground truth) | Runs commands its workspace/host rules permit; routes required denied commands | `~/.codex/rules/cafleet.rules` (`CODEX_HOME` relocates it), plus the `~/.codex/config.toml` settings and a trusted working directory — a permission posture, not a spawn dependency ([the rules file](#cafleet-rules-file)) |
+| `claude` | none | yes, via `--name <member-name>` | Runs the broker commands under its spawn-time allow rules and every command matching the operator's `permissions.allow`; auto mode's classifier reviews the rest, and a refused command routes to the Director | A permission profile in `~/.claude/settings.json` — a permission posture, not a spawn dependency ([Claude](#claude)) |
+| `codex` | kernel-enforced ([Codex](#codex)) | no — locate the pane through `cafleet member list` (`pane_id` is ground truth) | Runs commands its workspace/host rules permit; automatic review decides escalations, and a refused required command routes to the Director | `~/.codex/rules/cafleet.rules` (`CODEX_HOME` relocates it), plus the `~/.codex/config.toml` settings and a trusted working directory — a permission posture, not a spawn dependency ([the rules file](#cafleet-rules-file)) |
 | `opencode` | none | no — locate the pane through `cafleet member list` | `cafleet`: deny-by-default allowlist, everything outside it routes to the Director; `cafleet-ask`: the same allowlist, everything else opens a native permission form | The selected policy's preset, `~/.config/opencode/agents/<mode>.md` (`OPENCODE_CONFIG_DIR` relocates it) — a spawn precondition ([the agent presets](#cafleet-agent-preset)) |
 
 ## Director decision policy
@@ -96,18 +103,28 @@ Native shell probes displayed command/stdout/stderr followed by a model turn; th
 
 CAFleet input cancels no Claude tool approval or `AskUserQuestion` in the root Director's pane, which receives no automatic pane input, or in a runner-managed member's pane, where previews wait for an empty composer and send no Escape. A legacy unwrapped member runs `dontAsk`, so its open prompt is an `AskUserQuestion`; its Escape-first previews, `member prompt` and `member exec` input can cancel it, and Claude Code then reports a user rejection before the input arrives. The member treats a rejection followed by a `[cafleet msg …]` line ending with the Escape-dismissal clause as delivery-caused and re-asks the question or re-issues the call. A runner-managed member's preview ends with the resume clause only and arrives after the prompt closed, so a rejection before it stands. A rejection followed by Director prompt or native-command input follows that input, and the Director checks the pane for an open prompt before such dispatch. Recreating a legacy unwrapped member makes it runner-managed and removes the Escape lead.
 
-`--permission-mode dontAsk` is the omitted Claude member policy. Explicit native modes retain their own permission behavior. Under `dontAsk`, a member runs these calls without a prompt: its
-[spawn-time allow rules](#spawn-time-allow-rules), Claude Code's built-in
-read-only commands, file reads inside its working directory, and every tool
-call matching `permissions.allow`. Every other call — a shell command or a
-file edit, including one matching `permissions.ask` — is denied without a
-prompt. A write to one of Claude Code's protected paths, such as a project's
-`.git` or `.claude` directory, is denied whatever the allow list holds. Beyond
-the broker commands, the operator's settings are therefore the member's allow
-list; the recommended profiles are in
+`--permission-mode auto` is the omitted Claude member policy. A member runs
+its [spawn-time allow rules](#spawn-time-allow-rules) and every tool call
+matching `permissions.allow` without review; Claude Code's auto mode
+classifier reviews each other call, and a call it refuses returns to the
+member as a refusal, which the member routes to the Director like any denial.
+Native rules, hooks and managed policy remain authoritative: a `deny` or `ask`
+rule still applies, and auto mode must be available for the account and model.
+Where it is unavailable, the member can show native permission forms, and the
+runner reports `automatic_review_unavailable` when its profile recognizes the
+notice. The recommended profiles are in
 [Claude Code configuration](../quickstart.md#claude-code).
 
-Launch-policy evidence is pinned to Claude Code 2.1.302, Codex CLI 0.163.0 and OpenCode 2.1.4. The inspected Claude parser accepts canonical `default` and alias `manual`, although help renders the canonical mode as `manual`; explicit argv preserves the selected spelling. [Claude’s permission-mode reference](https://code.claude.com/docs/en/permission-modes) documents the alias. Codex help confirms `on-request` and `never` with the explicit workspace sandbox retained. OpenCode 2.1.4 prints `opencode v2.1.4` for `--version` and loads the agent preset that `--agent` names; its `cafleet` and `cafleet-ask` choices select presets rather than native flags, so both are eligible for every OpenCode version. These observations establish launch-policy eligibility. Detection, empty-composer and answer coverage for exactly these versions comes from their [bundled profiles](member-runtime.md#bundled-profiles-and-native-screen-fixtures); every other version records `coverage=unknown`.
+Explicit native modes retain their own permission behavior. Under explicit
+`dontAsk`, a member runs its spawn-time allow rules, Claude Code's built-in
+read-only commands, file reads inside its working directory, and every tool
+call matching `permissions.allow` without a prompt. Every other call — a shell
+command or a file edit, including one matching `permissions.ask` — is denied
+without a prompt. A write to one of Claude Code's protected paths, such as a
+project's `.git` or `.claude` directory, is denied whatever the allow list
+holds.
+
+Launch-policy evidence is pinned to Claude Code 2.1.302, Codex CLI 0.163.0 and OpenCode 2.1.4. The inspected Claude parser accepts canonical `default` and alias `manual`, although help renders the canonical mode as `manual`; explicit argv preserves the selected spelling. [Claude’s permission-mode reference](https://code.claude.com/docs/en/permission-modes) documents the alias. Codex help confirms `on-request` and `never` for `--ask-for-approval` and the `--approve-for-me` flag, which routes approval requests through automatic review using the workspace-write sandbox; every Codex choice retains the explicit workspace sandbox. OpenCode 2.1.4 prints `opencode v2.1.4` for `--version` and loads the agent preset that `--agent` names; its `cafleet` and `cafleet-ask` choices select presets rather than native flags, so both are eligible for every OpenCode version. These observations establish launch-policy eligibility. Detection, empty-composer and answer coverage for exactly these versions comes from their [bundled profiles](member-runtime.md#bundled-profiles-and-native-screen-fixtures); another version of a backend with bundled profiles runs under its newest one with `profile_match=fallback` ([profile version fallback](member-runtime.md#profile-version-fallback)).
 
 ### Spawn-time allow rules {#spawn-time-allow-rules}
 
@@ -146,8 +163,8 @@ The flags do not cover these cases:
 | `Bash(cafleet *)` | Other modes | The Director | One pattern pre-approves every subcommand the Director runs. |
 | `Skill(cafleet)`, `Skill(cafleet-design-doc)` | Both | The Director and every member | Each loads the installed skills through the Skill tool. |
 | `Read(~/.claude/skills/**)` | Both | The Director and every member | Role and reference pages of an installed skill sit outside the working directory. |
-| `Edit`, `Write` | Both | Every member that writes files | A member's file edit is denied unless an entry matches it. No entry covers a protected path. |
-| Prefixes for explicit native pane input under `ask`, including `member press` | Both | The Director | The operator confirms each dispatch; a member's own attempt is denied. |
+| `Edit`, `Write` | Both | Every member that writes files | Under `auto`, a matching entry pre-approves the member's edit without classifier review, and without one the classifier reviews each edit; under an explicit `dontAsk`, an edit no entry matches is denied. No entry covers a protected path. |
+| Prefixes for explicit native pane input under `ask`, including `member press` | Both | The Director | The operator confirms each dispatch. A member's own attempt reaches the `ask` rule: a native permission form under `auto`, a denial under an explicit `dontAsk`. |
 
 The auto mode profile carries no `Bash(cafleet ...)` allow entry: the
 classifier reviews each Director command that no rule matches, auto mode
@@ -169,19 +186,19 @@ the config directory, write the `Read` entry against that directory's
 
 ### What members can run {#claude-member-permissions}
 
-A member whose shell command is denied asks its Director to run it. The
+A member whose shell command is denied or refused by auto mode asks its Director to run it. The
 Director runs it with [`cafleet member exec`](cli-options.md#member-exec),
 which is under `ask`, so each routed command costs the operator one
 confirmation. Add an allow entry for every project command members run as
 part of their work — a test or lint task, for example, as `Bash(npm test *)` —
 so those commands run without routing. Routing carries shell commands only: a
-denied file edit needs a matching `Edit` entry, or, on a protected path, the
-Director to make the edit.
+denied or refused file edit needs a matching `Edit` entry, or, on a protected
+path, the Director to make the edit.
 
 | Symptom | Cause | Resolution |
 |---|---|---|
-| A member reports a denied shell command | The command is outside the spawn-time allow rules, the read-only set, and the allow list | Add an allow entry for the command. Until then, each Director dispatch of it asks the operator to confirm. |
-| A member reports a denied file edit | No `Edit` entry matches the file's path, or the path is protected | Add `Edit` and `Write`, or widen the `Edit` path rule to cover the member's working directory. For a protected path, the Director makes the edit. |
+| A member reports a refused or denied shell command | Auto mode's classifier refused a command outside the spawn-time allow rules and the allow list, or a `deny` rule matched it | Add an allow entry for the command. Until then, each Director dispatch of it asks the operator to confirm. |
+| A member reports a refused or denied file edit | Auto mode's classifier refused an edit no `Edit` entry matches, or the path is protected | Add `Edit` and `Write`, or widen the `Edit` path rule to cover the member's working directory. For a protected path, the Director makes the edit. |
 | The Director is prompted for every `cafleet` command | The session runs in a non-auto mode with the auto mode profile | Switch the session to auto mode, or use the other-modes profile |
 | The classifier blocks a Director `cafleet` command | Auto mode judged the action outside the request | Add a pattern for that subcommand per [`permissions.allow` coverage](cli-options.md#permissionsallow-coverage) |
 | `defaultMode: "auto"` has no effect | It is set in a project or local settings file, or auto mode is unavailable for the organization or model | Move it to `~/.claude/settings.json`, removing it from the project file. When auto mode is unavailable, use the other-modes profile. |
@@ -196,8 +213,10 @@ A native shell probe displayed the actual command, exit code, duration and outpu
 
 `--sandbox workspace-write` confines writes to the workspace under a
 kernel-enforced sandbox — codex is the only backend with one.
-`--ask-for-approval never` disables interactive approval prompts (upstream
-write-up: <https://developers.openai.com/codex/agent-approvals-security>).
+The omitted `--approve-for-me` routes approval requests through Codex's
+automatic review; an explicit `--ask-for-approval never` disables interactive
+approval prompts and `on-request` shows them (upstream write-up:
+<https://developers.openai.com/codex/agent-approvals-security>).
 
 Three `~/.codex/config.toml` prerequisites must be in place before the first
 codex spawn, covered in

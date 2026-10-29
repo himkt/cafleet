@@ -1,7 +1,7 @@
 # Member Automatic Approval Modes
 
 **Status**: Approved
-**Progress**: 0/31 tasks complete
+**Progress**: 3/31 tasks complete
 **Last Updated**: 2026-10-29
 
 ## Overview
@@ -364,6 +364,8 @@ Each case records versions, mode, profile, profile match, multiplexer, terminal 
 
 ### Step 1: Capture native automatic-mode evidence
 
+COMMENT(director): Captured by a Director-side helper (member host rules deny the native binaries and multiplexers); the Verifier reviews the captures afterwards. Raw captures and notes go under /development-pvc/work/himkt/cafleet/.captures/0000197/ (hidden, agent-only); the Programmer converts accepted captures into embedded fixtures in Step 6. Use Claude Code 2.1.302 at /root/.local/share/mise/installs/aqua-anthropics-claude-code/v2.1.302/claude (prepend its directory to PATH per case) and Codex 0.163.0 from PATH. Look at the existing fixture JSON shape under cafleet/src/coding_agent/profiles/native/ and the existing capture tooling under cafleet/src/runtime/runner_tests/ before capturing. Remove this marker in your gate report once Step 1 is done.
+
 - [ ] Verify that Codex 0.163.0 parses and starts with `--approve-for-me --sandbox workspace-write` and that Claude Code 2.1.302 starts with `--permission-mode auto` under the runner, and establish the § Startup dialog outcome for each on a fresh and a second launch. <!-- completed: -->
 - [ ] Capture each screen in § Native screens in automatic mode for Claude 2.1.302 `auto` under the runner at 36x120 with privacy masking, including two different refusals visible together, a refusal hidden by a permission form and rewrapped by a resize, the transcript viewer showing a refusal, and false-positive quotes of the refusal text. <!-- completed: -->
 - [ ] Capture the same screens for Codex 0.163.0 `approve-for-me`, including any escalated form and its allow/deny pre-stage forms. <!-- completed: -->
@@ -371,11 +373,13 @@ Each case records versions, mode, profile, profile match, multiplexer, terminal 
 
 ### Step 2: Update documentation
 
+COMMENT(director): Programmer — start now with the parts that do not depend on Step 1 captures (profile version fallback, V6 migration and `profile_match`, launch-policy defaults and argv, both event kinds and `director_action`, effective policy record, snapshot layouts, Director/member guidance). Leave rule patterns, captured screens, startup-dialog outcome and limits for after the Step 1 gate report; the Director will re-send ready for this step then. Report `complete` only when the capture-independent part is done, and keep this marker until the full step is done.
+
 - [ ] Update every `docs/` target in § Documentation targets with the defaults, Codex choice, screens, startup dialog, gate, annotations, events, effective policy, profile version fallback, snapshot layouts, profiles and limits; pin exact rule patterns from the Step 1 captures. <!-- completed: -->
-- [ ] Update `SPEC.md` contract surfaces: catalog, defaults, argv, V6 CHECK domain and `profile_match` column, profile selection and fallback warning, event kinds, `director_action` kinds, effective policy shape and the runtime snapshot keys and text line for every listed command. <!-- completed: -->
+- [x] Update `SPEC.md` contract surfaces: catalog, defaults, argv, V6 CHECK domain and `profile_match` column, profile selection and fallback warning, event kinds, `director_action` kinds, effective policy shape and the runtime snapshot keys and text line for every listed command. <!-- completed: 2026-10-29T07:57 -->
 - [ ] Update the Director role with the omitted-default spawn rule and the event and startup-dialog procedures. <!-- completed: -->
-- [ ] Update the remaining skill references and the member role for runtime bindings, notes and member posture. <!-- completed: -->
-- [ ] Search for remaining member-default mentions of `dontAsk`, `--permission-mode dontAsk` and `--ask-for-approval never` and update each one that describes the default. <!-- completed: -->
+- [x] Update the remaining skill references and the member role for runtime bindings, notes and member posture. <!-- completed: 2026-10-29T07:57 -->
+- [x] Search for remaining member-default mentions of `dontAsk`, `--permission-mode dontAsk` and `--ask-for-approval never` and update each one that describes the default. <!-- completed: 2026-10-29T07:57 -->
 
 ### Step 3: Add the V6 migration
 

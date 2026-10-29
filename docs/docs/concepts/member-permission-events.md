@@ -4,9 +4,20 @@ CAFleet runs new members inside an owned PTY runner. The runner observes native 
 
 ## Choose a native policy
 
-Set `member create --permission-mode MODE` for the selected backend. Omission preserves that backend's launch default. The [policy contract](../spec/member-runtime.md#launch-policy-and-capability-registry) owns choices and coverage; member launch mode is independent of the Director's decision policy. An interactive policy shows native permission forms: Claude's native `default`, Codex's native `on-request`, and OpenCode's `cafleet-ask`, whose agent preset asks for every shell command outside its allowlist instead of denying it.
+Spawn members with the omitted `--permission-mode`, which selects each backend's automatic approval mode: Claude `auto` and Codex `approve-for-me`, while OpenCode uses its `cafleet` preset. Pass `--permission-mode MODE` only when the user asks for another mode for that member. The [policy contract](../spec/member-runtime.md#launch-policy-and-capability-registry) owns choices and coverage; member launch mode is independent of the Director's decision policy. An interactive policy shows native permission forms: Claude's native `default`, Codex's native `on-request`, and OpenCode's `cafleet-ask`, whose agent preset asks for every shell command outside its allowlist instead of denying it. Automatic mode can still show a native form when the reviewer escalates an operation, and that form follows the same request flow.
 
-Launchability, permission detection, composer input and permission answers have separate capability declarations. An unknown profile permits manual terminal use, emits a coverage notification and holds generated input. A tested detector supplies no answer capability by itself. Native and managed rules remain authoritative.
+Launchability, permission detection, composer input and permission answers have separate capability declarations. A native version without its own bundled profile runs under the backend's newest bundled profile, recorded as `profile_match=fallback`; a backend with no profile permits manual terminal use, emits a coverage notification and holds generated input. A tested detector supplies no answer capability by itself. Native and managed rules remain authoritative.
+
+## Automatic review observations
+
+The runner reports two outcomes of automatic review as their own events, distinct from a native permission form and from a returned `permission_denied_observed` refusal:
+
+| Observation | Event | Director handling |
+|---|---|---|
+| The automatic reviewer refused an operation and returned the refusal to the model | `automatic_refusal_observed`, with `director_action.kind=review_automatic_refusal` | No native request is waiting, so there is nothing to answer. Act on the member's routed request with its exact command, cwd, environment and refusal, or ask the member whether the refused operation is still needed. |
+| Automatic review is unavailable or degraded for the member | `automatic_review_unavailable`, with `director_action.kind=review_automatic_review_unavailable` | Supervise the member as interactive, expect native permission forms and tell the user that the selected automatic mode cannot apply. |
+
+Neither event opens an interaction or changes input eligibility, and `permission respond` rejects them. The run's recorded effective policy shows whether automatic review was observed available or unavailable; `member show` exposes it. The [automatic review events](../spec/member-runtime.md#automatic-review-events) contract owns the payloads, and [annotation detection](../spec/member-runtime.md#annotation-detection) owns deduplication and limits.
 
 ## Consume a runtime event
 

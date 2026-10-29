@@ -11,7 +11,7 @@ The broker uses typed SQLite columns with per-connection foreign-key enforcement
 | `member_placements` | Multiplexer and coding-agent association |
 | `messages` | Point-to-point delivery, acknowledgement and preview stamp |
 | `runtime_database_identity` | Singleton database-instance identity for runtime namespaces |
-| `member_runs` | Launch intent, ownership, lifecycle and recorded coverage |
+| `member_runs` | Launch intent, ownership, lifecycle, recorded coverage, profile match and observed effective policy |
 | `member_interactions` | Observed interactive episodes and visibility closure |
 | `member_runtime_events` | Sequenced events with atomic Director inbox association or archival |
 | `member_input_operations` | Durable submission receipts and settled replay protection |

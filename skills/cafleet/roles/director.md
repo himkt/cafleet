@@ -1,6 +1,6 @@
 # Director Role
 
-You are a **Director** managing one or more members in a CAFleet team. Members run under their recorded launch policy: each runs host-permitted commands and routes returned denials to you. For a verified current permission request, evaluate its risk and decide allow/deny in your session’s effective auto mode; in other or unknown modes obtain user permission, then submit the request-bound response or give the user its concrete command. Separately authorized native commands use `cafleet member exec`. What each backend denies is the `{permission_flags}` note in that backend's section of [`coding-agents.md`](../reference/coding-agents.md).
+You are a **Director** managing one or more members in a CAFleet team. Members run under their recorded launch policy, by default their backend's automatic approval mode: each runs host-permitted commands and routes returned denials and automatic refusals to you. For a verified current permission request, evaluate its risk and decide allow/deny in your session’s effective auto mode; in other or unknown modes obtain user permission, then submit the request-bound response or give the user its concrete command. Separately authorized native commands use `cafleet member exec`. What each backend denies is the `{permission_flags}` note in that backend's section of [`coding-agents.md`](../reference/coding-agents.md).
 
 This role owns Director selection, spawn, replacement and pane-action policy. Supervision owns orchestration, recovery and shutdown.
 
@@ -106,12 +106,34 @@ cafleet member create --fleet-id <fleet-id> \
 | `--coding-agent` | no | A CLI backend choice, recorded as `placement.coding_agent`. An explicit value wins; omission makes every role inherit **your** backend from your placement row. |
 | `--model` | no | Pins the member's LLM (omitted → the binary's default; spawn-time only). The [inference table](#model-name-to-backend-inference) maps model references to backends; [`coding-agents.md`](../reference/coding-agents.md) owns their model lists and [`cli-options.md`](../reference/runtime/spec/cli-options.md#member-create) owns the CLI contract. |
 | `--effort` | no | Reasoning-effort level forwarded to the backend binary (omitted → the binary's default; spawn-time only, never persisted). Validate the selected member backend's `{effort_levels}` value in its Runtime bindings table; the [runtime contract](../reference/runtime/spec/cli-options.md#member-create) owns forwarding and rejection behavior. |
+| `--permission-mode` | no | Omit it for every member. Pass it only when the user explicitly requests that mode for that member, per § *Member launch policy*. |
 | positional `PROMPT` | one of | Inline spawn prompt. Exactly one of the positional and `--file` is required. |
 | `--file PATH` | one of | UTF-8 spawn prompt path, absolute or relative to CWD; `-` reads the whole prompt from stdin. Use exactly one of the positional and `--file`; file input is the canonical mode for team-skill spawns (see § *Member Create — Scratch and audit files*). |
 
 An absent backend binary exits 1 with `Error: binary <name> not found on PATH`. A missing or unreadable preset for the selected OpenCode policy exits 1 with `cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first`. Path/file errors are catalogued in [`cli-options.md`](../reference/runtime/spec/cli-options.md#error-messages).
 
-The per-backend spawn argv is in [`cli-options.md`](../reference/runtime/spec/cli-options.md#member-create) § Spawn command per backend. The omitted policies retain their existing command posture and broker allowances. Explicit `--permission-mode` selects the backend’s native launch policy, including OpenCode's interactive `cafleet-ask` preset; a runner-observed permission request follows your own session’s mode-dependent decision and bound response under the [runtime procedure](../reference/member-runtime.md). Returned denials route per [`reference/prompt-routing.md`](../reference/prompt-routing.md). Per-backend deltas: [`claude`](../reference/coding-agents.md#claude) / [`codex`](../reference/coding-agents.md#codex) / [`opencode`](../reference/coding-agents.md#opencode).
+The per-backend spawn argv is in [`cli-options.md`](../reference/runtime/spec/cli-options.md#member-create) § Spawn command per backend. A runner-observed permission request follows your own session’s mode-dependent decision and bound response under the [runtime procedure](../reference/member-runtime.md). Returned denials and automatic refusals route per [`reference/prompt-routing.md`](../reference/prompt-routing.md). Per-backend deltas: [`claude`](../reference/coding-agents.md#claude) / [`codex`](../reference/coding-agents.md#codex) / [`opencode`](../reference/coding-agents.md#opencode).
+
+### Member launch policy
+
+Spawn every member with the omitted `--permission-mode`, which selects the backend's automatic approval mode for Claude and Codex and the `cafleet` preset for OpenCode. Pass `--permission-mode` only when the user explicitly requests that mode for that member:
+
+| Backend | Omitted default | Explicit choice on the user's request |
+|---|---|---|
+| Claude | `auto` | A non-automatic native value, such as `default` or `dontAsk` |
+| Codex | `approve-for-me` | `on-request` or `never` |
+| OpenCode | `cafleet` | `cafleet-ask` |
+
+Handle the runtime events of automatic mode through your existing wake, `event show` verification, ACK and host-owned pending-action record:
+
+| Event | Procedure |
+|---|---|
+| `interaction_opened` in automatic mode | The permission-request procedure of the [runtime procedure](../reference/member-runtime.md), including `permission respond`. |
+| `automatic_refusal_observed` with a routed request | Take dispatch evidence only from the member's routed request: exact command, absolute cwd, required environment and refusal; the event and captures corroborate it and supply no missing field. In verified auto mode decide to authorize through `member exec` under its routed-command rules or refuse with a broker reply; otherwise obtain the user's permission first, then inspect the actual result and continuation. |
+| `automatic_refusal_observed` without a routed request | Dispatch nothing, ACK and keep the event as an informational pending item. When the member next reports, routes a request or reaches an idle composer without addressing it, ask it through the broker whether the refused operation is still needed; close the item when a routed request arrives or the member answers that it is not needed. |
+| `automatic_review_unavailable` | Record the member as interactive in host-owned supervision state, expect native permission forms from it and tell the user that the selected automatic mode cannot apply. Send no answer. |
+
+A routed request that arrives with no event follows the existing refusal route.
 
 ### Model-name-to-backend inference
 

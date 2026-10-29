@@ -24,7 +24,7 @@ Prices are standard provider USD rates per MTok and are planning estimates, not 
 | Director | Native goal lifecycle controls, such as a goal command, and background execution while supervision continues. Both capabilities are required. |
 | Member | Runner-compatible PTY lifecycle and an explicit detection-coverage declaration, with launch, detection and safe composer input treated separately. |
 
-Evaluate roles independently. An interactive Member policy is eligible; automatic-review or fixed allow/deny capability does not require its selection. Preserve native guards, managed policy, explicit denies and sandbox boundaries. Unknown detection/composer coverage permits manual native terminal work and holds CAFleet-generated input. The [member runtime procedure](member-runtime.md) owns event, input and continuation handling.
+Evaluate roles independently. A backend's native automatic review is its omitted Member policy where the backend offers one; interactive and fixed allow/deny policies remain explicit choices. Preserve native guards, managed policy, explicit denies and sandbox boundaries. Unknown detection/composer coverage permits manual native terminal work and holds CAFleet-generated input. The [member runtime procedure](member-runtime.md) owns event, input and continuation handling.
 
 Goal support is a host capability; retain supplied activation, pause, completion and budget authority. Evaluate native reception separately: a host satisfying both Director prerequisites can use explicit manual `poll` or finite `wait` when no verified receive adapter is available. Background execution alone establishes no unsolicited wake or per-record reception guarantee.
 
@@ -35,7 +35,7 @@ Goal support is a host capability; retain supplied activation, pause, completion
 | Placeholder | Value |
 |---|---|
 | `{decision_surface}` | the AskUserQuestion tool |
-| `{permission_flags}` | `--permission-mode dontAsk` |
+| `{permission_flags}` | `--permission-mode auto` |
 | `{pane_title}` | `claude --name <member-name>` sets `#{pane_title}` to the member name |
 | `{skill_loader}` | the Skill tool |
 | `{effort_levels}` | `low`, `medium`, `high`, `xhigh`, `max` (spawn flag `--effort <level>`) |
@@ -77,7 +77,7 @@ Sources: [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pr
 | A separate evaluator checks the session condition against the transcript; native background work defers evaluation and returns a host result. Per-record reception follows the native recipe below. | [Director wake](supervision.md#director-wake) |
 | Receive Director records through one owned Monitor task using the native recipe below. Preserve the supplied `/goal` state and pending user decisions across events and renewal. | [Director wake](supervision.md#director-wake); [native reception](#claude-native-director-reception) |
 | Native shell probes displayed command/stdout/stderr followed by a model turn; its trigger and a second permission check were not established. The Director authorizes routed native input under its host rules. | [Command authorization](prompt-routing.md#director-side-dispatch) |
-| The omitted `dontAsk` policy permits spawn-allowed broker tools, built-in read-only work and matching host allow rules; returned denials route to the Director. An explicitly interactive native policy can block on a request-bound Director/user response or manual native input under the runner procedure; protected file edits retain their host-rule boundary. | `{permission_flags}`; [routing](prompt-routing.md#member-side-reconsider-then-route) |
+| The omitted `auto` policy runs spawn-allowed broker tools and matching host allow rules, auto mode's classifier reviews every other call, and native rules, hooks and managed policy remain authoritative. A refused call is a permission refusal routed to the Director with its exact command, cwd, environment and refusal; an explicitly interactive native policy can instead block on a request-bound Director/user response or manual native input, and protected file edits retain their host-rule boundary. | `{permission_flags}`; [routing](prompt-routing.md#member-side-reconsider-then-route) |
 | Legacy unwrapped members run `dontAsk`, so their open prompt is an `AskUserQuestion`; a Bash, Edit/Write, WebFetch or MCP tool approval follows the same rule. Escape-first input cancels it and Claude Code reports `The user doesn't want to proceed with this tool use.` with a STOP instruction before the CAFleet input arrives: only a following `[cafleet msg …]` line ending with the Escape-dismissal clause makes it delivery-caused, so re-issue the call or re-ask the question; a resume-clause-only preview leaves the rejection standing, and following `member prompt` / `member exec` input governs. | [Member command execution](../roles/member.md#command-execution); [Director dispatch](prompt-routing.md#director-side-dispatch); [unwrapped previews](runtime/spec/multiplexer-backends.md#accepted-trade-offs) |
 | The root Director receives broker records through Monitor stdout with zero automatic pane input, and wrapped members receive previews only into a verified empty composer without Escape. A tool rejection or dismissed question in either pane therefore comes from the operator or host, never from CAFleet input. | [Director wake](supervision.md#director-wake); [wrapped previews](member-runtime.md#reconcile-generated-input) |
 
@@ -106,7 +106,7 @@ Evidence: Claude Code 2.1.301 stream probes established separate event turns fro
 | Placeholder | Value |
 |---|---|
 | `{decision_surface}` | a Director-relayed operator message |
-| `{permission_flags}` | `--ask-for-approval never --sandbox workspace-write` |
+| `{permission_flags}` | `--approve-for-me --sandbox workspace-write` |
 | `{pane_title}` | no `--name` analog |
 | `{skill_loader}` | reading each requested skill core, own backend section and role-required references by the absolute paths the spawn prompt provides |
 | `{effort_levels}` | `minimal`, `low`, `medium`, `high`, `xhigh` (spawn flag `--effort <level>`, forwarded as `--config=model_reasoning_effort=<level>`) |
@@ -141,7 +141,7 @@ Sources: [OpenAI pricing](https://developers.openai.com/api/docs/pricing) and [C
 | The objective belongs to the thread with model-callable lifecycle tools and optional token-budget accounting. Retain native session handles and explicitly read the owned receiver while delegated work remains, preserving goal activation, pause, completion and budget authority. | [Director wake](supervision.md#director-wake); [native reception](#codex-native-director-reception) |
 | Native shell input displayed command, exit code, duration and output. Installed protocol metadata describes unsandboxed dispatch while public CLI guidance describes current approval/sandbox settings; the effective TUI boundary and protocol path were not established. | [Native authorization](prompt-routing.md#director-side-dispatch) |
 | The Director authorizes routed native input under its host rules; harmless command visibility establishes no second member-tool permission check. Inspect output before explicit continuation. | [Dispatch and continuation](prompt-routing.md#director-side-dispatch) |
-| Run host-permitted workspace commands directly and route returned denials. Explicit interactive approval uses the original native surface and runtime-event procedure; the workspace sandbox and managed policy remain authoritative. | `{permission_flags}`; [member routing](prompt-routing.md#member-side-reconsider-then-route) |
+| Run host-permitted workspace commands directly; automatic review decides escalations, and a necessary refused or denied command routes to the Director with its exact command, cwd, environment and refusal. Explicit interactive approval uses the original native surface and runtime-event procedure; the workspace sandbox and managed policy remain authoritative. | `{permission_flags}`; [member routing](prompt-routing.md#member-side-reconsider-then-route) |
 
 Evidence: Codex CLI 0.162.1, checked 2026-10-22; [host continuation](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex) and [command reference](https://learn.chatgpt.com/docs/developer-commands).
 

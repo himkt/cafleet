@@ -1,6 +1,6 @@
 # Member runtime procedure
 
-New members run inside a CAFleet-owned PTY runner. Native launch policy, detector coverage, empty-composer observation, prompt submission, native-exec submission and request-bound answer coverage are separate. Omitted launch policy retains backend defaults; explicit `member create --permission-mode MODE` selects only that member launch. Interactive member policies include OpenCode's `cafleet-ask`, whose agent preset opens a native permission form for every shell command outside its allowlist. Unknown coverage preserves manual terminal operation. The bundled [runtime contract](runtime/spec/member-runtime.md) owns identity, privacy, capabilities and durable receipts.
+New members run inside a CAFleet-owned PTY runner. Native launch policy, detector coverage, empty-composer observation, prompt submission, native-exec submission and request-bound answer coverage are separate. Omitted launch policy selects the backend's automatic approval mode for Claude (`auto`) and Codex (`approve-for-me`) and the `cafleet` preset for OpenCode; explicit `member create --permission-mode MODE` selects another mode for only that member launch, on the user's request. Interactive member policies include OpenCode's `cafleet-ask`, whose agent preset opens a native permission form for every shell command outside its allowlist. A native version without its own bundled profile runs under the backend's newest bundled profile with `profile_match=fallback`. Unknown coverage preserves manual terminal operation. The bundled [runtime contract](runtime/spec/member-runtime.md) owns identity, privacy, capabilities and durable receipts.
 
 ## Consume observed interactions
 
@@ -14,6 +14,18 @@ New members run inside a CAFleet-owned PTY runner. Native launch policy, detecto
 8. Consume/ACK available inbox records, then explicitly invoke finite `cafleet message wait DIRECTOR_ID --timeout SECONDS --json` to retry held previews. Consume/ACK a returned batch and re-enter the receive step. A still-busy composer retains previews; the listener and runner perform no autonomous retry.
 
 Native and managed policy remain authoritative. A response selects a tested single-request allow/deny choice; it changes no persistent/session permission or host policy. Mode/source fields and evidence references are attributed coordination records rather than authentication credentials.
+
+## Consume automatic review events
+
+An `automatic_refusal_observed` or `automatic_review_unavailable` event follows steps 1–3 above, then its broker-built instruction. Neither event has a linked interaction, so `permission inspect` and `permission respond` reject it; there is no native request to answer.
+
+| Event | Procedure |
+|---|---|
+| `automatic_refusal_observed` with a routed request | Take dispatch evidence only from the routed request's exact command, absolute cwd, required environment and refusal; the event and captures corroborate it. In verified auto mode authorize a separate execution through `member exec` or refuse, and otherwise obtain the user's permission first. |
+| `automatic_refusal_observed` without a routed request | Dispatch nothing and keep the event pending. Ask the member whether the operation is still needed when it next reports, routes a request or goes idle. |
+| `automatic_review_unavailable` | Record the member as interactive, expect native permission forms from it and tell the user that the selected automatic mode cannot apply. Send no answer; the member keeps running under the mode its native host applies. |
+
+The event is an alert, not a one-to-one count of refusals: a repeated refusal of the same operation can emit nothing while the first is visible. `member show --json` exposes the run's `profile_match` and recorded `effective_policy`. The [automatic review events](runtime/spec/member-runtime.md#automatic-review-events) contract owns payloads and limits.
 
 ## Reconcile generated input
 
