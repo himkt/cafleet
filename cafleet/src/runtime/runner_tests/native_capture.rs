@@ -7,6 +7,10 @@ mod review_existing;
 mod review_policy;
 mod support;
 
+pub(crate) fn native_capture_service_child_path() -> &'static str {
+    test_path!(native_capture_service_child)
+}
+
 #[test]
 #[ignore = "Director-owned native verification requires an explicit private configuration"]
 fn native_capture_service_child() {

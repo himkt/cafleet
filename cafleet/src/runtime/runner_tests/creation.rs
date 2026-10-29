@@ -274,7 +274,7 @@ impl LaunchHost for Host {
 }
 
 fn inputs(fixture: &Fixture) -> (PendingMemberSpec, RunSettings) {
-    let mut placement = common::placement(None);
+    let mut placement = placement(None);
     placement.coding_agent = "codex".into();
     (
         PendingMemberSpec {

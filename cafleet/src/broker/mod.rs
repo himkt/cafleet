@@ -13,19 +13,17 @@ pub use messaging::*;
 
 #[cfg(test)]
 mod runtime_contract_tests {
-    use std::ops::RangeInclusive;
-
     use rusqlite::{Connection, params};
     use serde_json::{Value, json};
-    use tempfile::TempDir;
 
+    use super::fleets::test_support::create_fleet_fixture;
+    use super::members::test_support::register;
+    use super::runtime::test_support::*;
     use super::runtime::{self as storage, *};
-    use super::tests as common;
-    use crate::output::format_json;
+    use crate::db::test_support::{TableSnapshot, migrate_to_version, table_rows, table_snapshot};
 
     mod interaction_refresh {
         use super::*;
-        use std::collections::BTreeMap;
         use std::time::{Duration, Instant};
 
         struct RefreshFixture {
@@ -80,32 +78,16 @@ mod runtime_contract_tests {
             evidence::EvidencePolicy::metadata().apply(&raw).unwrap()
         }
 
-        fn state(conn: &Connection) -> BTreeMap<String, Vec<Vec<rusqlite::types::Value>>> {
-            let names = conn
-                .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-                .unwrap()
-                .query_map([], |row| row.get::<_, String>(0))
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
-            names
-                .into_iter()
-                .map(|name| {
-                    let escaped = name.replace('"', "\"\"");
-                    let values = rows(conn, &format!("\"{escaped}\""));
-                    (name, values)
-                })
-                .collect()
+        fn state(conn: &Connection) -> Vec<TableSnapshot> {
+            table_snapshot(conn, |_| true)
         }
 
-        fn assert_unchanged_except_interaction(
-            before: &BTreeMap<String, Vec<Vec<rusqlite::types::Value>>>,
-            after: &BTreeMap<String, Vec<Vec<rusqlite::types::Value>>>,
-        ) {
+        fn assert_unchanged_except_interaction(before: &[TableSnapshot], after: &[TableSnapshot]) {
             assert_eq!(before.len(), after.len());
-            for (table, old) in before {
-                if table != "member_interactions" {
-                    assert_eq!(old, after.get(table).unwrap(), "{table}");
+            for (old, new) in before.iter().zip(after) {
+                assert_eq!(old.name, new.name);
+                if old.name != "member_interactions" {
+                    assert_eq!(old, new, "{}", old.name);
                 }
             }
         }
@@ -255,7 +237,7 @@ mod runtime_contract_tests {
         #[test]
         fn runtime_refresh_semantic_barrier_and_episode_identity_are_scoped_to_the_owned_run() {
             let mut fixture = RefreshFixture::new();
-            let other_member = common::register(
+            let other_member = register(
                 &mut fixture.fixture.conn,
                 fixture.fixture.fleet,
                 "other-refresh-run",
@@ -668,7 +650,7 @@ mod runtime_contract_tests {
         }
 
         fn another_run(fixture: &mut ResponseFixture) -> (RunOwner, NewPermissionResponse) {
-            let member = common::register(
+            let member = register(
                 &mut fixture.base.conn,
                 fixture.base.fleet,
                 "another-response-worker",
@@ -2262,10 +2244,6 @@ mod runtime_contract_tests {
 
         use super::*;
 
-        mod v4_migrations {
-            refinery::embed_migrations!("migrations");
-        }
-
         const REVIEW_INSTRUCTION: &str = "Verify this event and the current request. Evaluate the operation and its risk. In the Director session's effective auto mode, decide allow or deny; otherwise obtain the user's permission. Submit the selected answer through the request-bound CAFleet response command, or give that complete command to the user. Inspect the native result and continuation afterward.";
 
         const MULTI_ROW_SENTENCE: &str = "The operation is shown as its displayed rows, where a row break may be a wrap or a line break in the command, so confirm the command against the excerpt before deciding.";
@@ -2300,15 +2278,7 @@ mod runtime_contract_tests {
                     .collect::<rusqlite::Result<Vec<_>>>()
                     .unwrap()
                     .join(",");
-                let mut statement = conn
-                    .prepare(&format!("SELECT {columns} FROM {table} ORDER BY 1"))
-                    .unwrap();
-                let width = statement.column_count();
-                statement
-                    .query_map([], |row| (0..width).map(|index| row.get(index)).collect())
-                    .unwrap()
-                    .collect::<rusqlite::Result<_>>()
-                    .unwrap()
+                table_rows(conn, &format!("SELECT {columns} FROM {table} ORDER BY 1"))
             })
             .into()
         }
@@ -2320,13 +2290,9 @@ mod runtime_contract_tests {
                 dir.path().join("legacy.db").display()
             ))
             .unwrap();
-            v4_migrations::migrations::runner()
-                .set_grouped(true)
-                .set_target(refinery::Target::Version(4))
-                .run(&mut conn)
-                .unwrap();
-            let (fleet, director) = common::create_fleet(&mut conn, "legacy-events");
-            let member = common::register(&mut conn, fleet, "legacy-worker", Some("%2"));
+            migrate_to_version(&mut conn, 4);
+            let (fleet, director) = create_fleet_fixture(&mut conn, "legacy-events");
+            let member = register(&mut conn, fleet, "legacy-worker", Some("%2"));
             let spec = Fixture::spec(&conn, fleet, director, member);
             conn.execute(
                 "INSERT INTO member_runs(member_id,fleet_id,director_member_id,backend,
@@ -3944,245 +3910,6 @@ mod runtime_contract_tests {
         }
     }
 
-    const NOW: &str = "2026-10-26T10:00:00.000000+00:00";
-    const SECRET: &str = "fixture-secret-194-unique";
-
-    struct Fixture {
-        _dir: TempDir,
-        conn: Connection,
-        fleet: i64,
-        director: i64,
-        member: i64,
-        run: RunRecord,
-    }
-
-    impl Fixture {
-        fn new() -> Self {
-            let dir = tempfile::tempdir().unwrap();
-            let mut conn = common::migrated_conn(&dir);
-            let (fleet, director) = common::create_fleet(&mut conn, "runtime-contract");
-            let member = common::register(&mut conn, fleet, "worker", Some("%2"));
-            let spec = Self::spec(&conn, fleet, director, member);
-            let run = storage::create_run(&mut conn, &spec).unwrap();
-            Self {
-                _dir: dir,
-                conn,
-                fleet,
-                director,
-                member,
-                run,
-            }
-        }
-
-        fn spec(conn: &Connection, fleet: i64, director: i64, member: i64) -> NewRun {
-            NewRun {
-                member_id: member,
-                fleet_id: fleet,
-                director_member_id: director,
-                backend: "codex".into(),
-                database_identity_json: storage::database_identity(conn).unwrap(),
-                launch_nonce: "a".repeat(64),
-                runtime_path: std::path::Path::new(conn.path().unwrap())
-                    .parent()
-                    .unwrap()
-                    .join(".cafleet-runs/fixture/run")
-                    .to_str()
-                    .unwrap()
-                    .into(),
-                requested_mode: None,
-                resolved_mode: "never".into(),
-                mode_source: ModeSource::Default,
-                permission_argv_json: json!([
-                    "--ask-for-approval",
-                    "never",
-                    "--sandbox",
-                    "workspace-write"
-                ]),
-                event_evidence: EventEvidence::Metadata,
-                native_version: Some("0.163.0".into()),
-                profile_version: None,
-                profile_match: None,
-                coverage: Coverage::Unknown,
-                owner_pid: i64::from(std::process::id()),
-                owner_start_identity: "fixture-start-identity".into(),
-            }
-        }
-
-        fn activate(&mut self) -> RunOwner {
-            self.conn.execute("UPDATE member_runs SET status='running',owner_kind='runner',owner_epoch=2 WHERE run_id=?1",[self.run.run_id]).unwrap();
-            self.run = storage::get_run(&self.conn, self.run.run_id).unwrap();
-            self.run.owner()
-        }
-
-        fn activate_next_epoch(&mut self) -> RunOwner {
-            self.conn
-                .execute(
-                    "UPDATE member_runs SET owner_epoch=owner_epoch+1 WHERE run_id=?1",
-                    [self.run.run_id],
-                )
-                .unwrap();
-            self.run = storage::get_run(&self.conn, self.run.run_id).unwrap();
-            self.run.owner()
-        }
-
-        fn recoverer(&mut self) -> RunOwner {
-            self.conn.execute("UPDATE member_runs SET status='recovering',owner_kind='reconciler',owner_epoch=owner_epoch+1 WHERE run_id=?1",[self.run.run_id]).unwrap();
-            self.run = storage::get_run(&self.conn, self.run.run_id).unwrap();
-            self.run.owner()
-        }
-
-        fn reserve(&mut self, owner: &RunOwner) -> RangeInclusive<i64> {
-            storage::reserve_event_sequences(&mut self.conn, owner).unwrap()
-        }
-
-        fn open(&mut self, owner: &RunOwner) -> RuntimeEventRecord {
-            self.reserve(owner);
-            let transition = opening(self.run.run_id, 1, 1, metadata());
-            storage::persist_transition(&mut self.conn, owner, &transition, PersistenceMode::Live)
-                .unwrap()
-        }
-
-        fn input(
-            &mut self,
-            owner: &RunOwner,
-            key: &str,
-            kind: InputKind,
-            message_id: Option<i64>,
-        ) -> InputOperation {
-            storage::reserve_input(
-                &mut self.conn,
-                owner,
-                &NewInput {
-                    operation_key: key.into(),
-                    kind,
-                    payload_digest: "d".repeat(64),
-                    message_id,
-                },
-            )
-            .unwrap()
-        }
-
-        fn reopen(&self) -> Connection {
-            crate::db::connect(&format!("sqlite:///{}", self.conn.path().unwrap())).unwrap()
-        }
-    }
-
-    fn raw_evidence(text: &str) -> Value {
-        json!({
-            "backend":"codex","native_version":"0.163.0","profile_version":"fixture-v1",
-            "rule_id":"native-tool-permission","screen_seq":120,
-            "operation":format!("run {text}"),"operation_rows":1,"choices":[format!("allow {text}"),"deny"],
-            "native_request_id":format!("native-{text}"),"excerpt":format!("request {text}"),
-            "semantic_fingerprint":format!("fingerprint-{text}"),
-            "truncated":false,"sensitive":false,
-        })
-    }
-
-    fn metadata() -> Value {
-        evidence::EvidencePolicy::metadata()
-            .apply(&raw_evidence(SECRET))
-            .unwrap()
-    }
-
-    fn opening(run: i64, event_seq: i64, episode_seq: i64, evidence: Value) -> ObservedTransition {
-        ObservedTransition {
-            run_id: run,
-            event_seq,
-            episode_seq: Some(episode_seq),
-            kind: RuntimeEventKind::InteractionOpened,
-            classification: Some(InteractionClass::PermissionRequest),
-            observed_at: NOW.into(),
-            evidence_json: evidence,
-            close_reason: None,
-            cause_json: None,
-        }
-    }
-
-    fn closure(run: i64, event_seq: i64, episode_seq: i64) -> ObservedTransition {
-        ObservedTransition {
-            kind: RuntimeEventKind::InteractionClosed,
-            close_reason: Some(InteractionCloseReason::NotVisible),
-            ..opening(run, event_seq, episode_seq, metadata())
-        }
-    }
-
-    fn rows(conn: &Connection, table: &str) -> Vec<Vec<rusqlite::types::Value>> {
-        let mut statement = conn
-            .prepare(&format!("SELECT * FROM {table} ORDER BY 1"))
-            .unwrap();
-        let width = statement.column_count();
-        statement
-            .query_map([], |row| (0..width).map(|index| row.get(index)).collect())
-            .unwrap()
-            .collect::<rusqlite::Result<_>>()
-            .unwrap()
-    }
-
-    fn durable_state(conn: &Connection) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
-        [
-            "member_runs",
-            "member_interactions",
-            "member_runtime_events",
-            "member_input_operations",
-            "messages",
-        ]
-        .map(|table| rows(conn, table))
-        .into()
-    }
-
-    fn assert_no_secret(conn: &Connection, secret: &str) {
-        let tables = conn
-            .prepare(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
-            )
-            .unwrap()
-            .query_map([], |row| row.get::<_, String>(0))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        for table in tables {
-            let table = table.replace('"', "\"\"");
-            for row in rows(conn, &format!("\"{table}\"")) {
-                for value in row {
-                    match value {
-                        rusqlite::types::Value::Text(text) => {
-                            assert!(!text.contains(secret), "secret in {table}: {text}")
-                        }
-                        rusqlite::types::Value::Blob(bytes) => assert!(
-                            !bytes
-                                .windows(secret.len())
-                                .any(|part| part == secret.as_bytes()),
-                            "secret in {table} blob"
-                        ),
-                        _ => {}
-                    }
-                }
-            }
-        }
-    }
-
-    fn assert_key_order(value: &Value, expected: &[&str]) {
-        assert_eq!(
-            value
-                .as_object()
-                .unwrap()
-                .keys()
-                .map(String::as_str)
-                .collect::<Vec<_>>(),
-            expected
-        );
-        let text = format_json(value);
-        let mut previous = 0;
-        for key in expected {
-            let needle = format!("\"{key}\":");
-            let position = text[previous..]
-                .find(&needle)
-                .unwrap_or_else(|| panic!("missing ordered {key} in {text}"))
-                + previous;
-            previous = position + needle.len();
-        }
-    }
-
     #[test]
     fn new_run_records_launch_intent_and_unreached_phases_without_inventing_policy() {
         let fixture = Fixture::new();
@@ -4207,8 +3934,8 @@ mod runtime_contract_tests {
     fn run_creation_validates_member_fleet_and_pinned_director_before_allocating() {
         for mismatch in ["member", "fleet", "director", "database"] {
             let mut fixture = Fixture::new();
-            let (other_fleet, other_director) = common::create_fleet(&mut fixture.conn, "foreign");
-            let member = common::register(&mut fixture.conn, fixture.fleet, "new-worker", None);
+            let (other_fleet, other_director) = create_fleet_fixture(&mut fixture.conn, "foreign");
+            let member = register(&mut fixture.conn, fixture.fleet, "new-worker", None);
             let mut spec = Fixture::spec(&fixture.conn, fixture.fleet, fixture.director, member);
             match mismatch {
                 "member" => spec.member_id = other_director,
@@ -4229,7 +3956,7 @@ mod runtime_contract_tests {
     #[test]
     fn explicit_mode_is_distinct_from_the_default_and_does_not_prove_effective_policy() {
         let mut fixture = Fixture::new();
-        let member = common::register(&mut fixture.conn, fixture.fleet, "explicit", None);
+        let member = register(&mut fixture.conn, fixture.fleet, "explicit", None);
         let mut spec = Fixture::spec(&fixture.conn, fixture.fleet, fixture.director, member);
         spec.requested_mode = Some("on-request".into());
         spec.resolved_mode = "on-request".into();
@@ -4714,7 +4441,7 @@ mod runtime_contract_tests {
             PersistenceMode::Live,
         )
         .unwrap();
-        let other_member = common::register(&mut fixture.conn, fixture.fleet, "other-worker", None);
+        let other_member = register(&mut fixture.conn, fixture.fleet, "other-worker", None);
         let spec = Fixture::spec(&fixture.conn, fixture.fleet, fixture.director, other_member);
         let other = storage::create_run(&mut fixture.conn, &spec).unwrap();
         fixture
@@ -4871,7 +4598,7 @@ mod runtime_contract_tests {
             let recipient = if destination == "director" {
                 fixture.director
             } else {
-                common::register(&mut fixture.conn, fixture.fleet, "other", None)
+                register(&mut fixture.conn, fixture.fleet, "other", None)
             };
             let message = super::send_message(
                 &mut fixture.conn,
@@ -6232,95 +5959,5 @@ mod runtime_contract_tests {
                 "redacted={redacted}"
             );
         }
-    }
-}
-
-#[cfg(test)]
-pub(crate) mod tests {
-    use rusqlite::Connection;
-    use tempfile::TempDir;
-
-    use super::{self as broker, NewPlacement};
-
-    pub fn migrated_conn(dir: &TempDir) -> Connection {
-        let url = format!("sqlite:///{}", dir.path().join("broker.db").display());
-        let mut conn = crate::db::connect(&url).unwrap();
-        crate::db::migrate_to_head(&mut conn).unwrap();
-        conn
-    }
-
-    pub fn placement(pane: Option<&str>) -> NewPlacement {
-        NewPlacement {
-            backend: "tmux".into(),
-            mux_session: "main".into(),
-            mux_window_id: "@1".into(),
-            mux_pane_id: pane.map(str::to_owned),
-            coding_agent: "claude".into(),
-        }
-    }
-
-    pub fn create_fleet(conn: &mut Connection, name: &str) -> (i64, i64) {
-        let fleet =
-            broker::create_fleet(conn, Some(name), "main", "@1", "%0", "claude", "tmux").unwrap();
-        (fleet.fleet_id, fleet.director.member_id)
-    }
-
-    pub fn register(conn: &mut Connection, fleet: i64, name: &str, pane: Option<&str>) -> i64 {
-        broker::register_member(conn, fleet, name, "assignment", Some(&placement(pane)))
-            .unwrap()
-            .member_id
-    }
-
-    struct FixtureDeletionHost;
-
-    impl crate::input::DeletionHost for FixtureDeletionHost {
-        fn shutdown(
-            &mut self,
-            _: &mut Connection,
-            _: &super::runtime::RunRecord,
-            _: crate::input::Deadline,
-        ) -> Result<crate::runtime::runner::ShutdownOutcome, crate::error::CafleetError> {
-            unreachable!("broker fixtures register no member runs")
-        }
-
-        fn close_pane(
-            &mut self,
-            _: &super::records::Placement,
-            _: crate::input::Deadline,
-        ) -> Result<crate::multiplexer::PostCloseLayout, crate::error::CafleetError> {
-            Ok(crate::multiplexer::PostCloseLayout::None)
-        }
-
-        fn restore_layout(
-            &mut self,
-            _: crate::multiplexer::PostCloseLayout,
-        ) -> Result<(), crate::error::CafleetError> {
-            Ok(())
-        }
-    }
-
-    pub fn guarded_delete_fleet(
-        conn: &mut Connection,
-        fleet: i64,
-    ) -> Result<super::records::DeletedFleet, crate::error::CafleetError> {
-        let path = conn
-            .path()
-            .expect("fleet deletion has a file-backed fixture");
-        assert!(
-            !path.is_empty(),
-            "fleet deletion has a concrete database path"
-        );
-        let url = format!("sqlite:///{path}");
-        let settings = crate::config::Settings::from_lookup(|name| {
-            (name == "CAFLEET_DATABASE_URL").then(|| url.clone())
-        })
-        .unwrap();
-        crate::input::delete_fleet_with_host(
-            conn,
-            &settings,
-            fleet,
-            crate::input::Deadline::new(),
-            &mut FixtureDeletionHost,
-        )
     }
 }

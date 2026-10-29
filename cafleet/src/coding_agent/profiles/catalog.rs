@@ -12,15 +12,44 @@ fn invalid(message: impl Into<String>) -> CafleetError {
 }
 
 #[cfg(test)]
+pub(crate) mod test_support {
+    use serde_json::{Value, json};
+
+    use super::ProfileCatalog;
+
+    pub(crate) fn synthetic_definitions() -> Value {
+        json!({
+            "schema_version":1,
+            "fixtures":[{"id":"synthetic-permission-1","kind":"synthetic","backend":"codex","native_version":"synthetic-0.0.1","rows":24,"cols":80,"source_ref":"synthetic-permission-screen.json","sha256":"689868668a9fa97d9efca75cda3f2cc0a87fde25884a5cb36aab3163b8abd773"}],
+            "profiles":[{"backend":"codex","native_versions":["synthetic-0.0.1"],"profile_version":"synthetic-profile-1",
+                "rules":[{"id":"synthetic-permission","priority":100,"observation":"permission_request",
+                    "region":{"screen":"either","start_pattern":"^Synthetic permission request$","end_pattern":"^Selection: $","max_rows":8,"cursor":"at_end"},
+                    "matchers":[
+                        {"id":"operation","scope":"line","pattern":"^Operation: (?P<operation>.+)$"},
+                        {"id":"allow","scope":"line","pattern":"^> (?P<label>Allow once)$"},
+                        {"id":"deny","scope":"line","pattern":"^  (?P<label>Deny once)$"},
+                        {"id":"form","scope":"line","pattern":"^Request form: synthetic-only$"}
+                    ],
+                    "extract":{"operation":{"matcher_id":"operation","capture":"operation"},"choices":[
+                        {"id":"allow-once","label":{"matcher_id":"allow","capture":"label"},"scope":"single_request"},
+                        {"id":"deny-once","label":{"matcher_id":"deny","capture":"label"},"scope":"single_request"}
+                    ],"native_request_id":null},"verified_noninteraction":false,"sensitive":false}],
+                "capabilities":{"detection":{"rule_ids":["synthetic-permission"],"fixture_ids":["synthetic-permission-1"]},"composer":null,"annotations":null,"answers":[]}}]
+        })
+    }
+
+    pub(crate) fn synthetic_catalog() -> ProfileCatalog {
+        ProfileCatalog::from_definitions(&synthetic_definitions()).unwrap()
+    }
+}
+
+#[cfg(test)]
 pub(super) mod inspection_tests {
     use super::*;
     use serde_json::json;
 
     pub(crate) fn inspection_fixture_definition() -> Value {
-        let mut value: Value = serde_json::from_str(include_str!(
-            "../../runtime/runner_tests/fixtures/synthetic-profile.json"
-        ))
-        .unwrap();
+        let mut value = super::test_support::synthetic_definitions();
         value["profiles"][0]["rules"][0]["matchers"][3]["pattern"] =
             json!("^Request form: (?P<focus>synthetic-only|synthetic-other)$");
         let mut alternate = value["profiles"][0]["rules"][0].clone();
@@ -79,10 +108,7 @@ pub(super) mod inspection_tests {
     pub(crate) const FOCUS_SGR: &str = "\x1b[48;2;250;178;131m";
 
     pub(crate) fn gated_fixture_definition() -> Value {
-        let mut value: Value = serde_json::from_str(include_str!(
-            "../../runtime/runner_tests/fixtures/synthetic-profile.json"
-        ))
-        .unwrap();
+        let mut value = super::test_support::synthetic_definitions();
         let mut native = value["fixtures"][0].clone();
         native["id"] = json!(GATED_REASON_FIXTURE);
         native["kind"] = json!("native");
@@ -305,16 +331,10 @@ pub(super) mod inspection_tests {
 
     #[test]
     fn permission_inspection_executable_plans_have_no_debug_or_serialized_representation() {
-        trait AmbiguousIfImplemented<Marker> {
-            fn check() {}
-        }
-        struct DebugImplemented;
-        struct SerializeImplemented;
-        impl<T: ?Sized> AmbiguousIfImplemented<()> for T {}
-        impl<T: ?Sized + std::fmt::Debug> AmbiguousIfImplemented<DebugImplemented> for T {}
-        impl<T: ?Sized + serde::Serialize> AmbiguousIfImplemented<SerializeImplemented> for T {}
-        let _ = <crate::coding_agent::AnswerPlan as AmbiguousIfImplemented<_>>::check;
-        let _ = <crate::coding_agent::AnswerStage as AmbiguousIfImplemented<_>>::check;
+        assert_no_debug_or_serialize!(
+            crate::coding_agent::AnswerPlan,
+            crate::coding_agent::AnswerStage
+        );
     }
 }
 fn require(ok: bool, message: &str) -> Result<()> {

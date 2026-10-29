@@ -364,7 +364,7 @@ mod tests {
     #[test]
     fn healthy_database_distinguishes_absent_stale_current_and_failed_install_queries() {
         let home = tempfile::tempdir().unwrap();
-        let mut conn = crate::broker::tests::migrated_conn(&home);
+        let mut conn = crate::db::test_support::migrated_conn(&home);
         let probe = Probe {
             home: home.path().into(),
             executable: true,
@@ -451,7 +451,7 @@ mod tests {
     #[test]
     fn opencode_installation_at_the_former_base_is_not_the_resolved_installation() {
         let home = tempfile::tempdir().unwrap();
-        let mut conn = crate::broker::tests::migrated_conn(&home);
+        let mut conn = crate::db::test_support::migrated_conn(&home);
         let former = home.path().join(".opencode");
         std::fs::create_dir_all(former.join("agents")).unwrap();
         for preset in ["cafleet.md", "cafleet-ask.md"] {

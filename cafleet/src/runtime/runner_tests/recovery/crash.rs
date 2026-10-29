@@ -43,7 +43,7 @@ impl Task {
                 .args([
                     "--ignored",
                     "--exact",
-                    "runtime::runner_tests::recovery::crash::runner_recovery_owned_process_child",
+                    runner_recovery_owned_process_child_path(),
                     "--nocapture",
                 ])
                 .env("CAFLEET_TEST_RECOVERY_CONFIG", config)
@@ -426,6 +426,10 @@ impl WriterHooks for PersistGate {
     }
 }
 
+pub(crate) fn runner_recovery_owned_process_child_path() -> &'static str {
+    test_path!(runner_recovery_owned_process_child)
+}
+
 #[test]
 #[ignore = "owned isolated recovery process helper"]
 fn runner_recovery_owned_process_child() {
@@ -493,11 +497,10 @@ fn runner_recovery_owned_process_child() {
         let status = writer.finish(deadline);
         panic!("the selected writer should be killed after fsync: {status:?}");
     }
-    let settings = Settings {
-        database_url: database_url.into(),
-        max_text_len: 200,
-        multiplexer: None,
-    };
+    let settings = Settings::for_database(
+        std::path::Path::new(crate::db::database_path(database_url).unwrap()),
+        None,
+    );
     let mut host = Host::new(deadline);
     let claim;
     let attestation = if matches!(

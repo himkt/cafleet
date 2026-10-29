@@ -21,9 +21,12 @@ use super::owned_child::OwnedChild;
 use super::*;
 use crate::config::Settings;
 
-const CHILD_TEST: &str = "runtime::runner_tests::control_service::runner_review_service_child";
 const DESCRIPTOR_ENV: &str = "CAFLEET_REVIEW_RUNNER_DESCRIPTOR";
 const SERVICES_ENV: &str = "CAFLEET_REVIEW_TEST_SERVICES";
+
+pub(crate) fn runner_review_service_child_path() -> &'static str {
+    test_path!(runner_review_service_child)
+}
 
 #[test]
 fn runner_review_service_child() {
@@ -40,11 +43,11 @@ fn runner_review_service_child() {
             input_service::install_panic_record(directory, "runner");
         }
     }
-    let settings = Settings {
-        database_url: std::env::var("CAFLEET_DATABASE_URL").unwrap(),
-        max_text_len: 200,
-        multiplexer: Some("tmux".into()),
-    };
+    let database_url = std::env::var("CAFLEET_DATABASE_URL").unwrap();
+    let settings = Settings::for_database(
+        Path::new(crate::db::database_path(&database_url).unwrap()),
+        Some("tmux"),
+    );
     let outcome = match std::env::var_os(SERVICES_ENV) {
         Some(configured) => {
             let configured = Path::new(&configured);
@@ -278,12 +281,8 @@ impl ServiceFixture {
             );
             Some(
                 match std::fs::read_to_string(collector_entry).unwrap().as_str() {
-                    "resize" => {
-                        "runtime::runner::native_capture::review_service_tests::runner_collector_resize_child"
-                    }
-                    "export" => {
-                        "runtime::runner_tests::control_service::review_export::runner_collector_export_child"
-                    }
+                    "resize" => runner_collector_resize_child_path(),
+                    "export" => review_export::runner_collector_export_child_path(),
                     other => panic!("unknown owned collector entry: {other}"),
                 },
             )
@@ -302,9 +301,9 @@ impl ServiceFixture {
             if let Some(entry) = capture_review {
                 entry
             } else if capture {
-                "runtime::runner_tests::native_capture::native_capture_service_child"
+                super::native_capture::native_capture_service_child_path()
             } else {
-                CHILD_TEST
+                runner_review_service_child_path()
             },
             "--nocapture",
             "--test-threads=1",

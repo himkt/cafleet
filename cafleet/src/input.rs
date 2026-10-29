@@ -816,9 +816,68 @@ pub(crate) fn lock_member_with_reservation(
 }
 
 #[cfg(test)]
+pub(crate) mod test_support {
+    use rusqlite::Connection;
+
+    use crate::broker::records::{DeletedFleet, Placement};
+    use crate::broker::runtime::RunRecord;
+    use crate::error::CafleetError;
+    use crate::multiplexer::PostCloseLayout;
+    use crate::runtime::runner::ShutdownOutcome;
+
+    struct FixtureDeletionHost;
+
+    impl super::DeletionHost for FixtureDeletionHost {
+        fn shutdown(
+            &mut self,
+            _: &mut Connection,
+            _: &RunRecord,
+            _: super::Deadline,
+        ) -> Result<ShutdownOutcome, CafleetError> {
+            unreachable!("broker fixtures register no member runs")
+        }
+
+        fn close_pane(
+            &mut self,
+            _: &Placement,
+            _: super::Deadline,
+        ) -> Result<PostCloseLayout, CafleetError> {
+            Ok(PostCloseLayout::None)
+        }
+
+        fn restore_layout(&mut self, _: PostCloseLayout) -> Result<(), CafleetError> {
+            Ok(())
+        }
+    }
+
+    pub(crate) fn guarded_delete_fleet(
+        conn: &mut Connection,
+        fleet: i64,
+    ) -> Result<DeletedFleet, CafleetError> {
+        let path = conn
+            .path()
+            .expect("fleet deletion has a file-backed fixture");
+        assert!(
+            !path.is_empty(),
+            "fleet deletion has a concrete database path"
+        );
+        let settings = crate::config::Settings::for_database(std::path::Path::new(path), None);
+        super::delete_fleet_with_host(
+            conn,
+            &settings,
+            fleet,
+            super::Deadline::new(),
+            &mut FixtureDeletionHost,
+        )
+    }
+}
+
+#[cfg(test)]
 mod pane_lock_wait_tests {
     use super::*;
-    use crate::broker::tests as common;
+    use crate::broker::fleets::test_support::create_fleet_fixture;
+    use crate::broker::members::test_support::register;
+    use crate::db::test_support::migrated_conn;
     use crate::multiplexer::INPUT_RESERVATION;
 
     struct LockFixture {
@@ -831,16 +890,13 @@ mod pane_lock_wait_tests {
     impl LockFixture {
         fn new() -> Self {
             let dir = tempfile::tempdir().unwrap();
-            let mut conn = common::migrated_conn(&dir);
-            let (fleet, _) = common::create_fleet(&mut conn, "locks");
-            let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+            let mut conn = migrated_conn(&dir);
+            let (fleet, _) = create_fleet_fixture(&mut conn, "locks");
+            let worker = register(&mut conn, fleet, "worker", Some("%2"));
             let member = crate::broker::get_member(&conn, worker, fleet)
                 .unwrap()
                 .unwrap();
-            let url = format!("sqlite:///{}", conn.path().unwrap());
-            let settings =
-                Settings::from_lookup(|name| (name == "CAFLEET_DATABASE_URL").then(|| url.clone()))
-                    .unwrap();
+            let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()), None);
             Self {
                 _dir: dir,
                 conn,
@@ -1112,7 +1168,7 @@ mod pane_lock_wait_tests {
         }
         drop(guard);
         assert_eq!(
-            common::guarded_delete_fleet(&mut fixture.conn, fixture.member.fleet_id)
+            test_support::guarded_delete_fleet(&mut fixture.conn, fixture.member.fleet_id)
                 .unwrap()
                 .deregistered_count,
             before.len()
@@ -1245,7 +1301,7 @@ mod pane_lock_wait_tests {
             );
             std::thread::sleep(Duration::from_millis(5));
         }
-        let added = common::register(&mut fixture.conn, fleet, "added-during-wait", Some("%99"));
+        let added = register(&mut fixture.conn, fleet, "added-during-wait", Some("%99"));
         let added_placement = crate::broker::get_member(&fixture.conn, added, fleet)
             .unwrap()
             .unwrap()

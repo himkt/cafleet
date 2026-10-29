@@ -210,15 +210,7 @@ mod inspection_tests {
 
     #[test]
     fn permission_inspection_observed_authority_has_no_debug_or_serialized_representation() {
-        trait AmbiguousIfImplemented<Marker> {
-            fn check() {}
-        }
-        struct DebugImplemented;
-        struct SerializeImplemented;
-        impl<T: ?Sized> AmbiguousIfImplemented<()> for T {}
-        impl<T: ?Sized + std::fmt::Debug> AmbiguousIfImplemented<DebugImplemented> for T {}
-        impl<T: ?Sized + serde::Serialize> AmbiguousIfImplemented<SerializeImplemented> for T {}
-        let _ = <ObservedRequest as AmbiguousIfImplemented<_>>::check;
+        assert_no_debug_or_serialize!(ObservedRequest);
     }
 }
 

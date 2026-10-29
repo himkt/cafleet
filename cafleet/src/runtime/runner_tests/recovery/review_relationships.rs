@@ -86,7 +86,7 @@ fn invoke(case: &mut Case, host: &mut Host) -> TestResult<RecoveryReport> {
 fn target(case: &mut Case, relationship: Relationship) -> i64 {
     match relationship {
         Relationship::MemberFleet | Relationship::DirectorFleet => {
-            common::create_fleet(&mut case.fixture.conn, "other-relationship-fleet").0
+            create_fleet_fixture(&mut case.fixture.conn, "other-relationship-fleet").0
         }
         Relationship::FleetDirector => {
             crate::broker::register_member(

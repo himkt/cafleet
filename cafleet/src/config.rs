@@ -40,6 +40,19 @@ impl Settings {
     }
 }
 
+#[cfg(test)]
+impl Settings {
+    pub(crate) fn for_database(path: &std::path::Path, multiplexer: Option<&str>) -> Settings {
+        let database_url = format!("sqlite:///{}", path.display());
+        Settings::from_lookup(|name| match name {
+            "CAFLEET_DATABASE_URL" => Some(database_url.clone()),
+            "CAFLEET_MULTIPLEXER" => multiplexer.map(str::to_owned),
+            _ => None,
+        })
+        .unwrap()
+    }
+}
+
 fn parse_numeric<T: std::str::FromStr>(
     lookup: &impl Fn(&str) -> Option<String>,
     name: &str,

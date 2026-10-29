@@ -27,11 +27,10 @@ struct Host {
 }
 
 fn settings(fixture: &Fixture) -> Settings {
-    Settings {
-        database_url: format!("sqlite:///{}", fixture.conn.path().unwrap()),
-        max_text_len: 200,
-        multiplexer: Some("tmux".into()),
-    }
+    Settings::for_database(
+        std::path::Path::new(fixture.conn.path().unwrap()),
+        Some("tmux"),
+    )
 }
 
 impl Host {
@@ -414,8 +413,8 @@ fn ordinary_placements_in_lock_order(
 fn fleet_deletion_ends_every_ordinary_member_and_keeps_the_director_pane() {
     let mut fixture = Fixture::new();
     let fleet = fixture.run.fleet_id;
-    let unwrapped = common::register(&mut fixture.conn, fleet, "unwrapped", Some("%5"));
-    let pending = common::register(&mut fixture.conn, fleet, "pending", None);
+    let unwrapped = register(&mut fixture.conn, fleet, "unwrapped", Some("%5"));
+    let pending = register(&mut fixture.conn, fleet, "pending", None);
     let placementless =
         crate::broker::register_member(&mut fixture.conn, fleet, "bare", "assignment", None)
             .unwrap()
@@ -462,7 +461,7 @@ fn fleet_deletion_stops_at_the_first_failed_member_and_a_rerun_resumes() {
     let mut fixture = Fixture::new();
     let fleet = fixture.run.fleet_id;
     for (name, pane) in [("first", "%5"), ("second", "%6"), ("third", "%7")] {
-        common::register(&mut fixture.conn, fleet, name, Some(pane));
+        register(&mut fixture.conn, fleet, name, Some(pane));
     }
     let settings = settings(&fixture);
     let order = ordinary_placements_in_lock_order(&fixture, &settings);

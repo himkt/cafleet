@@ -98,6 +98,23 @@ pub struct MessageRecord {
     pub text: String,
 }
 
+#[cfg(test)]
+impl MessageRecord {
+    pub(crate) const FIXTURE_STAMP: &str = "2026-10-25T01:00:00.000000+00:00";
+
+    pub(crate) fn fixture(id: i64, from: i64, to: i64, text: &str) -> Self {
+        Self {
+            message_id: id,
+            from_member_id: from,
+            to_member_id: to,
+            created_at: Self::FIXTURE_STAMP.into(),
+            status: MessageStatus::InputRequired,
+            status_timestamp: Self::FIXTURE_STAMP.into(),
+            text: text.into(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FleetRecord {
     pub fleet_id: i64,
@@ -140,15 +157,18 @@ pub struct DeletedMember {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::broker::{self, tests as common};
+    use crate::broker;
+    use crate::broker::fleets::test_support::create_fleet_fixture;
+    use crate::broker::members::test_support::register;
+    use crate::db::test_support::migrated_conn;
 
     fn fixture() -> (tempfile::TempDir, rusqlite::Connection, i64, i64) {
         let dir = tempfile::Builder::new()
             .prefix(".typed-records-")
             .tempdir_in(env!("CARGO_MANIFEST_DIR"))
             .unwrap();
-        let mut conn = common::migrated_conn(&dir);
-        let (fleet, director) = common::create_fleet(&mut conn, "typed-records");
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet_fixture(&mut conn, "typed-records");
         (dir, conn, fleet, director)
     }
 
@@ -170,7 +190,7 @@ mod tests {
     #[test]
     fn corrupt_recipient_status_stops_a_send_with_the_domain_cause_before_inserting() {
         let (_dir, mut conn, fleet, director) = fixture();
-        let worker = common::register(&mut conn, fleet, "worker", Some("%2"));
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
         conn.execute_batch("PRAGMA ignore_check_constraints=ON")
             .unwrap();
         conn.execute(

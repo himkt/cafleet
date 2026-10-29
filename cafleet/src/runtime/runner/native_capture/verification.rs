@@ -28,11 +28,10 @@ pub(crate) fn run_native_capture_verification_with_export_hooks(
 ) -> Result<i32> {
     let limits = NativeCaptureLimits::default();
     let config = read_native_capture_config(config, &limits)?;
-    let settings = Settings {
-        database_url: config.database_url.clone(),
-        max_text_len: 200,
-        multiplexer: None,
-    };
+    let settings = Settings::for_database(
+        Path::new(crate::db::database_path(&config.database_url)?),
+        None,
+    );
     let conn = crate::db::connect(&settings.database_url)?;
     let descriptor = load_descriptor(&conn, &config.descriptor_path)?;
     let run = storage::get_run(&conn, descriptor.run_id)?;
@@ -941,7 +940,8 @@ impl LaunchHost for CaptureVerificationLaunchHost<'_> {
         let child = vec![
             argv[0].clone(),
             "--exact".into(),
-            "runtime::runner_tests::native_capture::native_capture_service_child".into(),
+            crate::runtime::runner_tests::native_capture::native_capture_service_child_path()
+                .into(),
             "--ignored".into(),
             "--nocapture".into(),
             "--test-threads=1".into(),

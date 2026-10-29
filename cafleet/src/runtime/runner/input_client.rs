@@ -1601,11 +1601,10 @@ mod tests {
                     .unwrap();
             assert_eq!(acknowledged.message_id, notification.message_id);
             assert_eq!(acknowledged.status.as_str(), "completed");
-            let settings = Settings {
-                database_url: format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()),
-                max_text_len: 200,
-                multiplexer: None,
-            };
+            let settings = Settings::for_database(
+                std::path::Path::new(fixture.fixture.conn.path().unwrap()),
+                None,
+            );
             let size = rustix::termios::tcgetwinsize(&fixture.master).unwrap();
             let process = ProcessIdentity::read(run.owner_pid).unwrap().unwrap();
             assert_eq!(process.start_identity, run.owner_start_identity);
@@ -1816,11 +1815,10 @@ mod tests {
             std::thread::sleep(Duration::from_millis(2));
         };
         let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-        let settings = Settings {
-            database_url: format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()),
-            max_text_len: 200,
-            multiplexer: Some("tmux".into()),
-        };
+        let settings = Settings::for_database(
+            std::path::Path::new(fixture.fixture.conn.path().unwrap()),
+            Some("tmux"),
+        );
         let counts = |conn: &Connection| {
             [
                 "member_input_operations",
@@ -3376,11 +3374,7 @@ mod tests {
             .placement
             .unwrap();
         (
-            Settings {
-                database_url: format!("sqlite:///{}", conn.path().unwrap()),
-                max_text_len: 200,
-                multiplexer: Some("tmux".into()),
-            },
+            Settings::for_database(std::path::Path::new(conn.path().unwrap()), Some("tmux")),
             run,
             placement,
         )
@@ -3599,21 +3593,12 @@ mod tests {
         }
     }
 
-    fn health_records(conn: &Connection) -> [Vec<Vec<rusqlite::types::Value>>; 3] {
-        ["member_interactions", "member_runtime_events", "messages"].map(|table| {
-            let mut statement = conn
-                .prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))
-                .unwrap();
-            let columns = statement.column_count();
-            statement
-                .query_map([], |row| {
-                    (0..columns)
-                        .map(|column| row.get(column))
-                        .collect::<rusqlite::Result<Vec<_>>>()
-                })
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap()
+    fn health_records(conn: &Connection) -> Vec<crate::db::test_support::TableSnapshot> {
+        crate::db::test_support::table_snapshot(conn, |table| {
+            matches!(
+                table,
+                "member_interactions" | "member_runtime_events" | "messages"
+            )
         })
     }
 
@@ -4105,11 +4090,10 @@ mod tests {
             .unwrap()
             .placement
             .unwrap();
-            let settings = Settings {
-                database_url: format!("sqlite:///{}", fixture.conn.path().unwrap()),
-                max_text_len: 200,
-                multiplexer: Some("tmux".into()),
-            };
+            let settings = Settings::for_database(
+                std::path::Path::new(fixture.conn.path().unwrap()),
+                Some("tmux"),
+            );
             Self {
                 fixture,
                 settings,
@@ -4783,7 +4767,11 @@ mod tests {
             .unwrap();
             let before = storage::get_run(&case.fixture.conn, run.run_id).unwrap();
             let records = health_records(&case.fixture.conn);
-            assert_eq!(records[0].len(), 1, "meaningful open interaction control");
+            assert_eq!(
+                records[0].rows.len(),
+                1,
+                "meaningful open interaction control"
+            );
             let until = Instant::now() + Duration::from_secs(1);
             let mut host = SocketHost::new(&case.settings, &case.placement, until);
             if stale {
@@ -4963,9 +4951,11 @@ mod tests {
 
 #[cfg(test)]
 pub(super) mod permission_history {
+    use crate::broker::fleets::test_support::create_fleet_fixture;
+    use crate::broker::members::test_support::placement;
     use crate::broker::runtime::{self as storage, *};
-    use crate::broker::tests as common;
     use crate::config::Settings;
+    use crate::db::test_support::{TableSnapshot, table_snapshot};
     use crate::error::CafleetError;
     use crate::input::{Deadline, PaneLock, with_database_budget};
     use crate::runtime::runner::*;
@@ -5163,11 +5153,8 @@ pub(super) mod permission_history {
             let read = storage::get_permission_response(&fixture.conn, input_id).unwrap();
             assert!(read.claim.is_some());
             assert_eq!(read.response.metadata, request.metadata);
-            let settings = Settings {
-                database_url: format!("sqlite:///{}", fixture.conn.path().unwrap()),
-                max_text_len: 200,
-                multiplexer: None,
-            };
+            let settings =
+                Settings::for_database(std::path::Path::new(fixture.conn.path().unwrap()), None);
             let placement = crate::broker::get_member(
                 &fixture.conn,
                 fixture.run.member_id,
@@ -5191,46 +5178,14 @@ pub(super) mod permission_history {
         }
     }
 
-    #[derive(PartialEq)]
-    struct Table {
-        name: String,
-        values: Vec<Vec<rusqlite::types::Value>>,
-    }
     struct Snapshot {
-        tables: Vec<Table>,
+        tables: Vec<TableSnapshot>,
         changes: u64,
     }
     impl Snapshot {
         fn take(conn: &Connection) -> Self {
-            let names = conn
-                .prepare("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name")
-                .unwrap()
-                .query_map([], |row| row.get::<_, String>(0))
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
-            let tables = names
-                .into_iter()
-                .map(|name| {
-                    let quoted = name.replace('"', "\"\"");
-                    let mut statement = conn
-                        .prepare(&format!("SELECT * FROM \"{quoted}\" ORDER BY rowid"))
-                        .unwrap();
-                    let columns = statement.column_count();
-                    let values = statement
-                        .query_map([], |row| {
-                            (0..columns)
-                                .map(|index| row.get(index))
-                                .collect::<rusqlite::Result<Vec<_>>>()
-                        })
-                        .unwrap()
-                        .collect::<rusqlite::Result<Vec<_>>>()
-                        .unwrap();
-                    Table { name, values }
-                })
-                .collect();
             Self {
-                tables,
+                tables: table_snapshot(conn, |_| true),
                 changes: conn.total_changes(),
             }
         }
@@ -5265,11 +5220,7 @@ pub(super) mod permission_history {
         fn copied(case: &Case) -> (Settings, Connection) {
             let path = case.fixture._dir.path().join("copied-inspection.db");
             std::fs::copy(case.fixture.conn.path().unwrap(), &path).unwrap();
-            let settings = Settings {
-                database_url: format!("sqlite:///{}", path.display()),
-                max_text_len: 200,
-                multiplexer: None,
-            };
+            let settings = Settings::for_database(&path, None);
             let conn = crate::db::connect(&settings.database_url).unwrap();
             (settings, conn)
         }
@@ -5955,7 +5906,7 @@ pub(super) mod permission_history {
                     );
                 } else {
                     let other =
-                        common::create_fleet(&mut case.fixture.conn, "other-history-fleet").0;
+                        create_fleet_fixture(&mut case.fixture.conn, "other-history-fleet").0;
                     let member = if changed == "member" {
                         case.fixture.run.member_id
                     } else {
@@ -5983,11 +5934,7 @@ pub(super) mod permission_history {
             let case = Case::new(Retained::Accepted);
             let copied = case.fixture._dir.path().join("copied-history.db");
             std::fs::copy(case.fixture.conn.path().unwrap(), &copied).unwrap();
-            let settings = Settings {
-                database_url: format!("sqlite:///{}", copied.display()),
-                max_text_len: 200,
-                multiplexer: None,
-            };
+            let settings = Settings::for_database(&copied, None);
             let mut conn = crate::db::connect(&settings.database_url).unwrap();
             let before = Snapshot::take(&conn);
             assert!(
@@ -6146,7 +6093,7 @@ pub(super) mod permission_history {
             fn related(case: &Case) -> Case {
                 let mut conn = Connection::open(case.fixture.conn.path().unwrap()).unwrap();
                 conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
-                let mut placement = common::placement(Some("%3"));
+                let mut placement = placement(Some("%3"));
                 placement.coding_agent = "codex".into();
                 let member = crate::broker::register_member(
                     &mut conn,

@@ -237,49 +237,90 @@ pub(crate) fn schema_matches_version(
 }
 
 #[cfg(test)]
+pub(crate) mod test_support {
+    use std::path::{Path, PathBuf};
+
+    use rusqlite::Connection;
+    use rusqlite::types::Value;
+    use tempfile::TempDir;
+
+    pub(crate) fn migrated_conn(dir: &TempDir) -> Connection {
+        let url = format!("sqlite:///{}", dir.path().join("broker.db").display());
+        let mut conn = super::connect(&url).unwrap();
+        super::migrate_to_head(&mut conn).unwrap();
+        conn
+    }
+
+    pub(crate) fn migrate_to_version(conn: &mut Connection, version: u32) {
+        super::embedded::migrations::runner()
+            .set_grouped(true)
+            .set_target(refinery::Target::Version(i32::try_from(version).unwrap()))
+            .run(conn)
+            .unwrap();
+    }
+
+    pub(crate) fn table_rows(conn: &Connection, sql: &str) -> Vec<Vec<Value>> {
+        let mut statement = conn.prepare(sql).unwrap();
+        let width = statement.column_count();
+        statement
+            .query_map([], |row| (0..width).map(|column| row.get(column)).collect())
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    }
+
+    #[derive(Debug, PartialEq)]
+    pub(crate) struct TableSnapshot {
+        pub(crate) name: String,
+        pub(crate) rows: Vec<Vec<Value>>,
+    }
+
+    pub(crate) fn table_snapshot(
+        conn: &Connection,
+        include: impl Fn(&str) -> bool,
+    ) -> Vec<TableSnapshot> {
+        let names = conn
+            .prepare("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        names
+            .into_iter()
+            .filter(|name| include(name))
+            .map(|name| {
+                let quoted = name.replace('"', "\"\"");
+                let rows = table_rows(conn, &format!("SELECT * FROM \"{quoted}\" ORDER BY rowid"));
+                TableSnapshot { name, rows }
+            })
+            .collect()
+    }
+
+    pub(crate) fn wal_snapshot(database: &Path) -> [(PathBuf, Vec<u8>); 3] {
+        ["", "-wal", "-shm"].map(|suffix| {
+            let path = PathBuf::from(format!("{}{suffix}", database.display()));
+            let bytes = std::fs::read(&path).unwrap();
+            (path, bytes)
+        })
+    }
+}
+
+#[cfg(test)]
 mod runtime_tests {
     use rusqlite::{Connection, params};
     use serde_json::json;
     use tempfile::TempDir;
 
-    use crate::broker::tests as common;
+    use super::test_support::{migrate_to_version, migrated_conn, table_rows};
+    use crate::broker::fleets::test_support::create_fleet_fixture;
+    use crate::broker::members::test_support::register;
 
     mod permission_migration {
         use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
         use rusqlite::types::Value;
 
         use super::*;
-
-        fn v4_fixture() -> Fixture {
-            let dir = tempfile::tempdir().unwrap();
-            let mut conn =
-                crate::db::connect(&format!("sqlite:///{}", dir.path().join("v4.db").display()))
-                    .unwrap();
-            crate::db::embedded::migrations::runner()
-                .set_grouped(true)
-                .set_target(refinery::Target::Version(4))
-                .run(&mut conn)
-                .unwrap();
-            let (fleet, director) = common::create_fleet(&mut conn, "permission-upgrade");
-            let member = common::register(&mut conn, fleet, "retained", Some("%2"));
-            Fixture {
-                _dir: dir,
-                conn,
-                fleet,
-                director,
-                member,
-            }
-        }
-
-        fn query_rows(conn: &Connection, sql: &str) -> Vec<Vec<Value>> {
-            let mut statement = conn.prepare(sql).unwrap();
-            let width = statement.column_count();
-            statement
-                .query_map([], |row| (0..width).map(|column| row.get(column)).collect())
-                .unwrap()
-                .collect::<rusqlite::Result<_>>()
-                .unwrap()
-        }
 
         fn retained_rows(conn: &Connection) -> Vec<(String, String, Vec<Vec<Value>>)> {
             let tables = conn
@@ -301,7 +342,7 @@ mod runtime_tests {
                         .unwrap()
                         .join(",");
                     let rows =
-                        query_rows(conn, &format!("SELECT {columns} FROM {table} ORDER BY 1"));
+                        table_rows(conn, &format!("SELECT {columns} FROM {table} ORDER BY 1"));
                     (table, columns, rows)
                 })
                 .collect()
@@ -310,7 +351,7 @@ mod runtime_tests {
         fn assert_retained(conn: &Connection, before: &[(String, String, Vec<Vec<Value>>)]) {
             for (table, columns, expected) in before {
                 assert_eq!(
-                    query_rows(conn, &format!("SELECT {columns} FROM {table} ORDER BY 1")),
+                    table_rows(conn, &format!("SELECT {columns} FROM {table} ORDER BY 1")),
                     *expected,
                     "{table}"
                 );
@@ -402,7 +443,7 @@ mod runtime_tests {
 
         #[test]
         fn runtime_v5_upgrade_preserves_linked_rows_and_input_high_water() {
-            let mut fixture = v4_fixture();
+            let mut fixture = Fixture::at_version(4);
             let run = seed_retained(&mut fixture);
             let before = retained_rows(&fixture.conn);
             let high_water: i64 = fixture
@@ -421,7 +462,7 @@ mod runtime_tests {
 
         #[test]
         fn runtime_v5_repeated_migration_and_reconnect_preserve_identity_and_rows() {
-            let mut fixture = v4_fixture();
+            let mut fixture = Fixture::at_version(4);
             seed_retained(&mut fixture);
             let instance: String = fixture
                 .conn
@@ -495,7 +536,7 @@ mod runtime_tests {
                         "{table}: every audit/claim field is required"
                     );
                 }
-                let foreign_keys = query_rows(
+                let foreign_keys = table_rows(
                     &fixture.conn,
                     &format!(
                         "SELECT \"table\",\"from\",\"to\",on_delete FROM pragma_foreign_key_list('{table}') ORDER BY id,seq"
@@ -518,7 +559,7 @@ mod runtime_tests {
                 fixture.conn.execute("INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at) VALUES(?1,?2,?2,?3,'in_progress',?4,?4)",params![run,kind,"d".repeat(64),NOW]).unwrap();
             }
             assert!(fixture.conn.execute("INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at) VALUES(?1,'preview:no-message','preview',?2,'in_progress',?3,?3)",params![run,"d".repeat(64),NOW]).is_err());
-            let original = query_rows(
+            let original = table_rows(
                 &fixture.conn,
                 "SELECT * FROM member_input_operations ORDER BY input_id",
             );
@@ -532,14 +573,14 @@ mod runtime_tests {
             ] {
                 assert!(fixture.conn.execute(mutation, []).is_err(), "{mutation}");
                 assert_eq!(
-                    query_rows(
+                    table_rows(
                         &fixture.conn,
                         "SELECT * FROM member_input_operations ORDER BY input_id"
                     ),
                     original
                 );
             }
-            assert!(query_rows(&fixture.conn, "PRAGMA foreign_key_check").is_empty());
+            assert!(table_rows(&fixture.conn, "PRAGMA foreign_key_check").is_empty());
         }
 
         #[test]
@@ -563,14 +604,14 @@ mod runtime_tests {
 
         #[test]
         fn runtime_v5_failed_migration_retains_v4_schema_ledger_and_rows_for_retry() {
-            let mut fixture = v4_fixture();
+            let mut fixture = Fixture::at_version(4);
             seed_retained(&mut fixture);
             let before = retained_rows(&fixture.conn);
-            let schema = query_rows(
+            let schema = table_rows(
                 &fixture.conn,
                 "SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name",
             );
-            let ledger = query_rows(
+            let ledger = table_rows(
                 &fixture.conn,
                 "SELECT * FROM refinery_schema_history ORDER BY version",
             );
@@ -601,14 +642,14 @@ mod runtime_tests {
             assert!(fixture.conn.is_autocommit());
             assert_retained(&fixture.conn, &before);
             assert_eq!(
-                query_rows(
+                table_rows(
                     &fixture.conn,
                     "SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name"
                 ),
                 schema
             );
             assert_eq!(
-                query_rows(
+                table_rows(
                     &fixture.conn,
                     "SELECT * FROM refinery_schema_history ORDER BY version"
                 ),
@@ -668,7 +709,7 @@ mod runtime_tests {
             params![interaction, input],
         )
         .unwrap();
-            assert!(query_rows(&fixture.conn, "PRAGMA foreign_key_check").is_empty());
+            assert!(table_rows(&fixture.conn, "PRAGMA foreign_key_check").is_empty());
             (fixture, run, event, interaction, input)
         }
 
@@ -851,7 +892,7 @@ mod runtime_tests {
                 .conn
                 .execute_batch("PRAGMA foreign_keys=ON")
                 .unwrap();
-            assert!(query_rows(&fixture.conn, "PRAGMA foreign_key_check").is_empty());
+            assert!(table_rows(&fixture.conn, "PRAGMA foreign_key_check").is_empty());
         }
 
         #[test]
@@ -913,7 +954,7 @@ mod runtime_tests {
                     "{table}"
                 );
             }
-            let composite = query_rows(
+            let composite = table_rows(
                 &fixture.conn,
                 "SELECT id,seq,\"from\",\"to\" FROM pragma_foreign_key_list('member_permission_response_claims') WHERE \"table\"='member_permission_responses' ORDER BY seq",
             );
@@ -952,39 +993,6 @@ mod runtime_tests {
 
         const WIDENED_KIND_CHECK: &str = "CHECK(kind IN ('coverage_unknown','interaction_opened','interaction_obscured','interaction_closed','permission_denied_observed','automatic_refusal_observed','automatic_review_unavailable','runner_degraded','runner_lost','runner_exited'))";
 
-        fn fixture_at(version: i32) -> Fixture {
-            let dir = tempfile::tempdir().unwrap();
-            let mut conn = crate::db::connect(&format!(
-                "sqlite:///{}",
-                dir.path().join(format!("v{version}.db")).display()
-            ))
-            .unwrap();
-            crate::db::embedded::migrations::runner()
-                .set_grouped(true)
-                .set_target(refinery::Target::Version(version))
-                .run(&mut conn)
-                .unwrap();
-            let (fleet, director) = common::create_fleet(&mut conn, "automatic-review-upgrade");
-            let member = common::register(&mut conn, fleet, "retained", Some("%2"));
-            Fixture {
-                _dir: dir,
-                conn,
-                fleet,
-                director,
-                member,
-            }
-        }
-
-        fn query_rows(conn: &Connection, sql: &str) -> Vec<Vec<Value>> {
-            let mut statement = conn.prepare(sql).unwrap();
-            let width = statement.column_count();
-            statement
-                .query_map([], |row| (0..width).map(|column| row.get(column)).collect())
-                .unwrap()
-                .collect::<rusqlite::Result<_>>()
-                .unwrap()
-        }
-
         fn column_names(conn: &Connection, table: &str) -> Vec<String> {
             conn.prepare("SELECT name FROM pragma_table_info(?1) ORDER BY cid")
                 .unwrap()
@@ -1008,7 +1016,7 @@ mod runtime_tests {
                 .into_iter()
                 .map(|table| {
                     let columns = column_names(conn, &table);
-                    let rows = query_rows(
+                    let rows = table_rows(
                         conn,
                         &format!("SELECT {} FROM {table} ORDER BY 1, 2", columns.join(",")),
                     );
@@ -1020,7 +1028,7 @@ mod runtime_tests {
         fn assert_preserved(conn: &Connection, before: &Snapshot) {
             for (table, columns, expected) in before {
                 assert_eq!(
-                    query_rows(
+                    table_rows(
                         conn,
                         &format!("SELECT {} FROM {table} ORDER BY 1, 2", columns.join(","))
                     ),
@@ -1122,7 +1130,7 @@ mod runtime_tests {
                     params![interaction, input],
                 )
                 .unwrap();
-            assert!(query_rows(&fixture.conn, "PRAGMA foreign_key_check").is_empty());
+            assert!(table_rows(&fixture.conn, "PRAGMA foreign_key_check").is_empty());
             for table in REBUILT {
                 assert!(super::count(&fixture.conn, table) > 0, "{table}");
             }
@@ -1146,19 +1154,19 @@ mod runtime_tests {
 
         fn table_shape(conn: &Connection, table: &str) -> Vec<Vec<Vec<Value>>> {
             let mut shape = vec![
-                query_rows(
+                table_rows(
                     conn,
                     &format!(
                         "SELECT name,type,\"notnull\",dflt_value,pk FROM pragma_table_info('{table}') ORDER BY cid"
                     ),
                 ),
-                query_rows(
+                table_rows(
                     conn,
                     &format!(
                         "SELECT id,seq,\"table\",\"from\",\"to\",on_update,on_delete,\"match\" FROM pragma_foreign_key_list('{table}') ORDER BY id,seq"
                     ),
                 ),
-                query_rows(
+                table_rows(
                     conn,
                     &format!(
                         "SELECT name,\"unique\",origin,partial FROM pragma_index_list('{table}') ORDER BY name"
@@ -1173,7 +1181,7 @@ mod runtime_tests {
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .unwrap();
             for index in indexes {
-                shape.push(query_rows(
+                shape.push(table_rows(
                     conn,
                     &format!("SELECT seqno,name FROM pragma_index_info('{index}') ORDER BY seqno"),
                 ));
@@ -1236,7 +1244,7 @@ mod runtime_tests {
 
         #[test]
         fn runtime_v6_upgrade_preserves_event_response_and_claim_rows_with_identical_values() {
-            let mut fixture = fixture_at(5);
+            let mut fixture = Fixture::at_version(5);
             seed_v5(&mut fixture);
             let before = snapshot(&fixture.conn);
             crate::db::migrate_to_head(&mut fixture.conn).unwrap();
@@ -1245,32 +1253,32 @@ mod runtime_tests {
                 let (_, columns, _) = before.iter().find(|(name, _, _)| name == table).unwrap();
                 assert_eq!(&column_names(&fixture.conn, table), columns, "{table}");
             }
-            assert!(query_rows(&fixture.conn, "PRAGMA foreign_key_check").is_empty());
+            assert!(table_rows(&fixture.conn, "PRAGMA foreign_key_check").is_empty());
             assert_eq!(
-                query_rows(&fixture.conn, "PRAGMA integrity_check"),
+                table_rows(&fixture.conn, "PRAGMA integrity_check"),
                 vec![vec![Value::Text("ok".into())]]
             );
         }
 
         #[test]
         fn runtime_v6_upgrade_preserves_the_event_sequence_so_ids_are_never_reused() {
-            let mut fixture = fixture_at(5);
+            let mut fixture = Fixture::at_version(5);
             let seeded = seed_v5(&mut fixture);
-            let sequence_before = query_rows(
+            let sequence_before = table_rows(
                 &fixture.conn,
                 "SELECT name,seq FROM sqlite_sequence ORDER BY name",
             );
             assert_eq!(event_sequence(&fixture.conn), Some(seeded.event_high_water));
             crate::db::migrate_to_head(&mut fixture.conn).unwrap();
             assert_eq!(
-                query_rows(
+                table_rows(
                     &fixture.conn,
                     "SELECT name,seq FROM sqlite_sequence ORDER BY name"
                 ),
                 sequence_before
             );
             assert!(
-                query_rows(
+                table_rows(
                     &fixture.conn,
                     "SELECT name FROM sqlite_sequence WHERE name LIKE '%\\_v6' ESCAPE '\\'"
                 )
@@ -1283,7 +1291,7 @@ mod runtime_tests {
 
         #[test]
         fn runtime_v6_upgrade_of_a_database_without_events_keeps_the_sequence_absent() {
-            let mut fixture = fixture_at(5);
+            let mut fixture = Fixture::at_version(5);
             assert_eq!(event_sequence(&fixture.conn), None);
             crate::db::migrate_to_head(&mut fixture.conn).unwrap();
             assert_eq!(event_sequence(&fixture.conn), None);
@@ -1296,7 +1304,7 @@ mod runtime_tests {
 
         #[test]
         fn runtime_v6_rebuild_keeps_every_column_foreign_key_and_index_of_the_rebuilt_tables() {
-            let v5 = fixture_at(5);
+            let v5 = Fixture::at_version(5);
             let head = Fixture::new();
             for table in REBUILT {
                 assert_eq!(
@@ -1305,7 +1313,7 @@ mod runtime_tests {
                     "{table}"
                 );
             }
-            for row in query_rows(
+            for row in table_rows(
                 &head.conn,
                 "SELECT type,name,tbl_name,COALESCE(sql,'') FROM sqlite_master",
             ) {
@@ -1343,7 +1351,7 @@ mod runtime_tests {
 
         #[test]
         fn runtime_v6_upgraded_database_accepts_both_new_kinds_and_rejects_an_unknown_kind() {
-            let mut fixture = fixture_at(5);
+            let mut fixture = Fixture::at_version(5);
             let seeded = seed_v5(&mut fixture);
             assert!(
                 insert_event(&fixture, seeded.live_run, 10, "automatic_refusal_observed").is_err(),
@@ -1366,12 +1374,12 @@ mod runtime_tests {
                 "unknown kind",
             );
             assert_preserved(&fixture.conn, &before);
-            assert!(query_rows(&fixture.conn, "PRAGMA foreign_key_check").is_empty());
+            assert!(table_rows(&fixture.conn, "PRAGMA foreign_key_check").is_empty());
         }
 
         #[test]
         fn runtime_v6_response_foreign_key_targets_the_rebuilt_event_table() {
-            let mut fixture = fixture_at(5);
+            let mut fixture = Fixture::at_version(5);
             let seeded = seed_v5(&mut fixture);
             crate::db::migrate_to_head(&mut fixture.conn).unwrap();
             let referenced: i64 = fixture
@@ -1425,13 +1433,13 @@ mod runtime_tests {
                 ).is_err(),
                 "a response naming a missing event is rejected"
             );
-            assert!(query_rows(&fixture.conn, "PRAGMA foreign_key_check").is_empty());
+            assert!(table_rows(&fixture.conn, "PRAGMA foreign_key_check").is_empty());
         }
 
         #[test]
         fn runtime_v6_profile_match_column_is_nullable_text_appended_to_member_runs() {
             let fixture = Fixture::new();
-            let columns = query_rows(
+            let columns = table_rows(
                 &fixture.conn,
                 "SELECT name,type,\"notnull\",dflt_value,pk FROM pragma_table_info('member_runs') ORDER BY cid",
             );
@@ -1449,7 +1457,7 @@ mod runtime_tests {
 
         #[test]
         fn runtime_v6_backfills_profile_match_exact_for_every_profiled_v5_run() {
-            let mut fixture = fixture_at(5);
+            let mut fixture = Fixture::at_version(5);
             let seeded = seed_v5(&mut fixture);
             crate::db::migrate_to_head(&mut fixture.conn).unwrap();
             let profile_match = |run: i64| -> Option<String> {
@@ -1469,7 +1477,7 @@ mod runtime_tests {
                 assert_eq!(profile_match(*run), None, "run {run}");
             }
             assert_eq!(
-                query_rows(
+                table_rows(
                     &fixture.conn,
                     "SELECT COUNT(*) FROM member_runs WHERE (profile_version IS NULL) != (profile_match IS NULL)"
                 ),
@@ -1568,7 +1576,7 @@ mod runtime_tests {
 
         #[test]
         fn runtime_v6_head_guard_refuses_a_v5_shape_recorded_as_v6() {
-            let fixture = fixture_at(5);
+            let fixture = Fixture::at_version(5);
             fixture
                 .conn
                 .execute(
@@ -1581,18 +1589,18 @@ mod runtime_tests {
 
         #[test]
         fn runtime_v6_failed_migration_retains_v5_schema_ledger_and_rows_for_retry() {
-            let mut fixture = fixture_at(5);
+            let mut fixture = Fixture::at_version(5);
             seed_v5(&mut fixture);
             let before = snapshot(&fixture.conn);
-            let schema = query_rows(
+            let schema = table_rows(
                 &fixture.conn,
                 "SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name",
             );
-            let ledger = query_rows(
+            let ledger = table_rows(
                 &fixture.conn,
                 "SELECT * FROM refinery_schema_history ORDER BY version",
             );
-            let sequence = query_rows(
+            let sequence = table_rows(
                 &fixture.conn,
                 "SELECT name,seq FROM sqlite_sequence ORDER BY name",
             );
@@ -1624,21 +1632,21 @@ mod runtime_tests {
             assert!(fixture.conn.is_autocommit());
             assert_preserved(&fixture.conn, &before);
             assert_eq!(
-                query_rows(
+                table_rows(
                     &fixture.conn,
                     "SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name"
                 ),
                 schema
             );
             assert_eq!(
-                query_rows(
+                table_rows(
                     &fixture.conn,
                     "SELECT * FROM refinery_schema_history ORDER BY version"
                 ),
                 ledger
             );
             assert_eq!(
-                query_rows(
+                table_rows(
                     &fixture.conn,
                     "SELECT name,seq FROM sqlite_sequence ORDER BY name"
                 ),
@@ -1665,9 +1673,22 @@ mod runtime_tests {
     impl Fixture {
         fn new() -> Self {
             let dir = tempfile::tempdir().unwrap();
-            let mut conn = common::migrated_conn(&dir);
-            let (fleet, director) = common::create_fleet(&mut conn, "runtime-schema");
-            let member = common::register(&mut conn, fleet, "worker", Some("%2"));
+            let conn = migrated_conn(&dir);
+            Self::seeded(dir, conn)
+        }
+
+        fn at_version(version: u32) -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            let mut conn =
+                crate::db::connect(&format!("sqlite:///{}", dir.path().join("v.db").display()))
+                    .unwrap();
+            migrate_to_version(&mut conn, version);
+            Self::seeded(dir, conn)
+        }
+
+        fn seeded(dir: TempDir, mut conn: Connection) -> Self {
+            let (fleet, director) = create_fleet_fixture(&mut conn, "runtime-schema");
+            let member = register(&mut conn, fleet, "worker", Some("%2"));
             Self {
                 _dir: dir,
                 conn,
@@ -2176,6 +2197,7 @@ mod runtime_tests {
 
 #[cfg(test)]
 mod tests {
+    use super::test_support::{migrate_to_version, table_rows as rows};
     use super::*;
 
     fn require_current(conn: &Connection) -> Result<(), CafleetError> {
@@ -2184,22 +2206,8 @@ mod tests {
 
     fn at_version(version: u32) -> Connection {
         let mut conn = connect("sqlite:///:memory:").unwrap();
-        embedded::migrations::runner()
-            .set_grouped(true)
-            .set_target(refinery::Target::Version(i32::try_from(version).unwrap()))
-            .run(&mut conn)
-            .unwrap();
+        migrate_to_version(&mut conn, version);
         conn
-    }
-
-    fn rows(conn: &Connection, sql: &str) -> Vec<Vec<rusqlite::types::Value>> {
-        let mut statement = conn.prepare(sql).unwrap();
-        let width = statement.column_count();
-        statement
-            .query_map([], |row| (0..width).map(|column| row.get(column)).collect())
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap()
     }
 
     fn application_rows(conn: &Connection) -> Vec<Vec<Vec<rusqlite::types::Value>>> {

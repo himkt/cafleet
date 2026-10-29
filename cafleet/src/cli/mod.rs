@@ -10,41 +10,18 @@ mod setup;
 mod launch_policy_parser_tests {
     use super::*;
     use crate::coding_agent::CodingAgent;
-    use rusqlite::Connection;
-
-    fn registry_state(conn: &Connection) -> Vec<(String, Vec<Vec<rusqlite::types::Value>>)> {
-        let names = conn
-            .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-            .unwrap()
-            .query_map([], |row| row.get::<_, String>(0))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        names
-            .into_iter()
-            .map(|name| {
-                let escaped = name.replace('"', "\"\"");
-                let mut query = conn
-                    .prepare(&format!("SELECT * FROM \"{escaped}\" ORDER BY 1"))
-                    .unwrap();
-                let width = query.column_count();
-                let rows = query
-                    .query_map([], |row| (0..width).map(|column| row.get(column)).collect())
-                    .unwrap()
-                    .collect::<rusqlite::Result<Vec<_>>>()
-                    .unwrap();
-                (name, rows)
-            })
-            .collect()
-    }
+    use crate::db::test_support::{migrated_conn, table_snapshot};
 
     fn invalid_creation(backend: CodingAgent, extra: &[String]) -> CafleetError {
         let dir = tempfile::Builder::new()
             .prefix(".p194-")
             .tempdir_in("/tmp")
             .unwrap();
-        let mut conn = crate::broker::tests::migrated_conn(&dir);
-        let (fleet, _) = crate::broker::tests::create_fleet(&mut conn, "invalid-launch-fixture");
+        let mut conn = migrated_conn(&dir);
+        let (fleet, _) = crate::broker::fleets::test_support::create_fleet_fixture(
+            &mut conn,
+            "invalid-launch-fixture",
+        );
         let mut arguments = create_arguments()
             .into_iter()
             .map(String::from)
@@ -56,14 +33,13 @@ mod launch_policy_parser_tests {
         let Command::Member(command) = CliArgs::try_parse_from(arguments).unwrap().command else {
             panic!("member command expected")
         };
-        let before = registry_state(&conn);
+        let before = table_snapshot(&conn, |_| true);
         let identity = crate::broker::runtime::database_identity(&conn).unwrap();
         let paths = crate::runtime::runner::RuntimePaths::for_run(&identity, 1).unwrap();
-        let settings = Settings {
-            database_url: format!("sqlite:///{}", conn.path().unwrap()),
-            max_text_len: 200,
-            multiplexer: Some("unavailable-test-multiplexer".into()),
-        };
+        let settings = Settings::for_database(
+            std::path::Path::new(conn.path().unwrap()),
+            Some("unavailable-test-multiplexer"),
+        );
         let failure = member::run(&mut conn, &settings, command, crate::input::Deadline::new())
             .expect_err("invalid launch must fail");
         assert!(
@@ -71,7 +47,7 @@ mod launch_policy_parser_tests {
             "{}",
             failure.message()
         );
-        assert_eq!(registry_state(&conn), before);
+        assert_eq!(table_snapshot(&conn, |_| true), before);
         assert!(!paths.run_dir.exists());
         failure
     }
@@ -271,11 +247,7 @@ mod press_parser_tests {
     fn step5_press_cli_invalid_tail_is_usage_before_missing_database_validation() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("absent.db");
-        let settings = Settings {
-            database_url: format!("sqlite:///{}", path.display()),
-            max_text_len: 1000,
-            multiplexer: Some("tmux".into()),
-        };
+        let settings = Settings::for_database(&path, Some("tmux"));
         let command = CliArgs::try_parse_from([
             "cafleet", "member", "press", "42", "Enter", "Ctrl+1", "--json",
         ])
@@ -636,8 +608,9 @@ mod runtime_parser_tests {
         use tempfile::TempDir;
 
         use super::CliArgs;
-        use crate::broker::tests as common;
+        use crate::broker::fleets::test_support::create_fleet_fixture;
         use crate::config::Settings;
+        use crate::db::test_support::{migrated_conn, wal_snapshot};
 
         fn recognized_usage_error(args: &[&str]) {
             let error = super::usage_error(args);
@@ -832,8 +805,8 @@ mod runtime_parser_tests {
                 .prefix(".p194-entry-")
                 .tempdir_in("/tmp")
                 .unwrap();
-            let mut conn = common::migrated_conn(&dir);
-            let (fleet, _) = common::create_fleet(&mut conn, "recovery-entry");
+            let mut conn = migrated_conn(&dir);
+            let (fleet, _) = create_fleet_fixture(&mut conn, "recovery-entry");
             let member_id = crate::broker::register_member(
                 &mut conn,
                 fleet,
@@ -843,11 +816,7 @@ mod runtime_parser_tests {
             )
             .unwrap()
             .member_id;
-            let settings = Settings {
-                database_url: format!("sqlite:///{}", conn.path().unwrap()),
-                max_text_len: 200,
-                multiplexer: None,
-            };
+            let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()), None);
             (dir, settings, conn, member_id)
         }
 
@@ -895,12 +864,7 @@ mod runtime_parser_tests {
                 conn.execute_batch(mutation).unwrap();
                 conn.execute_batch("BEGIN; SELECT * FROM refinery_schema_history")
                     .unwrap();
-                let before = ["", "-wal", "-shm"].map(|suffix| {
-                    let path =
-                        std::path::PathBuf::from(format!("{}{suffix}", conn.path().unwrap()));
-                    let bytes = std::fs::read(&path).unwrap();
-                    (path, bytes)
-                });
+                let before = wal_snapshot(std::path::Path::new(conn.path().unwrap()));
                 let id = member_id.to_string();
                 let args = CliArgs::try_parse_from(["cafleet", "member", "recover", &id, "--json"])
                     .unwrap();
@@ -1036,10 +1000,7 @@ mod runtime_parser_tests {
         ] {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("refused.db");
-            let settings = crate::config::Settings::from_lookup(|name| {
-                (name == "CAFLEET_DATABASE_URL").then(|| format!("sqlite:///{}", path.display()))
-            })
-            .unwrap();
+            let settings = crate::config::Settings::for_database(&path, None);
             let mut conn = crate::db::connect(&settings.database_url).unwrap();
             crate::db::migrate_to_head(&mut conn).unwrap();
             conn.execute_batch(damage).unwrap();
@@ -1290,10 +1251,7 @@ mod runtime_parser_tests {
         let path = dir.path().join("registry.db");
         let descriptor = dir.path().join("unallocated.json");
         std::fs::write(&descriptor, b"{\"schema_version\":1}").unwrap();
-        let settings = crate::config::Settings::from_lookup(|name| {
-            (name == "CAFLEET_DATABASE_URL").then(|| format!("sqlite:///{}", path.display()))
-        })
-        .unwrap();
+        let settings = crate::config::Settings::for_database(&path, None);
         let mut conn = crate::db::connect(&settings.database_url).unwrap();
         crate::db::migrate_to_head(&mut conn).unwrap();
         drop(conn);
@@ -1466,22 +1424,14 @@ mod parser_contracts {
         ] {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("registry.db");
-            let settings = Settings {
-                database_url: format!("sqlite:///{}", path.display()),
-                max_text_len: 200,
-                multiplexer: None,
-            };
+            let settings = Settings::for_database(&path, None);
             let mut conn = crate::db::connect(&settings.database_url).unwrap();
             crate::db::migrate_to_head(&mut conn).unwrap();
             conn.execute_batch("PRAGMA journal_mode=WAL").unwrap();
             conn.execute_batch(mutation).unwrap();
             conn.execute_batch("BEGIN; SELECT * FROM refinery_schema_history")
                 .unwrap();
-            let before = ["", "-wal", "-shm"].map(|suffix| {
-                let file = std::path::PathBuf::from(format!("{}{suffix}", path.display()));
-                let bytes = std::fs::read(&file).unwrap();
-                (file, bytes)
-            });
+            let before = crate::db::test_support::wal_snapshot(&path);
             for command in [
                 Command::Fleet(fleet::FleetCommand::List { json: true }),
                 Command::Member(member::MemberCommand::Show {

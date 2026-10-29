@@ -1,7 +1,7 @@
 # Codebase redundancy cleanup
 
 **Status**: Approved
-**Progress**: 12/56 tasks complete
+**Progress**: 13/56 tasks complete
 **Last Updated**: 2026-10-29
 
 ## Overview
@@ -585,7 +585,7 @@ Each step is one commit and leaves `mise //cafleet:test` and `mise //cafleet:lin
 
 - [x] Add the `test_path!` and `assert_no_debug_or_serialize!` macros to `lib.rs` and the `child_path()` functions beside every re-exec child; replace every hard-coded child path literal <!-- completed: 2026-10-29T15:15 -->
 - [x] Create the storage, config and broker homes from § Shared test-support homes (`db::test_support`, `Settings::for_database`, `fleets`/`members`/`records` helpers, `broker::runtime::test_support`); split `broker::tests` and update its 20 importers <!-- completed: 2026-10-29T15:33 -->
-- [ ] Create `catalog::test_support::synthetic_definitions()`/`synthetic_catalog()`; point every synthetic-profile reader at them; delete `runner_tests/fixtures/synthetic-profile.json` <!-- completed: -->
+- [x] Create `catalog::test_support::synthetic_definitions()`/`synthetic_catalog()`; point every synthetic-profile reader at them; delete `runner_tests/fixtures/synthetic-profile.json` <!-- completed: 2026-10-29T15:39 -->
 
 ### Step 6: Dissolve `runtime/runner_tests/`
 

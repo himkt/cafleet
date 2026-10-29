@@ -45,6 +45,10 @@ fn write_pair(path: &Path, lease: &NativeCaptureLease) -> Result<()> {
     std::fs::rename(pending, path).map_err(io_error)
 }
 
+pub(crate) fn runner_collector_resize_child_path() -> &'static str {
+    test_path!(runner_collector_resize_child)
+}
+
 #[test]
 #[ignore = "Owned synthetic resize fixture selects this private entry"]
 fn runner_collector_resize_child() {
@@ -52,11 +56,10 @@ fn runner_collector_resize_child() {
         std::env::var_os("CAFLEET_NATIVE_CAPTURE_CONFIG").expect("owned resize configuration");
     let limits = NativeCaptureLimits::default();
     let config = read_native_capture_config(Path::new(&path), &limits).unwrap();
-    let settings = Settings {
-        database_url: config.database_url.clone(),
-        max_text_len: 200,
-        multiplexer: None,
-    };
+    let settings = Settings::for_database(
+        Path::new(crate::db::database_path(&config.database_url).unwrap()),
+        None,
+    );
     let conn = crate::db::connect(&settings.database_url).unwrap();
     let descriptor = load_descriptor(&conn, &config.descriptor_path).unwrap();
     let run = storage::get_run(&conn, descriptor.run_id).unwrap();

@@ -1,5 +1,6 @@
 use crate::broker::records::Placement;
 use crate::config::Settings;
+use crate::db::test_support::TableSnapshot;
 use crate::error::CafleetError;
 use serde_json::Value;
 use std::io::Write;
@@ -67,11 +68,8 @@ impl Case {
                 .unwrap()
                 .unwrap(),
         );
-        let settings = Settings {
-            database_url: format!("sqlite:///{}", fixture.conn.path().unwrap()),
-            max_text_len: 200,
-            multiplexer: None,
-        };
+        let settings =
+            Settings::for_database(std::path::Path::new(fixture.conn.path().unwrap()), None);
         let placement =
             crate::broker::get_member(&fixture.conn, fixture.run.member_id, fixture.run.fleet_id)
                 .unwrap()
@@ -386,37 +384,6 @@ fn new_host() -> Host {
     Host::new(Instant::now() + Duration::from_secs(2))
 }
 
-#[derive(Debug, PartialEq)]
-struct TableSnapshot {
-    name: String,
-    rows: Vec<Vec<rusqlite::types::Value>>,
-}
 fn rows(conn: &Connection) -> Vec<TableSnapshot> {
-    let names = conn
-        .prepare("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name")
-        .unwrap()
-        .query_map([], |row| row.get::<_, String>(0))
-        .unwrap()
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .unwrap();
-    names
-        .into_iter()
-        .map(|name| {
-            let quoted = name.replace('"', "\"\"");
-            let mut statement = conn
-                .prepare(&format!("SELECT * FROM \"{quoted}\" ORDER BY rowid"))
-                .unwrap();
-            let width = statement.column_count();
-            let rows = statement
-                .query_map([], |row| {
-                    (0..width)
-                        .map(|index| row.get(index))
-                        .collect::<rusqlite::Result<Vec<rusqlite::types::Value>>>()
-                })
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
-            TableSnapshot { name, rows }
-        })
-        .collect()
+    crate::db::test_support::table_snapshot(conn, |_| true)
 }

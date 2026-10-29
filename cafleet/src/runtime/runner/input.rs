@@ -718,15 +718,7 @@ mod permission_inspection_contracts {
 
     #[test]
     fn permission_inspection_current_authority_has_no_debug_or_serialized_representation() {
-        trait AmbiguousIfImplemented<Marker> {
-            fn check() {}
-        }
-        struct DebugImplemented;
-        struct SerializeImplemented;
-        impl<T: ?Sized> AmbiguousIfImplemented<()> for T {}
-        impl<T: ?Sized + std::fmt::Debug> AmbiguousIfImplemented<DebugImplemented> for T {}
-        impl<T: ?Sized + serde::Serialize> AmbiguousIfImplemented<SerializeImplemented> for T {}
-        let _ = <CurrentRequest as AmbiguousIfImplemented<_>>::check;
+        assert_no_debug_or_serialize!(CurrentRequest);
     }
 }
 
@@ -8357,10 +8349,8 @@ mod contract_tests {
             const PROFILE: &str = "synthetic-profile-1";
 
             pub(in crate::runtime::runner::input) fn catalog_definition() -> serde_json::Value {
-                let mut value: serde_json::Value = serde_json::from_str(include_str!(
-                    "../runner_tests/fixtures/synthetic-profile.json"
-                ))
-                .unwrap();
+                let mut value =
+                    crate::coding_agent::profiles::catalog::test_support::synthetic_definitions();
                 let fixture = value["fixtures"][0].clone();
                 let mut executable = fixture.clone();
                 executable["id"] = serde_json::json!("synthetic-prompt-plan");

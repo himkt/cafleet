@@ -129,8 +129,7 @@ fn configure(fixture: &mut Fixture, spec: &mut SpawnSpec, until: Instant) {
         .mode(0o700)
         .create(fixture._dir.path().join(PANIC_DIRECTORY))
         .unwrap();
-    let mut catalog: Value =
-        serde_json::from_str(include_str!("../fixtures/synthetic-profile.json")).unwrap();
+    let mut catalog = crate::coding_agent::profiles::catalog::test_support::synthetic_definitions();
     let mut executable = catalog["fixtures"][0].clone();
     executable["id"] = json!("synthetic-service-submission");
     catalog["fixtures"].as_array_mut().unwrap().push(executable);
@@ -163,7 +162,7 @@ fn configure(fixture: &mut Fixture, spec: &mut SpawnSpec, until: Instant) {
     spec.argv = vec![
         std::env::current_exe().unwrap().to_str().unwrap().into(),
         "--exact".into(),
-        CHILD_TEST.into(),
+        runner_review_service_child_path().into(),
         "--nocapture".into(),
         "--test-threads=1".into(),
     ];

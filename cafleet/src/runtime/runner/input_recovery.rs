@@ -609,11 +609,8 @@ pub(super) mod tests {
             .unwrap()
             .placement
             .unwrap();
-            let settings = Settings {
-                database_url: format!("sqlite:///{}", fixture.conn.path().unwrap()),
-                max_text_len: 200,
-                multiplexer: None,
-            };
+            let settings =
+                Settings::for_database(std::path::Path::new(fixture.conn.path().unwrap()), None);
             drop(lock);
             Self {
                 fixture,
@@ -661,37 +658,8 @@ pub(super) mod tests {
         }
     }
 
-    type DatabaseRows = Vec<(String, Vec<Vec<rusqlite::types::Value>>)>;
-
-    fn rows(conn: &Connection, excluded: &[&str]) -> DatabaseRows {
-        let names = conn
-            .prepare("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name")
-            .unwrap()
-            .query_map([], |row| row.get::<_, String>(0))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        names
-            .into_iter()
-            .filter(|name| !excluded.contains(&name.as_str()))
-            .map(|name| {
-                let quoted = name.replace('"', "\"\"");
-                let mut statement = conn
-                    .prepare(&format!("SELECT * FROM \"{quoted}\" ORDER BY rowid"))
-                    .unwrap();
-                let width = statement.column_count();
-                let values = statement
-                    .query_map([], |row| {
-                        (0..width)
-                            .map(|index| row.get(index))
-                            .collect::<rusqlite::Result<Vec<_>>>()
-                    })
-                    .unwrap()
-                    .collect::<rusqlite::Result<Vec<_>>>()
-                    .unwrap();
-                (name, values)
-            })
-            .collect()
+    fn rows(conn: &Connection, excluded: &[&str]) -> Vec<crate::db::test_support::TableSnapshot> {
+        crate::db::test_support::table_snapshot(conn, |name| !excluded.contains(&name))
     }
 
     fn assert_owner_only(before: &RunRecord, after: &RunRecord) {
@@ -863,7 +831,7 @@ pub(super) mod tests {
         ];
         let expected_history: Vec<_> = before
             .into_iter()
-            .filter(|(name, _)| !excluded.contains(&name.as_str()))
+            .filter(|table| !excluded.contains(&table.name.as_str()))
             .collect();
         assert_eq!(rows(&case.fixture.conn, excluded), expected_history);
         assert_eq!(spool(), original_spool);

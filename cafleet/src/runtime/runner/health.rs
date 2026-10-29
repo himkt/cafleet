@@ -462,40 +462,8 @@ mod tests {
 
         const SPOOL_CANARY: &[u8] = b"private-recovery-diagnosis-canary:not-a-complete-valid-frame";
 
-        #[derive(Debug, PartialEq)]
-        struct TableSnapshot {
-            name: String,
-            rows: Vec<Vec<rusqlite::types::Value>>,
-        }
-
-        fn registry_snapshot(conn: &Connection) -> Vec<TableSnapshot> {
-            let names = conn
-                .prepare("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name")
-                .unwrap()
-                .query_map([], |row| row.get::<_, String>(0))
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
-            names
-                .into_iter()
-                .map(|name| {
-                    let quoted = name.replace('"', "\"\"");
-                    let mut statement = conn
-                        .prepare(&format!("SELECT * FROM \"{quoted}\" ORDER BY rowid"))
-                        .unwrap();
-                    let width = statement.column_count();
-                    let rows = statement
-                        .query_map([], |row| {
-                            (0..width)
-                                .map(|index| row.get(index))
-                                .collect::<rusqlite::Result<Vec<rusqlite::types::Value>>>()
-                        })
-                        .unwrap()
-                        .collect::<rusqlite::Result<Vec<_>>>()
-                        .unwrap();
-                    TableSnapshot { name, rows }
-                })
-                .collect()
+        fn registry_snapshot(conn: &Connection) -> Vec<crate::db::test_support::TableSnapshot> {
+            crate::db::test_support::table_snapshot(conn, |_| true)
         }
 
         #[derive(Debug, PartialEq)]

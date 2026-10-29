@@ -4,7 +4,7 @@ pub(crate) use native_version::native_launch_identity;
 pub(crate) use native_version::version_token;
 mod policy;
 pub use policy::LaunchPolicySelection;
-mod profiles;
+pub(crate) mod profiles;
 #[cfg(test)]
 pub(crate) use profiles::ScreenRegion;
 pub(crate) use profiles::{

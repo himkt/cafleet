@@ -39,11 +39,7 @@ fn runner_recovery_copied_registry_identity_fails_before_touching_the_original_o
     std::fs::copy(case.fixture.conn.path().unwrap(), &copy).unwrap();
     let mut conn = Connection::open(&copy).unwrap();
     let copied_before = rows(&conn);
-    let settings = Settings {
-        database_url: format!("sqlite:///{}", copy.display()),
-        max_text_len: 200,
-        multiplexer: None,
-    };
+    let settings = Settings::for_database(&copy, None);
     let mut host = new_host();
     assert!(
         recover_member_with_host(

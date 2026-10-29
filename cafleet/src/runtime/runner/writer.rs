@@ -839,22 +839,15 @@ pub(super) mod contract_tests {
     }
     pub(in crate::runtime::runner) mod support {
         use super::*;
-        use crate::coding_agent::ProfileCatalog;
         use crate::runtime::runner_tests::owned_child::OwnedChild;
         use std::process::{Command, Stdio};
 
         pub(in crate::runtime::runner) const VERSION: &str = "synthetic-0.0.1";
         pub(in crate::runtime::runner) const PROFILE: &str = "synthetic-profile-1";
         pub(in crate::runtime::runner) const NOW: &str = "2026-10-26T16:40:00.000000+00:00";
-        pub(in crate::runtime::runner) fn definitions() -> Value {
-            serde_json::from_str(include_str!(
-                "../runner_tests/fixtures/synthetic-profile.json"
-            ))
-            .unwrap()
-        }
-        pub(in crate::runtime::runner) fn catalog() -> ProfileCatalog {
-            ProfileCatalog::from_definitions(&definitions()).unwrap()
-        }
+        pub(in crate::runtime::runner) use crate::coding_agent::profiles::catalog::test_support::{
+            synthetic_catalog as catalog, synthetic_definitions as definitions,
+        };
         pub(in crate::runtime::runner) fn configure(fixture: &mut WriterFixture) {
             fixture.fixture.conn.execute("UPDATE member_runs SET native_version=?1,profile_version=?2,profile_match='exact',coverage='tested',runner_pid=owner_pid,runner_start_identity=owner_start_identity WHERE run_id=?3",rusqlite::params![VERSION,PROFILE,fixture.fixture.run.run_id]).unwrap();
             fixture.fixture.run =

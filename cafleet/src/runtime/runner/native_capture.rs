@@ -13,6 +13,7 @@ use exporter::{CaptureExporterTask, InertCaptureExportHooks};
 pub(crate) use exporter::{NativeCaptureExportBoundary, NativeCaptureExportHooks};
 #[cfg(test)]
 mod review_service_tests;
+pub(crate) use review_service_tests::runner_collector_resize_child_path;
 mod verification;
 pub(crate) use files::*;
 pub(crate) use verification::{

@@ -1,6 +1,6 @@
 use super::*;
 use crate::broker::records::Placement;
-use crate::coding_agent::{ProfileCatalog, ScreenRegion};
+use crate::coding_agent::ScreenRegion;
 use crate::runtime::runner_tests::owned_child::OwnedChild;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -23,12 +23,7 @@ pub(super) fn private_write(path: &Path, bytes: &[u8]) {
 pub(super) fn digest(path: &Path) -> String {
     sha256_hex(&std::fs::read(path).unwrap())
 }
-pub(super) fn catalog() -> ProfileCatalog {
-    ProfileCatalog::from_definitions(
-        &serde_json::from_str(include_str!("../fixtures/synthetic-profile.json")).unwrap(),
-    )
-    .unwrap()
-}
+pub(super) use crate::coding_agent::profiles::catalog::test_support::synthetic_catalog as catalog;
 pub(super) fn redacted() -> Value {
     json!({"mode":"redacted","config":{"schema_version":1,"patterns":["PRIVATE-[A-Z]+"],"sensitive_rules":[]}})
 }

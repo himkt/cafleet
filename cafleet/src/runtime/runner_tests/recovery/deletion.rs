@@ -356,7 +356,7 @@ fn runner_recovery_deletion_rejects_foreign_pre_entry_post_recovery_and_post_clo
 fn runner_recovery_deletion_updates_only_its_proven_target_and_keeps_other_placements_pinned() {
     let mut case = Case::new();
     case.seed(&[opening(&case.fixture.run, 1, 1)]);
-    let other = common::register(
+    let other = register(
         &mut case.fixture.conn,
         case.fixture.run.fleet_id,
         "other-deletion-target",

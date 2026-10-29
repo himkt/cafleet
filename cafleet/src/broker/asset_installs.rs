@@ -29,7 +29,7 @@ mod tests {
     #[test]
     fn install_record_upsert_changes_only_the_selected_agent_and_path() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = crate::broker::tests::migrated_conn(&dir);
+        let mut conn = crate::db::test_support::migrated_conn(&dir);
         for (agent, path) in [("codex", "/a"), ("codex", "/b"), ("claude", "/a")] {
             record_asset_install(&mut conn, agent, path, "old").unwrap();
         }

@@ -256,7 +256,6 @@ impl ReceiveIo for BrokerReceiver<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::broker::records::MessageStatus;
     use std::cell::Cell;
 
     struct TestClock {
@@ -326,15 +325,7 @@ mod tests {
     }
 
     fn message(id: i64) -> MessageRecord {
-        MessageRecord {
-            message_id: id,
-            from_member_id: 2,
-            to_member_id: 1,
-            created_at: "2026-10-25T01:00:00.000000+00:00".into(),
-            status: MessageStatus::InputRequired,
-            status_timestamp: "2026-10-25T01:00:00.000000+00:00".into(),
-            text: "雪\nfull reply".repeat(300),
-        }
+        MessageRecord::fixture(id, 2, 1, &"雪\nfull reply".repeat(300))
     }
 
     fn no_attempt(_: i64, _: Deadline, _: &BTreeSet<i64>) -> Result<AttemptOutcome, CafleetError> {

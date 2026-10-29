@@ -248,17 +248,48 @@ pub fn list_members(conn: &Connection, fleet_id: i64) -> Result<Vec<MemberActivi
 }
 
 #[cfg(test)]
+pub(crate) mod test_support {
+    use rusqlite::Connection;
+
+    use super::NewPlacement;
+
+    pub(crate) fn placement(pane: Option<&str>) -> NewPlacement {
+        NewPlacement {
+            backend: "tmux".into(),
+            mux_session: "main".into(),
+            mux_window_id: "@1".into(),
+            mux_pane_id: pane.map(str::to_owned),
+            coding_agent: "claude".into(),
+        }
+    }
+
+    pub(crate) fn register(
+        conn: &mut Connection,
+        fleet: i64,
+        name: &str,
+        pane: Option<&str>,
+    ) -> i64 {
+        super::register_member(conn, fleet, name, "assignment", Some(&placement(pane)))
+            .unwrap()
+            .member_id
+    }
+}
+
+#[cfg(test)]
 mod tests {
+    use super::test_support::{placement, register};
     use super::*;
+    use crate::broker;
+    use crate::broker::fleets::test_support::create_fleet_fixture;
     use crate::broker::records::MemberStatus;
-    use crate::broker::tests::{create_fleet, migrated_conn, placement, register};
-    use crate::broker::{self, tests as common};
+    use crate::db::test_support::migrated_conn;
+    use crate::input::test_support::guarded_delete_fleet;
 
     #[test]
     fn registration_and_placement_updates_preserve_required_fields_and_valid_absence() {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = migrated_conn(&dir);
-        let (fleet, _) = create_fleet(&mut conn, "alpha");
+        let (fleet, _) = create_fleet_fixture(&mut conn, "alpha");
         let registered = register_member(
             &mut conn,
             fleet,
@@ -307,7 +338,7 @@ mod tests {
     fn registration_rolls_back_member_and_identifier_when_placement_fails() {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet(&mut conn, "alpha");
+        let (fleet, director) = create_fleet_fixture(&mut conn, "alpha");
         conn.execute_batch("CREATE TRIGGER fail_placement BEFORE INSERT ON member_placements BEGIN SELECT RAISE(ABORT, 'placement failure'); END").unwrap();
         assert!(
             register_member(
@@ -331,7 +362,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = migrated_conn(&dir);
         assert!(register_member(&mut conn, 999, "x", "assignment", None).is_err());
-        let (fleet, director) = create_fleet(&mut conn, "alpha");
+        let (fleet, director) = create_fleet_fixture(&mut conn, "alpha");
         for damage in [
             "UPDATE fleets SET director_member_id=NULL",
             "UPDATE members SET status='deregistered' WHERE member_id=1",
@@ -348,7 +379,7 @@ mod tests {
                 .unwrap();
         }
         assert!(deregister_member(&mut conn, director).is_err());
-        common::guarded_delete_fleet(&mut conn, fleet).unwrap();
+        guarded_delete_fleet(&mut conn, fleet).unwrap();
         assert!(register_member(&mut conn, fleet, "worker", "assignment", None).is_err());
     }
 
@@ -356,8 +387,8 @@ mod tests {
     fn deregistration_is_fleet_scoped_and_keeps_history() {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet(&mut conn, "alpha");
-        let (other, _) = create_fleet(&mut conn, "other");
+        let (fleet, director) = create_fleet_fixture(&mut conn, "alpha");
+        let (other, _) = create_fleet_fixture(&mut conn, "other");
         let worker = register(&mut conn, fleet, "worker", Some("%2"));
         let message = broker::send_message(&mut conn, director, worker, "history").unwrap();
         assert!(get_member(&conn, worker, other).unwrap().is_none());
@@ -392,7 +423,7 @@ mod tests {
     fn roster_preserves_all_placement_states_and_activity() {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet(&mut conn, "activity");
+        let (fleet, director) = create_fleet_fixture(&mut conn, "activity");
         let worker = register(&mut conn, fleet, "worker", Some("%2"));
         let pending = register(&mut conn, fleet, "pending", None);
         let ghost = register_member(&mut conn, fleet, "ghost", "paneless", None)

@@ -426,7 +426,7 @@ fn runner_batch2_capture_ignored_entry_requires_explicit_configuration_before_la
         std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "runtime::runner_tests::native_capture::native_capture_service_child",
+                super::native_capture_service_child_path(),
                 "--ignored",
                 "--test-threads=1",
             ])

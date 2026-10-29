@@ -4,15 +4,17 @@ mod fleet_deletion;
 pub(crate) mod owned_child;
 mod recovery;
 
-mod native_capture;
+pub(crate) mod native_capture;
 use rusqlite::Connection;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
 use super::runner::*;
+use crate::broker::fleets::test_support::create_fleet_fixture;
+use crate::broker::members::test_support::{placement, register};
 use crate::broker::runtime::{self as storage, *};
-use crate::broker::tests as common;
+use crate::db::test_support::migrated_conn;
 
 pub(super) fn read_fixture_bytes(
     stream: &mut std::os::unix::net::UnixStream,
@@ -96,9 +98,9 @@ impl Fixture {
             .prefix(".p194-")
             .tempdir_in("/tmp")
             .unwrap();
-        let mut conn = common::migrated_conn(&dir);
-        let (fleet, director) = common::create_fleet(&mut conn, "runner-contract");
-        let mut placement = common::placement(Some("%2"));
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet_fixture(&mut conn, "runner-contract");
+        let mut placement = placement(Some("%2"));
         placement.coding_agent = "codex".into();
         let member = crate::broker::register_member(
             &mut conn,

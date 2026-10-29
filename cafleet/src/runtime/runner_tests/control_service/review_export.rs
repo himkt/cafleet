@@ -88,6 +88,10 @@ impl Drop for ExportHooks {
     }
 }
 
+pub(crate) fn runner_collector_export_child_path() -> &'static str {
+    test_path!(runner_collector_export_child)
+}
+
 #[test]
 #[ignore = "Owned synthetic exporter fixture selects this private entry"]
 fn runner_collector_export_child() {

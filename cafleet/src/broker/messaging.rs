@@ -407,14 +407,16 @@ pub fn ack_message(conn: &mut Connection, message_id: i64) -> Result<MessageReco
 mod tests {
     use super::*;
     use crate::broker;
-    use crate::broker::tests::{create_fleet, migrated_conn, register};
+    use crate::broker::fleets::test_support::create_fleet_fixture;
+    use crate::broker::members::test_support::register;
+    use crate::db::test_support::migrated_conn;
     use tempfile::TempDir;
 
     #[test]
     fn send_poll_show_and_strict_ack_preserve_the_complete_body() {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet(&mut conn, "messages");
+        let (fleet, director) = create_fleet_fixture(&mut conn, "messages");
         let worker = register(&mut conn, fleet, "worker", Some("%2"));
         let text = format!("Unicode 世界\n{}\n\"quoted\" \u{1b}", "界".repeat(4096));
         let first = send_message(&mut conn, director, worker, &text).unwrap();
@@ -450,7 +452,7 @@ mod tests {
     fn self_and_pending_placement_messages_have_distinct_preview_states() {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet(&mut conn, "preview");
+        let (fleet, director) = create_fleet_fixture(&mut conn, "preview");
         let pending = register(&mut conn, fleet, "pending", None);
         let own = send_message(&mut conn, director, director, "self").unwrap();
         let assignment = send_message(&mut conn, director, pending, "pending").unwrap();
@@ -467,9 +469,9 @@ mod tests {
     fn sending_requires_active_same_fleet_members_and_a_live_root() {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet(&mut conn, "alpha");
+        let (fleet, director) = create_fleet_fixture(&mut conn, "alpha");
         let worker = register(&mut conn, fleet, "worker", None);
-        let (_, other) = create_fleet(&mut conn, "other");
+        let (_, other) = create_fleet_fixture(&mut conn, "other");
         for (sender, recipient) in [(999, worker), (director, 999), (director, other)] {
             assert!(matches!(
                 send_message(&mut conn, sender, recipient, "invalid"),
@@ -497,7 +499,7 @@ mod tests {
     fn corrupt_required_message_values_surface_their_decode_errors() {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = migrated_conn(&dir);
-        let (_, director) = create_fleet(&mut conn, "corrupt");
+        let (_, director) = create_fleet_fixture(&mut conn, "corrupt");
         let message = send_message(&mut conn, director, director, "body").unwrap();
         conn.execute(
             "UPDATE messages SET status_state='corrupt' WHERE message_id=?1",
@@ -532,7 +534,7 @@ mod tests {
 
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet(&mut conn, "ack-race");
+        let (fleet, director) = create_fleet_fixture(&mut conn, "ack-race");
         let member = register(&mut conn, fleet, "worker", Some("%2"));
         let message = broker::send_message(&mut conn, director, member, "ready").unwrap();
         let path = conn.path().unwrap().to_owned();
@@ -575,7 +577,7 @@ mod tests {
     fn poll_scopes_by_recipient_and_orders_by_status_timestamp_then_descending_id() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet(&mut conn, "ordering");
+        let (fleet, director) = create_fleet_fixture(&mut conn, "ordering");
         let worker = register(&mut conn, fleet, "worker", None);
         let peer = register(&mut conn, fleet, "peer", None);
         let mut ids = Vec::new();
@@ -603,7 +605,7 @@ mod tests {
     fn send_failure_rolls_back_the_message_without_leaving_an_identifier_gap() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet(&mut conn, "atomic");
+        let (fleet, director) = create_fleet_fixture(&mut conn, "atomic");
         let worker = register(&mut conn, fleet, "worker", None);
         conn.execute_batch(
             "CREATE TRIGGER reject_message BEFORE INSERT ON messages
@@ -630,7 +632,7 @@ mod tests {
     fn preview_selection_skips_attempted_ids_and_self_messages_without_hiding_pending_rows() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet(&mut conn, "selection");
+        let (fleet, director) = create_fleet_fixture(&mut conn, "selection");
         let worker = register(&mut conn, fleet, "worker", Some("%2"));
         let self_message = broker::send_message(&mut conn, worker, worker, "self").unwrap();
         conn.execute(
@@ -674,7 +676,7 @@ mod tests {
     fn oldest_pending_preview_uses_creation_order_and_skips_acked_and_notified_rows() {
         let dir = TempDir::new().unwrap();
         let mut conn = migrated_conn(&dir);
-        let (fleet, director) = create_fleet(&mut conn, "preview");
+        let (fleet, director) = create_fleet_fixture(&mut conn, "preview");
         let worker = register(&mut conn, fleet, "worker", None);
         let mut ids = Vec::new();
         for text in ["acked", "notified", "oldest", "newest"] {

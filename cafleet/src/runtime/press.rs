@@ -255,11 +255,10 @@ mod contract_tests {
     }
 
     fn settings(fixture: &Fixture) -> Settings {
-        Settings {
-            database_url: format!("sqlite:///{}", fixture.conn.path().unwrap()),
-            max_text_len: 1000,
-            multiplexer: Some("tmux".into()),
-        }
+        Settings::for_database(
+            std::path::Path::new(fixture.conn.path().unwrap()),
+            Some("tmux"),
+        )
     }
 
     fn setup(

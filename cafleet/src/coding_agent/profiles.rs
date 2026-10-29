@@ -1,4 +1,4 @@
-mod catalog;
+pub(crate) mod catalog;
 mod composer;
 mod detector;
 use super::CodingAgent;
@@ -487,16 +487,7 @@ mod contract_tests {
         {
             fn comparable<T: Clone + Eq>() {}
             comparable::<SemanticFingerprint>();
-            trait AmbiguousIfImplemented<Marker> {
-                fn check() {}
-            }
-            struct DebugImplemented;
-            struct SerializeImplemented;
-            impl<T: ?Sized> AmbiguousIfImplemented<()> for T {}
-            impl<T: ?Sized + std::fmt::Debug> AmbiguousIfImplemented<DebugImplemented> for T {}
-            impl<T: ?Sized + serde::Serialize> AmbiguousIfImplemented<SerializeImplemented> for T {}
-            // A forbidden trait implementation makes the inferred marker ambiguous.
-            let _ = <SemanticFingerprint as AmbiguousIfImplemented<_>>::check;
+            assert_no_debug_or_serialize!(SemanticFingerprint);
         }
     }
     mod focus_resolution {
@@ -3343,15 +3334,7 @@ mod contract_tests {
 
         #[test]
         fn step5_composer_e16_plans_withhold_debug_serialization_and_private_bytes_from_errors() {
-            trait AmbiguousIfImplemented<Marker> {
-                fn check() {}
-            }
-            struct DebugImplemented;
-            struct SerializeImplemented;
-            impl<T: ?Sized> AmbiguousIfImplemented<()> for T {}
-            impl<T: ?Sized + std::fmt::Debug> AmbiguousIfImplemented<DebugImplemented> for T {}
-            impl<T: ?Sized + serde::Serialize> AmbiguousIfImplemented<SerializeImplemented> for T {}
-            let _ = <ComposerPlan as AmbiguousIfImplemented<_>>::check;
+            assert_no_debug_or_serialize!(ComposerPlan);
             const SUBMIT: &str = "E16_PRIVATE_SUBMIT";
             const LITERAL: &str = "E16_PRIVATE_LITERAL";
             let hex = SUBMIT
@@ -8415,26 +8398,7 @@ mod contract_tests {
     const FIXTURE: &str = "synthetic-permission-1";
     const NOW: &str = "2026-10-26T15:35:00.000000+00:00";
 
-    fn definitions() -> Value {
-        json!({
-            "schema_version":1,
-            "fixtures":[{"id":FIXTURE,"kind":"synthetic","backend":"codex","native_version":VERSION,"rows":24,"cols":80,"source_ref":"synthetic-permission-screen.json","sha256":"689868668a9fa97d9efca75cda3f2cc0a87fde25884a5cb36aab3163b8abd773"}],
-            "profiles":[{"backend":"codex","native_versions":[VERSION],"profile_version":PROFILE,
-                "rules":[{"id":RULE,"priority":100,"observation":"permission_request",
-                    "region":{"screen":"either","start_pattern":"^Synthetic permission request$","end_pattern":"^Selection: $","max_rows":8,"cursor":"at_end"},
-                    "matchers":[
-                        {"id":"operation","scope":"line","pattern":"^Operation: (?P<operation>.+)$"},
-                        {"id":"allow","scope":"line","pattern":"^> (?P<label>Allow once)$"},
-                        {"id":"deny","scope":"line","pattern":"^  (?P<label>Deny once)$"},
-                        {"id":"form","scope":"line","pattern":"^Request form: synthetic-only$"}
-                    ],
-                    "extract":{"operation":{"matcher_id":"operation","capture":"operation"},"choices":[
-                        {"id":"allow-once","label":{"matcher_id":"allow","capture":"label"},"scope":"single_request"},
-                        {"id":"deny-once","label":{"matcher_id":"deny","capture":"label"},"scope":"single_request"}
-                    ],"native_request_id":null},"verified_noninteraction":false,"sensitive":false}],
-                "capabilities":{"detection":{"rule_ids":[RULE],"fixture_ids":[FIXTURE]},"composer":null,"annotations":null,"answers":[]}}]
-        })
-    }
+    use super::catalog::test_support::synthetic_definitions as definitions;
 
     fn lines(operation: &str) -> Vec<String> {
         vec![

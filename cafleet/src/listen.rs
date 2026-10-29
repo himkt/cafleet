@@ -308,7 +308,7 @@ mod tests {
     use crate::broker::messaging::{
         InboxClosure, InboxSnapshot, listen_snapshot, listen_snapshot_with_clock,
     };
-    use crate::broker::records::{MessageRecord, MessageStatus};
+    use crate::broker::records::MessageRecord;
     use crate::error::CafleetError;
     use crate::input::Deadline;
     use crate::listen::{ListenIo, ListenOutput, listen, write_json_line};
@@ -394,15 +394,7 @@ mod tests {
     }
 
     fn message(id: i64) -> MessageRecord {
-        MessageRecord {
-            message_id: id,
-            from_member_id: 2,
-            to_member_id: 1,
-            created_at: "2026-10-25T01:00:00.000000+00:00".into(),
-            status: MessageStatus::InputRequired,
-            status_timestamp: "2026-10-25T01:00:00.000000+00:00".into(),
-            text: format!("original body {id}"),
-        }
+        MessageRecord::fixture(id, 2, 1, &format!("original body {id}"))
     }
 
     fn open(messages: Vec<MessageRecord>) -> InboxSnapshot {

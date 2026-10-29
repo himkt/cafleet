@@ -353,11 +353,10 @@ mod tests {
     fn live_receipt_cli_reconciles_real_exec_history_and_preserves_repeat_evidence() {
         crate::runtime::with_input_service(|fixture, outer| {
             let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-            let settings = Settings::from_lookup(|name| {
-                (name == "CAFLEET_DATABASE_URL")
-                    .then(|| format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()))
-            })
-            .unwrap();
+            let settings = Settings::for_database(
+                std::path::Path::new(fixture.fixture.conn.path().unwrap()),
+                None,
+            );
             let original = storage::reserve_input(
                 &mut fixture.fixture.conn,
                 &run.owner(),

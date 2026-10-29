@@ -443,3 +443,247 @@ pub fn member_runtime(
         .map_err(db_err)?;
     id.map(|id| runtime_snapshot(conn, id)).transpose()
 }
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::ops::RangeInclusive;
+
+    use rusqlite::Connection;
+    use serde_json::{Value, json};
+    use tempfile::TempDir;
+
+    use super::{self as storage, *};
+    use crate::broker::fleets::test_support::create_fleet_fixture;
+    use crate::broker::members::test_support::register;
+    use crate::db::test_support::{migrated_conn, table_rows};
+    use crate::output::format_json;
+
+    pub(crate) const NOW: &str = "2026-10-26T10:00:00.000000+00:00";
+    pub(crate) const SECRET: &str = "fixture-secret-194-unique";
+
+    pub(crate) struct Fixture {
+        pub(crate) _dir: TempDir,
+        pub(crate) conn: Connection,
+        pub(crate) fleet: i64,
+        pub(crate) director: i64,
+        pub(crate) member: i64,
+        pub(crate) run: RunRecord,
+    }
+
+    impl Fixture {
+        pub(crate) fn new() -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            let mut conn = migrated_conn(&dir);
+            let (fleet, director) = create_fleet_fixture(&mut conn, "runtime-contract");
+            let member = register(&mut conn, fleet, "worker", Some("%2"));
+            let spec = Self::spec(&conn, fleet, director, member);
+            let run = storage::create_run(&mut conn, &spec).unwrap();
+            Self {
+                _dir: dir,
+                conn,
+                fleet,
+                director,
+                member,
+                run,
+            }
+        }
+
+        pub(crate) fn spec(conn: &Connection, fleet: i64, director: i64, member: i64) -> NewRun {
+            NewRun {
+                member_id: member,
+                fleet_id: fleet,
+                director_member_id: director,
+                backend: "codex".into(),
+                database_identity_json: storage::database_identity(conn).unwrap(),
+                launch_nonce: "a".repeat(64),
+                runtime_path: std::path::Path::new(conn.path().unwrap())
+                    .parent()
+                    .unwrap()
+                    .join(".cafleet-runs/fixture/run")
+                    .to_str()
+                    .unwrap()
+                    .into(),
+                requested_mode: None,
+                resolved_mode: "never".into(),
+                mode_source: ModeSource::Default,
+                permission_argv_json: json!([
+                    "--ask-for-approval",
+                    "never",
+                    "--sandbox",
+                    "workspace-write"
+                ]),
+                event_evidence: EventEvidence::Metadata,
+                native_version: Some("0.163.0".into()),
+                profile_version: None,
+                profile_match: None,
+                coverage: Coverage::Unknown,
+                owner_pid: i64::from(std::process::id()),
+                owner_start_identity: "fixture-start-identity".into(),
+            }
+        }
+
+        pub(crate) fn activate(&mut self) -> RunOwner {
+            self.conn.execute("UPDATE member_runs SET status='running',owner_kind='runner',owner_epoch=2 WHERE run_id=?1",[self.run.run_id]).unwrap();
+            self.run = storage::get_run(&self.conn, self.run.run_id).unwrap();
+            self.run.owner()
+        }
+
+        pub(crate) fn activate_next_epoch(&mut self) -> RunOwner {
+            self.conn
+                .execute(
+                    "UPDATE member_runs SET owner_epoch=owner_epoch+1 WHERE run_id=?1",
+                    [self.run.run_id],
+                )
+                .unwrap();
+            self.run = storage::get_run(&self.conn, self.run.run_id).unwrap();
+            self.run.owner()
+        }
+
+        pub(crate) fn recoverer(&mut self) -> RunOwner {
+            self.conn.execute("UPDATE member_runs SET status='recovering',owner_kind='reconciler',owner_epoch=owner_epoch+1 WHERE run_id=?1",[self.run.run_id]).unwrap();
+            self.run = storage::get_run(&self.conn, self.run.run_id).unwrap();
+            self.run.owner()
+        }
+
+        pub(crate) fn reserve(&mut self, owner: &RunOwner) -> RangeInclusive<i64> {
+            storage::reserve_event_sequences(&mut self.conn, owner).unwrap()
+        }
+
+        pub(crate) fn open(&mut self, owner: &RunOwner) -> RuntimeEventRecord {
+            self.reserve(owner);
+            let transition = opening(self.run.run_id, 1, 1, metadata());
+            storage::persist_transition(&mut self.conn, owner, &transition, PersistenceMode::Live)
+                .unwrap()
+        }
+
+        pub(crate) fn input(
+            &mut self,
+            owner: &RunOwner,
+            key: &str,
+            kind: InputKind,
+            message_id: Option<i64>,
+        ) -> InputOperation {
+            storage::reserve_input(
+                &mut self.conn,
+                owner,
+                &NewInput {
+                    operation_key: key.into(),
+                    kind,
+                    payload_digest: "d".repeat(64),
+                    message_id,
+                },
+            )
+            .unwrap()
+        }
+
+        pub(crate) fn reopen(&self) -> Connection {
+            crate::db::connect(&format!("sqlite:///{}", self.conn.path().unwrap())).unwrap()
+        }
+    }
+
+    pub(crate) fn raw_evidence(text: &str) -> Value {
+        json!({
+            "backend":"codex","native_version":"0.163.0","profile_version":"fixture-v1",
+            "rule_id":"native-tool-permission","screen_seq":120,
+            "operation":format!("run {text}"),"operation_rows":1,"choices":[format!("allow {text}"),"deny"],
+            "native_request_id":format!("native-{text}"),"excerpt":format!("request {text}"),
+            "semantic_fingerprint":format!("fingerprint-{text}"),
+            "truncated":false,"sensitive":false,
+        })
+    }
+
+    pub(crate) fn metadata() -> Value {
+        evidence::EvidencePolicy::metadata()
+            .apply(&raw_evidence(SECRET))
+            .unwrap()
+    }
+
+    pub(crate) fn opening(
+        run: i64,
+        event_seq: i64,
+        episode_seq: i64,
+        evidence: Value,
+    ) -> ObservedTransition {
+        ObservedTransition {
+            run_id: run,
+            event_seq,
+            episode_seq: Some(episode_seq),
+            kind: RuntimeEventKind::InteractionOpened,
+            classification: Some(InteractionClass::PermissionRequest),
+            observed_at: NOW.into(),
+            evidence_json: evidence,
+            close_reason: None,
+            cause_json: None,
+        }
+    }
+
+    pub(crate) fn closure(run: i64, event_seq: i64, episode_seq: i64) -> ObservedTransition {
+        ObservedTransition {
+            kind: RuntimeEventKind::InteractionClosed,
+            close_reason: Some(InteractionCloseReason::NotVisible),
+            ..opening(run, event_seq, episode_seq, metadata())
+        }
+    }
+
+    pub(crate) fn rows(conn: &Connection, table: &str) -> Vec<Vec<rusqlite::types::Value>> {
+        table_rows(conn, &format!("SELECT * FROM {table} ORDER BY 1"))
+    }
+
+    pub(crate) fn durable_state(conn: &Connection) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
+        [
+            "member_runs",
+            "member_interactions",
+            "member_runtime_events",
+            "member_input_operations",
+            "messages",
+        ]
+        .map(|table| rows(conn, table))
+        .into()
+    }
+
+    pub(crate) fn assert_no_secret(conn: &Connection, secret: &str) {
+        for table in
+            crate::db::test_support::table_snapshot(conn, |name| !name.starts_with("sqlite_"))
+        {
+            for row in table.rows {
+                for value in row {
+                    match value {
+                        rusqlite::types::Value::Text(text) => {
+                            assert!(!text.contains(secret), "secret in {}: {text}", table.name)
+                        }
+                        rusqlite::types::Value::Blob(bytes) => assert!(
+                            !bytes
+                                .windows(secret.len())
+                                .any(|part| part == secret.as_bytes()),
+                            "secret in {} blob",
+                            table.name
+                        ),
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    pub(crate) fn assert_key_order(value: &Value, expected: &[&str]) {
+        assert_eq!(
+            value
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            expected
+        );
+        let text = format_json(value);
+        let mut previous = 0;
+        for key in expected {
+            let needle = format!("\"{key}\":");
+            let position = text[previous..]
+                .find(&needle)
+                .unwrap_or_else(|| panic!("missing ordered {key} in {text}"))
+                + previous;
+            previous = position + needle.len();
+        }
+    }
+}

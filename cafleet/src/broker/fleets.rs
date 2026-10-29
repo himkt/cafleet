@@ -184,10 +184,24 @@ pub(crate) fn delete_fleet_rows(conn: &Connection, fleet_id: i64) -> Result<usiz
 }
 
 #[cfg(test)]
+pub(crate) mod test_support {
+    use rusqlite::Connection;
+
+    pub(crate) fn create_fleet_fixture(conn: &mut Connection, name: &str) -> (i64, i64) {
+        let fleet =
+            super::create_fleet(conn, Some(name), "main", "@1", "%0", "claude", "tmux").unwrap();
+        (fleet.fleet_id, fleet.director.member_id)
+    }
+}
+
+#[cfg(test)]
 mod tests {
+    use super::test_support::create_fleet_fixture;
     use super::*;
     use crate::broker;
-    use crate::broker::tests::{create_fleet, guarded_delete_fleet, migrated_conn, register};
+    use crate::broker::members::test_support::register;
+    use crate::db::test_support::migrated_conn;
+    use crate::input::test_support::guarded_delete_fleet;
 
     fn row_count(conn: &Connection, table: &str) -> i64 {
         conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
@@ -223,7 +237,7 @@ mod tests {
             }
             conn.execute_batch("DROP TRIGGER fail_registration")
                 .unwrap();
-            let (fleet, director) = create_fleet(&mut conn, "alpha");
+            let (fleet, director) = create_fleet_fixture(&mut conn, "alpha");
             assert_eq!((fleet, director), (1, 1));
             let stored = get_fleet(&conn, fleet).unwrap().unwrap();
             assert_eq!(stored.director_member_id, Some(director));
@@ -237,9 +251,9 @@ mod tests {
     fn fleet_listing_uses_time_then_id_and_counts_only_active_members() {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = migrated_conn(&dir);
-        let (first, _) = create_fleet(&mut conn, "first");
-        let (second, _) = create_fleet(&mut conn, "second");
-        let (third, _) = create_fleet(&mut conn, "third");
+        let (first, _) = create_fleet_fixture(&mut conn, "first");
+        let (second, _) = create_fleet_fixture(&mut conn, "second");
+        let (third, _) = create_fleet_fixture(&mut conn, "third");
         let worker = register(&mut conn, first, "worker", None);
         conn.execute("UPDATE fleets SET created_at='2026-01-01T00:00:00Z'", [])
             .unwrap();
@@ -277,7 +291,7 @@ mod tests {
         ] {
             let dir = tempfile::tempdir().unwrap();
             let mut conn = migrated_conn(&dir);
-            let (fleet, director) = create_fleet(&mut conn, "alpha");
+            let (fleet, director) = create_fleet_fixture(&mut conn, "alpha");
             let worker = register(&mut conn, fleet, "worker", None);
             let message =
                 broker::send_message(&mut conn, director, worker, "retained history").unwrap();

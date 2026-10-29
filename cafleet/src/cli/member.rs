@@ -946,7 +946,7 @@ mod tests {
                 Command::new(std::env::current_exe().unwrap())
                     .args([
                         "--exact",
-                        "cli::member::tests::recovery_deletion::runner_recovery_member_deletion_child",
+                        runner_recovery_member_deletion_child_path(),
                         "--ignored",
                         "--nocapture",
                     ])
@@ -968,6 +968,10 @@ mod tests {
             );
         }
 
+        pub(crate) fn runner_recovery_member_deletion_child_path() -> &'static str {
+            test_path!(runner_recovery_member_deletion_child)
+        }
+
         #[test]
         #[ignore = "owned isolated member-deletion helper"]
         fn runner_recovery_member_deletion_child() {
@@ -980,14 +984,11 @@ mod tests {
                 .prefix(".m194-")
                 .tempdir_in("/tmp")
                 .unwrap();
-            let mut conn = common::migrated_conn(&_dir);
-            let settings = Settings {
-                database_url: format!("sqlite:///{}", conn.path().unwrap()),
-                max_text_len: 200,
-                multiplexer: Some("tmux".into()),
-            };
-            let (fleet, director) = common::create_fleet(&mut conn, "member-recovery");
-            let worker = common::register(&mut conn, fleet, "worker", Some("%9"));
+            let mut conn = migrated_conn(&_dir);
+            let settings =
+                Settings::for_database(std::path::Path::new(conn.path().unwrap()), Some("tmux"));
+            let (fleet, director) = create_fleet_fixture(&mut conn, "member-recovery");
+            let worker = register(&mut conn, fleet, "worker", Some("%9"));
             broker::update_placement_pane_id(&mut conn, worker, "%9").unwrap();
             let identity = storage::database_identity(&conn).unwrap();
             let process = ProcessIdentity::current().unwrap();
@@ -1106,7 +1107,9 @@ mod tests {
     }
 
     use super::*;
-    use crate::broker::tests as common;
+    use crate::broker::fleets::test_support::create_fleet_fixture;
+    use crate::broker::members::test_support::register;
+    use crate::db::test_support::migrated_conn;
     use crate::input::{Deadline, PaneLock};
     use crate::multiplexer::{CommandRunner, RunError, TmuxMultiplexer};
     use clap::Parser;
@@ -1185,6 +1188,10 @@ mod tests {
         Deadline::until(before + Duration::from_nanos(remaining))
     }
 
+    pub(crate) fn external_input_member_child_path() -> &'static str {
+        test_path!(external_input_member_child)
+    }
+
     #[test]
     #[ignore = "owned member command subprocess entry"]
     fn external_input_member_child() {
@@ -1195,11 +1202,8 @@ mod tests {
         let config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         let setup_expiration = config["setup_expiration"].as_u64().unwrap();
         let setup_deadline = external_member_deadline(setup_expiration);
-        let settings = Settings {
-            database_url: config["database_url"].as_str().unwrap().into(),
-            max_text_len: 200,
-            multiplexer: Some("tmux".into()),
-        };
+        let database = crate::db::database_path(config["database_url"].as_str().unwrap()).unwrap();
+        let settings = Settings::for_database(std::path::Path::new(database), Some("tmux"));
         let mut conn = crate::db::connect(&settings.database_url).unwrap();
         external_member_private_json(&path.with_extension("ready"), &json!({"ready":true}));
         while !path.with_extension("continue").exists() {
@@ -1307,7 +1311,7 @@ mod tests {
                 Command::new(std::env::current_exe().unwrap())
                     .args([
                         "--exact",
-                        "cli::member::tests::external_input_member_child",
+                        external_input_member_child_path(),
                         "--ignored",
                         "--nocapture",
                         "--test-threads=1",
@@ -1571,11 +1575,10 @@ mod tests {
                     .unwrap()
                     .unwrap();
             let placement = member.placement.unwrap();
-            let settings = Settings {
-                database_url: format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()),
-                max_text_len: 200,
-                multiplexer: Some("tmux".into()),
-            };
+            let settings = Settings::for_database(
+                std::path::Path::new(fixture.fixture.conn.path().unwrap()),
+                Some("tmux"),
+            );
             let request = SubmitInput {
                 operation_key: row.operation_key.clone(),
                 input_kind: row.kind,
@@ -1611,14 +1614,11 @@ mod tests {
 
     fn fixture() -> (tempfile::TempDir, Connection, Settings, i64, i64, i64) {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = common::migrated_conn(&dir);
-        let settings = Settings {
-            database_url: format!("sqlite:///{}", conn.path().unwrap()),
-            max_text_len: 200,
-            multiplexer: Some("tmux".into()),
-        };
-        let (fleet, director) = common::create_fleet(&mut conn, "deletion");
-        let worker = common::register(&mut conn, fleet, "worker", None);
+        let mut conn = migrated_conn(&dir);
+        let settings =
+            Settings::for_database(std::path::Path::new(conn.path().unwrap()), Some("tmux"));
+        let (fleet, director) = create_fleet_fixture(&mut conn, "deletion");
+        let worker = register(&mut conn, fleet, "worker", None);
         (dir, conn, settings, fleet, director, worker)
     }
 

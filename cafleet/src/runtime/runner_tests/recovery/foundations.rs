@@ -184,11 +184,10 @@ fn runner_recovery_lock_transfer_contention_uses_the_original_absolute_deadline(
 fn runner_recovery_pane_guard_validates_the_actual_database_placement_and_named_inode() {
     use std::os::unix::fs::PermissionsExt;
     let fixture = Fixture::new();
-    let configuration = crate::config::Settings {
-        database_url: format!("sqlite:///{}", fixture.conn.path().unwrap()),
-        max_text_len: 200,
-        multiplexer: None,
-    };
+    let configuration = crate::config::Settings::for_database(
+        std::path::Path::new(fixture.conn.path().unwrap()),
+        None,
+    );
     let placement =
         crate::broker::get_member(&fixture.conn, fixture.run.member_id, fixture.run.fleet_id)
             .unwrap()

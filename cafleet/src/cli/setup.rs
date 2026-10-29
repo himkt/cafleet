@@ -95,11 +95,7 @@ mod tests {
     use clap::Parser;
 
     fn settings(home: &Path) -> Settings {
-        Settings::from_lookup(|name| {
-            (name == "CAFLEET_DATABASE_URL")
-                .then(|| format!("sqlite:///{}", home.join("registry.db").display()))
-        })
-        .unwrap()
+        Settings::for_database(&home.join("registry.db"), None)
     }
 
     #[test]
@@ -215,11 +211,7 @@ mod tests {
             conn.execute_batch("BEGIN; SELECT * FROM refinery_schema_history")
                 .unwrap();
             let path = crate::db::database_path(&settings.database_url).unwrap();
-            let before = ["", "-wal", "-shm"].map(|suffix| {
-                let path = PathBuf::from(format!("{path}{suffix}"));
-                let bytes = std::fs::read(&path).unwrap();
-                (path, bytes)
-            });
+            let before = crate::db::test_support::wal_snapshot(Path::new(path));
             assert!(prepare_database(&settings).is_err(), "{mutation}");
             for (path, bytes) in before {
                 assert_eq!(std::fs::read(&path).unwrap(), bytes, "{}", path.display());
