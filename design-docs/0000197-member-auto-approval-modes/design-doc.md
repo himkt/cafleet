@@ -10,7 +10,7 @@ Make each backend's native automatic approval mode the omitted member launch pol
 
 ## Success Criteria
 
-- [ ] An omitted `--permission-mode` launches Claude with `--permission-mode auto` and Codex with `--approve-for-me --sandbox workspace-write`, recording `resolved_mode` `auto` / `approve-for-me` and `mode_source=default`; OpenCode still launches `--agent cafleet`.
+- [ ] An omitted `--permission-mode` launches Claude with `--permission-mode auto` and Codex with `--approve-for-me`, recording `resolved_mode` `auto` / `approve-for-me` and `mode_source=default`; OpenCode still launches `--agent cafleet`.
 - [ ] Every previous choice remains explicit: Claude `dontAsk` and the other native values, Codex `on-request` and `never` with their current argv, OpenCode `cafleet` and `cafleet-ask`; catalog-derived help and the usage error list `approve-for-me` and the new defaults.
 - [ ] The Director guidance spawns every member with the omitted default and passes `--permission-mode` only when the user explicitly requests that mode for the member: a non-automatic choice for Claude or Codex, `cafleet-ask` for OpenCode.
 - [ ] The next contiguous current-family migration (V6) adds the event kinds `automatic_refusal_observed` and `automatic_review_unavailable`, preserves every existing row, sequence and foreign key, and the derived chain and schema-shape guards pass at head V6.
@@ -65,13 +65,13 @@ The default resolution (`CodingAgent::default_policy`) changes for Claude and Co
 | Backend | Omitted selection | Explicit choices (native version) | Permission argv |
 |---|---|---|---|
 | Claude | `auto` | `default`, `manual`, `dontAsk`, `acceptEdits`, `auto`, `bypassPermissions`, `plan` (2.1.302 or unprobed) | `--permission-mode <mode>` (unchanged mapping) |
-| Codex | `approve-for-me` | `on-request`, `never`, `approve-for-me` (0.163.0 or unprobed) | `on-request` / `never`: `--ask-for-approval <mode> --sandbox workspace-write` (unchanged); `approve-for-me`: `--approve-for-me --sandbox workspace-write` |
+| Codex | `approve-for-me` | `on-request`, `never`, `approve-for-me` (0.163.0 or unprobed) | `on-request` / `never`: `--ask-for-approval <mode> --sandbox workspace-write` (unchanged); `approve-for-me`: `--approve-for-me` |
 | OpenCode | `cafleet` | `cafleet`, `cafleet-ask` (every version) | `--agent <mode>` (unchanged) |
 
-- The Codex token `approve-for-me` names its native flag, as the other Codex tokens name their native `--ask-for-approval` values. Every Codex choice keeps the explicit `--sandbox workspace-write`, so the sandbox stays visible in argv and launch evidence.
+- The Codex token `approve-for-me` names its native flag, as the other Codex tokens name their native `--ask-for-approval` values. Codex 0.163.0 rejects `--approve-for-me` together with `--sandbox` (`error: the argument '--approve-for-me' cannot be used with '--sandbox <SANDBOX_MODE>'`, exit 2) because the flag itself selects the workspace-write sandbox, so the `approve-for-me` argv is the single flag; `on-request` and `never` keep their explicit `--sandbox workspace-write`.
 - The explicit `on-request` and `never` choices keep their current launch and inherit the user's Codex configuration, including any `approvals_reviewer`. Documentation states that such a configuration can answer escalations without a native form, as `docs/docs/spec/member-runtime.md` already records.
 - An omitted selection is not validated against the version catalog, as today: a Claude or Codex member whose probed version has no catalog entry still launches with the default. A native version that rejects `auto` or `--approve-for-me` exits immediately and produces the existing `runner_exited` event with its native status; the runner never retries another mode.
-- Run records keep the 0000194 launch-intent fields. Omitted Claude: `requested_mode=null`, `resolved_mode=auto`, `mode_source=default`, `permission_argv_json=["--permission-mode","auto"]`. Omitted Codex: `requested_mode=null`, `resolved_mode=approve-for-me`, `mode_source=default`, `permission_argv_json=["--approve-for-me","--sandbox","workspace-write"]`.
+- Run records keep the 0000194 launch-intent fields. Omitted Claude: `requested_mode=null`, `resolved_mode=auto`, `mode_source=default`, `permission_argv_json=["--permission-mode","auto"]`. Omitted Codex: `requested_mode=null`, `resolved_mode=approve-for-me`, `mode_source=default`, `permission_argv_json=["--approve-for-me"]`.
 - Claude keeps its other spawn arguments (`--prompt-suggestions false`, `--allowedTools Bash(cafleet message *)`, `--name`, model, effort).
 
 Spawn argv with omitted selection:
@@ -79,7 +79,7 @@ Spawn argv with omitted selection:
 | Backend | Spawn argv |
 |---|---|
 | `claude` | `claude --permission-mode auto --prompt-suggestions false --allowedTools <rule>... --name <member-name> <prompt>` |
-| `codex` | `codex --approve-for-me --sandbox workspace-write <prompt>` |
+| `codex` | `codex --approve-for-me <prompt>` |
 | `opencode` | `opencode mini --standalone --agent cafleet --prompt <prompt>` |
 
 Catalog-derived help reads `claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet)`. An unknown Codex value fails before registration with `--permission-mode for codex must be one of on-request, never, approve-for-me (got 'VALUE')`, exit 2.
@@ -132,13 +132,17 @@ New rules, each declared with the existing rule fields (`id`, `priority`, `obser
 
 | Rule id | `observation` | Capability group | `extract.operation` |
 |---|---|---|---|
-| `claude-auto-refusal` | `automatic_refusal` | `annotations` | Required: the refused operation |
+| `claude-auto-refusal` | `automatic_refusal` | `annotations` | Required: the refused tool call of a verbose-view block (`● Tool(<operation>)` followed by `⎿  Denied by auto mode classifier ∙ [<category>] ∙ …`) |
+| `claude-auto-refusal-notice` | `automatic_refusal` | `annotations` | Required: the default-view status-row notice text `<tool> denied by auto mode · [<category>]`; the refused command itself is not displayed |
 | `claude-auto-unavailable` | `automatic_review_unavailable` | `annotations` | `null` |
 | `claude-auto-mode-indicator` | `automatic_review_available` | `annotations` | `null` |
+| `claude-auto-ask-permission` | `permission_request` | `detection` | Required: the Bash operation of the ask-rule form; answer plans allow `31` (`1. Yes`) and deny `32` (`2. No`), both ungated |
 | `codex-auto-review-refusal` | `automatic_refusal` | `annotations` | Required: the refused operation |
 | `codex-auto-review-unavailable` | `automatic_review_unavailable` | `annotations` | `null` |
 | `codex-auto-review-indicator` | `automatic_review_available` | `annotations` | `null` |
-| `claude-auto-startup` / `codex-auto-startup` | `question` | `detection` | `null`; only for the once-per-configuration dialog outcome |
+| `codex-auto-startup` | `question` | `detection` | `null`; only for the once-per-configuration dialog outcome |
+
+Claude Code 2.1.302 renders an automatic refusal in one of two native forms depending on the user's Verbose output setting, and the profile claims both. The default view shows only a transient status-row notice above the composer border for about 8–10 seconds; it names the tool and category but not the command, so refusals of the same tool and category produce one fingerprint and one event. The verbose view keeps one transcript block per refused call with its command. The Claude escalated form appears in automatic mode only through an explicit `permissions.ask` rule; it differs from the `claude-bash-permission` form (an `Ask rule … overrides auto mode for this command.` row, a `/permissions to let auto mode decide` row, `2. No` as the deny choice), so it has its own request rule and answer plans. Claude needs no startup rule: the first launch shows only a non-blocking transcript notice.
 
 An automatic-mode composer variant, when Step 1 needs one, is an ordinary `composer_empty` rule in the `composer` group.
 
@@ -186,13 +190,13 @@ The annotation tracker keeps, per annotation rule, a set of fingerprint states:
 
 1. A fingerprint present in a frame's blocks is emitted after two compatible observations at least 100 ms apart, as for every runtime observation; several fingerprints are tracked and emitted independently.
 2. An emitted fingerprint is not emitted again until its state resets.
-3. A state resets only after the fingerprint has been absent for 250 ms of continuous frames whose primary observation is a verified noninteraction and whose frame guard holds. Frames showing a permission form, another interaction, an overlay, a working or unknown screen, a guard failure, or a redraw do not advance the reset, so a block hidden by any of them keeps its state and emits nothing when it reappears.
+3. A state resets only after the fingerprint has been absent for 250 ms of continuous frames whose primary observation is a verified noninteraction and whose frame guard holds. Frames showing a permission form, another interaction, an overlay, an unknown screen, a guard failure, or a redraw do not advance the reset, so a block hidden by any of them keeps its state and emits nothing when it reappears. A working screen advances the reset only when the profile classifies it as a verified noninteraction; Claude Code 2.1.302 keeps its idle composer visible while working, so its working frames do.
 4. `automatic_review_unavailable` is emitted at most once per run per rule id unless an `automatic_review_available` annotation was observed after it.
 5. `automatic_review_available` emits no event; it only updates the effective policy record.
 
 The existing `permission_denied` reset uses the verified noninteraction boundary alone because a primary refusal frame and an idle-composer frame exclude each other. An annotation stays visible above the idle composer, so that boundary alone would re-emit a still-visible refusal after every turn; the reset therefore requires the annotation's absence on such frames. An automatic refusal is a separate kind from `permission_denied_observed` because the deciding party is the automatic reviewer and the Director procedure differs (`director_action` `review_automatic_refusal`, where `permission_denied_observed` carries none); the two never match the same block, because one is a primary rule and the other an annotation and the fixture classification above asserts the separation.
 
-Limits stated in the documentation: the event is an alert, not a one-to-one count of native refusals. A second refusal of the same normalized operation emits nothing while the first is visible, or before an idle frame shows the first gone. A refusal rendered and removed within 100 ms is not observed. The member's routed refusal evidence remains the record in each case.
+Limits stated in the documentation: the event is an alert, not a one-to-one count of native refusals. A second refusal of the same normalized operation emits nothing while the first is visible, or before an idle frame shows the first gone. A refusal rendered and removed within 100 ms is not observed. For Claude in the default view, the notice names no command, refusals of the same tool and category collapse into one event, and a notice that expires while hidden by a form is never observed. The native-quote guard for Claude rests on the U+00A0 the native result prefix carries. The first launch on a brand-new Claude configuration renders on the primary screen, so no rule matches during that session. The member's routed refusal evidence remains the record in each case.
 
 ### Automatic refusal event
 
@@ -332,7 +336,7 @@ A routed request that arrives with no event follows the existing refusal route u
 
 ### Member guidance
 
-The member role and the coding-agent overlay describe the default posture as the backend's automatic approval mode: the member attempts role-authorized commands, an automatic refusal is a permission refusal for routing purposes, and the member routes a necessary refused command to the Director with the existing command, cwd, environment and refusal evidence, then stops dependent work. The Claude `{permission_flags}` binding becomes `--permission-mode auto` and the Codex binding becomes `--approve-for-me --sandbox workspace-write`; the Claude `dontAsk` note is replaced by the corresponding note for `auto` (native rules, hooks and managed policy remain authoritative; refused work routes to the Director).
+The member role and the coding-agent overlay describe the default posture as the backend's automatic approval mode: the member attempts role-authorized commands, an automatic refusal is a permission refusal for routing purposes, and the member routes a necessary refused command to the Director with the existing command, cwd, environment and refusal evidence, then stops dependent work. The Claude `{permission_flags}` binding becomes `--permission-mode auto` and the Codex binding becomes `--approve-for-me`; the Claude `dontAsk` note is replaced by the corresponding note for `auto` (native rules, hooks and managed policy remain authoritative; refused work routes to the Director).
 
 ### Documentation targets
 
@@ -372,9 +376,9 @@ Each case records versions, mode, profile, profile match, multiplexer, terminal 
 
 ### Step 1: Capture native automatic-mode evidence
 
-COMMENT(director): Captured by a Director-side helper (member host rules deny the native binaries and multiplexers); the Verifier reviews the captures afterwards. Raw captures and notes go under /development-pvc/work/himkt/cafleet/.captures/0000197/ (hidden, agent-only); the Programmer converts accepted captures into embedded fixtures in Step 6. Use Claude Code 2.1.302 at /root/.local/share/mise/installs/aqua-anthropics-claude-code/v2.1.302/claude (prepend its directory to PATH per case) and Codex 0.163.0 from PATH. Look at the existing fixture JSON shape under cafleet/src/coding_agent/profiles/native/ and the existing capture tooling under cafleet/src/runtime/runner_tests/ before capturing. Remove this marker in your gate report once Step 1 is done.
+COMMENT(director): Claude 2.1.302 captures are done (gate passed; report and fixtures in .captures/0000197/REPORT.md). Codex must be recaptured under the corrected single-flag `--approve-for-me` argv once Step 5 is fixed. Captured by a Director-side helper (member host rules deny the native binaries and multiplexers); the Verifier reviews the captures afterwards. Raw captures and notes go under /development-pvc/work/himkt/cafleet/.captures/0000197/ (hidden, agent-only); the Programmer converts accepted captures into embedded fixtures in Step 6. Use Claude Code 2.1.302 at /root/.local/share/mise/installs/aqua-anthropics-claude-code/v2.1.302/claude (prepend its directory to PATH per case) and Codex 0.163.0 from PATH. Look at the existing fixture JSON shape under cafleet/src/coding_agent/profiles/native/ and the existing capture tooling under cafleet/src/runtime/runner_tests/ before capturing. Remove this marker in your gate report once Step 1 is done.
 
-- [ ] Verify that Codex 0.163.0 parses and starts with `--approve-for-me --sandbox workspace-write` and that Claude Code 2.1.302 starts with `--permission-mode auto` under the runner, and establish the § Startup dialog outcome for each on a fresh and a second launch. <!-- completed: -->
+- [ ] Verify that Codex 0.163.0 parses and starts with `--approve-for-me` and that Claude Code 2.1.302 starts with `--permission-mode auto` under the runner, and establish the § Startup dialog outcome for each on a fresh and a second launch. <!-- completed: -->
 - [ ] Capture each screen in § Native screens in automatic mode for Claude 2.1.302 `auto` under the runner at 36x120 with privacy masking, including two different refusals visible together, a refusal hidden by a permission form and rewrapped by a resize, the transcript viewer showing a refusal, and false-positive quotes of the refusal text. <!-- completed: -->
 - [ ] Capture the same screens for Codex 0.163.0 `approve-for-me`, including any escalated form and its allow/deny pre-stage forms. <!-- completed: -->
 - [ ] Evaluate § Default-switch gate per backend and report its result and every screen that could not be produced to the Director; stop before Step 2 when a gate condition fails. <!-- completed: -->
@@ -401,10 +405,14 @@ COMMENT(director): Programmer — start now with the parts that do not depend on
 
 ### Step 5: Change the launch policy
 
+COMMENT(director): Step 1 showed Codex 0.163.0 rejects `--approve-for-me` with `--sandbox` (user decision: single flag). § Launch policy now specifies argv and run record `["--approve-for-me"]` and spawn `codex --approve-for-me <prompt>`. Programmer: change the `approve-for-me` mapping in policy.rs and every docs/, SPEC.md and skills/ mention of `--approve-for-me --sandbox workspace-write` (on-request/never keep their sandbox). Tester: update the Step 5 tests (and any fixture) that expect the sandbox pair after `--approve-for-me`. Each removes their half; the last deletes this marker.
+
 - [ ] Write tests: omitted Claude and Codex argv and run-record fields, explicit `approve-for-me`, unchanged explicit `dontAsk` / `on-request` / `never` / OpenCode argv, help text and the Codex usage error. <!-- completed: -->
 - [ ] Implement the new defaults and the `approve-for-me` catalog entry and mapping in `cafleet/src/coding_agent/policy.rs`, updating the 0000194/0000196 tests whose assertions encoded the old defaults. <!-- completed: -->
 
 ### Step 6: Add profiles, annotations and events
+
+COMMENT(director): Accepted as proposed below — Tester writes the write-path tests against this interface, Programmer implements it in Step 6; Tester removes this marker when the tests are written. Proposal: The spec fixes the effective policy record's shape, transactions and failure behavior but no storage interface, so the write-path tests (change-only writes, observed_mode per evidence policy, replayed event-carried writes, stale-owner and non-live rejection) cannot be written yet. Read-side tests (shape validation, snapshot key and text line) are written. Proposed contract, for Director/Programmer confirmation or replacement: in `crate::broker::runtime`, a `runtime_enum!` `AutomaticReview { Available => "available", Unavailable => "unavailable" }` and `pub struct EffectivePolicyObservation { pub automatic_review: AutomaticReview, pub observed_mode: Option<String>, pub rule_id: String, pub observed_at: String }` where `observed_mode` is already post-policy; `storage::persist_transition_with_effective_policy(conn, owner, &transition, &observation, mode) -> Result<RuntimeEventRecord, CafleetError>` accepts only an `automatic_review_unavailable` transition with an `Unavailable` observation and writes the record with the new `event_id` in the event transaction (idempotent on replay); `storage::record_effective_policy(conn, owner, &observation, deadline) -> Result<bool, CafleetError>` accepts only `Available`, runs in `owned_transaction`, requires status `running` or `degraded`, writes `event_id: null` and returns whether the record changed; both reject a non-null `observed_mode` on a `metadata` run.
 
 - [ ] Write catalog tests for the profile schema extension: annotation kinds, the required `annotations` group, group-membership and annotation-field violations including `frame`, multi-block region matching, and provenance. <!-- completed: -->
 - [ ] Implement the schema extension in the catalog and detector, returning annotations beside the unchanged primary observation; add `"annotations": null` to the OpenCode profile. <!-- completed: -->
@@ -434,3 +442,4 @@ COMMENT(director): Programmer — start now with the parts that do not depend on
 |------|---------|
 | 2026-10-29 | Initial draft |
 | 2026-10-29 | Added profile version fallback (`profile_match`), its V6 column, snapshot field, Step 4 and the Claude 2.1.306 fallback acceptance case; Claude captures stay on 2.1.302 installed beside 2.1.306 |
+| 2026-10-29 | Step 1 gate results: Codex `approve-for-me` argv is the single `--approve-for-me` flag (0.163.0 rejects it with `--sandbox`); Claude claims both refusal renderings (`claude-auto-refusal`, `claude-auto-refusal-notice`) and an ask-rule request rule, needs no startup rule, and its working frames advance the annotation reset; added the resulting limits |
