@@ -1,5 +1,5 @@
 use super::*;
-use crate::input::{Deadline, DeletionHost as _, PaneLock, delete_fleet_with_host};
+use crate::input::{Deadline, PaneLock, delete_fleet_with_host};
 use crate::multiplexer::PostCloseLayout;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, mpsc};

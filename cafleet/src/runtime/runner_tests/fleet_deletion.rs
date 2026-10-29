@@ -443,10 +443,16 @@ fn fleet_deletion_ends_every_ordinary_member_and_keeps_the_director_pane() {
     assert_eq!(closed, ["%2", "%5"]);
     assert_eq!(host.restored, 2);
     assert!(fleet_deleted(&fixture));
-    assert!(
-        crate::broker::list_members(&fixture.conn, fleet)
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        fixture
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM members WHERE fleet_id=?1 AND status='active'",
+                [fleet],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+        0
     );
 }
 
