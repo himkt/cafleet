@@ -626,7 +626,7 @@ impl Drop for EventWriter {
 pub(super) mod contract_tests {
     use super::*;
     use crate::broker::runtime::*;
-    use crate::runtime::runner_tests::Fixture;
+    use crate::runtime::runner::test_support::Fixture;
     mod refresh {
         use super::worker::{Hooks, Release, committed, start, wait_until};
         use super::*;
@@ -839,8 +839,6 @@ pub(super) mod contract_tests {
     }
     pub(in crate::runtime::runner) mod support {
         use super::*;
-        use crate::runtime::runner_tests::owned_child::OwnedChild;
-        use std::process::{Command, Stdio};
 
         pub(in crate::runtime::runner) const VERSION: &str = "synthetic-0.0.1";
         pub(in crate::runtime::runner) const PROFILE: &str = "synthetic-profile-1";
@@ -891,30 +889,6 @@ pub(super) mod contract_tests {
             }
             fn kind(&self) -> ObservationClockKind {
                 ObservationClockKind::Deterministic
-            }
-        }
-        pub(in crate::runtime::runner) struct ChildGuard {
-            pub child: OwnedChild,
-            pub identity: ProcessIdentity,
-        }
-        impl ChildGuard {
-            pub(in crate::runtime::runner) fn spawn(
-                executable: &std::path::Path,
-                arguments: &[String],
-            ) -> Self {
-                let child = OwnedChild::new(
-                    Command::new(executable)
-                        .args(arguments)
-                        .stdin(Stdio::piped())
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null())
-                        .spawn()
-                        .unwrap(),
-                );
-                let identity = ProcessIdentity::read(i64::from(child.id()))
-                    .unwrap()
-                    .expect("owned child generation");
-                Self { child, identity }
             }
         }
         pub(in crate::runtime::runner) fn running(

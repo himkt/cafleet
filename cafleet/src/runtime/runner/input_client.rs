@@ -1451,11 +1451,12 @@ fn inspect_permission_with_host(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::runner_tests::Fixture;
-    use crate::runtime::{
-        InputServiceFixture, input_service_barrier, input_service_composer, input_service_records,
+    use crate::runtime::runner::service::test_support::ServiceFixture;
+    use crate::runtime::runner::service::test_support::input_service::{
+        input_service_barrier, input_service_composer, input_service_records,
         wait_input_service_record, with_input_service,
     };
+    use crate::runtime::runner::test_support::Fixture;
     use sha2::{Digest, Sha256};
     use std::io::Write;
     use std::net::Shutdown;
@@ -1469,7 +1470,7 @@ mod tests {
         use std::collections::BTreeSet;
 
         fn resize(
-            fixture: &InputServiceFixture,
+            fixture: &ServiceFixture,
             process: &ProcessIdentity,
             size: rustix::termios::Winsize,
         ) {
@@ -1487,7 +1488,7 @@ mod tests {
 
         struct ObservedReceiver<'a, 'b> {
             receiver: BrokerReceiver<'a>,
-            fixture: &'b mut InputServiceFixture,
+            fixture: &'b mut ServiceFixture,
             run: RunRecord,
             process: ProcessIdentity,
             size: rustix::termios::Winsize,
@@ -1737,11 +1738,11 @@ mod tests {
         });
     }
 
-    fn inspection_barrier(fixture: &mut InputServiceFixture, start: usize, barrier: &str) {
+    fn inspection_barrier(fixture: &mut ServiceFixture, start: usize, barrier: &str) {
         native_answers_through_barrier(fixture, start, barrier, &[]);
     }
     fn native_answers_through_barrier(
-        fixture: &mut InputServiceFixture,
+        fixture: &mut ServiceFixture,
         start: usize,
         barrier: &str,
         prior: &[&str],
@@ -1793,9 +1794,9 @@ mod tests {
     #[test]
     fn permission_inspection_actual_service_projects_current_unsupported_request_without_answering()
     {
-        use crate::runtime::runner_tests::control_service::observation_services::synthetic;
+        use crate::runtime::runner::observation::test_support::synthetic;
 
-        let mut fixture = InputServiceFixture::configured(false, synthetic);
+        let mut fixture = ServiceFixture::configured(false, synthetic);
         fixture.start_running();
         let until = Instant::now() + Duration::from_secs(2);
         fixture.master.write_all(b"form-inspection\r").unwrap();
@@ -1938,9 +1939,9 @@ mod tests {
     #[test]
     fn permission_inspection_client_uses_real_guard_original_sql_bound_and_validates_live_reply() {
         use crate::coding_agent::inspection_fixture_definition;
-        use crate::runtime::runner_tests::control_service::observation_services::synthetic;
+        use crate::runtime::runner::observation::test_support::synthetic;
 
-        let mut fixture = InputServiceFixture::configured(false, |fixture, spec| {
+        let mut fixture = ServiceFixture::configured(false, |fixture, spec| {
             synthetic(fixture, spec);
             let path = fixture._dir.path().join("observation-services.json");
             let mut file = std::fs::OpenOptions::new()
@@ -2303,9 +2304,7 @@ mod tests {
     }
 
     fn response_services(fixture: &mut Fixture, spec: &mut SpawnSpec) {
-        crate::runtime::runner_tests::control_service::observation_services::synthetic(
-            fixture, spec,
-        );
+        crate::runtime::runner::observation::test_support::synthetic(fixture, spec);
         let mut catalog = crate::coding_agent::inspection_fixture_definition();
         catalog["profiles"][0]["capabilities"]["answers"][0]["stages"] = serde_json::json!([{
             "bytes_hex":"790d","required_rule_id":"synthetic-permission","required_choice_id":"allow-once"
@@ -2320,7 +2319,7 @@ mod tests {
         file.sync_all().unwrap();
     }
     fn response_command(
-        fixture: &mut InputServiceFixture,
+        fixture: &mut ServiceFixture,
         until: Instant,
         key: &str,
     ) -> (Settings, RunRecord, Placement, PermissionRespondInput) {
@@ -2373,7 +2372,7 @@ mod tests {
         (settings, run, placement, input)
     }
     fn service_response_audit(
-        fixture: &InputServiceFixture,
+        fixture: &ServiceFixture,
         input: &PermissionRespondInput,
     ) -> PermissionReceipt {
         let operation = storage::find_input(
@@ -2436,7 +2435,7 @@ mod tests {
 
     #[test]
     fn permission_response_actual_service_returns_typed_durable_audit_and_one_selected_answer() {
-        let mut fixture = InputServiceFixture::configured(false, response_services);
+        let mut fixture = ServiceFixture::configured(false, response_services);
         fixture.start_running();
         let until = Instant::now() + Duration::from_secs(2);
         let (settings, run, placement, input) =
@@ -2610,7 +2609,7 @@ mod tests {
 
     #[test]
     fn permission_response_actual_service_lost_reply_retains_audit_and_same_key_never_retypes() {
-        let mut fixture = InputServiceFixture::configured(false, response_services);
+        let mut fixture = ServiceFixture::configured(false, response_services);
         fixture.start_running();
         let until = Instant::now() + Duration::from_secs(2);
         let (settings, run, placement, input) =
@@ -2750,7 +2749,7 @@ mod tests {
 
     #[test]
     fn permission_receipt_postcommit_expiry_preserves_claim_context_and_consumed_history() {
-        let mut fixture = InputServiceFixture::configured(false, response_services);
+        let mut fixture = ServiceFixture::configured(false, response_services);
         fixture.start_running();
         let until = Instant::now() + Duration::from_secs(2);
         let (settings, run, placement, input) =
@@ -3365,7 +3364,7 @@ mod tests {
         skip_reconcile: bool,
     }
 
-    fn service_target(fixture: &InputServiceFixture) -> (Settings, RunRecord, Placement) {
+    fn service_target(fixture: &ServiceFixture) -> (Settings, RunRecord, Placement) {
         let conn = &fixture.fixture.conn;
         let run = storage::get_run(conn, fixture.fixture.run.run_id).unwrap();
         let placement = crate::broker::get_member(conn, run.member_id, run.fleet_id)
@@ -3603,7 +3602,7 @@ mod tests {
     }
 
     fn accepted_service_receipt(
-        fixture: &mut InputServiceFixture,
+        fixture: &mut ServiceFixture,
         outer: Instant,
         key: &str,
     ) -> (Settings, RunRecord, Placement, SubmitInput, InputOperation) {
@@ -4958,8 +4957,8 @@ pub(super) mod permission_history {
     use crate::db::test_support::{TableSnapshot, table_snapshot};
     use crate::error::CafleetError;
     use crate::input::{Deadline, PaneLock, with_database_budget};
+    use crate::runtime::runner::test_support::Fixture;
     use crate::runtime::runner::*;
-    use crate::runtime::runner_tests::Fixture;
     use rusqlite::Connection;
     use serde_json::json;
     use std::sync::Arc;

@@ -136,7 +136,7 @@ mod contract_tests {
     use crate::multiplexer::{
         AnyMultiplexer, CommandRunner, PressKeys, RunError, TimedRunError, TmuxMultiplexer,
     };
-    use crate::runtime::runner_tests::Fixture;
+    use crate::runtime::runner::test_support::Fixture;
     use nix::sys::signal::{SigSet, Signal};
     use std::cell::RefCell;
     use std::collections::HashMap;

@@ -10,18 +10,18 @@ use std::time::{Duration, Instant};
 #[cfg(test)]
 mod inspection_tests {
     use super::*;
-    use crate::runtime::runner_tests::Fixture;
+    use crate::runtime::runner::test_support::Fixture;
 
     #[test]
     fn permission_inspection_request_generation_exhaustion_invalidates_without_wrap() {
         use crate::coding_agent::{inspection_fixture_definition, inspection_fixture_form};
-        use crate::runtime::runner_tests::owned_child::OwnedChild;
+        use crate::runtime::system::test_support::TestChild;
         use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
         use std::process::{Command, Stdio};
         use std::sync::Arc;
 
         struct Native {
-            child: OwnedChild,
+            child: TestChild,
             until: Instant,
         }
         impl Drop for Native {
@@ -60,7 +60,7 @@ mod inspection_tests {
         .unwrap();
         writer.set_deadline(until);
         let mut native = Native {
-            child: OwnedChild::new(
+            child: TestChild::new(
                 Command::new("/bin/cat")
                     .stdin(Stdio::piped())
                     .stdout(Stdio::null())
@@ -1224,6 +1224,7 @@ mod controller_tests {
         Hooks, Release, committed, start, wait_until, wait_until_within,
     };
     use crate::runtime::runner::writer::contract_tests::{WriterFixture, deadline};
+    use crate::runtime::system::test_support::TestChild;
     use std::os::unix::process::ExitStatusExt;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1429,7 +1430,7 @@ mod controller_tests {
                     ).unwrap(),
                     1
                 );
-                assert!(case.child.identity.matches().unwrap());
+                assert!(case.child.identity().matches().unwrap());
             }
 
             #[test]
@@ -1466,7 +1467,7 @@ mod controller_tests {
                         .closed_at
                         .is_none()
                 );
-                assert!(case.child.identity.matches().unwrap());
+                assert!(case.child.identity().matches().unwrap());
             }
 
             #[test]
@@ -1547,7 +1548,7 @@ mod controller_tests {
             writer: EventWriter,
             controller: ObservationController,
             hooks: Arc<Hooks>,
-            child: ChildGuard,
+            child: TestChild,
             terminal: TerminalState,
             clock: Timeline,
             fixture: WriterFixture,
@@ -1590,8 +1591,8 @@ mod controller_tests {
                 if let Some(hooks) = observation_hooks {
                     controller.set_observation_hooks(hooks).unwrap();
                 }
-                let child = ChildGuard::spawn(std::path::Path::new("/bin/cat"), &[]);
-                running(&mut fixture, &child.identity);
+                let child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
+                running(&mut fixture, &child.identity());
                 let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
                 let clock = Timeline::new();
                 controller
@@ -1632,15 +1633,15 @@ mod controller_tests {
                 release
             }
             fn exit(&mut self, millis: u64) -> u64 {
-                assert!(self.child.identity.matches().unwrap());
+                assert!(self.child.identity().matches().unwrap());
                 nix::sys::signal::kill(
-                    nix::unistd::Pid::from_raw(i32::try_from(self.child.identity.pid).unwrap()),
+                    nix::unistd::Pid::from_raw(i32::try_from(self.child.identity().pid).unwrap()),
                     nix::sys::signal::Signal::SIGTERM,
                 )
                 .unwrap();
                 let until = deadline();
                 loop {
-                    if let Some(exit) = self.child.child.try_wait().unwrap() {
+                    if let Some(exit) = self.child.try_wait().unwrap() {
                         assert_eq!(exit.signal(), Some(15));
                         break;
                     }
@@ -1781,7 +1782,7 @@ mod controller_tests {
             let run = storage::get_run(&case.fixture.fixture.conn, case.fixture.fixture.run.run_id)
                 .unwrap();
             assert_eq!(run.status, RunStatus::Running);
-            assert!(case.child.child.try_wait().unwrap().is_some());
+            assert!(case.child.try_wait().unwrap().is_some());
             assert_eq!(
                 case.events()[0].event.kind,
                 RuntimeEventKind::InteractionOpened
@@ -1956,8 +1957,8 @@ mod controller_tests {
             1..=256,
         )
         .unwrap();
-        let child = ChildGuard::spawn(std::path::Path::new("/bin/cat"), &[]);
-        running(&mut fixture, &child.identity);
+        let child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
+        running(&mut fixture, &child.identity());
         let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
         controller
             .started(&fixture.fixture.run, &terminal.snapshot(), &writer, &clock)
@@ -2014,8 +2015,8 @@ mod controller_tests {
         )
         .unwrap();
         let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
-        let child = ChildGuard::spawn(std::path::Path::new("/bin/cat"), &[]);
-        running(&mut fixture, &child.identity);
+        let child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
+        running(&mut fixture, &child.identity());
         controller
             .started(&fixture.fixture.run, &terminal.snapshot(), &writer, &clock)
             .unwrap();
@@ -2082,8 +2083,8 @@ mod controller_tests {
                 .started(&fixture.fixture.run, &screen, &writer, &clock)
                 .is_err()
         );
-        let child = ChildGuard::spawn(std::path::Path::new("/bin/cat"), &[]);
-        running(&mut fixture, &child.identity);
+        let child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
+        running(&mut fixture, &child.identity());
         let mut stale = fixture.fixture.run.clone();
         stale.owner_epoch += 1;
         assert!(
@@ -2117,8 +2118,8 @@ mod controller_tests {
             1..=256,
         )
         .unwrap();
-        let mut child = ChildGuard::spawn(std::path::Path::new("/bin/cat"), &[]);
-        running(&mut fixture, &child.identity);
+        let mut child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
+        running(&mut fixture, &child.identity());
         let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
         controller
             .started(&fixture.fixture.run, &terminal.snapshot(), &writer, &clock)
@@ -2134,15 +2135,15 @@ mod controller_tests {
             .poll(&terminal.snapshot(), &writer, &clock)
             .unwrap();
         wait_until(|| committed(&fixture) == 1);
-        assert!(child.identity.matches().unwrap());
+        assert!(child.identity().matches().unwrap());
         nix::sys::signal::kill(
-            nix::unistd::Pid::from_raw(i32::try_from(child.identity.pid).unwrap()),
+            nix::unistd::Pid::from_raw(i32::try_from(child.identity().pid).unwrap()),
             nix::sys::signal::Signal::SIGTERM,
         )
         .unwrap();
         let until = deadline();
         let exit = loop {
-            if let Some(exit) = child.child.try_wait().unwrap() {
+            if let Some(exit) = child.try_wait().unwrap() {
                 break exit;
             }
             assert!(Instant::now() < until, "owned child signal exit");
@@ -2188,8 +2189,8 @@ mod controller_tests {
             1..=256,
         )
         .unwrap();
-        let child = ChildGuard::spawn(std::path::Path::new("/bin/cat"), &[]);
-        running(&mut fixture, &child.identity);
+        let child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
+        running(&mut fixture, &child.identity());
         let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
         controller
             .started(&fixture.fixture.run, &terminal.snapshot(), &writer, &clock)
@@ -2348,8 +2349,8 @@ mod controller_tests {
             1..=256,
         )
         .unwrap();
-        let child = ChildGuard::spawn(std::path::Path::new("/bin/cat"), &[]);
-        running(&mut fixture, &child.identity);
+        let child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
+        running(&mut fixture, &child.identity());
         let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
         controller
             .started(&fixture.fixture.run, &terminal.snapshot(), &writer, &clock)
@@ -2482,8 +2483,8 @@ mod controller_tests {
             1..=256,
         )
         .unwrap();
-        let child = ChildGuard::spawn(std::path::Path::new("/bin/cat"), &[]);
-        running(&mut fixture, &child.identity);
+        let child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
+        running(&mut fixture, &child.identity());
         let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
         controller
             .started(&fixture.fixture.run, &terminal.snapshot(), &writer, &clock)
@@ -2612,5 +2613,276 @@ mod controller_tests {
             .unwrap();
         assert_eq!(episodes, 2);
         assert_eq!(writer.finish(deadline()), (0, 0));
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::os::unix::fs::PermissionsExt;
+
+    use serde_json::json;
+
+    use crate::broker::runtime as storage;
+    use crate::runtime::runner::SpawnSpec;
+    use crate::runtime::runner::service::test_support::observation_services::private_write;
+    use crate::runtime::runner::test_support::Fixture;
+    pub(crate) fn synthetic(fixture: &mut Fixture, spec: &mut SpawnSpec) {
+        spec.environment.push((
+            "CAFLEET_REVIEW_NATIVE_START".into(),
+            fixture
+                ._dir
+                .path()
+                .join("native-started")
+                .to_str()
+                .unwrap()
+                .into(),
+        ));
+        fixture.conn.execute("UPDATE member_runs SET native_version='synthetic-0.0.1',profile_version='synthetic-profile-1',profile_match='exact',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
+        fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+        let script = fixture._dir.path().join("owned-observation-process");
+        private_write(&script,b"#!/bin/sh\nif [ \"$1\" = --version ]; then printf 'synthetic-0.0.1\\n'; exit 0; fi\n/usr/bin/touch \"$CAFLEET_REVIEW_NATIVE_START\"\nprintf 'review-native-ready\\n'\nwhile IFS= read -r line; do case \"$line\" in finish) exit 0 ;; form*) printf '\\033[2J\\033[19;1HSynthetic permission request\\r\\nOperation: write %s.txt\\r\\n> Allow once\\r\\n  Deny once\\r\\nRequest form: synthetic-only\\r\\nSelection: ' \"$line\" ;; transient) printf '\\033[2J\\033[19;1HSynthetic permission request\\r\\nOperation: write transient.txt\\r\\n> Allow once\\r\\n  Deny once\\r\\nRequest form: synthetic-only\\r\\nSelection: \\033[2J\\033[Hworking' ;; *) printf 'review-answer=%s\\n' \"$line\" ;; esac; done\n");
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        spec.argv = vec![script.to_str().unwrap().into(), "--approve-for-me".into()];
+        let definitions =
+            crate::coding_agent::profiles::catalog::test_support::synthetic_definitions();
+        private_write(
+            &fixture._dir.path().join("observation-services.json"),
+            &serde_json::to_vec(&json!({"catalog":definitions})).unwrap(),
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+    use std::time::{Duration, Instant};
+
+    use nix::sys::signal::{Signal, kill};
+    use nix::unistd::Pid;
+
+    use crate::broker::runtime as storage;
+    use crate::runtime::runner::service::test_support::*;
+
+    mod observation_contract {
+        use super::super::test_support::synthetic;
+        use super::*;
+        use crate::runtime::runner::service::test_support::observation_services::{
+            count, health, wait_until,
+        };
+        #[test]
+        fn runner_batch2_service_quiet_timer_persists_one_opening_without_changing_output_sequence()
+        {
+            let mut fixture = ServiceFixture::configured(false, synthetic);
+            fixture.start_running();
+            fixture.master.write_all(b"form-one\r").unwrap();
+            fixture.read_until("Operation: write form-one.txt");
+            let sequence = health(&mut fixture)["output_seq"].as_u64().unwrap();
+            wait_until(|| count(&fixture, "interaction_opened") == 1);
+            let after = health(&mut fixture);
+            assert_eq!(after["output_seq"], sequence);
+            assert_eq!(after["observation"]["visibility"], "visible");
+            assert_eq!(after["observation"]["eligibility"]["state"], "hold");
+            let messages:i64=fixture.fixture.conn.query_row("SELECT COUNT(*) FROM member_runtime_events e JOIN messages m ON m.message_id=e.message_id WHERE e.run_id=?1 AND e.kind='interaction_opened'",[fixture.fixture.run.run_id],|row|row.get(0)).unwrap();
+            assert_eq!(messages, 1);
+            fixture.assert_manual_io();
+            fixture.finish();
+        }
+
+        #[test]
+        fn runner_batch2_service_transient_form_and_clear_in_one_native_write_produce_no_episode() {
+            let mut fixture = ServiceFixture::configured(false, synthetic);
+            fixture.start_running();
+            fixture.master.write_all(b"transient\r").unwrap();
+            fixture.read_until("working");
+            let until = Instant::now() + Duration::from_millis(180);
+            while Instant::now() < until {
+                let status = health(&mut fixture);
+                assert_eq!(status["observation"]["eligibility"]["state"], "hold");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert_eq!(count(&fixture, "interaction_opened"), 0);
+            assert_eq!(
+                fixture
+                    .fixture
+                    .conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1",
+                        [fixture.fixture.run.run_id],
+                        |row| row.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                0
+            );
+            fixture.assert_manual_io();
+            fixture.finish();
+        }
+        #[test]
+        fn runner_batch2_service_shutdown_uses_the_active_controller_to_close_before_truthful_exit()
+        {
+            let mut fixture = ServiceFixture::configured(false, synthetic);
+            fixture.start_running();
+            fixture.master.write_all(b"form-shutdown\r").unwrap();
+            fixture.read_until("Operation: write form-shutdown.txt");
+            wait_until(|| count(&fixture, "interaction_opened") == 1);
+            fixture.finish();
+            let kinds: Vec<String> = fixture
+                .fixture
+                .conn
+                .prepare(
+                    "SELECT kind FROM member_runtime_events WHERE run_id=?1 ORDER BY event_seq",
+                )
+                .unwrap()
+                .query_map([fixture.fixture.run.run_id], |row| row.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            assert_eq!(
+                kinds,
+                ["interaction_opened", "interaction_closed", "runner_exited"]
+            );
+            let reason: String = fixture
+                .fixture
+                .conn
+                .query_row(
+                    "SELECT close_reason FROM member_interactions WHERE run_id=?1",
+                    [fixture.fixture.run.run_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(reason, "process_exited");
+        }
+        #[test]
+        fn runner_batch2_service_unknown_coverage_emits_once_while_manual_work_continues() {
+            let mut fixture = ServiceFixture::new(false);
+            fixture.start_running();
+            for _ in 0..3 {
+                fixture.health();
+                fixture.assert_manual_io();
+            }
+            fixture.finish();
+            let count:i64=fixture.fixture.conn.query_row("SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='coverage_unknown'",[fixture.fixture.run.run_id],|row|row.get(0)).unwrap();
+            assert_eq!(count, 1);
+            let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+            assert_eq!(run.resolved_mode, "approve-for-me");
+            assert!(run.effective_policy_json.is_none());
+        }
+
+        #[test]
+        fn runner_batch2_service_fallback_profile_emits_no_coverage_unknown_while_no_profile_still_does()
+         {
+            let fallback = crate::coding_agent::ProfileCatalog::bundled()
+                .unwrap()
+                .capabilities(crate::coding_agent::CodingAgent::Codex, Some("0.164.0"));
+            assert_eq!(
+                fallback.profile_match.map(|value| value.as_str()),
+                Some("fallback")
+            );
+            let fallback_profile = fallback.profile_version.unwrap();
+            for (profile, expected) in [(Some("fallback"), 0), (None, 1)] {
+                let fallback_profile = fallback_profile.clone();
+                let mut fixture = ServiceFixture::configured(false, move |fixture, _| {
+                    if profile.is_some() {
+                        fixture.conn.execute("UPDATE member_runs SET native_version='0.164.0',profile_version=?1,profile_match=?2,coverage='tested' WHERE run_id=?3",rusqlite::params![fallback_profile,profile,fixture.run.run_id]).unwrap();
+                    } else {
+                        fixture.conn.execute("UPDATE member_runs SET native_version=NULL,profile_version=NULL,profile_match=NULL,coverage='unknown' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
+                    }
+                    fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+                });
+                fixture.start_running();
+                for _ in 0..3 {
+                    fixture.health();
+                    fixture.assert_manual_io();
+                }
+                fixture.finish();
+                let count:i64=fixture.fixture.conn.query_row("SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='coverage_unknown'",[fixture.fixture.run.run_id],|row|row.get(0)).unwrap();
+                assert_eq!(count, expected, "{profile:?}");
+                let run =
+                    storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+                assert_eq!(
+                    run.profile_match.map(|value| value.as_str()),
+                    profile,
+                    "{profile:?}"
+                );
+            }
+        }
+    }
+
+    mod review_failures {
+        use super::*;
+        use crate::runtime::runner::service::test_support::observation_services::{
+            count, health, wait_until,
+        };
+        use crate::runtime::runner::service::test_support::review_failures::*;
+        #[test]
+        fn runner_review_r3_quiet_timer_detector_failure_keeps_real_service_health_and_manual_io() {
+            let mut fixture = ServiceFixture::configured(false, |fixture, spec| {
+                configure(fixture, spec, "quiet_timer", "detector")
+            });
+            fixture.start_running();
+            arm(&fixture);
+            fixture.master.write_all(b"form-quiet-failure\r").unwrap();
+            fixture.read_until("Operation: write form-quiet-failure.txt");
+            assert_fired(&fixture, "QuietTimer/Detector");
+            assert_live_after_fault(&mut fixture, "detector_unavailable");
+            fixture.finish();
+            assert_private_cause_stays_local(&fixture);
+        }
+
+        #[test]
+        fn runner_review_r3_resize_detector_failure_keeps_actual_resized_service_and_native_child()
+        {
+            let mut fixture = ServiceFixture::configured(false, |fixture, spec| {
+                configure(fixture, spec, "resize", "detector")
+            });
+            let started = fixture.start_running();
+            fixture.master.write_all(b"form-resize-failure\r").unwrap();
+            fixture.read_until("Operation: write form-resize-failure.txt");
+            wait_until(|| count(&fixture, "interaction_opened") == 1);
+            let sequence = health(&mut fixture)["output_seq"].as_u64().unwrap();
+            arm(&fixture);
+            rustix::termios::tcsetwinsize(
+                &fixture.master,
+                rustix::termios::Winsize {
+                    ws_row: 25,
+                    ws_col: 90,
+                    ws_xpixel: 0,
+                    ws_ypixel: 0,
+                },
+            )
+            .unwrap();
+            assert!(fixture.process.as_ref().unwrap().matches().unwrap());
+            kill(
+                Pid::from_raw(i32::try_from(fixture.child.id()).unwrap()),
+                Signal::SIGWINCH,
+            )
+            .unwrap();
+            assert_fired(&fixture, "Resize/Detector");
+            let status = fixture.health();
+            assert_eq!(status.child, Some(started.child));
+            assert!(health(&mut fixture)["output_seq"].as_u64().unwrap() > sequence);
+            assert_live_after_fault(&mut fixture, "detector_unavailable");
+            fixture.finish();
+            assert_private_cause_stays_local(&fixture);
+        }
+        #[test]
+        fn runner_review_r3_child_output_parser_and_detector_failures_keep_transport_and_typed_metadata()
+         {
+            for (operation, fired, diagnostic) in [
+                ("parser", "ChildOutput/Parser", "parser_unavailable"),
+                ("detector", "ChildOutput/Detector", "detector_unavailable"),
+            ] {
+                let mut fixture = ServiceFixture::configured(false, |fixture, spec| {
+                    configure(fixture, spec, "child_output", operation)
+                });
+                fixture.start_running();
+                arm(&fixture);
+                fixture.master.write_all(b"form-output-failure\r").unwrap();
+                fixture.read_until("Operation: write form-output-failure.txt");
+                assert_fired(&fixture, fired);
+                assert_live_after_fault(&mut fixture, diagnostic);
+                fixture.finish();
+                assert_private_cause_stays_local(&fixture);
+            }
+        }
     }
 }

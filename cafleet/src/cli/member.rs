@@ -207,7 +207,7 @@ fn load_member(
     member_id: i64,
     tolerate_missing_placement: bool,
 ) -> Result<MemberRecord, CafleetError> {
-    let member = crate::input::active_member(conn, member_id)?;
+    let member = crate::deletion::active_member(conn, member_id)?;
     if member.placement.is_none() && !tolerate_missing_placement {
         return Err(CafleetError::App(format!(
             "member {member_id} has no placement row; it was not spawned via \
@@ -570,7 +570,7 @@ fn lock_member_deletion(
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                 .map_err(crate::broker::members::db_err)?;
             let current = load_member(&tx, member_id, true)?;
-            if !crate::input::member_deletion_matches(snapshot, &current) {
+            if !crate::deletion::member_deletion_matches(snapshot, &current) {
                 return Ok(None);
             }
             if current.kind == crate::broker::records::MemberKind::Director {
@@ -589,9 +589,9 @@ fn lock_member_deletion(
                 let changed = crate::broker::members::deregister_member_rows(&tx, member_id)?;
                 assert!(changed, "the revalidated member remains active");
                 DeleteAction::Deregistered(if current.placement.is_none() {
-                    crate::input::NO_PLACEMENT_STATUS
+                    crate::deletion::NO_PLACEMENT_STATUS
                 } else {
-                    crate::input::PENDING_PANE_STATUS
+                    crate::deletion::PENDING_PANE_STATUS
                 })
             };
             tx.commit().map_err(crate::broker::members::db_err)?;
@@ -652,12 +652,12 @@ fn close_member(
         .clone()
         .expect("input-locked member placement");
     let (snapshot, held) = locked.snapshot_and_pane_lock(&settings.database_url, &placement)?;
-    crate::input::end_member(
+    crate::deletion::end_member(
         conn,
         settings,
         snapshot,
         held,
-        &mut crate::input::MultiplexerDeletionHost(mux),
+        &mut crate::deletion::MultiplexerDeletionHost(mux),
         deadline,
         &mut |_| Ok(()),
     )
@@ -914,8 +914,8 @@ mod tests {
     mod recovery_deletion {
         use super::*;
         use crate::broker::runtime::{self as storage, *};
-        use crate::runtime::OwnedChild;
         use crate::runtime::runner::{ProcessIdentity, RunArtifacts, RunLock, RuntimePaths};
+        use crate::runtime::system::test_support::TestChild;
         use std::process::{Command, Stdio};
 
         #[test]
@@ -942,7 +942,7 @@ mod tests {
             let file = std::fs::File::create(&log).unwrap();
             let started = Instant::now();
             let cleanup = started + Duration::from_secs(6);
-            let mut child = OwnedChild::new(
+            let mut child = TestChild::new(
                 Command::new(std::env::current_exe().unwrap())
                     .args([
                         "--exact",
@@ -1271,7 +1271,7 @@ mod tests {
     }
 
     struct ExternalMemberChild {
-        child: crate::runtime::OwnedChild,
+        child: crate::runtime::system::test_support::TestChild,
         until: Instant,
     }
     impl Drop for ExternalMemberChild {
@@ -1281,7 +1281,7 @@ mod tests {
     }
 
     fn external_member_invoke(
-        fixture: &crate::runtime::InputServiceFixture,
+        fixture: &crate::runtime::runner::service::test_support::ServiceFixture,
         action: &str,
         literal: &str,
         json: bool,
@@ -1307,7 +1307,7 @@ mod tests {
             }),
         );
         let mut owned = ExternalMemberChild {
-            child: crate::runtime::OwnedChild::new(
+            child: crate::runtime::system::test_support::TestChild::new(
                 Command::new(std::env::current_exe().unwrap())
                     .args([
                         "--exact",
@@ -1413,203 +1413,212 @@ mod tests {
     fn external_input_member_prompt_exec_route_raw_commands_and_print_actual_durable_ids() {
         use crate::broker::runtime as storage;
         use sha2::{Digest, Sha256};
-        crate::runtime::with_input_service(|fixture, outer| {
-            let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-            let member =
-                crate::broker::get_member(&fixture.fixture.conn, run.member_id, run.fleet_id)
-                    .unwrap()
-                    .unwrap();
-            let placement = member.placement.as_ref().unwrap();
-            let pane = placement.mux_pane_id.as_deref().unwrap();
-            for (action, kind) in [
-                ("prompt", storage::InputKind::Prompt),
-                ("exec", storage::InputKind::Exec),
-            ] {
-                for json in [true, false] {
-                    crate::runtime::input_service_composer(fixture, outer);
-                    let before = external_member_input_ids(&fixture.fixture.conn, run.run_id);
-                    let literal = format!("member {action} λ json={json}");
-                    let (status, stdout, stderr) =
-                        external_member_invoke(fixture, action, &literal, json, false, None, outer);
-                    assert!(
-                        status.success(),
-                        "actual {action} failed: {status}; stdout={stdout:?}; stderr={stderr:?}"
-                    );
-                    assert!(stderr.is_empty(), "{stderr}");
-                    let after = external_member_input_ids(&fixture.fixture.conn, run.run_id);
-                    assert_eq!(after.len(), before.len() + 1);
-                    assert_eq!(&after[..before.len()], before);
-                    let row =
-                        storage::get_input(&fixture.fixture.conn, *after.last().unwrap()).unwrap();
-                    assert_eq!(row.kind, kind);
-                    assert_eq!(row.state, storage::InputState::Accepted);
-                    assert_eq!(row.message_id, None);
-                    let prefix = format!("{}:{}:", kind.as_str(), run.run_id);
-                    let random = row
-                        .operation_key
-                        .strip_prefix(&prefix)
-                        .expect("one explicit invocation key");
-                    assert_eq!(random.len(), 64);
-                    assert!(
-                        random
-                            .bytes()
-                            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-                    );
-                    let payload = json!({"kind":kind.as_str(),"literal":literal,"message_id":null,"run_id":run.run_id});
-                    let digest: String = Sha256::digest(serde_json::to_vec(&payload).unwrap())
-                        .iter()
-                        .map(|byte| format!("{byte:02x}"))
-                        .collect();
-                    assert_eq!(
-                        row.payload_digest, digest,
-                        "Exec binds the raw command before the native prefix"
-                    );
-                    if json {
-                        let expected = if action == "prompt" {
-                            format!(
-                                "{{\"member_id\":{},\"pane_id\":{},\"text\":{},\"input_id\":{}}}",
-                                run.member_id,
-                                serde_json::to_string(pane).unwrap(),
-                                serde_json::to_string(&literal).unwrap(),
-                                row.input_id
-                            )
-                        } else {
-                            format!(
-                                "{{\"member_id\":{},\"pane_id\":{},\"coding_agent\":{},\"command\":{},\"dispatched\":true,\"input_id\":{}}}",
-                                run.member_id,
-                                serde_json::to_string(pane).unwrap(),
-                                serde_json::to_string(&placement.coding_agent).unwrap(),
-                                serde_json::to_string(&literal).unwrap(),
-                                row.input_id
-                            )
-                        };
-                        assert_eq!(
-                            stdout.lines().find(|line| line.starts_with('{')).unwrap(),
-                            expected
+        crate::runtime::runner::service::test_support::input_service::with_input_service(
+            |fixture, outer| {
+                let run =
+                    storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+                let member =
+                    crate::broker::get_member(&fixture.fixture.conn, run.member_id, run.fleet_id)
+                        .unwrap()
+                        .unwrap();
+                let placement = member.placement.as_ref().unwrap();
+                let pane = placement.mux_pane_id.as_deref().unwrap();
+                for (action, kind) in [
+                    ("prompt", storage::InputKind::Prompt),
+                    ("exec", storage::InputKind::Exec),
+                ] {
+                    for json in [true, false] {
+                        crate::runtime::runner::service::test_support::input_service::input_service_composer(fixture, outer);
+                        let before = external_member_input_ids(&fixture.fixture.conn, run.run_id);
+                        let literal = format!("member {action} λ json={json}");
+                        let (status, stdout, stderr) = external_member_invoke(
+                            fixture, action, &literal, json, false, None, outer,
                         );
-                    } else {
-                        let original = if action == "prompt" {
-                            format!(
-                                "Sent prompt {literal:?} to member {} ({pane}).",
-                                member.name
-                            )
-                        } else {
-                            format!(
-                                "Dispatched native command to member {} ({pane}). Inspect the pane for its result.",
-                                run.member_id
-                            )
-                        };
                         assert!(
-                            stdout.contains(&format!("{original}\nInput: {}\n", row.input_id)),
-                            "{stdout:?}"
+                            status.success(),
+                            "actual {action} failed: {status}; stdout={stdout:?}; stderr={stderr:?}"
                         );
-                    }
-                    let line = if action == "exec" {
-                        format!("! {literal}")
-                    } else {
-                        literal.clone()
-                    };
-                    crate::runtime::wait_input_service_record(fixture, &line, outer);
-                    crate::runtime::input_service_barrier(fixture, outer);
-                    assert_eq!(
-                        crate::runtime::input_service_records(fixture)
+                        assert!(stderr.is_empty(), "{stderr}");
+                        let after = external_member_input_ids(&fixture.fixture.conn, run.run_id);
+                        assert_eq!(after.len(), before.len() + 1);
+                        assert_eq!(&after[..before.len()], before);
+                        let row = storage::get_input(&fixture.fixture.conn, *after.last().unwrap())
+                            .unwrap();
+                        assert_eq!(row.kind, kind);
+                        assert_eq!(row.state, storage::InputState::Accepted);
+                        assert_eq!(row.message_id, None);
+                        let prefix = format!("{}:{}:", kind.as_str(), run.run_id);
+                        let random = row
+                            .operation_key
+                            .strip_prefix(&prefix)
+                            .expect("one explicit invocation key");
+                        assert_eq!(random.len(), 64);
+                        assert!(
+                            random
+                                .bytes()
+                                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                        );
+                        let payload = json!({"kind":kind.as_str(),"literal":literal,"message_id":null,"run_id":run.run_id});
+                        let digest: String = Sha256::digest(serde_json::to_vec(&payload).unwrap())
+                            .iter()
+                            .map(|byte| format!("{byte:02x}"))
+                            .collect();
+                        assert_eq!(
+                            row.payload_digest, digest,
+                            "Exec binds the raw command before the native prefix"
+                        );
+                        if json {
+                            let expected = if action == "prompt" {
+                                format!(
+                                    "{{\"member_id\":{},\"pane_id\":{},\"text\":{},\"input_id\":{}}}",
+                                    run.member_id,
+                                    serde_json::to_string(pane).unwrap(),
+                                    serde_json::to_string(&literal).unwrap(),
+                                    row.input_id
+                                )
+                            } else {
+                                format!(
+                                    "{{\"member_id\":{},\"pane_id\":{},\"coding_agent\":{},\"command\":{},\"dispatched\":true,\"input_id\":{}}}",
+                                    run.member_id,
+                                    serde_json::to_string(pane).unwrap(),
+                                    serde_json::to_string(&placement.coding_agent).unwrap(),
+                                    serde_json::to_string(&literal).unwrap(),
+                                    row.input_id
+                                )
+                            };
+                            assert_eq!(
+                                stdout.lines().find(|line| line.starts_with('{')).unwrap(),
+                                expected
+                            );
+                        } else {
+                            let original = if action == "prompt" {
+                                format!(
+                                    "Sent prompt {literal:?} to member {} ({pane}).",
+                                    member.name
+                                )
+                            } else {
+                                format!(
+                                    "Dispatched native command to member {} ({pane}). Inspect the pane for its result.",
+                                    run.member_id
+                                )
+                            };
+                            assert!(
+                                stdout.contains(&format!("{original}\nInput: {}\n", row.input_id)),
+                                "{stdout:?}"
+                            );
+                        }
+                        let line = if action == "exec" {
+                            format!("! {literal}")
+                        } else {
+                            literal.clone()
+                        };
+                        crate::runtime::runner::service::test_support::input_service::wait_input_service_record(fixture, &line, outer);
+                        crate::runtime::runner::service::test_support::input_service::input_service_barrier(fixture, outer);
+                        assert_eq!(
+                        crate::runtime::runner::service::test_support::input_service::input_service_records(fixture)
                             .iter()
                             .filter(|record| record["line"] == line)
                             .count(),
                         1
                     );
-                    assert_eq!(
-                        storage::get_input(&fixture.fixture.conn, row.input_id).unwrap(),
-                        row
-                    );
+                        assert_eq!(
+                            storage::get_input(&fixture.fixture.conn, row.input_id).unwrap(),
+                            row
+                        );
+                    }
                 }
-            }
-        });
+            },
+        );
     }
 
     #[test]
     fn external_input_member_lost_stdout_keeps_discoverable_receipt_and_same_key_never_retypes() {
         use crate::broker::runtime as storage;
         use crate::runtime::runner::{SubmissionStatus, SubmitInput, submit_wrapped_input};
-        crate::runtime::with_input_service(|fixture, outer| {
-            let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-            let before = external_member_input_ids(&fixture.fixture.conn, run.run_id);
-            let literal = "member output loss λ";
-            let (status, stdout, stderr) =
-                external_member_invoke(fixture, "prompt", literal, true, true, None, outer);
-            assert_eq!(status.code(), Some(101), "{status}; {stderr}");
-            assert!(stdout.is_empty());
-            assert!(
-                stderr.contains("stdout") && stderr.contains("Broken pipe"),
-                "{stderr}"
-            );
-            let ids = external_member_input_ids(&fixture.fixture.conn, run.run_id);
-            assert_eq!(ids.len(), before.len() + 1);
-            let row = storage::get_input(&fixture.fixture.conn, *ids.last().unwrap()).unwrap();
-            assert_eq!(row.state, storage::InputState::Accepted);
-            let (status, stdout, stderr) =
-                external_member_invoke(fixture, "show", "", true, false, None, outer);
-            assert!(status.success(), "{status}; {stderr}");
-            assert!(
-                external_member_json(&stdout)["runtime"]["unresolved_input_ids"]
-                    .as_array()
-                    .unwrap()
-                    .contains(&json!(row.input_id))
-            );
-            let (status, stdout, stderr) = external_member_invoke(
-                fixture,
-                "input_show",
-                "",
-                true,
-                false,
-                Some(row.input_id),
-                outer,
-            );
-            assert!(status.success(), "{status}; {stderr}");
-            let discovered = external_member_json(&stdout);
-            assert_eq!(discovered["input"]["input_id"], row.input_id);
-            assert_eq!(discovered["input"]["operation_key"], row.operation_key);
-            assert_eq!(discovered["input"]["state"], "accepted");
-            let member =
-                crate::broker::get_member(&fixture.fixture.conn, run.member_id, run.fleet_id)
-                    .unwrap()
-                    .unwrap();
-            let placement = member.placement.unwrap();
-            let settings = Settings::for_database(
-                std::path::Path::new(fixture.fixture.conn.path().unwrap()),
-                Some("tmux"),
-            );
-            let request = SubmitInput {
-                operation_key: row.operation_key.clone(),
-                input_kind: row.kind,
-                message_id: row.message_id,
-                literal: literal.into(),
-            };
-            let result = submit_wrapped_input(
-                &mut fixture.fixture.conn,
-                &settings,
-                &run,
-                &placement,
-                &request,
-                Deadline::until(outer),
-            )
-            .unwrap();
-            assert_eq!(result.status, SubmissionStatus::Accepted);
-            assert_eq!(result.input_id, Some(row.input_id));
-            assert_eq!(
-                storage::get_input(&fixture.fixture.conn, row.input_id).unwrap(),
-                row
-            );
-            crate::runtime::wait_input_service_record(fixture, literal, outer);
-            crate::runtime::input_service_barrier(fixture, outer);
-            assert_eq!(
-                crate::runtime::input_service_records(fixture)
+        crate::runtime::runner::service::test_support::input_service::with_input_service(
+            |fixture, outer| {
+                let run =
+                    storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+                let before = external_member_input_ids(&fixture.fixture.conn, run.run_id);
+                let literal = "member output loss λ";
+                let (status, stdout, stderr) =
+                    external_member_invoke(fixture, "prompt", literal, true, true, None, outer);
+                assert_eq!(status.code(), Some(101), "{status}; {stderr}");
+                assert!(stdout.is_empty());
+                assert!(
+                    stderr.contains("stdout") && stderr.contains("Broken pipe"),
+                    "{stderr}"
+                );
+                let ids = external_member_input_ids(&fixture.fixture.conn, run.run_id);
+                assert_eq!(ids.len(), before.len() + 1);
+                let row = storage::get_input(&fixture.fixture.conn, *ids.last().unwrap()).unwrap();
+                assert_eq!(row.state, storage::InputState::Accepted);
+                let (status, stdout, stderr) =
+                    external_member_invoke(fixture, "show", "", true, false, None, outer);
+                assert!(status.success(), "{status}; {stderr}");
+                assert!(
+                    external_member_json(&stdout)["runtime"]["unresolved_input_ids"]
+                        .as_array()
+                        .unwrap()
+                        .contains(&json!(row.input_id))
+                );
+                let (status, stdout, stderr) = external_member_invoke(
+                    fixture,
+                    "input_show",
+                    "",
+                    true,
+                    false,
+                    Some(row.input_id),
+                    outer,
+                );
+                assert!(status.success(), "{status}; {stderr}");
+                let discovered = external_member_json(&stdout);
+                assert_eq!(discovered["input"]["input_id"], row.input_id);
+                assert_eq!(discovered["input"]["operation_key"], row.operation_key);
+                assert_eq!(discovered["input"]["state"], "accepted");
+                let member =
+                    crate::broker::get_member(&fixture.fixture.conn, run.member_id, run.fleet_id)
+                        .unwrap()
+                        .unwrap();
+                let placement = member.placement.unwrap();
+                let settings = Settings::for_database(
+                    std::path::Path::new(fixture.fixture.conn.path().unwrap()),
+                    Some("tmux"),
+                );
+                let request = SubmitInput {
+                    operation_key: row.operation_key.clone(),
+                    input_kind: row.kind,
+                    message_id: row.message_id,
+                    literal: literal.into(),
+                };
+                let result = submit_wrapped_input(
+                    &mut fixture.fixture.conn,
+                    &settings,
+                    &run,
+                    &placement,
+                    &request,
+                    Deadline::until(outer),
+                )
+                .unwrap();
+                assert_eq!(result.status, SubmissionStatus::Accepted);
+                assert_eq!(result.input_id, Some(row.input_id));
+                assert_eq!(
+                    storage::get_input(&fixture.fixture.conn, row.input_id).unwrap(),
+                    row
+                );
+                crate::runtime::runner::service::test_support::input_service::wait_input_service_record(fixture, literal, outer);
+                crate::runtime::runner::service::test_support::input_service::input_service_barrier(
+                    fixture, outer,
+                );
+                assert_eq!(
+                crate::runtime::runner::service::test_support::input_service::input_service_records(fixture)
                     .iter()
                     .filter(|record| record["line"] == literal)
                     .count(),
                 1
             );
-        });
+            },
+        );
     }
 
     fn fixture() -> (tempfile::TempDir, Connection, Settings, i64, i64, i64) {

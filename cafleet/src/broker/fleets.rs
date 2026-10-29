@@ -201,7 +201,7 @@ mod tests {
     use crate::broker;
     use crate::broker::members::test_support::register;
     use crate::db::test_support::migrated_conn;
-    use crate::input::test_support::guarded_delete_fleet;
+    use crate::deletion::test_support::guarded_delete_fleet;
 
     fn row_count(conn: &Connection, table: &str) -> i64 {
         conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {

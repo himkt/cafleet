@@ -162,7 +162,7 @@ mod tests {
 
     use super::*;
     use crate::broker::runtime::RunStatus;
-    use crate::runtime::runner_tests::Fixture;
+    use crate::runtime::runner::test_support::Fixture;
     use rusqlite::params;
     use serde_json::json;
 

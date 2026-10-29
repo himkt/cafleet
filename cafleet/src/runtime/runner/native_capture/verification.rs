@@ -3,6 +3,7 @@ use crate::broker::runtime as storage;
 use crate::coding_agent::CodingAgent;
 use crate::config::Settings;
 use crate::multiplexer::{CommandRunner, MultiplexerContext, resolve_multiplexer};
+use crate::runtime::runner::test_support::sha256_hex;
 use crate::runtime::system::SystemRunner;
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
@@ -940,8 +941,7 @@ impl LaunchHost for CaptureVerificationLaunchHost<'_> {
         let child = vec![
             argv[0].clone(),
             "--exact".into(),
-            crate::runtime::runner_tests::native_capture::native_capture_service_child_path()
-                .into(),
+            native_capture_service_child_path().into(),
             "--ignored".into(),
             "--nocapture".into(),
             "--test-threads=1".into(),
@@ -1592,4 +1592,188 @@ fn native_capture_prepare_start_driver() {
         "absolute capture configuration required"
     );
     run_native_capture_prepare_start(config).expect("actual native prepare/start/cleanup outcome");
+}
+
+mod tests {
+    use std::time::Duration;
+
+    use nix::sys::signal::{Signal, kill};
+    use nix::unistd::Pid;
+    use serde_json::Value;
+
+    use super::*;
+    use crate::runtime::runner::service::test_support::*;
+    #[test]
+    fn runner_batch2_capture_ignored_entry_requires_explicit_configuration_before_launching() {
+        let directory = tempfile::Builder::new()
+            .prefix(".p194-entry-")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let output_path = directory.path().join("entry-output");
+        let output = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&output_path)
+            .unwrap();
+        let mut child = crate::runtime::system::test_support::TestChild::new(
+            std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    super::native_capture_service_child_path(),
+                    "--ignored",
+                    "--test-threads=1",
+                ])
+                .env_remove("CAFLEET_NATIVE_CAPTURE_CONFIG")
+                .stdout(std::process::Stdio::from(output.try_clone().unwrap()))
+                .stderr(std::process::Stdio::from(output))
+                .spawn()
+                .unwrap(),
+        );
+        let until = Instant::now() + Duration::from_secs(3);
+        let status = child.poll_until(until - Duration::from_secs(1)).unwrap();
+        if status.is_none() {
+            child.terminate_until(until);
+        }
+        assert!(
+            !status
+                .expect("configuration-free ignored entry completes within its bound")
+                .success()
+        );
+        assert!(std::fs::metadata(&output_path).unwrap().len() <= 65536);
+        let bytes = std::fs::read(&output_path).unwrap();
+        let combined = String::from_utf8_lossy(&bytes);
+        assert!(
+            combined.contains("CAFLEET_NATIVE_CAPTURE_CONFIG"),
+            "{combined}"
+        );
+    }
+    use crate::runtime::runner::service::test_support::observation_services::{
+        capture, health, private_write, wait_until,
+    };
+    #[test]
+    fn runner_collector_f3_common_service_arms_on_actual_resize_and_preserves_trigger_geometry_and_sequence()
+     {
+        let mut fixture = ServiceFixture::configured(false, |fixture, spec| {
+            capture(fixture, spec);
+            private_write(
+                &fixture._dir.path().join("collector-review-entry"),
+                b"resize",
+            );
+        });
+        let started = fixture.start_running();
+        let before = health(&mut fixture)["output_seq"].as_u64().unwrap();
+        rustix::termios::tcsetwinsize(
+            &fixture.master,
+            rustix::termios::Winsize {
+                ws_row: 25,
+                ws_col: 90,
+                ws_xpixel: 0,
+                ws_ypixel: 0,
+            },
+        )
+        .unwrap();
+        assert!(fixture.process.as_ref().unwrap().matches().unwrap());
+        kill(
+            Pid::from_raw(i32::try_from(fixture.child.id()).unwrap()),
+            Signal::SIGWINCH,
+        )
+        .unwrap();
+        let pair_path = fixture
+            .fixture
+            ._dir
+            .path()
+            .join("capture-output/actual-resize-pair.json");
+        wait_until(|| pair_path.exists());
+        let pair: Value = serde_json::from_slice(&std::fs::read(pair_path).unwrap()).unwrap();
+        assert_eq!(pair["status"], "complete");
+        let samples = pair["samples"].as_array().unwrap();
+        assert_eq!(samples.len(), 2);
+        assert_eq!(samples[0]["trigger"], "resize");
+        assert_eq!(samples[1]["trigger"], "timer");
+        for sample in samples {
+            assert_eq!(sample["rows"], 25);
+            assert_eq!(sample["cols"], 90);
+            assert_eq!(sample["screen_seq"], before + 1);
+        }
+        assert!(
+            samples[1]["monotonic_start_ns"]
+                .as_u64()
+                .unwrap()
+                .checked_sub(samples[0]["monotonic_end_ns"].as_u64().unwrap())
+                .unwrap()
+                >= 100_000_000
+        );
+        assert_eq!(pair["source"]["clock"]["kind"], "real");
+        assert_eq!(fixture.health().child, Some(started.child));
+        assert!(fixture.child.try_wait().unwrap().is_none());
+        fixture.assert_manual_io();
+        fixture.finish();
+    }
+}
+
+pub(crate) fn native_capture_service_child_path() -> &'static str {
+    test_path!(native_capture_service_child)
+}
+
+#[test]
+#[ignore = "Director-owned native verification requires an explicit private configuration"]
+fn native_capture_service_child() {
+    use std::io::{Read, Write};
+    use std::os::unix::fs::OpenOptionsExt;
+    let path = std::env::var_os("CAFLEET_NATIVE_CAPTURE_CONFIG")
+        .expect("CAFLEET_NATIVE_CAPTURE_CONFIG is required for explicit native verification");
+    let path = std::path::Path::new(&path);
+    assert!(
+        path.is_absolute(),
+        "capture configuration path must be absolute"
+    );
+    let config = read_native_capture_config(path, &NativeCaptureLimits::default()).unwrap();
+    let bounded_digest = |path: &std::path::Path| {
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(nix::libc::O_NOFOLLOW)
+            .open(path)
+            .unwrap();
+        let mut bytes = Vec::new();
+        file.take(65537).read_to_end(&mut bytes).unwrap();
+        assert!(
+            bytes.len() <= 65536,
+            "bounded private outcome evidence required"
+        );
+        sha256_hex(&bytes)
+    };
+    let config_sha256 = bounded_digest(path);
+    let producer_sha256 = bounded_digest(&config.producer_manifest_path);
+    let process = ProcessIdentity::current().unwrap();
+    let result = run_native_capture_verification(path);
+    let value = match &result {
+        Ok(status) => serde_json::json!({"schema_version":1,"config_sha256":config_sha256,
+            "run_id":config.expected_run_id,"launch_nonce":config.expected_launch_nonce,
+            "producer_sha256":producer_sha256,"process":process,"result":"ok","status":status,"error":null}),
+        Err(cause) => serde_json::json!({"schema_version":1,"config_sha256":config_sha256,
+            "run_id":config.expected_run_id,"launch_nonce":config.expected_launch_nonce,
+            "producer_sha256":producer_sha256,"process":process,"result":"error","status":null,
+            "error":cause.message().chars().take(2048).collect::<String>()}),
+    };
+    let bytes = serde_json::to_vec(&value).unwrap();
+    assert!(bytes.len() <= 16 * 1024);
+    let target = path.with_extension("service-outcome.json");
+    let temporary = path.with_extension("service-outcome.pending");
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(nix::libc::O_NOFOLLOW)
+        .open(&temporary)
+        .unwrap();
+    file.write_all(&bytes).unwrap();
+    file.sync_all().unwrap();
+    std::fs::hard_link(&temporary, &target).unwrap();
+    std::fs::remove_file(&temporary).unwrap();
+    match result {
+        Ok(0) => {}
+        Ok(status) => std::process::exit(status),
+        Err(cause) => panic!("native capture service returned an error: {cause}"),
+    }
 }

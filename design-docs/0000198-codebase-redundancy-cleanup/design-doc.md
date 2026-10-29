@@ -1,7 +1,7 @@
 # Codebase redundancy cleanup
 
 **Status**: Approved
-**Progress**: 25/56 tasks complete
+**Progress**: 30/56 tasks complete
 **Last Updated**: 2026-10-29
 
 ## Overview
@@ -589,11 +589,11 @@ Each step is one commit and leaves `mise //cafleet:test` and `mise //cafleet:lin
 
 ### Step 6: Dissolve `runtime/runner_tests/`
 
-- [ ] Move `Fixture` to `runner/mod.rs` `test_support`, `OwnedChild` to `system.rs` `TestChild`, and the control-service harness to `service.rs` `test_support` with final names; delete the `runtime/mod.rs` re-export block <!-- completed: -->
-- [ ] Move `creation.rs`, `control_service.rs`, `input_service*`, `observation_*` and `review_failures.rs` tests to their targets <!-- completed: -->
-- [ ] Create `deletion.rs` (INP-38) and move `fleet_deletion.rs` and `recovery/deletion.rs` tests into it with the merged deletion `Host` <!-- completed: -->
-- [ ] Move the recovery fixture to `recovery.rs` `test_support` and every `recovery/*` test to its target; merge `ClockHost`/`UnlinkHost` into `Host` <!-- completed: -->
-- [ ] Replace the blink `.raw` fixture with a generator; delete `runtime/runner_tests/` <!-- completed: -->
+- [x] Move `Fixture` to `runner/mod.rs` `test_support`, `OwnedChild` to `system.rs` `TestChild`, and the control-service harness to `service.rs` `test_support` with final names; delete the `runtime/mod.rs` re-export block <!-- completed: 2026-10-29T16:54 -->
+- [x] Move `creation.rs`, `control_service.rs`, `input_service*`, `observation_*` and `review_failures.rs` tests to their targets <!-- completed: 2026-10-29T16:54 -->
+- [x] Create `deletion.rs` (INP-38) and move `fleet_deletion.rs` and `recovery/deletion.rs` tests into it with the merged deletion `Host` <!-- completed: 2026-10-29T16:54 -->
+- [x] Move the recovery fixture to `recovery.rs` `test_support` and every `recovery/*` test to its target; merge `ClockHost`/`UnlinkHost` into `Host` <!-- completed: 2026-10-29T16:54 -->
+- [x] Replace the blink `.raw` fixture with a generator; delete `runtime/runner_tests/` <!-- completed: 2026-10-29T16:54 -->
 
 ### Step 7: Fold the native-capture harness and delete the tracer
 

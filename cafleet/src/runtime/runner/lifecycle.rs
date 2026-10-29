@@ -568,7 +568,7 @@ mod lifecycle_tests {
 
     use super::*;
     use crate::error::CafleetError;
-    use crate::runtime::runner_tests::Fixture;
+    use crate::runtime::runner::test_support::Fixture;
 
     #[test]
     fn runner_shutdown_clock_anchors_all_work_to_one_original_instant() {

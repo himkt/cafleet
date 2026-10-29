@@ -324,7 +324,7 @@ mod launch_readiness_tests {
     use super::*;
     use crate::error::CafleetError;
     use crate::multiplexer::{AnyMultiplexer, MultiplexerContext, TmuxMultiplexer, recording};
-    use crate::runtime::runner_tests::{Fixture, read_fixture_bytes, write_fixture_bytes};
+    use crate::runtime::runner::test_support::{Fixture, read_fixture_bytes, write_fixture_bytes};
 
     struct Endpoint {
         fixture: Fixture,
@@ -707,7 +707,7 @@ mod input_client_tests {
         InputControlOperation, InputControlReply, InputControlRequest, SubmissionStage,
         SubmissionStatus, SubmitInput,
     };
-    use crate::runtime::runner_tests::Fixture;
+    use crate::runtime::runner::test_support::Fixture;
     use serde_json::json;
     use std::net::Shutdown;
     use std::os::unix::fs::PermissionsExt;

@@ -313,7 +313,7 @@ pub(in crate::runtime::runner) fn encode_input_reply(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::runner_tests::Fixture;
+    use crate::runtime::runner::test_support::Fixture;
     use serde::de::{IgnoredAny, MapAccess, Visitor};
     use serde_json::{Value, json};
     use std::fmt;

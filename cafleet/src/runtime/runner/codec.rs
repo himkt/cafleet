@@ -200,7 +200,7 @@ mod input_frames_tests {
 mod control_codec_tests {
     use super::*;
     use crate::broker::runtime as storage;
-    use crate::runtime::runner_tests::{Fixture, read_fixture_bytes, write_fixture_bytes};
+    use crate::runtime::runner::test_support::{Fixture, read_fixture_bytes, write_fixture_bytes};
     use serde_json::{Value, json};
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixListener;

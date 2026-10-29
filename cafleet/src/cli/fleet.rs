@@ -98,7 +98,7 @@ pub fn run(
             Ok(())
         }
         FleetCommand::Delete { fleet_id, json } => {
-            let result = crate::input::delete_fleet(conn, settings, fleet_id, deadline)?;
+            let result = crate::deletion::delete_fleet(conn, settings, fleet_id, deadline)?;
             emit(json, &presentation::deleted_fleet(&result), || {
                 format_fleet_delete(&result)
             });

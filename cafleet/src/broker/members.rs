@@ -283,7 +283,7 @@ mod tests {
     use crate::broker::fleets::test_support::create_fleet_fixture;
     use crate::broker::records::MemberStatus;
     use crate::db::test_support::migrated_conn;
-    use crate::input::test_support::guarded_delete_fleet;
+    use crate::deletion::test_support::guarded_delete_fleet;
 
     #[test]
     fn registration_and_placement_updates_preserve_required_fields_and_valid_absence() {

@@ -830,7 +830,7 @@ mod mechanisms_tests {
     use std::time::{Duration, Instant};
 
     use super::*;
-    use crate::runtime::runner_tests::Fixture;
+    use crate::runtime::runner::test_support::Fixture;
 
     struct OwnedPty {
         session: PtySession,

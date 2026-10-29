@@ -1032,24 +1032,14 @@ mod permission_response_contracts {
 
     const OUTPUT_ARRIVING: &str = "terminal output still arriving";
 
-    // Captured from the blocked Claude Code 2.1.302 form: eleven status-dot blink writes, each
-    // moving the cursor home, to the bottom row and back to the form without touching form rows.
-    const CLAUDE_BLINK: &[u8] =
-        include_bytes!("../runner_tests/fixtures/claude-2.1.302-blocked-form-blink-1.raw");
-
-    fn blink_writes() -> Vec<&'static [u8]> {
-        let starts = CLAUDE_BLINK
-            .windows(4)
-            .enumerate()
-            .filter(|(_, window)| *window == b"\x1b[H\r")
-            .map(|(index, _)| index)
-            .collect::<Vec<_>>();
-        assert_eq!(starts.first(), Some(&0));
-        starts
-            .iter()
-            .enumerate()
-            .map(|(index, &start)| {
-                &CLAUDE_BLINK[start..starts.get(index + 1).copied().unwrap_or(CLAUDE_BLINK.len())]
+    // The blocked Claude Code 2.1.302 form's eleven status-dot blink writes: each moves the
+    // cursor home, to the bottom row and back to the form without touching form rows.
+    fn blink_writes() -> Vec<Vec<u8>> {
+        (0..11)
+            .map(|index| {
+                let dot = if index % 2 == 0 { "●" } else { " " };
+                format!("\x1b[H\r\x1b[9B\x1b[38;5;246m{dot}\x1b[39m\x1b[80;1H\x1b[23;2H")
+                    .into_bytes()
             })
             .collect()
     }
@@ -1178,16 +1168,17 @@ mod permission_response_contracts {
 
     #[test]
     fn permission_claude_blink_cursor_transit_keeps_generation_and_token_and_admits_respond() {
-        assert_eq!(CLAUDE_BLINK.len(), 441);
+        let writes = blink_writes();
+        assert_eq!(writes.len(), 11);
+        let captured = writes.concat();
+        assert_eq!(captured.len(), 441);
         assert_eq!(
-            Sha256::digest(CLAUDE_BLINK)
+            Sha256::digest(&captured)
                 .iter()
                 .map(|byte| format!("{byte:02x}"))
                 .collect::<String>(),
             "014fe1213f56da769340abaf3cb46961c682a58d16fbccd7e16e62ca8e582e9e"
         );
-        let writes = blink_writes();
-        assert_eq!(writes.len(), 11);
         with_claude_inspection(|h, _, _| {
             let ids = claude_blocked_form(h);
             let inspected = inspect(h, ids);
@@ -1230,7 +1221,7 @@ mod permission_response_contracts {
 
     #[test]
     fn permission_claude_transit_that_rewrites_a_form_row_revokes_the_token() {
-        let blink = blink_writes()[0];
+        let blink = &blink_writes()[0];
         let landing = b"\x1b[9B";
         let at = blink
             .windows(landing.len())
@@ -7088,8 +7079,9 @@ mod contract_tests {
         use crate::broker::runtime::{self as storage, RunStatus};
         use crate::coding_agent::ProfileCatalog;
         use crate::error::CafleetError;
+        use crate::runtime::runner::test_support::Fixture;
         use crate::runtime::runner::*;
-        use crate::runtime::runner_tests::{Fixture, owned_child::OwnedChild};
+        use crate::runtime::system::test_support::TestChild;
         use std::collections::VecDeque;
         use std::io::{self, ErrorKind};
         use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
@@ -7178,14 +7170,14 @@ mod contract_tests {
         }
 
         struct NativeChild {
-            child: OwnedChild,
+            child: TestChild,
             until: Instant,
         }
 
         impl NativeChild {
             fn spawn(until: Instant) -> Self {
                 Self {
-                    child: OwnedChild::new(
+                    child: TestChild::new(
                         Command::new("/bin/cat")
                             .stdin(Stdio::piped())
                             .stdout(Stdio::null())
@@ -7522,8 +7514,8 @@ mod contract_tests {
         use crate::broker::runtime as storage;
         use crate::coding_agent::ProfileCatalog;
         use crate::error::CafleetError;
+        use crate::runtime::runner::test_support::Fixture;
         use crate::runtime::runner::*;
-        use crate::runtime::runner_tests::Fixture;
         use std::collections::VecDeque;
         use std::io;
         use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
@@ -8339,7 +8331,7 @@ mod contract_tests {
 
         pub(in crate::runtime::runner::input) mod support {
             use super::*;
-            use crate::runtime::runner_tests::owned_child::OwnedChild;
+            use crate::runtime::system::test_support::TestChild;
             use std::process::{Command, Stdio};
             use std::sync::Mutex;
 
@@ -8547,7 +8539,7 @@ mod contract_tests {
             }
 
             struct Child {
-                native: OwnedChild,
+                native: TestChild,
                 until: Instant,
             }
             impl Drop for Child {
@@ -8652,7 +8644,7 @@ mod contract_tests {
                     .unwrap();
                     writer.set_deadline(until);
                     let child = Child {
-                        native: OwnedChild::new(
+                        native: TestChild::new(
                             Command::new("/bin/cat")
                                 .stdin(Stdio::piped())
                                 .stdout(Stdio::null())

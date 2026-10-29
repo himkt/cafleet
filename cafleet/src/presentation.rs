@@ -148,3 +148,78 @@ pub(crate) fn permission_inspection(row: &crate::runtime::runner::PermissionInsp
         "capability_reason":row.capability_reason,"supported_decisions":row.supported_decisions,"request_token":row.request_token,
         "output_seq":row.output_seq,"evidence":row.evidence,"missing_evidence":row.missing_evidence}})
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use crate::broker::runtime::RunStatus;
+    use crate::runtime::runner::{RecoveryOutcome, RecoveryReport};
+    #[test]
+    fn runner_recovery_presentation_pins_ordered_json_outcomes_and_exact_cleanup_text() {
+        for (outcome, wire, status) in [
+            (RecoveryOutcome::Recovered, "recovered", RunStatus::Lost),
+            (
+                RecoveryOutcome::Recovering,
+                "recovering",
+                RunStatus::Recovering,
+            ),
+            (
+                RecoveryOutcome::LiveOrUnreachable,
+                "live_or_unreachable",
+                RunStatus::Running,
+            ),
+            (
+                RecoveryOutcome::OperatorReconciliationRequired,
+                "operator_reconciliation_required",
+                RunStatus::Starting,
+            ),
+        ] {
+            let diagnostics = vec![
+                json!("bounded diagnostic"),
+                json!({"source":"operator_via_director","evidence_ref":"audit:termination"}),
+            ];
+            let report = RecoveryReport {
+                member_id: 7,
+                run_id: 11,
+                outcome,
+                replayed_count: 2,
+                inbox_count: 4,
+                archived_count: 0,
+                status,
+                cleanup_diagnostics: diagnostics.clone(),
+            };
+            let value = crate::presentation::runtime_recovery(&report);
+            assert_eq!(
+                value
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+                vec![
+                    "member_id",
+                    "run_id",
+                    "outcome",
+                    "replayed_count",
+                    "inbox_count",
+                    "archived_count",
+                    "status",
+                    "cleanup_diagnostics"
+                ]
+            );
+            assert_eq!(
+                value,
+                json!({"member_id":7,"run_id":11,"outcome":wire,"replayed_count":2,"inbox_count":4,"archived_count":0,"status":status.as_str(),"cleanup_diagnostics":diagnostics})
+            );
+            assert_eq!(
+                crate::output::format_runtime_recovery(&report),
+                format!(
+                    "Recovery: member=7 run=11 outcome={wire} status={} replayed=2 inbox=4 archived=0\nCleanup: bounded diagnostic\nCleanup: {}",
+                    status.as_str(),
+                    diagnostics[1]
+                )
+            );
+        }
+    }
+}

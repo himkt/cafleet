@@ -393,7 +393,7 @@ pub(super) mod tests {
     use crate::broker::runtime::{self as storage, *};
     use crate::config::Settings;
     use crate::input::{Deadline, PaneLock, with_database_budget};
-    use crate::runtime::runner_tests::Fixture;
+    use crate::runtime::runner::test_support::Fixture;
     use rusqlite::Connection;
     use serde_json::json;
     use std::os::unix::fs::MetadataExt;

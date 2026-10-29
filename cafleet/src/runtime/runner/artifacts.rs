@@ -525,7 +525,7 @@ mod tests {
     use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
 
     use super::*;
-    use crate::runtime::runner_tests::Fixture;
+    use crate::runtime::runner::test_support::Fixture;
     use rusqlite::params;
 
     #[test]
@@ -940,6 +940,197 @@ mod tests {
                 "{missing}"
             );
             assert!(!artifacts.paths.descriptor.exists());
+        }
+    }
+
+    mod lock_transfer {
+        use super::*;
+        use crate::broker::runtime::{Reachability, RunStatus};
+
+        #[test]
+        fn runner_recovery_lock_transfer_commits_fresh_epochs_and_preserves_first_origin_status() {
+            let mut fixture = Fixture::new();
+            let _artifacts = fixture.artifacts();
+            let lock = RunLock::acquire(&fixture.conn, &fixture.run.owner())
+                .unwrap()
+                .unwrap();
+            let original = fixture.run.clone();
+            let process = ProcessIdentity::current().unwrap();
+            for offset in 1..=2 {
+                let owner = lock
+                    .transfer_to_reconciler_with_deadline(
+                        &mut fixture.conn,
+                        &fixture.run,
+                        process.clone(),
+                        Instant::now() + Duration::from_secs(1),
+                    )
+                    .unwrap();
+                fixture.run = storage::get_run(&fixture.conn, original.run_id).unwrap();
+                assert_eq!(owner, fixture.run.owner());
+                assert_eq!(fixture.run.owner_epoch, original.owner_epoch + offset);
+                assert_eq!(fixture.run.owner_kind, OwnerKind::Reconciler);
+                assert_eq!(fixture.run.status, RunStatus::Recovering);
+                assert_eq!(fixture.run.recovery_origin_status, Some(original.status));
+                assert_eq!(fixture.run.owner_pid, process.pid);
+                assert_eq!(fixture.run.owner_start_identity, process.start_identity);
+                assert_eq!(
+                    fixture.run.runtime_dir_identity_json,
+                    original.runtime_dir_identity_json
+                );
+                assert_eq!(
+                    fixture.run.run_lock_identity_json,
+                    original.run_lock_identity_json
+                );
+                lock.validate(&fixture.conn, &owner).unwrap();
+            }
+            assert!(
+                storage::reserve_event_sequences(&mut fixture.conn, &original.owner()).is_err()
+            );
+        }
+
+        #[test]
+        fn runner_recovery_lock_transfer_rejects_every_changed_stable_expected_identity() {
+            for changed in [
+                "epoch",
+                "owner",
+                "nonce",
+                "backend",
+                "director",
+                "runtime_path",
+                "directory",
+                "lock",
+                "runner",
+                "child",
+                "database",
+            ] {
+                let mut fixture = Fixture::new();
+                let _artifacts = fixture.artifacts();
+                let lock = RunLock::acquire(&fixture.conn, &fixture.run.owner())
+                    .unwrap()
+                    .unwrap();
+                let before = fixture.run.clone();
+                let mut expected = before.clone();
+                match changed {
+                    "epoch" => expected.owner_epoch += 1,
+                    "owner" => expected.owner_start_identity.push_str("-foreign"),
+                    "nonce" => expected.launch_nonce = "b".repeat(64),
+                    "backend" => expected.backend = "claude".into(),
+                    "director" => expected.director_member_id += 1,
+                    "runtime_path" => expected.runtime_path.push_str("-foreign"),
+                    "directory" => {
+                        expected.runtime_dir_identity_json = Some(json!({"device":0,"inode":0}))
+                    }
+                    "lock" => expected.run_lock_identity_json = Some(json!({"device":0,"inode":0})),
+                    "runner" => {
+                        expected.runner_pid = Some(1);
+                        expected.runner_start_identity = Some("foreign".into());
+                    }
+                    "child" => {
+                        expected.child_pid = Some(1);
+                        expected.child_start_identity = Some("foreign".into());
+                    }
+                    "database" => {
+                        expected.database_identity_json["instance_id"] = json!("0".repeat(32))
+                    }
+                    _ => unreachable!(),
+                }
+                assert!(
+                    lock.transfer_to_reconciler_with_deadline(
+                        &mut fixture.conn,
+                        &expected,
+                        ProcessIdentity::current().unwrap(),
+                        Instant::now() + Duration::from_secs(1),
+                    )
+                    .is_err(),
+                    "{changed}"
+                );
+                assert_eq!(
+                    storage::get_run(&fixture.conn, before.run_id).unwrap(),
+                    before,
+                    "{changed}"
+                );
+                lock.validate(&fixture.conn, &before.owner()).unwrap();
+            }
+        }
+
+        #[test]
+        fn runner_recovery_lock_transfer_ignores_mutable_health_diagnostics_and_sequence_snapshots()
+        {
+            let mut fixture = Fixture::new();
+            let _artifacts = fixture.artifacts();
+            let lock = RunLock::acquire(&fixture.conn, &fixture.run.owner())
+                .unwrap()
+                .unwrap();
+            let mut expected = fixture.run.clone();
+            expected.last_health_at = Some("2000-01-01T00:00:00Z".into());
+            expected.reachability = Reachability::Suspect;
+            expected.cleanup_diagnostics_json = Some(json!(["old bounded diagnostic"]));
+            expected.event_seq_reserved_through += 256;
+            expected.observation_gap_count += 1;
+            lock.transfer_to_reconciler_with_deadline(
+                &mut fixture.conn,
+                &expected,
+                ProcessIdentity::current().unwrap(),
+                Instant::now() + Duration::from_secs(1),
+            )
+            .unwrap();
+            let current = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+            assert_eq!(
+                current.event_seq_reserved_through,
+                fixture.run.event_seq_reserved_through
+            );
+            assert_eq!(
+                current.observation_gap_count,
+                fixture.run.observation_gap_count
+            );
+        }
+
+        #[test]
+        fn runner_recovery_lock_transfer_commit_failure_returns_no_uncommitted_owner() {
+            let mut fixture = Fixture::new();
+            let _artifacts = fixture.artifacts();
+            let lock = RunLock::acquire(&fixture.conn, &fixture.run.owner())
+                .unwrap()
+                .unwrap();
+            fixture.conn.commit_hook(Some(|| true)).unwrap();
+            let result = lock.transfer_to_reconciler_with_deadline(
+                &mut fixture.conn,
+                &fixture.run,
+                ProcessIdentity::current().unwrap(),
+                Instant::now() + Duration::from_secs(1),
+            );
+            fixture.conn.commit_hook(None::<fn() -> bool>).unwrap();
+            assert!(result.is_err());
+            assert_eq!(
+                storage::get_run(&fixture.conn, fixture.run.run_id).unwrap(),
+                fixture.run
+            );
+            lock.validate(&fixture.conn, &fixture.run.owner()).unwrap();
+        }
+
+        #[test]
+        fn runner_recovery_lock_transfer_contention_uses_the_original_absolute_deadline() {
+            let mut fixture = Fixture::new();
+            let _artifacts = fixture.artifacts();
+            let lock = RunLock::acquire(&fixture.conn, &fixture.run.owner())
+                .unwrap()
+                .unwrap();
+            let writer = Connection::open(fixture.conn.path().unwrap()).unwrap();
+            writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+            let started = Instant::now();
+            let result = lock.transfer_to_reconciler_with_deadline(
+                &mut fixture.conn,
+                &fixture.run,
+                ProcessIdentity::current().unwrap(),
+                started + Duration::from_millis(80),
+            );
+            assert!(result.is_err());
+            assert!(started.elapsed() < Duration::from_millis(750));
+            writer.execute_batch("ROLLBACK").unwrap();
+            assert_eq!(
+                storage::get_run(&fixture.conn, fixture.run.run_id).unwrap(),
+                fixture.run
+            );
         }
     }
 }

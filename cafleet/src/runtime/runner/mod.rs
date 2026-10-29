@@ -16,7 +16,7 @@ mod observation;
 pub(crate) use observation::*;
 mod outbox;
 pub(crate) use outbox::*;
-mod recovery;
+pub(crate) mod recovery;
 pub(crate) use recovery::*;
 pub(crate) use writer::{EventWriter, InertWriterHooks, WriterBoundary, WriterHooks};
 mod episodes;
@@ -31,7 +31,7 @@ mod creation;
 mod health;
 mod lifecycle;
 mod process;
-mod service;
+pub(crate) mod service;
 mod terminal;
 mod transport;
 mod writer;
@@ -121,5 +121,171 @@ impl SpawnSpec {
             "evidence policy must be an object",
         )?;
         self.size.validate()
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use rusqlite::Connection;
+    use serde_json::json;
+    use sha2::{Digest, Sha256};
+    use tempfile::TempDir;
+
+    use super::*;
+    use crate::broker::fleets::test_support::create_fleet_fixture;
+    use crate::broker::members::test_support::placement;
+    use crate::broker::runtime::{self as storage, *};
+    use crate::db::test_support::migrated_conn;
+    pub(crate) fn read_fixture_bytes(
+        stream: &mut std::os::unix::net::UnixStream,
+        mut bytes: &mut [u8],
+        deadline: std::time::Instant,
+    ) {
+        use std::io::Read;
+        while !bytes.is_empty() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "fixture request read timed out"
+            );
+            match stream.read(bytes) {
+                Ok(0) => panic!("actual health client closed an incomplete request"),
+                Ok(count) => bytes = &mut bytes[count..],
+                Err(cause)
+                    if matches!(
+                        cause.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                    ) =>
+                {
+                    std::thread::sleep(
+                        std::time::Duration::from_millis(2)
+                            .min(deadline.saturating_duration_since(std::time::Instant::now())),
+                    );
+                }
+                Err(cause) => panic!("fixture request read failed: {cause}"),
+            }
+        }
+    }
+
+    pub(crate) fn write_fixture_bytes(
+        stream: &mut std::os::unix::net::UnixStream,
+        mut bytes: &[u8],
+        deadline: std::time::Instant,
+    ) {
+        use std::io::Write;
+        while !bytes.is_empty() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "fixture reply write timed out"
+            );
+            match stream.write(bytes) {
+                Ok(0) => panic!("fixture reply write made no progress"),
+                Ok(count) => bytes = &bytes[count..],
+                Err(cause)
+                    if matches!(
+                        cause.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                    ) =>
+                {
+                    std::thread::sleep(
+                        std::time::Duration::from_millis(2)
+                            .min(deadline.saturating_duration_since(std::time::Instant::now())),
+                    );
+                }
+                Err(cause) => panic!("fixture reply write failed: {cause}"),
+            }
+        }
+    }
+
+    pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
+        let mut encoded = String::with_capacity(64);
+        for byte in Sha256::digest(bytes) {
+            for nibble in [byte >> 4, byte & 0x0f] {
+                encoded.push(char::from(b"0123456789abcdef"[usize::from(nibble)]));
+            }
+        }
+        encoded
+    }
+
+    pub(crate) struct Fixture {
+        pub(crate) _dir: TempDir,
+        pub(crate) conn: Connection,
+        pub(crate) run: RunRecord,
+    }
+
+    impl Fixture {
+        pub(crate) fn new() -> Self {
+            let dir = tempfile::Builder::new()
+                .prefix(".p194-")
+                .tempdir_in("/tmp")
+                .unwrap();
+            let mut conn = migrated_conn(&dir);
+            let (fleet, director) = create_fleet_fixture(&mut conn, "runner-contract");
+            let mut placement = placement(Some("%2"));
+            placement.coding_agent = "codex".into();
+            let member = crate::broker::register_member(
+                &mut conn,
+                fleet,
+                "worker",
+                "assignment",
+                Some(&placement),
+            )
+            .unwrap()
+            .member_id;
+            let process = ProcessIdentity::current().unwrap();
+            let identity = storage::database_identity(&conn).unwrap();
+            let new = NewRun {
+                member_id: member,
+                fleet_id: fleet,
+                director_member_id: director,
+                backend: "codex".into(),
+                database_identity_json: identity.clone(),
+                launch_nonce: "a".repeat(64),
+                runtime_path: RuntimePaths::for_run(&identity, 1)
+                    .unwrap()
+                    .run_dir
+                    .to_str()
+                    .unwrap()
+                    .into(),
+                requested_mode: None,
+                resolved_mode: "approve-for-me".into(),
+                mode_source: ModeSource::Default,
+                permission_argv_json: json!(["--approve-for-me"]),
+                event_evidence: EventEvidence::Metadata,
+                native_version: None,
+                profile_version: None,
+                profile_match: None,
+                coverage: Coverage::Unknown,
+                owner_pid: process.pid,
+                owner_start_identity: process.start_identity,
+            };
+            let run = storage::create_run(&mut conn, &new).unwrap();
+            Self {
+                _dir: dir,
+                conn,
+                run,
+            }
+        }
+
+        pub(crate) fn artifacts(&mut self) -> RunArtifacts {
+            let artifacts = RunArtifacts::create(&mut self.conn, self.run.run_id).unwrap();
+            self.run = storage::get_run(&self.conn, self.run.run_id).unwrap();
+            artifacts
+        }
+
+        pub(crate) fn spec(&self) -> SpawnSpec {
+            SpawnSpec {
+                argv: vec![
+                    "/usr/bin/env".into(),
+                    "literal assignment 世界 '$x' `text`".into(),
+                ],
+                cwd: self._dir.path().to_path_buf(),
+                environment: vec![(
+                    "CAFLEET_DATABASE_URL".into(),
+                    format!("sqlite:///{}", self.conn.path().unwrap()),
+                )],
+                evidence_policy: json!({"mode":"metadata"}),
+                size: TerminalSize { rows: 24, cols: 80 },
+            }
+        }
     }
 }
