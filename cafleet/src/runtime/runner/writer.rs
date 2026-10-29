@@ -79,6 +79,13 @@ impl Mailbox {
         let local = Instant::now() + Duration::from_millis(100);
         self.deadline.map_or(local, |until| until.min(local))
     }
+    // Compaction validates every retained frame in one attempt and each retry repeats that
+    // whole pass, so it gets a budget wider than one work slice; otherwise an outbox whose
+    // validation outgrows the slice could never compact.
+    fn compaction_deadline(&self) -> Instant {
+        let local = Instant::now() + Duration::from_secs(1);
+        self.deadline.map_or(local, |until| until.min(local))
+    }
     fn success(&mut self) {
         self.diagnostic = None;
     }
@@ -332,7 +339,10 @@ impl EventWriter {
                             }
                         }
                         if compact && queue.is_empty() {
-                            let until = observed.lock().expect("writer mailbox").work_deadline();
+                            let until = observed
+                                .lock()
+                                .expect("writer mailbox")
+                                .compaction_deadline();
                             spool.compact_committed(&mut conn, &run.owner(), until)?;
                             compact = false;
                             observed.lock().expect("writer mailbox").success();
