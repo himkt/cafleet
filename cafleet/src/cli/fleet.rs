@@ -7,7 +7,7 @@ use crate::broker;
 use crate::coding_agent::CodingAgent;
 use crate::config::Settings;
 use crate::error::CafleetError;
-use crate::output::format_fleet_create;
+use crate::output::{format_fleet_create, format_fleet_delete};
 use crate::presentation;
 
 #[derive(Subcommand)]
@@ -36,7 +36,7 @@ pub enum FleetCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Deregister a fleet and its members.
+    /// End a fleet's ordinary members, then deregister the fleet.
     Delete {
         #[arg(value_name = "FLEET_ID")]
         fleet_id: i64,
@@ -100,10 +100,7 @@ pub fn run(
         FleetCommand::Delete { fleet_id, json } => {
             let result = crate::input::delete_fleet(conn, settings, fleet_id, deadline)?;
             emit(json, &presentation::deleted_fleet(&result), || {
-                format!(
-                    "Deleted fleet {fleet_id}. Deregistered {} members.",
-                    result.deregistered_count
-                )
+                format_fleet_delete(&result)
             });
             Ok(())
         }

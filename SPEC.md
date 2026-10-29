@@ -122,7 +122,7 @@ Preserve the validation boundary and explicit cause. Missing member/message, ina
 | `doctor` | Diagnose multiplexer, database, agent assets and member permissions | — | yes |
 | `fleet create` | Register the calling Director atomically | — | yes |
 | `fleet list` / `fleet show` | Read fleet registry | `FLEET_ID` for show | yes |
-| `fleet delete` | Deregister a fleet and its members | `FLEET_ID` | yes |
+| `fleet delete` | End a fleet's ordinary members, then deregister the fleet | `FLEET_ID` | yes |
 | `fleet capture` | Capture the active roster once | `FLEET_ID` | yes |
 | `member create` | Register and spawn an independent agent | `--fleet-id` relationship | yes |
 | `member delete` | Kill its owned pane and deregister | `MEMBER_ID` | yes |
@@ -172,7 +172,7 @@ An invalid value for an option with possible values exits 2 with a usage error t
 | `fleet create` | `<fleet-id> director=<member-id>` | Ordered `fleet_id, name, created_at, director`, with Director identity/description/registration/placement |
 | `fleet list` | `FLEET_ID DIRECTOR NAME MEMBERS CREATED_AT` columns | Fleet records |
 | `fleet show` | Fleet row with `deleted_at:` | Fleet including nullable `deleted_at` |
-| `fleet delete` | `Deleted fleet ID. Deregistered N members.` | `{deregistered_count}` |
+| `fleet delete` | `Deleted fleet ID. Deregistered N members.` plus one line per ordinary member | `{fleet_id, deregistered_count, members}` |
 | `message send` | `Message sent.` then envelope | `{message, notification_sent}` |
 | `message poll` | Envelopes, or `No messages found.` | Full record array |
 | `message ack` | `Message acknowledged.` then envelope | `{message}` |
@@ -397,9 +397,15 @@ List non-deleted fleets by descending creation timestamp/fleet ID. Rows retain t
 
 ##### `fleet delete`
 
-`cafleet fleet delete FLEET_ID [--json]` locks active concrete placements in sorted key order, revalidates the placement set, then stamps deletion and deregisters active members/removes placements in one transaction. It retains messages and is idempotent. Close owned member panes individually first.
+`cafleet fleet delete FLEET_ID [--json]` ends every active ordinary member that owns a concrete pane, then deregisters the fleet. It retains messages and is idempotent. One operation-wide five-second deadline bounds the whole command.
 
-One operation-wide five-second deadline bounds lock acquisition, with 50-millisecond retries and set-change restart. Contention leaves state unchanged and exits 1 with `fleet ID pane input remained busy for 5 seconds at member MEMBER_ID; fleet was not deleted.`
+1. **Lock.** Lock every active concrete placement in sorted key order and revalidate the placement set, retrying contention every 50 milliseconds and restarting on a set change. Contention until the deadline leaves every pane and registry row unchanged and exits 1 with `fleet ID pane input remained busy for 5 seconds at member MEMBER_ID; fleet was not deleted.`
+2. **End members.** Under the held locks, end each active ordinary member with a concrete pane, in lock-key order, through the `member delete` procedure: runner shutdown and recovery for a wrapped member, pane close, that member's deregistration, then optional layout restoration. A member without a runtime has its pane closed as well. The root Director's pane stays open.
+3. **Deregister the fleet.** One transaction stamps deletion, deregisters the remaining active members (the root Director and members with a pending or absent placement) and removes their placements.
+
+The first member that cannot be ended stops the command, and the fleet is not deleted. Members ended before it stay deregistered with closed panes; the failing member and every later member keep their registry rows and panes, so `member list` still shows them. The command exits 1 with `fleet ID was not deleted: member MEMBER_ID: CAUSE. Members already deleted: IDS.`, where `CAUSE` is the member deletion cause and `IDS` is a comma-separated id list or `none`. A placement-set change after cleanup began exits 1 with `fleet ID placement or runtime ownership changed during cleanup; fleet was not deleted.` Rerunning `fleet delete` resumes with the members that remain.
+
+On success the text output is `Deleted fleet ID. Deregistered N members.` followed by one `  member MEMBER_ID: PANE_STATUS` line per ordinary member in ascending id. `N` counts every member the command deregistered, root Director included; `PANE_STATUS` takes the `member delete` values `PANE (killed)`, `(pending — no pane)` and `(no placement)`. JSON is ordered `fleet_id, deregistered_count, members`, with one `{member_id, pane_status}` entry per ordinary member in the same order.
 
 ##### `fleet capture`
 
@@ -1201,6 +1207,7 @@ Application errors print as stderr text even with `--json`; the flag selects suc
 | (any id argument) | A non-integer id | The parser's native invalid-value error | 2 | — |
 | `fleet create` | Run outside a supported multiplexer | `Error: cafleet fleet create must be run inside a tmux or herdr session` | 1 | No DB writes |
 | `fleet show` / `fleet delete` | Unknown `FLEET_ID` | `Error: fleet 'X' not found.` | 1 | — |
+| `fleet delete` | An ordinary member cannot be ended | `Error: fleet X was not deleted: member <member-id>: <cause>. Members already deleted: <ids>.` | 1 | Earlier members stay deregistered; rerun resumes |
 | `member create` | Unknown `--fleet-id` | `Error: Fleet '<fleet-id>' not found.` | 2 | Director auto-discovery runs first thing |
 | `member create` | Into a soft-deleted fleet | `Error: fleet X is deleted` | 1 | — |
 | `member create` | The fleet row has no `director_member_id` recorded | `Error: fleet <fleet-id> has no root Director recorded; re-create the fleet with 'cafleet fleet create'.` | 1 | Mid-bootstrap corruption |
@@ -1482,7 +1489,7 @@ When a delivery's lock wait ends, one short read selects the oldest pending mess
 
 Duplicate placements for one pane share the same lock key. Process exit releases ownership. Read-only capture needs no input lock.
 
-Member deletion locks its concrete placement before killing/deregistering. Fleet deletion acquires active placement keys in sorted order and revalidates the placement set in its transaction. Retry contention every 50 milliseconds against one operation-wide five-second monotonic deadline. A changed set releases all guards and restarts within the same deadline. On timeout release all acquired guards and leave registry/panes unchanged.
+Member deletion locks its concrete placement before killing/deregistering. Fleet deletion acquires active placement keys in sorted order and revalidates the placement set before ending its members and again in its final transaction. Retry contention every 50 milliseconds against one operation-wide five-second monotonic deadline. A changed set releases all guards and restarts within the same deadline. On timeout release all acquired guards and leave registry/panes unchanged.
 
 Errors are `member ID's pane input remained busy for 5 seconds; member was not deleted.` and `fleet ID pane input remained busy for 5 seconds at member MEMBER_ID; fleet was not deleted.`
 

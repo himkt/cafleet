@@ -1,5 +1,6 @@
 use crate::broker::records::{
-    CreatedFleet, MemberActivity, MemberRecord, MessageRecord, Placement, RegisteredMember,
+    CreatedFleet, DeletedFleet, MemberActivity, MemberRecord, MessageRecord, Placement,
+    RegisteredMember,
 };
 
 use super::truncate_text;
@@ -55,6 +56,20 @@ pub fn format_fleet_create(fleet: &CreatedFleet) -> String {
     format!("{} director={}", fleet.fleet_id, fleet.director.member_id)
 }
 
+pub fn format_fleet_delete(deleted: &DeletedFleet) -> String {
+    let mut lines = vec![format!(
+        "Deleted fleet {}. Deregistered {} members.",
+        deleted.fleet_id, deleted.deregistered_count
+    )];
+    for member in &deleted.members {
+        lines.push(format!(
+            "  member {}: {}",
+            member.member_id, member.pane_status
+        ));
+    }
+    lines.join("\n")
+}
+
 pub fn format_member(member: &RegisteredMember, placement: &Placement) -> String {
     let pane = placement.mux_pane_id.as_deref().unwrap_or("(pending)");
     format!(
@@ -107,7 +122,7 @@ pub fn format_member_list(members: &[MemberActivity]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::broker::records::{MemberKind, MemberStatus, MessageStatus};
+    use crate::broker::records::{DeletedMember, MemberKind, MemberStatus, MessageStatus};
 
     #[test]
     fn unicode_truncation_changes_only_human_message_bodies() {
@@ -180,5 +195,39 @@ mod tests {
         ] {
             assert_eq!(format_idle(idle), expected);
         }
+    }
+
+    #[test]
+    fn fleet_deletion_reports_every_ordinary_member_outcome_in_text_and_json() {
+        let deleted = DeletedFleet {
+            fleet_id: 4,
+            deregistered_count: 3,
+            members: vec![
+                DeletedMember {
+                    member_id: 6,
+                    pane_status: "%7 (killed)".into(),
+                },
+                DeletedMember {
+                    member_id: 8,
+                    pane_status: "(pending — no pane)".into(),
+                },
+            ],
+        };
+        assert_eq!(
+            format_fleet_delete(&deleted),
+            "Deleted fleet 4. Deregistered 3 members.\n  member 6: %7 (killed)\n  member 8: (pending — no pane)"
+        );
+        assert_eq!(
+            crate::presentation::deleted_fleet(&deleted).to_string(),
+            r#"{"fleet_id":4,"deregistered_count":3,"members":[{"member_id":6,"pane_status":"%7 (killed)"},{"member_id":8,"pane_status":"(pending — no pane)"}]}"#
+        );
+        let empty = DeletedFleet {
+            members: Vec::new(),
+            ..deleted
+        };
+        assert_eq!(
+            format_fleet_delete(&empty),
+            "Deleted fleet 4. Deregistered 3 members."
+        );
     }
 }

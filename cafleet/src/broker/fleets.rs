@@ -2,8 +2,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use super::members::db_err;
 use super::records::{
-    CreatedFleet, DeletedFleet, FleetRecord, FleetSummary, MemberKind, MemberRecord, MemberStatus,
-    Placement,
+    CreatedFleet, FleetRecord, FleetSummary, MemberKind, MemberRecord, MemberStatus, Placement,
 };
 use crate::error::CafleetError;
 use crate::time::{format_utc, now_utc};
@@ -165,10 +164,7 @@ pub fn get_fleet(conn: &Connection, fleet_id: i64) -> Result<Option<FleetRecord>
     fetch_fleet(conn, fleet_id)
 }
 
-pub(crate) fn delete_fleet_rows(
-    conn: &Connection,
-    fleet_id: i64,
-) -> Result<DeletedFleet, CafleetError> {
+pub(crate) fn delete_fleet_rows(conn: &Connection, fleet_id: i64) -> Result<usize, CafleetError> {
     let fleet = fetch_fleet(conn, fleet_id)?
         .ok_or_else(|| CafleetError::App(format!("fleet '{fleet_id}' not found.")))?;
     let now = format_utc(now_utc());
@@ -184,10 +180,7 @@ pub(crate) fn delete_fleet_rows(
         params![now, fleet_id],
     ).map_err(db_err)?;
     conn.execute("DELETE FROM member_placements WHERE member_id IN (SELECT member_id FROM members WHERE fleet_id=?1)", [fleet_id]).map_err(db_err)?;
-    Ok(DeletedFleet {
-        fleet_id,
-        deregistered_count,
-    })
+    Ok(deregistered_count)
 }
 
 #[cfg(test)]
@@ -285,7 +278,7 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let mut conn = migrated_conn(&dir);
             let (fleet, director) = create_fleet(&mut conn, "alpha");
-            let worker = register(&mut conn, fleet, "worker", Some("%2"));
+            let worker = register(&mut conn, fleet, "worker", None);
             let message =
                 broker::send_message(&mut conn, director, worker, "retained history").unwrap();
             let before = get_fleet(&conn, fleet).unwrap();

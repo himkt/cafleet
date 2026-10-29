@@ -1,5 +1,6 @@
 use super::*;
-use crate::input::{Deadline, FleetDeletionHost, PaneLock, delete_fleet_with_host};
+use crate::input::{Deadline, PaneLock, delete_fleet_with_host};
+use crate::multiplexer::PostCloseLayout;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, mpsc};
 
@@ -41,7 +42,7 @@ impl DeletionHost {
         assert_eq!(std::ptr::from_ref(conn).addr(), self.connection);
     }
 }
-impl FleetDeletionHost for DeletionHost {
+impl crate::input::DeletionHost for DeletionHost {
     fn shutdown(
         &mut self,
         conn: &mut Connection,
@@ -130,7 +131,11 @@ impl FleetDeletionHost for DeletionHost {
         }
         Ok(completion)
     }
-    fn close_pane(&mut self, placement: &Placement, deadline: Deadline) -> TestResult<()> {
+    fn close_pane(
+        &mut self,
+        placement: &Placement,
+        deadline: Deadline,
+    ) -> TestResult<PostCloseLayout> {
         assert_eq!(deadline.instant(), self.recovery.deadline);
         self.assert_pane(placement);
         self.calls.push("close");
@@ -149,6 +154,9 @@ impl FleetDeletionHost for DeletionHost {
                 )
                 .unwrap();
         }
+        Ok(PostCloseLayout::None)
+    }
+    fn restore_layout(&mut self, _: PostCloseLayout) -> TestResult<()> {
         Ok(())
     }
 }
@@ -297,7 +305,7 @@ fn runner_recovery_deletion_updates_only_its_proven_target_and_keeps_other_place
         &mut case.fixture.conn,
         case.fixture.run.fleet_id,
         "other-deletion-target",
-        Some("%3"),
+        None,
     );
     case.release();
     let deadline = Deadline::until(Instant::now() + Duration::from_secs(2));

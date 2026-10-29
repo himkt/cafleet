@@ -65,4 +65,4 @@ Read and ACK the completed report, inspect the summary and present it. Record re
 
 ### Teardown
 
-After the authorized outcome, consume the final inbox, delete each ordinary member, verify the root-only roster, delete fleet 7 and confirm it is absent from the active list. Collect the receiver's fleet-deleted closure and native task exit. Member deletion owns pane teardown; fleet deletion owns registry deregistration and retains history. Preserve artifacts and immutable prompt inputs.
+After the authorized outcome, consume the final inbox, delete fleet 7 and confirm it is absent from the active list. Collect the receiver's fleet-deleted closure and native task exit. Fleet deletion ends each ordinary member as member deletion does, closing its pane, then deregisters the registry while keeping the Director's pane and retaining history. Preserve artifacts and immutable prompt inputs.

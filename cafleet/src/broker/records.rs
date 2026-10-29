@@ -128,6 +128,13 @@ pub struct CreatedFleet {
 pub struct DeletedFleet {
     pub fleet_id: i64,
     pub deregistered_count: usize,
+    pub members: Vec<DeletedMember>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeletedMember {
+    pub member_id: i64,
+    pub pane_status: String,
 }
 
 #[cfg(test)]

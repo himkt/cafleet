@@ -125,8 +125,7 @@ A multiplexer failure calls for diagnosis of the calling context and target plac
 
 Use CAFleet primitives within the task's authorized scope.
 
-1. Delete every owned ordinary member with `cafleet member delete <member-id>`. The operation kills its pane and deregisters it while serializing input ownership.
-2. Run `cafleet member list <fleet-id>`; only the root Director should remain. Resolve failed member teardown before proceeding.
-3. Consume the final inbox and complete the workflow's approval gates, then run `cafleet fleet delete <fleet-id>`. This deregisters the Director and registry without killing its pane.
-4. Collect the listener's `fleet_deleted` closure and native task exit, then retire its handle. If retiring reception while the fleet stays live, use verified native cancellation with observed termination, or stop renewal and drain its finite lease. Discard an incomplete final line and preserve pending messages for later reads.
-5. Run `cafleet fleet list` and confirm the fleet is absent. Limit cleanup to fleets covered by this task's authorization.
+1. Consume the final inbox and complete the workflow's approval gates, then run `cafleet fleet delete <fleet-id>`. It ends each remaining ordinary member as `cafleet member delete` does, killing its pane and deregistering it while serializing input ownership, and reports each pane outcome. It then deregisters the Director and registry while leaving the Director's own pane open.
+2. When it reports a member it could not end, the fleet stays registered. Run `cafleet member list <fleet-id>`, resolve that member's cause, then rerun `cafleet fleet delete <fleet-id>`; it resumes with the remaining members.
+3. Collect the listener's `fleet_deleted` closure and native task exit, then retire its handle. If retiring reception while the fleet stays live, use verified native cancellation with observed termination, or stop renewal and drain its finite lease. Discard an incomplete final line and preserve pending messages for later reads.
+4. Run `cafleet fleet list` and confirm the fleet is absent. Limit cleanup to fleets covered by this task's authorization.
