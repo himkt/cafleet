@@ -2366,18 +2366,21 @@ Profile provenance stays exact-version: a profile declares only the native versi
 
 The bundled catalog is embedded in the CAFleet binary together with the native screen fixtures that its declarations cite. Each profile's capabilities rest on accepted native captures of its exact native version.
 
-Claude Code `2.1.302`, profile `claude-2.1.302-default-3`:
+Each automatic-mode profile replaces its predecessor as its version's bundled profile and keeps every predecessor rule and answer plan unchanged; earlier runs keep their recorded `profile_version` text. Neither pinned version shows a startup notice or opt-in dialog for its automatic mode under the runner, on a fresh configuration or on a second launch, so no profile declares a startup rule.
+
+Claude Code `2.1.302`, profile `claude-2.1.302-auto-1`, applies under every Claude launch policy:
 
 | Capability | Status | Declaration |
 |---|---|---|
-| Detection | `tested` | The native `default` Bash permission form (`Bash command` heading, approval text, proceed question, focused choice and the `Yes`/`No` single-request choices) in the alternate screen, with a plain or boxed operation, unwrapped or wrapped, within 24 rows from its heading to its `Esc to cancel · Tab to amend` line |
-| Allow answer | `tested` | One stage, byte `31` (digit `1`), selecting `Yes` as `allow-once` |
-| Deny answer | `tested` | One stage, byte `34` (digit `4`), selecting `No` as `deny-once` |
+| Detection | `tested` | Rule `claude-bash-permission`: the native `default` Bash permission form (`Bash command` heading, approval text, proceed question, focused choice and the `Yes`/`No` single-request choices) in the alternate screen, with a plain or boxed operation, unwrapped or wrapped, within 24 rows from its heading to its `Esc to cancel · Tab to amend` line. Rule `claude-auto-ask-permission`: the automatic-mode ask-rule form described below |
+| Allow answer | `tested` | One stage, byte `31` (digit `1`), selecting `Yes` as `allow-once`, for either request rule |
+| Deny answer | `tested` | One stage, byte `34` (digit `4`) for `claude-bash-permission` and byte `32` (digit `2`) for `claude-auto-ask-permission`, selecting `No` as `deny-once` |
 | Empty-composer observation | `tested` | The idle prompt line with the terminal cursor immediately after the prompt prefix; a verified non-interaction boundary |
+| Annotations | `tested` | `claude-auto-refusal`, `claude-auto-refusal-notice`, `claude-auto-unavailable` and `claude-auto-mode-indicator`, described below |
 | Prompt submission | `unknown` | — |
 | Native-exec submission | `unknown` | — |
 
-Both answers select their choice by its number, so they do not depend on which choice is focused. The broadened choices 2 and 3 have no answer plan. The empty-composer observation reads the composer as empty only when the cursor sits at the end of the prompt prefix; a draft whose cursor was moved back to the prefix reads as empty. A native version without its own bundled profile runs under the backend's fallback profile (§ Profile version fallback).
+Every answer selects its choice by its number, so it does not depend on which choice is focused. The broadened choices 2 and 3 have no answer plan. The empty-composer observation reads the composer as empty only when the cursor sits at the end of the prompt prefix; a draft whose cursor was moved back to the prefix reads as empty. A native version without its own bundled profile runs under the backend's fallback profile (§ Profile version fallback).
 
 Detection rests on native captures of the form unwrapped at 120 columns, wrapped plain at 52 columns, and boxed at 89 and 120 columns; both answers rest on the 120-column and the 52-column plain captures. A narrow pane or a long command makes Claude wrap the form: the tip, the description and the choice labels continue on further rows, and the operation between the dashed rules spans several rows. The operation rows take one of two native shapes:
 
@@ -2392,7 +2395,27 @@ Claude positions every row explicitly, so the terminal records no soft wrap, and
 
 The request identity follows the displayed rows. A resize that rewraps a multi-row operation, or moves it between one row and several, replaces its episode; a resize that leaves every operation row unchanged keeps it.
 
-Codex CLI `0.163.0` launched with `--ask-for-approval on-request --sandbox workspace-write`, profile `codex-0.163.0-on-request-1`:
+Claude Code 2.1.302 in `auto` shows a native permission form only through an explicit `permissions.ask` rule. That form differs from the `default` form: it carries a `│ Ask rule … overrides auto mode for this command.` row and a `/permissions to let auto mode decide` row, has no `This command requires approval` line, and offers `2. No` as its deny choice. Rule `claude-auto-ask-permission` (priority 100, alternate screen, cursor inside) spans from `^ Bash command$` to `^ Esc to cancel · Tab to amend$` within 24 rows and requires these line matchers besides the shared operation matcher and its one-space `row_margin`:
+
+- `^ │ Ask rule \S`
+- `^ /permissions to let auto mode decide$`
+- `^ Do you want to proceed\?\s*$`
+- `^ ❯ [1-9]\. ` for the focus, `^ [❯ ] 1\. (?P<label>Yes)$` and `^ [❯ ] 2\. (?P<label>No)$` for the choices
+
+In the captures, allow `1` ran the command, and deny `2` printed `Interrupted · What should Claude do instead?`.
+
+Claude renders an automatic refusal in one of two native forms, depending on the user's Verbose output setting, and the profile claims both. Every Claude annotation rule (priority 40, alternate screen, cursor any) declares the same frame guard: require `^❯\u{a0}` (the live composer prefix) and reject `^  Showing detailed transcript · ctrl\+o to toggle` (the transcript viewer's footer).
+
+| Rule | Region | Captured screen |
+|---|---|---|
+| `claude-auto-refusal` | Start `^● [A-Z][A-Za-z]*\(`, end `^  ⎿ \u{a0}Denied by auto mode classifier ∙ \[`, at most 8 rows | The verbose-view transcript block `● Bash(<command>)` followed by `  ⎿  Denied by auto mode classifier ∙ [<category>] ∙ see https://code.claude.com/docs/s/claude-code-auto-mode`, kept in the live transcript |
+| `claude-auto-refusal-notice` | Start `^ +[a-z][a-z_]* denied by auto mode · \[[^\]]+\] · /permissions`, end the composer border `^─{3,}(?: \S.* ─)?$`, at most 2 rows | The default-view status-row notice `<tool> denied by auto mode · [<category>] · /permissions` above the composer border, shown for about 8–10 seconds |
+| `claude-auto-unavailable` | Start `^ +auto mode disabled by settings\b`, end the composer border, at most 2 rows | The transient notice `auto mode disabled by settings`, induced by `permissions.disableAutoMode`; the footer then shows `⏸ manual mode on` |
+| `claude-auto-mode-indicator` | Start and end `^  ⏵⏵ auto mode on \(shift\+tab to cycle\)`, one row | The footer badge on every live `auto` frame; its `mode` capture records `observed_mode` `auto mode` |
+
+`claude-auto-refusal` matches its region with one region-scoped matcher that captures the refused tool, the operation between the parentheses and the category, so the operation evidence is the refused command. Its first row follows `● Bash(` and carries no margin, so the rule declares no `row_margin`, and a wrapped operation reports its continuation rows with their two-space margin. `claude-auto-refusal-notice` captures `<tool> denied by auto mode · [<category>]` as its operation, because the default view never shows the refused command. `claude-auto-unavailable` captures its notice with a null operation. The native result prefix carries a U+00A0 after `⎿`, while a model quote of the same words carries two ASCII spaces, so quotes do not match.
+
+Codex CLI `0.163.0`, profile `codex-0.163.0-approve-for-me-1`, applies under every Codex launch policy; the request and answer rules come from captures under `--ask-for-approval on-request --sandbox workspace-write`:
 
 | Capability | Status | Declaration |
 |---|---|---|
@@ -2400,10 +2423,18 @@ Codex CLI `0.163.0` launched with `--ask-for-approval on-request --sandbox works
 | Allow answer | `tested` | One stage, byte `79` (`y`), selecting `Yes, proceed` as `allow-once` |
 | Deny answer | `tested` | One stage, byte `33` (digit `3`), selecting `No, and tell Codex what to do differently` as `deny-once` |
 | Empty-composer observation | `tested` | The idle `› ` composer line with the terminal cursor immediately after the prefix, its placeholder text shown; a verified non-interaction boundary |
+| Annotations | `tested` | `codex-auto-review-refusal` and `codex-auto-review-indicator`, described below |
 | Prompt submission | `unknown` | — |
 | Native-exec submission | `unknown` | — |
 
 The rules anchor on the live form's heading and closing lines rather than on absolute rows, and the reason line is model-authored text that the rule requires but excludes from the request identity. The deny answer uses the choice's digit because that choice displays only `esc` as its shortcut, and CAFleet never sends a lone Escape to a held form. Choice 2, which approves a command prefix persistently, has no answer plan. The native captures showed the decision on the native surface: after allow, Codex printed `✔ You approved codex to run <command> this time` and ran the command; after deny, it printed `✗ You canceled the request to run <command>` and `■ Conversation interrupted`, and ran nothing. These lines are decision evidence for the Director's continuation check, not bundled rules. A Codex configuration that routes approvals to its automatic reviewer (`approvals_reviewer`) answers escalations without any native form, so detection observes no request. The detection covers a single-line command; a command that wraps in a narrow pane yields no detection, so no `interaction_opened` event is produced, programmatic input stays held, and the request is answered manually on the native surface.
+
+Codex 0.163.0 in `approve-for-me` routes every escalation to its automatic reviewer and shows no native permission form, so the profile adds no request rule. Both Codex annotation rules (priority 40, alternate screen, cursor any) declare the same frame guard: require `^(?:› Ask Codex to do anything|  \? for shortcuts)` (the live composer or its hint line) and reject `^  k keep & next · esc dismiss & close` (the f2 warnings overlay).
+
+- `codex-auto-review-refusal` spans from `^✗ Request denied for codex to run \S` to the next blank row `^\s*$` within 6 rows. Its region matcher `\A✗ Request denied for codex to run (?P<operation>[^\n]*\S(?:\n  [^\n]*\S)*)\s*\n\s*\z` captures the refused command, and its `row_margin` is two spaces. The line stays in the transcript at column 0, followed by `• Failed (exit 1) <command>`; model quotes render indented or `• `-prefixed, never at column 0, so they do not match. Codex wraps a long command inside a token with a two-space continuation margin, and the fingerprint strips that margin before removing the row break, so a resize keeps the fingerprint.
+- `codex-auto-review-indicator` matches the one row `^  Permissions: +Workspace \(Approve for me\)\s*$` in the `/status` block. Its `mode` capture records `observed_mode` `Workspace (Approve for me)`.
+
+The captures showed an allowed escalation only as an ordinary `• Ran …` transcript line, and the reviewer at work as `• Reviewing approval request (Ns • esc to interrupt)`; both are verified non-interaction frames with the composer visible, so neither needs a rule.
 
 OpenCode `2.1.4` `mini`, profile `opencode-2.1.4-cafleet-ask-1`, applies under either OpenCode launch policy; only `cafleet-ask` shows permission forms:
 
@@ -2678,19 +2709,32 @@ Annotation rules use the region contract of the other rules, with these differen
 | Screen | Each rule declares the screen its captures show. Scrollback is excluded, as for every rule. |
 | Blocks | The start and end patterns delimit one refusal or notice block, and the matchers require the native result decoration, so model text quoting the same words does not match. Every qualifying region yields a block, in row order and non-overlapping, so two refusals visible together are two blocks; other rules still require exactly one qualifying region. |
 | Live-transcript frame guard | Each `frame.require_patterns` entry must match a live-screen line of the same frame and no `frame.reject_patterns` entry may match one. Require patterns name lines present only in the live TUI, such as its composer or footer line; reject patterns name the transcript viewer's header, and a frame failing the guard yields no blocks for that rule. |
-| Fingerprint | Backend, profile, rule id and the displayed operation or notice text, normalized by removing every row break and collapsing each whitespace run to one space, so a resize that rewraps a block keeps its fingerprint. The event's `operation` evidence still reports the displayed rows. |
+| Fingerprint | Backend, profile, rule id and the displayed operation or notice text, normalized by first stripping the operation extract's `row_margin` from each continuation row, then removing every row break and collapsing each whitespace run to one space, so a resize that rewraps a block, even inside a token, keeps its fingerprint. The event's `operation` evidence still reports the displayed rows, continuation margins included. |
 
 The annotation tracker keeps a set of fingerprint states per annotation rule:
 
 1. A fingerprint present in a frame's blocks is emitted after two compatible observations at least 100 ms apart; several fingerprints are tracked and emitted independently.
 2. An emitted fingerprint is not emitted again until its state resets.
-3. A state resets only after the fingerprint has been absent for 250 ms of continuous frames whose primary observation is a verified noninteraction and whose frame guard holds. A frame showing a permission form, another interaction, an overlay, a working or unknown screen, a guard failure or a redraw does not advance the reset, so a block hidden by any of them keeps its state and emits nothing when it reappears.
+3. A state resets only after the fingerprint has been absent for 250 ms of continuous frames whose primary observation is a verified noninteraction and whose frame guard holds. A frame showing a permission form, another interaction, an overlay, an unknown screen, a guard failure or a redraw does not advance the reset, so a block hidden by any of them keeps its state and emits nothing when it reappears. A working screen advances the reset only when the profile classifies it as a verified noninteraction; Claude Code 2.1.302 and Codex 0.163.0 keep their idle composer visible while working (Codex also while its reviewer runs), so their working frames do.
 4. `automatic_review_unavailable` is emitted at most once per run per rule id unless an `automatic_review_available` annotation was observed after it.
 5. `automatic_review_available` emits no event; it only updates the effective policy record.
 
 The `permission_denied` reset uses the verified noninteraction boundary alone because a primary refusal frame and an idle-composer frame exclude each other. An annotation stays visible above the idle composer, so its reset also requires the annotation's absence. An automatic refusal is a separate kind from `permission_denied_observed` because the automatic reviewer decided it and the Director procedure differs; the two never match the same block, because one is a primary rule and the other an annotation.
 
-The event is an alert, not a one-to-one count of native refusals. A second refusal of the same normalized operation emits nothing while the first is visible or before an idle frame shows the first gone, and a refusal rendered and removed within 100 ms is not observed. The member's routed refusal evidence remains the record in each case.
+The event is an alert, not a one-to-one count of native refusals. These limits apply:
+
+| Backend | Limit |
+|---|---|
+| Every backend | A second refusal of the same normalized operation emits nothing while the first is visible or before an idle frame shows the first gone. A refusal rendered and removed within 100 ms is not observed. |
+| Claude Code 2.1.302 | In the default view the notice names no command, so refusals of the same tool and category collapse into one event, and a notice that expires while a form hides it is never observed. The default-view notice was captured at 120 columns only; a narrower pane can truncate its ` · /permissions` suffix, and such a notice is not observed. |
+| Claude Code 2.1.302 | The native-quote guard rests on the U+00A0 that the native result prefix carries. The first launch on a brand-new configuration renders on the primary screen, so no rule matches during that session. |
+| Claude Code 2.1.302 | `claude-auto-refusal` strips no row margin, so a command token wider than the pane, wrapped inside the token, changes its fingerprint after a resize and can emit once more. |
+| Claude Code 2.1.302 | Only the captured unavailable notice `auto mode disabled by settings` is observed. The binary also carries `auto mode is unavailable for your plan`, `auto mode unavailable while fast mode is on`, `auto mode unavailable for this model` and `auto mode is unavailable right now`, which no capture shows and no rule claims. |
+| Codex 0.163.0 | Commands longer than about 70 characters display truncated, so refusals sharing the displayed prefix share a fingerprint. The reviewer's reason appears only in the f2 warnings overlay and the ctrl+t view. |
+| Codex 0.163.0 | After three consecutive automatic denials Codex interrupts the turn (`■ Conversation interrupted`); the reason, `Automatic approval review rejected too many approval requests for this turn …`, appears only in the f2 warnings overlay. The Director receives one `automatic_refusal_observed` per denial, and the member stops without reporting. |
+| Codex 0.163.0 | No unavailable-review screen appears on the live screen, so no rule claims `automatic_review_unavailable`, and the positive indicator appears only on demand in the `/status` block. |
+
+The member's routed refusal evidence remains the record in each case.
 
 #### Persistence, notification and read interfaces
 
@@ -3164,6 +3208,7 @@ The Director handles the automatic review events (§ Automatic review events) th
 | `interaction_opened` in automatic mode | The permission-request procedure above, including `permission respond`. |
 | `automatic_refusal_observed` with a routed request | Dispatch evidence comes only from the routed request: exact command, absolute cwd, required environment and refusal; the event and captures corroborate it and supply no missing field. In verified auto mode decide to authorize through the routed-command dispatch (`member exec`) or to refuse with a broker reply; otherwise obtain the user's permission first, then inspect the actual result and continuation. |
 | `automatic_refusal_observed` without a routed request | Dispatch nothing, ACK and keep the event as an informational pending item. When the member next reports, routes a request or reaches an idle composer without addressing it, ask it through the broker whether the refused operation is still needed; the item closes when a routed request arrives or the member answers that it is not needed. |
+| Several `automatic_refusal_observed` events, then an idle member that sent no report | Codex 0.163.0 interrupts the turn after three consecutive automatic denials, so the member stops without routing a request (§ Annotation detection). Treat the events as one pending item and ask the member through the broker whether the refused operations are still needed; the broker message resumes it. |
 | `automatic_review_unavailable` | Record the member as interactive in host-owned supervision state, expect native permission forms from it and tell the user when the selected automatic mode cannot apply. No answer is sent. |
 
 A routed request that arrives with no event follows the refusal route above unchanged.

@@ -124,6 +124,8 @@ Spawn every member with the omitted `--permission-mode`, which selects the backe
 | Codex | `approve-for-me` | `on-request` or `never` |
 | OpenCode | `cafleet` | `cafleet-ask` |
 
+Neither pinned automatic mode (Claude Code 2.1.302 `auto`, Codex 0.163.0 `approve-for-me`) shows a startup notice or opt-in dialog under the runner, so a new member needs no startup answer from you; any first-launch dialog the native host shows, such as a folder-trust prompt, follows the existing held-interaction procedure.
+
 Handle the runtime events of automatic mode through your existing wake, `event show` verification, ACK and host-owned pending-action record:
 
 | Event | Procedure |
@@ -131,6 +133,7 @@ Handle the runtime events of automatic mode through your existing wake, `event s
 | `interaction_opened` in automatic mode | The permission-request procedure of the [runtime procedure](../reference/member-runtime.md), including `permission respond`. |
 | `automatic_refusal_observed` with a routed request | Take dispatch evidence only from the member's routed request: exact command, absolute cwd, required environment and refusal; the event and captures corroborate it and supply no missing field. In verified auto mode decide to authorize through `member exec` under its routed-command rules or refuse with a broker reply; otherwise obtain the user's permission first, then inspect the actual result and continuation. |
 | `automatic_refusal_observed` without a routed request | Dispatch nothing, ACK and keep the event as an informational pending item. When the member next reports, routes a request or reaches an idle composer without addressing it, ask it through the broker whether the refused operation is still needed; close the item when a routed request arrives or the member answers that it is not needed. |
+| Several `automatic_refusal_observed` events, then an idle member that sent no report | Codex 0.163.0 interrupts the turn after three consecutive automatic denials, so the member stops without routing a request. Treat the events as one pending item and ask the member through the broker whether the refused operations are still needed; the broker message resumes it. |
 | `automatic_review_unavailable` | Record the member as interactive in host-owned supervision state, expect native permission forms from it and tell the user that the selected automatic mode cannot apply. Send no answer. |
 
 A routed request that arrives with no event follows the existing refusal route.

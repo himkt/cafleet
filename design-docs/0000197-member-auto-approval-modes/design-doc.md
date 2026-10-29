@@ -1,7 +1,7 @@
 # Member Automatic Approval Modes
 
 **Status**: Approved
-**Progress**: 13/31 tasks complete
+**Progress**: 16/31 tasks complete
 **Last Updated**: 2026-10-29
 
 ## Overview
@@ -376,15 +376,6 @@ Each case records versions, mode, profile, profile match, multiplexer, terminal 
 
 ### Step 1: Capture native automatic-mode evidence
 
-COMMENT(director): Programmer — accepted Verifier impl bug: restrict claude-auto-unavailable to the captured string and list the others as a documented limit; remove this marker when done. Finding: `claude-auto-unavailable` claims four notice strings no capture shows (`is unavailable for your plan`, `unavailable while fast mode is on`, `unavailable for this model`, `is unavailable right now`; taken from binary strings per REPORT.md § Screens) in its `start_pattern` and `notice` matcher (`cafleet/src/coding_agent/profiles/bundled.json:382`, `:388`). § Native screens allows a rule only for captured screens, and Success Criterion 5 requires every claimed rule to rest on native captures. Restrict both patterns to `auto mode disabled by settings` (evidence `claude-2.1.302-auto-unavailable-notice-1`) and list the other strings as a documented limit.
-
-
-
-
-COMMENT(director): Programmer — accepted: add this Codex denial-limit behavior to the Step 2 documented limits and to the Director handling of a refusal without a routed request (several events, then a stopped member); remove this marker when done. Finding: after 3 consecutive automatic denials Codex interrupts the turn (`■ Conversation interrupted`), and the reason (`Automatic approval review rejected too many approval requests for this turn …`) appears only in the f2 warnings overlay (`codex-0.163.0-auto-denial-limit-warning-1`, `-interrupted-1`). The Director then receives one `automatic_refusal_observed` per denial, and the member stops without reporting. Add this to the Step 2 documented limits and the Director's refusal-without-routed-request handling.
-
-
-
 - [x] Verify that Codex 0.163.0 parses and starts with `--approve-for-me` and that Claude Code 2.1.302 starts with `--permission-mode auto` under the runner, and establish the § Startup dialog outcome for each on a fresh and a second launch. <!-- completed: 2026-10-29T10:45 -->
 - [x] Capture each screen in § Native screens in automatic mode for Claude 2.1.302 `auto` under the runner at 36x120 with privacy masking, including two different refusals visible together, a refusal hidden by a permission form and rewrapped by a resize, the transcript viewer showing a refusal, and false-positive quotes of the refusal text. <!-- completed: 2026-10-29T10:45 -->
 - [x] Capture the same screens for Codex 0.163.0 `approve-for-me`, including any escalated form and its allow/deny pre-stage forms. <!-- completed: 2026-10-29T10:45 -->
@@ -392,11 +383,9 @@ COMMENT(director): Programmer — accepted: add this Codex denial-limit behavior
 
 ### Step 2: Update documentation
 
-COMMENT(director): Programmer — start now with the parts that do not depend on Step 1 captures (profile version fallback, V6 migration and `profile_match`, launch-policy defaults and argv, both event kinds and `director_action`, effective policy record, snapshot layouts, Director/member guidance). Leave rule patterns, captured screens, startup-dialog outcome and limits for after the Step 1 gate report; the Director will re-send ready for this step then. Report `complete` only when the capture-independent part is done, and keep this marker until the full step is done.
-
-- [ ] Update every `docs/` target in § Documentation targets with the defaults, Codex choice, screens, startup dialog, gate, annotations, events, effective policy, profile version fallback, snapshot layouts, profiles and limits; pin exact rule patterns from the Step 1 captures. <!-- completed: -->
+- [x] Update every `docs/` target in § Documentation targets with the defaults, Codex choice, screens, startup dialog, gate, annotations, events, effective policy, profile version fallback, snapshot layouts, profiles and limits; pin exact rule patterns from the Step 1 captures. <!-- completed: 2026-10-29T10:55 -->
 - [x] Update `SPEC.md` contract surfaces: catalog, defaults, argv, V6 CHECK domain and `profile_match` column, profile selection and fallback warning, event kinds, `director_action` kinds, effective policy shape and the runtime snapshot keys and text line for every listed command. <!-- completed: 2026-10-29T07:57 -->
-- [ ] Update the Director role with the omitted-default spawn rule and the event and startup-dialog procedures. <!-- completed: -->
+- [x] Update the Director role with the omitted-default spawn rule and the event and startup-dialog procedures. <!-- completed: 2026-10-29T10:55 -->
 - [x] Update the remaining skill references and the member role for runtime bindings, notes and member posture. <!-- completed: 2026-10-29T07:57 -->
 - [x] Search for remaining member-default mentions of `dontAsk`, `--permission-mode dontAsk` and `--ask-for-approval never` and update each one that describes the default. <!-- completed: 2026-10-29T07:57 -->
 
