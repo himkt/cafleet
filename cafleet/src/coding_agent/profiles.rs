@@ -5548,8 +5548,39 @@ mod contract_tests {
                     )],
                     "one record change for a steady indicator"
                 );
-                assert!(run.hold(NOTICE_EXPIRED, 1050, 1500).policy.is_empty());
+                assert_eq!(
+                    run.hold(NOTICE_EXPIRED, 1050, 1500).policy,
+                    [(
+                        AutomaticReview::Available,
+                        mode,
+                        INDICATOR_RULE.to_owned(),
+                        NOW.to_owned()
+                    )],
+                    "a footer variant is a fresh indicator emission"
+                );
             }
+        }
+
+        #[test]
+        fn tracker_records_a_re_shown_indicator_after_a_reset_as_a_second_policy_observation() {
+            let available = (
+                AutomaticReview::Available,
+                None,
+                INDICATOR_RULE.to_owned(),
+                NOW.to_owned(),
+            );
+            let mut run = Run::metadata();
+            assert_eq!(
+                run.hold(IDLE, 0, 300).policy,
+                std::slice::from_ref(&available)
+            );
+            let absent = run.hold(MANUAL_FOOTER, 350, 700);
+            assert!(absent.policy.is_empty(), "{:?}", absent.policy);
+            assert_eq!(
+                run.hold(IDLE, 750, 1100).policy,
+                [available],
+                "a fresh indicator emission resubmits the unchanged state"
+            );
         }
 
         #[test]
