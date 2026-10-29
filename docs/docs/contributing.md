@@ -1,6 +1,6 @@
 # Contributing
 
-Develop changes through reviewed designs and the bundled CAFleet workflows. Run repository tasks from the root using mise full-path notation.
+Develop changes through reviewed designs and the bundled CAFleet workflows. Run repository tasks from the root using mise full-path notation. [SPEC.md](https://github.com/himkt/cafleet/blob/main/SPEC.md) is the specification for the CLI, runtime and storage contracts.
 
 ## Project structure
 
@@ -14,7 +14,9 @@ Develop changes through reviewed designs and the bundled CAFleet workflows. Run 
 
 ## Rust boundaries
 
-Broker queries return typed records; CLI presenters construct wire output. Shared diagnosis validates identity, schema and assets. Keep durable storage separate from synchronous notification, finite receiving, input ownership and multiplexer I/O. Required state fails at its read boundary. Preserve process pipe draining, owned-child cleanup, pane ownership compensation and layout cleanup.
+Broker queries return typed records; CLI presenters construct wire output. Shared diagnosis validates database identity and schema. Keep durable storage separate from synchronous notification, finite receiving, input ownership and multiplexer I/O. Required state fails at its read boundary. Preserve process pipe draining, owned-child cleanup, pane ownership compensation and layout cleanup.
+
+Every Rust test is a unit test in a `#[cfg(test)] mod tests` block of the implementation file it exercises. Shared test helpers live in a `#[cfg(test)] pub(crate) mod test_support` beside the type they build, and test inputs stay inline in the test module.
 
 ## Development
 
@@ -32,7 +34,7 @@ mise //cafleet:install
 cafleet setup
 ```
 
-Use `mise tasks` and package task definitions as the task registry. Run Rust validation with `mise //cafleet:test`, `mise //cafleet:lint` and `mise //cafleet:typecheck`. The release build needs Rust and embedded skills/presets. Reinstall the binary after Rust changes to use the new implementation.
+Use `mise tasks` and package task definitions as the task registry. Run Rust validation with `mise //cafleet:test` and `mise //cafleet:lint`. The release build needs Rust and embedded skills/presets. Reinstall the binary after Rust changes to use the new implementation.
 
 ### Installing the skills from your checkout
 
@@ -67,4 +69,4 @@ Map herdr’s broad `blocked` state into CAFleet’s typed interaction classes, 
 
 Use safe PTY/terminal APIs behind deterministic transport traits; the crate sets `unsafe_code = "deny"`. The single exception is the macOS process identity read, one `sysctl(CTL_KERN, KERN_PROC, KERN_PROC_PID)` call into a fixed, size-checked `kinfo_proc` buffer. Every safe start-time interface applies a same-effective-user check that fails for setuid descendants in the owned process group. That call carries an item-scoped `#[allow(unsafe_code)]` with its safety invariants stated inline; add no other unsafe code. The selected PTY and terminal-screen crates are `portable-pty` and `vt100`; resolve compatible versions through Cargo and retain the lockfile. Separate terminal transport, classification and event storage, and preserve bounded shutdown independently of SQLite waits.
 
-Every claimed detector/composer/answer profile requires CAFleet-owned positive and adversarial replay fixtures, including redraw, wrapping, fragmented ANSI/UTF-8, alternate screens, competing forms and quoted transcript false positives. Acceptance also requires exact-version real native PTY evidence for the claimed capability on each registered multiplexer, including concurrent output/input and the observed-state race boundary. [Native acceptance and coverage](spec/member-runtime.md#native-acceptance-and-coverage) owns the minimum policies, evidence fields and fault cases. Answer profiles additionally pin single-request allow/deny semantics, focus/key stages, request-token revalidation and human/output race behavior. A launch-help probe supplies no tested detector/composer/answer claim; missing minimum native evidence fails feature acceptance.
+Every claimed detector/composer/answer profile requires CAFleet-owned positive and adversarial replay fixtures, including redraw, wrapping, fragmented ANSI/UTF-8, alternate screens, competing forms and quoted transcript false positives. Acceptance also requires exact-version real native PTY evidence for the claimed capability on each registered multiplexer, including concurrent output/input and the observed-state race boundary. [SPEC §6.9 Native acceptance and coverage](https://github.com/himkt/cafleet/blob/main/SPEC.md#native-acceptance-and-coverage) owns the minimum policies, evidence fields and fault cases. Answer profiles additionally pin single-request allow/deny semantics, focus/key stages, request-token revalidation and human/output race behavior. A launch-help probe supplies no tested detector/composer/answer claim; missing minimum native evidence fails feature acceptance.

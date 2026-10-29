@@ -9,14 +9,14 @@ CAFleet multiplexes independent coding-agent sessions in tmux or herdr. Use its 
 | fleet | A namespace identified by a non-secret integer `fleet_id` | [Fleet isolation](#fleet-isolation) |
 | root Director | The current session registered by fleet creation; owns assignments and team lifecycle | [Member lifecycle](member-lifecycle.md) |
 | member | An independent coding-agent session registered in a fleet | [Member lifecycle](member-lifecycle.md) |
-| placement | The association between a member and its multiplexer session, window, pane and backend | [Data model](../spec/data-model.md) |
+| placement | The association between a member and its multiplexer session, window, pane and backend | [Database schema](https://github.com/himkt/cafleet/blob/main/SPEC.md#8-database-schema) |
 | broker | The synchronous SQLite data-access layer used by the CLI | [Storage](storage.md) |
-| message | One point-to-point delivery, consumed through `input_required → completed` | [Message envelope](../spec/message-envelope.md) |
-| inline preview | A literal one-line notification submitted through the member’s recorded transport when input is eligible, carrying the full body or a show pointer | [Notifications](../spec/multiplexer-backends.md#push-notifications) |
-| receive | A finite inbox wait for scripts and manual use that also retries ordinary-member previews | [Message wait](../spec/cli-options.md#message-wait) |
-| inbox stream | A persistent read-only JSONL observer of pending messages with explicit ACK consumption | [Message listen](../spec/cli-options.md#message-listen) |
+| message | One point-to-point delivery, consumed through `input_required → completed` | [Output and formatting](https://github.com/himkt/cafleet/blob/main/SPEC.md#64-output--formatting) |
+| inline preview | A literal one-line notification submitted through the member’s recorded transport when input is eligible, carrying the full body or a show pointer | [Push notifications](https://github.com/himkt/cafleet/blob/main/SPEC.md#push-notifications) |
+| receive | A finite inbox wait for scripts and manual use that also retries ordinary-member previews | [Message wait](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-wait) |
+| inbox stream | A persistent read-only JSONL observer of pending messages with explicit ACK consumption | [Message listen](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-listen) |
 | runner | The owned PTY observer and input arbiter for a member run | [Member permission events](member-permission-events.md) |
-| runtime event | A durable typed terminal/lifecycle observation linked to the Director’s inbox | [Member runtime](../spec/member-runtime.md) |
+| runtime event | A durable typed terminal/lifecycle observation linked to the Director’s inbox | [Member runtime](https://github.com/himkt/cafleet/blob/main/SPEC.md#69-member-pty-runtime) |
 | coding-agent backend | The selected agent binary recorded in a placement | [Coding agents](coding-agents.md) |
 
 ## Fleet isolation
@@ -35,11 +35,11 @@ Fleet creation atomically registers the calling Director and its current pane. Y
 | Multiplexer | Split, read, type into and close panes while preserving layout ownership |
 | Member | Perform its assignment, report through the broker and route required unavailable commands |
 
-The [CLI reference](../spec/cli-options.md#subcommand-summary) owns the command registry. The product ships as a CLI with embedded skills/presets and this documentation site.
+The [subcommand summary](https://github.com/himkt/cafleet/blob/main/SPEC.md#subcommand-summary) owns the command registry. The product ships as a CLI with embedded skills/presets and this documentation site.
 
 ## Receiving delegated work
 
-The Director owns one native inbox receiver, reconciles full broker records, ACKs consumption and keeps deferred actions in host-owned task state. Ordinary members receive pane previews. Native reception preserves supplied goal controls and user decision gates; the [fleet guide](../how-to/mixed-backend-team.md#manual-lifecycle) explains handle ownership, recovery and manual reception.
+The Director receives replies through its native inbox tools and ordinary members receive pane previews; the [fleet guide](../how-to/mixed-backend-team.md#manual-lifecycle) explains reception, consumption and recovery.
 
 ## Design document workflow
 
