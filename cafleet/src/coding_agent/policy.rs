@@ -54,11 +54,7 @@ impl CodingAgent {
     fn permission_arguments(self, mode: &str) -> Vec<String> {
         match self {
             Self::Claude => vec!["--permission-mode".into(), mode.into()],
-            Self::Codex if mode == "approve-for-me" => vec![
-                "--approve-for-me".into(),
-                "--sandbox".into(),
-                "workspace-write".into(),
-            ],
+            Self::Codex if mode == "approve-for-me" => vec!["--approve-for-me".into()],
             Self::Codex => vec![
                 "--ask-for-approval".into(),
                 mode.into(),

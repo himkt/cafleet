@@ -9,7 +9,7 @@ This contract describes runner-managed member launch, terminal observations, dur
 | Backend | Omitted selection | Explicit selection mapping |
 |---|---|---|
 | Claude | `auto` | Use the native permission-mode value through `--permission-mode`; retain broker-tool allowance, prompt suggestions, name and model/effort boundaries. |
-| Codex | `approve-for-me` with `workspace-write` | Map `on-request` and `never` to `--ask-for-approval <mode>` and `approve-for-me` to `--approve-for-me`; every choice retains the explicit `--sandbox workspace-write`. |
+| Codex | `approve-for-me` | Map `on-request` and `never` to `--ask-for-approval <mode> --sandbox workspace-write` and `approve-for-me` to the single `--approve-for-me` flag, which selects the workspace-write sandbox itself. |
 | OpenCode | `cafleet` preset | Map `cafleet` and `cafleet-ask` to `--agent <mode>`, selecting the agent preset of that name; explicit `cafleet` records `mode_source=explicit`. |
 
 The omitted Claude and Codex selections are each backend's native automatic approval mode: an automatic reviewer decides the operations that no native rule settles, and the runner reports its observable refusals and unavailability as [automatic review events](#automatic-review-events). Every other choice applies only through an explicit `--permission-mode`. An omitted selection is not validated against the version catalog, so a member whose probed version has no catalog entry still launches with the default; a native version that rejects `auto` or `--approve-for-me` exits immediately and produces `runner_exited` as described below.
@@ -23,7 +23,7 @@ Record `requested_mode` as nullable text, `resolved_mode` as required text, `mod
 | Selection | `requested_mode` | `resolved_mode` | `mode_source` | `permission_argv_json` |
 |---|---|---|---|---|
 | Omitted Claude | `null` | `auto` | `default` | `["--permission-mode","auto"]` |
-| Omitted Codex | `null` | `approve-for-me` | `default` | `["--approve-for-me","--sandbox","workspace-write"]` |
+| Omitted Codex | `null` | `approve-for-me` | `default` | `["--approve-for-me"]` |
 | Explicit Codex `never` | `never` | `never` | `explicit` | `["--ask-for-approval","never","--sandbox","workspace-write"]` |
 
 `effective_policy_json` remains null unless a tested native observation supplies it ([effective policy record](#effective-policy-record)); an installed version, argv or selected profile alone proves no effective authorization decision.

@@ -106,7 +106,7 @@ Evidence: Claude Code 2.1.301 stream probes established separate event turns fro
 | Placeholder | Value |
 |---|---|
 | `{decision_surface}` | a Director-relayed operator message |
-| `{permission_flags}` | `--approve-for-me --sandbox workspace-write` |
+| `{permission_flags}` | `--approve-for-me` |
 | `{pane_title}` | no `--name` analog |
 | `{skill_loader}` | reading each requested skill core, own backend section and role-required references by the absolute paths the spawn prompt provides |
 | `{effort_levels}` | `minimal`, `low`, `medium`, `high`, `xhigh` (spawn flag `--effort <level>`, forwarded as `--config=model_reasoning_effort=<level>`) |

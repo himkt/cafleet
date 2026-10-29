@@ -25,7 +25,7 @@ These are the child argv with omitted permission selection. The leading token na
 | Backend | Spawn argv |
 |---|---|
 | `claude` | `claude --permission-mode auto --prompt-suggestions false --allowedTools <rule>... --name <member-name> <prompt>` |
-| `codex` | `codex --approve-for-me --sandbox workspace-write <prompt>` |
+| `codex` | `codex --approve-for-me <prompt>` |
 | `opencode` | `opencode mini --standalone --agent cafleet --prompt <prompt>` |
 
 Explicit choices change only the permission tokens:
@@ -124,7 +124,7 @@ without a prompt. A write to one of Claude Code's protected paths, such as a
 project's `.git` or `.claude` directory, is denied whatever the allow list
 holds.
 
-Launch-policy evidence is pinned to Claude Code 2.1.302, Codex CLI 0.163.0 and OpenCode 2.1.4. The inspected Claude parser accepts canonical `default` and alias `manual`, although help renders the canonical mode as `manual`; explicit argv preserves the selected spelling. [Claude’s permission-mode reference](https://code.claude.com/docs/en/permission-modes) documents the alias. Codex help confirms `on-request` and `never` for `--ask-for-approval` and the `--approve-for-me` flag, which routes approval requests through automatic review using the workspace-write sandbox; every Codex choice retains the explicit workspace sandbox. OpenCode 2.1.4 prints `opencode v2.1.4` for `--version` and loads the agent preset that `--agent` names; its `cafleet` and `cafleet-ask` choices select presets rather than native flags, so both are eligible for every OpenCode version. These observations establish launch-policy eligibility. Detection, empty-composer and answer coverage for exactly these versions comes from their [bundled profiles](member-runtime.md#bundled-profiles-and-native-screen-fixtures); another version of a backend with bundled profiles runs under its newest one with `profile_match=fallback` ([profile version fallback](member-runtime.md#profile-version-fallback)).
+Launch-policy evidence is pinned to Claude Code 2.1.302, Codex CLI 0.163.0 and OpenCode 2.1.4. The inspected Claude parser accepts canonical `default` and alias `manual`, although help renders the canonical mode as `manual`; explicit argv preserves the selected spelling. [Claude’s permission-mode reference](https://code.claude.com/docs/en/permission-modes) documents the alias. Codex help confirms `on-request` and `never` for `--ask-for-approval` and the `--approve-for-me` flag, which routes approval requests through automatic review using the workspace-write sandbox. Codex 0.163.0 rejects `--approve-for-me` together with `--sandbox`, so the `approve-for-me` argv is the single flag, while `on-request` and `never` retain the explicit `--sandbox workspace-write`. OpenCode 2.1.4 prints `opencode v2.1.4` for `--version` and loads the agent preset that `--agent` names; its `cafleet` and `cafleet-ask` choices select presets rather than native flags, so both are eligible for every OpenCode version. These observations establish launch-policy eligibility. Detection, empty-composer and answer coverage for exactly these versions comes from their [bundled profiles](member-runtime.md#bundled-profiles-and-native-screen-fixtures); another version of a backend with bundled profiles runs under its newest one with `profile_match=fallback` ([profile version fallback](member-runtime.md#profile-version-fallback)).
 
 ### Spawn-time allow rules {#spawn-time-allow-rules}
 
@@ -211,10 +211,11 @@ The objective belongs to the thread, with model-callable lifecycle tools and opt
 
 A native shell probe displayed the actual command, exit code, duration and output. Installed protocol metadata describes unsandboxed dispatch while public CLI guidance describes current approval/sandbox settings; the TUI's effective boundary and protocol path were not established. Treat native input as a Director-authorized action rather than assume a second member-tool permission check.
 
-`--sandbox workspace-write` confines writes to the workspace under a
+The workspace-write sandbox confines writes to the workspace under a
 kernel-enforced sandbox — codex is the only backend with one.
-The omitted `--approve-for-me` routes approval requests through Codex's
-automatic review; an explicit `--ask-for-approval never` disables interactive
+The omitted `--approve-for-me` selects that sandbox itself and routes approval
+requests through Codex's automatic review; an explicit choice adds
+`--sandbox workspace-write` to its `--ask-for-approval` value, and an explicit `--ask-for-approval never` disables interactive
 approval prompts and `on-request` shows them (upstream write-up:
 <https://developers.openai.com/codex/agent-approvals-security>).
 
