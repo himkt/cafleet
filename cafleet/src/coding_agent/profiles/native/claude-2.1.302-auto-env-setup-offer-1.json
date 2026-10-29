@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "fixture_id": "claude-2.1.302-auto-env-setup-offer-1",
+  "provenance": "native",
+  "backend": "claude",
+  "native_version": "2.1.302",
+  "rows": 36,
+  "cols": 120,
+  "alternate_screen": true,
+  "screen_seq": 8511,
+  "cursor_row": 27,
+  "cursor_col": 2,
+  "lines": [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "▎ [✻] [✻] [✻] · Share Claude Code and earn $10 in usage credits · /passes",
+    "",
+    "❯ You are a disposable acceptance-test member in a private CAFleet fleet.                                               ",
+    "  FLEET ID: 1                                                                                                           ",
+    "  YOUR MEMBER ID: 3                                                                                                     ",
+    "  DIRECTOR MEMBER ID: 1                                                                                                 ",
+    "  CODING AGENT: claude                                                                                                  ",
+    "                                                                                                                        ",
+    "  Instructions from the Director arrive in your pane as lines starting with [cafleet msg ...]. Perform each instruction ",
+    "  with your shell tool, one command per tool call, then report the observed result to the Director with:                ",
+    "  cafleet message send --from-member-id 3 --to-member-id 1 \"<one-line result>\"                                          ",
+    "                                                                                                                        ",
+    "  If your permission system refuses a command, do not retry it or work around it. Report it instead with:               ",
+    "  cafleet message send --from-member-id 3 --to-member-id 1 \"Need to run: <exact command> in <absolute cwd>. Refused:    ",
+    "  <refusal text>\"                                                                                                       ",
+    "  Then stop and wait for the next instruction.                                                                          ",
+    "",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "  Teach auto mode about your environment?",
+    " ",
+    "  Auto mode works better when it knows your environment. Takes about a minute.",
+    "",
+    "  ❯ 1. Yes",
+    "    2. Not now",
+    "    3. Don't show again",
+    "",
+    "  Enter to confirm · Esc to cancel",
+    "──────────────────────────────────────────────────────────────────────────────────────────────────────── acc-clc-auto2 ─",
+    "❯ ",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "  ⏵⏵ auto mode on (shift+tab to cycle)"
+  ],
+  "masked_rows": [
+    {
+      "row": 1,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 2,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 3,
+      "reason": "reviewed_privacy"
+    }
+  ]
+}

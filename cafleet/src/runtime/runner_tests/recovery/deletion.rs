@@ -19,6 +19,7 @@ struct DeletionHost {
     calls: Vec<&'static str>,
     connection: usize,
     recovered: Option<RunRecord>,
+    runner_gone: bool,
 }
 impl DeletionHost {
     fn new(case: &Case, deadline: Deadline) -> Self {
@@ -29,6 +30,7 @@ impl DeletionHost {
             calls: Vec::new(),
             connection: std::ptr::from_ref(&case.fixture.conn).addr(),
             recovered: None,
+            runner_gone: false,
         }
     }
     fn assert_pane(&self, placement: &Placement) {
@@ -58,6 +60,11 @@ impl crate::input::DeletionHost for DeletionHost {
             .unwrap();
         self.assert_pane(&placement);
         self.calls.push("shutdown");
+        if self.runner_gone {
+            return Err(CafleetError::App(
+                "member runtime: ECONNREFUSED: Connection refused".into(),
+            ));
+        }
         conn.execute(
             "UPDATE member_runs SET cleanup_state='complete' WHERE run_id=?1",
             [run.run_id],
@@ -246,6 +253,54 @@ fn runner_recovery_deletion_uses_real_shared_outbox_open_scan_append_and_compact
     for boundary in ["before_replay", "after_commit", "before_compact"] {
         assert!(host.recovery.calls.iter().any(|name| name == boundary));
     }
+}
+
+#[test]
+fn runner_recovery_deletion_of_an_exited_runner_with_incomplete_cleanup_recovers_without_contacting_it()
+ {
+    let mut case = Case::new();
+    case.fixture
+        .conn
+        .execute(
+            "UPDATE member_runs SET status='exited',cleanup_state='incomplete',exit_code=143,ended_at=?1 WHERE run_id=?2",
+            rusqlite::params![NOW, case.fixture.run.run_id],
+        )
+        .unwrap();
+    case.refresh();
+    let original = case.fixture.run.clone();
+    case.release();
+    let deadline = Deadline::until(Instant::now() + Duration::from_secs(2));
+    let mut host = DeletionHost::new(&case, deadline);
+    host.runner_gone = true;
+    delete_fleet_with_host(
+        &mut case.fixture.conn,
+        &case.settings,
+        original.fleet_id,
+        deadline,
+        &mut host,
+    )
+    .unwrap();
+    assert_eq!(
+        host.calls,
+        vec!["recover", "close"],
+        "an exited runner is recovered, never asked to shut down"
+    );
+    let recovered = host.recovered.as_ref().unwrap();
+    assert_eq!(recovered.status, RunStatus::Exited);
+    assert_eq!(recovered.exit_code, Some(143));
+    assert_eq!(recovered.cleanup_state, CleanupState::Complete);
+    assert!(events(&case).is_empty());
+    assert!(case.spool_bytes().is_none_or(|bytes| bytes.is_empty()));
+    let status: String = case
+        .fixture
+        .conn
+        .query_row(
+            "SELECT status FROM members WHERE member_id=?1 AND fleet_id=?2",
+            rusqlite::params![original.member_id, original.fleet_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(status, "deregistered");
 }
 
 #[test]

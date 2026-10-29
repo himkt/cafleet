@@ -1547,6 +1547,80 @@ mod ownership_refresh_tests {
         assert_state(&session, &pinned, false, clock);
     }
 
+    #[cfg(target_os = "linux")]
+    mod reaped_stat {
+        use super::*;
+
+        fn reaped_stat_read() -> io::Error {
+            let mut child = std::process::Command::new("true").spawn().unwrap();
+            let mut stat = std::fs::File::open(format!("/proc/{}/stat", child.id())).unwrap();
+            child.wait().unwrap();
+            let mut text = String::new();
+            stat.read_to_string(&mut text)
+                .expect_err("a stat read of a reaped task fails")
+        }
+
+        #[test]
+        fn runner_process_stat_read_of_a_task_reaped_after_open_fails_with_esrch() {
+            assert_eq!(reaped_stat_read().raw_os_error(), Some(nix::libc::ESRCH));
+        }
+
+        #[test]
+        fn runner_process_esrch_stat_read_is_a_vanished_process() {
+            assert_eq!(
+                ProcessIdentity::from_stat(B, Err(reaped_stat_read())).unwrap(),
+                None
+            );
+            assert!(stopped_from_stat(Err(reaped_stat_read())).unwrap());
+        }
+
+        #[test]
+        fn runner_process_other_stat_read_errors_still_fail() {
+            let denied = || io::Error::from_raw_os_error(nix::libc::EACCES);
+            assert!(ProcessIdentity::from_stat(B, Err(denied())).is_err());
+            assert!(stopped_from_stat(Err(denied())).is_err());
+        }
+
+        #[test]
+        fn runner_process_live_stat_text_keeps_its_identity_and_running_state() {
+            let pid = i64::from(std::process::id());
+            let text = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+            assert_eq!(
+                ProcessIdentity::from_stat(pid, Ok(text.clone())).unwrap(),
+                Some(ProcessIdentity::current().unwrap())
+            );
+            assert!(!stopped_from_stat(Ok(text)).unwrap());
+        }
+
+        #[test]
+        fn runner_refresh_member_reaped_between_enumeration_and_stat_read_keeps_the_runner_alive() {
+            for vanished in [
+                vec![Step::Identity(
+                    B,
+                    ProcessIdentity::from_stat(B, Err(reaped_stat_read())),
+                )],
+                vec![
+                    observed(identity(B)),
+                    Step::Stopped(B, stopped_from_stat(Err(reaped_stat_read()))),
+                ],
+            ] {
+                let mut session = inert(&[identity(A)], false);
+                let clock = boundaries(&session);
+                let mut script = Script::new(
+                    [members(&[A, B])]
+                        .into_iter()
+                        .chain(active(identity(A)))
+                        .chain(vanished)
+                        .chain([observed(identity(A))]),
+                );
+                session.refresh_owned_with(&mut script).unwrap();
+                script.finished();
+                let pinned = [(A, identity(A))].into_iter().collect();
+                assert_state(&session, &pinned, false, clock);
+            }
+        }
+    }
+
     #[test]
     fn step5_refresh_absent_and_stopped_members_close_before_any_anchor_fold() {
         let mut session = inert(&[identity(A)], false);

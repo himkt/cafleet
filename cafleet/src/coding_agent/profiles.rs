@@ -4435,6 +4435,8 @@ mod contract_tests {
         const INDICATOR_RULE: &str = "claude-auto-mode-indicator";
         const ASK_RULE: &str = "claude-auto-ask-permission";
         const PERMISSION_RULE: &str = "claude-bash-permission";
+        const TIP_RULE: &str = "claude-bash-permission-auto-tip";
+        const STARTUP_RULE: &str = "claude-auto-startup";
         const IDLE_RULE: &str = "claude-idle-composer";
         const UNMATCHED: &str = "unmatched-screen";
         const NOTICE: &str = "bash denied by auto mode · [Code from External]";
@@ -4444,6 +4446,8 @@ mod contract_tests {
         const ASK_ALLOW: &str = "touch /tmp/cafleet-197/ws-cl2/ask-allow.marker";
         const ASK_DENY: &str = "touch /tmp/cafleet-197/ws-cl2/ask-deny.marker";
         const ASK_DENY_TWO: &str = "touch /tmp/cafleet-197/ws-cl2/ask-deny-two.marker";
+        const TIP_ALLOW: &str = "touch /tmp/cafleet-197/acc/ws-clx/tip-allow.marker";
+        const TIP_DENY: &str = "touch /tmp/cafleet-197/acc/ws-clx/tip-deny.marker";
 
         const IDLE: &str = "claude-2.1.302-auto-idle-composer-1";
         const RUNNING: &str = "claude-2.1.302-auto-approved-running-1";
@@ -4463,6 +4467,13 @@ mod contract_tests {
         const VERBOSE_QUOTE: &str = "claude-2.1.302-auto-verbose-quote-false-positive-1";
         const UNAVAILABLE_NOTICE: &str = "claude-2.1.302-auto-unavailable-notice-1";
         const MANUAL_FOOTER: &str = "claude-2.1.302-auto-unavailable-manual-footer-1";
+        const TIP_FORM: &str = "claude-2.1.302-access-permission-1";
+        const TIP_ALLOW_PRE_STAGE: &str = "claude-2.1.302-access-allow-pre-stage-1";
+        const TIP_ALLOW_RUNNING: &str = "claude-2.1.302-access-allow-running-1";
+        const TIP_DENY_PRE_STAGE: &str = "claude-2.1.302-access-deny-pre-stage-1";
+        const STARTUP_OFFER: &str = "claude-2.1.302-auto-env-setup-offer-1";
+        const STARTUP_WIZARD: &str = "claude-2.1.302-auto-env-setup-wizard-1";
+        const STARTUP_CANCELLED: &str = "claude-2.1.302-auto-env-setup-cancelled-idle-1";
 
         macro_rules! native {
             ($id:literal) => {
@@ -4474,7 +4485,13 @@ mod contract_tests {
             };
         }
 
-        pub(super) const FIXTURES: [(&str, &str, &[u8]); 28] = [
+        pub(super) const FIXTURES: [(&str, &str, &[u8]); 38] = [
+            native!("claude-2.1.302-access-allow-continuation-1"),
+            native!("claude-2.1.302-access-allow-pre-stage-1"),
+            native!("claude-2.1.302-access-allow-running-1"),
+            native!("claude-2.1.302-access-deny-continuation-1"),
+            native!("claude-2.1.302-access-deny-pre-stage-1"),
+            native!("claude-2.1.302-access-permission-1"),
             native!("claude-2.1.302-auto-approved-done-1"),
             native!("claude-2.1.302-auto-approved-running-1"),
             native!("claude-2.1.302-auto-ask-allow-continuation-1"),
@@ -4482,6 +4499,9 @@ mod contract_tests {
             native!("claude-2.1.302-auto-ask-hiding-refusal-notice-1"),
             native!("claude-2.1.302-auto-ask-hiding-refusal-notice-resized-1"),
             native!("claude-2.1.302-auto-ask-permission-1"),
+            native!("claude-2.1.302-auto-env-setup-cancelled-idle-1"),
+            native!("claude-2.1.302-auto-env-setup-offer-1"),
+            native!("claude-2.1.302-auto-env-setup-wizard-1"),
             native!("claude-2.1.302-auto-fresh-first-launch-notice-1"),
             native!("claude-2.1.302-auto-fresh-onboarding-theme-1"),
             native!("claude-2.1.302-auto-idle-composer-1"),
@@ -4502,6 +4522,7 @@ mod contract_tests {
             native!("claude-2.1.302-auto-verbose-refusal-rewrapped-idle-1"),
             native!("claude-2.1.302-auto-verbose-transcript-viewer-1"),
             native!("claude-2.1.302-auto-verbose-two-refusals-1"),
+            native!("claude-2.1.302-default-manual-idle-1"),
             native!("claude-2.1.302-trust-dialog-1"),
         ];
 
@@ -4515,10 +4536,27 @@ mod contract_tests {
         const COMPOSER: ObservationKind = ObservationKind::ComposerEmpty;
         const FORM: ObservationKind =
             ObservationKind::Interaction(InteractionClass::PermissionRequest);
+        const QUESTION: ObservationKind = ObservationKind::Interaction(InteractionClass::Question);
         const UNKNOWN: ObservationKind = ObservationKind::Unknown;
         const INDICATOR: (&str, Option<&str>) = (INDICATOR_RULE, None);
 
-        const CLASSIFICATION: [Expected; 28] = [
+        const CLASSIFICATION: [Expected; 38] = [
+            (
+                "claude-2.1.302-access-allow-continuation-1",
+                COMPOSER,
+                IDLE_RULE,
+                &[],
+            ),
+            (TIP_ALLOW_PRE_STAGE, FORM, TIP_RULE, &[]),
+            (TIP_ALLOW_RUNNING, COMPOSER, IDLE_RULE, &[]),
+            (
+                "claude-2.1.302-access-deny-continuation-1",
+                COMPOSER,
+                IDLE_RULE,
+                &[],
+            ),
+            (TIP_DENY_PRE_STAGE, FORM, TIP_RULE, &[]),
+            (TIP_FORM, FORM, TIP_RULE, &[]),
             (
                 "claude-2.1.302-auto-approved-done-1",
                 COMPOSER,
@@ -4546,6 +4584,9 @@ mod contract_tests {
                 &[],
             ),
             (ASK_FORM, FORM, ASK_RULE, &[]),
+            (STARTUP_CANCELLED, COMPOSER, IDLE_RULE, &[INDICATOR]),
+            (STARTUP_OFFER, QUESTION, STARTUP_RULE, &[INDICATOR]),
+            (STARTUP_WIZARD, QUESTION, STARTUP_RULE, &[]),
             (
                 "claude-2.1.302-auto-fresh-first-launch-notice-1",
                 UNKNOWN,
@@ -4633,6 +4674,12 @@ mod contract_tests {
                     (REFUSAL_RULE, Some(EIGHT)),
                     INDICATOR,
                 ],
+            ),
+            (
+                "claude-2.1.302-default-manual-idle-1",
+                COMPOSER,
+                IDLE_RULE,
+                &[],
             ),
             ("claude-2.1.302-trust-dialog-1", UNKNOWN, UNMATCHED, &[]),
         ];
@@ -4809,6 +4856,24 @@ mod contract_tests {
                 }
                 held
             }
+
+            fn episode(&mut self, id: &str, from: u64, until: u64) -> Vec<TransitionDraft> {
+                let mut transitions = Vec::new();
+                let mut millis = from;
+                while millis <= until {
+                    transitions.extend(self.at(id, millis).transitions.into_iter().filter(
+                        |transition| {
+                            matches!(
+                                transition.kind,
+                                RuntimeEventKind::InteractionOpened
+                                    | RuntimeEventKind::InteractionClosed
+                            )
+                        },
+                    ));
+                    millis += 50;
+                }
+                transitions
+            }
         }
 
         fn assert_annotation_event(event: &TransitionDraft, kind: RuntimeEventKind, rule: &str) {
@@ -4865,16 +4930,10 @@ mod contract_tests {
                     [REFUSAL_RULE, NOTICE_RULE, UNAVAILABLE_RULE, INDICATOR_RULE].map(String::from)
                 )
             );
-            assert!(group("detection").contains(PERMISSION_RULE));
-            assert!(group("detection").contains(ASK_RULE));
+            for rule in [PERMISSION_RULE, ASK_RULE, TIP_RULE, STARTUP_RULE] {
+                assert!(group("detection").contains(rule), "{rule}");
+            }
             assert!(group("composer").contains(IDLE_RULE));
-            let rules = profile["rules"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|rule| rule["id"].as_str().unwrap())
-                .collect::<BTreeSet<_>>();
-            assert!(!rules.contains("claude-auto-startup"));
             for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
                 let predecessor = ProfileCatalog::bundled()
                     .unwrap()
@@ -5081,6 +5140,165 @@ mod contract_tests {
             assert_eq!(
                 observe("claude-2.1.302-default-permission-1").rule_id,
                 PERMISSION_RULE
+            );
+        }
+
+        #[test]
+        fn bundled_claude_auto_tip_form_answers_allow_with_1_and_deny_with_4_ungated() {
+            let catalog = ProfileCatalog::bundled().unwrap();
+            for (id, operation) in [
+                (TIP_FORM, TIP_ALLOW),
+                (TIP_ALLOW_PRE_STAGE, TIP_ALLOW),
+                (TIP_DENY_PRE_STAGE, TIP_DENY),
+            ] {
+                let form = observe(id);
+                assert_eq!(form.match_evidence, MatchEvidence::Complete, "{id}");
+                assert!(!form.verified_noninteraction, "{id}");
+                assert_eq!(form.raw_evidence["operation"], operation, "{id}");
+                assert_eq!(form.raw_evidence["choices"], json!(["Yes", "No"]), "{id}");
+            }
+            let other_forms = [
+                ("claude-2.1.302-default-permission-1", PERMISSION_RULE),
+                (ASK_FORM, ASK_RULE),
+            ];
+            for (decision, choice, byte, pre_stage) in [
+                (
+                    PermissionDecision::Allow,
+                    "allow-once",
+                    b"1",
+                    TIP_ALLOW_PRE_STAGE,
+                ),
+                (
+                    PermissionDecision::Deny,
+                    "deny-once",
+                    b"4",
+                    TIP_DENY_PRE_STAGE,
+                ),
+            ] {
+                let plan = catalog
+                    .answer_plan(CodingAgent::Claude, CLAUDE_VERSION, TIP_RULE, decision)
+                    .unwrap()
+                    .expect("tip-rule answer plan");
+                assert_eq!(plan.choice_id(), choice);
+                assert_eq!(plan.stages().len(), 1, "{decision:?}");
+                let stage = &plan.stages()[0];
+                assert_eq!(stage.bytes(), byte);
+                assert_eq!(stage.required_rule_id(), TIP_RULE);
+                assert_eq!(stage.required_choice_id(), choice);
+                assert!(stage.gate().is_none(), "{decision:?} is ungated");
+                let capability = plan.capability();
+                assert_eq!(capability.profile_version(), PROFILE_VERSION);
+                assert_eq!(capability.request_rule_id(), TIP_RULE);
+                assert_eq!(capability.decision(), decision);
+                assert_eq!(
+                    capability.fixture_ids(),
+                    [pre_stage.to_owned()].as_slice(),
+                    "{decision:?} rests on its pre-stage capture"
+                );
+                let matched = detector(&catalog)
+                    .match_answer(&screen(pre_stage), &plan)
+                    .unwrap()
+                    .expect("the pre-stage form matches its plan");
+                assert_eq!(matched.choices(), &["Yes".to_owned(), "No".to_owned()]);
+                assert!(Some(matched.semantic()) == observe(pre_stage).fingerprint.as_ref());
+                for (other, rule) in other_forms {
+                    assert!(
+                        detector(&catalog)
+                            .match_answer(&screen(other), &plan)
+                            .unwrap()
+                            .is_none(),
+                        "{decision:?} tip plan on {other}"
+                    );
+                    let foreign = catalog
+                        .answer_plan(CodingAgent::Claude, CLAUDE_VERSION, rule, decision)
+                        .unwrap()
+                        .unwrap();
+                    assert!(
+                        detector(&catalog)
+                            .match_answer(&screen(pre_stage), &foreign)
+                            .unwrap()
+                            .is_none(),
+                        "{decision:?} {rule} plan on the tip form"
+                    );
+                }
+            }
+            assert_eq!(
+                observe("claude-2.1.302-default-permission-1").rule_id,
+                PERMISSION_RULE
+            );
+        }
+
+        #[test]
+        fn bundled_claude_auto_startup_dialog_is_one_question_without_an_answer_plan() {
+            let catalog = ProfileCatalog::bundled().unwrap();
+            let offer = observe(STARTUP_OFFER);
+            let wizard = observe(STARTUP_WIZARD);
+            for (id, observed) in [(STARTUP_OFFER, &offer), (STARTUP_WIZARD, &wizard)] {
+                assert_eq!(observed.match_evidence, MatchEvidence::Complete, "{id}");
+                assert!(!observed.verified_noninteraction, "{id}");
+                assert_eq!(observed.raw_evidence["operation"], Value::Null, "{id}");
+                assert_eq!(observed.raw_evidence["choices"], json!([]), "{id}");
+                assert!(observed.fingerprint.is_some(), "{id}");
+            }
+            assert!(
+                offer.fingerprint == wizard.fingerprint,
+                "the offer and its wizard are one dialog"
+            );
+            for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                assert!(
+                    catalog
+                        .answer_plan(CodingAgent::Claude, CLAUDE_VERSION, STARTUP_RULE, decision)
+                        .unwrap()
+                        .is_none(),
+                    "{decision:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn tracker_holds_one_question_episode_across_the_startup_dialog_until_the_composer_returns()
+        {
+            let mut run = Run::metadata();
+            let offer = run.episode(STARTUP_OFFER, 0, 300);
+            assert_eq!(offer.len(), 1, "{offer:?}");
+            assert_eq!(offer[0].kind, RuntimeEventKind::InteractionOpened);
+            assert_eq!(offer[0].episode_seq, Some(1));
+            assert_eq!(offer[0].classification, Some(InteractionClass::Question));
+            let wizard = run.episode(STARTUP_WIZARD, 350, 900);
+            assert!(
+                wizard.is_empty(),
+                "the wizard continues the episode: {wizard:?}"
+            );
+            let cancelled = run.episode(STARTUP_CANCELLED, 950, 1400);
+            assert_eq!(cancelled.len(), 1, "{cancelled:?}");
+            assert_eq!(cancelled[0].kind, RuntimeEventKind::InteractionClosed);
+            assert_eq!(cancelled[0].episode_seq, Some(1));
+            assert_eq!(
+                cancelled[0].close_reason,
+                Some(InteractionCloseReason::NotVisible)
+            );
+        }
+
+        #[test]
+        fn tracker_opens_one_permission_episode_for_the_tip_form_and_closes_it_once_the_command_runs()
+         {
+            let mut run = Run::metadata();
+            let form = run.episode(TIP_FORM, 0, 300);
+            assert_eq!(form.len(), 1, "{form:?}");
+            assert_eq!(form[0].kind, RuntimeEventKind::InteractionOpened);
+            assert_eq!(
+                form[0].classification,
+                Some(InteractionClass::PermissionRequest)
+            );
+            let pre_stage = run.episode(TIP_ALLOW_PRE_STAGE, 350, 600);
+            assert!(pre_stage.is_empty(), "{pre_stage:?}");
+            let running = run.episode(TIP_ALLOW_RUNNING, 650, 1100);
+            assert_eq!(running.len(), 1, "{running:?}");
+            assert_eq!(running[0].kind, RuntimeEventKind::InteractionClosed);
+            assert_eq!(running[0].episode_seq, form[0].episode_seq);
+            assert_eq!(
+                running[0].close_reason,
+                Some(InteractionCloseReason::NotVisible)
             );
         }
 
