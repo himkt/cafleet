@@ -1,25 +1,26 @@
 # Member Automatic Approval Modes
 
-**Status**: Approved
-**Progress**: 0/28 tasks complete
+**Status**: Complete
+**Progress**: 31/31 tasks complete
 **Last Updated**: 2026-10-29
 
 ## Overview
 
-Make each backend's native automatic approval mode the omitted member launch policy for Claude (`--permission-mode auto`) and Codex (`--approve-for-me`); another mode applies only when the user explicitly asks for it, through an explicit `--permission-mode` choice. Extend the bundled Claude Code 2.1.302 and Codex 0.163.0 profiles from native captures so the member PTY runner reports an automatic refusal and unavailable automatic review to the Director as their own durable events, and records the observed availability of automatic review on the run. Native permission forms that still appear in automatic mode continue through the existing `interaction_opened` and `permission respond` flow.
+Make each backend's native automatic approval mode the omitted member launch policy for Claude (`--permission-mode auto`) and Codex (`--approve-for-me`); another mode applies only when the user explicitly asks for it, through an explicit `--permission-mode` choice. Extend the bundled Claude Code 2.1.302 and Codex 0.163.0 profiles from native captures so the member PTY runner reports an automatic refusal and unavailable automatic review to the Director as their own durable events, and records the observed availability of automatic review on the run. Native permission forms that still appear in automatic mode continue through the existing `interaction_opened` and `permission respond` flow. A native version without its own bundled profile runs under the backend's newest bundled profile, recorded as `profile_match=fallback`, so an unchanged native UI keeps working without a new capture.
 
 ## Success Criteria
 
-- [ ] An omitted `--permission-mode` launches Claude with `--permission-mode auto` and Codex with `--approve-for-me --sandbox workspace-write`, recording `resolved_mode` `auto` / `approve-for-me` and `mode_source=default`; OpenCode still launches `--agent cafleet`.
-- [ ] Every previous choice remains explicit: Claude `dontAsk` and the other native values, Codex `on-request` and `never` with their current argv, OpenCode `cafleet` and `cafleet-ask`; catalog-derived help and the usage error list `approve-for-me` and the new defaults.
-- [ ] The Director guidance spawns every member with the omitted default and passes `--permission-mode` only when the user explicitly requests that mode for the member: a non-automatic choice for Claude or Codex, `cafleet-ask` for OpenCode.
-- [ ] The next contiguous current-family migration (V6) adds the event kinds `automatic_refusal_observed` and `automatic_review_unavailable`, preserves every existing row, sequence and foreign key, and the derived chain and schema-shape guards pass at head V6.
-- [ ] A Claude 2.1.302 member and a Codex 0.163.0 member record bundled profiles `claude-2.1.302-auto-1` and `codex-0.163.0-approve-for-me-1` with `coverage=tested`, each profile meets its § Default-switch gate, and every rule it claims rests on native captures at that exact version.
-- [ ] A captured automatic refusal produces exactly one `automatic_refusal_observed` event and Director inbox record with `director_action.kind=review_automatic_refusal`, creates no interaction row, leaves the frame's input eligibility unchanged and offers no `permission respond`.
-- [ ] A captured unavailable-review screen produces one `automatic_review_unavailable` event with `director_action.kind=review_automatic_review_unavailable`, and `effective_policy_json` records `automatic_review=unavailable` with its `rule_id` and `event_id`; `observed_mode` holds the displayed mode only under `redacted` evidence and is null under `metadata`. The member keeps running, and `member show` exposes the recorded policy.
-- [ ] A native permission form shown in automatic mode opens the existing `interaction_opened` episode and is answered through `permission respond` exactly as under the interactive policies.
-- [ ] On both tmux and herdr, live acceptance on each backend covers the omitted-default launch, an auto-approved fixture, an auto-refused fixture and, where the native host shows one, an escalated form answered allow and deny; each uncaptured screen is a documented limit.
-- [ ] Member and Director guidance, `docs/`, `SPEC.md` and the skill references describe the new defaults, both events and their Director handling, and `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build` pass.
+- [x] An omitted `--permission-mode` launches Claude with `--permission-mode auto` and Codex with `--approve-for-me`, recording `resolved_mode` `auto` / `approve-for-me` and `mode_source=default`; OpenCode still launches `--agent cafleet`.
+- [x] Every previous choice remains explicit: Claude `dontAsk` and the other native values, Codex `on-request` and `never` with their current argv, OpenCode `cafleet` and `cafleet-ask`; catalog-derived help and the usage error list `approve-for-me` and the new defaults.
+- [x] The Director guidance spawns every member with the omitted default and passes `--permission-mode` only when the user explicitly requests that mode for the member: a non-automatic choice for Claude or Codex, `cafleet-ask` for OpenCode.
+- [x] The next contiguous current-family migration (V6) adds the event kinds `automatic_refusal_observed` and `automatic_review_unavailable`, preserves every existing row, sequence and foreign key, and the derived chain and schema-shape guards pass at head V6.
+- [x] A Claude 2.1.302 member and a Codex 0.163.0 member record bundled profiles `claude-2.1.302-auto-1` and `codex-0.163.0-approve-for-me-1` with `coverage=tested` and `profile_match=exact`, each profile meets its § Default-switch gate, and every rule it claims rests on native captures at that exact version.
+- [x] A captured automatic refusal produces exactly one `automatic_refusal_observed` event and Director inbox record with `director_action.kind=review_automatic_refusal`, creates no interaction row, leaves the frame's input eligibility unchanged and offers no `permission respond`.
+- [x] A captured unavailable-review screen produces one `automatic_review_unavailable` event with `director_action.kind=review_automatic_review_unavailable`, and `effective_policy_json` records `automatic_review=unavailable` with its `rule_id` and `event_id`; `observed_mode` holds the displayed mode only under `redacted` evidence and is null under `metadata`. The member keeps running, and `member show` exposes the recorded policy.
+- [x] A member whose probed native version has no bundled profile (for example Claude Code 2.1.306) records the backend's newest bundled profile with `profile_match=fallback`, the profile's capabilities and the fallback warning; on an unchanged native UI it detects, delivers prompts and answers forms as under its exact version, and a run with no profile records `profile_match=null` and `coverage=unknown` as today.
+- [x] A native permission form shown in automatic mode opens the existing `interaction_opened` episode and is answered through `permission respond` exactly as under the interactive policies.
+- [x] On both tmux and herdr, live acceptance on each backend covers the omitted-default launch, an auto-approved fixture, an auto-refused fixture and, where the native host shows one, an escalated form answered allow and deny; each uncaptured screen is a documented limit.
+- [x] Member and Director guidance, `docs/`, `SPEC.md` and the skill references describe the new defaults, both events and their Director handling, and `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build` pass.
 
 ---
 
@@ -36,7 +37,7 @@ The shipped launch catalog (`CodingAgent::policy_choices`) already accepts Claud
 -s, --sandbox <read-only|workspace-write|danger-full-access>
 ```
 
-Bundled profiles are keyed by backend and native version, not by mode, so one profile per version serves every policy of that backend. The detector (`Detector::observe`) produces one primary observation per frame: it matches the profile's `detection` and `composer` rules and continuation rules, keeps the highest priority, and turns a conflict into `unknown_interaction` or `unknown`. The existing `permission_denied` observation is such a primary observation; the episode tracker emits `permission_denied_observed` once per stable result and resets that identity after a 250 ms profile-verified noninteraction boundary (an idle-composer rule). No bundled profile declares a `permission_denied` rule today.
+Bundled profiles are keyed by backend and native version, not by mode, so one profile per version serves every policy of that backend. Selection requires an exact version match, so every native update (the installed Claude Code is already 2.1.306) drops a member to `coverage=unknown` until its UI is recaptured, even when the UI is unchanged; rules match screen patterns, and a changed UI already fails to match. The detector (`Detector::observe`) produces one primary observation per frame: it matches the profile's `detection` and `composer` rules and continuation rules, keeps the highest priority, and turns a conflict into `unknown_interaction` or `unknown`. The existing `permission_denied` observation is such a primary observation; the episode tracker emits `permission_denied_observed` once per stable result and resets that identity after a 250 ms profile-verified noninteraction boundary (an idle-composer rule). No bundled profile declares a `permission_denied` rule today.
 
 The runtime event kind is a closed SQL CHECK domain created in V4; `member_permission_responses.event_id` (V5) references `member_runtime_events`. `effective_policy_json` exists on `member_runs` and stays null until an actual native observation supplies it. In the 0000194 acceptance environment the user's Codex `approvals_reviewer = "auto_review"` configuration answered escalations without a native form and was disabled for those captures; this design's acceptance needs automatic review active.
 
@@ -52,6 +53,7 @@ The runtime event kind is a closed SQL CHECK domain created in V4; `member_permi
 | Bundled profiles `claude-2.1.302-auto-1` and `codex-0.163.0-approve-for-me-1` built from native captures, and the profile `annotations` capability | Native versions other than Claude Code 2.1.302 and Codex 0.163.0 |
 | Event kinds `automatic_refusal_observed` and `automatic_review_unavailable`, their `director_action` and the V6 migration | A request-bound answer to an automatic refusal (no native request is waiting) |
 | The observed availability of automatic review in `effective_policy_json` and in the shared runtime snapshot | Forcing the Codex reviewer on or off for the explicit `on-request` / `never` choices |
+| Profile version fallback for every backend: the newest bundled profile serves an unprofiled native version, recorded in `member_runs.profile_match` | Version ranges or per-rule version declarations |
 | Member and Director guidance, `docs/`, `SPEC.md` and skill references for the defaults and events | Changes to the Director's own session settings or the Director profiles |
 
 The runner, episode, inspection, response, receipt, recovery and Director-continuation contracts of 0000194 and 0000196 apply unchanged except where this document states otherwise.
@@ -63,13 +65,13 @@ The default resolution (`CodingAgent::default_policy`) changes for Claude and Co
 | Backend | Omitted selection | Explicit choices (native version) | Permission argv |
 |---|---|---|---|
 | Claude | `auto` | `default`, `manual`, `dontAsk`, `acceptEdits`, `auto`, `bypassPermissions`, `plan` (2.1.302 or unprobed) | `--permission-mode <mode>` (unchanged mapping) |
-| Codex | `approve-for-me` | `on-request`, `never`, `approve-for-me` (0.163.0 or unprobed) | `on-request` / `never`: `--ask-for-approval <mode> --sandbox workspace-write` (unchanged); `approve-for-me`: `--approve-for-me --sandbox workspace-write` |
+| Codex | `approve-for-me` | `on-request`, `never`, `approve-for-me` (0.163.0 or unprobed) | `on-request` / `never`: `--ask-for-approval <mode> --sandbox workspace-write` (unchanged); `approve-for-me`: `--approve-for-me` |
 | OpenCode | `cafleet` | `cafleet`, `cafleet-ask` (every version) | `--agent <mode>` (unchanged) |
 
-- The Codex token `approve-for-me` names its native flag, as the other Codex tokens name their native `--ask-for-approval` values. Every Codex choice keeps the explicit `--sandbox workspace-write`, so the sandbox stays visible in argv and launch evidence.
+- The Codex token `approve-for-me` names its native flag, as the other Codex tokens name their native `--ask-for-approval` values. Codex 0.163.0 rejects `--approve-for-me` together with `--sandbox` (`error: the argument '--approve-for-me' cannot be used with '--sandbox <SANDBOX_MODE>'`, exit 2) because the flag itself selects the workspace-write sandbox, so the `approve-for-me` argv is the single flag; `on-request` and `never` keep their explicit `--sandbox workspace-write`.
 - The explicit `on-request` and `never` choices keep their current launch and inherit the user's Codex configuration, including any `approvals_reviewer`. Documentation states that such a configuration can answer escalations without a native form, as `docs/docs/spec/member-runtime.md` already records.
 - An omitted selection is not validated against the version catalog, as today: a Claude or Codex member whose probed version has no catalog entry still launches with the default. A native version that rejects `auto` or `--approve-for-me` exits immediately and produces the existing `runner_exited` event with its native status; the runner never retries another mode.
-- Run records keep the 0000194 launch-intent fields. Omitted Claude: `requested_mode=null`, `resolved_mode=auto`, `mode_source=default`, `permission_argv_json=["--permission-mode","auto"]`. Omitted Codex: `requested_mode=null`, `resolved_mode=approve-for-me`, `mode_source=default`, `permission_argv_json=["--approve-for-me","--sandbox","workspace-write"]`.
+- Run records keep the 0000194 launch-intent fields. Omitted Claude: `requested_mode=null`, `resolved_mode=auto`, `mode_source=default`, `permission_argv_json=["--permission-mode","auto"]`. Omitted Codex: `requested_mode=null`, `resolved_mode=approve-for-me`, `mode_source=default`, `permission_argv_json=["--approve-for-me"]`.
 - Claude keeps its other spawn arguments (`--prompt-suggestions false`, `--allowedTools Bash(cafleet message *)`, `--name`, model, effort).
 
 Spawn argv with omitted selection:
@@ -77,7 +79,7 @@ Spawn argv with omitted selection:
 | Backend | Spawn argv |
 |---|---|
 | `claude` | `claude --permission-mode auto --prompt-suggestions false --allowedTools <rule>... --name <member-name> <prompt>` |
-| `codex` | `codex --approve-for-me --sandbox workspace-write <prompt>` |
+| `codex` | `codex --approve-for-me <prompt>` |
 | `opencode` | `opencode mini --standalone --agent cafleet --prompt <prompt>` |
 
 Catalog-derived help reads `claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet)`. An unknown Codex value fails before registration with `--permission-mode for codex must be one of on-request, never, approve-for-me (got 'VALUE')`, exit 2.
@@ -94,7 +96,7 @@ Each screen below is captured natively at the pinned version under the CAFleet r
 | Escalation shown as a native permission form | Primary `permission_request` | Existing episode, inspection and `permission respond` flow. If the form matches the existing `claude-2.1.302-default` / `codex-0.163.0-on-request` request and answer rules, those rules are reused unchanged; a different form gets its own rule and answer plans with pre-stage fixtures. |
 | Automatic review unavailable or degraded (for example auto mode unavailable for the account or model, a fallback to prompting, or an unavailable reviewer) | Annotation `automatic_review_unavailable` | § Unavailable automatic review event. |
 | Positive automatic-mode indicator (for example a footer mode badge) | Annotation `automatic_review_available` | Records `automatic_review=available` in `effective_policy_json`. |
-| Startup notice or opt-in dialog for automatic mode | Primary `question` when captured, otherwise `unknown_interaction` | § Startup dialog. |
+| Startup notice or opt-in dialog for automatic mode | Primary `question` when captured; an uncaptured screen matches no rule, so the observation is `unknown`: programmatic input stays held and no runtime event reaches the Director | § Startup dialog. |
 
 ### Startup dialog
 
@@ -130,15 +132,38 @@ New rules, each declared with the existing rule fields (`id`, `priority`, `obser
 
 | Rule id | `observation` | Capability group | `extract.operation` |
 |---|---|---|---|
-| `claude-auto-refusal` | `automatic_refusal` | `annotations` | Required: the refused operation |
+| `claude-auto-refusal` | `automatic_refusal` | `annotations` | Required: the refused tool call of a verbose-view block (`● Tool(<operation>)` followed by `⎿  Denied by auto mode classifier ∙ [<category>] ∙ …`) |
+| `claude-auto-refusal-notice` | `automatic_refusal` | `annotations` | Required: the default-view status-row notice text `<tool> denied by auto mode · [<category>]`; the refused command itself is not displayed |
 | `claude-auto-unavailable` | `automatic_review_unavailable` | `annotations` | `null` |
 | `claude-auto-mode-indicator` | `automatic_review_available` | `annotations` | `null` |
+| `claude-auto-ask-permission` | `permission_request` | `detection` | Required: the Bash operation of the ask-rule form; answer plans allow `31` (`1. Yes`) and deny `32` (`2. No`), both ungated |
+| `claude-auto-startup` | `question` | `detection` | `null`; the once-per-configuration `Teach auto mode about your environment?` dialog, no answer plan |
+| `claude-bash-permission-auto-tip` | `permission_request` | `detection` | Required: the Bash operation of the explicit-`default` form variant carrying the auto-mode tip; allow and deny answer plans from its pre-stage captures |
 | `codex-auto-review-refusal` | `automatic_refusal` | `annotations` | Required: the refused operation |
-| `codex-auto-review-unavailable` | `automatic_review_unavailable` | `annotations` | `null` |
 | `codex-auto-review-indicator` | `automatic_review_available` | `annotations` | `null` |
-| `claude-auto-startup` / `codex-auto-startup` | `question` | `detection` | `null`; only for the once-per-configuration dialog outcome |
+
+Claude Code 2.1.302 renders an automatic refusal in one of two native forms depending on the user's Verbose output setting, and the profile claims both. The default view shows only a transient status-row notice above the composer border for about 8–10 seconds; it names the tool and category but not the command, so refusals of the same tool and category produce one fingerprint and one event. The verbose view keeps one transcript block per refused call with its command. The Claude escalated form appears in automatic mode only through an explicit `permissions.ask` rule; it differs from the `claude-bash-permission` form (an `Ask rule … overrides auto mode for this command.` row, a `/permissions to let auto mode decide` row, `2. No` as the deny choice), so it has its own request rule and answer plans. Live acceptance showed that Claude Code 2.1.302 in `auto` opens a `Teach auto mode about your environment?` dialog after the first turn of a new configuration and not again on later launches (the once-per-configuration outcome of § Startup dialog), so the Claude profile adds a `claude-auto-startup` `question` rule for it. Under an account with automatic mode available, the explicit `default` policy renders its Bash form with a `Tip: auto mode handles these prompts for you` row and a `3. Yes, and switch to auto mode` choice instead of `This command requires approval`, so the profile also adds a request rule and answer plans for that variant.
+
+Codex 0.163.0 in `approve-for-me` renders an automatic refusal as a persistent column-0 transcript line `✗ Request denied for codex to run <cmd>` (model quotes are never at column 0) and shows its positive indicator only in the `/status` block (`Permissions: Workspace (Approve for me)`). It showed no startup dialog, no native permission form (every escalation went to the reviewer) and no unavailable-review screen, so the Codex profile claims no startup, unavailable or new request rule; the existing `codex-0.163.0-on-request-1` request and answer rules stay unchanged for the interactive policies. Codex truncates commands longer than about 70 characters, so refusals sharing the displayed prefix share a fingerprint.
 
 An automatic-mode composer variant, when Step 1 needs one, is an ordinary `composer_empty` rule in the `composer` group.
+
+### Profile version fallback
+
+Profile selection after the native version probe changes for every backend:
+
+| Probe result | Selected profile | `profile_version` | `profile_match` | `coverage` |
+|---|---|---|---|---|
+| Version with a bundled profile | That profile | Its name | `exact` | `tested` when it declares detection, otherwise `unknown` (unchanged) |
+| Version without a bundled profile, backend has bundled profiles | The backend's profile with the highest declared native version | Its name | `fallback` | Computed from the selected profile exactly as for `exact` |
+| Version without a bundled profile, backend has none | None | `null` | `null` | `unknown` (unchanged) |
+| Probe failure | None | `null` | `null` | `unknown` (unchanged) |
+
+- Versions compare by their dotted numeric components, left to right; a missing component counts as `0`. The selection does not depend on whether the probed version is newer or older than the declared one.
+- Every capability lookup keyed by backend and native version (detection, composer, submission and answer plans, `NativeCapabilities`) resolves through the selected profile, so a fallback run behaves exactly as an exact run of the profile's declared version, and `native_version` still records the probed version.
+- The rules match screen patterns, so a changed UI fails safe: an unmatched form or composer yields the existing `unknown` / `unknown_interaction` observation, holds programmatic input and offers no answer plan. An answer plan writes only after its request rule, choices and gates matched the fresh observation, as today.
+- `member create` writes one stderr line for a fallback, `Warning: no bundled profile for BACKEND VERSION; using PROFILE (profile_match=fallback).`, and leaves stdout text and JSON otherwise unchanged. A fallback emits no `coverage_unknown` event.
+- Profile provenance stays exact-version: a profile declares only the versions its captures were taken on, and catalog validation is unchanged. A fallback adds no provenance; acceptance on an unprofiled version is the recorded evidence that its UI is unchanged.
 
 ### Profile schema extension
 
@@ -161,19 +186,19 @@ Annotation rules use the region contract of the existing rules, with screen and 
 - **Blocks.** The start and end patterns delimit one refusal or notice block, and matchers require the native result decoration (for example the tool-result prefix), so model text quoting the same words does not match. Every qualifying region yields a block (§ Profile schema extension), so two refusals visible together are two blocks.
 - **Live-transcript frame guard.** The rule's `frame.require_patterns` must each match a live-screen line of the same frame, and no `frame.reject_patterns` may match one. The require patterns name lines present only in the live TUI (for example its composer or footer line), and the reject patterns name the transcript viewer's header, both pinned from captures. A frame failing the guard yields no blocks for that rule.
 
-The fingerprint is backend, profile, rule id and the displayed operation (or notice text) normalized by removing every row break and collapsing each whitespace run to one space, so a resize that rewraps a block keeps its fingerprint. The event's `operation` evidence still reports the displayed rows, as 0000194 specifies.
+The fingerprint is backend, profile, rule id and the displayed operation (or notice text) normalized by first stripping the extract's `row_margin` from each continuation row, then removing every row break and collapsing each whitespace run to one space, so a resize that rewraps a block, even inside a token, keeps its fingerprint. The event's `operation` evidence still reports the displayed rows, as 0000194 specifies.
 
 The annotation tracker keeps, per annotation rule, a set of fingerprint states:
 
 1. A fingerprint present in a frame's blocks is emitted after two compatible observations at least 100 ms apart, as for every runtime observation; several fingerprints are tracked and emitted independently.
 2. An emitted fingerprint is not emitted again until its state resets.
-3. A state resets only after the fingerprint has been absent for 250 ms of continuous frames whose primary observation is a verified noninteraction and whose frame guard holds. Frames showing a permission form, another interaction, an overlay, a working or unknown screen, a guard failure, or a redraw do not advance the reset, so a block hidden by any of them keeps its state and emits nothing when it reappears.
+3. A state resets only after the fingerprint has been absent for 250 ms of continuous frames whose primary observation is a verified noninteraction and whose frame guard holds. Frames showing a permission form, another interaction, an overlay, an unknown screen, a guard failure, or a redraw do not advance the reset, so a block hidden by any of them keeps its state and emits nothing when it reappears. A working screen advances the reset only when the profile classifies it as a verified noninteraction; Claude Code 2.1.302 and Codex 0.163.0 keep their idle composer visible while working (Codex also while its reviewer runs), so their working frames do.
 4. `automatic_review_unavailable` is emitted at most once per run per rule id unless an `automatic_review_available` annotation was observed after it.
 5. `automatic_review_available` emits no event; it only updates the effective policy record.
 
 The existing `permission_denied` reset uses the verified noninteraction boundary alone because a primary refusal frame and an idle-composer frame exclude each other. An annotation stays visible above the idle composer, so that boundary alone would re-emit a still-visible refusal after every turn; the reset therefore requires the annotation's absence on such frames. An automatic refusal is a separate kind from `permission_denied_observed` because the deciding party is the automatic reviewer and the Director procedure differs (`director_action` `review_automatic_refusal`, where `permission_denied_observed` carries none); the two never match the same block, because one is a primary rule and the other an annotation and the fixture classification above asserts the separation.
 
-Limits stated in the documentation: the event is an alert, not a one-to-one count of native refusals. A second refusal of the same normalized operation emits nothing while the first is visible, or before an idle frame shows the first gone. A refusal rendered and removed within 100 ms is not observed. The member's routed refusal evidence remains the record in each case.
+Limits stated in the documentation: the event is an alert, not a one-to-one count of native refusals. A second refusal of the same normalized operation emits nothing while the first is visible, or before an idle frame shows the first gone. A refusal rendered and removed within 100 ms is not observed. For Claude in the default view, the notice names no command, refusals of the same tool and category collapse into one event, and a notice that expires while hidden by a form is never observed. The native-quote guard for Claude rests on the U+00A0 the native result prefix carries. The first launch on a brand-new Claude configuration renders on the primary screen, so no rule matches during that session. The Claude default-view notice was captured at 120 columns only; a narrower pane can truncate its ` · /permissions` suffix, and such a notice is not observed. `claude-auto-refusal` strips no row margin, so a Claude command token wider than the pane, wrapped inside the token, changes its fingerprint after a resize and can emit once more. The member's routed refusal evidence remains the record in each case.
 
 ### Automatic refusal event
 
@@ -242,7 +267,7 @@ The available update is not spooled: a runner lost before it commits loses only 
 
 ### Runtime snapshot presentation
 
-The shared runtime snapshot (`presentation::runtime_snapshot` for JSON, `output::format_runtime_snapshot` for text) appends `effective_policy` (the stored object or `null`) as its last key, after `child_start_identity`, and the text runtime line appends ` review=STATE`, where `STATE` is the recorded `automatic_review` value or `-`. Every command that renders the snapshot changes accordingly:
+The shared runtime snapshot (`presentation::runtime_snapshot` for JSON, `output::format_runtime_snapshot` for text) inserts `profile_match` (`exact`, `fallback` or `null`) immediately after `coverage` and appends `effective_policy` (the stored object or `null`) as its last key, after `child_start_identity`. The text runtime line becomes `Runtime: run=ID mode=MODE status=STATUS coverage=COVERAGE profile=MATCH review=STATE`, where `MATCH` is the recorded `profile_match` or `-` and `STATE` is the recorded `automatic_review` value or `-`. Every command that renders the snapshot changes accordingly:
 
 | Command | JSON surface | Text surface |
 |---|---|---|
@@ -250,7 +275,7 @@ The shared runtime snapshot (`presentation::runtime_snapshot` for JSON, `output:
 | `member show` | `runtime` object | `Runtime:` line |
 | `event show` | `run` object | Runtime summary line |
 
-`event show` renders the current run, so an existing event read after the upgrade shows the new key and field as well; the event payload itself and its message bytes are unchanged. Step 5 enumerates every consumer of the two helpers and tests each surface's exact key order and text line.
+`event show` renders the current run, so an existing event read after the upgrade shows the new key and field as well; the event payload itself and its message bytes are unchanged. Steps 4 and 6 enumerate every consumer of the two helpers and tests each surface's exact key order and text line.
 
 ### Payload schema version
 
@@ -271,8 +296,24 @@ SQLite cannot alter a CHECK in place, and the grouped migration transaction runs
 3. Create `member_permission_response_claims_v6` with its composite foreign key referencing `member_permission_responses_v6(interaction_id, input_id)` and otherwise the V5 definition; copy all rows.
 4. Drop `member_permission_response_claims`, then `member_permission_responses`, then `member_runtime_events`; each drop has no remaining referencing rows, and the last removes the old sequence row.
 5. Rename `member_runtime_events_v6`, `member_permission_responses_v6` and `member_permission_response_claims_v6` to their final names in that order. SQLite's non-legacy rename rewrites the referencing foreign keys to the final names and renames the `_v6` sequence row with its table.
+6. Add the profile-match column in place and backfill existing runs, which all selected their profile by exact version. SQLite tests an added column's CHECK against existing rows, and a NULL `profile_match` makes `IN` NULL rather than false, so the CHECK names `IS NOT NULL` explicitly and the profiled runs are stashed and their `profile_version` cleared while the column is added:
 
-The derived chain guard and schema-shape guard must pass at head V6; both are computed from the embedded registry, and the shape guard compares columns, foreign keys and indexes. The migration tests establish the CHECK widening and data preservation: populate V5 rows in all three tables (including a response and a claim), migrate, and assert identical rows, the preserved `sqlite_sequence` value, an empty `PRAGMA foreign_key_check`, insertion of both new kinds and rejection of an unknown kind.
+```sql
+CREATE TEMP TABLE v6_profiled_runs AS
+  SELECT run_id, profile_version FROM member_runs WHERE profile_version IS NOT NULL;
+UPDATE member_runs SET profile_version = NULL WHERE profile_version IS NOT NULL;
+ALTER TABLE member_runs ADD COLUMN profile_match TEXT
+  CHECK((profile_version IS NULL AND profile_match IS NULL)
+     OR (profile_version IS NOT NULL AND profile_match IS NOT NULL
+         AND profile_match IN ('exact','fallback')));
+UPDATE member_runs SET
+  profile_version = (SELECT p.profile_version FROM v6_profiled_runs p WHERE p.run_id = member_runs.run_id),
+  profile_match = 'exact'
+  WHERE run_id IN (SELECT run_id FROM v6_profiled_runs);
+DROP TABLE v6_profiled_runs;
+```
+
+The derived chain guard and schema-shape guard must pass at head V6; both are computed from the embedded registry, and the shape guard compares columns, foreign keys and indexes. The migration tests establish the CHECK widening and data preservation: populate V5 rows in all three tables (including a response and a claim), migrate, and assert identical rows, the preserved `sqlite_sequence` value, an empty `PRAGMA foreign_key_check`, insertion of both new kinds and rejection of an unknown kind, `profile_match='exact'` on every V5 run with a profile and `null` on the others, and rejection of a `profile_match` inconsistent with `profile_version`.
 
 ### Director guidance
 
@@ -297,17 +338,17 @@ A routed request that arrives with no event follows the existing refusal route u
 
 ### Member guidance
 
-The member role and the coding-agent overlay describe the default posture as the backend's automatic approval mode: the member attempts role-authorized commands, an automatic refusal is a permission refusal for routing purposes, and the member routes a necessary refused command to the Director with the existing command, cwd, environment and refusal evidence, then stops dependent work. The Claude `{permission_flags}` binding becomes `--permission-mode auto` and the Codex binding becomes `--approve-for-me --sandbox workspace-write`; the Claude `dontAsk` note is replaced by the corresponding note for `auto` (native rules, hooks and managed policy remain authoritative; refused work routes to the Director).
+The member role and the coding-agent overlay describe the default posture as the backend's automatic approval mode: the member attempts role-authorized commands, an automatic refusal is a permission refusal for routing purposes, and the member routes a necessary refused command to the Director with the existing command, cwd, environment and refusal evidence, then stops dependent work. The Claude `{permission_flags}` binding becomes `--permission-mode auto` and the Codex binding becomes `--approve-for-me`; the Claude `dontAsk` note is replaced by the corresponding note for `auto` (native rules, hooks and managed policy remain authoritative; refused work routes to the Director).
 
 ### Documentation targets
 
 | Target | Change |
 |---|---|
-| `docs/docs/spec/member-runtime.md` | Launch-policy defaults and the Codex choice; automatic-mode screens, startup dialog and default-switch gate; annotation detection and the profile schema extension; both events and their `director_action`; effective policy record; profiles and limits |
+| `docs/docs/spec/member-runtime.md` | Launch-policy defaults and the Codex choice; automatic-mode screens, startup dialog and default-switch gate; annotation detection and the profile schema extension; both events and their `director_action`; effective policy record; profile version fallback and `profile_match` in the native version probe section; profiles and limits |
 | `docs/docs/spec/coding-agent-backends.md` | Spawn argv table, shared contract and per-backend posture for the new defaults; the explicit choices and their config inheritance; the one-time startup-dialog setup step when it applies |
 | `docs/docs/concepts/member-permission-events.md` | Automatic refusals and unavailable review as distinct observations |
-| `docs/docs/spec/cli-options.md` and every other `docs/` page that states a member default policy | Help text and usage error; the `effective_policy` key and ` review=STATE` field in the `member create`, `member show` and `event show` JSON and text layouts |
-| `SPEC.md` | Defaults, catalog, argv, V6 CHECK domain, event kinds, payload value domains, effective policy shape, and the runtime snapshot key order and text line for `member create`, `member show` and `event show` |
+| `docs/docs/spec/cli-options.md` and every other `docs/` page that states a member default policy | Help text and usage error; the fallback warning; the `profile_match` and `effective_policy` keys and the ` profile=MATCH` / ` review=STATE` fields in the `member create`, `member show` and `event show` JSON and text layouts |
+| `SPEC.md` | Defaults, catalog, argv, V6 CHECK domain and `profile_match` column, profile selection and fallback warning, event kinds, payload value domains, effective policy shape, and the runtime snapshot key order and text line for `member create`, `member show` and `event show` |
 | `skills/cafleet/roles/director.md` | Spawn every member with the omitted default and pass `--permission-mode` only on the user's explicit request for that member, per the § Director guidance table; Director handling of both events and the startup dialog |
 | `skills/cafleet/reference/coding-agents.md`, `skills/cafleet/roles/member.md`, `skills/cafleet/reference/member-runtime.md`, `skills/cafleet/reference/prompt-routing.md` | Runtime bindings, notes, member posture and the event procedures |
 
@@ -315,7 +356,7 @@ Find the remaining pages with a repository search for the old default argv strin
 
 ### Acceptance
 
-Acceptance uses the shipping release build, a private database under `/tmp`, Claude Code 2.1.302 and Codex 0.163.0 first on `PATH`, automatic mode available for the account and model, and a dedicated tmux server or herdr tab per case. Fixture commands are disposable and harmless even if executed:
+Acceptance uses the shipping release build, a private database under `/tmp`, Claude Code 2.1.302 and Codex 0.163.0 first on `PATH` (Claude 2.1.302 is installed beside the user's 2.1.306 with `mise install aqua:anthropics/claude-code@2.1.302` and selected by prepending its install directory to `PATH`), automatic mode available for the account and model, and a dedicated tmux server or herdr tab per case. Fixture commands are disposable and harmless even if executed:
 
 | Fixture | Purpose | Example |
 |---|---|---|
@@ -324,7 +365,9 @@ Acceptance uses the shipping release build, a private database under `/tmp`, Cla
 | Escalated | The host shows a native permission form | Pinned from the Step 1 captures for each backend |
 | Unavailable | The host reports automatic review unavailable | Pinned from the Step 1 captures; omitted when the host cannot be made to show it |
 
-Each case records versions, mode, profile, multiplexer, terminal size, cwd, events, inbox records, effective policy and the observed native result. A fixture that does not produce its intended screen is a recorded limit for that backend, not a pass. User-attended cases are limited to flows where a user decision is part of the procedure: a non-auto-mode Director decision on an automatic refusal and on an escalated form, and the startup dialog when it applies.
+A fallback case repeats the omitted-default launch, auto-approved, auto-refused and escalated cases with the installed Claude Code 2.1.306, which has no bundled profile: it records `profile_match=fallback` and either the same observations as 2.1.302 or each UI difference that failed to match, which becomes a documented limit for that version.
+
+Each case records versions, mode, profile, profile match, multiplexer, terminal size, cwd, events, inbox records, effective policy and the observed native result. A fixture that does not produce its intended screen is a recorded limit for that backend, not a pass. User-attended cases are limited to flows where a user decision is part of the procedure: a non-auto-mode Director decision on an automatic refusal and on an escalated form, and the startup dialog when it applies.
 
 ---
 
@@ -335,49 +378,55 @@ Each case records versions, mode, profile, multiplexer, terminal size, cwd, even
 
 ### Step 1: Capture native automatic-mode evidence
 
-- [ ] Verify that Codex 0.163.0 parses and starts with `--approve-for-me --sandbox workspace-write` and that Claude Code 2.1.302 starts with `--permission-mode auto` under the runner, and establish the § Startup dialog outcome for each on a fresh and a second launch. <!-- completed: -->
-- [ ] Capture each screen in § Native screens in automatic mode for Claude 2.1.302 `auto` under the runner at 36x120 with privacy masking, including two different refusals visible together, a refusal hidden by a permission form and rewrapped by a resize, the transcript viewer showing a refusal, and false-positive quotes of the refusal text. <!-- completed: -->
-- [ ] Capture the same screens for Codex 0.163.0 `approve-for-me`, including any escalated form and its allow/deny pre-stage forms. <!-- completed: -->
-- [ ] Evaluate § Default-switch gate per backend and report its result and every screen that could not be produced to the Director; stop before Step 2 when a gate condition fails. <!-- completed: -->
+- [x] Verify that Codex 0.163.0 parses and starts with `--approve-for-me` and that Claude Code 2.1.302 starts with `--permission-mode auto` under the runner, and establish the § Startup dialog outcome for each on a fresh and a second launch. <!-- completed: 2026-10-29T10:45 -->
+- [x] Capture each screen in § Native screens in automatic mode for Claude 2.1.302 `auto` under the runner at 36x120 with privacy masking, including two different refusals visible together, a refusal hidden by a permission form and rewrapped by a resize, the transcript viewer showing a refusal, and false-positive quotes of the refusal text. <!-- completed: 2026-10-29T10:45 -->
+- [x] Capture the same screens for Codex 0.163.0 `approve-for-me`, including any escalated form and its allow/deny pre-stage forms. <!-- completed: 2026-10-29T10:45 -->
+- [x] Evaluate § Default-switch gate per backend and report its result and every screen that could not be produced to the Director; stop before Step 2 when a gate condition fails. <!-- completed: 2026-10-29T10:45 -->
 
 ### Step 2: Update documentation
 
-- [ ] Update every `docs/` target in § Documentation targets with the defaults, Codex choice, screens, startup dialog, gate, annotations, events, effective policy, snapshot layouts, profiles and limits; pin exact rule patterns from the Step 1 captures. <!-- completed: -->
-- [ ] Update `SPEC.md` contract surfaces: catalog, defaults, argv, V6 CHECK domain, event kinds, `director_action` kinds, effective policy shape and the runtime snapshot key and text line for every listed command. <!-- completed: -->
-- [ ] Update the Director role with the omitted-default spawn rule and the event and startup-dialog procedures. <!-- completed: -->
-- [ ] Update the remaining skill references and the member role for runtime bindings, notes and member posture. <!-- completed: -->
-- [ ] Search for remaining member-default mentions of `dontAsk`, `--permission-mode dontAsk` and `--ask-for-approval never` and update each one that describes the default. <!-- completed: -->
+- [x] Update every `docs/` target in § Documentation targets with the defaults, Codex choice, screens, startup dialog, gate, annotations, events, effective policy, profile version fallback, snapshot layouts, profiles and limits; pin exact rule patterns from the Step 1 captures. <!-- completed: 2026-10-29T10:55 -->
+- [x] Update `SPEC.md` contract surfaces: catalog, defaults, argv, V6 CHECK domain and `profile_match` column, profile selection and fallback warning, event kinds, `director_action` kinds, effective policy shape and the runtime snapshot keys and text line for every listed command. <!-- completed: 2026-10-29T07:57 -->
+- [x] Update the Director role with the omitted-default spawn rule and the event and startup-dialog procedures. <!-- completed: 2026-10-29T10:55 -->
+- [x] Update the remaining skill references and the member role for runtime bindings, notes and member posture. <!-- completed: 2026-10-29T07:57 -->
+- [x] Search for remaining member-default mentions of `dontAsk`, `--permission-mode dontAsk` and `--ask-for-approval never` and update each one that describes the default. <!-- completed: 2026-10-29T07:57 -->
 
 ### Step 3: Add the V6 migration
 
-- [ ] Write migration tests: V5 rows in events, responses and claims survive with identical values, `sqlite_sequence` is preserved, `PRAGMA foreign_key_check` is empty, both new kinds insert and an unknown kind is rejected. <!-- completed: -->
-- [ ] Add `V6__automatic_review_events.sql` with the dependency-ordered rebuild, extend `RuntimeEventKind`, and confirm the derived chain and schema-shape guards pass at head V6. <!-- completed: -->
+- [x] Write migration tests: V5 rows in events, responses and claims survive with identical values, `sqlite_sequence` is preserved, `PRAGMA foreign_key_check` is empty, both new kinds insert and an unknown kind is rejected, and `profile_match` is backfilled and constrained. <!-- completed: 2026-10-29T08:05 -->
+- [x] Add `V6__automatic_review_events.sql` with the dependency-ordered rebuild and the `profile_match` column, extend `RuntimeEventKind`, and confirm the derived chain and schema-shape guards pass at head V6. <!-- completed: 2026-10-29T08:09 -->
 
-### Step 4: Change the launch policy
+### Step 4: Add profile version fallback
 
-- [ ] Write tests: omitted Claude and Codex argv and run-record fields, explicit `approve-for-me`, unchanged explicit `dontAsk` / `on-request` / `never` / OpenCode argv, help text and the Codex usage error. <!-- completed: -->
-- [ ] Implement the new defaults and the `approve-for-me` catalog entry and mapping in `cafleet/src/coding_agent/policy.rs`, updating the 0000194/0000196 tests whose assertions encoded the old defaults. <!-- completed: -->
+- [x] Write tests: exact, fallback (newer and older probed versions, multi-component comparison), no-profile and probe-failure selection with their `profile_version` / `profile_match` / `coverage`; capabilities resolved through the fallback profile; the fallback warning and absent `coverage_unknown` event; a fallback run detecting and answering a predecessor fixture; and the `profile_match` snapshot key and ` profile=MATCH` text field on `member create`, `member show` and `event show`. <!-- completed: 2026-10-29T08:48 -->
+- [x] Implement fallback selection in the catalog and native launch identity, route every version-keyed capability lookup through the selected profile, persist `profile_match` on the run and render it in the shared runtime snapshot. <!-- completed: 2026-10-29T08:48 -->
 
-### Step 5: Add profiles, annotations and events
+### Step 5: Change the launch policy
 
-- [ ] Write catalog tests for the profile schema extension: annotation kinds, the required `annotations` group, group-membership and annotation-field violations including `frame`, multi-block region matching, and provenance. <!-- completed: -->
-- [ ] Implement the schema extension in the catalog and detector, returning annotations beside the unchanged primary observation; add `"annotations": null` to the OpenCode profile. <!-- completed: -->
-- [ ] Add the Step 1 captures as embedded native fixtures with their digests, and the false-positive fixtures. <!-- completed: -->
-- [ ] Write fixture-backed tracker tests for each claimed rule: stable-twice emission, two different refusals visible together emitting two events, no re-emission while present, reset only after 250 ms absence on verified-noninteraction frames, no re-emission after a permission form or overlay hides the block or after a resize rewraps it, the unavailable-once rule, quote/viewer/scrollback false positives and frame-guard failures, unchanged primary observations and eligibility on annotation frames, and unchanged request/answer behavior on the predecessor fixtures. <!-- completed: -->
-- [ ] Implement `claude-2.1.302-auto-1` and `codex-0.163.0-approve-for-me-1` with the claimed rules and the annotation tracker. <!-- completed: -->
-- [ ] Write tests for both event payloads, `director_action` instructions and argv, inbox delivery, archived recovery, idempotent replay, metadata/redacted evidence, and `permission inspect` / `respond` rejection of a refusal event. <!-- completed: -->
-- [ ] Implement both event kinds through the existing outbox and event transaction, with no interaction row and no input change. <!-- completed: -->
-- [ ] Write tests for the effective policy record: shape validation, change-only writes, `observed_mode` under each evidence policy, replayed event-carried writes, rejected available writes for a stale owner or non-live status, and the snapshot key and text line on `member create`, `member show` and `event show`. <!-- completed: -->
-- [ ] Implement the effective policy writes and the shared runtime snapshot presentation. <!-- completed: -->
+- [x] Write tests: omitted Claude and Codex argv and run-record fields, explicit `approve-for-me`, unchanged explicit `dontAsk` / `on-request` / `never` / OpenCode argv, help text and the Codex usage error. <!-- completed: 2026-10-29T10:26 -->
+- [x] Implement the new defaults and the `approve-for-me` catalog entry and mapping in `cafleet/src/coding_agent/policy.rs`, updating the 0000194/0000196 tests whose assertions encoded the old defaults. <!-- completed: 2026-10-29T10:26 -->
 
-### Step 6: Validate and accept
+### Step 6: Add profiles, annotations and events
 
-- [ ] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build`; verify help, JSON and embedded assets match the documentation. <!-- completed: -->
-- [ ] Run live acceptance for Claude on tmux and herdr: omitted-default launch, auto-approved, auto-refused with its event and Director handling, escalated form allow and deny, and unavailable where captured. <!-- completed: -->
-- [ ] Run live acceptance for Codex on tmux and herdr with the same cases. <!-- completed: -->
-- [ ] Run the user-attended cases: a non-auto-mode Director decision on an automatic refusal and on an escalated form, and the startup dialog when it applies. <!-- completed: -->
-- [ ] Record versions, outcomes, latencies and every uncaptured or unobserved case as a documented limit in the execution record and the shipping documentation. <!-- completed: -->
-- [ ] Confirm the explicit interactive policies still pass their existing 0000194/0000196 acceptance shape on one multiplexer with the new profiles. <!-- completed: -->
+- [x] Write catalog tests for the profile schema extension: annotation kinds, the required `annotations` group, group-membership and annotation-field violations including `frame`, multi-block region matching, and provenance. <!-- completed: 2026-10-29T11:03 -->
+- [x] Implement the schema extension in the catalog and detector, returning annotations beside the unchanged primary observation; add `"annotations": null` to the OpenCode profile. <!-- completed: 2026-10-29T11:03 -->
+- [x] Add the Step 1 captures as embedded native fixtures with their digests, and the false-positive fixtures. <!-- completed: 2026-10-29T11:03 -->
+- [x] Write fixture-backed tracker tests for each claimed rule: stable-twice emission, two different refusals visible together emitting two events, no re-emission while present, reset only after 250 ms absence on verified-noninteraction frames, no re-emission after a permission form or overlay hides the block or after a resize rewraps it, the unavailable-once rule, quote/viewer/scrollback false positives and frame-guard failures, unchanged primary observations and eligibility on annotation frames, and unchanged request/answer behavior on the predecessor fixtures. <!-- completed: 2026-10-29T11:03 -->
+- [x] Implement `claude-2.1.302-auto-1` and `codex-0.163.0-approve-for-me-1` with the claimed rules and the annotation tracker. <!-- completed: 2026-10-29T11:03 -->
+- [x] Write tests for both event payloads, `director_action` instructions and argv, inbox delivery, archived recovery, idempotent replay, metadata/redacted evidence, and `permission inspect` / `respond` rejection of a refusal event. <!-- completed: 2026-10-29T11:03 -->
+- [x] Implement both event kinds through the existing outbox and event transaction, with no interaction row and no input change. <!-- completed: 2026-10-29T11:03 -->
+- [x] Write tests for the effective policy record: shape validation, change-only writes, `observed_mode` under each evidence policy, replayed event-carried writes, rejected available writes for a stale owner or non-live status, and the snapshot key and text line on `member create`, `member show` and `event show`. <!-- completed: 2026-10-29T11:03 -->
+- [x] Implement the effective policy writes and the shared runtime snapshot presentation. <!-- completed: 2026-10-29T11:03 -->
+
+### Step 7: Validate and accept
+
+- [x] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build`; verify help, JSON and embedded assets match the documentation. <!-- completed: 2026-10-29T11:38 -->
+- [x] Run live acceptance for Claude on tmux and herdr: omitted-default launch, auto-approved, auto-refused with its event and Director handling, escalated form allow and deny, and unavailable where captured. <!-- completed: 2026-10-29T12:55 -->
+- [x] Run live acceptance for Codex on tmux and herdr with the same cases, reading `mode_source=default` and `permission_argv_json=["--approve-for-me"]` from the run record (`member_runs`), which `member show --json` does not expose; record as limits the cases this host cannot produce (no escalated form or unavailable screen in automatic mode, and in-sandbox auto-approval where bwrap cannot create user namespaces). <!-- completed: 2026-10-29T12:55 -->
+- [x] Run the § Acceptance fallback case with the installed Claude Code 2.1.306 on one multiplexer, recording `profile_match=fallback` and every UI difference that failed to match. <!-- completed: 2026-10-29T12:55 -->
+- [x] Run the user-attended cases: a non-auto-mode Director decision on an automatic refusal and on an escalated form, and the startup dialog when it applies. <!-- completed: 2026-10-29T13:18 -->
+- [x] Record versions, outcomes, latencies and every uncaptured or unobserved case as a documented limit in the execution record and the shipping documentation. <!-- completed: 2026-10-29T13:18 -->
+- [x] Confirm the explicit interactive policies still pass their existing 0000194/0000196 acceptance shape on one multiplexer with the new profiles. <!-- completed: 2026-10-29T12:55 -->
 
 ---
 
@@ -386,3 +435,7 @@ Each case records versions, mode, profile, multiplexer, terminal size, cwd, even
 | Date | Changes |
 |------|---------|
 | 2026-10-29 | Initial draft |
+| 2026-10-29 | Added profile version fallback (`profile_match`), its V6 column, snapshot field, Step 4 and the Claude 2.1.306 fallback acceptance case; Claude captures stay on 2.1.302 installed beside 2.1.306 |
+| 2026-10-29 | Step 1 gate results: Codex `approve-for-me` argv is the single `--approve-for-me` flag (0.163.0 rejects it with `--sandbox`); Claude claims both refusal renderings (`claude-auto-refusal`, `claude-auto-refusal-notice`) and an ask-rule request rule, needs no startup rule, and its working frames advance the annotation reset; added the resulting limits |
+| 2026-10-29 | Codex Step 1 outcome (refusal and indicator rules only; fingerprint strips the continuation `row_margin` first) and live-acceptance revisions: Claude adds the `claude-auto-startup` `question` rule for the once-per-configuration `Teach auto mode about your environment?` dialog (superseding "needs no startup rule" above) and the `claude-bash-permission-auto-tip` request rule with allow `31` / deny `34`; unmatched screens are `unknown` with no Director event; the final outbox compaction gets its own budget; ESRCH stat reads count as vanished processes; deleting an exited member recovers it |
+| 2026-10-29 | Implementation complete (PR #516) |

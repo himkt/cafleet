@@ -55,17 +55,25 @@ fn persist(
     conn: &mut Connection,
     result: &mut RecoveryCompletion,
     transition: &ObservedTransition,
+    effective_policy: Option<&storage::EffectivePolicyObservation>,
     original: bool,
     host: &mut impl RecoveryHost,
     until: Instant,
 ) -> Result<()> {
-    let (event, inserted) = with_database_deadline(conn, until, |conn| {
-        storage::persist_transition_counted(
+    let (event, inserted) = with_database_deadline(conn, until, |conn| match effective_policy {
+        Some(observation) => storage::persist_transition_with_effective_policy_counted(
+            conn,
+            &result.run.owner(),
+            transition,
+            observation,
+            PersistenceMode::Recovery,
+        ),
+        None => storage::persist_transition_counted(
             conn,
             &result.run.owner(),
             transition,
             PersistenceMode::Recovery,
-        )
+        ),
     })?;
     if inserted {
         count(result, &event, original)?;
@@ -156,7 +164,15 @@ fn perform(
             check_snapshot(conn, &result.run, pinned)
         })?;
         host.checkpoint(RecoveryBoundary::BeforeReplay, &result.run, until)?;
-        persist(conn, result, &frame.transition, true, host, until)?;
+        persist(
+            conn,
+            result,
+            &frame.transition,
+            frame.effective_policy.as_ref(),
+            true,
+            host,
+            until,
+        )?;
     }
     let existing = with_database_deadline(conn, until, |conn| terminal_outcome(conn, &result.run))?;
     let target = match existing {
@@ -171,7 +187,7 @@ fn perform(
             })?;
             for transition in transitions {
                 outbox.append_recovery(conn, &transition, until)?;
-                persist(conn, result, &transition, false, host, until)?;
+                persist(conn, result, &transition, None, false, host, until)?;
             }
             RunStatus::Lost
         }

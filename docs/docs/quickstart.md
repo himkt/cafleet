@@ -48,8 +48,10 @@ that need one.
 
 Add the profile below that matches the permission mode your Director session
 runs in to your user-level `~/.claude/settings.json`. Members start in
-`dontAsk` mode whichever mode the Director uses, so both profiles pre-approve
-what members need beyond their broker commands.
+`auto` mode whichever mode the Director uses, so auto mode must be available
+for your account and model. Both profiles pre-approve what members need beyond
+their broker commands, and auto mode's classifier reviews each other member
+call.
 
 | Behavior | Auto mode profile | Other-modes profile |
 |---|---|---|

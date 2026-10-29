@@ -14,8 +14,8 @@ pub struct LaunchPolicySelection {
 impl CodingAgent {
     fn default_policy(self) -> &'static str {
         match self {
-            Self::Claude => "dontAsk",
-            Self::Codex => "never",
+            Self::Claude => "auto",
+            Self::Codex => "approve-for-me",
             Self::Opencode => "cafleet",
         }
     }
@@ -45,7 +45,7 @@ impl CodingAgent {
                 "bypassPermissions",
                 "plan",
             ],
-            (Self::Codex, None | Some("0.163.0")) => &["on-request", "never"],
+            (Self::Codex, None | Some("0.163.0")) => &["on-request", "never", "approve-for-me"],
             (Self::Opencode, _) => &["cafleet", "cafleet-ask"],
             _ => &[],
         };
@@ -54,6 +54,7 @@ impl CodingAgent {
     fn permission_arguments(self, mode: &str) -> Vec<String> {
         match self {
             Self::Claude => vec!["--permission-mode".into(), mode.into()],
+            Self::Codex if mode == "approve-for-me" => vec!["--approve-for-me".into()],
             Self::Codex => vec![
                 "--ask-for-approval".into(),
                 mode.into(),

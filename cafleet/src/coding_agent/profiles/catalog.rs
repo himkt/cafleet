@@ -1,7 +1,7 @@
 use super::composer::{ComposerOperation, ComposerSubmission};
 use super::detector::ObservationKind;
 use super::{AnswerCapability, CodingAgent, PermissionDecision};
-use crate::broker::runtime::Coverage;
+use crate::broker::runtime::{Coverage, ProfileMatch};
 use crate::error::CafleetError;
 use regex::Regex;
 use serde_json::{Map, Value};
@@ -234,8 +234,18 @@ pub(super) mod inspection_tests {
                 assert_eq!(stage.required_choice_id(), choice);
             }
         }
+        assert!(
+            catalog
+                .answer_plan(
+                    CodingAgent::Claude,
+                    "synthetic-0.0.1",
+                    "synthetic-permission",
+                    PermissionDecision::Allow
+                )
+                .unwrap()
+                .is_none()
+        );
         for (version, rule, decision) in [
-            ("other", "synthetic-permission", PermissionDecision::Allow),
             ("synthetic-0.0.1", "unknown", PermissionDecision::Allow),
             (
                 "synthetic-0.0.1",
@@ -406,6 +416,11 @@ pub(super) struct Region {
     pub cursor: String,
 }
 #[derive(Clone)]
+pub(super) struct Frame {
+    pub require: Vec<Regex>,
+    pub reject: Vec<Regex>,
+}
+#[derive(Clone)]
 pub(super) struct Rule {
     pub id: String,
     pub priority: i64,
@@ -418,6 +433,7 @@ pub(super) struct Rule {
     pub verified: bool,
     pub sensitive: bool,
     pub continuation: Option<Continuation>,
+    pub frame: Option<Frame>,
 }
 #[derive(Clone)]
 pub(super) struct Capability {
@@ -506,10 +522,64 @@ pub(super) struct Profile {
     pub rules: Vec<Rule>,
     pub detection: Option<Capability>,
     pub composer: Option<Capability>,
+    pub annotations: Option<Capability>,
     pub submissions: [Option<ComposerSubmission>; 2],
     pub answers: Vec<Answer>,
 }
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum VersionComponent {
+    Number(u64),
+    Text(String),
+}
+#[derive(Debug, Clone)]
+struct DottedVersion(Vec<VersionComponent>);
+impl PartialEq for DottedVersion {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+impl Eq for DottedVersion {}
+impl DottedVersion {
+    fn parse(version: &str) -> Self {
+        Self(
+            version
+                .split('.')
+                .map(|part| {
+                    part.parse().map_or_else(
+                        |_| VersionComponent::Text(part.into()),
+                        VersionComponent::Number,
+                    )
+                })
+                .collect(),
+        )
+    }
+}
+impl Ord for DottedVersion {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        let missing = VersionComponent::Number(0);
+        (0..self.0.len().max(other.0.len()))
+            .map(|index| {
+                let left = self.0.get(index).unwrap_or(&missing);
+                let right = other.0.get(index).unwrap_or(&missing);
+                left.cmp(right)
+            })
+            .find(|ordering| ordering.is_ne())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    }
+}
+impl PartialOrd for DottedVersion {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
 impl Profile {
+    fn newest_version(&self) -> DottedVersion {
+        self.versions
+            .iter()
+            .map(|version| DottedVersion::parse(version))
+            .max()
+            .expect("catalog validation requires every profile to declare a native version")
+    }
     pub(super) fn answer_plan(
         &self,
         version: &str,
@@ -547,6 +617,7 @@ pub struct NativeCapabilities {
     pub backend: CodingAgent,
     pub native_version: Option<String>,
     pub profile_version: Option<String>,
+    pub profile_match: Option<ProfileMatch>,
     pub detection: Coverage,
     pub composer: Coverage,
     pub prompt_submission: Coverage,
@@ -616,12 +687,15 @@ fn compile_rule(value: &Value) -> Result<Rule> {
             .ok_or_else(|| invalid("rule observation required"))?,
     )?)?;
     let continues = kind == ObservationKind::PermissionContinuation;
+    let annotation = kind.is_annotation();
     let fields = if continues {
         RULE_FIELDS
             .iter()
             .chain(&CONTINUATION_FIELDS)
             .copied()
             .collect()
+    } else if annotation {
+        RULE_FIELDS.iter().chain(&["frame"]).copied().collect()
     } else {
         RULE_FIELDS.to_vec()
     };
@@ -709,18 +783,52 @@ fn compile_rule(value: &Value) -> Result<Rule> {
         !continues || (ex["operation"].is_null() && choices.is_empty()),
         "continuation declares no operation or choices",
     )?;
+    let operation = operation_capture(&ex["operation"], &matchers)?;
+    let native = optional_capture(&ex["native_request_id"], &matchers)?;
+    let frame = if annotation {
+        require(
+            choices.is_empty() && native.is_none() && !verified,
+            "annotation rules declare no choices, native request id or verified noninteraction",
+        )?;
+        require(
+            operation.is_some() == (kind == ObservationKind::AutomaticRefusal),
+            "only automatic refusal annotations capture an operation",
+        )?;
+        Some(compile_frame(&m["frame"])?)
+    } else {
+        None
+    };
     Ok(Rule {
         id,
         priority,
         kind,
         region,
-        operation: operation_capture(&ex["operation"], &matchers)?,
-        native: optional_capture(&ex["native_request_id"], &matchers)?,
+        operation,
+        native,
         choices,
         matchers,
         verified,
         sensitive: boolean(&m["sensitive"])?,
         continuation,
+        frame,
+    })
+}
+fn compile_frame(value: &Value) -> Result<Frame> {
+    let m = object(value, &["require_patterns", "reject_patterns"])?;
+    let patterns = |value: &Value| {
+        array(value)?
+            .iter()
+            .map(expression)
+            .collect::<Result<Vec<_>>>()
+    };
+    let require_patterns = patterns(&m["require_patterns"])?;
+    require(
+        !require_patterns.is_empty(),
+        "annotation frame requires a live-screen pattern",
+    )?;
+    Ok(Frame {
+        require: require_patterns,
+        reject: patterns(&m["reject_patterns"])?,
     })
 }
 const STAGE_FIELDS: [&str; 3] = ["bytes_hex", "required_rule_id", "required_choice_id"];
@@ -896,9 +1004,29 @@ fn provenance(
         "every exact version needs compatible provenance",
     )
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Group {
+    Detection,
+    Composer,
+    Annotations,
+}
+impl Group {
+    fn of(kind: ObservationKind) -> Self {
+        if kind.is_annotation() {
+            Self::Annotations
+        } else if matches!(
+            kind,
+            ObservationKind::ComposerEmpty | ObservationKind::ComposerDraft
+        ) {
+            Self::Composer
+        } else {
+            Self::Detection
+        }
+    }
+}
 fn capability(
     value: &Value,
-    composer: bool,
+    group: Group,
     rules: &[Rule],
     backend: CodingAgent,
     versions: &[String],
@@ -907,7 +1035,7 @@ fn capability(
     if value.is_null() {
         return Ok(None);
     }
-    let fields: &[&str] = if composer && value.get("submission").is_some() {
+    let fields: &[&str] = if group == Group::Composer && value.get("submission").is_some() {
         &["rule_ids", "fixture_ids", "submission"]
     } else {
         &["rule_ids", "fixture_ids"]
@@ -921,10 +1049,7 @@ fn capability(
             .find(|r| &r.id == id)
             .ok_or_else(|| invalid("unknown capability rule"))?;
         require(
-            matches!(
-                rule.kind,
-                ObservationKind::ComposerEmpty | ObservationKind::ComposerDraft
-            ) == composer,
+            Group::of(rule.kind) == group,
             "capability rule component mismatch",
         )?;
     }
@@ -1057,6 +1182,158 @@ const BUNDLED_FIXTURES: &[(&str, &[u8])] = &[
         include_bytes!("native/claude-2.1.302-boxed-single-row-permission-1.json"),
     ),
     (
+        "native/claude-2.1.302-auto-approved-done-1.json",
+        include_bytes!("native/claude-2.1.302-auto-approved-done-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-approved-running-1.json",
+        include_bytes!("native/claude-2.1.302-auto-approved-running-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-ask-allow-continuation-1.json",
+        include_bytes!("native/claude-2.1.302-auto-ask-allow-continuation-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-ask-deny-continuation-1.json",
+        include_bytes!("native/claude-2.1.302-auto-ask-deny-continuation-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-ask-hiding-refusal-notice-1.json",
+        include_bytes!("native/claude-2.1.302-auto-ask-hiding-refusal-notice-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-ask-hiding-refusal-notice-resized-1.json",
+        include_bytes!("native/claude-2.1.302-auto-ask-hiding-refusal-notice-resized-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-ask-permission-1.json",
+        include_bytes!("native/claude-2.1.302-auto-ask-permission-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-fresh-first-launch-notice-1.json",
+        include_bytes!("native/claude-2.1.302-auto-fresh-first-launch-notice-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-fresh-onboarding-theme-1.json",
+        include_bytes!("native/claude-2.1.302-auto-fresh-onboarding-theme-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-idle-composer-1.json",
+        include_bytes!("native/claude-2.1.302-auto-idle-composer-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-model-switch-question-1.json",
+        include_bytes!("native/claude-2.1.302-auto-model-switch-question-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-quote-false-positive-1.json",
+        include_bytes!("native/claude-2.1.302-auto-quote-false-positive-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-refusal-notice-expired-1.json",
+        include_bytes!("native/claude-2.1.302-auto-refusal-notice-expired-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-refusal-notice-idle-1.json",
+        include_bytes!("native/claude-2.1.302-auto-refusal-notice-idle-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-refusal-notice-working-1.json",
+        include_bytes!("native/claude-2.1.302-auto-refusal-notice-working-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-transcript-viewer-1.json",
+        include_bytes!("native/claude-2.1.302-auto-transcript-viewer-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-two-refusals-notice-1.json",
+        include_bytes!("native/claude-2.1.302-auto-two-refusals-notice-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-unavailable-manual-footer-1.json",
+        include_bytes!("native/claude-2.1.302-auto-unavailable-manual-footer-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-unavailable-notice-1.json",
+        include_bytes!("native/claude-2.1.302-auto-unavailable-notice-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-verbose-quote-false-positive-1.json",
+        include_bytes!("native/claude-2.1.302-auto-verbose-quote-false-positive-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-verbose-refusal-above-form-1.json",
+        include_bytes!("native/claude-2.1.302-auto-verbose-refusal-above-form-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-verbose-refusal-hidden-by-form-1.json",
+        include_bytes!("native/claude-2.1.302-auto-verbose-refusal-hidden-by-form-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-verbose-refusal-restored-idle-1.json",
+        include_bytes!("native/claude-2.1.302-auto-verbose-refusal-restored-idle-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-verbose-refusal-rewrapped-form-1.json",
+        include_bytes!("native/claude-2.1.302-auto-verbose-refusal-rewrapped-form-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-verbose-refusal-rewrapped-idle-1.json",
+        include_bytes!("native/claude-2.1.302-auto-verbose-refusal-rewrapped-idle-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-verbose-transcript-viewer-1.json",
+        include_bytes!("native/claude-2.1.302-auto-verbose-transcript-viewer-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-verbose-two-refusals-1.json",
+        include_bytes!("native/claude-2.1.302-auto-verbose-two-refusals-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-trust-dialog-1.json",
+        include_bytes!("native/claude-2.1.302-trust-dialog-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-access-allow-continuation-1.json",
+        include_bytes!("native/claude-2.1.302-access-allow-continuation-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-access-allow-pre-stage-1.json",
+        include_bytes!("native/claude-2.1.302-access-allow-pre-stage-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-access-allow-running-1.json",
+        include_bytes!("native/claude-2.1.302-access-allow-running-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-access-deny-continuation-1.json",
+        include_bytes!("native/claude-2.1.302-access-deny-continuation-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-access-deny-pre-stage-1.json",
+        include_bytes!("native/claude-2.1.302-access-deny-pre-stage-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-access-permission-1.json",
+        include_bytes!("native/claude-2.1.302-access-permission-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-env-setup-cancelled-idle-1.json",
+        include_bytes!("native/claude-2.1.302-auto-env-setup-cancelled-idle-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-env-setup-offer-1.json",
+        include_bytes!("native/claude-2.1.302-auto-env-setup-offer-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-env-setup-wizard-1.json",
+        include_bytes!("native/claude-2.1.302-auto-env-setup-wizard-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-default-manual-idle-1.json",
+        include_bytes!("native/claude-2.1.302-default-manual-idle-1.json"),
+    ),
+    (
         "native/codex-0.163.0-on-request-permission-1.json",
         include_bytes!("native/codex-0.163.0-on-request-permission-1.json"),
     ),
@@ -1071,6 +1348,82 @@ const BUNDLED_FIXTURES: &[(&str, &[u8])] = &[
     (
         "native/codex-0.163.0-idle-composer-1.json",
         include_bytes!("native/codex-0.163.0-idle-composer-1.json"),
+    ),
+    (
+        "native/codex-0.163.0-auto-approved-escalated-1.json",
+        include_bytes!("native/codex-0.163.0-auto-approved-escalated-1.json"),
+    ),
+    (
+        "native/codex-0.163.0-auto-denial-limit-interrupted-1.json",
+        include_bytes!("native/codex-0.163.0-auto-denial-limit-interrupted-1.json"),
+    ),
+    (
+        "native/codex-0.163.0-auto-denial-limit-warning-1.json",
+        include_bytes!("native/codex-0.163.0-auto-denial-limit-warning-1.json"),
+    ),
+    (
+        "native/codex-0.163.0-auto-expanded-detail-1.json",
+        include_bytes!("native/codex-0.163.0-auto-expanded-detail-1.json"),
+    ),
+    (
+        "native/codex-0.163.0-auto-fresh-idle-1.json",
+        include_bytes!("native/codex-0.163.0-auto-fresh-idle-1.json"),
+    ),
+    (
+        "native/codex-0.163.0-auto-idle-composer-1.json",
+        include_bytes!("native/codex-0.163.0-auto-idle-composer-1.json"),
+    ),
+    (
+        "native/codex-0.163.0-auto-quote-false-positive-1.json",
+        include_bytes!("native/codex-0.163.0-auto-quote-false-positive-1.json"),
+    ),
+    (
+        "native/codex-0.163.0-auto-refusal-after-overlay-1.json",
+        include_bytes!("native/codex-0.163.0-auto-refusal-after-overlay-1.json"),
+    ),
+    (
+        "native/codex-0.163.0-auto-refusal-idle-1.json",
+        include_bytes!("native/codex-0.163.0-auto-refusal-idle-1.json"),
+    ),
+    (
+        "native/codex-0.163.0-auto-refusal-warning-overlay-1.json",
+        include_bytes!("native/codex-0.163.0-auto-refusal-warning-overlay-1.json"),
+    ),
+    (
+        "native/codex-0.163.0-auto-refusal-working-1.json",
+        include_bytes!("native/codex-0.163.0-auto-refusal-working-1.json"),
+    ),
+    (
+        "native/codex-0.163.0-auto-reviewing-1.json",
+        include_bytes!("native/codex-0.163.0-auto-reviewing-1.json"),
+    ),
+    (
+        "native/codex-0.163.0-auto-sandbox-failure-1.json",
+        include_bytes!("native/codex-0.163.0-auto-sandbox-failure-1.json"),
+    ),
+    (
+        "native/codex-0.163.0-auto-second-launch-idle-1.json",
+        include_bytes!("native/codex-0.163.0-auto-second-launch-idle-1.json"),
+    ),
+    (
+        "native/codex-0.163.0-auto-status-indicator-1.json",
+        include_bytes!("native/codex-0.163.0-auto-status-indicator-1.json"),
+    ),
+    (
+        "native/codex-0.163.0-auto-two-refusals-1.json",
+        include_bytes!("native/codex-0.163.0-auto-two-refusals-1.json"),
+    ),
+    (
+        "native/codex-0.163.0-auto-two-refusals-resized-1.json",
+        include_bytes!("native/codex-0.163.0-auto-two-refusals-resized-1.json"),
+    ),
+    (
+        "native/codex-0.163.0-auto-two-refusals-restored-1.json",
+        include_bytes!("native/codex-0.163.0-auto-two-refusals-restored-1.json"),
+    ),
+    (
+        "native/codex-0.163.0-auto-warning-overlay-1.json",
+        include_bytes!("native/codex-0.163.0-auto-warning-overlay-1.json"),
     ),
     (
         "native/opencode-2.1.4-ask-permission-1.json",
@@ -1362,16 +1715,45 @@ impl ProfileCatalog {
             for rule in &rules {
                 validate_continuation(rule, &rules, backend, &versions, &fixtures)?;
             }
-            let c = object(&m["capabilities"], &["detection", "composer", "answers"])?;
+            let c = object(
+                &m["capabilities"],
+                &["detection", "composer", "annotations", "answers"],
+            )?;
             let detection = capability(
                 &c["detection"],
-                false,
+                Group::Detection,
                 &rules,
                 backend,
                 &versions,
                 &fixtures,
             )?;
-            let composer = capability(&c["composer"], true, &rules, backend, &versions, &fixtures)?;
+            let composer = capability(
+                &c["composer"],
+                Group::Composer,
+                &rules,
+                backend,
+                &versions,
+                &fixtures,
+            )?;
+            let annotations = capability(
+                &c["annotations"],
+                Group::Annotations,
+                &rules,
+                backend,
+                &versions,
+                &fixtures,
+            )?;
+            require(
+                rules
+                    .iter()
+                    .filter(|rule| rule.kind.is_annotation())
+                    .all(|rule| {
+                        annotations
+                            .as_ref()
+                            .is_some_and(|group| group.rules.contains(&rule.id))
+                    }),
+                "every annotation rule belongs to the annotations group",
+            )?;
             let submissions = composer_submissions(&c["composer"], backend, &versions, &fixtures)?;
             let mut answers = Vec::new();
             let mut decisions = BTreeSet::new();
@@ -1480,6 +1862,7 @@ impl ProfileCatalog {
                 rules,
                 detection,
                 composer,
+                annotations,
                 submissions,
                 answers,
             });
@@ -1491,11 +1874,21 @@ impl ProfileCatalog {
         })
     }
     pub(super) fn matching(&self, backend: CodingAgent, version: Option<&str>) -> Option<&Profile> {
-        version.and_then(|v| {
-            self.profiles
-                .iter()
-                .find(|p| p.backend == backend && p.versions.iter().any(|s| s == v))
-        })
+        self.selection(backend, version).map(|(profile, _)| profile)
+    }
+    fn selection(
+        &self,
+        backend: CodingAgent,
+        version: Option<&str>,
+    ) -> Option<(&Profile, ProfileMatch)> {
+        let version = version?;
+        let candidates = || self.profiles.iter().filter(|p| p.backend == backend);
+        if let Some(exact) = candidates().find(|p| p.versions.iter().any(|s| s == version)) {
+            return Some((exact, ProfileMatch::Exact));
+        }
+        candidates()
+            .max_by(|a, b| a.newest_version().cmp(&b.newest_version()))
+            .map(|newest| (newest, ProfileMatch::Fallback))
     }
     pub fn rule_ids(&self) -> Vec<String> {
         self.profiles
@@ -1506,11 +1899,13 @@ impl ProfileCatalog {
             .collect()
     }
     pub fn capabilities(&self, backend: CodingAgent, version: Option<&str>) -> NativeCapabilities {
-        let profile = self.matching(backend, version);
+        let selection = self.selection(backend, version);
+        let profile = selection.map(|(profile, _)| profile);
         NativeCapabilities {
             backend,
             native_version: version.map(str::to_owned),
             profile_version: profile.map(|p| p.version.clone()),
+            profile_match: selection.map(|(_, profile_match)| profile_match),
             detection: if profile.is_some_and(|p| p.detection.is_some()) {
                 Coverage::Tested
             } else {
@@ -1536,10 +1931,18 @@ impl ProfileCatalog {
                 Coverage::Unknown
             },
             answer_decisions: profile
-                .map(|p| p.answers.iter().map(|a| a.decision).collect())
+                .map(|p| {
+                    let mut decisions = Vec::new();
+                    for answer in &p.answers {
+                        if !decisions.contains(&answer.decision) {
+                            decisions.push(answer.decision);
+                        }
+                    }
+                    decisions
+                })
                 .unwrap_or_default(),
             capability_reason: if profile.is_none() {
-                Some("exact native profile unavailable".into())
+                Some("native profile unavailable".into())
             } else {
                 None
             },

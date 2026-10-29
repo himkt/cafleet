@@ -30,12 +30,21 @@ fn channel(
 }
 fn select_catalog(fixture: &mut CaptureFixture, bundled: bool) -> ProfileCatalog {
     if bundled {
+        let selected = ProfileCatalog::bundled().unwrap().capabilities(
+            crate::coding_agent::CodingAgent::Codex,
+            fixture.fixture.run.native_version.as_deref(),
+        );
         fixture
             .fixture
             .conn
             .execute(
-                "UPDATE member_runs SET profile_version=NULL,coverage='unknown' WHERE run_id=?1",
-                [fixture.fixture.run.run_id],
+                "UPDATE member_runs SET profile_version=?1,profile_match=?2,coverage=?3 WHERE run_id=?4",
+                rusqlite::params![
+                    selected.profile_version,
+                    selected.profile_match.map(|value| value.as_str()),
+                    selected.detection.as_str(),
+                    fixture.fixture.run.run_id
+                ],
             )
             .unwrap();
         fixture.fixture.run =
@@ -51,28 +60,25 @@ fn runner_collector_f1_actual_permission_options_match_the_recorded_emitted_poli
 {
     for mutation in [
         "approval",
-        "sandbox",
         "missing_approval",
-        "missing_sandbox",
         "repeat_approval",
-        "repeat_sandbox",
+        "added_sandbox",
+        "trailing_sandbox",
     ] {
         let mut fixture = CaptureFixture::new(json!({"mode":"metadata"}));
         let (mut port, receiver) = channel(&fixture, &catalog());
         match mutation {
-            "approval" => fixture.spec.argv[2] = "on-request".into(),
-            "sandbox" => fixture.spec.argv[4] = "read-only".into(),
+            "approval" => fixture.spec.argv[1] = "--full-auto".into(),
             "missing_approval" => {
-                fixture.spec.argv.drain(1..3);
+                fixture.spec.argv.remove(1);
             }
-            "missing_sandbox" => {
-                fixture.spec.argv.drain(3..5);
-            }
-            "repeat_approval" => fixture
+            "repeat_approval" => fixture.spec.argv.push("--approve-for-me".into()),
+            "added_sandbox" => fixture
                 .spec
                 .argv
-                .extend(["--ask-for-approval".into(), "never".into()]),
-            "repeat_sandbox" => fixture
+                .splice(2..2, ["--sandbox".into(), "workspace-write".into()])
+                .for_each(drop),
+            "trailing_sandbox" => fixture
                 .spec
                 .argv
                 .extend(["--sandbox".into(), "danger-full-access".into()]),

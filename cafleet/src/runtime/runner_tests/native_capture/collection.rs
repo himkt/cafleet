@@ -271,7 +271,7 @@ fn runner_batch2_capture_metadata_projects_no_grid_title_secret_or_private_sourc
         source["permission_argv"],
         fixture.fixture.run.permission_argv_json
     );
-    assert_eq!(source["resolved_mode"], "never");
+    assert_eq!(source["resolved_mode"], "approve-for-me");
     assert_eq!(source["producer"]["kind"], "synthetic");
     assert!(
         serde_json::to_string(&source["clock"])

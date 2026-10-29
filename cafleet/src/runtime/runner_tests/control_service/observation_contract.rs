@@ -320,6 +320,43 @@ fn runner_batch2_service_unknown_coverage_emits_once_while_manual_work_continues
     let count:i64=fixture.fixture.conn.query_row("SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='coverage_unknown'",[fixture.fixture.run.run_id],|row|row.get(0)).unwrap();
     assert_eq!(count, 1);
     let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-    assert_eq!(run.resolved_mode, "never");
+    assert_eq!(run.resolved_mode, "approve-for-me");
     assert!(run.effective_policy_json.is_none());
+}
+
+#[test]
+fn runner_batch2_service_fallback_profile_emits_no_coverage_unknown_while_no_profile_still_does() {
+    let fallback = crate::coding_agent::ProfileCatalog::bundled()
+        .unwrap()
+        .capabilities(crate::coding_agent::CodingAgent::Codex, Some("0.164.0"));
+    assert_eq!(
+        fallback.profile_match.map(|value| value.as_str()),
+        Some("fallback")
+    );
+    let fallback_profile = fallback.profile_version.unwrap();
+    for (profile, expected) in [(Some("fallback"), 0), (None, 1)] {
+        let fallback_profile = fallback_profile.clone();
+        let mut fixture = ServiceFixture::configured(false, move |fixture, _| {
+            if profile.is_some() {
+                fixture.conn.execute("UPDATE member_runs SET native_version='0.164.0',profile_version=?1,profile_match=?2,coverage='tested' WHERE run_id=?3",rusqlite::params![fallback_profile,profile,fixture.run.run_id]).unwrap();
+            } else {
+                fixture.conn.execute("UPDATE member_runs SET native_version=NULL,profile_version=NULL,profile_match=NULL,coverage='unknown' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
+            }
+            fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+        });
+        fixture.start_running();
+        for _ in 0..3 {
+            fixture.health();
+            fixture.assert_manual_io();
+        }
+        fixture.finish();
+        let count:i64=fixture.fixture.conn.query_row("SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='coverage_unknown'",[fixture.fixture.run.run_id],|row|row.get(0)).unwrap();
+        assert_eq!(count, expected, "{profile:?}");
+        let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+        assert_eq!(
+            run.profile_match.map(|value| value.as_str()),
+            profile,
+            "{profile:?}"
+        );
+    }
 }

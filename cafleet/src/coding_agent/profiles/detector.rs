@@ -16,6 +16,9 @@ pub(crate) enum ObservationKind {
     ComposerEmpty,
     ComposerDraft,
     Unknown,
+    AutomaticRefusal,
+    AutomaticReviewUnavailable,
+    AutomaticReviewAvailable,
 }
 
 #[cfg(test)]
@@ -345,14 +348,31 @@ pub(super) mod inspection_tests {
         let replay = claude_observation(&native_screen(|_| {}, true));
         assert!(observation.fingerprint.is_some());
         assert!(replay.fingerprint == observation.fingerprint);
-        let other_version = ProfileCatalog::bundled().unwrap();
-        let unprofiled = Detector::new(&other_version, CodingAgent::Claude, Some("2.1.301"))
+        let catalog = ProfileCatalog::bundled().unwrap();
+        for version in ["2.1.301", "2.1.306"] {
+            let fallback = Detector::new(&catalog, CodingAgent::Claude, Some(version))
+                .unwrap()
+                .observe(&screen)
+                .unwrap();
+            assert_eq!(fallback.kind, observation.kind, "{version}");
+            assert_eq!(fallback.rule_id, observation.rule_id, "{version}");
+            assert_eq!(
+                fallback.profile_version, observation.profile_version,
+                "{version}"
+            );
+            assert_eq!(
+                fallback.raw_evidence["operation"], observation.raw_evidence["operation"],
+                "{version}"
+            );
+            assert_eq!(fallback.raw_evidence["native_version"], version);
+        }
+        let unprobed = Detector::new(&catalog, CodingAgent::Claude, None)
             .unwrap()
             .observe(&screen)
             .unwrap();
-        assert_eq!(unprofiled.kind, ObservationKind::Unknown);
-        assert_eq!(unprofiled.raw_evidence["operation"], Value::Null);
-        assert_eq!(unprofiled.raw_evidence["operation_rows"], Value::Null);
+        assert_eq!(unprobed.kind, ObservationKind::Unknown);
+        assert_eq!(unprobed.raw_evidence["operation"], Value::Null);
+        assert_eq!(unprobed.raw_evidence["operation_rows"], Value::Null);
     }
 
     #[test]
@@ -425,7 +445,7 @@ pub(super) mod inspection_tests {
         assert_eq!(observation.rule_id, "claude-bash-permission");
         assert_eq!(
             observation.profile_version.as_deref(),
-            Some("claude-2.1.302-default-3")
+            Some("claude-2.1.302-auto-1")
         );
         assert_eq!(observation.raw_evidence["operation"], operation);
         assert_eq!(
@@ -469,11 +489,16 @@ pub(super) mod inspection_tests {
             assert_eq!(pre_stage.raw_evidence["operation_rows"], 2);
         }
         let catalog = ProfileCatalog::bundled().unwrap();
-        let unprofiled = Detector::new(&catalog, CodingAgent::Claude, Some("2.1.301"))
+        let unprobed = Detector::new(&catalog, CodingAgent::Claude, None)
             .unwrap()
             .observe(&screen)
             .unwrap();
-        assert_eq!(unprofiled.kind, ObservationKind::Unknown);
+        assert_eq!(unprobed.kind, ObservationKind::Unknown);
+        let fallback = Detector::new(&catalog, CodingAgent::Claude, Some("2.1.306"))
+            .unwrap()
+            .observe(&screen)
+            .unwrap();
+        assert_ne!(fallback.kind, ObservationKind::Unknown);
     }
 
     #[test]
@@ -1041,11 +1066,24 @@ pub(super) mod inspection_tests {
         assert!(observation.fingerprint.is_some());
         assert!(replay.fingerprint == observation.fingerprint);
         let catalog = ProfileCatalog::bundled().unwrap();
-        let unprofiled = Detector::new(&catalog, CodingAgent::Codex, Some("0.162.0"))
+        for version in ["0.162.0", "0.164.0"] {
+            let fallback = Detector::new(&catalog, CodingAgent::Codex, Some(version))
+                .unwrap()
+                .observe(&screen)
+                .unwrap();
+            assert_eq!(fallback.kind, observation.kind, "{version}");
+            assert_eq!(fallback.rule_id, observation.rule_id, "{version}");
+            assert_eq!(
+                fallback.profile_version, observation.profile_version,
+                "{version}"
+            );
+            assert_eq!(fallback.raw_evidence["native_version"], version);
+        }
+        let unprobed = Detector::new(&catalog, CodingAgent::Codex, None)
             .unwrap()
             .observe(&screen)
             .unwrap();
-        assert_eq!(unprofiled.kind, ObservationKind::Unknown);
+        assert_eq!(unprobed.kind, ObservationKind::Unknown);
     }
 
     #[test]
@@ -1278,6 +1316,9 @@ impl ObservationKind {
             "composer_empty" => Self::ComposerEmpty,
             "composer_draft" => Self::ComposerDraft,
             "unknown" => Self::Unknown,
+            "automatic_refusal" => Self::AutomaticRefusal,
+            "automatic_review_unavailable" => Self::AutomaticReviewUnavailable,
+            "automatic_review_available" => Self::AutomaticReviewAvailable,
             _ => return Err(CafleetError::Usage("invalid profile observation".into())),
         })
     }
@@ -1290,7 +1331,18 @@ impl ObservationKind {
             Self::ComposerEmpty => "composer_empty",
             Self::ComposerDraft => "composer_draft",
             Self::Unknown => "unknown",
+            Self::AutomaticRefusal => "automatic_refusal",
+            Self::AutomaticReviewUnavailable => "automatic_review_unavailable",
+            Self::AutomaticReviewAvailable => "automatic_review_available",
         }
+    }
+    pub(crate) fn is_annotation(self) -> bool {
+        matches!(
+            self,
+            Self::AutomaticRefusal
+                | Self::AutomaticReviewUnavailable
+                | Self::AutomaticReviewAvailable
+        )
     }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1325,6 +1377,35 @@ pub(crate) struct ScreenObservation {
     pub native_correlation: Option<String>,
     pub output_seq: u64,
     pub continues_rule_id: Option<String>,
+    pub annotations: Vec<AnnotationBlock>,
+    pub guarded_annotation_rules: Vec<String>,
+}
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct AnnotationFingerprint {
+    backend: String,
+    profile_version: String,
+    rule_id: String,
+    shown: String,
+}
+#[derive(Clone)]
+pub(crate) struct AnnotationBlock {
+    pub kind: ObservationKind,
+    pub rule_id: String,
+    pub matched_region: ScreenRegion,
+    pub raw_evidence: Value,
+    pub fingerprint: AnnotationFingerprint,
+}
+fn normalized_shown(text: &str, row_margin: Option<&str>) -> String {
+    let mut rows = text.split('\n');
+    let mut joined = rows.next().expect("split yields a first row").to_owned();
+    for row in rows {
+        joined.push_str(
+            row_margin
+                .and_then(|margin| row.strip_prefix(margin))
+                .unwrap_or(row),
+        );
+    }
+    joined.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 pub(crate) struct Detector {
     backend: CodingAgent,
@@ -1428,6 +1509,7 @@ struct Matched {
     operation: Option<String>,
     choices: Vec<String>,
     native: Option<String>,
+    mode: Option<String>,
     excerpt: String,
     focuses: BTreeMap<String, String>,
     label_cells: Vec<(String, Vec<(u16, u16)>)>,
@@ -1442,11 +1524,57 @@ fn captured(
         .filter(|s| !s.is_empty())
         .cloned()
 }
+type Candidate = (usize, usize, ScreenRegion);
 fn match_rule(rule: &Rule, screen: &ScreenSnapshot, lines: &[LogicalLine]) -> Option<Matched> {
+    match qualifying_regions(rule, screen, lines).as_slice() {
+        [candidate] => extract(rule, lines, *candidate),
+        _ => None,
+    }
+}
+fn frame_guard_holds(rule: &Rule, lines: &[LogicalLine]) -> bool {
+    let frame = rule
+        .frame
+        .as_ref()
+        .expect("annotation rules declare a frame");
+    frame
+        .require
+        .iter()
+        .all(|pattern| lines.iter().any(|line| pattern.is_match(&line.text)))
+        && !frame
+            .reject
+            .iter()
+            .any(|pattern| lines.iter().any(|line| pattern.is_match(&line.text)))
+}
+fn match_annotation_blocks(
+    rule: &Rule,
+    screen: &ScreenSnapshot,
+    lines: &[LogicalLine],
+) -> Vec<Matched> {
+    if !frame_guard_holds(rule, lines) {
+        return Vec::new();
+    }
+    let mut blocks = Vec::new();
+    let mut next_free = 0;
+    for candidate in qualifying_regions(rule, screen, lines) {
+        if candidate.0 < next_free {
+            continue;
+        }
+        if let Some(block) = extract(rule, lines, candidate) {
+            next_free = candidate.1 + 1;
+            blocks.push(block);
+        }
+    }
+    blocks
+}
+fn qualifying_regions(
+    rule: &Rule,
+    screen: &ScreenSnapshot,
+    lines: &[LogicalLine],
+) -> Vec<Candidate> {
     if (rule.region.screen == "primary" && screen.alternate_screen)
         || (rule.region.screen == "alternate" && !screen.alternate_screen)
     {
-        return None;
+        return Vec::new();
     }
     let mut regions = Vec::new();
     for (start, line) in lines.iter().enumerate() {
@@ -1490,10 +1618,9 @@ fn match_rule(rule: &Rule, screen: &ScreenSnapshot, lines: &[LogicalLine]) -> Op
             }
         }
     }
-    if regions.len() != 1 {
-        return None;
-    }
-    let (start, end, region) = regions[0];
+    regions
+}
+fn extract(rule: &Rule, lines: &[LogicalLine], (start, end, region): Candidate) -> Option<Matched> {
     let selected = &lines[start..=end];
     let region_text = selected
         .iter()
@@ -1560,6 +1687,7 @@ fn match_rule(rule: &Rule, screen: &ScreenSnapshot, lines: &[LogicalLine]) -> Op
             let value = captured(reference, &values)?;
             Some(match &reference.row_margin {
                 None => value,
+                Some(_) if rule.kind.is_annotation() => value,
                 Some(margin) => value
                     .split('\n')
                     .map(|row| row.strip_prefix(margin.as_str()))
@@ -1578,12 +1706,18 @@ fn match_rule(rule: &Rule, screen: &ScreenSnapshot, lines: &[LogicalLine]) -> Op
         .iter()
         .map(|choice| captured(&choice.label, &values))
         .collect::<Option<Vec<_>>>()?;
+    let mode = values
+        .values()
+        .find_map(|named| named.get("mode"))
+        .filter(|mode| !mode.is_empty())
+        .cloned();
     Some(Matched {
         rule: rule.clone(),
         region,
         operation,
         choices,
         native,
+        mode,
         excerpt: region_text,
         focuses,
         label_cells,
@@ -1699,6 +1833,58 @@ impl Detector {
             profile: catalog.matching(backend, version).cloned(),
         })
     }
+    fn annotation_blocks(
+        &self,
+        profile: &Profile,
+        screen: &ScreenSnapshot,
+        lines: &[LogicalLine],
+        unmatched_evidence: &Value,
+    ) -> Vec<AnnotationBlock> {
+        let Some(group) = &profile.annotations else {
+            return Vec::new();
+        };
+        let mut blocks = profile
+            .rules
+            .iter()
+            .filter(|rule| group.rules.contains(&rule.id))
+            .flat_map(|rule| match_annotation_blocks(rule, screen, lines))
+            .map(|matched| {
+                let mut raw_evidence = unmatched_evidence.clone();
+                raw_evidence["rule_id"] = json!(matched.rule.id);
+                raw_evidence["operation"] = json!(matched.operation);
+                raw_evidence["operation_rows"] = json!(
+                    matched
+                        .operation
+                        .as_ref()
+                        .map(|text| text.split('\n').count())
+                );
+                raw_evidence["excerpt"] = json!(matched.excerpt);
+                raw_evidence["sensitive"] = json!(matched.rule.sensitive);
+                raw_evidence["observed_mode"] = json!(matched.mode);
+                AnnotationBlock {
+                    kind: matched.rule.kind,
+                    fingerprint: AnnotationFingerprint {
+                        backend: self.backend.name().into(),
+                        profile_version: profile.version.clone(),
+                        rule_id: matched.rule.id.clone(),
+                        shown: normalized_shown(
+                            matched.operation.as_deref().unwrap_or(&matched.excerpt),
+                            matched
+                                .rule
+                                .operation
+                                .as_ref()
+                                .and_then(|capture| capture.row_margin.as_deref()),
+                        ),
+                    },
+                    rule_id: matched.rule.id,
+                    matched_region: matched.region,
+                    raw_evidence,
+                }
+            })
+            .collect::<Vec<_>>();
+        blocks.sort_by_key(|block| (block.matched_region.top, block.rule_id.clone()));
+        blocks
+    }
     pub(crate) fn observe(&self, screen: &ScreenSnapshot) -> Result<ScreenObservation> {
         let profile_version = self.profile.as_ref().map(|p| p.version.clone());
         let mut observation = ScreenObservation {
@@ -1713,11 +1899,27 @@ impl Detector {
             native_correlation: None,
             output_seq: screen.screen_seq,
             continues_rule_id: None,
+            annotations: Vec::new(),
+            guarded_annotation_rules: Vec::new(),
         };
         let Some(profile) = &self.profile else {
             return Ok(observation);
         };
         let lines = logical_lines(screen)?;
+        observation.annotations =
+            self.annotation_blocks(profile, screen, &lines, &observation.raw_evidence);
+        observation.guarded_annotation_rules = profile
+            .rules
+            .iter()
+            .filter(|rule| {
+                profile
+                    .annotations
+                    .as_ref()
+                    .is_some_and(|group| group.rules.contains(&rule.id))
+                    && frame_guard_holds(rule, &lines)
+            })
+            .map(|rule| rule.id.clone())
+            .collect();
         let mut matched = profile
             .rules
             .iter()

@@ -142,14 +142,14 @@ fn configure(fixture: &mut Fixture, spec: &mut SpawnSpec, until: Instant) {
     rule["matchers"] = json!([{"id":"state","scope":"line","pattern":"^Synthetic state$"}]);
     rule["extract"] = json!({"operation":null,"choices":[],"native_request_id":null});
     rule["verified_noninteraction"] = json!(true);
-    catalog["profiles"][0]["capabilities"] = json!({"detection":null,"answers":[],"composer":{
+    catalog["profiles"][0]["capabilities"] = json!({"detection":null,"annotations":null,"answers":[],"composer":{
         "rule_ids":["synthetic-service-composer"],"fixture_ids":[catalog["fixtures"][0]["id"]],
         "submission":{
             "prompt":{"prefix_hex":"","submit_hex":"0d","fixture_ids":["synthetic-service-submission"]},
             "exec":{"prefix_hex":"2120","submit_hex":"0d","fixture_ids":["synthetic-service-submission"]}
         }
     }});
-    fixture.conn.execute("UPDATE member_runs SET native_version='synthetic-0.0.1',profile_version='synthetic-profile-1',coverage='unknown' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
+    fixture.conn.execute("UPDATE member_runs SET native_version='synthetic-0.0.1',profile_version='synthetic-profile-1',profile_match='exact',coverage='unknown' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
     fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
     let config = fixture._dir.path().join("service-input-native.json");
     private_write(

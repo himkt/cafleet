@@ -1,12 +1,15 @@
 pub(crate) use events::{
     original as original_transition, validate_transition as validate_observed_transition,
 };
+mod effective_policy;
 mod events;
 pub mod evidence;
 mod inputs;
 mod permissions;
 mod records;
 
+pub(crate) use effective_policy::persist_transition_with_effective_policy_counted;
+pub use effective_policy::{persist_transition_with_effective_policy, record_effective_policy};
 pub use events::{get_event, persist_transition, update_interaction_evidence};
 pub(crate) use events::{persist_transition_counted, persist_transition_in_transaction};
 pub(crate) use inputs::{
@@ -141,6 +144,7 @@ fn map_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunRecord> {
         created_at: row.get("created_at")?,
         native_version: row.get("native_version")?,
         profile_version: row.get("profile_version")?,
+        profile_match: row.get("profile_match")?,
         effective_policy_json: optional_json(row, "effective_policy_json", false)?,
         owner_epoch: row.get("owner_epoch")?,
         owner_kind: row.get("owner_kind")?,
@@ -207,6 +211,7 @@ pub fn get_run(conn: &Connection, run_id: i64) -> Result<RunRecord, CafleetError
         "member_runs.permission_argv_json",
         "string arguments required",
     )?;
+    effective_policy::validate(&run)?;
     Ok(run)
 }
 
@@ -360,12 +365,14 @@ pub(crate) fn insert_run(conn: &Connection, new: &NewRun) -> Result<RunRecord, C
             "INSERT INTO member_runs(member_id,fleet_id,director_member_id,backend,database_identity_json,
              launch_nonce,runtime_path,requested_mode,resolved_mode,mode_source,permission_argv_json,
              event_evidence,coverage,status,created_at,native_version,profile_version,owner_epoch,
-             owner_kind,owner_pid,owner_start_identity,reachability,cleanup_state,event_seq_reserved_through,observation_gap_count)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,'starting',?14,?15,?16,1,'creator',?17,?18,'reachable','incomplete',0,0)",
+             owner_kind,owner_pid,owner_start_identity,reachability,cleanup_state,event_seq_reserved_through,observation_gap_count,
+             profile_match)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,'starting',?14,?15,?16,1,'creator',?17,?18,'reachable','incomplete',0,0,?19)",
             params![new.member_id,new.fleet_id,new.director_member_id,new.backend,new.database_identity_json.to_string(),
                 new.launch_nonce,new.runtime_path,new.requested_mode,new.resolved_mode,new.mode_source.as_str(),
                 new.permission_argv_json.to_string(),new.event_evidence.as_str(),new.coverage.as_str(),now,
-                new.native_version,new.profile_version,new.owner_pid,new.owner_start_identity],
+                new.native_version,new.profile_version,new.owner_pid,new.owner_start_identity,
+                new.profile_match.map(ProfileMatch::as_str)],
         ).map_err(db_err)?;
     let run = get_run(conn, conn.last_insert_rowid())?;
     Ok(run)

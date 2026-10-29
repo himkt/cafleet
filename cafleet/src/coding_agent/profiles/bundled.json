@@ -91,6 +91,44 @@
       "source_ref": "native/claude-2.1.302-boxed-single-row-permission-1.json",
       "sha256": "0a701f94912057b13c5775c74e2574683dd861787a205424dc5a991e9699b062"
     },
+    {"id": "claude-2.1.302-auto-approved-done-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-approved-done-1.json", "sha256": "3f36a2628161ab1be31dca74ea74b9a41162467890f7d2a417c3bb8578ad0639"},
+    {"id": "claude-2.1.302-auto-approved-running-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-approved-running-1.json", "sha256": "2f625757c65769bb32959b771014233f74bd028b4f6e7ef58278637e0224a077"},
+    {"id": "claude-2.1.302-auto-ask-allow-continuation-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-ask-allow-continuation-1.json", "sha256": "6d9db0d918bd949a03b47cb210c1a21845ad7a4a4733fd355dded11bd7de5fb6"},
+    {"id": "claude-2.1.302-auto-ask-deny-continuation-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 90, "source_ref": "native/claude-2.1.302-auto-ask-deny-continuation-1.json", "sha256": "1f6526db0c890387ad40c517b7ccd6a9b7085deda7cab79eeb8124f63cfec778"},
+    {"id": "claude-2.1.302-auto-ask-hiding-refusal-notice-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-ask-hiding-refusal-notice-1.json", "sha256": "e425f0b00785334fc9a4e384156f63f149e32a4a64bd6045eee1013d66364bb7"},
+    {"id": "claude-2.1.302-auto-ask-hiding-refusal-notice-resized-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 90, "source_ref": "native/claude-2.1.302-auto-ask-hiding-refusal-notice-resized-1.json", "sha256": "f32289352a2f2e603e83f18ea6099d2dcabf497a3550817925107d3d4cbfb9a2"},
+    {"id": "claude-2.1.302-auto-ask-permission-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-ask-permission-1.json", "sha256": "3e61ca7c6bb35c8f1bd207438eb057a0785bcc832c788eaf2d902d031a646b52"},
+    {"id": "claude-2.1.302-auto-fresh-first-launch-notice-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-fresh-first-launch-notice-1.json", "sha256": "7296ba376d12cbf1eaf129ad3cb6d5808ae68f828fd0ce1c564f6fa4f2f82133"},
+    {"id": "claude-2.1.302-auto-fresh-onboarding-theme-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-fresh-onboarding-theme-1.json", "sha256": "940090a2d312f9e82953d0347a83b0d352edef04f8f99a98aa915ab9bc979acf"},
+    {"id": "claude-2.1.302-auto-idle-composer-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-idle-composer-1.json", "sha256": "2948f4572dace3790ea9357064aa77f14dfb3461548c0c411c6ca3ad65fb544d"},
+    {"id": "claude-2.1.302-auto-model-switch-question-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-model-switch-question-1.json", "sha256": "cbf826cd8cc66e1d186a80ab75c3540d5985113239298a4c36787102d6c2f794"},
+    {"id": "claude-2.1.302-auto-quote-false-positive-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-quote-false-positive-1.json", "sha256": "9406cdc9afa94f7249b1c40022207bd7b7b9124d4dba0d97636809f75fa88760"},
+    {"id": "claude-2.1.302-auto-refusal-notice-expired-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-refusal-notice-expired-1.json", "sha256": "ef0715abbf6d25e6c477a01cee4c805fde1bab253dc4b3c658ff300784d8f4e8"},
+    {"id": "claude-2.1.302-auto-refusal-notice-idle-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-refusal-notice-idle-1.json", "sha256": "ca2696175065ff2af54e68e66d5604db1e8b6a01f554f8267c36dcf259b31285"},
+    {"id": "claude-2.1.302-auto-refusal-notice-working-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-refusal-notice-working-1.json", "sha256": "a75ec80332e05d97f3be731c38145428971d2cee3d20fabd3c140d3d2ebe823a"},
+    {"id": "claude-2.1.302-auto-transcript-viewer-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-transcript-viewer-1.json", "sha256": "de0a6ff5832aa1fe2f3b0e1499bff5b581868673dfe33b6b549e7e346fe3c979"},
+    {"id": "claude-2.1.302-auto-two-refusals-notice-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-two-refusals-notice-1.json", "sha256": "fea2e41ed5c40dd6542712d01b9c20967b8718e0cfa0548c19ff2b5e77af0d74"},
+    {"id": "claude-2.1.302-auto-unavailable-manual-footer-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-unavailable-manual-footer-1.json", "sha256": "ca30abdf34480860037a74c744644f12d4c9f8ea3a9e1c277cc909a679d4e97c"},
+    {"id": "claude-2.1.302-auto-unavailable-notice-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-unavailable-notice-1.json", "sha256": "d81e777289e61e2936f281f33036a22c95e52020e4c09f575531244e368c0c0d"},
+    {"id": "claude-2.1.302-auto-verbose-quote-false-positive-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-verbose-quote-false-positive-1.json", "sha256": "1f909b30fe8dc6c2d28db7a92e37edd93a8867e3181234b94f0c489932251ef5"},
+    {"id": "claude-2.1.302-auto-verbose-refusal-above-form-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-verbose-refusal-above-form-1.json", "sha256": "26c4ee40201df1db1656ba8325996ce5cd8d70f1a4f1ad257fa07be8256ae619"},
+    {"id": "claude-2.1.302-auto-verbose-refusal-hidden-by-form-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 20, "cols": 60, "source_ref": "native/claude-2.1.302-auto-verbose-refusal-hidden-by-form-1.json", "sha256": "67bef1c0ca6d031e4b4c16553352eb6e39fc96a5c88eb24a6bd3b9db118f223b"},
+    {"id": "claude-2.1.302-auto-verbose-refusal-restored-idle-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-verbose-refusal-restored-idle-1.json", "sha256": "3429b0d562641b8bcc6f8acafcf6e9b8c337e9311db9846ee6859754f00ae4ce"},
+    {"id": "claude-2.1.302-auto-verbose-refusal-rewrapped-form-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 60, "source_ref": "native/claude-2.1.302-auto-verbose-refusal-rewrapped-form-1.json", "sha256": "1dfe7aab1eeda9d6d80720cbec40338858a47c678d04333a6df230c70ef68e7f"},
+    {"id": "claude-2.1.302-auto-verbose-refusal-rewrapped-idle-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 20, "cols": 60, "source_ref": "native/claude-2.1.302-auto-verbose-refusal-rewrapped-idle-1.json", "sha256": "7462056e4913ac25a0278d5e00316b4f7b795dcf0635a6ab911e4c77a6c37289"},
+    {"id": "claude-2.1.302-auto-verbose-transcript-viewer-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-verbose-transcript-viewer-1.json", "sha256": "75f31665ed8ae6dac1e9066fdb0b0102af09475d6967a62b0ffeb2a1945dda73"},
+    {"id": "claude-2.1.302-auto-verbose-two-refusals-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-verbose-two-refusals-1.json", "sha256": "02139c84601cdd081a6b28e2174373a5a0d65e59108a5e4b22fd15f27c939488"},
+    {"id": "claude-2.1.302-trust-dialog-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-trust-dialog-1.json", "sha256": "c5c0c29606bbffd419a038aac11f9f20561779298b3a70d1a5b4c224a20a2ed6"},
+    {"id": "claude-2.1.302-access-allow-continuation-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-access-allow-continuation-1.json", "sha256": "439c0dc8b297291f4e2a2ddbee94429a100f0a0a9c38a125605edde95764e23b"},
+    {"id": "claude-2.1.302-access-allow-pre-stage-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-access-allow-pre-stage-1.json", "sha256": "725750e4f7d293c8821830134990f7e77cc49cc22fa5bd4c5ce1dc070bb2a815"},
+    {"id": "claude-2.1.302-access-allow-running-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-access-allow-running-1.json", "sha256": "ca16dd8cf9e7b7fe5537acf5424722b50843bc5a2c7e45ace287fb68194bba94"},
+    {"id": "claude-2.1.302-access-deny-continuation-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-access-deny-continuation-1.json", "sha256": "eee767ecea57307a6c77b36364e9068b8ca213b2f62cec266ba643f7ed82a82d"},
+    {"id": "claude-2.1.302-access-deny-pre-stage-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-access-deny-pre-stage-1.json", "sha256": "2887367274c6ed001722e1e8ff8eb7fd83157b9739f7424619ff20ad97fefa91"},
+    {"id": "claude-2.1.302-access-permission-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-access-permission-1.json", "sha256": "34c18fa8683209dc8030c51a331286c53519ef548d3c105766656671dfd6de49"},
+    {"id": "claude-2.1.302-auto-env-setup-cancelled-idle-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-env-setup-cancelled-idle-1.json", "sha256": "88ec8648d616e76cc4fbe73a2978625bc7e0770380ef5b2712fc894a17e9db9f"},
+    {"id": "claude-2.1.302-auto-env-setup-offer-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-env-setup-offer-1.json", "sha256": "68970ee9c53ecccbf6547c1ce551a272678c86916b61f366093ff39bf89dc23d"},
+    {"id": "claude-2.1.302-auto-env-setup-wizard-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-auto-env-setup-wizard-1.json", "sha256": "104b58d5890d85cbf0102e28c54f5a816126e859ea4bd10469c66e4f2dfa98b3"},
+    {"id": "claude-2.1.302-default-manual-idle-1", "kind": "native", "backend": "claude", "native_version": "2.1.302", "rows": 36, "cols": 120, "source_ref": "native/claude-2.1.302-default-manual-idle-1.json", "sha256": "f6543513a5f48add713e7d9560e7edb96f746026ec3c1e13e9e55d0db276596c"},
     {
       "id": "codex-0.163.0-on-request-permission-1",
       "kind": "native",
@@ -131,6 +169,25 @@
       "source_ref": "native/codex-0.163.0-idle-composer-1.json",
       "sha256": "f7337eae171edcce09eafad4750e7b2fa6354b680adff0c3089ec435be5c5a2b"
     },
+    {"id": "codex-0.163.0-auto-approved-escalated-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-approved-escalated-1.json", "sha256": "4e112683d83c6b6703bc06633657e1ca74b003fc39b52f0ea032f0c6ff5ccb69"},
+    {"id": "codex-0.163.0-auto-denial-limit-interrupted-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-denial-limit-interrupted-1.json", "sha256": "96a389b38ac91b883f686f81289cc164a9c4dcc0aa3d75b6892f8b2819f79090"},
+    {"id": "codex-0.163.0-auto-denial-limit-warning-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-denial-limit-warning-1.json", "sha256": "aefe65069b821baa8b0559113b10cedfc0632f5467180107b5da2df07b0fc403"},
+    {"id": "codex-0.163.0-auto-expanded-detail-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-expanded-detail-1.json", "sha256": "4ffbd27f550f8f4bb12bbca97942813b59e2ccc0835a6086b5781d6784a3fe84"},
+    {"id": "codex-0.163.0-auto-fresh-idle-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-fresh-idle-1.json", "sha256": "13660dfb09c4343b1ab4e7c5a3a81c4f107486a4ced31e84555a213a6d917283"},
+    {"id": "codex-0.163.0-auto-idle-composer-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-idle-composer-1.json", "sha256": "e002eff0228570e55b9508e7bd3a26d8780669189c2f842e6c93d44372fd9279"},
+    {"id": "codex-0.163.0-auto-quote-false-positive-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-quote-false-positive-1.json", "sha256": "dd603ee6f1753f409e77ba95a509314077ed1874f9f01eee6bc911f143e0d56c"},
+    {"id": "codex-0.163.0-auto-refusal-after-overlay-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-refusal-after-overlay-1.json", "sha256": "691099cff6faf5bbe7c5199e2680eba020025a82421bf165682b7d5220e87117"},
+    {"id": "codex-0.163.0-auto-refusal-idle-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-refusal-idle-1.json", "sha256": "09e62fb15ff4aabedb7897098c56349bce20b79deef8a7f186ca21f5b1b31ab0"},
+    {"id": "codex-0.163.0-auto-refusal-warning-overlay-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-refusal-warning-overlay-1.json", "sha256": "2e84665d62b5702b396774933f8889927c97aa151e4deffab8cbf9cee0698846"},
+    {"id": "codex-0.163.0-auto-refusal-working-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-refusal-working-1.json", "sha256": "7e0bacb73a0ab7e20bddda950ff52b4d2ea72fd98696a30bc3c747132251831c"},
+    {"id": "codex-0.163.0-auto-reviewing-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-reviewing-1.json", "sha256": "4dda3f7a84c40f78d4b16a84695f4fd45a63f6d49f09bf7e93dbb97772a3cd6a"},
+    {"id": "codex-0.163.0-auto-sandbox-failure-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-sandbox-failure-1.json", "sha256": "512225e5b5ba3ef8854da2964fa0bdd648d9b2261047a732fcd63cf0403e7586"},
+    {"id": "codex-0.163.0-auto-second-launch-idle-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-second-launch-idle-1.json", "sha256": "8404ae4fce35e28d90759b3e0346595c502d732a65ab584a9d8025e4b326f4e6"},
+    {"id": "codex-0.163.0-auto-status-indicator-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-status-indicator-1.json", "sha256": "1069e654110b4a2e15672b88ae913e09e5794bcdd07ee502495e2819700fa9e3"},
+    {"id": "codex-0.163.0-auto-two-refusals-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-two-refusals-1.json", "sha256": "0ea187dcb053ff37df1c8e8bfb76c0733a0b9a04ddf29ca250f1235a5705863f"},
+    {"id": "codex-0.163.0-auto-two-refusals-resized-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 80, "source_ref": "native/codex-0.163.0-auto-two-refusals-resized-1.json", "sha256": "81e4bb5555d27d05ed647403aaa11cf91d383157b55dfc11cbbed1360d9215e2"},
+    {"id": "codex-0.163.0-auto-two-refusals-restored-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-two-refusals-restored-1.json", "sha256": "4b96b136c631e7e1ef610301750b74e27e3a18a5af56e149ee1d0b77ff2a9108"},
+    {"id": "codex-0.163.0-auto-warning-overlay-1", "kind": "native", "backend": "codex", "native_version": "0.163.0", "rows": 36, "cols": 120, "source_ref": "native/codex-0.163.0-auto-warning-overlay-1.json", "sha256": "a10041fbeb395ec4f0233ada28693c7d20e030a57b4f7d7a25fd73b36256c320"},
     {
       "id": "opencode-2.1.4-ask-permission-1",
       "kind": "native",
@@ -206,7 +263,7 @@
     {
       "backend": "claude",
       "native_versions": ["2.1.302"],
-      "profile_version": "claude-2.1.302-default-3",
+      "profile_version": "claude-2.1.302-auto-1",
       "rules": [
         {
           "id": "claude-bash-permission",
@@ -260,21 +317,244 @@
           },
           "verified_noninteraction": true,
           "sensitive": false
+        },
+        {
+          "id": "claude-auto-ask-permission",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^ Bash command$",
+            "end_pattern": "^ Esc to cancel · Tab to amend$",
+            "max_rows": 24,
+            "cursor": "inside"
+          },
+          "matchers": [
+            {"id": "heading", "scope": "line", "pattern": "^ Bash command$"},
+            {"id": "operation", "scope": "region", "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"},
+            {"id": "ask_rule", "scope": "line", "pattern": "^ │ Ask rule \\S"},
+            {"id": "auto_hint", "scope": "line", "pattern": "^ /permissions to let auto mode decide$"},
+            {"id": "question", "scope": "line", "pattern": "^ Do you want to proceed\\?\\s*$"},
+            {"id": "focus", "scope": "line", "pattern": "^ ❯ [1-9]\\. "},
+            {"id": "allow", "scope": "line", "pattern": "^ [❯ ] 1\\. (?P<label>Yes)$"},
+            {"id": "deny", "scope": "line", "pattern": "^ [❯ ] 2\\. (?P<label>No)$"}
+          ],
+          "extract": {
+            "operation": {"matcher_id": "operation", "capture": "operation", "row_margin": " "},
+            "choices": [
+              {"id": "allow-once", "label": {"matcher_id": "allow", "capture": "label"}, "scope": "single_request"},
+              {"id": "deny-once", "label": {"matcher_id": "deny", "capture": "label"}, "scope": "single_request"}
+            ],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "claude-bash-permission-auto-tip",
+          "priority": 100,
+          "observation": "permission_request",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^ Bash command$",
+            "end_pattern": "^ Esc to cancel · Tab to amend$",
+            "max_rows": 24,
+            "cursor": "inside"
+          },
+          "matchers": [
+            {"id": "heading", "scope": "line", "pattern": "^ Bash command$"},
+            {"id": "operation", "scope": "region", "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"},
+            {"id": "question", "scope": "line", "pattern": "^ Do you want to proceed\\?$"},
+            {"id": "focus", "scope": "line", "pattern": "^ ❯ [1-9]\\. "},
+            {"id": "allow", "scope": "line", "pattern": "^ [❯ ] 1\\. (?P<label>Yes)$"},
+            {"id": "access", "scope": "line", "pattern": "^ [❯ ] 2\\. Yes, and always allow access to \\S.* from this project$"},
+            {"id": "switch", "scope": "line", "pattern": "^ [❯ ] 3\\. Yes, and switch to auto mode · auto mode handles these prompts for you$"},
+            {"id": "deny", "scope": "line", "pattern": "^ [❯ ] 4\\. (?P<label>No)$"}
+          ],
+          "extract": {
+            "operation": {"matcher_id": "operation", "capture": "operation", "row_margin": " "},
+            "choices": [
+              {"id": "allow-once", "label": {"matcher_id": "allow", "capture": "label"}, "scope": "single_request"},
+              {"id": "deny-once", "label": {"matcher_id": "deny", "capture": "label"}, "scope": "single_request"}
+            ],
+            "native_request_id": null
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "claude-auto-startup",
+          "priority": 100,
+          "observation": "question",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^ {2,3}Teach auto mode about your environment\\?$",
+            "end_pattern": "^ {2,3}(?:Enter to confirm|←/→ to change · Enter to continue) · Esc to cancel$",
+            "max_rows": 14,
+            "cursor": "inside"
+          },
+          "matchers": [
+            {"id": "heading", "scope": "line", "pattern": "^ {2,3}Teach auto mode about your environment\\?$"},
+            {"id": "focus", "scope": "line", "pattern": "^ {2,3}❯ \\S"},
+            {"id": "footer", "scope": "line", "pattern": "^ {2,3}(?:Enter to confirm|←/→ to change · Enter to continue) · Esc to cancel$"}
+          ],
+          "extract": {"operation": null, "choices": [], "native_request_id": null},
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "claude-auto-refusal",
+          "priority": 40,
+          "observation": "automatic_refusal",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^● [A-Z][A-Za-z]*\\(",
+            "end_pattern": "^  ⎿ \\u{a0}Denied by auto mode classifier ∙ \\[",
+            "max_rows": 8,
+            "cursor": "any"
+          },
+          "matchers": [
+            {"id": "operation", "scope": "region", "pattern": "\\A● (?P<tool>[A-Z][A-Za-z]*)\\((?P<operation>[^\\n]*(?:\\n  [^⎿\\n][^\\n]*)*?)\\)\\s*\\n  ⎿ \\u{a0}Denied by auto mode classifier ∙ \\[(?P<category>[^\\]\\n]+)\\] ∙(?: see(?: https://code\\.claude\\.com/docs/s/claude-code-auto-mode)?)?\\s*\\z"}
+          ],
+          "extract": {
+            "operation": {"matcher_id": "operation", "capture": "operation"},
+            "choices": [],
+            "native_request_id": null
+          },
+          "frame": {
+            "require_patterns": ["^❯\\u{a0}"],
+            "reject_patterns": ["^  Showing detailed transcript · ctrl\\+o to toggle"]
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "claude-auto-refusal-notice",
+          "priority": 40,
+          "observation": "automatic_refusal",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^ +[a-z][a-z_]* denied by auto mode · \\[[^\\]]+\\] · /permissions",
+            "end_pattern": "^─{3,}(?: \\S.* ─)?$",
+            "max_rows": 2,
+            "cursor": "any"
+          },
+          "matchers": [
+            {"id": "operation", "scope": "line", "pattern": "^ +(?P<operation>[a-z][a-z_]* denied by auto mode · \\[[^\\]]+\\]) · /permissions"}
+          ],
+          "extract": {
+            "operation": {"matcher_id": "operation", "capture": "operation"},
+            "choices": [],
+            "native_request_id": null
+          },
+          "frame": {
+            "require_patterns": ["^❯\\u{a0}"],
+            "reject_patterns": ["^  Showing detailed transcript · ctrl\\+o to toggle"]
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "claude-auto-unavailable",
+          "priority": 40,
+          "observation": "automatic_review_unavailable",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^ +auto mode disabled by settings\\b",
+            "end_pattern": "^─{3,}(?: \\S.* ─)?$",
+            "max_rows": 2,
+            "cursor": "any"
+          },
+          "matchers": [
+            {"id": "notice", "scope": "line", "pattern": "^ +(?P<notice>auto mode disabled by settings)"}
+          ],
+          "extract": {"operation": null, "choices": [], "native_request_id": null},
+          "frame": {
+            "require_patterns": ["^❯\\u{a0}"],
+            "reject_patterns": ["^  Showing detailed transcript · ctrl\\+o to toggle"]
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "claude-auto-mode-indicator",
+          "priority": 40,
+          "observation": "automatic_review_available",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^  ⏵⏵ auto mode on \\(shift\\+tab to cycle\\)",
+            "end_pattern": "^  ⏵⏵ auto mode on \\(shift\\+tab to cycle\\)",
+            "max_rows": 1,
+            "cursor": "any"
+          },
+          "matchers": [
+            {"id": "mode", "scope": "line", "pattern": "^  ⏵⏵ (?P<mode>auto mode) on \\(shift\\+tab to cycle\\)"}
+          ],
+          "extract": {"operation": null, "choices": [], "native_request_id": null},
+          "frame": {
+            "require_patterns": ["^❯\\u{a0}"],
+            "reject_patterns": ["^  Showing detailed transcript · ctrl\\+o to toggle"]
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
         }
       ],
       "capabilities": {
-        "detection": {
-          "rule_ids": ["claude-bash-permission"],
+        "annotations": {
+          "rule_ids": [
+            "claude-auto-refusal",
+            "claude-auto-refusal-notice",
+            "claude-auto-unavailable",
+            "claude-auto-mode-indicator"
+          ],
           "fixture_ids": [
+            "claude-2.1.302-auto-verbose-two-refusals-1",
+            "claude-2.1.302-auto-verbose-refusal-restored-idle-1",
+            "claude-2.1.302-auto-verbose-refusal-rewrapped-idle-1",
+            "claude-2.1.302-auto-refusal-notice-working-1",
+            "claude-2.1.302-auto-refusal-notice-idle-1",
+            "claude-2.1.302-auto-two-refusals-notice-1",
+            "claude-2.1.302-auto-unavailable-notice-1",
+            "claude-2.1.302-auto-idle-composer-1",
+            "claude-2.1.302-auto-quote-false-positive-1",
+            "claude-2.1.302-auto-verbose-quote-false-positive-1",
+            "claude-2.1.302-auto-transcript-viewer-1",
+            "claude-2.1.302-auto-verbose-transcript-viewer-1",
+            "claude-2.1.302-auto-unavailable-manual-footer-1"
+          ]
+        },
+        "detection": {
+          "rule_ids": [
+            "claude-bash-permission",
+            "claude-auto-ask-permission",
+            "claude-bash-permission-auto-tip",
+            "claude-auto-startup"
+          ],
+          "fixture_ids": [
+            "claude-2.1.302-access-permission-1",
+            "claude-2.1.302-access-allow-pre-stage-1",
+            "claude-2.1.302-access-deny-pre-stage-1",
+            "claude-2.1.302-auto-env-setup-offer-1",
+            "claude-2.1.302-auto-env-setup-wizard-1",
             "claude-2.1.302-default-permission-1",
             "claude-2.1.302-wrapped-permission-1",
             "claude-2.1.302-boxed-permission-1",
-            "claude-2.1.302-boxed-single-row-permission-1"
+            "claude-2.1.302-boxed-single-row-permission-1",
+            "claude-2.1.302-auto-ask-permission-1",
+            "claude-2.1.302-auto-ask-hiding-refusal-notice-1",
+            "claude-2.1.302-auto-ask-hiding-refusal-notice-resized-1",
+            "claude-2.1.302-auto-verbose-refusal-above-form-1",
+            "claude-2.1.302-auto-verbose-refusal-hidden-by-form-1",
+            "claude-2.1.302-auto-verbose-refusal-rewrapped-form-1"
           ]
         },
         "composer": {
           "rule_ids": ["claude-idle-composer"],
-          "fixture_ids": ["claude-2.1.302-idle-composer-1"]
+          "fixture_ids": [
+            "claude-2.1.302-idle-composer-1",
+            "claude-2.1.302-auto-idle-composer-1",
+            "claude-2.1.302-default-manual-idle-1"
+          ]
         },
         "answers": [
           {
@@ -298,6 +578,50 @@
               {"bytes_hex": "34", "required_rule_id": "claude-bash-permission", "required_choice_id": "deny-once"}
             ],
             "fixture_ids": ["claude-2.1.302-deny-pre-stage-1", "claude-2.1.302-wrapped-deny-pre-stage-1"]
+          },
+          {
+            "decision": "allow",
+            "request_rule_id": "claude-auto-ask-permission",
+            "answer_rule_id": "claude-auto-ask-allow-digit",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {"bytes_hex": "31", "required_rule_id": "claude-auto-ask-permission", "required_choice_id": "allow-once"}
+            ],
+            "fixture_ids": ["claude-2.1.302-auto-ask-permission-1"]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "claude-auto-ask-permission",
+            "answer_rule_id": "claude-auto-ask-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {"bytes_hex": "32", "required_rule_id": "claude-auto-ask-permission", "required_choice_id": "deny-once"}
+            ],
+            "fixture_ids": ["claude-2.1.302-auto-ask-hiding-refusal-notice-1", "claude-2.1.302-auto-verbose-refusal-above-form-1"]
+          },
+          {
+            "decision": "allow",
+            "request_rule_id": "claude-bash-permission-auto-tip",
+            "answer_rule_id": "claude-bash-auto-tip-allow-digit",
+            "choice_id": "allow-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {"bytes_hex": "31", "required_rule_id": "claude-bash-permission-auto-tip", "required_choice_id": "allow-once"}
+            ],
+            "fixture_ids": ["claude-2.1.302-access-allow-pre-stage-1"]
+          },
+          {
+            "decision": "deny",
+            "request_rule_id": "claude-bash-permission-auto-tip",
+            "answer_rule_id": "claude-bash-auto-tip-deny-digit",
+            "choice_id": "deny-once",
+            "focus_matcher_id": "focus",
+            "stages": [
+              {"bytes_hex": "34", "required_rule_id": "claude-bash-permission-auto-tip", "required_choice_id": "deny-once"}
+            ],
+            "fixture_ids": ["claude-2.1.302-access-deny-pre-stage-1"]
           }
         ]
       }
@@ -305,7 +629,7 @@
     {
       "backend": "codex",
       "native_versions": ["0.163.0"],
-      "profile_version": "codex-0.163.0-on-request-1",
+      "profile_version": "codex-0.163.0-approve-for-me-1",
       "rules": [
         {
           "id": "codex-exec-approval",
@@ -359,16 +683,85 @@
           },
           "verified_noninteraction": true,
           "sensitive": false
+        },
+        {
+          "id": "codex-auto-review-refusal",
+          "priority": 40,
+          "observation": "automatic_refusal",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^✗ Request denied for codex to run \\S",
+            "end_pattern": "^\\s*$",
+            "max_rows": 6,
+            "cursor": "any"
+          },
+          "matchers": [
+            {"id": "operation", "scope": "region", "pattern": "\\A✗ Request denied for codex to run (?P<operation>[^\\n]*\\S(?:\\n  [^\\n]*\\S)*)\\s*\\n\\s*\\z"}
+          ],
+          "extract": {
+            "operation": {"matcher_id": "operation", "capture": "operation", "row_margin": "  "},
+            "choices": [],
+            "native_request_id": null
+          },
+          "frame": {
+            "require_patterns": ["^(?:› Ask Codex to do anything|  \\? for shortcuts)"],
+            "reject_patterns": ["^  k keep & next · esc dismiss & close"]
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
+        },
+        {
+          "id": "codex-auto-review-indicator",
+          "priority": 40,
+          "observation": "automatic_review_available",
+          "region": {
+            "screen": "alternate",
+            "start_pattern": "^  Permissions: +Workspace \\(Approve for me\\)\\s*$",
+            "end_pattern": "^  Permissions: +Workspace \\(Approve for me\\)\\s*$",
+            "max_rows": 1,
+            "cursor": "any"
+          },
+          "matchers": [
+            {"id": "mode", "scope": "line", "pattern": "^  Permissions: +(?P<mode>Workspace \\(Approve for me\\))\\s*$"}
+          ],
+          "extract": {"operation": null, "choices": [], "native_request_id": null},
+          "frame": {
+            "require_patterns": ["^(?:› Ask Codex to do anything|  \\? for shortcuts)"],
+            "reject_patterns": ["^  k keep & next · esc dismiss & close"]
+          },
+          "verified_noninteraction": false,
+          "sensitive": false
         }
       ],
       "capabilities": {
+        "annotations": {
+          "rule_ids": ["codex-auto-review-refusal", "codex-auto-review-indicator"],
+          "fixture_ids": [
+            "codex-0.163.0-auto-refusal-working-1",
+            "codex-0.163.0-auto-refusal-idle-1",
+            "codex-0.163.0-auto-refusal-after-overlay-1",
+            "codex-0.163.0-auto-two-refusals-1",
+            "codex-0.163.0-auto-two-refusals-resized-1",
+            "codex-0.163.0-auto-two-refusals-restored-1",
+            "codex-0.163.0-auto-denial-limit-interrupted-1",
+            "codex-0.163.0-auto-status-indicator-1",
+            "codex-0.163.0-auto-quote-false-positive-1",
+            "codex-0.163.0-auto-refusal-warning-overlay-1",
+            "codex-0.163.0-auto-warning-overlay-1",
+            "codex-0.163.0-auto-expanded-detail-1"
+          ]
+        },
         "detection": {
           "rule_ids": ["codex-exec-approval"],
           "fixture_ids": ["codex-0.163.0-on-request-permission-1"]
         },
         "composer": {
           "rule_ids": ["codex-idle-composer"],
-          "fixture_ids": ["codex-0.163.0-idle-composer-1"]
+          "fixture_ids": [
+            "codex-0.163.0-idle-composer-1",
+            "codex-0.163.0-auto-idle-composer-1",
+            "codex-0.163.0-auto-fresh-idle-1"
+          ]
         },
         "answers": [
           {
@@ -482,6 +875,7 @@
         }
       ],
       "capabilities": {
+        "annotations": null,
         "detection": {
           "rule_ids": ["opencode-shell-permission"],
           "fixture_ids": ["opencode-2.1.4-ask-permission-1"]

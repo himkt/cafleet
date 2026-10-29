@@ -5035,7 +5035,7 @@ pub(super) mod permission_history {
                 )
                 .unwrap();
             assert_eq!(fixture.conn.execute(
-                "UPDATE member_runs SET status='running',coverage='tested',profile_version='fixture-detector-v1',started_at=?1 WHERE run_id=?2",
+                "UPDATE member_runs SET status='running',native_version='0.162.0',coverage='tested',profile_version='fixture-detector-v1',profile_match='exact',started_at=?1 WHERE run_id=?2",
                 rusqlite::params![NOW, fixture.run.run_id],
             ).unwrap(), 1);
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
@@ -5293,6 +5293,59 @@ pub(super) mod permission_history {
             ) {
                 Err(failure) => failure.source,
                 Ok(_) => panic!("this inspection is refused"),
+            }
+        }
+
+        #[test]
+        fn permission_inspect_rejects_an_automatic_review_event_naming_an_existing_interaction() {
+            for kind in [
+                RuntimeEventKind::AutomaticRefusalObserved,
+                RuntimeEventKind::AutomaticReviewUnavailable,
+            ] {
+                let mut case = Case::new(Retained::Accepted);
+                let (_, interaction_id) = opened(&case);
+                let evidence = storage::evidence::EvidencePolicy::metadata()
+                    .apply(&json!({
+                        "backend":"codex","native_version":case.fixture.run.native_version,"profile_version":"fixture-detector-v1",
+                        "rule_id":"fixture-auto-review","screen_seq":2,"operation":null,"choices":null,
+                        "native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false
+                    }))
+                    .unwrap();
+                let annotation = storage::persist_transition(
+                    &mut case.fixture.conn,
+                    &case.owner,
+                    &ObservedTransition {
+                        run_id: case.owner.run_id,
+                        event_seq: 2,
+                        episode_seq: None,
+                        kind,
+                        classification: None,
+                        observed_at: NOW.into(),
+                        evidence_json: evidence,
+                        close_reason: None,
+                        cause_json: None,
+                    },
+                    PersistenceMode::Live,
+                )
+                .unwrap();
+                let inputs = |conn: &Connection| -> i64 {
+                    conn.query_row("SELECT COUNT(*) FROM member_input_operations", [], |row| {
+                        row.get(0)
+                    })
+                    .unwrap()
+                };
+                let before = inputs(&case.fixture.conn);
+                let director = case.fixture.run.director_member_id;
+                let settings = case.settings.clone();
+                let error = inspect(
+                    &mut case.fixture.conn,
+                    &settings,
+                    annotation.event_id,
+                    interaction_id,
+                    director,
+                );
+                assert_eq!(error.exit_code(), 1, "{kind:?}: {}", error.message());
+                assert_eq!(inputs(&case.fixture.conn), before, "{kind:?}");
             }
         }
 
@@ -6138,6 +6191,7 @@ pub(super) mod permission_history {
                         event_evidence: original.event_evidence,
                         native_version: original.native_version.clone(),
                         profile_version: None,
+                        profile_match: None,
                         coverage: Coverage::Unknown,
                         owner_pid: process.pid,
                         owner_start_identity: process.start_identity,

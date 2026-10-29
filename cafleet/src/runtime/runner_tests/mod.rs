@@ -125,17 +125,13 @@ impl Fixture {
                 .unwrap()
                 .into(),
             requested_mode: None,
-            resolved_mode: "never".into(),
+            resolved_mode: "approve-for-me".into(),
             mode_source: ModeSource::Default,
-            permission_argv_json: json!([
-                "--ask-for-approval",
-                "never",
-                "--sandbox",
-                "workspace-write"
-            ]),
+            permission_argv_json: json!(["--approve-for-me"]),
             event_evidence: EventEvidence::Metadata,
-            native_version: Some("0.162.0".into()),
+            native_version: None,
             profile_version: None,
+            profile_match: None,
             coverage: Coverage::Unknown,
             owner_pid: process.pid,
             owner_start_identity: process.start_identity,

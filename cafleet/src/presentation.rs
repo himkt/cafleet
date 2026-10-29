@@ -30,10 +30,12 @@ pub fn runtime_snapshot(row: &crate::broker::runtime::RuntimeSnapshot) -> Value 
     let run = &row.run;
     json!({"run_id":run.run_id,"resolved_mode":run.resolved_mode,"status":run.status.as_str(),
         "reachability":run.reachability.as_str(),"owner_epoch":run.owner_epoch,"last_health_at":run.last_health_at,
-        "coverage":run.coverage.as_str(),"current_interaction_id":row.current_interaction_id,
+        "coverage":run.coverage.as_str(),"profile_match":run.profile_match.map(|profile_match| profile_match.as_str()),
+        "current_interaction_id":row.current_interaction_id,
         "unresolved_input_ids":row.unresolved_input_ids,"owner_kind":run.owner_kind.as_str(),"owner_pid":run.owner_pid,
         "owner_start_identity":run.owner_start_identity,"runner_pid":run.runner_pid,"runner_start_identity":run.runner_start_identity,
-        "child_pid":run.child_pid,"child_start_identity":run.child_start_identity})
+        "child_pid":run.child_pid,"child_start_identity":run.child_start_identity,
+        "effective_policy":run.effective_policy_json})
 }
 
 fn runtime_interaction(row: &crate::broker::runtime::InteractionRecord) -> Value {

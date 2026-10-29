@@ -145,7 +145,7 @@ mod permission_inspection_contracts {
                 event_evidence: "metadata",
                 backend: crate::coding_agent::CodingAgent::Claude,
                 native_version: "2.1.302",
-                profile_version: "claude-2.1.302-default-3",
+                profile_version: "claude-2.1.302-auto-1",
                 size: crate::runtime::runner::TerminalSize {
                     rows: 36,
                     cols: 120,
@@ -8375,7 +8375,7 @@ mod contract_tests {
                     serde_json::json!({"operation":null,"choices":[],"native_request_id":null});
                 rule["verified_noninteraction"] = serde_json::json!(true);
                 value["profiles"][0]["capabilities"] = serde_json::json!({
-                    "detection":null,"answers":[],"composer":{
+                    "detection":null,"annotations":null,"answers":[],"composer":{
                         "rule_ids":["synthetic-composer-empty"],"fixture_ids":[fixture["id"]],
                         "submission":{"prompt":{"prefix_hex":"","submit_hex":"7e","fixture_ids":["synthetic-prompt-plan"]},"exec":null}
                     }
@@ -8636,10 +8636,11 @@ mod contract_tests {
                     storage::reserve_event_sequences(&mut fixture.conn, &fixture.run.owner())
                         .unwrap();
                     let catalog = catalog();
-                    let coverage = catalog
-                        .capabilities(profile.backend, Some(profile.native_version))
-                        .detection;
-                    fixture.conn.execute("UPDATE member_runs SET backend=?1,native_version=?2,profile_version=?3,coverage=?4,event_evidence=?5 WHERE run_id=?6",rusqlite::params![profile.backend.name(),profile.native_version,profile.profile_version,coverage.as_str(),profile.event_evidence,fixture.run.run_id]).unwrap();
+                    let selected =
+                        catalog.capabilities(profile.backend, Some(profile.native_version));
+                    let coverage = selected.detection;
+                    let profile_match = selected.profile_match.map(|value| value.as_str());
+                    fixture.conn.execute("UPDATE member_runs SET backend=?1,native_version=?2,profile_version=?3,profile_match=?4,coverage=?5,event_evidence=?6 WHERE run_id=?7",rusqlite::params![profile.backend.name(),profile.native_version,profile.profile_version,profile_match,coverage.as_str(),profile.event_evidence,fixture.run.run_id]).unwrap();
                     fixture
                         .conn
                         .execute(

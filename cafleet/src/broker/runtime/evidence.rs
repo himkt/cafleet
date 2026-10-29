@@ -169,6 +169,23 @@ impl EvidencePolicy {
         Ok(value)
     }
 
+    pub fn displayed_mode(
+        &self,
+        rule: &str,
+        sensitive: bool,
+        mode: Option<&str>,
+    ) -> Result<Option<String>, CafleetError> {
+        if self.mode == EventEvidence::Metadata || sensitive || self.sensitive_rules.contains(rule)
+        {
+            return Ok(None);
+        }
+        let mut truncated = false;
+        Ok(self
+            .transform(&json!(mode), &mut truncated)?
+            .as_str()
+            .map(str::to_owned))
+    }
+
     fn transform(&self, value: &Value, truncated: &mut bool) -> Result<Value, CafleetError> {
         match value {
             Value::Null => Ok(Value::Null),

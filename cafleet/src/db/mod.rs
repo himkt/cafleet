@@ -281,7 +281,7 @@ mod runtime_tests {
                 .unwrap()
         }
 
-        fn retained_rows(conn: &Connection) -> Vec<(String, Vec<Vec<Value>>)> {
+        fn retained_rows(conn: &Connection) -> Vec<(String, String, Vec<Vec<Value>>)> {
             let tables = conn
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name != 'refinery_schema_history' ORDER BY name")
         .unwrap()
@@ -292,16 +292,25 @@ mod runtime_tests {
             tables
                 .into_iter()
                 .map(|table| {
-                    let rows = query_rows(conn, &format!("SELECT * FROM {table} ORDER BY 1"));
-                    (table, rows)
+                    let columns = conn
+                        .prepare("SELECT name FROM pragma_table_info(?1) ORDER BY cid")
+                        .unwrap()
+                        .query_map([&table], |row| row.get::<_, String>(0))
+                        .unwrap()
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                        .unwrap()
+                        .join(",");
+                    let rows =
+                        query_rows(conn, &format!("SELECT {columns} FROM {table} ORDER BY 1"));
+                    (table, columns, rows)
                 })
                 .collect()
         }
 
-        fn assert_retained(conn: &Connection, before: &[(String, Vec<Vec<Value>>)]) {
-            for (table, expected) in before {
+        fn assert_retained(conn: &Connection, before: &[(String, String, Vec<Vec<Value>>)]) {
+            for (table, columns, expected) in before {
                 assert_eq!(
-                    query_rows(conn, &format!("SELECT * FROM {table} ORDER BY 1")),
+                    query_rows(conn, &format!("SELECT {columns} FROM {table} ORDER BY 1")),
                     *expected,
                     "{table}"
                 );
@@ -915,6 +924,734 @@ mod runtime_tests {
         }
     }
 
+    mod automatic_review_migration {
+        use rusqlite::OptionalExtension;
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+        use rusqlite::types::Value;
+
+        use super::*;
+
+        const REBUILT: [&str; 3] = [
+            "member_runtime_events",
+            "member_permission_responses",
+            "member_permission_response_claims",
+        ];
+
+        const V6_EVENT_KINDS: [&str; 10] = [
+            "coverage_unknown",
+            "interaction_opened",
+            "interaction_obscured",
+            "interaction_closed",
+            "permission_denied_observed",
+            "automatic_refusal_observed",
+            "automatic_review_unavailable",
+            "runner_degraded",
+            "runner_lost",
+            "runner_exited",
+        ];
+
+        const WIDENED_KIND_CHECK: &str = "CHECK(kind IN ('coverage_unknown','interaction_opened','interaction_obscured','interaction_closed','permission_denied_observed','automatic_refusal_observed','automatic_review_unavailable','runner_degraded','runner_lost','runner_exited'))";
+
+        fn fixture_at(version: i32) -> Fixture {
+            let dir = tempfile::tempdir().unwrap();
+            let mut conn = crate::db::connect(&format!(
+                "sqlite:///{}",
+                dir.path().join(format!("v{version}.db")).display()
+            ))
+            .unwrap();
+            crate::db::embedded::migrations::runner()
+                .set_grouped(true)
+                .set_target(refinery::Target::Version(version))
+                .run(&mut conn)
+                .unwrap();
+            let (fleet, director) = common::create_fleet(&mut conn, "automatic-review-upgrade");
+            let member = common::register(&mut conn, fleet, "retained", Some("%2"));
+            Fixture {
+                _dir: dir,
+                conn,
+                fleet,
+                director,
+                member,
+            }
+        }
+
+        fn query_rows(conn: &Connection, sql: &str) -> Vec<Vec<Value>> {
+            let mut statement = conn.prepare(sql).unwrap();
+            let width = statement.column_count();
+            statement
+                .query_map([], |row| (0..width).map(|column| row.get(column)).collect())
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        }
+
+        fn column_names(conn: &Connection, table: &str) -> Vec<String> {
+            conn.prepare("SELECT name FROM pragma_table_info(?1) ORDER BY cid")
+                .unwrap()
+                .query_map([table], |row| row.get::<_, String>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        }
+
+        type Snapshot = Vec<(String, Vec<String>, Vec<Vec<Value>>)>;
+
+        fn snapshot(conn: &Connection) -> Snapshot {
+            let tables = conn
+                .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name != 'refinery_schema_history' ORDER BY name")
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            tables
+                .into_iter()
+                .map(|table| {
+                    let columns = column_names(conn, &table);
+                    let rows = query_rows(
+                        conn,
+                        &format!("SELECT {} FROM {table} ORDER BY 1, 2", columns.join(",")),
+                    );
+                    (table, columns, rows)
+                })
+                .collect()
+        }
+
+        fn assert_preserved(conn: &Connection, before: &Snapshot) {
+            for (table, columns, expected) in before {
+                assert_eq!(
+                    query_rows(
+                        conn,
+                        &format!("SELECT {} FROM {table} ORDER BY 1, 2", columns.join(","))
+                    ),
+                    *expected,
+                    "{table}"
+                );
+            }
+        }
+
+        fn insert_event(
+            fixture: &Fixture,
+            run: i64,
+            seq: i64,
+            kind: &str,
+        ) -> rusqlite::Result<i64> {
+            fixture.conn.execute(
+                "INSERT INTO member_runtime_events(run_id,event_seq,kind,observed_at,committed_at,
+                 payload_json,notification_state,archive_reason)
+                 VALUES(?1,?2,?3,?4,?4,'{\"schema_version\":2}','archived','member_inactive')",
+                params![run, seq, kind, NOW],
+            )?;
+            Ok(fixture.conn.last_insert_rowid())
+        }
+
+        fn set_profile(fixture: &Fixture, run: i64, profile: &str) {
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_runs SET native_version='2.1.302',profile_version=?1 WHERE run_id=?2",
+                    params![profile, run],
+                )
+                .unwrap();
+        }
+
+        struct Seeded {
+            profiled_runs: Vec<i64>,
+            unprofiled_runs: Vec<i64>,
+            event_high_water: i64,
+            live_run: i64,
+        }
+
+        fn seed_v5(fixture: &mut Fixture) -> Seeded {
+            let profiled_exited = fixture.run("exited").unwrap();
+            set_profile(fixture, profiled_exited, "claude-2.1.302-default-3");
+            let unprofiled_exited = fixture.run("exited").unwrap();
+            let live_run = fixture.run("running").unwrap();
+            set_profile(fixture, live_run, "codex-0.163.0-on-request-1");
+
+            let interaction = fixture
+                .interaction(live_run, 1, "permission_request")
+                .unwrap();
+            let opened = fixture.archived_event(live_run, 1).unwrap();
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_runtime_events SET interaction_id=?1,kind='interaction_opened' WHERE event_id=?2",
+                    params![interaction, opened],
+                )
+                .unwrap();
+            let message = crate::broker::send_message(
+                &mut fixture.conn,
+                fixture.member,
+                fixture.director,
+                "runtime event inbox 世界",
+            )
+            .unwrap();
+            fixture.conn.execute(
+                "INSERT INTO member_runtime_events(run_id,event_seq,kind,observed_at,committed_at,
+                 payload_json,notification_state,message_id)
+                 VALUES(?1,2,'permission_denied_observed',?2,?2,'{\"schema_version\":2}','inbox',?3)",
+                params![live_run, NOW, message.message_id],
+            ).unwrap();
+            insert_event(fixture, unprofiled_exited, 1, "runner_exited").unwrap();
+            let discarded = insert_event(fixture, live_run, 3, "coverage_unknown").unwrap();
+            fixture
+                .conn
+                .execute(
+                    "DELETE FROM member_runtime_events WHERE event_id=?1",
+                    [discarded],
+                )
+                .unwrap();
+
+            let input = fixture.input(live_run, "permission:allow").unwrap();
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_input_operations SET kind='permission_response' WHERE input_id=?1",
+                    [input],
+                )
+                .unwrap();
+            fixture.conn.execute(
+                "INSERT INTO member_permission_responses(input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_profile_version,answer_rule_id,decided_at) VALUES(?1,?2,?3,1,?4,'allow',?5,'auto','director-auto','fixture:mode','fixture:decision','codex-0.163.0-on-request-1','single-request-choice',?6)",
+                params![input, opened, interaction, "a".repeat(64), fixture.director, NOW],
+            ).unwrap();
+            fixture
+                .conn
+                .execute(
+                    "INSERT INTO member_permission_response_claims(interaction_id,input_id) VALUES(?1,?2)",
+                    params![interaction, input],
+                )
+                .unwrap();
+            assert!(query_rows(&fixture.conn, "PRAGMA foreign_key_check").is_empty());
+            for table in REBUILT {
+                assert!(super::count(&fixture.conn, table) > 0, "{table}");
+            }
+            Seeded {
+                profiled_runs: vec![profiled_exited, live_run],
+                unprofiled_runs: vec![unprofiled_exited],
+                event_high_water: discarded,
+                live_run,
+            }
+        }
+
+        fn event_sequence(conn: &Connection) -> Option<i64> {
+            conn.query_row(
+                "SELECT seq FROM sqlite_sequence WHERE name='member_runtime_events'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap()
+        }
+
+        fn table_shape(conn: &Connection, table: &str) -> Vec<Vec<Vec<Value>>> {
+            let mut shape = vec![
+                query_rows(
+                    conn,
+                    &format!(
+                        "SELECT name,type,\"notnull\",dflt_value,pk FROM pragma_table_info('{table}') ORDER BY cid"
+                    ),
+                ),
+                query_rows(
+                    conn,
+                    &format!(
+                        "SELECT id,seq,\"table\",\"from\",\"to\",on_update,on_delete,\"match\" FROM pragma_foreign_key_list('{table}') ORDER BY id,seq"
+                    ),
+                ),
+                query_rows(
+                    conn,
+                    &format!(
+                        "SELECT name,\"unique\",origin,partial FROM pragma_index_list('{table}') ORDER BY name"
+                    ),
+                ),
+            ];
+            let indexes = conn
+                .prepare("SELECT name FROM pragma_index_list(?1) ORDER BY name")
+                .unwrap()
+                .query_map([table], |row| row.get::<_, String>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            for index in indexes {
+                shape.push(query_rows(
+                    conn,
+                    &format!("SELECT seqno,name FROM pragma_index_info('{index}') ORDER BY seqno"),
+                ));
+            }
+            shape
+        }
+
+        fn table_ddl(conn: &Connection, table: &str) -> String {
+            conn.query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",
+                [table],
+                |row| row.get(0),
+            )
+            .unwrap()
+        }
+
+        fn assert_check_violation(
+            fixture: &Fixture,
+            result: rusqlite::Result<usize>,
+            context: &str,
+        ) {
+            match result {
+                Err(rusqlite::Error::SqliteFailure(code, _)) => {
+                    assert_eq!(
+                        code.code,
+                        rusqlite::ErrorCode::ConstraintViolation,
+                        "{context}"
+                    );
+                    assert_eq!(
+                        code.extended_code,
+                        rusqlite::ffi::SQLITE_CONSTRAINT_CHECK,
+                        "{context}"
+                    );
+                }
+                other => panic!("expected a CHECK violation for {context}: {other:?}"),
+            }
+            assert!(fixture.conn.is_autocommit(), "{context}");
+        }
+
+        #[test]
+        fn runtime_v6_automatic_review_migration_is_the_contiguous_successor_to_v5() {
+            let chain = crate::db::migration_chain();
+            assert!(crate::db::head_version() >= 6);
+            assert!(
+                chain.contains(&(6, "automatic_review_events".to_string())),
+                "{chain:?}"
+            );
+            assert_eq!(
+                chain
+                    .iter()
+                    .map(|(version, _)| *version)
+                    .collect::<Vec<_>>(),
+                (1..=crate::db::head_version()).collect::<Vec<_>>()
+            );
+            let fixture = Fixture::new();
+            crate::diagnosis::classify_schema(&fixture.conn, crate::db::head_version())
+                .require_current()
+                .unwrap();
+        }
+
+        #[test]
+        fn runtime_v6_upgrade_preserves_event_response_and_claim_rows_with_identical_values() {
+            let mut fixture = fixture_at(5);
+            seed_v5(&mut fixture);
+            let before = snapshot(&fixture.conn);
+            crate::db::migrate_to_head(&mut fixture.conn).unwrap();
+            assert_preserved(&fixture.conn, &before);
+            for table in REBUILT {
+                let (_, columns, _) = before.iter().find(|(name, _, _)| name == table).unwrap();
+                assert_eq!(&column_names(&fixture.conn, table), columns, "{table}");
+            }
+            assert!(query_rows(&fixture.conn, "PRAGMA foreign_key_check").is_empty());
+            assert_eq!(
+                query_rows(&fixture.conn, "PRAGMA integrity_check"),
+                vec![vec![Value::Text("ok".into())]]
+            );
+        }
+
+        #[test]
+        fn runtime_v6_upgrade_preserves_the_event_sequence_so_ids_are_never_reused() {
+            let mut fixture = fixture_at(5);
+            let seeded = seed_v5(&mut fixture);
+            let sequence_before = query_rows(
+                &fixture.conn,
+                "SELECT name,seq FROM sqlite_sequence ORDER BY name",
+            );
+            assert_eq!(event_sequence(&fixture.conn), Some(seeded.event_high_water));
+            crate::db::migrate_to_head(&mut fixture.conn).unwrap();
+            assert_eq!(
+                query_rows(
+                    &fixture.conn,
+                    "SELECT name,seq FROM sqlite_sequence ORDER BY name"
+                ),
+                sequence_before
+            );
+            assert!(
+                query_rows(
+                    &fixture.conn,
+                    "SELECT name FROM sqlite_sequence WHERE name LIKE '%\\_v6' ESCAPE '\\'"
+                )
+                .is_empty()
+            );
+            let next =
+                insert_event(&fixture, seeded.live_run, 4, "automatic_refusal_observed").unwrap();
+            assert_eq!(next, seeded.event_high_water + 1);
+        }
+
+        #[test]
+        fn runtime_v6_upgrade_of_a_database_without_events_keeps_the_sequence_absent() {
+            let mut fixture = fixture_at(5);
+            assert_eq!(event_sequence(&fixture.conn), None);
+            crate::db::migrate_to_head(&mut fixture.conn).unwrap();
+            assert_eq!(event_sequence(&fixture.conn), None);
+            let run = fixture.run("running").unwrap();
+            assert_eq!(
+                insert_event(&fixture, run, 1, "coverage_unknown").unwrap(),
+                1
+            );
+        }
+
+        #[test]
+        fn runtime_v6_rebuild_keeps_every_column_foreign_key_and_index_of_the_rebuilt_tables() {
+            let v5 = fixture_at(5);
+            let head = Fixture::new();
+            for table in REBUILT {
+                assert_eq!(
+                    table_shape(&head.conn, table),
+                    table_shape(&v5.conn, table),
+                    "{table}"
+                );
+            }
+            for row in query_rows(
+                &head.conn,
+                "SELECT type,name,tbl_name,COALESCE(sql,'') FROM sqlite_master",
+            ) {
+                for value in row {
+                    if let Value::Text(text) = value {
+                        assert!(!text.contains("_v6"), "{text}");
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn runtime_v6_event_kind_check_is_widened_to_the_specified_domain() {
+            let fixture = Fixture::new();
+            let ddl = table_ddl(&fixture.conn, "member_runtime_events");
+            assert!(ddl.contains(WIDENED_KIND_CHECK), "{ddl}");
+            let run = fixture.run("running").unwrap();
+            for (seq, kind) in (1..).zip(V6_EVENT_KINDS) {
+                insert_event(&fixture, run, seq, kind)
+                    .unwrap_or_else(|error| panic!("{kind}: {error}"));
+            }
+            for kind in [
+                "automatic_review_available",
+                "automatic_refusal",
+                "approved",
+                "",
+            ] {
+                assert_check_violation(
+                    &fixture,
+                    insert_event(&fixture, run, 99, kind).map(|_| 1),
+                    kind,
+                );
+            }
+        }
+
+        #[test]
+        fn runtime_v6_upgraded_database_accepts_both_new_kinds_and_rejects_an_unknown_kind() {
+            let mut fixture = fixture_at(5);
+            let seeded = seed_v5(&mut fixture);
+            assert!(
+                insert_event(&fixture, seeded.live_run, 10, "automatic_refusal_observed").is_err(),
+                "V5 must still reject the new kinds"
+            );
+            crate::db::migrate_to_head(&mut fixture.conn).unwrap();
+            insert_event(&fixture, seeded.live_run, 10, "automatic_refusal_observed").unwrap();
+            insert_event(
+                &fixture,
+                seeded.live_run,
+                11,
+                "automatic_review_unavailable",
+            )
+            .unwrap();
+            let before = snapshot(&fixture.conn);
+            assert_check_violation(
+                &fixture,
+                insert_event(&fixture, seeded.live_run, 12, "automatic_refusal_rejected")
+                    .map(|_| 1),
+                "unknown kind",
+            );
+            assert_preserved(&fixture.conn, &before);
+            assert!(query_rows(&fixture.conn, "PRAGMA foreign_key_check").is_empty());
+        }
+
+        #[test]
+        fn runtime_v6_response_foreign_key_targets_the_rebuilt_event_table() {
+            let mut fixture = fixture_at(5);
+            let seeded = seed_v5(&mut fixture);
+            crate::db::migrate_to_head(&mut fixture.conn).unwrap();
+            let referenced: i64 = fixture
+                .conn
+                .query_row(
+                    "SELECT event_id FROM member_permission_responses",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(
+                fixture
+                    .conn
+                    .execute(
+                        "DELETE FROM member_runtime_events WHERE event_id=?1",
+                        [referenced]
+                    )
+                    .is_err(),
+                "the response foreign key restricts deleting its event"
+            );
+            let interaction: i64 = fixture
+                .conn
+                .query_row(
+                    "SELECT interaction_id FROM member_permission_response_claims",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(
+                fixture
+                    .conn
+                    .execute(
+                        "DELETE FROM member_permission_responses WHERE interaction_id=?1",
+                        [interaction]
+                    )
+                    .is_err(),
+                "the claim foreign key restricts deleting its response"
+            );
+            let input = fixture.input(seeded.live_run, "orphan-response").unwrap();
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_input_operations SET kind='permission_response' WHERE input_id=?1",
+                    [input],
+                )
+                .unwrap();
+            assert!(
+                fixture.conn.execute(
+                    "INSERT INTO member_permission_responses(input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_profile_version,answer_rule_id,decided_at) VALUES(?1,99999,?2,1,?3,'deny',?4,'auto','director-auto','fixture:mode','fixture:decision','p','r',?5)",
+                    params![input, interaction, "a".repeat(64), fixture.director, NOW],
+                ).is_err(),
+                "a response naming a missing event is rejected"
+            );
+            assert!(query_rows(&fixture.conn, "PRAGMA foreign_key_check").is_empty());
+        }
+
+        #[test]
+        fn runtime_v6_profile_match_column_is_nullable_text_appended_to_member_runs() {
+            let fixture = Fixture::new();
+            let columns = query_rows(
+                &fixture.conn,
+                "SELECT name,type,\"notnull\",dflt_value,pk FROM pragma_table_info('member_runs') ORDER BY cid",
+            );
+            assert_eq!(
+                columns.last().unwrap(),
+                &vec![
+                    Value::Text("profile_match".into()),
+                    Value::Text("TEXT".into()),
+                    Value::Integer(0),
+                    Value::Null,
+                    Value::Integer(0),
+                ]
+            );
+        }
+
+        #[test]
+        fn runtime_v6_backfills_profile_match_exact_for_every_profiled_v5_run() {
+            let mut fixture = fixture_at(5);
+            let seeded = seed_v5(&mut fixture);
+            crate::db::migrate_to_head(&mut fixture.conn).unwrap();
+            let profile_match = |run: i64| -> Option<String> {
+                fixture
+                    .conn
+                    .query_row(
+                        "SELECT profile_match FROM member_runs WHERE run_id=?1",
+                        [run],
+                        |row| row.get(0),
+                    )
+                    .unwrap()
+            };
+            for run in &seeded.profiled_runs {
+                assert_eq!(profile_match(*run).as_deref(), Some("exact"), "run {run}");
+            }
+            for run in &seeded.unprofiled_runs {
+                assert_eq!(profile_match(*run), None, "run {run}");
+            }
+            assert_eq!(
+                query_rows(
+                    &fixture.conn,
+                    "SELECT COUNT(*) FROM member_runs WHERE (profile_version IS NULL) != (profile_match IS NULL)"
+                ),
+                vec![vec![Value::Integer(0)]]
+            );
+        }
+
+        #[test]
+        fn runtime_v6_profile_match_must_agree_with_profile_version() {
+            let fixture = Fixture::new();
+            let unprofiled = fixture.run("exited").unwrap();
+            let profiled = fixture.run("running").unwrap();
+            assert_check_violation(
+                &fixture,
+                fixture.conn.execute(
+                    "UPDATE member_runs SET profile_version='claude-2.1.302-default-3' WHERE run_id=?1",
+                    [profiled],
+                ),
+                "profile_version without profile_match",
+            );
+            for value in ["exact", "fallback"] {
+                assert_check_violation(
+                    &fixture,
+                    fixture.conn.execute(
+                        "UPDATE member_runs SET profile_match=?1 WHERE run_id=?2",
+                        params![value, unprofiled],
+                    ),
+                    &format!("profile_match={value} without profile_version"),
+                );
+            }
+            for value in ["exact", "fallback"] {
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_runs SET native_version='2.1.306',profile_version='claude-2.1.302-default-3',profile_match=?1 WHERE run_id=?2",
+                        params![value, profiled],
+                    )
+                    .unwrap_or_else(|error| panic!("{value}: {error}"));
+            }
+            for change in [
+                "profile_match=NULL",
+                "profile_match='bogus'",
+                "profile_match='EXACT'",
+                "profile_match=''",
+                "profile_version=NULL",
+            ] {
+                assert_check_violation(
+                    &fixture,
+                    fixture.conn.execute(
+                        &format!("UPDATE member_runs SET {change} WHERE run_id=?1"),
+                        [profiled],
+                    ),
+                    change,
+                );
+            }
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_runs SET profile_version=NULL,profile_match=NULL WHERE run_id=?1",
+                    [profiled],
+                )
+                .unwrap();
+        }
+
+        #[test]
+        fn runtime_v6_runtime_event_kind_values_match_the_sql_domain() {
+            use crate::broker::runtime::RuntimeEventKind;
+            let mut values = RuntimeEventKind::VALUES.to_vec();
+            let mut expected = V6_EVENT_KINDS.to_vec();
+            values.sort_unstable();
+            expected.sort_unstable();
+            assert_eq!(values, expected);
+            for kind in ["automatic_refusal_observed", "automatic_review_unavailable"] {
+                assert_eq!(RuntimeEventKind::try_from(kind).unwrap().as_str(), kind);
+                assert_eq!(
+                    serde_json::to_value(RuntimeEventKind::try_from(kind).unwrap()).unwrap(),
+                    serde_json::Value::String(kind.into())
+                );
+            }
+            assert!(RuntimeEventKind::try_from("automatic_review_available").is_err());
+            let fixture = Fixture::new();
+            let run = fixture.run("running").unwrap();
+            for (seq, kind) in (1..).zip(RuntimeEventKind::VALUES) {
+                let event = insert_event(&fixture, run, seq, kind).unwrap();
+                let stored: RuntimeEventKind = fixture
+                    .conn
+                    .query_row(
+                        "SELECT kind FROM member_runtime_events WHERE event_id=?1",
+                        [event],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(stored.as_str(), *kind);
+            }
+        }
+
+        #[test]
+        fn runtime_v6_head_guard_refuses_a_v5_shape_recorded_as_v6() {
+            let fixture = fixture_at(5);
+            fixture
+                .conn
+                .execute(
+                    "INSERT INTO refinery_schema_history(version,name,applied_on,checksum) VALUES(6,'automatic_review_events','2026-10-29T00:00:00Z','1')",
+                    [],
+                )
+                .unwrap();
+            assert!(!crate::db::schema_matches_version(&fixture.conn, 6).unwrap());
+        }
+
+        #[test]
+        fn runtime_v6_failed_migration_retains_v5_schema_ledger_and_rows_for_retry() {
+            let mut fixture = fixture_at(5);
+            seed_v5(&mut fixture);
+            let before = snapshot(&fixture.conn);
+            let schema = query_rows(
+                &fixture.conn,
+                "SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name",
+            );
+            let ledger = query_rows(
+                &fixture.conn,
+                "SELECT * FROM refinery_schema_history ORDER BY version",
+            );
+            let sequence = query_rows(
+                &fixture.conn,
+                "SELECT name,seq FROM sqlite_sequence ORDER BY name",
+            );
+            fixture
+                .conn
+                .authorizer(Some(|context: AuthContext<'_>| {
+                    if matches!(
+                        context.action,
+                        AuthAction::AlterTable {
+                            table_name: "member_runs",
+                            ..
+                        }
+                    ) {
+                        Authorization::Deny
+                    } else {
+                        Authorization::Allow
+                    }
+                }))
+                .unwrap();
+            let result = crate::db::migrate_to_head(&mut fixture.conn);
+            fixture
+                .conn
+                .authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+                .unwrap();
+            assert!(
+                result.is_err(),
+                "the denied V6 profile_match column must fail migration"
+            );
+            assert!(fixture.conn.is_autocommit());
+            assert_preserved(&fixture.conn, &before);
+            assert_eq!(
+                query_rows(
+                    &fixture.conn,
+                    "SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name"
+                ),
+                schema
+            );
+            assert_eq!(
+                query_rows(
+                    &fixture.conn,
+                    "SELECT * FROM refinery_schema_history ORDER BY version"
+                ),
+                ledger
+            );
+            assert_eq!(
+                query_rows(
+                    &fixture.conn,
+                    "SELECT name,seq FROM sqlite_sequence ORDER BY name"
+                ),
+                sequence
+            );
+            crate::db::migrate_to_head(&mut fixture.conn).unwrap();
+            assert_preserved(&fixture.conn, &before);
+            crate::diagnosis::classify_schema(&fixture.conn, crate::db::head_version())
+                .require_current()
+                .unwrap();
+        }
+    }
+
     const NOW: &str = "2026-10-26T10:00:00.000000+00:00";
 
     struct Fixture {
@@ -1065,7 +1802,7 @@ mod runtime_tests {
         for (table, expected) in [
             (
                 "member_runs",
-                "run_id member_id fleet_id director_member_id backend database_identity_json launch_nonce runtime_path requested_mode resolved_mode mode_source permission_argv_json event_evidence coverage status created_at native_version profile_version effective_policy_json owner_epoch owner_kind owner_pid owner_start_identity reachability cleanup_state event_seq_reserved_through observation_gap_count runtime_dir_identity_json run_lock_identity_json runner_pid runner_start_identity child_pid child_start_identity started_at last_health_at ended_at exit_code exit_signal cleanup_diagnostics_json recovery_origin_status",
+                "run_id member_id fleet_id director_member_id backend database_identity_json launch_nonce runtime_path requested_mode resolved_mode mode_source permission_argv_json event_evidence coverage status created_at native_version profile_version effective_policy_json owner_epoch owner_kind owner_pid owner_start_identity reachability cleanup_state event_seq_reserved_through observation_gap_count runtime_dir_identity_json run_lock_identity_json runner_pid runner_start_identity child_pid child_start_identity started_at last_health_at ended_at exit_code exit_signal cleanup_diagnostics_json recovery_origin_status profile_match",
             ),
             (
                 "member_interactions",
@@ -1353,6 +2090,8 @@ mod runtime_tests {
             "interaction_obscured",
             "interaction_closed",
             "permission_denied_observed",
+            "automatic_refusal_observed",
+            "automatic_review_unavailable",
             "runner_degraded",
             "runner_lost",
             "runner_exited",

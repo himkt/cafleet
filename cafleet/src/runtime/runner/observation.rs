@@ -45,7 +45,7 @@ mod inspection_tests {
         .unwrap();
         fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
         storage::reserve_event_sequences(&mut fixture.conn, &fixture.run.owner()).unwrap();
-        fixture.conn.execute("UPDATE member_runs SET native_version='synthetic-0.0.1',profile_version='synthetic-profile-1',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
+        fixture.conn.execute("UPDATE member_runs SET native_version='synthetic-0.0.1',profile_version='synthetic-profile-1',profile_match='exact',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
         fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
         let catalog = ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
         let mut controller =
@@ -460,6 +460,7 @@ impl ObservationController {
         let capabilities = catalog.capabilities(backend, run.native_version.as_deref());
         ensure(
             capabilities.profile_version == run.profile_version
+                && capabilities.profile_match == run.profile_match
                 && capabilities.detection == run.coverage,
             "observer profile/coverage mismatch",
         )?;
@@ -691,14 +692,28 @@ impl ObservationController {
         })
     }
     fn retain(&mut self, update: EpisodeUpdate) -> Result<()> {
+        let primary = update
+            .transitions
+            .iter()
+            .filter(|draft| {
+                !matches!(
+                    draft.kind,
+                    RuntimeEventKind::AutomaticRefusalObserved
+                        | RuntimeEventKind::AutomaticReviewUnavailable
+                )
+            })
+            .count();
         ensure(
-            self.pending.is_none() && update.transitions.len() <= 2,
+            self.pending.is_none() && primary <= 2,
             "one bounded observation update required",
         )?;
         self.visibility = update.visibility;
         self.eligibility = update.eligibility;
         self.next_deadline = update.next_deadline;
-        if !update.transitions.is_empty() || update.latest_evidence.is_some() {
+        if !update.transitions.is_empty()
+            || update.latest_evidence.is_some()
+            || update.effective_policy.is_some()
+        {
             self.pending = Some(PendingEpisodeUpdate {
                 update,
                 next_draft: 0,
@@ -714,6 +729,7 @@ impl ObservationController {
             transitions,
             latest_evidence: None,
             next_deadline: None,
+            effective_policy: None,
         }
     }
     fn gap(&mut self, reason: ObservationFailure, now: &ObservationMoment) -> Result<()> {
@@ -779,8 +795,23 @@ impl ObservationController {
                     );
                 }
                 let value = pending.materialized.take().expect("materialized original");
-                match writer.try_submit(value) {
-                    Ok(()) => pending.next_draft += 1,
+                let carried = pending
+                    .update
+                    .effective_policy
+                    .as_ref()
+                    .filter(|observation| {
+                        observation.automatic_review == storage::AutomaticReview::Unavailable
+                            && value.kind == RuntimeEventKind::AutomaticReviewUnavailable
+                    })
+                    .cloned();
+                let carries = carried.is_some();
+                match writer.try_submit_with_policy(value, carried) {
+                    Ok(()) => {
+                        pending.next_draft += 1;
+                        if carries {
+                            pending.update.effective_policy = None;
+                        }
+                    }
                     Err(retained) => {
                         pending.materialized = Some(retained.transition);
                         self.pending_error = Some(retained.cause);
@@ -799,6 +830,13 @@ impl ObservationController {
                     }
                 }
             } else {
+                if let Some(observation) = pending.update.effective_policy.take() {
+                    ensure(
+                        observation.automatic_review == storage::AutomaticReview::Available,
+                        "an unavailable effective policy travels with its event",
+                    )?;
+                    writer.try_record_policy(observation);
+                }
                 self.pending = None;
                 self.pending_error = None;
             }
@@ -1198,6 +1236,101 @@ mod controller_tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{Duration, Instant};
+
+    mod bounded_updates {
+        use super::*;
+
+        fn draft(fixture: &WriterFixture, kind: RuntimeEventKind) -> TransitionDraft {
+            TransitionDraft {
+                run_id: fixture.fixture.run.run_id,
+                episode_seq: None,
+                kind,
+                classification: None,
+                observed_at: NOW.into(),
+                evidence_json: serde_json::json!({}),
+                close_reason: None,
+                cause_json: None,
+            }
+        }
+
+        fn update(transitions: Vec<TransitionDraft>) -> EpisodeUpdate {
+            EpisodeUpdate {
+                visibility: Visibility::NotVisible,
+                eligibility: InputEligibility::ComposerEmpty,
+                transitions,
+                latest_evidence: None,
+                next_deadline: None,
+                effective_policy: None,
+            }
+        }
+
+        fn controller(fixture: &WriterFixture) -> ObservationController {
+            ObservationController::new(
+                &fixture.fixture.run,
+                &catalog(),
+                storage::evidence::EvidencePolicy::metadata(),
+                1..=256,
+            )
+            .unwrap()
+        }
+
+        #[test]
+        fn runner_policy_bounded_update_counts_only_primary_transitions() {
+            let mut fixture = WriterFixture::new();
+            configure(&mut fixture);
+            let primary = || {
+                vec![
+                    draft(&fixture, RuntimeEventKind::InteractionClosed),
+                    draft(&fixture, RuntimeEventKind::InteractionOpened),
+                ]
+            };
+            let mut annotated = primary();
+            annotated.extend([
+                draft(&fixture, RuntimeEventKind::AutomaticRefusalObserved),
+                draft(&fixture, RuntimeEventKind::AutomaticRefusalObserved),
+                draft(&fixture, RuntimeEventKind::AutomaticReviewUnavailable),
+            ]);
+            let mut accepted = controller(&fixture);
+            accepted.retain(update(annotated)).unwrap();
+            assert_eq!(
+                accepted.pending.as_ref().unwrap().update.transitions.len(),
+                5
+            );
+            let mut excess = primary();
+            excess.push(draft(&fixture, RuntimeEventKind::InteractionObscured));
+            let mut rejected = controller(&fixture);
+            let failure = rejected.retain(update(excess)).err().unwrap();
+            assert!(
+                failure
+                    .message()
+                    .contains("one bounded observation update required"),
+                "{failure:?}"
+            );
+            assert!(rejected.pending.is_none());
+        }
+
+        #[test]
+        fn runner_policy_an_update_carrying_only_an_effective_policy_is_retained_for_the_writer() {
+            let mut fixture = WriterFixture::new();
+            configure(&mut fixture);
+            let mut only_policy = controller(&fixture);
+            only_policy
+                .retain(EpisodeUpdate {
+                    effective_policy: Some(storage::EffectivePolicyObservation {
+                        automatic_review: storage::AutomaticReview::Available,
+                        observed_mode: None,
+                        rule_id: "codex-auto-review-indicator".into(),
+                        observed_at: NOW.into(),
+                    }),
+                    ..update(Vec::new())
+                })
+                .unwrap();
+            assert!(only_policy.pending.is_some());
+            let mut nothing = controller(&fixture);
+            nothing.retain(update(Vec::new())).unwrap();
+            assert!(nothing.pending.is_none());
+        }
+    }
 
     mod review {
         use super::*;

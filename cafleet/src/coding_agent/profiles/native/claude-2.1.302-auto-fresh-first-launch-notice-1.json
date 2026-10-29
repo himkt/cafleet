@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "fixture_id": "claude-2.1.302-auto-fresh-first-launch-notice-1",
+  "provenance": "native",
+  "backend": "claude",
+  "native_version": "2.1.302",
+  "rows": 36,
+  "cols": 120,
+  "alternate_screen": false,
+  "screen_seq": 12657,
+  "cursor_row": 19,
+  "cursor_col": 2,
+  "lines": [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "❯ Reply with the single word ready and then wait.                                                                       ",
+    "",
+    "● Auto mode lets Claude handle permission prompts automatically — Claude checks each tool call for risky actions",
+    "  and prompt injection before executing. Actions Claude identifies as safe are executed, while actions Claude ",
+    "  identifies as risky are blocked and Claude may try a different approach. Ideal for long-running tasks. Claude ",
+    "  can make mistakes that allow harmful commands to run, it's recommended to only use in isolated environments. ",
+    "  Shift+Tab to change mode.",
+    "",
+    "● ready",
+    "",
+    "✻ Cogitated for 3s · done 8:08 AM",
+    "",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────── cap-cl1 ─",
+    "❯  ",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents                       Update available! Run: mise upgrade claude",
+    "                                                                                                    ◐ medium · /effort",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "masked_rows": [
+    {
+      "row": 0,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 1,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 2,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 4,
+      "reason": "reviewed_privacy"
+    }
+  ]
+}

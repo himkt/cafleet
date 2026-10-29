@@ -1,7 +1,7 @@
 use super::*;
 use crate::broker::runtime::{
-    self as storage, InteractionEvidenceUpdate, ObservedTransition, PersistenceMode, RunRecord,
-    RuntimeEventKind,
+    self as storage, EffectivePolicyObservation, InteractionEvidenceUpdate, ObservedTransition,
+    PersistenceMode, RunRecord, RuntimeEventKind,
 };
 #[cfg(test)]
 use sha2::{Digest, Sha256};
@@ -35,6 +35,8 @@ pub(crate) struct WriterStatus {
     pub gap_count: u64,
     pub degraded: bool,
     pub diagnostic: Option<String>,
+    #[cfg(test)]
+    pub policy_diagnostic: Option<String>,
 }
 #[derive(Debug)]
 pub(crate) struct RetainedTransition {
@@ -54,6 +56,9 @@ struct Refresh {
 }
 struct Mailbox {
     pending: u64,
+    policies: u64,
+    #[cfg(test)]
+    policy_diagnostic: Option<String>,
     gaps: u64,
     diagnostic: Option<String>,
     last_sequence: i64,
@@ -74,18 +79,47 @@ impl Mailbox {
         let local = Instant::now() + Duration::from_millis(100);
         self.deadline.map_or(local, |until| until.min(local))
     }
+    // Compaction validates every retained frame in one attempt and each retry repeats that
+    // whole pass, so it gets a budget wider than one work slice; otherwise an outbox whose
+    // validation outgrows the slice could never compact.
+    fn compaction_deadline(&self) -> Instant {
+        let local = Instant::now() + Duration::from_secs(1);
+        self.deadline.map_or(local, |until| until.min(local))
+    }
     fn success(&mut self) {
         self.diagnostic = None;
     }
+    fn policy_dropped(&mut self, cause: &CafleetError) {
+        eprintln!("member runtime: effective policy update dropped: {cause}");
+        #[cfg(test)]
+        {
+            self.policy_diagnostic = Some(cause.message().into_owned());
+        }
+    }
 }
 pub(crate) struct EventWriter {
-    sender: Option<mpsc::SyncSender<ObservedTransition>>,
+    sender: Option<mpsc::SyncSender<Work>>,
     mailbox: Arc<Mutex<Mailbox>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
+enum Work {
+    Event {
+        transition: Box<ObservedTransition>,
+        effective_policy: Option<EffectivePolicyObservation>,
+    },
+    Policy(EffectivePolicyObservation),
+}
 struct Pending {
-    transition: ObservedTransition,
+    work: Work,
     synced: bool,
+}
+impl Pending {
+    fn event_seq(&self) -> Option<i64> {
+        match &self.work {
+            Work::Event { transition, .. } => Some(transition.event_seq),
+            Work::Policy(_) => None,
+        }
+    }
 }
 impl EventWriter {
     pub(crate) fn start(
@@ -123,6 +157,9 @@ impl EventWriter {
         let (sender, receiver) = mpsc::sync_channel(64);
         let mailbox = Arc::new(Mutex::new(Mailbox {
             pending: 0,
+            policies: 0,
+            #[cfg(test)]
+            policy_diagnostic: None,
             gaps: 0,
             diagnostic: None,
             last_sequence: 0,
@@ -149,7 +186,12 @@ impl EventWriter {
                         if state.deadline.is_some_and(|end| Instant::now() >= end) {
                             break;
                         }
-                        if state.stop && state.pending == 0 && state.refresh.is_none() && !compact {
+                        if state.stop
+                            && state.pending == 0
+                            && state.policies == 0
+                            && state.refresh.is_none()
+                            && !compact
+                        {
                             break;
                         }
                     }
@@ -170,9 +212,9 @@ impl EventWriter {
                             }
                             check_deadline(Instant::now(), until)?;
                             match receiver.try_recv() {
-                                Ok(transition) => queue.push_back(Pending {
-                                    transition,
-                                    synced: false,
+                                Ok(work) => queue.push_back(Pending {
+                                    synced: matches!(work, Work::Policy(_)),
+                                    work,
                                 }),
                                 Err(
                                     mpsc::TryRecvError::Empty | mpsc::TryRecvError::Disconnected,
@@ -181,9 +223,20 @@ impl EventWriter {
                         }
                         for pending in &mut queue {
                             if !pending.synced {
+                                let Work::Event {
+                                    transition,
+                                    effective_policy,
+                                } = &pending.work
+                                else {
+                                    unreachable!("effective policy updates are never spooled")
+                                };
                                 let until =
                                     observed.lock().expect("writer mailbox").work_deadline();
-                                spool.append_synced(&pending.transition, until)?;
+                                spool.append_synced_with_policy(
+                                    transition,
+                                    effective_policy.as_ref(),
+                                    until,
+                                )?;
                                 pending.synced = true;
                             }
                         }
@@ -194,8 +247,10 @@ impl EventWriter {
                                 .as_ref()
                                 .filter(|value| {
                                     value.barrier <= committed
-                                        && queue.front().is_none_or(|event| {
-                                            event.transition.event_seq > value.barrier
+                                        && queue.front().is_none_or(|pending| {
+                                            pending
+                                                .event_seq()
+                                                .is_none_or(|sequence| sequence > value.barrier)
                                         })
                                 })
                                 .cloned()
@@ -222,29 +277,72 @@ impl EventWriter {
                             state.success();
                         } else if let Some(pending) = queue.front() {
                             let until = observed.lock().expect("writer mailbox").work_deadline();
-                            hooks.before(WriterBoundary::Persist, until)?;
-                            with_database_deadline(&mut conn, until, |conn| {
-                                lock.validate(conn, &run.owner())?;
-                                storage::persist_transition(
-                                    conn,
-                                    &run.owner(),
-                                    &pending.transition,
-                                    PersistenceMode::Live,
-                                )
-                                .map(|_| ())
-                            })?;
-                            committed = pending.transition.event_seq;
-                            compact = true;
-                            queue.pop_front();
-                            {
-                                let mut state = observed.lock().expect("writer mailbox");
-                                state.pending =
-                                    state.pending.checked_sub(1).expect("accepted writer count");
-                                state.success();
+                            match &pending.work {
+                                Work::Event {
+                                    transition,
+                                    effective_policy,
+                                } => {
+                                    hooks.before(WriterBoundary::Persist, until)?;
+                                    with_database_deadline(&mut conn, until, |conn| {
+                                        lock.validate(conn, &run.owner())?;
+                                        match effective_policy {
+                                            Some(observation) => {
+                                                storage::persist_transition_with_effective_policy(
+                                                    conn,
+                                                    &run.owner(),
+                                                    transition,
+                                                    observation,
+                                                    PersistenceMode::Live,
+                                                )
+                                            }
+                                            None => storage::persist_transition(
+                                                conn,
+                                                &run.owner(),
+                                                transition,
+                                                PersistenceMode::Live,
+                                            ),
+                                        }
+                                        .map(|_| ())
+                                    })?;
+                                    committed = transition.event_seq;
+                                    compact = true;
+                                    queue.pop_front();
+                                    let mut state = observed.lock().expect("writer mailbox");
+                                    state.pending = state
+                                        .pending
+                                        .checked_sub(1)
+                                        .expect("accepted writer count");
+                                    state.success();
+                                }
+                                Work::Policy(observation) => {
+                                    let outcome = hooks
+                                        .before(WriterBoundary::Persist, until)
+                                        .and_then(|()| lock.validate(&conn, &run.owner()))
+                                        .and_then(|()| {
+                                            storage::record_effective_policy(
+                                                &mut conn,
+                                                &run.owner(),
+                                                observation,
+                                                until,
+                                            )
+                                        });
+                                    queue.pop_front();
+                                    let mut state = observed.lock().expect("writer mailbox");
+                                    state.policies = state
+                                        .policies
+                                        .checked_sub(1)
+                                        .expect("accepted policy update count");
+                                    if let Err(cause) = outcome {
+                                        state.policy_dropped(&cause);
+                                    }
+                                }
                             }
                         }
                         if compact && queue.is_empty() {
-                            let until = observed.lock().expect("writer mailbox").work_deadline();
+                            let until = observed
+                                .lock()
+                                .expect("writer mailbox")
+                                .compaction_deadline();
                             spool.compact_committed(&mut conn, &run.owner(), until)?;
                             compact = false;
                             observed.lock().expect("writer mailbox").success();
@@ -289,9 +387,17 @@ impl EventWriter {
             thread: Some(thread),
         })
     }
+    #[cfg(test)]
     pub(crate) fn try_submit(
         &self,
         transition: ObservedTransition,
+    ) -> std::result::Result<(), Box<RetainedTransition>> {
+        self.try_submit_with_policy(transition, None)
+    }
+    pub(crate) fn try_submit_with_policy(
+        &self,
+        transition: ObservedTransition,
+        effective_policy: Option<EffectivePolicyObservation>,
     ) -> std::result::Result<(), Box<RetainedTransition>> {
         let mut state = self.mailbox.lock().expect("writer mailbox");
         let result = (|| -> Result<()> {
@@ -300,12 +406,20 @@ impl EventWriter {
                 transition.event_seq > state.last_sequence,
                 "accepted event sequence regressed",
             )?;
+            ensure(
+                effective_policy.is_none()
+                    || transition.kind == RuntimeEventKind::AutomaticReviewUnavailable,
+                "only an unavailable review event carries an effective policy",
+            )?;
             crate::broker::runtime::evidence::validate(&transition.evidence_json)?;
             let sender = self
                 .sender
                 .as_ref()
                 .ok_or_else(|| error("event writer is stopped"))?;
-            match sender.try_send(transition.clone()) {
+            match sender.try_send(Work::Event {
+                transition: Box::new(transition.clone()),
+                effective_policy,
+            }) {
                 Ok(()) => Ok(()),
                 Err(_) => Err(error("runtime observation channel is full or unavailable")),
             }
@@ -331,6 +445,30 @@ impl EventWriter {
                 state.failure(&cause);
                 Err(Box::new(RetainedTransition { transition, cause }))
             }
+        }
+    }
+    pub(crate) fn try_record_policy(&self, observation: EffectivePolicyObservation) {
+        let mut state = self.mailbox.lock().expect("writer mailbox");
+        let sent = if state.stop {
+            Err(error("event writer is stopped"))
+        } else {
+            self.sender
+                .as_ref()
+                .ok_or_else(|| error("event writer is stopped"))
+                .and_then(|sender| {
+                    sender
+                        .try_send(Work::Policy(observation))
+                        .map_err(|_| error("runtime observation channel is full or unavailable"))
+                })
+        };
+        match sent {
+            Ok(()) => {
+                state.policies = state
+                    .policies
+                    .checked_add(1)
+                    .expect("policy update count overflow");
+            }
+            Err(cause) => state.policy_dropped(&cause),
         }
     }
     #[cfg(test)]
@@ -413,6 +551,8 @@ impl EventWriter {
             gap_count: state.gaps,
             degraded: state.diagnostic.is_some(),
             diagnostic: state.diagnostic.clone(),
+            #[cfg(test)]
+            policy_diagnostic: state.policy_diagnostic.clone(),
         }
     }
     pub(crate) fn diagnostic(&self) -> Option<String> {
@@ -716,7 +856,7 @@ pub(super) mod contract_tests {
             ProfileCatalog::from_definitions(&definitions()).unwrap()
         }
         pub(in crate::runtime::runner) fn configure(fixture: &mut WriterFixture) {
-            fixture.fixture.conn.execute("UPDATE member_runs SET native_version=?1,profile_version=?2,coverage='tested',runner_pid=owner_pid,runner_start_identity=owner_start_identity WHERE run_id=?3",rusqlite::params![VERSION,PROFILE,fixture.fixture.run.run_id]).unwrap();
+            fixture.fixture.conn.execute("UPDATE member_runs SET native_version=?1,profile_version=?2,profile_match='exact',coverage='tested',runner_pid=owner_pid,runner_start_identity=owner_start_identity WHERE run_id=?3",rusqlite::params![VERSION,PROFILE,fixture.fixture.run.run_id]).unwrap();
             fixture.fixture.run =
                 storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
         }
@@ -1178,6 +1318,285 @@ pub(super) mod contract_tests {
                 vec![value]
             );
             blocking.execute_batch("ROLLBACK").unwrap();
+        }
+
+        struct SlowCompaction {
+            calls: AtomicU64,
+        }
+        impl WriterHooks for SlowCompaction {
+            fn before(&self, boundary: WriterBoundary, _: Instant) -> Result<()> {
+                if matches!(boundary, WriterBoundary::Compact) {
+                    self.calls.fetch_add(1, Ordering::AcqRel);
+                    std::thread::sleep(Duration::from_millis(250));
+                }
+                Ok(())
+            }
+        }
+
+        #[test]
+        fn runner_batch2_worker_final_compaction_slower_than_one_work_slice_commits_before_the_shutdown_deadline()
+         {
+            let fixture = WriterFixture::new();
+            let hooks = Arc::new(SlowCompaction {
+                calls: AtomicU64::new(0),
+            });
+            let mut writer = EventWriter::start_with_hooks(
+                format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()),
+                fixture.fixture.run.clone(),
+                fixture.lock.clone(),
+                fixture.artifacts.paths.outbox.clone(),
+                hooks.clone(),
+            )
+            .unwrap();
+            assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
+            wait_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
+            let begin = Instant::now();
+            assert_eq!(writer.finish(begin + Duration::from_secs(3)), (0, 0));
+            assert!(
+                writer.joined(),
+                "the worker stops once its final compaction commits"
+            );
+            assert!(begin.elapsed() < Duration::from_secs(3));
+            assert!(
+                std::fs::read(&fixture.artifacts.paths.outbox)
+                    .unwrap()
+                    .is_empty(),
+                "the committed outbox is compacted"
+            );
+            assert!(hooks.calls.load(Ordering::Acquire) >= 1);
+        }
+    }
+
+    pub(in crate::runtime::runner) mod effective_policy {
+        use super::worker::{Hooks, Release, committed, start, wait_until};
+        use super::*;
+
+        const UNAVAILABLE_RULE: &str = "codex-auto-review-unavailable";
+        const AVAILABLE_RULE: &str = "codex-auto-review-indicator";
+
+        pub(in crate::runtime::runner) fn unavailable(
+            fixture: &WriterFixture,
+            sequence: i64,
+        ) -> ObservedTransition {
+            let evidence = storage::evidence::EvidencePolicy::metadata()
+                .apply(&serde_json::json!({"backend":fixture.fixture.run.backend,"native_version":fixture.fixture.run.native_version,"profile_version":fixture.fixture.run.profile_version,"rule_id":UNAVAILABLE_RULE,"screen_seq":sequence,"operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false}))
+                .unwrap();
+            ObservedTransition {
+                kind: RuntimeEventKind::AutomaticReviewUnavailable,
+                evidence_json: evidence,
+                cause_json: None,
+                ..transition(fixture, sequence)
+            }
+        }
+
+        pub(in crate::runtime::runner) fn observation(
+            automatic_review: AutomaticReview,
+        ) -> EffectivePolicyObservation {
+            EffectivePolicyObservation {
+                automatic_review,
+                observed_mode: None,
+                rule_id: if automatic_review == AutomaticReview::Unavailable {
+                    UNAVAILABLE_RULE
+                } else {
+                    AVAILABLE_RULE
+                }
+                .into(),
+                observed_at: "2026-10-26T16:40:00.000000+00:00".into(),
+            }
+        }
+
+        pub(in crate::runtime::runner) fn record(
+            observation: &EffectivePolicyObservation,
+            event_id: Option<i64>,
+        ) -> Value {
+            serde_json::json!({
+                "schema_version":1,
+                "automatic_review":observation.automatic_review.as_str(),
+                "observed_mode":observation.observed_mode,
+                "rule_id":observation.rule_id,
+                "event_id":event_id,
+                "observed_at":observation.observed_at,
+            })
+        }
+
+        pub(in crate::runtime::runner) fn frame_bodies(mut bytes: &[u8]) -> Vec<Value> {
+            let mut bodies = Vec::new();
+            while !bytes.is_empty() {
+                let length =
+                    usize::try_from(u32::from_be_bytes(bytes[..4].try_into().unwrap())).unwrap();
+                let body = &bytes[36..36 + length];
+                assert_eq!(&bytes[4..36], &Sha256::digest(body)[..]);
+                bodies.push(serde_json::from_slice(body).unwrap());
+                bytes = &bytes[36 + length..];
+            }
+            bodies
+        }
+
+        fn set_status(fixture: &mut WriterFixture, status: &str) {
+            fixture
+                .fixture
+                .conn
+                .execute(
+                    "UPDATE member_runs SET status=?1 WHERE run_id=?2",
+                    rusqlite::params![status, fixture.fixture.run.run_id],
+                )
+                .unwrap();
+            fixture.fixture.run =
+                storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+        }
+
+        fn stored(fixture: &WriterFixture) -> Option<Value> {
+            storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id)
+                .unwrap()
+                .effective_policy_json
+        }
+
+        fn spool(fixture: &WriterFixture) -> Vec<u8> {
+            std::fs::read(&fixture.artifacts.paths.outbox).unwrap()
+        }
+
+        #[test]
+        fn runner_policy_unavailable_frame_spools_its_observation_and_commits_it_with_the_event() {
+            let mut fixture = WriterFixture::new();
+            set_status(&mut fixture, "running");
+            let hooks = Arc::new(Hooks::default());
+            hooks.pause(WriterBoundary::Persist);
+            let mut writer = start(&fixture, hooks.clone());
+            let release = Release(hooks.clone());
+            let value = unavailable(&fixture, 1);
+            let lost = observation(AutomaticReview::Unavailable);
+            assert!(
+                writer
+                    .try_submit_with_policy(value.clone(), Some(lost.clone()))
+                    .is_ok()
+            );
+            hooks.wait(WriterBoundary::Persist, 1);
+            let mut expected = serde_json::to_value(&value).unwrap();
+            expected["effective_policy"] = serde_json::to_value(&lost).unwrap();
+            assert_eq!(frame_bodies(&spool(&fixture)), vec![expected]);
+            assert_eq!(stored(&fixture), None);
+            drop(release);
+            wait_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
+            let event = storage::get_event(&fixture.fixture.conn, 1).unwrap().event;
+            assert_eq!(event.kind, RuntimeEventKind::AutomaticReviewUnavailable);
+            assert_eq!(stored(&fixture), Some(record(&lost, Some(event.event_id))));
+            assert_eq!(writer.finish(deadline()).0, 0);
+        }
+
+        #[test]
+        fn runner_policy_other_frames_keep_their_bytes_and_reject_an_attached_observation() {
+            let mut fixture = WriterFixture::new();
+            set_status(&mut fixture, "running");
+            let hooks = Arc::new(Hooks::default());
+            hooks.pause(WriterBoundary::Persist);
+            let mut writer = start(&fixture, hooks.clone());
+            let release = Release(hooks.clone());
+            let plain = transition(&fixture, 1);
+            assert!(
+                writer
+                    .try_submit_with_policy(
+                        plain.clone(),
+                        Some(observation(AutomaticReview::Unavailable))
+                    )
+                    .is_err()
+            );
+            assert!(writer.try_submit_with_policy(plain.clone(), None).is_ok());
+            hooks.wait(WriterBoundary::Persist, 1);
+            assert_eq!(spool(&fixture), frame(&plain));
+            drop(release);
+            wait_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
+            assert_eq!(stored(&fixture), None);
+            assert_eq!(writer.finish(deadline()).0, 0);
+        }
+
+        #[test]
+        fn runner_policy_available_update_commits_behind_accepted_transitions_without_spooling() {
+            let mut fixture = WriterFixture::new();
+            set_status(&mut fixture, "running");
+            let hooks = Arc::new(Hooks::default());
+            hooks.pause(WriterBoundary::Persist);
+            let mut writer = start(&fixture, hooks.clone());
+            let release = Release(hooks.clone());
+            let earlier = transition(&fixture, 1);
+            assert!(writer.try_submit(earlier.clone()).is_ok());
+            hooks.wait(WriterBoundary::Persist, 1);
+            let shown = observation(AutomaticReview::Available);
+            writer.try_record_policy(shown.clone());
+            std::thread::sleep(Duration::from_millis(50));
+            assert_eq!(stored(&fixture), None, "queued behind the paused event");
+            assert_eq!(
+                spool(&fixture),
+                frame(&earlier),
+                "the update is not spooled"
+            );
+            drop(release);
+            wait_until(|| stored(&fixture).is_some());
+            assert_eq!(committed(&fixture), 1);
+            assert_eq!(stored(&fixture), Some(record(&shown, None)));
+            let status = writer.status();
+            assert_eq!(status.policy_diagnostic, None);
+            assert!(!status.degraded);
+            assert_eq!(writer.finish(deadline()).0, 0);
+        }
+
+        #[test]
+        fn runner_policy_available_update_on_a_non_live_run_is_dropped_once_and_the_worker_continues()
+         {
+            let mut fixture = WriterFixture::new();
+            set_status(&mut fixture, "stopping");
+            let hooks = Arc::new(Hooks::default());
+            let mut writer = start(&fixture, hooks.clone());
+            let _release = Release(hooks.clone());
+            writer.try_record_policy(observation(AutomaticReview::Available));
+            wait_until(|| writer.status().policy_diagnostic.is_some());
+            let persists = hooks.calls(WriterBoundary::Persist);
+            std::thread::sleep(Duration::from_millis(300));
+            assert_eq!(
+                hooks.calls(WriterBoundary::Persist),
+                persists,
+                "a dropped update is not retried"
+            );
+            assert_eq!(stored(&fixture), None);
+            let status = writer.status();
+            assert!(!status.degraded, "{status:?}");
+            assert_eq!(status.gap_count, 0);
+            assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
+            wait_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
+            assert_eq!(writer.finish(deadline()).0, 0);
+        }
+
+        #[test]
+        fn runner_policy_available_update_from_a_superseded_owner_is_dropped_with_a_diagnostic() {
+            let mut fixture = WriterFixture::new();
+            set_status(&mut fixture, "running");
+            let hooks = Arc::new(Hooks::default());
+            let mut writer = start(&fixture, hooks.clone());
+            let _release = Release(hooks.clone());
+            let lost = observation(AutomaticReview::Unavailable);
+            assert!(
+                writer
+                    .try_submit_with_policy(unavailable(&fixture, 1), Some(lost.clone()))
+                    .is_ok()
+            );
+            wait_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
+            let current = stored(&fixture).expect("event-carried record");
+            assert_eq!(current, record(&lost, Some(1)));
+            fixture
+                .fixture
+                .conn
+                .execute(
+                    "UPDATE member_runs SET owner_epoch=owner_epoch+1 WHERE run_id=?1",
+                    [fixture.fixture.run.run_id],
+                )
+                .unwrap();
+            writer.try_record_policy(observation(AutomaticReview::Available));
+            wait_until(|| writer.status().policy_diagnostic.is_some());
+            assert_eq!(
+                stored(&fixture),
+                Some(current),
+                "a superseded runner never overwrites the record"
+            );
+            writer.finish(deadline());
         }
     }
 

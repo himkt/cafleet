@@ -1,5 +1,7 @@
 use super::*;
-use crate::broker::runtime::{self as storage, ObservedTransition, RunOwner, RunRecord};
+use crate::broker::runtime::{
+    self as storage, EffectivePolicyObservation, ObservedTransition, RunOwner, RunRecord,
+};
 use rusqlite::{Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -28,8 +30,49 @@ impl OutboxIo for File {
 }
 pub(crate) struct OutboxFrame {
     pub transition: ObservedTransition,
+    pub effective_policy: Option<EffectivePolicyObservation>,
     pub start: u64,
     pub end: u64,
+}
+const EFFECTIVE_POLICY_KEY: &str = "effective_policy";
+fn frame_body(
+    transition: &ObservedTransition,
+    effective_policy: Option<&EffectivePolicyObservation>,
+) -> Result<Vec<u8>> {
+    let Some(observation) = effective_policy else {
+        return serde_json::to_vec(transition).map_err(io_error);
+    };
+    let mut body = serde_json::to_value(transition).map_err(io_error)?;
+    body.as_object_mut()
+        .expect("a transition serializes as an object")
+        .insert(
+            EFFECTIVE_POLICY_KEY.into(),
+            serde_json::to_value(observation).map_err(io_error)?,
+        );
+    serde_json::to_vec(&body).map_err(io_error)
+}
+fn parse_frame_body(
+    body: &[u8],
+) -> Result<(ObservedTransition, Option<EffectivePolicyObservation>)> {
+    let mut value = serde_json::from_slice::<Value>(body).map_err(io_error)?;
+    let effective_policy = value
+        .as_object_mut()
+        .ok_or_else(|| error("outbox frame body must be an object"))?
+        .remove(EFFECTIVE_POLICY_KEY)
+        .map(serde_json::from_value::<EffectivePolicyObservation>)
+        .transpose()
+        .map_err(io_error)?;
+    let transition: ObservedTransition = serde_json::from_value(value.clone()).map_err(io_error)?;
+    ensure(
+        value == serde_json::to_value(&transition).map_err(io_error)?,
+        "unknown outbox transition fields",
+    )?;
+    ensure(
+        effective_policy.is_none()
+            || transition.kind == storage::RuntimeEventKind::AutomaticReviewUnavailable,
+        "only an unavailable review frame carries an effective policy",
+    )?;
+    Ok((transition, effective_policy))
 }
 pub(crate) struct OutboxScan {
     pub frames: Vec<OutboxFrame>,
@@ -230,12 +273,7 @@ impl<S: OutboxIo> Outbox<S> {
             self.io.read_exact(&mut body).map_err(io_error)?;
             let digest: [u8; 32] = Sha256::digest(&body).into();
             ensure(digest == checksum, "outbox frame checksum mismatch")?;
-            let transition: ObservedTransition = serde_json::from_slice(&body).map_err(io_error)?;
-            ensure(
-                serde_json::from_slice::<Value>(&body).map_err(io_error)?
-                    == serde_json::to_value(&transition).map_err(io_error)?,
-                "unknown outbox transition fields",
-            )?;
+            let (transition, effective_policy) = parse_frame_body(&body)?;
             storage::validate_observed_transition(&run, &transition)?;
             ensure(
                 transition.event_seq >= previous,
@@ -248,6 +286,7 @@ impl<S: OutboxIo> Outbox<S> {
             let end = position + 36 + bytes;
             frames.push(OutboxFrame {
                 transition,
+                effective_policy,
                 start: position,
                 end,
             });
@@ -262,13 +301,22 @@ impl<S: OutboxIo> Outbox<S> {
             incomplete_tail: tail,
         })
     }
+    #[cfg(test)]
     pub(crate) fn append_synced(
         &mut self,
         value: &ObservedTransition,
         until: Instant,
     ) -> Result<()> {
+        self.append_synced_with_policy(value, None, until)
+    }
+    pub(crate) fn append_synced_with_policy(
+        &mut self,
+        value: &ObservedTransition,
+        effective_policy: Option<&EffectivePolicyObservation>,
+        until: Instant,
+    ) -> Result<()> {
         let run = self.validate(until)?;
-        self.append_validated(value, run, until)
+        self.append_validated(value, effective_policy, run, until)
     }
     pub(crate) fn append_recovery(
         &mut self,
@@ -277,11 +325,12 @@ impl<S: OutboxIo> Outbox<S> {
         until: Instant,
     ) -> Result<()> {
         let run = self.validate_on(conn, until)?;
-        self.append_validated(value, run, until)
+        self.append_validated(value, None, run, until)
     }
     fn append_validated(
         &mut self,
         value: &ObservedTransition,
+        effective_policy: Option<&EffectivePolicyObservation>,
         run: RunRecord,
         until: Instant,
     ) -> Result<()> {
@@ -294,7 +343,12 @@ impl<S: OutboxIo> Outbox<S> {
                 self.dirty = false;
             }
         }
-        let body = serde_json::to_vec(value).map_err(io_error)?;
+        ensure(
+            effective_policy.is_none()
+                || value.kind == storage::RuntimeEventKind::AutomaticReviewUnavailable,
+            "only an unavailable review frame carries an effective policy",
+        )?;
+        let body = frame_body(value, effective_policy)?;
         let digest: [u8; 32] = Sha256::digest(&body).into();
         if let Some(old) = self.known.get(&value.event_seq) {
             ensure(*old == digest, "conflicting outbox sequence retry")?;
@@ -840,6 +894,106 @@ mod tests {
             deadline(),
         )
         .unwrap()
+    }
+
+    mod effective_policy_frames {
+        use super::*;
+        use crate::runtime::runner::writer::contract_tests::effective_policy::{
+            frame_bodies, observation, unavailable,
+        };
+
+        fn framed(body: &Value) -> Vec<u8> {
+            let body = serde_json::to_vec(body).unwrap();
+            let mut bytes = u32::try_from(body.len()).unwrap().to_be_bytes().to_vec();
+            bytes.extend_from_slice(&Sha256::digest(&body));
+            bytes.extend(body);
+            bytes
+        }
+
+        #[test]
+        fn runner_outbox_unavailable_frame_body_adds_only_the_effective_policy_key() {
+            let fixture = WriterFixture::new();
+            let io = FaultIo::default();
+            let mut outbox = open(&fixture, io.clone());
+            let plain = transition(&fixture, 1);
+            outbox
+                .append_synced_with_policy(&plain, None, deadline())
+                .unwrap();
+            assert_eq!(io.snapshot_bytes(), frame(&plain), "unchanged frame bytes");
+            let value = unavailable(&fixture, 2);
+            let lost = observation(AutomaticReview::Unavailable);
+            outbox
+                .append_synced_with_policy(&value, Some(&lost), deadline())
+                .unwrap();
+            let mut expected = serde_json::to_value(&value).unwrap();
+            expected["effective_policy"] = serde_json::to_value(&lost).unwrap();
+            assert_eq!(
+                frame_bodies(&io.snapshot_bytes()),
+                vec![serde_json::to_value(&plain).unwrap(), expected]
+            );
+            let scan = outbox.scan(deadline()).unwrap();
+            assert_eq!(scan.frames.len(), 2);
+            assert!(scan.frames[0].effective_policy.is_none());
+            assert_eq!(scan.frames[1].transition, value);
+            assert_eq!(
+                serde_json::to_value(scan.frames[1].effective_policy.as_ref().unwrap()).unwrap(),
+                serde_json::to_value(&lost).unwrap()
+            );
+            outbox
+                .append_synced_with_policy(&value, Some(&lost), deadline())
+                .unwrap();
+            assert_eq!(
+                frame_bodies(&io.snapshot_bytes()).len(),
+                2,
+                "identical retry"
+            );
+            assert!(
+                outbox
+                    .append_synced_with_policy(&value, None, deadline())
+                    .is_err(),
+                "a retry without its observation conflicts with the original frame"
+            );
+        }
+
+        #[test]
+        fn runner_outbox_rejects_an_effective_policy_on_any_other_frame() {
+            let fixture = WriterFixture::new();
+            let io = FaultIo::default();
+            let mut outbox = open(&fixture, io.clone());
+            let plain = transition(&fixture, 1);
+            let lost = observation(AutomaticReview::Unavailable);
+            assert!(
+                outbox
+                    .append_synced_with_policy(&plain, Some(&lost), deadline())
+                    .is_err()
+            );
+            assert!(io.snapshot_bytes().is_empty());
+            let mut forged = serde_json::to_value(&plain).unwrap();
+            forged["effective_policy"] = serde_json::to_value(&lost).unwrap();
+            let on_disk = FaultIo::from_bytes(framed(&forged));
+            assert!(
+                Outbox::from_io(
+                    &fixture.fixture.conn,
+                    &fixture.fixture.run,
+                    fixture.lock.clone(),
+                    on_disk,
+                    deadline(),
+                )
+                .is_err()
+            );
+            let mut malformed = serde_json::to_value(unavailable(&fixture, 1)).unwrap();
+            malformed["effective_policy"] = serde_json::json!({"automatic_review":"available"});
+            assert!(
+                Outbox::from_io(
+                    &fixture.fixture.conn,
+                    &fixture.fixture.run,
+                    fixture.lock.clone(),
+                    FaultIo::from_bytes(framed(&malformed)),
+                    deadline(),
+                )
+                .is_err()
+            );
+        }
     }
 
     #[test]
