@@ -747,7 +747,7 @@ fn runner_review_control_creator_disconnect_before_start_exits_without_spawning(
     assert_eq!(run.status, RunStatus::Failed);
     assert!(run.ended_at.is_some());
     assert!(
-        RunLock::acquire(&fixture.fixture.conn, &run.owner())
+        RunLock::acquire_released(&fixture.fixture.conn, &run.owner())
             .unwrap()
             .is_some()
     );
@@ -778,7 +778,7 @@ fn runner_review_control_accepted_start_spawn_and_storage_failures_compensate() 
         }
         assert!(!fixture._artifacts.paths.descriptor.exists());
         assert!(
-            RunLock::acquire(&fixture.fixture.conn, &run.owner())
+            RunLock::acquire_released(&fixture.fixture.conn, &run.owner())
                 .unwrap()
                 .is_some()
         );

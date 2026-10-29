@@ -603,7 +603,9 @@ fn runner_recovery_owned_process_child() {
     let spool_state = if matches!(mode, "transaction" | "exceptional_first") {
         "database_only"
     } else if run.owner_pid == actual.pid && run.owner_start_identity == actual.start_identity {
-        let held = RunLock::acquire(&conn, &run.owner()).unwrap().unwrap();
+        let held = RunLock::acquire_released(&conn, &run.owner())
+            .unwrap()
+            .unwrap();
         held.validate(&conn, &run.owner()).unwrap();
         let paths = validate_run_paths(&conn, &run).unwrap();
         match std::fs::read(paths.outbox) {

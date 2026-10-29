@@ -520,6 +520,9 @@ pub struct PaneLock {
     path: PathBuf,
 }
 
+#[cfg(test)]
+pub(crate) const RELEASED_LOCK_GRACE: Duration = Duration::from_secs(2);
+
 pub fn lock_path(database_url: &str, placement: &Placement) -> Result<PathBuf, CafleetError> {
     let pane = placement
         .mux_pane_id
@@ -620,6 +623,20 @@ impl PaneLock {
             };
             std::thread::sleep(left.min(Duration::from_millis(50)));
         }
+    }
+
+    /// Acquire a lock the caller has just seen released. A child forked by a concurrent
+    /// test shares the released descriptor's flock until its exec closes it, so retry briefly.
+    #[cfg(test)]
+    pub(crate) fn acquire_released(
+        database_url: &str,
+        placement: &Placement,
+    ) -> Result<Option<Self>, CafleetError> {
+        Self::acquire_within(
+            database_url,
+            placement,
+            Deadline::until(Instant::now() + RELEASED_LOCK_GRACE),
+        )
     }
 }
 
@@ -996,7 +1013,7 @@ mod pane_lock_wait_tests {
         );
         holder.join().unwrap();
         assert!(
-            PaneLock::try_acquire(&fixture.settings.database_url, fixture.placement())
+            PaneLock::acquire_released(&fixture.settings.database_url, fixture.placement())
                 .unwrap()
                 .is_some()
         );
@@ -1044,7 +1061,7 @@ mod pane_lock_wait_tests {
                 .is_none()
         );
         drop(guard);
-        let _guard = PaneLock::try_acquire(&alias_url, &duplicate)
+        let _guard = PaneLock::acquire_released(&alias_url, &duplicate)
             .unwrap()
             .unwrap();
         assert_eq!(std::fs::metadata(&path).unwrap().ino(), metadata.ino());
@@ -1078,7 +1095,7 @@ mod pane_lock_wait_tests {
         );
         for placement in &placements[..placements.len() - 1] {
             assert!(
-                PaneLock::try_acquire(&fixture.settings.database_url, &placement.placement)
+                PaneLock::acquire_released(&fixture.settings.database_url, &placement.placement)
                     .unwrap()
                     .is_some()
             );
@@ -1130,7 +1147,7 @@ mod pane_lock_wait_tests {
         );
         drop(locked);
         assert!(
-            PaneLock::try_acquire(&fixture.settings.database_url, &placement)
+            PaneLock::acquire_released(&fixture.settings.database_url, &placement)
                 .unwrap()
                 .is_some()
         );
@@ -1256,7 +1273,7 @@ mod pane_lock_wait_tests {
         drop(added_guard);
         for placement in placements {
             assert!(
-                PaneLock::try_acquire(&fixture.settings.database_url, &placement.placement)
+                PaneLock::acquire_released(&fixture.settings.database_url, &placement.placement)
                     .unwrap()
                     .is_some()
             );

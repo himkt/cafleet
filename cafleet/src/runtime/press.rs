@@ -319,22 +319,10 @@ mod contract_tests {
         );
     }
 
-    // A refused press releases its pane lock on return, but under full-suite load a concurrent
-    // lock probe can still observe it briefly; wait a bounded interval instead of one attempt.
-    fn acquire_within(database_url: &str, placement: &Placement) -> bool {
-        let until = Instant::now() + Duration::from_secs(2);
-        loop {
-            if PaneLock::try_acquire(database_url, placement)
-                .unwrap()
-                .is_some()
-            {
-                return true;
-            }
-            if Instant::now() >= until {
-                return false;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
+    fn acquire_released(database_url: &str, placement: &Placement) -> bool {
+        PaneLock::acquire_released(database_url, placement)
+            .unwrap()
+            .is_some()
     }
 
     fn post_refusal_lock_diagnostic(probe: &Probe) -> String {
@@ -414,7 +402,7 @@ mod contract_tests {
                 .unwrap(),
             0
         );
-        assert!(acquire_within(&settings.database_url, &probe.placement));
+        assert!(acquire_released(&settings.database_url, &probe.placement));
     }
 
     #[test]
@@ -488,7 +476,7 @@ mod contract_tests {
         assert_zero_effect(&busy, fixture.run.member_id);
         assert!(probe.calls.borrow().is_empty());
         drop(held);
-        assert!(acquire_within(&settings.database_url, &probe.placement));
+        assert!(acquire_released(&settings.database_url, &probe.placement));
     }
 
     #[test]
@@ -522,7 +510,7 @@ mod contract_tests {
                 _ => unreachable!(),
             }
             assert!(
-                acquire_within(&settings.database_url, &probe.placement),
+                acquire_released(&settings.database_url, &probe.placement),
                 "post-refusal pane lock is released: {}",
                 post_refusal_lock_diagnostic(&probe),
             );
@@ -578,7 +566,7 @@ mod contract_tests {
                 }
                 _ => unreachable!(),
             }
-            assert!(acquire_within(&settings.database_url, &probe.placement));
+            assert!(acquire_released(&settings.database_url, &probe.placement));
         }
     }
 }

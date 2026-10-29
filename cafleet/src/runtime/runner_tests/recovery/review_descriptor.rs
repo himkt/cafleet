@@ -38,7 +38,7 @@ fn owned_bytes(case: &Case) -> Vec<u8> {
     let lock = if let Some(held) = &case.held {
         held.as_ref()
     } else {
-        acquired = RunLock::acquire(&case.fixture.conn, &run.owner())
+        acquired = RunLock::acquire_released(&case.fixture.conn, &run.owner())
             .unwrap()
             .unwrap();
         &acquired
@@ -239,7 +239,7 @@ fn changed_after_pin(mutation: Mutation) {
                 .is_symlink()
         );
         let run = storage::get_run(&case.fixture.conn, case.fixture.run.run_id).unwrap();
-        let lock = RunLock::acquire(&case.fixture.conn, &run.owner())
+        let lock = RunLock::acquire_released(&case.fixture.conn, &run.owner())
             .unwrap()
             .unwrap();
         lock.validate(&case.fixture.conn, &run.owner()).unwrap();

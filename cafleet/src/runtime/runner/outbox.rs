@@ -1273,7 +1273,7 @@ mod tests {
         );
         drop(outbox);
         assert!(
-            RunLock::acquire(&fixture.conn, &fixture.run.owner())
+            RunLock::acquire_released(&fixture.conn, &fixture.run.owner())
                 .unwrap()
                 .is_some()
         );
