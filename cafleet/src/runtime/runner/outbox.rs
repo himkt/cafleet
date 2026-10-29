@@ -981,7 +981,7 @@ mod tests {
                 )
                 .is_err()
             );
-            let mut malformed = serde_json::to_value(&unavailable(&fixture, 1)).unwrap();
+            let mut malformed = serde_json::to_value(unavailable(&fixture, 1)).unwrap();
             malformed["effective_policy"] = serde_json::json!({"automatic_review":"available"});
             assert!(
                 Outbox::from_io(

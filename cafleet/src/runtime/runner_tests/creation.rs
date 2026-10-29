@@ -424,13 +424,13 @@ fn runner_creation_records_the_selected_profile_and_its_match_on_the_pending_run
         (None, None, None, None),
         (
             Some("0.163.0"),
-            Some("codex-0.163.0-on-request-1"),
+            Some("codex-0.163.0-approve-for-me-1"),
             Some(ProfileMatch::Exact),
             Some("exact"),
         ),
         (
             Some("0.164.0"),
-            Some("codex-0.163.0-on-request-1"),
+            Some("codex-0.163.0-approve-for-me-1"),
             Some(ProfileMatch::Fallback),
             Some("fallback"),
         ),

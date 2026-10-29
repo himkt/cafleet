@@ -3291,7 +3291,7 @@ mod runtime_contract_tests {
                     redacted(&refusal_raw(operation)),
                 );
                 let evidence = &event.payload_json["evidence"];
-                assert_eq!(evidence["operation"], operation);
+                assert_eq!(evidence["operation"], operation.replace('\n', "\\x0a"));
                 assert_eq!(evidence["operation_rows"], rows);
                 assert!(evidence["excerpt"].is_string());
                 assert_eq!(
@@ -5563,7 +5563,7 @@ mod runtime_contract_tests {
                 .unwrap();
             let runtime = &crate::presentation::member(&member)["runtime"];
             assert_eq!(
-                runtime.as_object().unwrap().keys().last().unwrap(),
+                runtime.as_object().unwrap().keys().next_back().unwrap(),
                 "effective_policy"
             );
             assert_eq!(runtime["effective_policy"], record);
@@ -5579,7 +5579,12 @@ mod runtime_contract_tests {
             let shown = crate::presentation::runtime_event(&view);
             assert_eq!(shown["run"]["effective_policy"], record);
             assert_eq!(
-                shown["run"].as_object().unwrap().keys().last().unwrap(),
+                shown["run"]
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .next_back()
+                    .unwrap(),
                 "effective_policy"
             );
             assert_eq!(

@@ -1,5 +1,118 @@
 use super::*;
 
+fn unavailable(run: &RunRecord, sequence: i64) -> ObservedTransition {
+    ObservedTransition {
+        run_id: run.run_id,
+        event_seq: sequence,
+        episode_seq: None,
+        kind: RuntimeEventKind::AutomaticReviewUnavailable,
+        classification: None,
+        observed_at: NOW.into(),
+        evidence_json: storage::evidence::EvidencePolicy::metadata().apply(&json!({"backend":run.backend,"native_version":run.native_version,"profile_version":run.profile_version,"rule_id":"codex-auto-review-unavailable","screen_seq":sequence,"operation":null,"choices":null,"native_request_id":null,"excerpt":null,"truncated":false,"sensitive":false})).unwrap(),
+        close_reason: None,
+        cause_json: None,
+    }
+}
+
+#[test]
+fn runner_recovery_replays_an_unavailable_frame_with_its_effective_policy_record() {
+    let mut case = Case::new();
+    let value = unavailable(&case.fixture.run, 1);
+    let lost = storage::EffectivePolicyObservation {
+        automatic_review: storage::AutomaticReview::Unavailable,
+        observed_mode: None,
+        rule_id: "codex-auto-review-unavailable".into(),
+        observed_at: NOW.into(),
+    };
+    {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let mut spool = Outbox::open_owned(
+            &case.fixture.conn,
+            &case.fixture.run,
+            case.held.as_ref().unwrap().clone(),
+            deadline,
+        )
+        .unwrap();
+        spool
+            .append_synced_with_policy(&value, Some(&lost), deadline)
+            .unwrap();
+    }
+    let mut host = new_host();
+    let report = case.recover(&mut host).unwrap();
+    assert!(matches!(report.outcome, RecoveryOutcome::Recovered));
+    let rows = events(&case);
+    assert_eq!(
+        rows[0].event.kind,
+        RuntimeEventKind::AutomaticReviewUnavailable
+    );
+    assert_eq!(rows[0].event.event_seq, value.event_seq);
+    assert_eq!(rows[0].event.notification_state, NotificationState::Inbox);
+    assert_eq!(
+        storage::get_run(&case.fixture.conn, case.fixture.run.run_id)
+            .unwrap()
+            .effective_policy_json,
+        Some(json!({
+            "schema_version":1,"automatic_review":"unavailable","observed_mode":null,
+            "rule_id":"codex-auto-review-unavailable","event_id":rows[0].event.event_id,
+            "observed_at":NOW,
+        }))
+    );
+    assert!(case.spool_bytes().is_none_or(|bytes| bytes.is_empty()));
+}
+
+#[test]
+fn runner_recovery_replays_a_committed_unavailable_frame_idempotently() {
+    let mut case = Case::new();
+    let value = unavailable(&case.fixture.run, 1);
+    let lost = storage::EffectivePolicyObservation {
+        automatic_review: storage::AutomaticReview::Unavailable,
+        observed_mode: None,
+        rule_id: "codex-auto-review-unavailable".into(),
+        observed_at: NOW.into(),
+    };
+    {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let mut spool = Outbox::open_owned(
+            &case.fixture.conn,
+            &case.fixture.run,
+            case.held.as_ref().unwrap().clone(),
+            deadline,
+        )
+        .unwrap();
+        spool
+            .append_synced_with_policy(&value, Some(&lost), deadline)
+            .unwrap();
+    }
+    let committed = storage::persist_transition_with_effective_policy(
+        &mut case.fixture.conn,
+        &case.fixture.run.owner(),
+        &value,
+        &lost,
+        PersistenceMode::Live,
+    )
+    .unwrap();
+    let record = storage::get_run(&case.fixture.conn, case.fixture.run.run_id)
+        .unwrap()
+        .effective_policy_json;
+    let mut host = new_host();
+    let report = case.recover(&mut host).unwrap();
+    assert!(matches!(report.outcome, RecoveryOutcome::Recovered));
+    let rows = events(&case);
+    assert_eq!(rows[0].event.event_id, committed.event_id);
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row.event.kind == RuntimeEventKind::AutomaticReviewUnavailable)
+            .count(),
+        1
+    );
+    assert_eq!(
+        storage::get_run(&case.fixture.conn, case.fixture.run.run_id)
+            .unwrap()
+            .effective_policy_json,
+        record
+    );
+}
+
 #[test]
 fn runner_recovery_replays_opening_and_obscurity_before_one_monitor_closure_and_loss() {
     let mut case = Case::new();
