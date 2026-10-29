@@ -23,12 +23,10 @@ pub(crate) enum ObservationKind {
 
 impl ObservationKind {
     pub(super) fn parse(value: &str) -> Result<Self> {
+        if let Ok(class) = InteractionClass::try_from(value) {
+            return Ok(Self::Interaction(class));
+        }
         Ok(match value {
-            "permission_request" => Self::Interaction(InteractionClass::PermissionRequest),
-            "question" => Self::Interaction(InteractionClass::Question),
-            "trust" => Self::Interaction(InteractionClass::Trust),
-            "update" => Self::Interaction(InteractionClass::Update),
-            "unknown_interaction" => Self::Interaction(InteractionClass::UnknownInteraction),
             "permission_denied" => Self::PermissionDenied,
             "permission_continuation" => Self::PermissionContinuation,
             "working" => Self::Working,
@@ -78,26 +76,26 @@ type SemanticPart = (String, String, String, Option<String>, Vec<String>);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ScreenRegion {
-    pub top: u16,
-    pub left: u16,
-    pub bottom: u16,
-    pub right: u16,
+    pub(crate) top: u16,
+    pub(crate) left: u16,
+    pub(crate) bottom: u16,
+    pub(crate) right: u16,
 }
 #[derive(Clone)]
 pub(crate) struct ScreenObservation {
-    pub kind: ObservationKind,
-    pub profile_version: Option<String>,
-    pub rule_id: String,
-    pub match_evidence: MatchEvidence,
-    pub matched_region: Option<ScreenRegion>,
-    pub raw_evidence: Value,
-    pub fingerprint: Option<SemanticFingerprint>,
-    pub verified_noninteraction: bool,
-    pub native_correlation: Option<String>,
-    pub output_seq: u64,
-    pub continues_rule_id: Option<String>,
-    pub annotations: Vec<AnnotationBlock>,
-    pub guarded_annotation_rules: Vec<String>,
+    pub(crate) kind: ObservationKind,
+    pub(crate) profile_version: Option<String>,
+    pub(crate) rule_id: String,
+    pub(crate) match_evidence: MatchEvidence,
+    pub(crate) matched_region: Option<ScreenRegion>,
+    pub(crate) raw_evidence: Value,
+    pub(crate) fingerprint: Option<SemanticFingerprint>,
+    pub(crate) verified_noninteraction: bool,
+    pub(crate) native_correlation: Option<String>,
+    pub(crate) output_seq: u64,
+    pub(crate) continues_rule_id: Option<String>,
+    pub(crate) annotations: Vec<AnnotationBlock>,
+    pub(crate) guarded_annotation_rules: Vec<String>,
 }
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct AnnotationFingerprint {
@@ -108,11 +106,11 @@ pub(crate) struct AnnotationFingerprint {
 }
 #[derive(Clone)]
 pub(crate) struct AnnotationBlock {
-    pub kind: ObservationKind,
-    pub rule_id: String,
-    pub matched_region: ScreenRegion,
-    pub raw_evidence: Value,
-    pub fingerprint: AnnotationFingerprint,
+    pub(crate) kind: ObservationKind,
+    pub(crate) rule_id: String,
+    pub(crate) matched_region: ScreenRegion,
+    pub(crate) raw_evidence: Value,
+    pub(crate) fingerprint: AnnotationFingerprint,
 }
 fn normalized_shown(text: &str, row_margin: Option<&str>) -> String {
     let mut rows = text.split('\n');

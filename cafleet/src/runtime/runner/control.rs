@@ -21,7 +21,7 @@ pub(super) fn pause(deadline: Instant) -> Result<()> {
     Ok(())
 }
 pub(super) struct ControlClient {
-    pub stream: UnixStream,
+    pub(crate) stream: UnixStream,
     decoder: ControlDecoder,
 }
 

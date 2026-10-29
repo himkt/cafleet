@@ -30,23 +30,23 @@ impl WriterHooks for InertWriterHooks {
 }
 #[derive(Debug, Clone)]
 pub(crate) struct WriterStatus {
-    pub pending_count: u64,
-    pub pending_evidence: bool,
-    pub gap_count: u64,
-    pub degraded: bool,
-    pub diagnostic: Option<String>,
+    pub(crate) pending_count: u64,
+    pub(crate) pending_evidence: bool,
+    pub(crate) gap_count: u64,
+    pub(crate) degraded: bool,
+    pub(crate) diagnostic: Option<String>,
     #[cfg(test)]
-    pub policy_diagnostic: Option<String>,
+    pub(crate) policy_diagnostic: Option<String>,
 }
 #[derive(Debug)]
 pub(crate) struct RetainedTransition {
-    pub transition: ObservedTransition,
-    pub cause: CafleetError,
+    pub(crate) transition: ObservedTransition,
+    pub(crate) cause: CafleetError,
 }
 #[derive(Debug)]
 pub(crate) struct RetainedEvidenceUpdate {
-    pub update: InteractionEvidenceUpdate,
-    pub cause: CafleetError,
+    pub(crate) update: InteractionEvidenceUpdate,
+    pub(crate) cause: CafleetError,
 }
 #[derive(Clone)]
 struct Refresh {
@@ -782,7 +782,7 @@ pub(crate) mod test_support {
             Ok(())
         }
     }
-    pub(crate) struct Release(pub Arc<Hooks>);
+    pub(crate) struct Release(pub(crate) Arc<Hooks>);
     impl Drop for Release {
         fn drop(&mut self) {
             self.0.release_for_cleanup();

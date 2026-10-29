@@ -5,7 +5,7 @@ use crate::broker::records::{
 
 use super::truncate_text;
 
-pub fn format_message(message: &MessageRecord, limit: usize) -> String {
+pub(crate) fn format_message(message: &MessageRecord, limit: usize) -> String {
     let header = format!(
         "[{} | from:{} | {}]",
         message.message_id, message.from_member_id, message.status_timestamp
@@ -18,7 +18,7 @@ pub fn format_message(message: &MessageRecord, limit: usize) -> String {
     }
 }
 
-pub fn format_messages(messages: &[MessageRecord], limit: usize) -> String {
+pub(crate) fn format_messages(messages: &[MessageRecord], limit: usize) -> String {
     if messages.is_empty() {
         return "No messages found.".into();
     }
@@ -38,7 +38,7 @@ pub(crate) fn format_member_press(value: &crate::runtime::KeyAcknowledgment) -> 
     )
 }
 
-pub fn format_member_detail(member: &MemberRecord) -> String {
+pub(crate) fn format_member_detail(member: &MemberRecord) -> String {
     let mut text = format!(
         "{} {} {}",
         member.member_id,
@@ -52,11 +52,11 @@ pub fn format_member_detail(member: &MemberRecord) -> String {
     text
 }
 
-pub fn format_fleet_create(fleet: &CreatedFleet) -> String {
+pub(crate) fn format_fleet_create(fleet: &CreatedFleet) -> String {
     format!("{} director={}", fleet.fleet_id, fleet.director.member_id)
 }
 
-pub fn format_fleet_delete(deleted: &DeletedFleet) -> String {
+pub(crate) fn format_fleet_delete(deleted: &DeletedFleet) -> String {
     let mut lines = vec![format!(
         "Deleted fleet {}. Deregistered {} members.",
         deleted.fleet_id, deleted.deregistered_count
@@ -70,7 +70,7 @@ pub fn format_fleet_delete(deleted: &DeletedFleet) -> String {
     lines.join("\n")
 }
 
-pub fn format_member(member: &RegisteredMember, placement: &Placement) -> String {
+pub(crate) fn format_member(member: &RegisteredMember, placement: &Placement) -> String {
     let pane = placement.mux_pane_id.as_deref().unwrap_or("(pending)");
     format!(
         "{} {} backend={} pane={pane}",
@@ -91,7 +91,7 @@ fn format_idle(idle: Option<i64>) -> String {
     }
 }
 
-pub fn format_member_list(members: &[MemberActivity]) -> String {
+pub(crate) fn format_member_list(members: &[MemberActivity]) -> String {
     if members.is_empty() {
         return "0 members.".into();
     }

@@ -8,13 +8,13 @@ use crate::config_dir::{EnvLookup, opencode_skills_base};
 use crate::embedded::{PRESETS, SKILLS, lookup};
 use crate::error::CafleetError;
 
-pub struct AgentPaths {
-    pub identity: String,
+pub(crate) struct AgentPaths {
+    pub(crate) identity: String,
     skills_dir: PathBuf,
     presets: Vec<(String, PathBuf)>,
 }
 
-pub fn agent_paths(
+pub(crate) fn agent_paths(
     env: EnvLookup<'_>,
     home: &Path,
     agent: CodingAgent,
@@ -48,7 +48,7 @@ pub fn agent_paths(
     })
 }
 
-pub fn install_agent(
+pub(crate) fn install_agent(
     conn: &mut Connection,
     agent: CodingAgent,
     paths: &AgentPaths,

@@ -4,14 +4,13 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use rusqlite::Connection;
-use sha2::{Digest, Sha256};
 
 use crate::broker::records::{MemberRecord, Placement};
 use crate::config::Settings;
 use crate::error::CafleetError;
 
 #[derive(Debug, Clone, Copy)]
-pub struct Deadline(Instant);
+pub(crate) struct Deadline(Instant);
 
 pub(crate) fn valid_input(text: &str) -> bool {
     !text.trim().is_empty() && !text.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
@@ -33,7 +32,7 @@ impl Deadline {
             })
             .unwrap_or_default()
     }
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::until(Instant::now() + Duration::from_secs(5))
     }
 
@@ -41,7 +40,7 @@ impl Deadline {
         Self(instant)
     }
 
-    pub fn remaining(self) -> Result<Duration, CafleetError> {
+    pub(crate) fn remaining(self) -> Result<Duration, CafleetError> {
         self.remaining_at(Instant::now())
     }
 
@@ -61,7 +60,7 @@ impl Deadline {
         )
     }
 
-    pub fn retry(self) -> bool {
+    pub(crate) fn retry(self) -> bool {
         match self.remaining() {
             Ok(left) => {
                 std::thread::sleep(left.min(Duration::from_millis(50)));
@@ -169,11 +168,8 @@ impl<'a> DatabaseBudget<'a> {
                 );
             }
         });
-        let previous: u32 = conn
-            .query_row("PRAGMA busy_timeout", [], |row| row.get(0))
-            .map_err(crate::broker::members::db_err)?;
-        conn.busy_handler(Some(wait_for_database_deadline))
-            .map_err(crate::broker::members::db_err)?;
+        let previous: u32 = conn.query_row("PRAGMA busy_timeout", [], |row| row.get(0))?;
+        conn.busy_handler(Some(wait_for_database_deadline))?;
         DATABASE_WAITS.with(|waits| {
             let mut waits = waits.borrow_mut();
             waits.identity = Some(identity);
@@ -206,11 +202,11 @@ impl<'a> DatabaseBudget<'a> {
         let restored = if nested {
             self.conn
                 .busy_handler(Some(wait_for_database_deadline))
-                .map_err(crate::broker::members::db_err)
+                .map_err(crate::error::CafleetError::from)
         } else {
             self.conn
                 .busy_timeout(self.previous_timeout)
-                .map_err(crate::broker::members::db_err)
+                .map_err(crate::error::CafleetError::from)
         };
         DATABASE_WAITS.with(|waits| {
             let mut waits = waits.borrow_mut();
@@ -234,7 +230,7 @@ impl Drop for DatabaseBudget<'_> {
     }
 }
 
-pub fn with_database_budget<T>(
+pub(crate) fn with_database_budget<T>(
     conn: &mut Connection,
     deadline: Deadline,
     operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
@@ -284,22 +280,21 @@ fn scoped_database_budget<T>(
             error.message()
         ))
     });
-    match (result, restored) {
-        (Ok(value), Ok(())) => Ok(value),
-        (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
-        (Err(primary), Err(cleanup)) => Err(primary.with_cleanup(cleanup.message())),
-    }
+    CafleetError::merge_cleanup(result, restored)
 }
 
-pub struct PaneLock {
-    _file: File,
+pub(crate) struct PaneLock {
+    file: File,
     path: PathBuf,
 }
 
 #[cfg(test)]
 pub(crate) const RELEASED_LOCK_GRACE: Duration = Duration::from_secs(2);
 
-pub fn lock_path(database_url: &str, placement: &Placement) -> Result<PathBuf, CafleetError> {
+pub(crate) fn lock_path(
+    database_url: &str,
+    placement: &Placement,
+) -> Result<PathBuf, CafleetError> {
     let pane = placement
         .mux_pane_id
         .as_deref()
@@ -313,10 +308,7 @@ pub fn lock_path(database_url: &str, placement: &Placement) -> Result<PathBuf, C
     let mut directory = database.into_os_string();
     directory.push(".pane-locks");
     let key = format!("{}\0{}\0{pane}", placement.backend, placement.mux_session);
-    let key: String = Sha256::digest(key.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
+    let key = crate::digest::sha256_hex(key.as_bytes());
     Ok(PathBuf::from(directory).join(format!("{key}.lock")))
 }
 
@@ -332,7 +324,7 @@ impl PaneLock {
             return Err(CafleetError::App("held pane lock binding mismatch".into()));
         }
         let open = self
-            ._file
+            .file
             .metadata()
             .map_err(|cause| CafleetError::App(cause.to_string()))?;
         let named = std::fs::symlink_metadata(&path)
@@ -347,7 +339,7 @@ impl PaneLock {
         }
         Ok(())
     }
-    pub fn try_acquire(
+    pub(crate) fn try_acquire(
         database_url: &str,
         placement: &Placement,
     ) -> Result<Option<Self>, CafleetError> {
@@ -375,7 +367,7 @@ impl PaneLock {
                 ))
             })?;
         match file.try_lock() {
-            Ok(()) => Ok(Some(Self { _file: file, path })),
+            Ok(()) => Ok(Some(Self { file, path })),
             Err(TryLockError::WouldBlock) => Ok(None),
             Err(TryLockError::Error(error)) => Err(CafleetError::App(format!(
                 "cannot lock pane input {}: {error}",
@@ -385,7 +377,7 @@ impl PaneLock {
     }
 
     /// Retry a held lock every 50 ms until `lock_deadline`; `None` means it stayed busy.
-    pub fn acquire_within(
+    pub(crate) fn acquire_within(
         database_url: &str,
         placement: &Placement,
         lock_deadline: Deadline,
@@ -416,9 +408,9 @@ impl PaneLock {
     }
 }
 
-pub struct LockedMember {
-    pub member: MemberRecord,
-    _guard: PaneLock,
+pub(crate) struct LockedMember {
+    pub(crate) member: MemberRecord,
+    guard: PaneLock,
 }
 
 impl LockedMember {
@@ -428,16 +420,16 @@ impl LockedMember {
             .placement
             .as_ref()
             .expect("locked member has a placement");
-        self._guard.validate_binding(database_url, placement)?;
-        Ok(&self._guard)
+        self.guard.validate_binding(database_url, placement)?;
+        Ok(&self.guard)
     }
 }
 
 pub(crate) struct LockedDeletion<S, T> {
-    pub snapshot: S,
-    pub value: T,
+    pub(crate) snapshot: S,
+    pub(crate) value: T,
     _span: crate::signals::DeferTermination,
-    _guards: Vec<PaneLock>,
+    guards: Vec<PaneLock>,
 }
 
 pub(crate) fn pane_lock_for<'a>(
@@ -460,7 +452,7 @@ impl<S, T> LockedDeletion<S, T> {
         database_url: &str,
         placement: &Placement,
     ) -> Result<&PaneLock, CafleetError> {
-        pane_lock_for(&self._guards, database_url, placement)
+        pane_lock_for(&self.guards, database_url, placement)
     }
 
     pub(crate) fn snapshot_and_pane_lock(
@@ -468,7 +460,7 @@ impl<S, T> LockedDeletion<S, T> {
         database_url: &str,
         placement: &Placement,
     ) -> Result<(&mut S, &PaneLock), CafleetError> {
-        let guard = pane_lock_for(&self._guards, database_url, placement)?;
+        let guard = pane_lock_for(&self.guards, database_url, placement)?;
         Ok((&mut self.snapshot, guard))
     }
 }
@@ -525,7 +517,7 @@ pub(crate) fn lock_deletion<S, T>(
                 snapshot,
                 value,
                 _span: span,
-                _guards: guards,
+                guards,
             });
         }
         drop(span);
@@ -534,7 +526,7 @@ pub(crate) fn lock_deletion<S, T>(
     }
 }
 
-pub fn lock_member(
+pub(crate) fn lock_member(
     conn: &mut Connection,
     settings: &Settings,
     member: &MemberRecord,
@@ -586,7 +578,7 @@ pub(crate) fn lock_member_with_reservation(
     }
     Ok(Some(LockedMember {
         member: current,
-        _guard: guard,
+        guard,
     }))
 }
 
@@ -756,7 +748,7 @@ mod tests {
             assert!(with_database_budget(&mut conn, expired, |_| Ok(())).is_err());
             complete_database_budget(&mut conn, expired, |conn| {
                 conn.execute_batch("BEGIN IMMEDIATE; INSERT INTO probe VALUES(42); COMMIT;")
-                    .map_err(crate::broker::members::db_err)
+                    .map_err(crate::error::CafleetError::from)
             })
             .unwrap();
             assert_eq!(
@@ -785,13 +777,11 @@ mod tests {
             with_database_budget(&mut conn, deadline, |conn| {
                 std::thread::sleep(Duration::from_millis(30));
                 complete_database_budget(conn, deadline, |conn| {
-                    let tx = conn
-                        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                        .map_err(crate::broker::members::db_err)?;
-                    tx.execute("UPDATE probe SET value=42", [])
-                        .map_err(crate::broker::members::db_err)?;
+                    let tx =
+                        conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+                    tx.execute("UPDATE probe SET value=42", [])?;
                     release.send(()).unwrap();
-                    tx.commit().map_err(crate::broker::members::db_err)
+                    tx.commit().map_err(crate::error::CafleetError::from)
                 })?;
                 assert!(with_database_budget(conn, deadline, |_| Ok(())).is_err());
                 Ok(())
@@ -818,7 +808,7 @@ mod tests {
             let expired = Deadline::until(started - Duration::from_millis(1));
             let error = complete_database_budget(&mut conn, expired, |conn| {
                 conn.execute("INSERT INTO probe VALUES(42)", [])
-                    .map_err(crate::broker::members::db_err)
+                    .map_err(crate::error::CafleetError::from)
             })
             .unwrap_err();
             assert!(error.message().contains("database is locked"));
@@ -921,7 +911,7 @@ mod tests {
                     }
                     with_database_budget(conn, Deadline::new(), |conn| {
                         conn.query_row("SELECT value FROM probe", [], |row| row.get::<_, i64>(0))
-                            .map_err(crate::broker::members::db_err)
+                            .map_err(crate::error::CafleetError::from)
                     })
                 })
                 .unwrap_err();
@@ -951,15 +941,14 @@ mod tests {
             let deadline = Deadline::until(started + Duration::from_millis(200));
             let error = with_database_budget(&mut conn, deadline, |conn| {
                 assert_eq!(
-                    conn.query_row("SELECT value FROM probe", [], |row| row.get::<_, i64>(0))
-                        .map_err(crate::broker::members::db_err)?,
+                    conn.query_row("SELECT value FROM probe", [], |row| row.get::<_, i64>(0))?,
                     42
                 );
                 release.join().unwrap();
                 let writer = Connection::open(&path).unwrap();
                 writer.execute_batch("BEGIN EXCLUSIVE").unwrap();
                 conn.query_row("SELECT value FROM probe", [], |row| row.get::<_, i64>(0))
-                    .map_err(crate::broker::members::db_err)
+                    .map_err(crate::error::CafleetError::from)
             })
             .unwrap_err();
             assert!(matches!(error, CafleetError::DatabaseBusy(_)));

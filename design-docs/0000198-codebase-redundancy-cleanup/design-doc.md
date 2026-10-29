@@ -1,7 +1,7 @@
 # Codebase redundancy cleanup
 
 **Status**: Approved
-**Progress**: 38/56 tasks complete
+**Progress**: 42/56 tasks complete
 **Last Updated**: 2026-10-29
 
 ## Overview
@@ -611,10 +611,10 @@ Each step is one commit and leaves `mise //cafleet:test` and `mise //cafleet:lin
 
 ### Step 9: Visibility and crate-wide helpers
 
-- [ ] Narrow visibility per CLI-01/INP-45/MUX-19 and delete every dead item the lint reports <!-- completed: -->
-- [ ] Add `digest.rs` and `system::random_hex32`, and replace every copy <!-- completed: -->
-- [ ] Add `From<rusqlite::Error>` and replace the `db_err` sites (BRK-04) <!-- completed: -->
-- [ ] Apply CLI-07, INP-43, BRK-07, CLI-13 and AGT-15 <!-- completed: -->
+- [x] Narrow visibility per CLI-01/INP-45/MUX-19 and delete every dead item the lint reports <!-- completed: 2026-10-29T23:18 -->
+- [x] Add `digest.rs` and `system::random_hex32`, and replace every copy <!-- completed: 2026-10-29T23:29 -->
+- [x] Add `From<rusqlite::Error>` and replace the `db_err` sites (BRK-04) <!-- completed: 2026-10-29T23:35 -->
+- [x] Apply CLI-07, INP-43, BRK-07, CLI-13 and AGT-15 <!-- completed: 2026-10-29T23:42 -->
 
 ### Step 10: Runtime runner simplification
 

@@ -1,24 +1,22 @@
 use rusqlite::{Connection, params};
 
-use super::members::db_err;
 use crate::error::CafleetError;
-use crate::time::{format_utc, now_utc};
+use crate::time::now_stamp;
 
-pub fn record_asset_install(
+pub(crate) fn record_asset_install(
     conn: &mut Connection,
     coding_agent: &str,
     path: &str,
     cafleet_version: &str,
 ) -> Result<(), CafleetError> {
-    let now = format_utc(now_utc());
+    let now = now_stamp();
     conn.execute(
         "INSERT INTO asset_installs (coding_agent, path, cafleet_version, installed_at)
          VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT(coding_agent, path) DO UPDATE SET
              cafleet_version=excluded.cafleet_version, installed_at=excluded.installed_at",
         params![coding_agent, path, cafleet_version, now],
-    )
-    .map_err(db_err)?;
+    )?;
     Ok(())
 }
 

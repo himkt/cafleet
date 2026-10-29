@@ -27,15 +27,13 @@ pub(crate) fn deletion_placements(
         "SELECT m.member_id, p.backend, p.mux_session, p.mux_window_id, p.mux_pane_id, p.coding_agent, p.created_at
          FROM members m JOIN member_placements p ON p.member_id=m.member_id
          WHERE m.fleet_id=?1 AND m.status='active' AND p.mux_pane_id IS NOT NULL"
-    ).map_err(crate::broker::members::db_err)?;
-    let rows = statement
-        .query_map([fleet_id], |row| {
-            Ok((row.get::<_, i64>(0)?, Placement::from_row(row, 1)?))
-        })
-        .map_err(crate::broker::members::db_err)?;
+    )?;
+    let rows = statement.query_map([fleet_id], |row| {
+        Ok((row.get::<_, i64>(0)?, Placement::from_row(row, 1)?))
+    })?;
     let mut placements = Vec::new();
     for row in rows {
-        let (member_id, placement) = row.map_err(crate::broker::members::db_err)?;
+        let (member_id, placement) = row?;
         let path = lock_path(&settings.database_url, &placement).map_err(|error| {
             CafleetError::App(format!(
                 "member {member_id} pane input: {}",
@@ -295,16 +293,14 @@ pub(crate) fn end_member(
         ))
     })?;
     finalize_deletion(conn, deadline, snapshot.runtime.is_some(), |conn| {
-        let tx = conn
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .map_err(crate::broker::members::db_err)?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         revalidate_member(&tx, snapshot, "after pane close")?;
         let changed = crate::broker::members::deregister_member_rows(&tx, member_id)?;
         assert!(
             changed,
             "the input-locked member stays active until deregistration"
         );
-        tx.commit().map_err(crate::broker::members::db_err)
+        tx.commit().map_err(crate::error::CafleetError::from)
     })
     .map_err(|error| {
         CafleetError::App(format!(
@@ -321,7 +317,7 @@ pub(crate) fn end_member(
     Ok(format!("{pane_id} (killed)"))
 }
 
-pub fn delete_fleet(
+pub(crate) fn delete_fleet(
     conn: &mut Connection,
     settings: &Settings,
     fleet_id: i64,
@@ -419,16 +415,14 @@ pub(crate) fn delete_fleet_with_host(
         }
     }
     let (deregistered_count, unplaced) = with_database_budget(conn, deadline, |conn| {
-        let tx = conn
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .map_err(crate::broker::members::db_err)?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         if !same_placements(&deletion_placements(&tx, settings, fleet_id)?, &remaining) {
             return Err(changed_error());
         }
         let unplaced = unplaced_member_outcomes(&tx, fleet_id)?;
         let deregistered_count = crate::broker::fleets::delete_fleet_rows(&tx, fleet_id)?;
         deadline.remaining()?;
-        tx.commit().map_err(crate::broker::members::db_err)?;
+        tx.commit()?;
         Ok((deregistered_count, unplaced))
     })?;
     drop(locked);
@@ -474,29 +468,25 @@ fn unplaced_member_outcomes(
     conn: &Connection,
     fleet_id: i64,
 ) -> Result<Vec<DeletedMember>, CafleetError> {
-    let mut statement = conn
-        .prepare(
-            "SELECT m.member_id, p.member_id IS NOT NULL
+    let mut statement = conn.prepare(
+        "SELECT m.member_id, p.member_id IS NOT NULL
              FROM members m LEFT JOIN member_placements p ON p.member_id=m.member_id
              WHERE m.fleet_id=?1 AND m.status='active' AND p.mux_pane_id IS NULL
                AND m.member_id IS NOT (SELECT director_member_id FROM fleets WHERE fleet_id=?1)",
-        )
-        .map_err(crate::broker::members::db_err)?;
-    let rows = statement
-        .query_map([fleet_id], |row| {
-            Ok(DeletedMember {
-                member_id: row.get(0)?,
-                pane_status: if row.get(1)? {
-                    PENDING_PANE_STATUS
-                } else {
-                    NO_PLACEMENT_STATUS
-                }
-                .to_owned(),
-            })
+    )?;
+    let rows = statement.query_map([fleet_id], |row| {
+        Ok(DeletedMember {
+            member_id: row.get(0)?,
+            pane_status: if row.get(1)? {
+                PENDING_PANE_STATUS
+            } else {
+                NO_PLACEMENT_STATUS
+            }
+            .to_owned(),
         })
-        .map_err(crate::broker::members::db_err)?;
+    })?;
     rows.collect::<Result<_, _>>()
-        .map_err(crate::broker::members::db_err)
+        .map_err(crate::error::CafleetError::from)
 }
 
 #[cfg(test)]
@@ -1628,7 +1618,7 @@ mod tests {
                         42
                     );
                     conn.query_row(LONG_SQL, [], |row| row.get::<_, i64>(0))
-                        .map_err(crate::broker::members::db_err)
+                        .map_err(crate::error::CafleetError::from)
                 });
                 let emergency_fired = emergency.finish();
                 eprintln!("recovery nested SQL {exit}: emergency_fired={emergency_fired}");

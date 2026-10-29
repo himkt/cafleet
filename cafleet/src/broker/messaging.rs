@@ -5,11 +5,10 @@ use std::sync::{
 };
 use std::time::Instant;
 
-use super::members::db_err;
 use super::records::{MemberStatus, MessageRecord};
 use crate::error::CafleetError;
 use crate::input::{Deadline, with_database_budget};
-use crate::time::{format_utc, now_utc};
+use crate::time::now_stamp;
 
 pub(crate) const MESSAGE_COLUMNS: &str =
     "message_id, from_member_id, to_member_id, created_at, status_state, status_timestamp, text";
@@ -27,7 +26,7 @@ pub(crate) fn message_row(
         map_message_row,
     )
     .optional()
-    .map_err(db_err)
+    .map_err(crate::error::CafleetError::from)
 }
 
 pub(crate) fn map_message_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageRecord> {
@@ -42,7 +41,10 @@ pub(crate) fn map_message_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Messa
     })
 }
 
-pub fn get_message(conn: &Connection, message_id: i64) -> Result<MessageRecord, CafleetError> {
+pub(crate) fn get_message(
+    conn: &Connection,
+    message_id: i64,
+) -> Result<MessageRecord, CafleetError> {
     message_row(conn, message_id)?
         .ok_or_else(|| CafleetError::Value(format!("Message {message_id} not found")))
 }
@@ -55,17 +57,15 @@ fn sender_fleet(conn: &Connection, from_member_id: i64) -> Result<i64, CafleetEr
     })
 }
 
-pub fn send_message(
+pub(crate) fn send_message(
     conn: &mut Connection,
     from_member_id: i64,
     to_member_id: i64,
     text: &str,
 ) -> Result<MessageRecord, CafleetError> {
-    let tx = conn
-        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-        .map_err(db_err)?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let message = insert_message_validated(&tx, from_member_id, to_member_id, text)?;
-    tx.commit().map_err(db_err)?;
+    tx.commit()?;
     Ok(message)
 }
 
@@ -83,8 +83,7 @@ pub(crate) fn insert_message_validated(
             [to_member_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .optional()
-        .map_err(db_err)?;
+        .optional()?;
     let Some((recipient_fleet, recipient_status)) = recipient else {
         return Err(CafleetError::Value(format!(
             "Destination member not found: {to_member_id}"
@@ -101,7 +100,7 @@ pub(crate) fn insert_message_validated(
         )));
     }
 
-    let now = format_utc(now_utc());
+    let now = now_stamp();
     // A self-send owes no keystroke, so it is settled at insert.
     let notified_at = (to_member_id == from_member_id).then_some(&now);
     let message = conn.query_row(
@@ -109,27 +108,23 @@ pub(crate) fn insert_message_validated(
          VALUES (?1, ?2, ?3, 'input_required', ?3, ?4, ?5) RETURNING {MESSAGE_COLUMNS}"),
         params![from_member_id, to_member_id, now, text, notified_at],
         map_message_row,
-    ).map_err(db_err)?;
+    )?;
     Ok(message)
 }
 
-pub fn oldest_pending_preview(
+pub(crate) fn oldest_pending_preview(
     conn: &Connection,
     member_id: i64,
     attempted: &std::collections::BTreeSet<i64>,
 ) -> Result<Option<MessageRecord>, CafleetError> {
-    let mut statement = conn
-        .prepare(&format!(
-            "SELECT {MESSAGE_COLUMNS} FROM messages \
+    let mut statement = conn.prepare(&format!(
+        "SELECT {MESSAGE_COLUMNS} FROM messages \
              WHERE to_member_id=?1 AND {PENDING_PREVIEW} \
              ORDER BY created_at, message_id"
-        ))
-        .map_err(db_err)?;
-    let rows = statement
-        .query_map([member_id], map_message_row)
-        .map_err(db_err)?;
+    ))?;
+    let rows = statement.query_map([member_id], map_message_row)?;
     for row in rows {
-        let message = row.map_err(db_err)?;
+        let message = row?;
         if !attempted.contains(&message.message_id) {
             return Ok(Some(message));
         }
@@ -142,36 +137,28 @@ pub(crate) fn stamp_notified_validated(
     message_id: i64,
     when: &str,
 ) -> Result<bool, CafleetError> {
-    let changed = conn
-        .execute(
-            &format!(
-                "UPDATE messages SET notified_at=?1 WHERE message_id=?2 AND {PENDING_PREVIEW}"
-            ),
-            params![when, message_id],
-        )
-        .map_err(db_err)?;
+    let changed = conn.execute(
+        &format!("UPDATE messages SET notified_at=?1 WHERE message_id=?2 AND {PENDING_PREVIEW}"),
+        params![when, message_id],
+    )?;
     Ok(changed == 1)
 }
 
-pub fn poll_messages(
+pub(crate) fn poll_messages(
     conn: &Connection,
     member_id: i64,
 ) -> Result<Vec<MessageRecord>, CafleetError> {
     if super::members::active_member_fleet(conn, member_id)?.is_none() {
         return Err(CafleetError::Value(format!("Member {member_id} not found")));
     }
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT {MESSAGE_COLUMNS} FROM messages \
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {MESSAGE_COLUMNS} FROM messages \
              WHERE to_member_id=?1 AND status_state='input_required' \
              ORDER BY status_timestamp DESC, message_id DESC"
-        ))
-        .map_err(db_err)?;
+    ))?;
     let rows = stmt
-        .query_map([member_id], map_message_row)
-        .map_err(db_err)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(db_err)?;
+        .query_map([member_id], map_message_row)?
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
 
@@ -221,8 +208,7 @@ fn listen_snapshot_with_clock(
                 }
                 expired
             }),
-        )
-        .map_err(db_err)?;
+        )?;
         let result = read_listen_snapshot(
             conn,
             member_id,
@@ -233,7 +219,7 @@ fn listen_snapshot_with_clock(
         );
         let cleanup = conn
             .progress_handler(0, None::<fn() -> bool>)
-            .map_err(db_err);
+            .map_err(crate::error::CafleetError::from);
         match (result, cleanup) {
             (Ok(snapshot), Ok(())) => Ok(snapshot),
             (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
@@ -253,11 +239,11 @@ fn read_listen_snapshot(
     interrupted: &AtomicBool,
 ) -> Result<InboxSnapshot, CafleetError> {
     deadline.remaining_at(now())?;
-    let tx = conn.transaction().map_err(db_err)?;
+    let tx = conn.transaction()?;
     let result = select_listen_snapshot(&tx, member_id, expected_fleet, deadline, now).and_then(
         |snapshot| {
             deadline.remaining_at(now())?;
-            tx.execute_batch("COMMIT").map_err(db_err)?;
+            tx.execute_batch("COMMIT")?;
             Ok(snapshot)
         },
     );
@@ -267,7 +253,7 @@ fn read_listen_snapshot(
     };
     match result {
         Ok(snapshot) => Ok(snapshot),
-        Err(error) => match tx.rollback().map_err(db_err) {
+        Err(error) => match tx.rollback().map_err(crate::error::CafleetError::from) {
             Ok(()) => Err(error),
             Err(cleanup) => {
                 Err(error.with_cleanup(format!("rolling back listener snapshot failed: {cleanup}")))
@@ -290,8 +276,7 @@ fn select_listen_snapshot(
             [member_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .optional()
-        .map_err(db_err)?;
+        .optional()?;
     deadline.remaining_at(now())?;
     let Some((fleet_id, status)) = subject else {
         return Err(if expected_fleet.is_some() {
@@ -353,31 +338,32 @@ fn select_listen_snapshot(
         }
     }
     deadline.remaining_at(now())?;
-    let mut statement = conn
-        .prepare(&format!(
-            "SELECT {MESSAGE_COLUMNS} FROM messages \
+    let mut statement = conn.prepare(&format!(
+        "SELECT {MESSAGE_COLUMNS} FROM messages \
              WHERE to_member_id=?1 AND status_state='input_required' \
              ORDER BY created_at ASC, message_id ASC"
-        ))
-        .map_err(db_err)?;
+    ))?;
     deadline.remaining_at(now())?;
-    let mut rows = statement.query([member_id]).map_err(db_err)?;
+    let mut rows = statement.query([member_id])?;
     deadline.remaining_at(now())?;
     let mut messages = Vec::new();
     loop {
         deadline.remaining_at(now())?;
-        let row = rows.next().map_err(db_err)?;
+        let row = rows.next()?;
         deadline.remaining_at(now())?;
         let Some(row) = row else { break };
-        let message = map_message_row(row).map_err(db_err)?;
+        let message = map_message_row(row)?;
         deadline.remaining_at(now())?;
         messages.push(message);
     }
     Ok(InboxSnapshot::Open { fleet_id, messages })
 }
 
-pub fn ack_message(conn: &mut Connection, message_id: i64) -> Result<MessageRecord, CafleetError> {
-    let now = format_utc(now_utc());
+pub(crate) fn ack_message(
+    conn: &mut Connection,
+    message_id: i64,
+) -> Result<MessageRecord, CafleetError> {
+    let now = now_stamp();
     let updated = conn
         .query_row(
             &format!(
@@ -387,8 +373,7 @@ pub fn ack_message(conn: &mut Connection, message_id: i64) -> Result<MessageReco
             params![now, message_id],
             map_message_row,
         )
-        .optional()
-        .map_err(db_err)?;
+        .optional()?;
     if let Some(message) = updated {
         return Ok(message);
     }

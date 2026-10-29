@@ -1,5 +1,4 @@
 use super::*;
-use crate::broker::members::db_err;
 use crate::broker::records::{MemberStatus, Placement};
 use crate::broker::runtime::{self as storage, *};
 use crate::config::Settings;
@@ -16,16 +15,14 @@ pub(super) fn receipt_placement(conn: &Connection, run: &RunRecord) -> Result<Op
             "SELECT m.status,f.deleted_at FROM members m JOIN fleets f ON f.fleet_id=m.fleet_id WHERE m.member_id=?1 AND m.fleet_id=?2",
             params![run.member_id, run.fleet_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .map_err(db_err)?;
+        )?;
     let placement = conn
         .query_row(
             "SELECT backend,mux_session,mux_window_id,mux_pane_id,coding_agent,created_at FROM member_placements WHERE member_id=?1",
             [run.member_id],
             |row| Placement::from_row(row, 0),
         )
-        .optional()
-        .map_err(db_err)?;
+        .optional()?;
     ensure(
         placement.is_some() || status != MemberStatus::Active || deleted.is_some(),
         "active receipt member requires its recorded placement",
@@ -154,10 +151,10 @@ impl<'a> ExclusiveReceiptGuard<'a> {
             "receipt placement and pane guard must form a matching pair",
         )?;
         with_database_deadline(conn, deadline, |conn| {
-            let tx = conn.transaction().map_err(db_err)?;
+            let tx = conn.transaction()?;
             validate_snapshot(&tx, settings, input, run, pane.0, pane.1)?;
             check_deadline(Instant::now(), deadline)?;
-            tx.commit().map_err(db_err)
+            tx.commit().map_err(crate::error::CafleetError::from)
         })?;
         host.checkpoint(RecoveryBoundary::AfterSnapshot, run, deadline)?;
         check_deadline(Instant::now(), deadline)?;
@@ -255,9 +252,7 @@ impl<'a> ExclusiveReceiptGuard<'a> {
         host.checkpoint(RecoveryBoundary::BeforeTakeover, self.run, self.deadline)?;
         check_deadline(Instant::now(), self.deadline)?;
         with_database_deadline(conn, self.deadline, |conn| {
-            let tx = conn
-                .transaction_with_behavior(TransactionBehavior::Immediate)
-                .map_err(db_err)?;
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
             check_deadline(Instant::now(), self.deadline)?;
             let current = validate_snapshot(
                 &tx,
@@ -283,7 +278,7 @@ impl<'a> ExclusiveReceiptGuard<'a> {
             let changed = tx.execute(
                 "UPDATE member_runs SET owner_epoch=?1,owner_kind='reconciler',owner_pid=?2,owner_start_identity=?3 WHERE run_id=?4 AND owner_epoch=?5 AND owner_kind=?6 AND owner_pid=?7 AND owner_start_identity=?8",
                 params![epoch,self.process.pid,self.process.start_identity,current.run_id,current.owner_epoch,current.owner_kind.as_str(),current.owner_pid,current.owner_start_identity],
-            ).map_err(db_err)?;
+            )?;
             ensure(changed == 1, "exclusive receipt ownership CAS failed")?;
             let mut expected = current;
             expected.owner_epoch = epoch;
@@ -340,7 +335,7 @@ impl<'a> ExclusiveReceiptGuard<'a> {
             check_deadline(Instant::now(), self.deadline)?;
             self.validate_locked_snapshot(&tx, &settled, &owned)?;
             check_deadline(Instant::now(), self.deadline)?;
-            tx.commit().map_err(db_err)?;
+            tx.commit()?;
             Ok(settled)
         })
     }

@@ -1,7 +1,7 @@
 use rusqlite::{Connection, OptionalExtension, params};
 
 use super::*;
-use crate::time::{format_utc, now_utc};
+use crate::time::now_stamp;
 
 fn map_input(row: &rusqlite::Row<'_>) -> rusqlite::Result<InputOperation> {
     Ok(InputOperation {
@@ -64,20 +64,19 @@ fn validate_input(
     Ok(input)
 }
 
-pub fn get_input(conn: &Connection, input_id: i64) -> Result<InputOperation, CafleetError> {
+pub(crate) fn get_input(conn: &Connection, input_id: i64) -> Result<InputOperation, CafleetError> {
     let input = conn
         .query_row(
             "SELECT * FROM member_input_operations WHERE input_id=?1",
             [input_id],
             map_input,
         )
-        .optional()
-        .map_err(db_err)?
+        .optional()?
         .ok_or_else(|| CafleetError::Value(format!("Input {input_id} not found")))?;
     validate_input(conn, input)
 }
 
-pub fn find_input(
+pub(crate) fn find_input(
     conn: &Connection,
     run_id: i64,
     key: &str,
@@ -88,8 +87,7 @@ pub fn find_input(
             params![run_id, key],
             map_input,
         )
-        .optional()
-        .map_err(db_err)?;
+        .optional()?;
     input.map(|input| validate_input(conn, input)).transpose()
 }
 
@@ -98,7 +96,8 @@ pub(crate) enum InputReservation {
     Existing(InputOperation),
 }
 
-pub fn reserve_input(
+#[cfg(test)]
+pub(crate) fn reserve_input(
     conn: &mut Connection,
     owner: &RunOwner,
     new: &NewInput,
@@ -156,12 +155,12 @@ pub(crate) fn reserve_input_with_provenance(
             )?;
         }
         require_capacity(conn, run.run_id)?;
-        let now = format_utc(now_utc());
+        let now = now_stamp();
         conn.execute(
             "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id)
              VALUES(?1,?2,?3,?4,'in_progress',?5,?5,?6)",
             params![run.run_id,new.operation_key,new.kind.as_str(),new.payload_digest,now,new.message_id],
-        ).map_err(db_err)?;
+        )?;
         get_input(conn, conn.last_insert_rowid()).map(InputReservation::Inserted)
     })
 }
@@ -180,7 +179,7 @@ fn owned_input(
     Ok(input)
 }
 
-pub fn record_input_state(
+pub(crate) fn record_input_state(
     conn: &mut Connection,
     owner: &RunOwner,
     input_id: i64,
@@ -213,8 +212,8 @@ pub fn record_input_state(
         )?;
         let changed = conn.execute(
             "UPDATE member_input_operations SET state=?1,updated_at=?2 WHERE input_id=?3 AND state=?4",
-            params![next.as_str(),format_utc(now_utc()),input_id,expected.as_str()],
-        ).map_err(db_err)?;
+            params![next.as_str(),now_stamp(),input_id,expected.as_str()],
+        )?;
         require(
             changed == 1,
             "member_input_operations.state",
@@ -224,7 +223,8 @@ pub fn record_input_state(
     })
 }
 
-pub fn settle_input(
+#[cfg(test)]
+pub(crate) fn settle_input(
     conn: &mut Connection,
     owner: &RunOwner,
     input_id: i64,
@@ -285,8 +285,8 @@ fn settle(
     let changed = conn.execute(
         "UPDATE member_input_operations SET state='settled',disposition=?1,evidence_ref=?2,updated_at=?3
          WHERE input_id=?4 AND state=?5",
-        params![disposition.as_str(),evidence_ref,format_utc(now_utc()),input_id,expected.as_str()],
-    ).map_err(db_err)?;
+        params![disposition.as_str(),evidence_ref,now_stamp(),input_id,expected.as_str()],
+    )?;
     require(
         changed == 1,
         "member_input_operations.state",
@@ -295,7 +295,7 @@ fn settle(
     get_input(conn, input_id)
 }
 
-pub fn settle_preview(
+pub(crate) fn settle_preview(
     conn: &mut Connection,
     owner: &RunOwner,
     input_id: i64,
@@ -347,9 +347,8 @@ fn stamp_preview(
     )?;
     conn.execute(
         "UPDATE messages SET notified_at=?1 WHERE message_id=?2 AND notified_at IS NULL",
-        params![format_utc(now_utc()), message_id],
-    )
-    .map_err(db_err)?;
+        params![now_stamp(), message_id],
+    )?;
     Ok(())
 }
 
@@ -357,7 +356,7 @@ pub(super) fn require_capacity(conn: &Connection, run_id: i64) -> Result<(), Caf
     let unresolved: i64 = conn.query_row(
         "SELECT COUNT(*) FROM member_input_operations WHERE run_id=?1 AND state IN ('in_progress','accepted','uncertain')",
         [run_id], |row| row.get(0),
-    ).map_err(db_err)?;
+    )?;
     require(
         unresolved < 4096,
         "member_input_operations",

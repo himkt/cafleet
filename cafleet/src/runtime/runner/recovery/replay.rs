@@ -89,12 +89,12 @@ pub(super) fn loss_transitions(
 ) -> Result<Vec<ObservedTransition>> {
     let snapshot = storage::runtime_snapshot(conn, run.run_id)?;
     let mut next = first;
-    let now = crate::time::format_utc(crate::time::now_utc());
+    let now = crate::time::now_stamp();
     let mut transitions = Vec::new();
     if let Some(interaction_id) = snapshot.current_interaction_id {
         let interaction = storage::get_event(conn, conn.query_row(
             "SELECT event_id FROM member_runtime_events WHERE interaction_id=?1 ORDER BY event_seq LIMIT 1",
-            [interaction_id], |row| row.get::<_, i64>(0)).map_err(db_err)?)?.interaction
+            [interaction_id], |row| row.get::<_, i64>(0))?)?.interaction
             .ok_or_else(|| error("pending recovery interaction missing"))?;
         transitions.push(ObservedTransition {
             run_id: run.run_id,
@@ -125,14 +125,18 @@ pub(super) fn loss_transitions(
         observed_at: now,
         evidence_json: evidence,
         close_reason: None,
-        cause_json: Some(json!({"kind":if missing {"runtime_path_missing"} else {"monitor_lost"}})),
+        cause_json: Some(json!({"kind":if missing {
+            RuntimeCauseKind::RuntimePathMissing
+        } else {
+            RuntimeCauseKind::MonitorLost
+        }.as_str()})),
     });
     Ok(transitions)
 }
 pub(super) fn terminal_outcome(conn: &Connection, run: &RunRecord) -> Result<Option<RunStatus>> {
     let terminal: Option<String> = conn.query_row(
         "SELECT kind FROM member_runtime_events WHERE run_id=?1 AND kind IN ('runner_exited','runner_lost') ORDER BY event_seq DESC LIMIT 1",
-        [run.run_id], |row| row.get(0)).optional().map_err(db_err)?;
+        [run.run_id], |row| row.get(0)).optional()?;
     match terminal.as_deref() {
         Some("runner_exited") => Ok(Some(RunStatus::Exited)),
         Some("runner_lost") => Ok(Some(RunStatus::Lost)),
@@ -213,17 +217,15 @@ fn perform(
         host.unlink_descriptor(path, deadline)
     })?;
     result.run = with_database_deadline(conn, until, |conn| {
-        let tx = conn
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .map_err(db_err)?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         check_snapshot(&tx, &result.run, pinned)?;
         lock.validate(&tx, &result.run.owner())?;
         storage::validate_owner(&tx, &result.run.owner())?;
         tx.execute("UPDATE member_runs SET status=?1,cleanup_state='complete',ended_at=COALESCE(ended_at,?2),cleanup_diagnostics_json=?3 WHERE run_id=?4 AND owner_epoch=?5",
-            params![target.as_str(),crate::time::format_utc(crate::time::now_utc()),serde_json::to_string(&result.report.cleanup_diagnostics).map_err(io_error)?,result.run.run_id,result.run.owner_epoch]).map_err(db_err)?;
+            params![target.as_str(),crate::time::now_stamp(),serde_json::to_string(&result.report.cleanup_diagnostics).map_err(io_error)?,result.run.run_id,result.run.owner_epoch])?;
         let current = storage::get_run(&tx, result.run.run_id)?;
         check_deadline(Instant::now(), until)?;
-        tx.commit().map_err(db_err)?;
+        tx.commit()?;
         Ok(current)
     })?;
     result.report.status = result.run.status;

@@ -5,13 +5,13 @@ use super::CodingAgent;
 use crate::broker::runtime::PermissionDecision;
 #[cfg(test)]
 use crate::error::CafleetError;
+pub(crate) use catalog::ProfileCatalog;
 pub(crate) use catalog::{AnswerPlan, AnswerStage, StageGate};
-pub use catalog::{NativeCapabilities, ProfileCatalog};
 pub(crate) use composer::ComposerOperation;
 pub(crate) use detector::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AnswerCapability {
+pub(crate) struct AnswerCapability {
     backend: CodingAgent,
     native_version: String,
     profile_version: String,
@@ -21,25 +21,25 @@ pub struct AnswerCapability {
     fixture_ids: Vec<String>,
 }
 impl AnswerCapability {
-    pub fn backend(&self) -> CodingAgent {
+    pub(crate) fn backend(&self) -> CodingAgent {
         self.backend
     }
-    pub fn native_version(&self) -> &str {
+    pub(crate) fn native_version(&self) -> &str {
         &self.native_version
     }
-    pub fn profile_version(&self) -> &str {
+    pub(crate) fn profile_version(&self) -> &str {
         &self.profile_version
     }
-    pub fn request_rule_id(&self) -> &str {
+    pub(crate) fn request_rule_id(&self) -> &str {
         &self.request_rule_id
     }
-    pub fn answer_rule_id(&self) -> &str {
+    pub(crate) fn answer_rule_id(&self) -> &str {
         &self.answer_rule_id
     }
-    pub fn decision(&self) -> PermissionDecision {
+    pub(crate) fn decision(&self) -> PermissionDecision {
         self.decision
     }
-    pub fn fixture_ids(&self) -> &[String] {
+    pub(crate) fn fixture_ids(&self) -> &[String] {
         &self.fixture_ids
     }
 

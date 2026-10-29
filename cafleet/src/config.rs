@@ -1,17 +1,19 @@
 use crate::error::CafleetError;
 
 #[derive(Debug, Clone)]
-pub struct Settings {
-    pub database_url: String,
-    pub max_text_len: usize,
-    pub multiplexer: Option<String>,
+pub(crate) struct Settings {
+    pub(crate) database_url: String,
+    pub(crate) max_text_len: usize,
+    pub(crate) multiplexer: Option<String>,
 }
 
 impl Settings {
     /// Read each field from exactly its own `CAFLEET_*` name (no prefix
     /// magic). Bad numerics fail loudly; the default database URL is the only
     /// place `~` (the home directory) is expanded.
-    pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> Result<Settings, CafleetError> {
+    pub(crate) fn from_lookup(
+        lookup: impl Fn(&str) -> Option<String>,
+    ) -> Result<Settings, CafleetError> {
         let database_url = match lookup("CAFLEET_DATABASE_URL") {
             Some(value) => value,
             None => {
@@ -35,7 +37,7 @@ impl Settings {
         })
     }
 
-    pub fn from_env() -> Result<Settings, CafleetError> {
+    pub(crate) fn from_env() -> Result<Settings, CafleetError> {
         Settings::from_lookup(|name| std::env::var(name).ok())
     }
 }

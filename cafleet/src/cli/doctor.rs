@@ -12,7 +12,7 @@ use crate::error::CafleetError;
 use crate::runtime::system::SystemProbe;
 
 #[derive(Args)]
-pub struct DoctorArgs {
+pub(crate) struct DoctorArgs {
     /// Output in JSON format.
     #[arg(long)]
     json: bool,
@@ -35,7 +35,7 @@ impl Check {
     }
 }
 
-pub fn run(settings: &Settings, args: DoctorArgs) -> Result<(), CafleetError> {
+pub(crate) fn run(settings: &Settings, args: DoctorArgs) -> Result<(), CafleetError> {
     let mux = super::helpers::resolve_mux(settings).and_then(|mux| {
         mux.ensure_available()?;
         let context = mux.context_discovery()?;
@@ -79,14 +79,10 @@ pub fn run(settings: &Settings, args: DoctorArgs) -> Result<(), CafleetError> {
             .as_ref()
             .expect("compatible schema has an open connection");
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        let mut statement = conn
-            .prepare("SELECT run_id FROM member_runs ORDER BY run_id")
-            .map_err(crate::broker::members::db_err)?;
+        let mut statement = conn.prepare("SELECT run_id FROM member_runs ORDER BY run_id")?;
         let runs = statement
-            .query_map([], |row| row.get::<_, i64>(0))
-            .map_err(crate::broker::members::db_err)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(crate::broker::members::db_err)?;
+            .query_map([], |row| row.get::<_, i64>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
         for run_id in runs {
             if std::time::Instant::now() >= deadline {
                 checks.push(Check::new(

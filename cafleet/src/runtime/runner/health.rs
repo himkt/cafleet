@@ -5,12 +5,12 @@ use std::time::Instant;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct HealthSnapshot {
-    pub identity: ControlIdentity,
-    pub runner: ProcessIdentity,
-    pub child: Option<ProcessIdentity>,
-    pub output_seq: u64,
+    pub(crate) identity: ControlIdentity,
+    pub(crate) runner: ProcessIdentity,
+    pub(crate) child: Option<ProcessIdentity>,
+    pub(crate) output_seq: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub observation: Option<ObservationHealth>,
+    pub(crate) observation: Option<ObservationHealth>,
 }
 impl HealthSnapshot {
     pub(crate) fn decode(value: Value, run: &RunRecord) -> Result<Self> {
@@ -51,7 +51,7 @@ pub(crate) fn probe_health(run: &RunRecord, deadline: Instant) -> Result<HealthS
     HealthSnapshot::decode(reply, run)
 }
 pub(crate) struct RuntimeDiagnosis {
-    pub diagnostics: Vec<String>,
+    pub(crate) diagnostics: Vec<String>,
 }
 pub(crate) fn diagnose_runtime(
     conn: &Connection,
@@ -104,13 +104,13 @@ fn diagnose_runtime_observed(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ObservationHealth {
-    pub visibility: Visibility,
-    pub eligibility: InputEligibility,
-    pub pending_count: u64,
-    pub pending_evidence: bool,
-    pub gap_count: u64,
-    pub degraded: bool,
-    pub diagnostic: Option<String>,
+    pub(crate) visibility: Visibility,
+    pub(crate) eligibility: InputEligibility,
+    pub(crate) pending_count: u64,
+    pub(crate) pending_evidence: bool,
+    pub(crate) gap_count: u64,
+    pub(crate) degraded: bool,
+    pub(crate) diagnostic: Option<String>,
 }
 impl ObservationHealth {
     pub(crate) fn validate(&self) -> Result<()> {

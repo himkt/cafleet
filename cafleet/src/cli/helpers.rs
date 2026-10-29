@@ -2,7 +2,7 @@ use serde_json::Value;
 
 use crate::error::CafleetError;
 use crate::output::format_json;
-pub use crate::runtime::resolve_mux;
+pub(crate) use crate::runtime::resolve_mux;
 use crate::runtime::system::read_stdin;
 
 fn is_blank(text: &str) -> bool {
@@ -10,7 +10,7 @@ fn is_blank(text: &str) -> bool {
         .all(|c| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
 }
 
-pub fn resolve_body(
+pub(crate) fn resolve_body(
     inline: Option<&str>,
     file: Option<&str>,
     flag: &str,
@@ -26,7 +26,7 @@ pub fn resolve_body(
     })
 }
 
-pub fn resolve_command_body(
+pub(crate) fn resolve_command_body(
     inline: Option<&str>,
     file: Option<&str>,
 ) -> Result<String, CafleetError> {
@@ -73,7 +73,7 @@ fn read_body(inline: Option<&str>, file: Option<&str>, flag: &str) -> Result<Str
     }
 }
 
-pub fn emit(json: bool, payload: &Value, text: impl FnOnce() -> String) {
+pub(crate) fn emit(json: bool, payload: &Value, text: impl FnOnce() -> String) {
     if json {
         println!("{}", format_json(payload));
     } else {

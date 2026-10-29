@@ -15,7 +15,6 @@ use crate::multiplexer::{AnyMultiplexer, Lead};
 use crate::output::{format_member, format_member_detail, format_member_list};
 use crate::presentation;
 use crate::runtime::system::SystemProbe;
-use crate::time::now_utc;
 
 #[derive(Args)]
 #[group(required = true, multiple = false)]
@@ -41,7 +40,7 @@ pub(crate) struct ExecBodyArgs {
 }
 
 #[derive(Subcommand)]
-pub enum MemberCommand {
+pub(crate) enum MemberCommand {
     /// Reconcile a recorded member run under exclusive ownership.
     Recover {
         /// The member whose recorded run is reconciled.
@@ -250,7 +249,7 @@ pub(crate) fn prepare_input(command: &mut MemberCommand) -> Result<(), CafleetEr
     Ok(())
 }
 
-pub fn run(
+pub(crate) fn run(
     conn: &mut Connection,
     settings: &Settings,
     command: MemberCommand,
@@ -410,7 +409,7 @@ fn create(
         .map_err(|e| CafleetError::App(e.to_string()))?;
 
     use crate::runtime::runner;
-    use std::io::{IsTerminal, Read};
+    use std::io::IsTerminal;
     use std::time::{Duration, Instant};
     let deadline = Instant::now() + Duration::from_secs(10);
     let probe = backend.probe_native_version(
@@ -438,13 +437,11 @@ fn create(
         ),
         &|name| SystemProbe.env_var(name),
     )?;
-    let next_run: i64 = conn
-        .query_row(
-            "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='member_runs'),0)+1",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(crate::broker::members::db_err)?;
+    let next_run: i64 = conn.query_row(
+        "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='member_runs'),0)+1",
+        [],
+        |row| row.get(0),
+    )?;
     runner::RuntimePaths::for_run(&identity, next_run)?;
     let cwd = std::env::current_dir().map_err(|cause| CafleetError::App(cause.to_string()))?;
     let size = if std::io::stdin().is_terminal() {
@@ -452,14 +449,8 @@ fn create(
     } else {
         runner::TerminalSize { rows: 24, cols: 80 }
     };
-    let mut random = [0u8; 32];
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut file| file.read_exact(&mut random))
+    let launch_nonce = crate::runtime::system::random_hex32()
         .map_err(|cause| CafleetError::App(format!("launch nonce unavailable: {cause}")))?;
-    let launch_nonce = random
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
     let pending = runner::PendingMemberSpec {
         fleet_id,
         name: name.into(),
@@ -566,9 +557,7 @@ fn lock_member_deletion(
             Ok((member, targets))
         },
         |conn, snapshot, _guards| {
-            let tx = conn
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .map_err(crate::broker::members::db_err)?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             let current = load_member(&tx, member_id, true)?;
             if !crate::deletion::member_deletion_matches(snapshot, &current) {
                 return Ok(None);
@@ -594,7 +583,7 @@ fn lock_member_deletion(
                     crate::deletion::PENDING_PANE_STATUS
                 })
             };
-            tx.commit().map_err(crate::broker::members::db_err)?;
+            tx.commit()?;
             Ok(Some(action))
         },
         |_| {
@@ -704,17 +693,12 @@ fn dispatch_input(
     let id = member.member_id;
     if let Some(runtime) = &member.runtime {
         use crate::runtime::runner::{InputFailure, SubmissionStatus, SubmitInput};
-        use std::io::Read;
 
         let run = &runtime.run;
         let placement = member.placement.as_ref().expect("placed input member");
-        let mut random = [0; 32];
-        std::fs::File::open("/dev/urandom")
-            .and_then(|mut file| file.read_exact(&mut random))
-            .map_err(|cause| {
-                CafleetError::App(format!("cannot generate input operation key: {cause}"))
-            })?;
-        let random: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+        let random = crate::runtime::system::random_hex32().map_err(|cause| {
+            CafleetError::App(format!("cannot generate input operation key: {cause}"))
+        })?;
         let request = SubmitInput {
             operation_key: format!("{}:{}:{random}", kind.as_str(), run.run_id),
             input_kind: kind,
@@ -904,7 +888,7 @@ fn capture(
         member_id,
         pane_id,
         lines,
-        snapshot: CaptureSnapshot::from_raw(&raw, ansi, now_utc()),
+        snapshot: CaptureSnapshot::from_raw(&raw, ansi, chrono::Utc::now()),
     };
     write_member_capture(&mut std::io::stdout(), &capture, json)
 }
@@ -1412,7 +1396,6 @@ mod tests {
     #[test]
     fn external_input_member_prompt_exec_route_raw_commands_and_print_actual_durable_ids() {
         use crate::broker::runtime as storage;
-        use sha2::{Digest, Sha256};
         crate::runtime::runner::service::test_support::input_service::with_input_service(
             |fixture, outer| {
                 let run =
@@ -1459,10 +1442,8 @@ mod tests {
                                 .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
                         );
                         let payload = json!({"kind":kind.as_str(),"literal":literal,"message_id":null,"run_id":run.run_id});
-                        let digest: String = Sha256::digest(serde_json::to_vec(&payload).unwrap())
-                            .iter()
-                            .map(|byte| format!("{byte:02x}"))
-                            .collect();
+                        let digest =
+                            crate::digest::sha256_hex(&serde_json::to_vec(&payload).unwrap());
                         assert_eq!(
                             row.payload_digest, digest,
                             "Exec binds the raw command before the native prefix"

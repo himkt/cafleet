@@ -1,5 +1,4 @@
 use super::*;
-use crate::broker::members::db_err;
 use crate::broker::records::Placement;
 use crate::broker::runtime::{self as storage, *};
 use crate::config::Settings;
@@ -162,7 +161,7 @@ fn completion(run: RunRecord, outcome: RecoveryOutcome) -> Result<RecoveryComple
 }
 fn placement(conn: &Connection, member_id: i64) -> Result<Option<Placement>> {
     conn.query_row("SELECT backend,mux_session,mux_window_id,mux_pane_id,coding_agent,created_at FROM member_placements WHERE member_id=?1",
-        [member_id], |row| Placement::from_row(row, 0)).optional().map_err(db_err)
+        [member_id], |row| Placement::from_row(row, 0)).optional().map_err(crate::error::CafleetError::from)
 }
 fn snapshot(
     conn: &mut Connection,
@@ -227,7 +226,7 @@ pub(super) fn advance_recovery_owner(
         .checked_add(1)
         .ok_or_else(|| error("owner epoch exhausted"))?;
     let changed = conn.execute("UPDATE member_runs SET owner_epoch=?1,owner_kind='reconciler',owner_pid=?2,owner_start_identity=?3,recovery_origin_status=COALESCE(recovery_origin_status,status),status='recovering' WHERE run_id=?4 AND owner_epoch=?5",
-        params![epoch,process.pid,process.start_identity,current.run_id,current.owner_epoch]).map_err(db_err)?;
+        params![epoch,process.pid,process.start_identity,current.run_id,current.owner_epoch])?;
     ensure(changed == 1, "recovery takeover lost CAS")?;
     storage::get_run(conn, expected.run_id)
 }
@@ -1532,8 +1531,8 @@ mod tests {
     use crate::broker::runtime::{self as storage, *};
     use crate::config::Settings;
     use crate::db::test_support::TableSnapshot;
+    use crate::digest::sha256_hex;
     use crate::error::CafleetError;
-    use crate::runtime::runner::test_support::*;
     use crate::runtime::runner::*;
     use crate::runtime::system::test_support::TestChild;
     use std::sync::Arc;
@@ -1815,7 +1814,7 @@ mod tests {
                     conn.query_row("SELECT COUNT(*) FROM member_runtime_events", [], |row| {
                         row.get::<_, i64>(0)
                     })
-                    .map_err(crate::broker::members::db_err)
+                    .map_err(crate::error::CafleetError::from)
                 },
             );
             eprintln!(

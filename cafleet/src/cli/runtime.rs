@@ -26,7 +26,7 @@ fn evidence_reference(value: &str) -> Result<String, String> {
 }
 
 #[derive(Subcommand)]
-pub enum EventCommand {
+pub(crate) enum EventCommand {
     /// Read a durable runtime event and its current run/interaction state.
     Show {
         /// The runtime event to read.
@@ -39,14 +39,14 @@ pub enum EventCommand {
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
-pub enum Disposition {
+pub(crate) enum Disposition {
     Submitted,
     NotSubmitted,
     AbandonedUncertain,
 }
 
 #[derive(Subcommand)]
-pub enum InputCommand {
+pub(crate) enum InputCommand {
     /// Read a durable programmatic-input receipt.
     Show {
         /// The programmatic-input receipt to read.
@@ -73,7 +73,7 @@ pub enum InputCommand {
     },
 }
 
-pub fn event(conn: &Connection, command: EventCommand) -> Result<(), CafleetError> {
+pub(crate) fn event(conn: &Connection, command: EventCommand) -> Result<(), CafleetError> {
     match command {
         EventCommand::Show { event_id, json } => {
             let view = runtime::get_event(conn, event_id)?;
@@ -85,7 +85,7 @@ pub fn event(conn: &Connection, command: EventCommand) -> Result<(), CafleetErro
     }
 }
 
-pub fn input(
+pub(crate) fn input(
     conn: &mut Connection,
     settings: &crate::config::Settings,
     command: InputCommand,
@@ -150,7 +150,7 @@ where
 }
 
 #[derive(Subcommand)]
-pub enum PermissionCommand {
+pub(crate) enum PermissionCommand {
     /// Read the current native permission request and its answer capability.
     Inspect {
         /// The interaction carrying the request.
@@ -210,7 +210,7 @@ pub enum PermissionCommand {
     },
 }
 
-pub fn permission(
+pub(crate) fn permission(
     conn: &mut Connection,
     settings: &crate::config::Settings,
     command: PermissionCommand,

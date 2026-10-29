@@ -1,6 +1,6 @@
 mod press;
 pub(crate) mod runner;
-pub mod system;
+pub(crate) mod system;
 pub(crate) use press::{KeyAcknowledgment, press_member};
 
 use crate::config::Settings;
@@ -14,7 +14,7 @@ fn env_snapshot() -> std::collections::HashMap<String, String> {
     std::env::vars().collect()
 }
 
-pub fn resolve_mux(settings: &Settings) -> Result<AnyMultiplexer, MultiplexerError> {
+pub(crate) fn resolve_mux(settings: &Settings) -> Result<AnyMultiplexer, MultiplexerError> {
     resolve_multiplexer(
         settings.multiplexer.as_deref(),
         env_snapshot(),

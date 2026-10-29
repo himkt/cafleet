@@ -22,7 +22,7 @@ pub(crate) struct BodyArgs {
 }
 
 #[derive(Subcommand)]
-pub enum MessageCommand {
+pub(crate) enum MessageCommand {
     /// Send a unicast message.
     Send {
         /// Sender's member ID.
@@ -87,7 +87,7 @@ pub enum MessageCommand {
     },
 }
 
-pub fn run(
+pub(crate) fn run(
     conn: &mut Connection,
     settings: &Settings,
     command: MessageCommand,

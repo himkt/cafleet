@@ -6,25 +6,22 @@ pub(crate) fn pending_previews(
     fleet_id: i64,
     subject_id: i64,
 ) -> Result<Vec<(i64, i64)>, CafleetError> {
-    let mut statement = conn
-        .prepare(&format!(
-            "SELECT m.member_id, g.message_id FROM members m
+    let mut statement = conn.prepare(&format!(
+        "SELECT m.member_id, g.message_id FROM members m
          JOIN fleets f ON f.fleet_id=m.fleet_id
          JOIN member_placements p ON p.member_id=m.member_id AND p.mux_pane_id IS NOT NULL
          JOIN messages g ON g.to_member_id=m.member_id
          WHERE m.fleet_id=?1 AND m.status='active' AND m.member_id!=?2
          AND m.member_id!=f.director_member_id AND {}
          ORDER BY m.member_id, g.created_at, g.message_id",
-            super::messaging::PENDING_PREVIEW,
-        ))
-        .map_err(super::members::db_err)?;
+        super::messaging::PENDING_PREVIEW,
+    ))?;
     statement
         .query_map(params![fleet_id, subject_id], |row| {
             Ok((row.get(0)?, row.get(1)?))
-        })
-        .map_err(super::members::db_err)?
+        })?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(super::members::db_err)
+        .map_err(crate::error::CafleetError::from)
 }
 
 #[cfg(test)]

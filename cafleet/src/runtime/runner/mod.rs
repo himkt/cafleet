@@ -70,8 +70,8 @@ pub(crate) fn ensure(condition: bool, message: &str) -> Result<()> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct TerminalSize {
-    pub rows: u16,
-    pub cols: u16,
+    pub(crate) rows: u16,
+    pub(crate) cols: u16,
 }
 
 impl TerminalSize {
@@ -85,11 +85,11 @@ impl TerminalSize {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct SpawnSpec {
-    pub argv: Vec<String>,
-    pub cwd: PathBuf,
-    pub environment: Vec<(String, String)>,
-    pub evidence_policy: Value,
-    pub size: TerminalSize,
+    pub(crate) argv: Vec<String>,
+    pub(crate) cwd: PathBuf,
+    pub(crate) environment: Vec<(String, String)>,
+    pub(crate) evidence_policy: Value,
+    pub(crate) size: TerminalSize,
 }
 
 impl SpawnSpec {
@@ -124,7 +124,6 @@ impl SpawnSpec {
 pub(crate) mod test_support {
     use rusqlite::Connection;
     use serde_json::json;
-    use sha2::{Digest, Sha256};
     use tempfile::TempDir;
 
     use super::*;
@@ -190,16 +189,6 @@ pub(crate) mod test_support {
                 Err(cause) => panic!("fixture reply write failed: {cause}"),
             }
         }
-    }
-
-    pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
-        let mut encoded = String::with_capacity(64);
-        for byte in Sha256::digest(bytes) {
-            for nibble in [byte >> 4, byte & 0x0f] {
-                encoded.push(char::from(b"0123456789abcdef"[usize::from(nibble)]));
-            }
-        }
-        encoded
     }
 
     pub(crate) struct Fixture {

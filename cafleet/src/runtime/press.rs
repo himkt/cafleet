@@ -12,9 +12,9 @@ use crate::input::{Deadline, with_database_budget};
 use crate::multiplexer::{AnyMultiplexer, PressKeys};
 
 pub(crate) struct KeyAcknowledgment {
-    pub member_id: i64,
-    pub pane_id: String,
-    pub keys: Vec<String>,
+    pub(crate) member_id: i64,
+    pub(crate) pane_id: String,
+    pub(crate) keys: Vec<String>,
 }
 
 fn effect_error(member_id: i64, cause: CafleetError, started: bool) -> CafleetError {

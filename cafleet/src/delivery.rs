@@ -16,7 +16,6 @@ use crate::runtime::runner::{
     RealInputDeadlineClock, ReceiptReply, SubmissionStatus, SubmitInput, find_submission,
     submit_wrapped_input_under_pane_lock_with_host, validate_submission_target,
 };
-use crate::time::format_utc;
 use rusqlite::Connection;
 use std::collections::BTreeSet;
 
@@ -122,9 +121,9 @@ fn read_snapshot<T>(
     read: impl FnOnce(&Connection) -> Result<T, CafleetError>,
 ) -> Result<T, CafleetError> {
     deadline.remaining()?;
-    let tx = conn.transaction().map_err(broker::members::db_err)?;
+    let tx = conn.transaction()?;
     let result = read(&tx)?;
-    tx.commit().map_err(broker::members::db_err)?;
+    tx.commit()?;
     Ok(result)
 }
 
@@ -308,7 +307,7 @@ fn deliver_pending_with_host(
                 broker::messaging::stamp_notified_validated(
                     conn,
                     candidate_id,
-                    &format_utc(crate::time::now_utc()),
+                    &crate::time::now_stamp(),
                 )
             }) {
                 Ok(_) => sent.push(candidate_id),
@@ -1196,15 +1195,11 @@ mod tests {
     }
 
     fn preview_digest(run_id: i64, message_id: i64, literal: &str) -> String {
-        use sha2::{Digest, Sha256};
         let canonical = format!(
             "{{\"kind\":\"preview\",\"literal\":{},\"message_id\":{message_id},\"run_id\":{run_id}}}",
             serde_json::to_string(literal).unwrap()
         );
-        Sha256::digest(canonical.as_bytes())
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect()
+        crate::digest::sha256_hex(canonical.as_bytes())
     }
 
     #[test]

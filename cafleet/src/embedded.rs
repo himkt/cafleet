@@ -2,7 +2,7 @@
 
 include!(concat!(env!("OUT_DIR"), "/embedded_data.rs"));
 
-pub fn lookup(
+pub(crate) fn lookup(
     table: &'static [(&'static str, &'static [u8])],
     path: &str,
 ) -> Option<&'static [u8]> {

@@ -1,15 +1,13 @@
 use super::*;
-use crate::broker::members::db_err;
 use crate::broker::records::Placement;
 use crate::broker::runtime::{self as storage, *};
 use crate::config::Settings;
 use crate::input::{Deadline, PaneLock, inherited_database_deadline, with_database_budget};
 use rusqlite::{Connection, OptionalExtension};
-use sha2::{Digest, Sha256};
 use std::time::Instant;
 
 pub(crate) struct PreparedSubmission<'a> {
-    pub request: &'a SubmitInput,
+    pub(crate) request: &'a SubmitInput,
     expiration: InputExpiration,
     deadline: Instant,
 }
@@ -191,14 +189,11 @@ fn submission_digest(run_id: i64, request: &SubmitInput) -> Result<String> {
             return Err(CafleetError::Usage("ordinary input kind required".into()));
         }
     }
-    let bytes = canonical_json(&serde_json::json!({
+    let bytes = crate::digest::canonical_json(&serde_json::json!({
         "run_id":run_id,"kind":request.input_kind.as_str(),
         "message_id":request.message_id,"literal":request.literal,
     }));
-    Ok(Sha256::digest(bytes.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect())
+    Ok(crate::digest::sha256_hex(bytes.as_bytes()))
 }
 
 pub(crate) fn find_submission(
@@ -211,7 +206,7 @@ pub(crate) fn find_submission(
     let result = (|| {
         let digest = submission_digest(identity.run_id, request)?;
         with_database_budget(conn, deadline, |conn| {
-            let tx = conn.transaction().map_err(db_err)?;
+            let tx = conn.transaction()?;
             let run = selected_run(&tx, identity.run_id)?;
             ensure(
                 run.database_identity_json == identity.database_identity_json,
@@ -228,7 +223,7 @@ pub(crate) fn find_submission(
                 )?;
             }
             deadline.remaining()?;
-            tx.commit().map_err(db_err)?;
+            tx.commit()?;
             Ok(retained)
         })
     })();
@@ -489,18 +484,16 @@ pub(crate) fn submit_wrapped_input_under_pane_lock_with_host(
         health.validate(expected_run)?;
         deadline.remaining()?;
         with_database_budget(conn, deadline, |conn| {
-            let tx = conn
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .map_err(db_err)?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             held.validate_binding(&settings.database_url, expected_placement)?;
             validate_submission_target(&tx, settings, expected_run, expected_placement)?;
             let changed = tx.execute(
                 "UPDATE member_runs SET reachability='reachable',last_health_at=?1 WHERE run_id=?2 AND owner_epoch=?3",
-                rusqlite::params![crate::time::format_utc(crate::time::now_utc()), expected_run.run_id, expected_run.owner_epoch],
-            ).map_err(db_err)?;
+                rusqlite::params![crate::time::now_stamp(), expected_run.run_id, expected_run.owner_epoch],
+            )?;
             ensure(changed == 1, "submission health ownership changed")?;
             deadline.remaining()?;
-            tx.commit().map_err(db_err)
+            tx.commit().map_err(crate::error::CafleetError::from)
         })?;
         let input = SubmitInput {
             operation_key: attempt.request.operation_key.clone(),
@@ -669,7 +662,7 @@ fn reconcile_receipt_with_hosts(
             "nonempty reconciliation evidence required",
         )?;
         let (original, run, placement) = with_database_budget(conn, deadline, |conn| {
-            let tx = conn.transaction().map_err(db_err)?;
+            let tx = conn.transaction()?;
             validate_receipt_database(&tx, settings)?;
             let input = storage::get_input(&tx, input_id)?;
             context.run_id = Some(input.run_id);
@@ -690,7 +683,7 @@ fn reconcile_receipt_with_hosts(
                 super::input_recovery::receipt_placement(&tx, &run)?
             };
             deadline.remaining()?;
-            tx.commit().map_err(db_err)?;
+            tx.commit()?;
             Ok((input, run, placement))
         })?;
         if original.state == InputState::Settled {
@@ -719,7 +712,7 @@ fn reconcile_receipt_with_hosts(
         let live = (|| {
             let read_target = |conn: &mut Connection| {
                 with_database_budget(conn, deadline, |conn| {
-                    let tx = conn.transaction().map_err(db_err)?;
+                    let tx = conn.transaction()?;
                     held.validate_binding(&settings.database_url, &placement)?;
                     validate_receipt_target(&tx, settings, &run, &placement)?;
                     let input = storage::get_input(&tx, input_id)?;
@@ -734,7 +727,7 @@ fn reconcile_receipt_with_hosts(
                         "receipt immutable input identity changed",
                     )?;
                     deadline.remaining()?;
-                    tx.commit().map_err(db_err)?;
+                    tx.commit()?;
                     Ok(input)
                 })
             };
@@ -993,8 +986,7 @@ pub(super) fn response_lookup(
             rusqlite::params![run.run_id, input.operation_key],
             |row| row.get::<_, i64>(0),
         )
-        .optional()
-        .map_err(db_err)?;
+        .optional()?;
     let Some(id) = id else {
         return Ok(None);
     };
@@ -1029,7 +1021,7 @@ fn prepare_response(
         operation_key: Some(input.operation_key.clone()),
     };
     let result = with_database_budget(conn, deadline, |conn| {
-        let tx = conn.transaction().map_err(db_err)?;
+        let tx = conn.transaction()?;
         let run = selected_run(&tx, input.expected_run_id)?;
         let retained = response_lookup(&tx, &run, input, &mut context.input_id)?;
         let prepared = if let Some(receipt) = &retained
@@ -1060,7 +1052,7 @@ fn prepare_response(
             ResponsePreparation::Live(Box::new((run, original, retained)))
         };
         deadline.remaining()?;
-        tx.commit().map_err(db_err)?;
+        tx.commit()?;
         Ok(prepared)
     });
     result.map_err(|source| context.failure(source))
@@ -1123,7 +1115,7 @@ pub(crate) fn respond_permission_with_host(
                 deadline.remaining()?;
                 held.validate_binding(&settings.database_url, &placement)?;
                 with_database_budget(conn, deadline, |conn| {
-                    let tx = conn.transaction().map_err(db_err)?;
+                    let tx = conn.transaction()?;
                     validate_submission_target(&tx, settings, &run, &placement)?;
                     let view = super::input::inspection_association(
                         &tx,
@@ -1150,7 +1142,7 @@ pub(crate) fn respond_permission_with_host(
                         )?;
                     }
                     deadline.remaining()?;
-                    tx.commit().map_err(db_err)
+                    tx.commit().map_err(crate::error::CafleetError::from)
                 })
             };
         validate(conn)?;
@@ -1181,7 +1173,7 @@ pub(crate) fn respond_permission_with_host(
             "permission response reply identity mismatch",
         )?;
         let receipt = with_database_budget(conn, deadline, |conn| {
-            let tx = conn.transaction().map_err(db_err)?;
+            let tx = conn.transaction()?;
             held.validate_binding(&settings.database_url, &placement)?;
             validate_submission_target(&tx, settings, &run, &placement)?;
             association(
@@ -1194,7 +1186,7 @@ pub(crate) fn respond_permission_with_host(
             let receipt = response_lookup(&tx, &run, input, &mut context.input_id)?;
             context.input_id = receipt.as_ref().map(|r| r.input.input_id);
             deadline.remaining()?;
-            tx.commit().map_err(db_err)?;
+            tx.commit()?;
             Ok(receipt)
         })?;
         match (reply.submission.input_id, receipt.as_ref()) {
@@ -1286,15 +1278,14 @@ fn inspect_permission_with_host(
         )?;
         let deadline = submission_deadline(conn, deadline)?;
         let (run, placement, original) = with_database_budget(conn, deadline, |conn| {
-            let tx = conn.transaction().map_err(db_err)?;
+            let tx = conn.transaction()?;
             let interaction_exists = tx
                 .query_row(
                     "SELECT 1 FROM member_interactions WHERE interaction_id=?1",
                     [input.interaction_id],
                     |_| Ok(()),
                 )
-                .optional()
-                .map_err(db_err)?
+                .optional()?
                 .is_some();
             if !interaction_exists {
                 return Err(CafleetError::App(format!(
@@ -1315,7 +1306,7 @@ fn inspect_permission_with_host(
             validate_submission_target(&tx, settings, &run, &placement)?;
             let view = super::input::inspection_association(&tx, &run, input)?;
             deadline.remaining()?;
-            tx.commit().map_err(db_err)?;
+            tx.commit()?;
             Ok((run, placement, view))
         })?;
         let expiration = InputExpiration::capture(deadline.instant(), &mut RealInputDeadlineClock)?;
@@ -1328,7 +1319,7 @@ fn inspect_permission_with_host(
                 deadline.remaining()?;
                 held.validate_binding(&settings.database_url, &placement)?;
                 with_database_budget(conn, deadline, |conn| {
-                    let tx = conn.transaction().map_err(db_err)?;
+                    let tx = conn.transaction()?;
                     validate_submission_target(&tx, settings, &run, &placement)?;
                     let view = super::input::inspection_association(&tx, &run, input)?;
                     ensure(
@@ -1341,7 +1332,7 @@ fn inspect_permission_with_host(
                         "permission inspection association changed",
                     )?;
                     deadline.remaining()?;
-                    tx.commit().map_err(db_err)
+                    tx.commit().map_err(crate::error::CafleetError::from)
                 })
             };
         validate(conn)?;
@@ -1681,7 +1672,6 @@ mod tests {
         wait_input_service_record, with_input_service,
     };
     use crate::runtime::runner::test_support::Fixture;
-    use sha2::{Digest, Sha256};
     use std::io::Write;
     use std::net::Shutdown;
     use std::time::Duration;
@@ -1755,7 +1745,7 @@ mod tests {
                 conn.query_row(
                     "SELECT event_id,interaction_id,message_id FROM member_runtime_events WHERE run_id=?1 AND kind='interaction_opened'",
                     [fixture.fixture.run.run_id], |row| Ok((row.get::<_, i64>(0)?,row.get::<_, i64>(1)?,row.get::<_, i64>(2)?)),
-                ).optional().map_err(db_err)
+                ).optional().map_err(crate::error::CafleetError::from)
             }).unwrap();
             if let Some(row) = row {
                 break row;
@@ -1916,7 +1906,7 @@ mod tests {
         let output_start = fixture.output.len();
         let (event_id, interaction_id, message_id) = loop {
             let ids = with_database_budget(&mut fixture.fixture.conn,Deadline::until(outer),|conn| {
-                conn.query_row("SELECT event_id,interaction_id,message_id FROM member_runtime_events WHERE run_id=?1 AND kind='interaction_opened'",[fixture.fixture.run.run_id],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?))).optional().map_err(db_err)
+                conn.query_row("SELECT event_id,interaction_id,message_id FROM member_runtime_events WHERE run_id=?1 AND kind='interaction_opened'",[fixture.fixture.run.run_id],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?))).optional().map_err(crate::error::CafleetError::from)
             }).unwrap();
             if let Some(ids) = ids {
                 break ids;
@@ -2169,8 +2159,7 @@ mod tests {
                             .push(Deadline::inherited_or_new().instant());
                     }
                     Authorization::Allow
-                }))
-                .map_err(db_err)?;
+                }))?;
                 active = Some(respond_permission_with_host(
                     conn,
                     &case.settings,
@@ -2195,7 +2184,7 @@ mod tests {
                 ));
                 expired_calls = Some(calls.load(Ordering::SeqCst));
                 conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
-                    .map_err(db_err)
+                    .map_err(crate::error::CafleetError::from)
             });
         let expired = expired.expect("expired-frame invocation completed");
         let expired_calls = expired_calls.expect("SQL count sampled after expired invocation");
@@ -2276,7 +2265,7 @@ mod tests {
         fixture.read_until("Operation: write form-response.txt");
         let (event_id, interaction_id) = loop {
             let row=with_database_budget(&mut fixture.fixture.conn,Deadline::until(until),|conn| {
-                conn.query_row("SELECT event_id,interaction_id FROM member_runtime_events WHERE run_id=?1 AND kind='interaction_opened'",[fixture.fixture.run.run_id],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?))).optional().map_err(db_err)
+                conn.query_row("SELECT event_id,interaction_id FROM member_runtime_events WHERE run_id=?1 AND kind='interaction_opened'",[fixture.fixture.run.run_id],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?))).optional().map_err(crate::error::CafleetError::from)
             }).unwrap();
             if let Some(ids) = row {
                 break ids;
@@ -2399,7 +2388,7 @@ mod tests {
             let conn = crate::db::connect(&database).unwrap();
             assert_eq!(conn.execute(
                 "UPDATE member_interactions SET closed_at=?1,close_reason='not_visible' WHERE interaction_id=?2 AND closed_at IS NULL",
-                rusqlite::params![crate::time::format_utc(crate::time::now_utc()), interaction_id],
+                rusqlite::params![crate::time::now_stamp(), interaction_id],
             ).unwrap(), 1);
             let closed_at: Option<String> = conn
                 .query_row(
@@ -3257,10 +3246,7 @@ mod tests {
             "kind":request.input_kind.as_str(), "literal":request.literal,
             "message_id":request.message_id, "run_id":run_id,
         });
-        Sha256::digest(serde_json::to_vec(&value).unwrap())
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect()
+        crate::digest::sha256_hex(&serde_json::to_vec(&value).unwrap())
     }
 
     struct NoLiveHost;

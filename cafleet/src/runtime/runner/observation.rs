@@ -1,15 +1,15 @@
 use super::*;
 use crate::broker::runtime::{
-    self as storage, InteractionCloseReason, OwnerKind, RunRecord, RunStatus, RuntimeEventKind,
-    evidence::EvidencePolicy,
+    self as storage, InteractionCloseReason, OwnerKind, RunRecord, RunStatus, RuntimeCauseKind,
+    RuntimeEventKind, evidence::EvidencePolicy,
 };
 use crate::coding_agent::{AnswerMatch, Detector, ProfileCatalog};
 use std::ops::RangeInclusive;
 use std::time::{Duration, Instant};
 
 pub(crate) struct ObservationMoment {
-    pub monotonic: Instant,
-    pub observed_at: String,
+    pub(crate) monotonic: Instant,
+    pub(crate) observed_at: String,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ObservationClockKind {
@@ -48,7 +48,7 @@ impl ObservationClock for RealObservationClock {
     fn sample(&self) -> ObservationMoment {
         ObservationMoment {
             monotonic: Instant::now(),
-            observed_at: crate::time::format_utc(crate::time::now_utc()),
+            observed_at: crate::time::now_stamp(),
         }
     }
     fn kind(&self) -> ObservationClockKind {
@@ -74,14 +74,14 @@ impl ObservationFailure {
 }
 #[derive(Debug)]
 pub(crate) struct ObservationStatus {
-    pub visibility: Visibility,
-    pub eligibility: InputEligibility,
-    pub next_deadline: Option<Instant>,
-    pub retained_transition: bool,
-    pub retained_draft: bool,
-    pub retained_evidence: bool,
-    pub gap_count: u64,
-    pub diagnostic: Option<String>,
+    pub(crate) visibility: Visibility,
+    pub(crate) eligibility: InputEligibility,
+    pub(crate) next_deadline: Option<Instant>,
+    pub(crate) retained_transition: bool,
+    pub(crate) retained_draft: bool,
+    pub(crate) retained_evidence: bool,
+    pub(crate) gap_count: u64,
+    pub(crate) diagnostic: Option<String>,
 }
 struct PendingEpisodeUpdate {
     update: EpisodeUpdate,
@@ -796,7 +796,7 @@ impl ObservationController {
         }
         if self.gap.is_some() && !writer.status().degraded {
             let gap = self.gap.take().expect("gap present");
-            let cause = |kind: &str| serde_json::json!({"kind":kind,"gap_count":gap.count,"gap_started_at":gap.started_at,"gap_ended_at":if kind=="storage_recovered"{Some(&now.observed_at)}else{None}});
+            let cause = |kind: RuntimeCauseKind| serde_json::json!({"kind":kind.as_str(),"gap_count":gap.count,"gap_started_at":gap.started_at,"gap_ended_at":if kind==RuntimeCauseKind::StorageRecovered{Some(&now.observed_at)}else{None}});
             let first = self.lifecycle(
                 RuntimeEventKind::RunnerDegraded,
                 cause(
@@ -804,9 +804,9 @@ impl ObservationController {
                         gap.reason,
                         ObservationFailure::Parser | ObservationFailure::Detector
                     ) {
-                        "observer_error"
+                        RuntimeCauseKind::ObserverError
                     } else {
-                        "storage_pressure"
+                        RuntimeCauseKind::StoragePressure
                     },
                 ),
                 &gap.started_at,
@@ -814,7 +814,7 @@ impl ObservationController {
             )?;
             let last = self.lifecycle(
                 RuntimeEventKind::RunnerDegraded,
-                cause("storage_recovered"),
+                cause(RuntimeCauseKind::StorageRecovered),
                 &now.observed_at,
                 current.screen_seq,
             )?;
@@ -836,10 +836,10 @@ impl ObservationController {
                 .finish(InteractionCloseReason::ProcessExited, &exit.at)?;
             let cause = match exit.exit {
                 ChildExit::Code(code) => {
-                    serde_json::json!({"kind":"native_exit","exit_code":code,"exit_signal":null})
+                    serde_json::json!({"kind":RuntimeCauseKind::NativeExit.as_str(),"exit_code":code,"exit_signal":null})
                 }
                 ChildExit::Signal(signal) => {
-                    serde_json::json!({"kind":"native_exit","exit_code":null,"exit_signal":signal})
+                    serde_json::json!({"kind":RuntimeCauseKind::NativeExit.as_str(),"exit_code":null,"exit_signal":signal})
                 }
             };
             update.transitions.push(self.lifecycle(
@@ -1032,24 +1032,24 @@ pub(crate) mod native_capture {
 
     #[derive(Clone, Debug, Serialize)]
     pub(crate) struct NativeCaptureLimits {
-        pub max_cells: usize,
-        pub max_source_bytes: usize,
-        pub max_title_bytes: usize,
-        pub max_patterns: usize,
-        pub max_pattern_bytes: usize,
-        pub max_total_pattern_bytes: usize,
-        pub max_compiled_regex_bytes: usize,
-        pub max_pattern_input_bytes: usize,
-        pub max_scratch_bytes: usize,
-        pub max_projected_heap_bytes: usize,
-        pub max_encoded_sample_bytes: usize,
-        pub max_encoded_result_bytes: usize,
-        pub max_arm_bytes: usize,
-        pub max_config_bytes: usize,
-        pub max_producer_bytes: usize,
-        pub max_diagnostic_bytes: usize,
-        pub max_interval: Duration,
-        pub max_request_duration: Duration,
+        pub(crate) max_cells: usize,
+        pub(crate) max_source_bytes: usize,
+        pub(crate) max_title_bytes: usize,
+        pub(crate) max_patterns: usize,
+        pub(crate) max_pattern_bytes: usize,
+        pub(crate) max_total_pattern_bytes: usize,
+        pub(crate) max_compiled_regex_bytes: usize,
+        pub(crate) max_pattern_input_bytes: usize,
+        pub(crate) max_scratch_bytes: usize,
+        pub(crate) max_projected_heap_bytes: usize,
+        pub(crate) max_encoded_sample_bytes: usize,
+        pub(crate) max_encoded_result_bytes: usize,
+        pub(crate) max_arm_bytes: usize,
+        pub(crate) max_config_bytes: usize,
+        pub(crate) max_producer_bytes: usize,
+        pub(crate) max_diagnostic_bytes: usize,
+        pub(crate) max_interval: Duration,
+        pub(crate) max_request_duration: Duration,
     }
     impl Default for NativeCaptureLimits {
         fn default() -> Self {
@@ -1112,11 +1112,11 @@ pub(crate) mod native_capture {
     #[derive(Clone, Debug, Serialize, Deserialize)]
     #[serde(deny_unknown_fields)]
     pub(crate) struct CaptureMask {
-        pub screen: CaptureScreen,
-        pub rows: u16,
-        pub cols: u16,
-        pub region: ScreenRegion,
-        pub reason: CaptureMaskReason,
+        pub(crate) screen: CaptureScreen,
+        pub(crate) rows: u16,
+        pub(crate) cols: u16,
+        pub(crate) region: ScreenRegion,
+        pub(crate) reason: CaptureMaskReason,
     }
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
     #[serde(rename_all = "snake_case")]
@@ -1276,11 +1276,11 @@ pub(crate) mod native_capture {
     }
     #[derive(Clone)]
     pub(crate) struct NativeCaptureRequest {
-        pub capture_id: String,
-        pub run_id: i64,
-        pub owner_epoch: i64,
-        pub minimum_interval: Duration,
-        pub deadline: Instant,
+        pub(crate) capture_id: String,
+        pub(crate) run_id: i64,
+        pub(crate) owner_epoch: i64,
+        pub(crate) minimum_interval: Duration,
+        pub(crate) deadline: Instant,
     }
     pub(crate) fn validate_capture_id(id: &str) -> Result<()> {
         ensure(
@@ -2142,6 +2142,7 @@ pub(crate) mod native_capture {
         use crate::broker::records::Placement;
         use crate::broker::runtime as storage;
         use crate::coding_agent::ScreenRegion;
+        use crate::digest::sha256_hex;
         use crate::runtime::runner::test_support::*;
         use crate::runtime::system::test_support::TestChild;
         use std::fs::OpenOptions;
@@ -2462,8 +2463,8 @@ pub(crate) mod native_capture {
         use super::test_support::*;
         use super::*;
         use crate::broker::runtime::{self as storage, *};
+        use crate::digest::sha256_hex;
         use crate::runtime::runner::service::test_support::*;
-        use crate::runtime::runner::test_support::*;
 
         mod collection {
             use super::*;
@@ -3522,7 +3523,7 @@ pub(crate) mod native_capture {
                     minimum_interval_ms: 100,
                     timeout_ms: 2000,
                 };
-                let arm_at = crate::time::now_utc();
+                let arm_at = chrono::Utc::now();
                 private_write(
                     &fixture.fixture._dir.path().join("capture-arm.json"),
                     &serde_json::to_vec(&request).unwrap(),
@@ -3568,7 +3569,7 @@ pub(crate) mod native_capture {
                 let first_end = samples[0]["monotonic_end_ns"].as_u64().unwrap();
                 let second_start = samples[1]["monotonic_start_ns"].as_u64().unwrap();
                 assert!(second_start.checked_sub(first_end).unwrap() >= 100_000_000);
-                let collected_at = crate::time::now_utc();
+                let collected_at = chrono::Utc::now();
                 for sample in samples {
                     assert!(
                         sample["monotonic_end_ns"].as_u64().unwrap()
@@ -3843,6 +3844,7 @@ pub(crate) mod native_capture {
 
             use super::*;
             use crate::broker::runtime::{self as storage, *};
+            use crate::digest::sha256_hex;
             use crate::runtime::runner::service::test_support::observation_services::{
                 capture, private_write,
             };
@@ -4614,28 +4616,13 @@ pub(crate) mod native_capture {
 
     mod files {
         use super::*;
-        use sha2::{Digest, Sha256};
         use std::fs::{File, OpenOptions};
         use std::io::{Read, Write};
         use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
         use std::path::{Path, PathBuf};
 
         pub(super) fn file_digest(path: &Path) -> Result<String> {
-            let mut file = File::open(path).map_err(io_error)?;
-            let mut hash = Sha256::new();
-            let mut bytes = [0; 65536];
-            loop {
-                let count = file.read(&mut bytes).map_err(io_error)?;
-                if count == 0 {
-                    break;
-                }
-                hash.update(&bytes[..count]);
-            }
-            Ok(hash
-                .finalize()
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<String>())
+            crate::digest::sha256_file_hex(path).map_err(io_error)
         }
         fn private_directory(path: &Path) -> Result<(u64, u64)> {
             ensure(path.is_absolute(), "private directory must be absolute")?;
@@ -4708,15 +4695,15 @@ pub(crate) mod native_capture {
         #[derive(Clone, Debug, Serialize, Deserialize)]
         #[serde(deny_unknown_fields)]
         pub(crate) struct NativeCaptureConfig {
-            pub schema_version: u32,
-            pub database_url: String,
-            pub descriptor_path: PathBuf,
-            pub expected_run_id: i64,
-            pub expected_launch_nonce: String,
-            pub arm_path: PathBuf,
-            pub output_directory: PathBuf,
-            pub producer_manifest_path: PathBuf,
-            pub capture_policy_path: PathBuf,
+            pub(crate) schema_version: u32,
+            pub(crate) database_url: String,
+            pub(crate) descriptor_path: PathBuf,
+            pub(crate) expected_run_id: i64,
+            pub(crate) expected_launch_nonce: String,
+            pub(crate) arm_path: PathBuf,
+            pub(crate) output_directory: PathBuf,
+            pub(crate) producer_manifest_path: PathBuf,
+            pub(crate) capture_policy_path: PathBuf,
         }
         pub(crate) fn read_native_capture_config(
             path: &Path,
@@ -4873,12 +4860,12 @@ pub(crate) mod native_capture {
         #[derive(Clone, Debug, Serialize, Deserialize)]
         #[serde(deny_unknown_fields)]
         pub(crate) struct NativeCaptureArm {
-            pub schema_version: u32,
-            pub capture_id: String,
-            pub run_id: i64,
-            pub owner_epoch: i64,
-            pub minimum_interval_ms: u64,
-            pub timeout_ms: u64,
+            pub(crate) schema_version: u32,
+            pub(crate) capture_id: String,
+            pub(crate) run_id: i64,
+            pub(crate) owner_epoch: i64,
+            pub(crate) minimum_interval_ms: u64,
+            pub(crate) timeout_ms: u64,
         }
         impl NativeCaptureArm {
             pub(crate) fn to_request(
@@ -4977,12 +4964,12 @@ pub(crate) mod native_capture {
             Incomplete,
         }
         pub(crate) struct NativeCapturePublication {
-            pub artifact_path: PathBuf,
-            pub manifest_path: PathBuf,
-            pub artifact_sha256: String,
-            pub artifact_bytes: u64,
-            pub collection_status: NativeCaptureStatus,
-            pub publication_status: CapturePublicationStatus,
+            pub(crate) artifact_path: PathBuf,
+            pub(crate) manifest_path: PathBuf,
+            pub(crate) artifact_sha256: String,
+            pub(crate) artifact_bytes: u64,
+            pub(crate) collection_status: NativeCaptureStatus,
+            pub(crate) publication_status: CapturePublicationStatus,
         }
         struct PublicationTemporary {
             path: PathBuf,
@@ -5097,11 +5084,7 @@ pub(crate) mod native_capture {
                 directory.sync_all().map_err(io_error)
             })();
             let cleanup = temporary.cleanup();
-            match (result, cleanup) {
-                (Ok(()), Ok(())) => Ok(()),
-                (Err(primary), Err(cleanup)) => Err(primary.with_cleanup(cleanup.message())),
-                (Err(cause), _) | (_, Err(cause)) => Err(cause),
-            }
+            CafleetError::merge_cleanup(result, cleanup)
         }
         pub(super) fn publish_private(path: &Path, bytes: &[u8], until: Instant) -> Result<()> {
             publish_file(
@@ -5166,10 +5149,7 @@ pub(crate) mod native_capture {
                 )?;
                 super::encode_bounded(result, limits.max_encoded_result_bytes)?
             };
-            let artifact_sha256 = Sha256::digest(&encoded)
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<String>();
+            let artifact_sha256 = crate::digest::sha256_hex(&encoded);
             let artifact_bytes = encoded.len() as u64;
             ensure(
                 private_directory(directory)? == directory_identity,
@@ -5746,11 +5726,10 @@ pub(crate) mod native_capture {
         use crate::broker::runtime as storage;
         use crate::coding_agent::CodingAgent;
         use crate::config::Settings;
+        use crate::digest::sha256_hex;
         use crate::multiplexer::{CommandRunner, MultiplexerContext, resolve_multiplexer};
-        use crate::runtime::runner::test_support::sha256_hex;
         use crate::runtime::system::SystemRunner;
         use rusqlite::Connection;
-        use sha2::{Digest, Sha256};
         use std::os::unix::fs::MetadataExt;
         use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
         use std::path::Path;
@@ -6373,13 +6352,6 @@ pub(crate) mod native_capture {
             stdout: String,
             exit_code: i32,
         }
-
-        fn driver_digest(bytes: &[u8]) -> String {
-            Sha256::digest(bytes)
-                .iter()
-                .map(|b| format!("{b:02x}"))
-                .collect()
-        }
         fn driver_read<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
             let bytes = super::files::read_private(path, 65536)
                 .map_err(|cause| error(format!("{}: {}", path.display(), cause.message())))?;
@@ -6601,7 +6573,7 @@ pub(crate) mod native_capture {
                 NativeCaptureLimits::default().max_encoded_result_bytes,
             )?;
             ensure(
-                manifest["artifact_sha256"] == driver_digest(&bytes)
+                manifest["artifact_sha256"] == crate::digest::sha256_hex(&bytes)
                     && manifest["artifact_bytes"] == bytes.len(),
                 "capture artifact/manifest digest mismatch",
             )?;
@@ -6627,7 +6599,7 @@ pub(crate) mod native_capture {
             )?;
             Ok(
                 json!({"manifest_path":manifest_path,"manifest_sha256":super::files::file_digest(&manifest_path)?,
-        "artifact_path":artifact,"artifact_sha256":driver_digest(&bytes),"service_status":service["status"]}),
+        "artifact_path":artifact,"artifact_sha256":crate::digest::sha256_hex(&bytes),"service_status":service["status"]}),
             )
         }
 
@@ -7134,7 +7106,7 @@ pub(crate) mod native_capture {
             )?;
             let ownership = DriverOwnership {
                 schema_version: 1,
-                case_manifest_sha256: driver_digest(&case_bytes),
+                case_manifest_sha256: crate::digest::sha256_hex(&case_bytes),
                 case_nonce: case.case_nonce.clone(),
                 driver: ProcessIdentity::current()?,
                 server: ProcessIdentity::read(case.tmux.server_pid)?
@@ -7992,7 +7964,7 @@ mod tests {
                 .unwrap()
                 .expect("owned live synthetic child");
             assert!(identity.matches().unwrap());
-            fixture.conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3 WHERE run_id=?4",rusqlite::params![identity.pid,identity.start_identity,crate::time::format_utc(crate::time::now_utc()),fixture.run.run_id]).unwrap();
+            fixture.conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3 WHERE run_id=?4",rusqlite::params![identity.pid,identity.start_identity,crate::time::now_stamp(),fixture.run.run_id]).unwrap();
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
             let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
             let primary = catch_unwind(AssertUnwindSafe(|| {

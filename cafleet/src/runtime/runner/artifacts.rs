@@ -1,6 +1,6 @@
 use super::*;
-use crate::broker::members::db_err;
 use crate::broker::runtime::{self as storage, OwnerKind, RunOwner, RunRecord};
+use crate::digest::canonical_json;
 use rusqlite::{Connection, params};
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -16,34 +16,6 @@ use std::time::Instant;
 mod recovery_descriptor;
 pub(crate) use recovery_descriptor::RecoveryDescriptor;
 
-pub(crate) fn canonical_json(value: &Value) -> String {
-    match value {
-        Value::Object(map) => {
-            let sorted: std::collections::BTreeMap<_, _> = map.iter().collect();
-            format!(
-                "{{{}}}",
-                sorted
-                    .iter()
-                    .map(|(key, value)| format!(
-                        "{}:{}",
-                        serde_json::to_string(key).expect("JSON key serializes"),
-                        canonical_json(value)
-                    ))
-                    .collect::<Vec<_>>()
-                    .join(",")
-            )
-        }
-        Value::Array(items) => format!(
-            "[{}]",
-            items
-                .iter()
-                .map(canonical_json)
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
-        _ => value.to_string(),
-    }
-}
 fn namespace(identity: &Value) -> String {
     let digest = Sha256::digest(canonical_json(identity).as_bytes());
     let alphabet = b"abcdefghijklmnopqrstuvwxyz234567";
@@ -66,13 +38,13 @@ fn namespace(identity: &Value) -> String {
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimePaths {
-    pub namespace_dir: PathBuf,
-    pub namespace_manifest: PathBuf,
-    pub run_dir: PathBuf,
-    pub descriptor: PathBuf,
-    pub control_socket: PathBuf,
-    pub owner_lock: PathBuf,
-    pub outbox: PathBuf,
+    pub(crate) namespace_dir: PathBuf,
+    pub(crate) namespace_manifest: PathBuf,
+    pub(crate) run_dir: PathBuf,
+    pub(crate) descriptor: PathBuf,
+    pub(crate) control_socket: PathBuf,
+    pub(crate) owner_lock: PathBuf,
+    pub(crate) outbox: PathBuf,
 }
 impl RuntimePaths {
     pub(crate) fn for_run(identity: &Value, run_id: i64) -> Result<Self> {
@@ -207,7 +179,7 @@ pub(crate) fn validate_run_paths(conn: &Connection, run: &RunRecord) -> Result<R
 }
 
 pub(crate) struct RunArtifacts {
-    pub paths: RuntimePaths,
+    pub(crate) paths: RuntimePaths,
     descriptor_identity: RefCell<Option<Value>>,
 }
 impl RunArtifacts {
@@ -263,7 +235,7 @@ impl RunArtifacts {
         let lock_id = identity(&lock.metadata().map_err(io_error)?);
         with_database_deadline(conn, deadline, |conn| {
             validate_database(conn, &run.database_identity_json)?;
-            let changed=conn.execute("UPDATE member_runs SET runtime_path=?1,runtime_dir_identity_json=?2,run_lock_identity_json=?3 WHERE run_id=?4 AND owner_epoch=?5 AND owner_kind='creator' AND runtime_dir_identity_json IS NULL",params![paths.run_dir.to_string_lossy(),dir_id.to_string(),lock_id.to_string(),run_id,run.owner_epoch]).map_err(db_err)?;
+            let changed=conn.execute("UPDATE member_runs SET runtime_path=?1,runtime_dir_identity_json=?2,run_lock_identity_json=?3 WHERE run_id=?4 AND owner_epoch=?5 AND owner_kind='creator' AND runtime_dir_identity_json IS NULL",params![paths.run_dir.to_string_lossy(),dir_id.to_string(),lock_id.to_string(),run_id,run.owner_epoch])?;
             ensure(changed == 1, "artifact ownership changed during allocation")
         })?;
         Ok(Self {
@@ -326,15 +298,15 @@ impl Drop for RunArtifacts {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct LaunchDescriptor {
-    pub schema_version: u32,
-    pub database_identity_json: Value,
-    pub fleet_id: i64,
-    pub member_id: i64,
-    pub director_member_id: i64,
-    pub run_id: i64,
-    pub owner_epoch: i64,
-    pub launch_nonce: String,
-    pub spawn: SpawnSpec,
+    pub(crate) schema_version: u32,
+    pub(crate) database_identity_json: Value,
+    pub(crate) fleet_id: i64,
+    pub(crate) member_id: i64,
+    pub(crate) director_member_id: i64,
+    pub(crate) run_id: i64,
+    pub(crate) owner_epoch: i64,
+    pub(crate) launch_nonce: String,
+    pub(crate) spawn: SpawnSpec,
 }
 impl LaunchDescriptor {
     pub(crate) fn new(run: &RunRecord, spawn: SpawnSpec) -> Result<Self> {
@@ -414,9 +386,7 @@ impl RunLock {
         check: impl FnOnce(&Connection) -> Result<()>,
     ) -> Result<RunRecord> {
         with_database_deadline(conn, deadline, |conn| {
-            let tx = conn
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .map_err(db_err)?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             check(&tx)?;
             let current = storage::get_run(&tx, expected.run_id)?;
             validate_database(&tx, &expected.database_identity_json)?;
@@ -434,7 +404,7 @@ impl RunLock {
                 super::recovery::advance_recovery_owner(&tx, expected, &process)?
             };
             check_deadline(Instant::now(), deadline)?;
-            tx.commit().map_err(db_err)?;
+            tx.commit()?;
             Ok(next)
         })
     }
@@ -503,18 +473,16 @@ impl RunLock {
             "runner transfer requires creator ownership",
         )?;
         with_database_deadline(conn, deadline, |conn| {
-            let tx = conn
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .map_err(db_err)?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             self.validate(&tx, owner)?;
             let epoch = owner
                 .owner_epoch
                 .checked_add(1)
                 .ok_or_else(|| error("owner epoch exhausted"))?;
-            let changed=tx.execute("UPDATE member_runs SET owner_epoch=?1,owner_kind='runner',owner_pid=?2,owner_start_identity=?3,runner_pid=?2,runner_start_identity=?3,last_health_at=?4 WHERE run_id=?5 AND owner_epoch=?6 AND owner_kind='creator'",params![epoch,process.pid,process.start_identity,crate::time::format_utc(crate::time::now_utc()),owner.run_id,owner.owner_epoch]).map_err(db_err)?;
+            let changed=tx.execute("UPDATE member_runs SET owner_epoch=?1,owner_kind='runner',owner_pid=?2,owner_start_identity=?3,runner_pid=?2,runner_start_identity=?3,last_health_at=?4 WHERE run_id=?5 AND owner_epoch=?6 AND owner_kind='creator'",params![epoch,process.pid,process.start_identity,crate::time::now_stamp(),owner.run_id,owner.owner_epoch])?;
             ensure(changed == 1, "creator ownership transfer lost CAS")?;
             let next = storage::get_run(&tx, owner.run_id)?.owner();
-            tx.commit().map_err(db_err)?;
+            tx.commit()?;
             Ok(next)
         })
     }

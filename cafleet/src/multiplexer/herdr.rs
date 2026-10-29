@@ -95,13 +95,13 @@ fn shlex_join(command: &[String]) -> String {
         .join(" ")
 }
 
-pub struct HerdrMultiplexer {
+pub(crate) struct HerdrMultiplexer {
     runner: Rc<dyn CommandRunner>,
     env: HashMap<String, String>,
 }
 
 impl HerdrMultiplexer {
-    pub fn new(runner: Rc<dyn CommandRunner>, env: HashMap<String, String>) -> Self {
+    pub(crate) fn new(runner: Rc<dyn CommandRunner>, env: HashMap<String, String>) -> Self {
         HerdrMultiplexer { runner, env }
     }
 
@@ -112,7 +112,7 @@ impl HerdrMultiplexer {
         }
     }
 
-    pub fn name(&self) -> &'static str {
+    pub(crate) fn name(&self) -> &'static str {
         "herdr"
     }
 
@@ -155,7 +155,7 @@ impl HerdrMultiplexer {
         }
     }
 
-    pub fn ensure_available(&self) -> Result<(), MultiplexerError> {
+    pub(crate) fn ensure_available(&self) -> Result<(), MultiplexerError> {
         if !self.runner.binary_exists("herdr") {
             return Err(MultiplexerError::new("herdr binary not found on PATH"));
         }
@@ -271,7 +271,7 @@ impl HerdrMultiplexer {
         Ok(())
     }
 
-    pub fn context_discovery(&self) -> Result<MultiplexerContext, MultiplexerError> {
+    pub(crate) fn context_discovery(&self) -> Result<MultiplexerContext, MultiplexerError> {
         let result = self.run_json(&herdr_argv(&["herdr", "pane", "current"]), None)?;
         let pane = &result["pane"];
         Ok(MultiplexerContext {
@@ -285,7 +285,7 @@ impl HerdrMultiplexer {
     /// rightward; later members split the column's max pane downward, then the
     /// column is rebalanced to equal heights (best-effort, anchored on the
     /// Director's own pane).
-    pub fn split_window(
+    pub(crate) fn split_window(
         &self,
         reference: &MultiplexerContext,
         env: &[(String, String)],
@@ -452,7 +452,7 @@ impl HerdrMultiplexer {
         Ok(())
     }
 
-    pub fn send_prompt(
+    pub(crate) fn send_prompt(
         &self,
         target_pane_id: &str,
         text: &str,
@@ -480,7 +480,7 @@ impl HerdrMultiplexer {
     /// `herdr pane read` prints the raw terminal buffer (no envelope); the
     /// shared capture windowing ([`super::capture_window`]) enforces the last-N
     /// window client-side — the daemon may return more rows than requested.
-    pub fn capture_pane(
+    pub(crate) fn capture_pane(
         &self,
         target_pane_id: &str,
         lines: i64,
@@ -509,7 +509,7 @@ impl HerdrMultiplexer {
         Ok(super::capture_window(&raw, lines))
     }
 
-    pub fn kill_pane(
+    pub(crate) fn kill_pane(
         &self,
         target_pane_id: &str,
         ignore_missing: bool,

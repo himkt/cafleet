@@ -18,13 +18,11 @@ fn map_interaction(row: &rusqlite::Row<'_>) -> rusqlite::Result<InteractionRecor
 }
 
 pub(super) fn interaction(conn: &Connection, id: i64) -> Result<InteractionRecord, CafleetError> {
-    let interaction = conn
-        .query_row(
-            "SELECT * FROM member_interactions WHERE interaction_id=?1",
-            [id],
-            map_interaction,
-        )
-        .map_err(db_err)?;
+    let interaction = conn.query_row(
+        "SELECT * FROM member_interactions WHERE interaction_id=?1",
+        [id],
+        map_interaction,
+    )?;
     require(
         interaction.episode_seq > 0
             && interaction.closed_at.is_some() == interaction.close_reason.is_some(),
@@ -69,15 +67,17 @@ fn source(kind: RuntimeEventKind) -> &'static str {
     }
 }
 
-pub fn get_event(conn: &Connection, event_id: i64) -> Result<RuntimeEventView, CafleetError> {
+pub(crate) fn get_event(
+    conn: &Connection,
+    event_id: i64,
+) -> Result<RuntimeEventView, CafleetError> {
     let event = conn
         .query_row(
             "SELECT * FROM member_runtime_events WHERE event_id=?1",
             [event_id],
             map_event,
         )
-        .optional()
-        .map_err(db_err)?
+        .optional()?
         .ok_or_else(|| CafleetError::Value(format!("Event {event_id} not found")))?;
     let run = runtime_snapshot(conn, event.run_id)?;
     historical_ownership(conn, &run.run)?;
@@ -435,13 +435,11 @@ fn apply_interaction(
         .classification
         .expect("validated episode has classification");
     if transition.kind == RuntimeEventKind::InteractionOpened {
-        let latest: Option<i64> = conn
-            .query_row(
-                "SELECT MAX(episode_seq) FROM member_interactions WHERE run_id=?1",
-                [transition.run_id],
-                |row| row.get(0),
-            )
-            .map_err(db_err)?;
+        let latest: Option<i64> = conn.query_row(
+            "SELECT MAX(episode_seq) FROM member_interactions WHERE run_id=?1",
+            [transition.run_id],
+            |row| row.get(0),
+        )?;
         require(
             latest.is_none_or(|latest| sequence > latest),
             "episode_seq",
@@ -452,16 +450,14 @@ fn apply_interaction(
              VALUES(?1,?2,?3,?4,?5,?6)",
             params![transition.run_id,sequence,class.as_str(),transition.evidence_json["evidence_digest"].as_str().expect("validated digest"),
                 transition.observed_at,transition.evidence_json.to_string()],
-        ).map_err(db_err)?;
+        )?;
         return Ok(Some(conn.last_insert_rowid()));
     }
-    let id: i64 = conn
-        .query_row(
-            "SELECT interaction_id FROM member_interactions WHERE run_id=?1 AND episode_seq=?2",
-            params![transition.run_id, sequence],
-            |row| row.get(0),
-        )
-        .map_err(db_err)?;
+    let id: i64 = conn.query_row(
+        "SELECT interaction_id FROM member_interactions WHERE run_id=?1 AND episode_seq=?2",
+        params![transition.run_id, sequence],
+        |row| row.get(0),
+    )?;
     let current = interaction(conn, id)?;
     require(
         current.classification == class && current.closed_at.is_none(),
@@ -472,8 +468,7 @@ fn apply_interaction(
         conn.execute(
             "UPDATE member_interactions SET closed_at=?1,close_reason=?2 WHERE interaction_id=?3",
             params![transition.observed_at, reason.as_str(), id],
-        )
-        .map_err(db_err)?;
+        )?;
     }
     Ok(Some(id))
 }
@@ -510,7 +505,7 @@ fn payload(
     Ok(payload)
 }
 
-pub fn persist_transition(
+pub(crate) fn persist_transition(
     conn: &mut Connection,
     owner: &RunOwner,
     transition: &ObservedTransition,
@@ -548,8 +543,7 @@ pub(crate) fn persist_transition_in_transaction(
             params![run.run_id, transition.event_seq],
             |row| row.get(0),
         )
-        .optional()
-        .map_err(db_err)?;
+        .optional()?;
     if let Some(id) = previous {
         let existing = get_event(conn, id)?;
         require(
@@ -579,13 +573,11 @@ pub(crate) fn persist_transition_in_transaction(
     if archive_reason.is_none() {
         super::super::fleets::require_live_fleet(conn, run.fleet_id)?;
     }
-    let latest: Option<i64> = conn
-        .query_row(
-            "SELECT MAX(event_seq) FROM member_runtime_events WHERE run_id=?1",
-            [run.run_id],
-            |row| row.get(0),
-        )
-        .map_err(db_err)?;
+    let latest: Option<i64> = conn.query_row(
+        "SELECT MAX(event_seq) FROM member_runtime_events WHERE run_id=?1",
+        [run.run_id],
+        |row| row.get(0),
+    )?;
     require(
         latest.is_none_or(|latest| transition.event_seq > latest),
         "event_seq",
@@ -614,8 +606,8 @@ pub(crate) fn persist_transition_in_transaction(
             "INSERT INTO member_runtime_events(run_id,event_seq,interaction_id,kind,observed_at,committed_at,payload_json,notification_state,message_id,archive_reason)
              VALUES(?1,?2,?3,?4,?5,?6,'{}',?7,?8,?9)",
             params![run.run_id,transition.event_seq,interaction_id,transition.kind.as_str(),transition.observed_at,
-                format_utc(now_utc()),notification_state.as_str(),message_id,archive_reason.map(|reason| reason.as_str())],
-        ).map_err(db_err)?;
+                now_stamp(),notification_state.as_str(),message_id,archive_reason.map(|reason| reason.as_str())],
+        )?;
     let event_id = conn.last_insert_rowid();
     let payload = payload(run, transition, event_id, interaction_id)?.to_string();
     require(
@@ -626,14 +618,12 @@ pub(crate) fn persist_transition_in_transaction(
     conn.execute(
         "UPDATE member_runtime_events SET payload_json=?1 WHERE event_id=?2",
         params![payload, event_id],
-    )
-    .map_err(db_err)?;
+    )?;
     if let Some(message_id) = message_id {
         conn.execute(
             "UPDATE messages SET text=?1 WHERE message_id=?2",
             params![payload, message_id],
-        )
-        .map_err(db_err)?;
+        )?;
     }
     if transition.kind == RuntimeEventKind::RunnerExited {
         let cause = transition
@@ -664,7 +654,7 @@ pub(crate) fn persist_transition_in_transaction(
             "actual native status required",
         )?;
         conn.execute("UPDATE member_runs SET status='exited',ended_at=?1,exit_code=?2,exit_signal=?3 WHERE run_id=?4",
-                params![transition.observed_at,exit_code,exit_signal,run.run_id]).map_err(db_err)?;
+                params![transition.observed_at,exit_code,exit_signal,run.run_id])?;
     }
     get_event(conn, event_id).map(|view| (view.event, true))
 }
@@ -735,7 +725,7 @@ fn director_action(
     )
 }
 
-pub fn update_interaction_evidence(
+pub(crate) fn update_interaction_evidence(
     conn: &mut Connection,
     owner: &RunOwner,
     update: &InteractionEvidenceUpdate,
@@ -761,26 +751,28 @@ pub fn update_interaction_evidence(
                 "evidence_json",
                 "refresh evidence does not match current run/profile/policy/sequence",
             )?;
-            let maximum: Option<i64> = conn
-                .query_row(
-                    "SELECT MAX(event_seq) FROM member_runtime_events WHERE run_id=?1",
-                    [run.run_id],
-                    |row| row.get(0),
-                )
-                .map_err(db_err)?;
+            let maximum: Option<i64> = conn.query_row(
+                "SELECT MAX(event_seq) FROM member_runtime_events WHERE run_id=?1",
+                [run.run_id],
+                |row| row.get(0),
+            )?;
             require(
                 after_event_seq > 0 && maximum == Some(after_event_seq),
                 "after_event_seq",
                 "refresh barrier must match committed run maximum",
             )?;
-            let id: i64 = conn.query_row("SELECT interaction_id FROM member_interactions WHERE run_id=?1 AND episode_seq=?2",params![run.run_id,update.episode_seq],|row| row.get(0)).map_err(db_err)?;
+            let id: i64 = conn.query_row(
+                "SELECT interaction_id FROM member_interactions WHERE run_id=?1 AND episode_seq=?2",
+                params![run.run_id, update.episode_seq],
+                |row| row.get(0),
+            )?;
             let current = interaction(conn, id)?;
             require(
                 current.closed_at.is_none(),
                 "interaction_id",
                 "refresh requires an open current episode",
             )?;
-            let opening_id:i64 = conn.query_row("SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND interaction_id=?2 AND kind='interaction_opened' AND event_seq<=?3",params![run.run_id,id,after_event_seq],|row| row.get(0)).map_err(db_err)?;
+            let opening_id:i64 = conn.query_row("SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND interaction_id=?2 AND kind='interaction_opened' AND event_seq<=?3",params![run.run_id,id,after_event_seq],|row| row.get(0))?;
             get_event(conn, opening_id)?;
             let previous = current.evidence_json["screen_seq"]
                 .as_u64()
@@ -798,7 +790,7 @@ pub fn update_interaction_evidence(
                 )?;
                 return Ok(current);
             }
-            let changed = conn.execute("UPDATE member_interactions SET evidence_json=?1,evidence_digest=?2 WHERE interaction_id=?3 AND closed_at IS NULL",params![value.to_string(),value["evidence_digest"].as_str().expect("validated digest"),id]).map_err(db_err)?;
+            let changed = conn.execute("UPDATE member_interactions SET evidence_json=?1,evidence_digest=?2 WHERE interaction_id=?3 AND closed_at IS NULL",params![value.to_string(),value["evidence_digest"].as_str().expect("validated digest"),id])?;
             require(
                 changed == 1,
                 "interaction_id",

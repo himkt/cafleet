@@ -1,7 +1,7 @@
 use super::{
     ControlIdentity, DrainedInput, InputControlOperation, InputControlReply, InputControlRequest,
     InputDrain, InputEligibility, ObservationController, ObservedContinuation, ProgrammaticWrite,
-    PtyIo, SubmissionResult, SubmissionStatus, Visibility, canonical_json, validate_operation_key,
+    PtyIo, SubmissionResult, SubmissionStatus, Visibility, validate_operation_key,
 };
 use super::{
     InputFailure, ProcessIdentity, Result, RunLock, SubmissionStage, Transport, check_deadline,
@@ -12,17 +12,16 @@ use super::{
 };
 #[cfg(test)]
 use super::{RealInputDeadlineClock, receive_input_expiration};
-use crate::broker::members::db_err;
 use crate::broker::records::{MemberKind, Placement};
 use crate::broker::runtime::{self as storage, OwnerKind, RunRecord, RunStatus};
 use crate::coding_agent::{
     AnswerMatch, AnswerPlan, AnswerStage, ProfileCatalog, SemanticFingerprint, StageGate,
 };
 use crate::coding_agent::{ComposerOperation, coding_agent};
+use crate::digest::{canonical_json, sha256_hex};
 use crate::error::CafleetError;
 use crate::input::{Deadline, inherited_database_deadline, with_database_budget};
 use rusqlite::{Connection, TransactionBehavior};
-use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::io::{self, ErrorKind};
 use std::sync::Arc;
@@ -46,10 +45,10 @@ pub(crate) enum InputBoundary {
 }
 
 pub(crate) struct InputCheckpoint {
-    pub input_id: Option<i64>,
-    pub stage: SubmissionStage,
-    pub written_bytes: u64,
-    pub output_seq: u64,
+    pub(crate) input_id: Option<i64>,
+    pub(crate) stage: SubmissionStage,
+    pub(crate) written_bytes: u64,
+    pub(crate) output_seq: u64,
 }
 
 pub(crate) trait InputHooks: Send + Sync {
@@ -70,9 +69,9 @@ impl InputHooks for InertInputHooks {
 }
 
 pub(crate) struct InputServices {
-    pub catalog: ProfileCatalog,
-    pub token_source: Box<dyn RequestTokenSource>,
-    pub hooks: Arc<dyn InputHooks>,
+    pub(crate) catalog: ProfileCatalog,
+    pub(crate) token_source: Box<dyn RequestTokenSource>,
+    pub(crate) hooks: Arc<dyn InputHooks>,
 }
 
 pub(crate) struct InputCoordinator {
@@ -166,7 +165,7 @@ pub(super) fn inspection_association(
                 == Some(run.fleet_id),
         "permission Director is inactive",
     )?;
-    let live: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM fleets WHERE fleet_id=?1 AND director_member_id=?2 AND deleted_at IS NULL)", rusqlite::params![run.fleet_id, run.director_member_id], |r| r.get(0)).map_err(db_err)?;
+    let live: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM fleets WHERE fleet_id=?1 AND director_member_id=?2 AND deleted_at IS NULL)", rusqlite::params![run.fleet_id, run.director_member_id], |r| r.get(0))?;
     ensure(live, "permission fleet/Director changed")?;
     Ok(view)
 }
@@ -530,11 +529,11 @@ impl InputCoordinator {
                     return Err(error("permission inspection operation required"));
                 };
                 let view = with_database_deadline(conn, deadline, |conn| {
-                    let tx = conn.transaction().map_err(db_err)?;
+                    let tx = conn.transaction()?;
                     self.validate_live_run(&tx, run)?;
                     let view = inspection_association(&tx, &self.run, &input)?;
                     check_deadline(Instant::now(), deadline)?;
-                    tx.commit().map_err(db_err)?;
+                    tx.commit()?;
                     Ok(view)
                 })?;
                 let interaction = view
@@ -606,7 +605,7 @@ impl InputCoordinator {
                             self.current_request = None;
                             let mut bytes = [0; 32];
                             self.services.token_source.fill(&mut bytes)?;
-                            let token = bytes.iter().map(|b| format!("{b:02x}")).collect();
+                            let token = crate::digest::hex(&bytes);
                             self.current_request = Some((next, token));
                         }
                         let (current, token) = self
@@ -966,7 +965,7 @@ impl InputCoordinator {
             "permission response fixed identity mismatch",
         )?;
         with_database_deadline(conn, deadline, |conn| {
-            let tx = conn.transaction().map_err(db_err)?;
+            let tx = conn.transaction()?;
             ensure(
                 storage::database_identity(&tx)? == self.run.database_identity_json,
                 "input database identity changed",
@@ -976,7 +975,7 @@ impl InputCoordinator {
                 *known_id = Some(receipt.input.input_id);
             }
             check_deadline(Instant::now(), deadline)?;
-            tx.commit().map_err(db_err)?;
+            tx.commit()?;
             Ok(retained)
         })
     }
@@ -1095,11 +1094,11 @@ impl InputCoordinator {
             }
             self.validate_permission_binding(&selection, observation)?;
             with_database_deadline(conn, deadline, |conn| {
-                let tx = conn.transaction().map_err(db_err)?;
+                let tx = conn.transaction()?;
                 self.validate_live(&tx, run)?;
                 self.validate_permission_association(&tx, &selection)?;
                 check_deadline(Instant::now(), deadline)?;
-                tx.commit().map_err(db_err)
+                tx.commit().map_err(crate::error::CafleetError::from)
             })?;
             if self.pending.is_some() {
                 return Ok(Some(InputControlReply::PermissionResponse(
@@ -1412,7 +1411,7 @@ impl InputCoordinator {
                 operation_key = Some(key.clone());
                 validate_operation_key(key)?;
                 with_database_deadline(conn, deadline, |conn| {
-                    let tx = conn.transaction().map_err(db_err)?;
+                    let tx = conn.transaction()?;
                     self.validate_receipt_owner(&tx, run)?;
                     let reply = if let Some(input) = storage::find_input(&tx, self.run.run_id, key)?
                     {
@@ -1432,7 +1431,7 @@ impl InputCoordinator {
                         InputControlReply::Receipt(ReceiptReply::Missing)
                     };
                     check_deadline(Instant::now(), deadline)?;
-                    tx.commit().map_err(db_err)?;
+                    tx.commit()?;
                     Ok(reply)
                 })
             }
@@ -1449,9 +1448,7 @@ impl InputCoordinator {
                     "nonempty reconciliation evidence required",
                 )?;
                 let settled = with_database_deadline(conn, deadline, |conn| {
-                    let tx = conn
-                        .transaction_with_behavior(TransactionBehavior::Immediate)
-                        .map_err(db_err)?;
+                    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
                     self.validate_receipt_owner(&tx, run)?;
                     let input = storage::get_input(&tx, *id)?;
                     operation_key = Some(input.operation_key.clone());
@@ -1515,7 +1512,7 @@ impl InputCoordinator {
                         }
                     };
                     check_deadline(Instant::now(), deadline)?;
-                    tx.commit().map_err(db_err)?;
+                    tx.commit()?;
                     Ok(settled)
                 })?;
                 if let Some(retained) = self.operations.get_mut(id) {
@@ -1559,7 +1556,7 @@ impl InputCoordinator {
                 "retirement caller run identity changed",
             )?;
             with_database_deadline(conn, deadline, |conn| {
-                let tx = conn.transaction().map_err(db_err)?;
+                let tx = conn.transaction()?;
                 let current = storage::validate_owner(&tx, &self.run.owner())?;
                 ensure(
                     stable_run_identity(&current) == stable_run_identity(&self.run),
@@ -1593,7 +1590,7 @@ impl InputCoordinator {
                     )?;
                 }
                 check_deadline(Instant::now(), deadline)?;
-                tx.commit().map_err(db_err)
+                tx.commit().map_err(crate::error::CafleetError::from)
             })?;
             check_deadline(Instant::now(), deadline)?;
             self.operations.remove(&input_id);
@@ -1780,7 +1777,7 @@ impl InputCoordinator {
                 crate::input::valid_input(&input.literal),
                 "composer submission requires one nonempty line without control characters",
             )?;
-            let digest = Sha256::digest(canonical_json(&serde_json::json!({"run_id":self.run.run_id,"kind":input.input_kind.as_str(),"message_id":input.message_id,"literal":input.literal})).as_bytes()).iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+            let digest = sha256_hex(canonical_json(&serde_json::json!({"run_id":self.run.run_id,"kind":input.input_kind.as_str(),"message_id":input.message_id,"literal":input.literal})).as_bytes());
             let retained = with_database_deadline(conn, deadline, |conn| {
                 ensure(
                     storage::database_identity(conn)? == self.run.database_identity_json,
@@ -1954,10 +1951,8 @@ impl InputCoordinator {
                 "final input validation requires autocommit",
             )?;
             let result = with_database_budget(conn, Deadline::until(effective), |conn| {
-                conn.busy_handler(Some(|_| false)).map_err(db_err)?;
-                let tx = conn
-                    .transaction_with_behavior(TransactionBehavior::Immediate)
-                    .map_err(db_err)?;
+                conn.busy_handler(Some(|_| false))?;
+                let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
                 self.validate_live(&tx, run)?;
                 let id = operation
                     .input_id
@@ -1991,7 +1986,7 @@ impl InputCoordinator {
                     )?;
                 }
                 check_deadline(Instant::now(), effective)?;
-                tx.rollback().map_err(db_err)
+                tx.rollback().map_err(crate::error::CafleetError::from)
             });
             let effective = inherited_database_deadline(conn)
                 .map_or(effective, |bound| effective.min(bound.instant()));
@@ -2525,9 +2520,7 @@ impl InputCoordinator {
         deadline: Instant,
     ) -> Result<Self> {
         let run = with_database_deadline(conn, deadline, |conn| {
-            let tx = conn
-                .transaction_with_behavior(TransactionBehavior::Deferred)
-                .map_err(db_err)?;
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
             let current = storage::validate_owner(&tx, &run.owner())?;
             ensure(
                 stable_run_identity(&current) == stable_run_identity(run),
@@ -2548,7 +2541,7 @@ impl InputCoordinator {
             )?;
             lock.validate(&tx, &current.owner())?;
             check_deadline(Instant::now(), deadline)?;
-            tx.commit().map_err(db_err)?;
+            tx.commit()?;
             Ok(current)
         })?;
         let placement = with_database_deadline(conn, deadline, |conn| {
@@ -2816,7 +2809,7 @@ mod tests {
                 assert!(identity.matches().unwrap());
                 fixture.conn.execute(
                     "UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3 WHERE run_id=?4",
-                    rusqlite::params![identity.pid, identity.start_identity, crate::time::format_utc(crate::time::now_utc()), fixture.run.run_id],
+                    rusqlite::params![identity.pid, identity.start_identity, crate::time::now_stamp(), fixture.run.run_id],
                 ).unwrap();
                 fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
                 assert_eq!(fixture.run.status, RunStatus::Running);
@@ -3183,8 +3176,6 @@ mod tests {
 
         #[test]
         fn step5_prompt_reservation_race_returns_existing_uncertainty_without_write_authority() {
-            use sha2::{Digest, Sha256};
-
             with_host(|h| {
                 let key = "prompt:interleaved-reservation";
                 let request = h.request(key);
@@ -3213,10 +3204,7 @@ mod tests {
                 let new = storage::NewInput {
                     operation_key: key.into(),
                     kind: storage::InputKind::Prompt,
-                    payload_digest: Sha256::digest(canonical.as_bytes())
-                        .iter()
-                        .map(|byte| format!("{byte:02x}"))
-                        .collect(),
+                    payload_digest: sha256_hex(canonical.as_bytes()),
                     message_id: None,
                 };
                 let mut independent =
@@ -3944,16 +3932,16 @@ mod tests {
             }
 
             pub(in crate::runtime::runner::input) struct HostProfile {
-                pub policy: storage::evidence::EvidencePolicy,
-                pub event_evidence: &'static str,
-                pub backend: crate::coding_agent::CodingAgent,
-                pub native_version: &'static str,
-                pub profile_version: &'static str,
-                pub size: TerminalSize,
-                pub screen: Vec<u8>,
+                pub(crate) policy: storage::evidence::EvidencePolicy,
+                pub(crate) event_evidence: &'static str,
+                pub(crate) backend: crate::coding_agent::CodingAgent,
+                pub(crate) native_version: &'static str,
+                pub(crate) profile_version: &'static str,
+                pub(crate) size: TerminalSize,
+                pub(crate) screen: Vec<u8>,
             }
             impl HostProfile {
-                pub fn synthetic(
+                pub(crate) fn synthetic(
                     policy: storage::evidence::EvidencePolicy,
                     event_evidence: &'static str,
                 ) -> Self {
@@ -3978,18 +3966,18 @@ mod tests {
 
             #[derive(Clone, Debug)]
             pub(in crate::runtime::runner::input) struct Point {
-                pub boundary: &'static str,
-                pub id: Option<i64>,
-                pub count: u64,
-                pub seq: u64,
+                pub(crate) boundary: &'static str,
+                pub(crate) id: Option<i64>,
+                pub(crate) count: u64,
+                pub(crate) seq: u64,
             }
 
             pub(in crate::runtime::runner::input) struct Hooks {
-                pub points: Mutex<Vec<Point>>,
-                pub until: Instant,
+                pub(crate) points: Mutex<Vec<Point>>,
+                pub(crate) until: Instant,
             }
             impl Hooks {
-                pub fn count(&self, boundary: &str) -> usize {
+                pub(crate) fn count(&self, boundary: &str) -> usize {
                     self.points
                         .lock()
                         .unwrap()
@@ -3997,7 +3985,7 @@ mod tests {
                         .filter(|p| p.boundary == boundary)
                         .count()
                 }
-                pub fn input_id(&self) -> i64 {
+                pub(crate) fn input_id(&self) -> i64 {
                     self.points
                         .lock()
                         .unwrap()
@@ -4036,9 +4024,9 @@ mod tests {
 
             #[derive(Default)]
             pub(in crate::runtime::runner::input) struct Reader {
-                pub bytes: VecDeque<u8>,
-                pub consumed: usize,
-                pub calls: usize,
+                pub(crate) bytes: VecDeque<u8>,
+                pub(crate) consumed: usize,
+                pub(crate) calls: usize,
             }
             impl ByteInput for Reader {
                 fn try_read(&mut self, target: &mut [u8]) -> io::Result<usize> {
@@ -4057,11 +4045,11 @@ mod tests {
             }
 
             pub(in crate::runtime::runner::input) struct Pty {
-                pub child: Reader,
-                pub offers: Vec<Vec<u8>>,
-                pub program: Vec<Vec<u8>>,
-                pub manual: Vec<u8>,
-                pub short: Option<usize>,
+                pub(crate) child: Reader,
+                pub(crate) offers: Vec<Vec<u8>>,
+                pub(crate) program: Vec<Vec<u8>>,
+                pub(crate) manual: Vec<u8>,
+                pub(crate) short: Option<usize>,
                 expected_program: Vec<u8>,
                 database_url: String,
                 hooks: Arc<Hooks>,
@@ -4095,7 +4083,7 @@ mod tests {
                 }
             }
             #[derive(Default)]
-            pub(in crate::runtime::runner::input) struct Output(pub Vec<u8>);
+            pub(in crate::runtime::runner::input) struct Output(pub(crate) Vec<u8>);
             impl Display for Output {
                 fn try_write(&mut self, bytes: &[u8]) -> io::Result<usize> {
                     self.0.extend_from_slice(bytes);
@@ -4117,23 +4105,23 @@ mod tests {
             }
 
             pub(in crate::runtime::runner::input) struct Host {
-                pub fixture: Fixture,
+                pub(crate) fixture: Fixture,
                 _artifacts: RunArtifacts,
-                pub coordinator: InputCoordinator,
-                pub writer: EventWriter,
-                pub controller: ObservationController,
-                pub transport: Transport,
-                pub human: Reader,
-                pub pty: Pty,
-                pub output: Output,
-                pub hooks: Arc<Hooks>,
-                pub until: Instant,
+                pub(crate) coordinator: InputCoordinator,
+                pub(crate) writer: EventWriter,
+                pub(crate) controller: ObservationController,
+                pub(crate) transport: Transport,
+                pub(crate) human: Reader,
+                pub(crate) pty: Pty,
+                pub(crate) output: Output,
+                pub(crate) hooks: Arc<Hooks>,
+                pub(crate) until: Instant,
                 expires: u64,
                 child: Child,
             }
 
             impl Host {
-                pub fn new() -> Self {
+                pub(crate) fn new() -> Self {
                     Self::build(
                         catalog,
                         encoded(),
@@ -4226,7 +4214,7 @@ mod tests {
                         .unwrap()
                         .expect("owned live child");
                     assert!(identity.matches().unwrap());
-                    fixture.conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3 WHERE run_id=?4",rusqlite::params![identity.pid,identity.start_identity,crate::time::format_utc(crate::time::now_utc()),fixture.run.run_id]).unwrap();
+                    fixture.conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3 WHERE run_id=?4",rusqlite::params![identity.pid,identity.start_identity,crate::time::now_stamp(),fixture.run.run_id]).unwrap();
                     fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
                     let transport = Self::transport_sized(profile.size);
                     controller
@@ -4299,7 +4287,7 @@ mod tests {
                     )
                     .unwrap()
                 }
-                pub fn request(&self, key: &str) -> InputControlRequest {
+                pub(crate) fn request(&self, key: &str) -> InputControlRequest {
                     let run = &self.fixture.run;
                     InputControlRequest {
                         protocol_version: 1,
@@ -4321,7 +4309,7 @@ mod tests {
                         }),
                     }
                 }
-                pub fn drain(&mut self) {
+                pub(crate) fn drain(&mut self) {
                     loop {
                         assert!(
                             Instant::now() < self.until,
@@ -4354,7 +4342,7 @@ mod tests {
                         std::thread::sleep(Duration::from_millis(1));
                     }
                 }
-                pub fn advance(&mut self) -> Option<InputControlReply> {
+                pub(crate) fn advance(&mut self) -> Option<InputControlReply> {
                     self.coordinator
                         .advance(
                             &mut self.fixture.conn,
@@ -4366,7 +4354,7 @@ mod tests {
                         )
                         .unwrap()
                 }
-                pub fn arm(&mut self, key: &str) -> i64 {
+                pub(crate) fn arm(&mut self, key: &str) -> i64 {
                     let request = self.request(key);
                     assert!(
                         self.coordinator
@@ -4403,7 +4391,7 @@ mod tests {
                     }
                     panic!("real reservation and BeforeWrite reach Armed within finite turns");
                 }
-                pub fn finish(&mut self) {
+                pub(crate) fn finish(&mut self) {
                     let counts = self.writer.finish(self.until);
                     let status = self.writer.status();
                     self.child.native.terminate_until(self.until);
@@ -5008,7 +4996,7 @@ mod tests {
                 assert!(inspect_request(h, wrong, h.until).is_err());
                 h.drain();
                 assert!(inspect_request(h, request(h, ids), Instant::now()).is_err());
-                h.fixture.conn.execute("UPDATE member_interactions SET closed_at=?1,close_reason='not_visible' WHERE interaction_id=?2",rusqlite::params![crate::time::format_utc(crate::time::now_utc()),ids.1]).unwrap();
+                h.fixture.conn.execute("UPDATE member_interactions SET closed_at=?1,close_reason='not_visible' WHERE interaction_id=?2",rusqlite::params![crate::time::now_stamp(),ids.1]).unwrap();
                 h.drain();
                 assert!(inspect_request(h, request(h, ids), h.until).is_err());
                 assert_eq!(calls.load(Ordering::SeqCst), 1);
@@ -5631,10 +5619,7 @@ mod tests {
             let captured = writes.concat();
             assert_eq!(captured.len(), 441);
             assert_eq!(
-                Sha256::digest(&captured)
-                    .iter()
-                    .map(|byte| format!("{byte:02x}"))
-                    .collect::<String>(),
+                sha256_hex(&captured),
                 "014fe1213f56da769340abaf3cb46961c682a58d16fbccd7e16e62ca8e582e9e"
             );
             with_claude_inspection(|h, _, _| {

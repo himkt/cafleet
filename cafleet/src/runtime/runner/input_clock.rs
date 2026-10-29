@@ -2,9 +2,9 @@ use super::*;
 use std::time::{Duration, Instant};
 
 pub(crate) struct InputClockSample {
-    pub before: Instant,
-    pub monotonic_ns: u64,
-    pub after: Instant,
+    pub(crate) before: Instant,
+    pub(crate) monotonic_ns: u64,
+    pub(crate) after: Instant,
 }
 impl InputClockSample {
     fn validate(&self) -> Result<()> {

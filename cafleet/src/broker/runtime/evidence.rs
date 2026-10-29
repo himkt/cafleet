@@ -2,7 +2,6 @@ use std::collections::BTreeSet;
 
 use regex::Regex;
 use serde_json::{Map, Value, json};
-use sha2::{Digest, Sha256};
 
 use super::{EventEvidence, invalid, require};
 use crate::error::CafleetError;
@@ -11,14 +10,14 @@ const SCREEN_FIELDS: [&str; 4] = ["operation", "choices", "native_request_id", "
 const EVIDENCE_LIMIT: usize = 12 * 1024;
 const EXCERPT_LIMIT: usize = 8 * 1024;
 
-pub struct EvidencePolicy {
+pub(crate) struct EvidencePolicy {
     mode: EventEvidence,
     patterns: Vec<Regex>,
     sensitive_rules: BTreeSet<String>,
 }
 
 impl EvidencePolicy {
-    pub fn metadata() -> Self {
+    pub(crate) fn metadata() -> Self {
         Self {
             mode: EventEvidence::Metadata,
             patterns: Vec::new(),
@@ -26,7 +25,7 @@ impl EvidencePolicy {
         }
     }
 
-    pub fn redacted(config: &Value, known_rules: &[&str]) -> Result<Self, CafleetError> {
+    pub(crate) fn redacted(config: &Value, known_rules: &[&str]) -> Result<Self, CafleetError> {
         let fail = || CafleetError::Usage("invalid event redaction configuration".into());
         let config = config.as_object().ok_or_else(fail)?;
         if config.get("schema_version") != Some(&json!(1)) {
@@ -64,7 +63,7 @@ impl EvidencePolicy {
         })
     }
 
-    pub fn apply(&self, raw: &Value) -> Result<Value, CafleetError> {
+    pub(crate) fn apply(&self, raw: &Value) -> Result<Value, CafleetError> {
         let raw = raw
             .as_object()
             .ok_or_else(|| invalid("evidence", "object required"))?;
@@ -169,7 +168,7 @@ impl EvidencePolicy {
         Ok(value)
     }
 
-    pub fn displayed_mode(
+    pub(crate) fn displayed_mode(
         &self,
         rule: &str,
         sensitive: bool,
@@ -234,32 +233,13 @@ fn escape_controls(text: &str) -> String {
         .collect()
 }
 
-fn canonical(value: &Value) -> Value {
-    match value {
-        Value::Object(object) => {
-            let mut keys = object.keys().collect::<Vec<_>>();
-            keys.sort();
-            Value::Object(
-                keys.into_iter()
-                    .map(|key| (key.clone(), canonical(&object[key])))
-                    .collect(),
-            )
-        }
-        Value::Array(values) => Value::Array(values.iter().map(canonical).collect()),
-        _ => value.clone(),
-    }
-}
-
 pub(super) fn digest(value: &Value) -> String {
     let mut value = value.clone();
     value
         .as_object_mut()
         .expect("evidence is an object")
         .remove("evidence_digest");
-    Sha256::digest(canonical(&value).to_string().as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    crate::digest::sha256_hex(crate::digest::canonical_json(&value).as_bytes())
 }
 
 fn validate_operation_rows(object: &Map<String, Value>) -> Result<(), CafleetError> {
@@ -448,10 +428,7 @@ mod tests {
         }
         let mut value = value.clone();
         value.as_object_mut().unwrap().remove("evidence_digest");
-        Sha256::digest(sorted(&value).to_string().as_bytes())
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect()
+        crate::digest::hex(&Sha256::digest(sorted(&value).to_string().as_bytes()))
     }
 
     #[test]

@@ -29,10 +29,10 @@ impl OutboxIo for File {
     }
 }
 pub(crate) struct OutboxFrame {
-    pub transition: ObservedTransition,
-    pub effective_policy: Option<EffectivePolicyObservation>,
-    pub start: u64,
-    pub end: u64,
+    pub(crate) transition: ObservedTransition,
+    pub(crate) effective_policy: Option<EffectivePolicyObservation>,
+    pub(crate) start: u64,
+    pub(crate) end: u64,
 }
 const EFFECTIVE_POLICY_KEY: &str = "effective_policy";
 fn frame_body(
@@ -75,9 +75,9 @@ fn parse_frame_body(
     Ok((transition, effective_policy))
 }
 pub(crate) struct OutboxScan {
-    pub frames: Vec<OutboxFrame>,
-    pub incomplete_tail: Option<String>,
-    pub maximum_event_seq: Option<i64>,
+    pub(crate) frames: Vec<OutboxFrame>,
+    pub(crate) incomplete_tail: Option<String>,
+    pub(crate) maximum_event_seq: Option<i64>,
 }
 pub(crate) struct Outbox<S: OutboxIo> {
     io: S,
@@ -408,8 +408,7 @@ impl<S: OutboxIo> Outbox<S> {
                     rusqlite::params![owner.run_id, frame.transition.event_seq],
                     |row| row.get(0),
                 )
-                .optional()
-                .map_err(crate::broker::members::db_err)?;
+                .optional()?;
                     if let Some(id) = id {
                         let view = storage::get_event(conn, id)?;
                         ensure(

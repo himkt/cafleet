@@ -12,11 +12,11 @@ const OUTPUT_BYTES: u64 = 4096;
 const VERSION_TOKEN: &str = r"^v?[0-9]+(\.[0-9]+)+([-+][0-9A-Za-z.]+)?$";
 
 pub(crate) struct NativeLaunchIdentity {
-    pub native_version: Option<String>,
-    pub profile_version: Option<String>,
-    pub profile_match: Option<ProfileMatch>,
-    pub coverage: Coverage,
-    pub warning: Option<String>,
+    pub(crate) native_version: Option<String>,
+    pub(crate) profile_version: Option<String>,
+    pub(crate) profile_match: Option<ProfileMatch>,
+    pub(crate) coverage: Coverage,
+    pub(crate) warning: Option<String>,
 }
 
 pub(crate) fn native_launch_identity(

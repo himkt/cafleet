@@ -3,29 +3,33 @@ pub(crate) use events::{
 };
 mod effective_policy;
 mod events;
-pub mod evidence;
+pub(crate) mod evidence;
 mod inputs;
 mod permissions;
 mod records;
 
 pub(crate) use effective_policy::persist_transition_with_effective_policy_counted;
-pub use effective_policy::{persist_transition_with_effective_policy, record_effective_policy};
-pub use events::{get_event, persist_transition, update_interaction_evidence};
+pub(crate) use effective_policy::{
+    persist_transition_with_effective_policy, record_effective_policy,
+};
+pub(crate) use events::{get_event, persist_transition, update_interaction_evidence};
 pub(crate) use events::{persist_transition_counted, persist_transition_in_transaction};
 pub(crate) use inputs::{
     InputReservation, reserve_input_with_provenance, settle_input_in_transaction,
 };
-pub use inputs::{
-    find_input, get_input, record_input_state, reserve_input, settle_input, settle_preview,
-};
-pub use permissions::{
+pub(crate) use inputs::{find_input, get_input, record_input_state, settle_preview};
+#[cfg(test)]
+pub(crate) use inputs::{reserve_input, settle_input};
+#[cfg(test)]
+pub(crate) use permissions::release_permission_claim;
+pub(crate) use permissions::{
     ZeroByteRetirement, get_permission_response, lookup_permission_response,
-    permission_response_digest, release_permission_claim, reserve_permission_response,
+    permission_response_digest, reserve_permission_response,
 };
 pub(crate) use permissions::{
     rearm_permission_response, settle_permission_response_in_transaction,
 };
-pub use records::*;
+pub(crate) use records::*;
 
 use std::ops::RangeInclusive;
 use std::os::unix::fs::MetadataExt;
@@ -33,11 +37,10 @@ use std::os::unix::fs::MetadataExt;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde_json::{Value, json};
 
-use super::members::db_err;
 use super::records::MemberStatus;
 use crate::error::CafleetError;
 use crate::input::{Deadline, with_database_budget};
-use crate::time::{format_utc, now_utc};
+use crate::time::now_stamp;
 
 pub(super) fn invalid(field: &str, description: impl Into<String>) -> CafleetError {
     CafleetError::InvalidStoredValue {
@@ -99,7 +102,7 @@ fn optional_json(
     present.map(|_| json_column(row, field, array)).transpose()
 }
 
-pub fn database_identity(conn: &Connection) -> Result<Value, CafleetError> {
+pub(crate) fn database_identity(conn: &Connection) -> Result<Value, CafleetError> {
     let path = conn
         .path()
         .ok_or_else(|| invalid("database_identity", "file-backed database required"))?;
@@ -108,13 +111,11 @@ pub fn database_identity(conn: &Connection) -> Result<Value, CafleetError> {
     let metadata = canonical
         .metadata()
         .map_err(|error| CafleetError::App(format!("cannot inspect runtime database: {error}")))?;
-    let instance: String = conn
-        .query_row(
-            "SELECT instance_id FROM runtime_database_identity WHERE singleton_id=1",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(db_err)?;
+    let instance: String = conn.query_row(
+        "SELECT instance_id FROM runtime_database_identity WHERE singleton_id=1",
+        [],
+        |row| row.get(0),
+    )?;
     hex(&instance, 32, "runtime_database_identity.instance_id")?;
     let canonical = canonical
         .to_str()
@@ -170,15 +171,14 @@ fn map_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunRecord> {
     })
 }
 
-pub fn get_run(conn: &Connection, run_id: i64) -> Result<RunRecord, CafleetError> {
+pub(crate) fn get_run(conn: &Connection, run_id: i64) -> Result<RunRecord, CafleetError> {
     let run = conn
         .query_row(
             "SELECT * FROM member_runs WHERE run_id=?1",
             [run_id],
             map_run,
         )
-        .optional()
-        .map_err(db_err)?
+        .optional()?
         .ok_or_else(|| CafleetError::Value(format!("Run {run_id} not found")))?;
     nonblank(
         &run.owner_start_identity,
@@ -247,20 +247,16 @@ pub(super) fn historical_ownership(
     conn: &Connection,
     run: &RunRecord,
 ) -> Result<Option<ArchiveReason>, CafleetError> {
-    let member: (i64, MemberStatus) = conn
-        .query_row(
-            "SELECT fleet_id,status FROM members WHERE member_id=?1",
-            [run.member_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .map_err(db_err)?;
-    let director: (i64, MemberStatus) = conn
-        .query_row(
-            "SELECT fleet_id,status FROM members WHERE member_id=?1",
-            [run.director_member_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .map_err(db_err)?;
+    let member: (i64, MemberStatus) = conn.query_row(
+        "SELECT fleet_id,status FROM members WHERE member_id=?1",
+        [run.member_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let director: (i64, MemberStatus) = conn.query_row(
+        "SELECT fleet_id,status FROM members WHERE member_id=?1",
+        [run.director_member_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
     let fleet = super::fleets::fetch_fleet(conn, run.fleet_id)?
         .ok_or_else(|| invalid("member_runs.fleet_id", "fleet missing"))?;
     require(
@@ -308,26 +304,23 @@ pub(super) fn owned_transaction<T>(
 ) -> Result<T, CafleetError> {
     let deadline = Deadline::inherited_or_new();
     with_database_budget(conn, deadline, |conn| {
-        let tx = conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(db_err)?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let run = validate_owner(&tx, owner)?;
         let result = operation(&tx, &run)?;
         deadline.remaining()?;
-        tx.commit().map_err(db_err)?;
+        tx.commit()?;
         Ok(result)
     })
 }
 
-pub fn create_run(conn: &mut Connection, new: &NewRun) -> Result<RunRecord, CafleetError> {
+#[cfg(test)]
+pub(crate) fn create_run(conn: &mut Connection, new: &NewRun) -> Result<RunRecord, CafleetError> {
     let deadline = Deadline::inherited_or_new();
     with_database_budget(conn, deadline, |conn| {
-        let tx = conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(db_err)?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let run = insert_run(&tx, new)?;
         deadline.remaining()?;
-        tx.commit().map_err(db_err)?;
+        tx.commit()?;
         Ok(run)
     })
 }
@@ -360,7 +353,7 @@ pub(crate) fn insert_run(conn: &Connection, new: &NewRun) -> Result<RunRecord, C
         "member_runs.ownership",
         "member/fleet/Director mismatch",
     )?;
-    let now = format_utc(now_utc());
+    let now = now_stamp();
     conn.execute(
             "INSERT INTO member_runs(member_id,fleet_id,director_member_id,backend,database_identity_json,
              launch_nonce,runtime_path,requested_mode,resolved_mode,mode_source,permission_argv_json,
@@ -373,12 +366,12 @@ pub(crate) fn insert_run(conn: &Connection, new: &NewRun) -> Result<RunRecord, C
                 new.permission_argv_json.to_string(),new.event_evidence.as_str(),new.coverage.as_str(),now,
                 new.native_version,new.profile_version,new.owner_pid,new.owner_start_identity,
                 new.profile_match.map(ProfileMatch::as_str)],
-        ).map_err(db_err)?;
+        )?;
     let run = get_run(conn, conn.last_insert_rowid())?;
     Ok(run)
 }
 
-pub fn reserve_event_sequences(
+pub(crate) fn reserve_event_sequences(
     conn: &mut Connection,
     owner: &RunOwner,
 ) -> Result<RangeInclusive<i64>, CafleetError> {
@@ -394,7 +387,7 @@ pub fn reserve_event_sequences(
         let changed = conn.execute(
             "UPDATE member_runs SET event_seq_reserved_through=?1 WHERE run_id=?2 AND owner_epoch=?3 AND event_seq_reserved_through=?4",
             params![last,run.run_id,run.owner_epoch,run.event_seq_reserved_through],
-        ).map_err(db_err)?;
+        )?;
         require(
             changed == 1,
             "member_runs.owner",
@@ -404,7 +397,10 @@ pub fn reserve_event_sequences(
     })
 }
 
-pub fn runtime_snapshot(conn: &Connection, run_id: i64) -> Result<RuntimeSnapshot, CafleetError> {
+pub(crate) fn runtime_snapshot(
+    conn: &Connection,
+    run_id: i64,
+) -> Result<RuntimeSnapshot, CafleetError> {
     let run = get_run(conn, run_id)?;
     let current_interaction_id = conn
         .query_row(
@@ -412,16 +408,13 @@ pub fn runtime_snapshot(conn: &Connection, run_id: i64) -> Result<RuntimeSnapsho
             [run_id],
             |row| row.get(0),
         )
-        .optional()
-        .map_err(db_err)?;
+        .optional()?;
     let mut statement = conn.prepare(
         "SELECT input_id FROM member_input_operations WHERE run_id=?1 AND state IN ('in_progress','accepted','uncertain') ORDER BY input_id",
-    ).map_err(db_err)?;
+    )?;
     let unresolved_input_ids = statement
-        .query_map([run_id], |row| row.get(0))
-        .map_err(db_err)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(db_err)?;
+        .query_map([run_id], |row| row.get(0))?
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(RuntimeSnapshot {
         run,
         current_interaction_id,
@@ -429,7 +422,7 @@ pub fn runtime_snapshot(conn: &Connection, run_id: i64) -> Result<RuntimeSnapsho
     })
 }
 
-pub fn member_runtime(
+pub(crate) fn member_runtime(
     conn: &Connection,
     member_id: i64,
 ) -> Result<Option<RuntimeSnapshot>, CafleetError> {
@@ -439,8 +432,7 @@ pub fn member_runtime(
             [member_id],
             |row| row.get(0),
         )
-        .optional()
-        .map_err(db_err)?;
+        .optional()?;
     id.map(|id| runtime_snapshot(conn, id)).transpose()
 }
 

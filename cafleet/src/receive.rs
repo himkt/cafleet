@@ -29,27 +29,27 @@ impl Clock for SystemClock {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PendingPreview {
-    pub member_id: i64,
-    pub message_id: i64,
+    pub(crate) member_id: i64,
+    pub(crate) message_id: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ReceiveSnapshot {
-    pub messages: Vec<MessageRecord>,
-    pub pending: Vec<PendingPreview>,
+    pub(crate) messages: Vec<MessageRecord>,
+    pub(crate) pending: Vec<PendingPreview>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NotificationError {
-    pub member_id: i64,
-    pub message_id: i64,
-    pub error: String,
+    pub(crate) member_id: i64,
+    pub(crate) message_id: i64,
+    pub(crate) error: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AttemptOutcome {
-    pub sent: Vec<i64>,
-    pub end: AttemptEnd,
+    pub(crate) sent: Vec<i64>,
+    pub(crate) end: AttemptEnd,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,7 +72,7 @@ impl AttemptOutcome {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WaitOutcome {
-    pub messages: Vec<MessageRecord>,
+    pub(crate) messages: Vec<MessageRecord>,
 }
 
 pub(crate) trait ReceiveIo {
@@ -216,7 +216,7 @@ fn subject_fleet(
 impl ReceiveIo for BrokerReceiver<'_> {
     fn check(&mut self, deadline: Deadline) -> Result<ReceiveSnapshot, CafleetError> {
         let (snapshot, fleet) = crate::input::with_database_budget(self.conn, deadline, |conn| {
-            let tx = conn.transaction().map_err(broker::members::db_err)?;
+            let tx = conn.transaction()?;
             let fleet = subject_fleet(&tx, self.member_id, self.fleet_id)?;
             let messages = broker::poll_messages(&tx, self.member_id)?;
             let pending = broker::panes::pending_previews(&tx, fleet, self.member_id)?
@@ -226,7 +226,7 @@ impl ReceiveIo for BrokerReceiver<'_> {
                     message_id,
                 })
                 .collect();
-            tx.commit().map_err(broker::members::db_err)?;
+            tx.commit()?;
             Ok((ReceiveSnapshot { messages, pending }, fleet))
         })?;
         self.fleet_id = Some(fleet);

@@ -121,8 +121,7 @@ impl<'a> CancellationScope<'a> {
         };
         scope
             .conn
-            .progress_handler(1000, Some(database_cancelled))
-            .map_err(crate::broker::members::db_err)?;
+            .progress_handler(1000, Some(database_cancelled))?;
         let interrupt = scope.conn.get_interrupt_handle();
         let (stop, receive) = std::sync::mpsc::channel();
         scope.stop = Some(stop);
@@ -171,12 +170,8 @@ impl<'a> CancellationScope<'a> {
         } else {
             self.conn.progress_handler(0, None::<fn() -> bool>)
         }
-        .map_err(crate::broker::members::db_err);
-        match (watchdog, restored) {
-            (Ok(_), Ok(())) => Ok(()),
-            (Err(primary), Err(cleanup)) => Err(primary.with_cleanup(cleanup.message())),
-            (Err(cause), _) | (_, Err(cause)) => Err(cause),
-        }
+        .map_err(crate::error::CafleetError::from);
+        CafleetError::merge_cleanup(watchdog.map(|_| ()), restored)
     }
 }
 
@@ -202,25 +197,20 @@ pub(crate) fn with_database_deadline<T>(
         let mut scope = CancellationScope::new(conn)?;
         let result = operation(scope.conn);
         let restored = scope.restore();
-        match (result, restored) {
-            (Ok(value), Ok(())) => {
-                deadline.remaining()?;
-                Ok(value)
-            }
-            (Err(primary), Err(cleanup)) => Err(primary.with_cleanup(cleanup.message())),
-            (Err(cause), _) | (_, Err(cause)) => Err(cause),
-        }
+        let value = CafleetError::merge_cleanup(result, restored)?;
+        deadline.remaining()?;
+        Ok(value)
     })
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct ShutdownOutcome {
-    pub native_exit: Option<ChildExit>,
-    pub cleanup_state: CleanupState,
-    pub diagnostics: Vec<String>,
-    pub dropped_display_bytes: u64,
-    pub pending_event_frames: u64,
-    pub unsaved_observation_gap: u64,
+    pub(crate) native_exit: Option<ChildExit>,
+    pub(crate) cleanup_state: CleanupState,
+    pub(crate) diagnostics: Vec<String>,
+    pub(crate) dropped_display_bytes: u64,
+    pub(crate) pending_event_frames: u64,
+    pub(crate) unsaved_observation_gap: u64,
 }
 
 pub(crate) trait ShutdownHost {

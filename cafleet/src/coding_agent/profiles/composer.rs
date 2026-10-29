@@ -26,9 +26,9 @@ impl ComposerOperation {
 
 #[derive(Clone)]
 pub(super) struct ComposerSubmission {
-    pub prefix: Vec<u8>,
-    pub submit: Vec<u8>,
-    pub fixtures: Vec<Fixture>,
+    pub(crate) prefix: Vec<u8>,
+    pub(crate) submit: Vec<u8>,
+    pub(crate) fixtures: Vec<Fixture>,
 }
 
 impl ComposerSubmission {
@@ -489,11 +489,7 @@ mod tests {
         assert_no_debug_or_serialize!(ComposerPlan);
         const SUBMIT: &str = "E16_PRIVATE_SUBMIT";
         const LITERAL: &str = "E16_PRIVATE_LITERAL";
-        let hex = SUBMIT
-            .as_bytes()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
+        let hex = crate::digest::hex(SUBMIT.as_bytes());
         for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
             let good = match operation {
                 ComposerOperation::Prompt => definition(Some(&hex), None),

@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ProcessIdentity {
-    pub pid: i64,
-    pub start_identity: String,
+    pub(crate) pid: i64,
+    pub(crate) start_identity: String,
 }
 impl ProcessIdentity {
     pub(crate) fn current() -> Result<Self> {

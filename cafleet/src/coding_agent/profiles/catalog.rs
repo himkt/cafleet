@@ -71,79 +71,79 @@ fn lower_hex(value: &str) -> bool {
 }
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct Fixture {
-    pub id: String,
-    pub kind: String,
-    pub backend: CodingAgent,
-    pub version: String,
+    pub(crate) id: String,
+    pub(crate) kind: String,
+    pub(crate) backend: CodingAgent,
+    pub(crate) version: String,
 }
 #[derive(Clone)]
 pub(super) struct Capture {
-    pub matcher: String,
-    pub name: String,
-    pub row_margin: Option<String>,
+    pub(crate) matcher: String,
+    pub(crate) name: String,
+    pub(crate) row_margin: Option<String>,
 }
 #[derive(Clone)]
 pub(super) struct Choice {
-    pub id: String,
-    pub label: Capture,
-    pub scope: String,
+    pub(crate) id: String,
+    pub(crate) label: Capture,
+    pub(crate) scope: String,
 }
 #[derive(Clone)]
 pub(super) struct Matcher {
-    pub id: String,
-    pub scope: String,
-    pub regex: Regex,
-    pub background_focus: bool,
+    pub(crate) id: String,
+    pub(crate) scope: String,
+    pub(crate) regex: Regex,
+    pub(crate) background_focus: bool,
 }
 #[derive(Clone)]
 pub(super) struct Continuation {
-    pub rule_id: String,
-    pub choice_id: String,
-    pub fixtures: Vec<String>,
+    pub(crate) rule_id: String,
+    pub(crate) choice_id: String,
+    pub(crate) fixtures: Vec<String>,
 }
 #[derive(Clone)]
 pub(super) struct Region {
-    pub screen: String,
-    pub start: Regex,
-    pub end: Regex,
-    pub max_rows: u16,
-    pub cursor: String,
+    pub(crate) screen: String,
+    pub(crate) start: Regex,
+    pub(crate) end: Regex,
+    pub(crate) max_rows: u16,
+    pub(crate) cursor: String,
 }
 #[derive(Clone)]
 pub(super) struct Frame {
-    pub require: Vec<Regex>,
-    pub reject: Vec<Regex>,
+    pub(crate) require: Vec<Regex>,
+    pub(crate) reject: Vec<Regex>,
 }
 #[derive(Clone)]
 pub(super) struct Rule {
-    pub id: String,
-    pub priority: i64,
-    pub kind: ObservationKind,
-    pub region: Region,
-    pub matchers: Vec<Matcher>,
-    pub operation: Option<Capture>,
-    pub choices: Vec<Choice>,
-    pub native: Option<Capture>,
-    pub verified: bool,
-    pub sensitive: bool,
-    pub continuation: Option<Continuation>,
-    pub frame: Option<Frame>,
+    pub(crate) id: String,
+    pub(crate) priority: i64,
+    pub(crate) kind: ObservationKind,
+    pub(crate) region: Region,
+    pub(crate) matchers: Vec<Matcher>,
+    pub(crate) operation: Option<Capture>,
+    pub(crate) choices: Vec<Choice>,
+    pub(crate) native: Option<Capture>,
+    pub(crate) verified: bool,
+    pub(crate) sensitive: bool,
+    pub(crate) continuation: Option<Continuation>,
+    pub(crate) frame: Option<Frame>,
 }
 #[derive(Clone)]
 pub(super) struct Capability {
-    pub rules: Vec<String>,
-    pub fixtures: Vec<String>,
+    pub(crate) rules: Vec<String>,
+    pub(crate) fixtures: Vec<String>,
 }
 #[derive(Clone)]
 pub(super) struct Answer {
-    pub decision: PermissionDecision,
-    pub request: String,
-    pub id: String,
-    pub fixtures: Vec<String>,
-    pub choice_id: String,
-    pub focus_matcher_id: String,
-    pub stages: Vec<AnswerStage>,
-    pub provenance: Vec<Fixture>,
+    pub(crate) decision: PermissionDecision,
+    pub(crate) request: String,
+    pub(crate) id: String,
+    pub(crate) fixtures: Vec<String>,
+    pub(crate) choice_id: String,
+    pub(crate) focus_matcher_id: String,
+    pub(crate) stages: Vec<AnswerStage>,
+    pub(crate) provenance: Vec<Fixture>,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -210,15 +210,15 @@ impl AnswerPlan {
 }
 #[derive(Clone)]
 pub(super) struct Profile {
-    pub backend: CodingAgent,
-    pub versions: Vec<String>,
-    pub version: String,
-    pub rules: Vec<Rule>,
-    pub detection: Option<Capability>,
-    pub composer: Option<Capability>,
-    pub annotations: Option<Capability>,
-    pub submissions: [Option<ComposerSubmission>; 2],
-    pub answers: Vec<Answer>,
+    pub(crate) backend: CodingAgent,
+    pub(crate) versions: Vec<String>,
+    pub(crate) version: String,
+    pub(crate) rules: Vec<Rule>,
+    pub(crate) detection: Option<Capability>,
+    pub(crate) composer: Option<Capability>,
+    pub(crate) annotations: Option<Capability>,
+    pub(crate) submissions: [Option<ComposerSubmission>; 2],
+    pub(crate) answers: Vec<Answer>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum VersionComponent {
@@ -302,22 +302,29 @@ impl Profile {
     }
 }
 #[derive(Clone)]
-pub struct ProfileCatalog {
+pub(crate) struct ProfileCatalog {
     profiles: Vec<Profile>,
     #[cfg(test)]
     capture_origin: &'static str,
 }
-pub struct NativeCapabilities {
-    pub backend: CodingAgent,
-    pub native_version: Option<String>,
-    pub profile_version: Option<String>,
-    pub profile_match: Option<ProfileMatch>,
-    pub detection: Coverage,
-    pub composer: Coverage,
-    pub prompt_submission: Coverage,
-    pub native_exec_submission: Coverage,
-    pub answer_decisions: Vec<PermissionDecision>,
-    pub capability_reason: Option<String>,
+pub(crate) struct NativeCapabilities {
+    #[cfg(test)]
+    pub(crate) backend: CodingAgent,
+    #[cfg(test)]
+    pub(crate) native_version: Option<String>,
+    pub(crate) profile_version: Option<String>,
+    pub(crate) profile_match: Option<ProfileMatch>,
+    pub(crate) detection: Coverage,
+    #[cfg(test)]
+    pub(crate) composer: Coverage,
+    #[cfg(test)]
+    pub(crate) prompt_submission: Coverage,
+    #[cfg(test)]
+    pub(crate) native_exec_submission: Coverage,
+    #[cfg(test)]
+    pub(crate) answer_decisions: Vec<PermissionDecision>,
+    #[cfg(test)]
+    pub(crate) capability_reason: Option<String>,
 }
 fn capture(value: &Value, matchers: &[Matcher]) -> Result<Capture> {
     let map = object(value, &["matcher_id", "capture"])?;
@@ -1149,14 +1156,6 @@ const BUNDLED_FIXTURES: &[(&str, &[u8])] = &[
     ),
 ];
 
-fn sha256_hex(bytes: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
-
 fn verify_native_screen(entry: &Value, embedded: &[(&str, &[u8])]) -> Result<()> {
     let id = text(&entry["id"])?;
     require(
@@ -1170,7 +1169,7 @@ fn verify_native_screen(entry: &Value, embedded: &[(&str, &[u8])]) -> Result<()>
         .map(|(_, bytes)| *bytes)
         .ok_or_else(|| invalid("bundled fixture bytes are not embedded"))?;
     require(
-        sha256_hex(bytes) == text(&entry["sha256"])?,
+        crate::digest::sha256_hex(bytes) == text(&entry["sha256"])?,
         "bundled fixture digest mismatch",
     )?;
     let screen: Value = serde_json::from_slice(bytes)
@@ -1300,7 +1299,7 @@ fn verify_cell_backgrounds(
 }
 
 impl ProfileCatalog {
-    pub fn bundled() -> Result<Self> {
+    pub(crate) fn bundled() -> Result<Self> {
         let definitions: Value = serde_json::from_str(BUNDLED_DEFINITIONS)
             .map_err(|cause| invalid(format!("bundled definitions: {cause}")))?;
         Self::from_bundled_definitions(&definitions, BUNDLED_FIXTURES)
@@ -1338,7 +1337,7 @@ impl ProfileCatalog {
     pub(crate) fn capture_origin(&self) -> &'static str {
         self.capture_origin
     }
-    pub fn from_definitions(value: &Value) -> Result<Self> {
+    pub(crate) fn from_definitions(value: &Value) -> Result<Self> {
         let root = object(value, &["schema_version", "fixtures", "profiles"])?;
         require(
             root["schema_version"].as_u64() == Some(1),
@@ -1584,7 +1583,7 @@ impl ProfileCatalog {
             .max_by(|a, b| a.newest_version().cmp(&b.newest_version()))
             .map(|newest| (newest, ProfileMatch::Fallback))
     }
-    pub fn rule_ids(&self) -> Vec<String> {
+    pub(crate) fn rule_ids(&self) -> Vec<String> {
         self.profiles
             .iter()
             .flat_map(|p| p.rules.iter().map(|r| r.id.clone()))
@@ -1592,11 +1591,17 @@ impl ProfileCatalog {
             .into_iter()
             .collect()
     }
-    pub fn capabilities(&self, backend: CodingAgent, version: Option<&str>) -> NativeCapabilities {
+    pub(crate) fn capabilities(
+        &self,
+        backend: CodingAgent,
+        version: Option<&str>,
+    ) -> NativeCapabilities {
         let selection = self.selection(backend, version);
         let profile = selection.map(|(profile, _)| profile);
         NativeCapabilities {
+            #[cfg(test)]
             backend,
+            #[cfg(test)]
             native_version: version.map(str::to_owned),
             profile_version: profile.map(|p| p.version.clone()),
             profile_match: selection.map(|(_, profile_match)| profile_match),
@@ -1605,11 +1610,13 @@ impl ProfileCatalog {
             } else {
                 Coverage::Unknown
             },
+            #[cfg(test)]
             composer: if profile.is_some_and(|p| p.composer.is_some()) {
                 Coverage::Tested
             } else {
                 Coverage::Unknown
             },
+            #[cfg(test)]
             prompt_submission: if profile
                 .is_some_and(|p| p.submissions[ComposerOperation::Prompt.index()].is_some())
             {
@@ -1617,6 +1624,7 @@ impl ProfileCatalog {
             } else {
                 Coverage::Unknown
             },
+            #[cfg(test)]
             native_exec_submission: if profile
                 .is_some_and(|p| p.submissions[ComposerOperation::Exec.index()].is_some())
             {
@@ -1624,6 +1632,7 @@ impl ProfileCatalog {
             } else {
                 Coverage::Unknown
             },
+            #[cfg(test)]
             answer_decisions: profile
                 .map(|p| {
                     let mut decisions = Vec::new();
@@ -1635,6 +1644,7 @@ impl ProfileCatalog {
                     decisions
                 })
                 .unwrap_or_default(),
+            #[cfg(test)]
             capability_reason: if profile.is_none() {
                 Some("native profile unavailable".into())
             } else {
@@ -1642,7 +1652,8 @@ impl ProfileCatalog {
             },
         }
     }
-    pub fn answer_capability(
+    #[cfg(test)]
+    pub(crate) fn answer_capability(
         &self,
         backend: CodingAgent,
         version: &str,
@@ -3211,7 +3222,6 @@ mod tests {
     }
     mod bundled_claude {
         use super::*;
-        use sha2::{Digest, Sha256};
         use std::collections::BTreeSet;
 
         const CLAUDE_VERSION: &str = "2.1.302";
@@ -3329,10 +3339,7 @@ mod tests {
         }
 
         fn digest(bytes: &[u8]) -> String {
-            Sha256::digest(bytes)
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect()
+            crate::digest::sha256_hex(bytes)
         }
 
         fn definitions() -> Value {
@@ -4225,7 +4232,6 @@ mod tests {
     mod bundled_claude_auto {
         use super::*;
         use crate::broker::runtime::{AutomaticReview, EffectivePolicyObservation};
-        use sha2::{Digest, Sha256};
         use std::collections::BTreeSet;
 
         const CLAUDE_VERSION: &str = "2.1.302";
@@ -4563,10 +4569,7 @@ mod tests {
         }
 
         fn digest(bytes: &[u8]) -> String {
-            Sha256::digest(bytes)
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect()
+            crate::digest::sha256_hex(bytes)
         }
 
         fn redacted() -> EvidencePolicy {
@@ -5431,7 +5434,6 @@ mod tests {
     mod bundled_codex_auto {
         use super::*;
         use crate::broker::runtime::AutomaticReview;
-        use sha2::{Digest, Sha256};
         use std::collections::BTreeSet;
 
         const CODEX_VERSION: &str = "0.163.0";
@@ -5731,10 +5733,7 @@ mod tests {
         }
 
         fn digest(bytes: &[u8]) -> String {
-            Sha256::digest(bytes)
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect()
+            crate::digest::sha256_hex(bytes)
         }
 
         #[test]
@@ -5973,7 +5972,6 @@ mod tests {
 
     mod bundled_codex {
         use super::*;
-        use sha2::{Digest, Sha256};
         use std::collections::BTreeSet;
 
         const CODEX_VERSION: &str = "0.163.0";
@@ -6036,10 +6034,7 @@ mod tests {
         }
 
         fn digest(bytes: &[u8]) -> String {
-            Sha256::digest(bytes)
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect()
+            crate::digest::sha256_hex(bytes)
         }
 
         fn definitions() -> Value {
@@ -6429,7 +6424,6 @@ mod tests {
 
     mod bundled_opencode {
         use super::*;
-        use sha2::{Digest, Sha256};
         use std::collections::BTreeSet;
 
         const OPENCODE_VERSION: &str = "2.1.4";
@@ -6534,10 +6528,7 @@ mod tests {
         }
 
         fn digest(bytes: &[u8]) -> String {
-            Sha256::digest(bytes)
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect()
+            crate::digest::sha256_hex(bytes)
         }
 
         fn definitions() -> Value {

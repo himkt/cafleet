@@ -2,32 +2,35 @@ use std::path::{Path, PathBuf};
 
 use crate::error::CafleetError;
 
-pub type EnvLookup<'a> = &'a dyn Fn(&str) -> Option<String>;
+pub(crate) type EnvLookup<'a> = &'a dyn Fn(&str) -> Option<String>;
 
 #[derive(Debug)]
-pub struct ResolvedDir {
-    pub path: PathBuf,
+pub(crate) struct ResolvedDir {
+    pub(crate) path: PathBuf,
 }
 
-pub fn claude_config_dir(env: EnvLookup, home: &Path) -> Result<ResolvedDir, CafleetError> {
+pub(crate) fn claude_config_dir(env: EnvLookup, home: &Path) -> Result<ResolvedDir, CafleetError> {
     resolve("CLAUDE_CONFIG_DIR", env, home.join(".claude"))
 }
 
-pub fn codex_home(env: EnvLookup, home: &Path) -> Result<ResolvedDir, CafleetError> {
+pub(crate) fn codex_home(env: EnvLookup, home: &Path) -> Result<ResolvedDir, CafleetError> {
     resolve("CODEX_HOME", env, home.join(".codex"))
 }
 
 /// opencode discovers skills only at fixed paths, so the skills base ignores
 /// every variable.
-pub fn opencode_skills_base(home: &Path) -> PathBuf {
+pub(crate) fn opencode_skills_base(home: &Path) -> PathBuf {
     home.join(".config/opencode")
 }
 
-pub fn opencode_preset_base(env: EnvLookup, home: &Path) -> Result<ResolvedDir, CafleetError> {
+pub(crate) fn opencode_preset_base(
+    env: EnvLookup,
+    home: &Path,
+) -> Result<ResolvedDir, CafleetError> {
     resolve("OPENCODE_CONFIG_DIR", env, opencode_skills_base(home))
 }
 
-pub fn require_absolute(var: &str, value: &str) -> Result<(), CafleetError> {
+pub(crate) fn require_absolute(var: &str, value: &str) -> Result<(), CafleetError> {
     if Path::new(value).is_absolute() {
         Ok(())
     } else {

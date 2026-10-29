@@ -5,7 +5,7 @@ const BRACE_HINT: &str = "Double literal braces ({{, }}) to keep them as text.";
 /// The spawn-placeholder mini-formatter used by `member create`:
 /// Python brace grammar — `{{` / `}}` escapes, the four placeholders, and the
 /// unknown-vs-malformed usage-error taxonomy (both exit 2).
-pub fn substitute_spawn_placeholders(
+pub(crate) fn substitute_spawn_placeholders(
     body: &str,
     fleet_id: i64,
     member_id: i64,

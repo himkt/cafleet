@@ -1,13 +1,12 @@
 use super::*;
 use crate::coding_agent::AnswerCapability;
 use crate::runtime::runner::with_database_deadline;
-use sha2::{Digest, Sha256};
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::time::Instant;
 
 #[derive(Debug)]
-pub struct ZeroByteRetirement<'guard> {
+pub(crate) struct ZeroByteRetirement<'guard> {
     owner: RunOwner,
     input_id: i64,
     interaction_id: i64,
@@ -121,7 +120,7 @@ fn validate_metadata(metadata: &PermissionResponseMetadata) -> Result<(), Caflee
     nonblank(&metadata.answer_rule_id, "answer_rule_id")
 }
 
-pub fn permission_response_digest(
+pub(crate) fn permission_response_digest(
     run_id: i64,
     metadata: &PermissionResponseMetadata,
 ) -> Result<String, CafleetError> {
@@ -132,17 +131,9 @@ pub fn permission_response_digest(
         "request_token":metadata.request_token,"decision":metadata.decision,"director_mode":metadata.director_mode,
         "decision_source":metadata.decision_source,"mode_evidence_ref":metadata.mode_evidence_ref,
         "decision_evidence_ref":metadata.decision_evidence_ref,"answer_profile_version":metadata.answer_profile_version,"answer_rule_id":metadata.answer_rule_id});
-    let sorted = object
-        .as_object()
-        .expect("digest object")
-        .iter()
-        .collect::<std::collections::BTreeMap<_, _>>();
-    let bytes = serde_json::to_vec(&sorted)
-        .map_err(|error| invalid("permission_response", error.to_string()))?;
-    Ok(Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect())
+    Ok(crate::digest::sha256_hex(
+        crate::digest::canonical_json(&object).as_bytes(),
+    ))
 }
 
 fn map_response(row: &rusqlite::Row<'_>) -> rusqlite::Result<PermissionResponseRecord> {
@@ -177,17 +168,15 @@ fn read_claim(
     input: &InputOperation,
     metadata: &PermissionResponseMetadata,
 ) -> Result<Option<PermissionResponseClaim>, CafleetError> {
-    let mut stmt = conn.prepare("SELECT interaction_id,input_id FROM member_permission_response_claims WHERE interaction_id=?1 OR input_id=?2").map_err(db_err)?;
+    let mut stmt = conn.prepare("SELECT interaction_id,input_id FROM member_permission_response_claims WHERE interaction_id=?1 OR input_id=?2")?;
     let claims = stmt
         .query_map(params![metadata.interaction_id, input.input_id], |row| {
             Ok(PermissionResponseClaim {
                 interaction_id: row.get(0)?,
                 input_id: row.get(1)?,
             })
-        })
-        .map_err(db_err)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(db_err)?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     let matching = claims
         .iter()
         .find(|claim| {
@@ -220,8 +209,7 @@ pub(super) fn validate_input_response(
             [input.input_id],
             map_response,
         )
-        .optional()
-        .map_err(db_err)?;
+        .optional()?;
     if input.kind != InputKind::PermissionResponse {
         require(
             response.is_none(),
@@ -269,7 +257,7 @@ pub(super) fn validate_input_response(
     Ok(Some(response))
 }
 
-pub fn get_permission_response(
+pub(crate) fn get_permission_response(
     conn: &Connection,
     input_id: i64,
 ) -> Result<PermissionReceipt, CafleetError> {
@@ -286,7 +274,7 @@ pub fn get_permission_response(
     })
 }
 
-pub fn lookup_permission_response(
+pub(crate) fn lookup_permission_response(
     conn: &Connection,
     identity: &PermissionReceiptIdentity,
     request: &NewPermissionResponse,
@@ -317,7 +305,7 @@ pub fn lookup_permission_response(
         .transpose()
 }
 
-pub fn reserve_permission_response(
+pub(crate) fn reserve_permission_response(
     conn: &mut Connection,
     owner: &RunOwner,
     request: &NewPermissionResponse,
@@ -332,11 +320,9 @@ pub fn reserve_permission_response(
         if let Some(receipt) = lookup_permission_response(conn, &identity, request)? {
             return Ok(PermissionReservation::Retained(receipt));
         }
-        let tx = conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(db_err)?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(receipt) = lookup_permission_response(&tx, &identity, request)? {
-            tx.commit().map_err(db_err)?;
+            tx.commit()?;
             return Ok(PermissionReservation::Retained(receipt));
         }
         let run = validate_owner(&tx, owner)?;
@@ -370,27 +356,27 @@ pub fn reserve_permission_response(
         validate_current_capability(&tx, &run, metadata, capability)?;
         inputs::require_capacity(&tx, run.run_id)?;
         let digest = permission_response_digest(run.run_id, metadata)?;
-        let now = format_utc(now_utc());
-        tx.execute("INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at) VALUES(?1,?2,'permission_response',?3,'in_progress',?4,?4)",params![run.run_id,request.operation_key,digest,now]).map_err(db_err)?;
+        let now = now_stamp();
+        tx.execute("INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,created_at,updated_at) VALUES(?1,?2,'permission_response',?3,'in_progress',?4,?4)",params![run.run_id,request.operation_key,digest,now])?;
         let input_id = tx.last_insert_rowid();
-        tx.execute("INSERT INTO member_permission_responses(input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_profile_version,answer_rule_id,decided_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",params![input_id,metadata.event_id,metadata.interaction_id,metadata.expected_owner_epoch,metadata.request_token,metadata.decision.as_str(),metadata.director_member_id,metadata.director_mode.as_str(),metadata.decision_source.as_str(),metadata.mode_evidence_ref,metadata.decision_evidence_ref,metadata.answer_profile_version,metadata.answer_rule_id,now]).map_err(db_err)?;
+        tx.execute("INSERT INTO member_permission_responses(input_id,event_id,interaction_id,expected_owner_epoch,request_token,decision,director_member_id,director_mode,decision_source,mode_evidence_ref,decision_evidence_ref,answer_profile_version,answer_rule_id,decided_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",params![input_id,metadata.event_id,metadata.interaction_id,metadata.expected_owner_epoch,metadata.request_token,metadata.decision.as_str(),metadata.director_member_id,metadata.director_mode.as_str(),metadata.decision_source.as_str(),metadata.mode_evidence_ref,metadata.decision_evidence_ref,metadata.answer_profile_version,metadata.answer_rule_id,now])?;
         tx.execute(
             "INSERT INTO member_permission_response_claims(interaction_id,input_id) VALUES(?1,?2)",
             params![metadata.interaction_id, input_id],
-        )
-        .map_err(db_err)?;
+        )?;
         let receipt = get_permission_response(&tx, input_id)?;
         require(
             Instant::now() < deadline,
             "deadline",
             "response reservation deadline expired",
         )?;
-        tx.commit().map_err(db_err)?;
+        tx.commit()?;
         Ok(PermissionReservation::Reserved(receipt))
     })
 }
 
-pub fn release_permission_claim(
+#[cfg(test)]
+pub(crate) fn release_permission_claim(
     conn: &mut Connection,
     owner: &RunOwner,
     input_id: i64,
@@ -502,10 +488,8 @@ pub(crate) fn rearm_permission_response(
         "rearm requires its own immediate transaction",
     )?;
     with_database_deadline(conn, deadline, |conn| {
-        conn.busy_handler(Some(|_| false)).map_err(db_err)?;
-        let tx = conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(db_err)?;
+        conn.busy_handler(Some(|_| false))?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let run = validate_owner(&tx, owner)?;
         let receipt = get_permission_response(&tx, proof.input_id)?;
         validate_proof(owner, &receipt, proof)?;
@@ -518,9 +502,9 @@ pub(crate) fn rearm_permission_response(
         )?;
         validate_current_capability(&tx, &run, &request.metadata, Some(capability))?;
         if receipt.claim.is_none() {
-            tx.execute("INSERT INTO member_permission_response_claims(interaction_id,input_id) VALUES(?1,?2)", params![request.metadata.interaction_id, receipt.input.input_id]).map_err(db_err)?;
+            tx.execute("INSERT INTO member_permission_response_claims(interaction_id,input_id) VALUES(?1,?2)", params![request.metadata.interaction_id, receipt.input.input_id])?;
         }
-        let changed = tx.execute("UPDATE member_input_operations SET state='in_progress',updated_at=?1 WHERE input_id=?2 AND state='ready'", params![format_utc(now_utc()), receipt.input.input_id]).map_err(db_err)?;
+        let changed = tx.execute("UPDATE member_input_operations SET state='in_progress',updated_at=?1 WHERE input_id=?2 AND state='ready'", params![now_stamp(), receipt.input.input_id])?;
         require(changed == 1, "state", "permission rearm lost CAS")?;
         let rearmed = get_permission_response(&tx, receipt.input.input_id)?;
         require(
@@ -528,7 +512,7 @@ pub(crate) fn rearm_permission_response(
             "deadline",
             "permission rearm deadline expired",
         )?;
-        tx.commit().map_err(db_err)?;
+        tx.commit()?;
         Ok(rearmed)
     })
 }
@@ -554,7 +538,10 @@ pub(crate) fn release_permission_claim_in_transaction(
         "serialized zero-byte state required",
     )?;
     if receipt.claim.is_some() {
-        let changed = conn.execute("DELETE FROM member_permission_response_claims WHERE interaction_id=?1 AND input_id=?2", params![proof.interaction_id, input_id]).map_err(db_err)?;
+        let changed = conn.execute(
+            "DELETE FROM member_permission_response_claims WHERE interaction_id=?1 AND input_id=?2",
+            params![proof.interaction_id, input_id],
+        )?;
         require(changed == 1, "permission_claim", "claim release lost CAS")?;
     }
     require(
@@ -655,10 +642,7 @@ mod tests {
             .unwrap()
             .iter()
             .collect::<BTreeMap<_, _>>();
-        Sha256::digest(serde_json::to_vec(&sorted).unwrap())
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect()
+        crate::digest::hex(&Sha256::digest(serde_json::to_vec(&sorted).unwrap()))
     }
 
     fn assert_rejected_unchanged(fixture: &mut ResponseFixture, request: &NewPermissionResponse) {

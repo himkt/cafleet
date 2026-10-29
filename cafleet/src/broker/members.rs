@@ -1,45 +1,31 @@
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+#[cfg(test)]
+use rusqlite::TransactionBehavior;
+use rusqlite::{Connection, OptionalExtension, params};
 
 use super::records::{MemberActivity, MemberKind, MemberRecord, Placement, RegisteredMember};
 use crate::error::CafleetError;
-use crate::time::{format_utc, now_utc, parse_lenient};
+use crate::time::{now_stamp, parse_lenient};
 
 #[derive(Debug, Clone)]
-pub struct NewPlacement {
-    pub backend: String,
-    pub mux_session: String,
-    pub mux_window_id: String,
-    pub mux_pane_id: Option<String>,
-    pub coding_agent: String,
+pub(crate) struct NewPlacement {
+    pub(crate) backend: String,
+    pub(crate) mux_session: String,
+    pub(crate) mux_window_id: String,
+    pub(crate) mux_pane_id: Option<String>,
+    pub(crate) coding_agent: String,
 }
 
-pub(crate) fn db_err(e: rusqlite::Error) -> CafleetError {
-    if matches!(
-        e.sqlite_error_code(),
-        Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked)
-    ) {
-        return CafleetError::DatabaseBusy(format!("database error: {e}"));
-    }
-    if let rusqlite::Error::FromSqlConversionFailure(_, _, source) = &e
-        && let Some(error) = source.downcast_ref::<CafleetError>()
-    {
-        return error.clone();
-    }
-    CafleetError::App(format!("database error: {e}"))
-}
-
-pub fn register_member(
+#[cfg(test)]
+pub(crate) fn register_member(
     conn: &mut Connection,
     fleet_id: i64,
     name: &str,
     description: &str,
     placement: Option<&NewPlacement>,
 ) -> Result<RegisteredMember, CafleetError> {
-    let tx = conn
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(db_err)?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let member = register_member_rows(&tx, fleet_id, name, description, placement)?;
-    tx.commit().map_err(db_err)?;
+    tx.commit()?;
     Ok(member)
 }
 
@@ -50,22 +36,20 @@ pub(crate) fn register_member_rows(
     description: &str,
     placement: Option<&NewPlacement>,
 ) -> Result<RegisteredMember, CafleetError> {
-    let now = format_utc(now_utc());
+    let now = now_stamp();
     super::fleets::require_live_fleet(conn, fleet_id)?;
-    let member = conn
-        .query_row(
-            "INSERT INTO members (fleet_id, name, description, status, registered_at)
+    let member = conn.query_row(
+        "INSERT INTO members (fleet_id, name, description, status, registered_at)
          VALUES (?1, ?2, ?3, 'active', ?4) RETURNING member_id, name, registered_at",
-            params![fleet_id, name, description, now],
-            |row| {
-                Ok(RegisteredMember {
-                    member_id: row.get(0)?,
-                    name: row.get(1)?,
-                    registered_at: row.get(2)?,
-                })
-            },
-        )
-        .map_err(db_err)?;
+        params![fleet_id, name, description, now],
+        |row| {
+            Ok(RegisteredMember {
+                member_id: row.get(0)?,
+                name: row.get(1)?,
+                registered_at: row.get(2)?,
+            })
+        },
+    )?;
     let member_id = member.member_id;
     if let Some(p) = placement {
         conn.execute(
@@ -81,13 +65,12 @@ pub(crate) fn register_member_rows(
                 p.coding_agent,
                 now
             ],
-        )
-        .map_err(db_err)?;
+        )?;
     }
     Ok(member)
 }
 
-pub fn get_member(
+pub(crate) fn get_member(
     conn: &Connection,
     member_id: i64,
     fleet_id: i64,
@@ -111,27 +94,34 @@ pub fn get_member(
                 runtime: None,
             })
         },
-    ).optional().map_err(db_err)?;
+    ).optional()?;
     if let Some(member) = &mut member {
         member.runtime = super::runtime::member_runtime(conn, member_id)?;
     }
     Ok(member)
 }
 
-pub fn active_member_fleet(conn: &Connection, member_id: i64) -> Result<Option<i64>, CafleetError> {
+pub(crate) fn active_member_fleet(
+    conn: &Connection,
+    member_id: i64,
+) -> Result<Option<i64>, CafleetError> {
     conn.query_row(
         "SELECT fleet_id FROM members WHERE member_id=?1 AND status='active'",
         [member_id],
         |row| row.get(0),
     )
     .optional()
-    .map_err(db_err)
+    .map_err(crate::error::CafleetError::from)
 }
 
-pub fn deregister_member(conn: &mut Connection, member_id: i64) -> Result<bool, CafleetError> {
-    let tx = conn.transaction().map_err(db_err)?;
+#[cfg(test)]
+pub(crate) fn deregister_member(
+    conn: &mut Connection,
+    member_id: i64,
+) -> Result<bool, CafleetError> {
+    let tx = conn.transaction()?;
     let changed = deregister_member_rows(&tx, member_id)?;
-    tx.commit().map_err(db_err)?;
+    tx.commit()?;
     Ok(changed)
 }
 
@@ -139,39 +129,35 @@ pub(crate) fn deregister_member_rows(
     conn: &Connection,
     member_id: i64,
 ) -> Result<bool, CafleetError> {
-    let is_root: bool = conn
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM fleets \
+    let is_root: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM fleets \
              WHERE director_member_id=?1 AND deleted_at IS NULL)",
-            [member_id],
-            |row| row.get(0),
-        )
-        .map_err(db_err)?;
+        [member_id],
+        |row| row.get(0),
+    )?;
     if is_root {
         return Err(CafleetError::App(
             "cannot deregister the root Director; use 'cafleet fleet delete' instead".to_string(),
         ));
     }
-    let now = format_utc(now_utc());
-    let changed = conn
-        .execute(
-            "UPDATE members SET status='deregistered', deregistered_at=?1 \
+    let now = now_stamp();
+    let changed = conn.execute(
+        "UPDATE members SET status='deregistered', deregistered_at=?1 \
              WHERE member_id=?2 AND status='active'",
-            params![now, member_id],
-        )
-        .map_err(db_err)?;
+        params![now, member_id],
+    )?;
     if changed == 0 {
         return Ok(false);
     }
     conn.execute(
         "DELETE FROM member_placements WHERE member_id=?1",
         [member_id],
-    )
-    .map_err(db_err)?;
+    )?;
     Ok(true)
 }
 
-pub fn update_placement_pane_id(
+#[cfg(test)]
+pub(crate) fn update_placement_pane_id(
     conn: &mut Connection,
     member_id: i64,
     pane_id: &str,
@@ -183,7 +169,7 @@ pub fn update_placement_pane_id(
         |row| Placement::from_row(row, 0),
     )
     .optional()
-    .map_err(db_err)
+    .map_err(crate::error::CafleetError::from)
 }
 
 fn roster_rows(conn: &Connection, fleet_id: i64) -> Result<Vec<MemberActivity>, CafleetError> {
@@ -198,7 +184,7 @@ fn roster_rows(conn: &Connection, fleet_id: i64) -> Result<Vec<MemberActivity>, 
          LEFT JOIN member_placements p ON p.member_id=m.member_id
          WHERE m.fleet_id=?1 AND m.status='active'
          ORDER BY m.member_id"
-    ).map_err(db_err)?;
+    )?;
     stmt.query_map([fleet_id], |row| {
         let backend: Option<String> = row.get(4)?;
         Ok(MemberActivity {
@@ -222,10 +208,9 @@ fn roster_rows(conn: &Connection, fleet_id: i64) -> Result<Vec<MemberActivity>, 
             last_ack: row.get(14)?,
             idle: None,
         })
-    })
-    .map_err(db_err)?
+    })?
     .collect::<Result<Vec<_>, _>>()
-    .map_err(db_err)
+    .map_err(crate::error::CafleetError::from)
 }
 
 fn idle_seconds(row: &MemberActivity, now: chrono::DateTime<chrono::Utc>) -> Option<i64> {
@@ -237,9 +222,12 @@ fn idle_seconds(row: &MemberActivity, now: chrono::DateTime<chrono::Utc>) -> Opt
     Some((now - parsed).num_seconds().max(0))
 }
 
-pub fn list_members(conn: &Connection, fleet_id: i64) -> Result<Vec<MemberActivity>, CafleetError> {
+pub(crate) fn list_members(
+    conn: &Connection,
+    fleet_id: i64,
+) -> Result<Vec<MemberActivity>, CafleetError> {
     super::fleets::require_live_fleet(conn, fleet_id)?;
-    let now = now_utc();
+    let now = chrono::Utc::now();
     let mut rows = roster_rows(conn, fleet_id)?;
     for row in &mut rows {
         row.idle = idle_seconds(row, now);

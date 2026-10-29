@@ -3,11 +3,11 @@ use crate::broker::runtime::ModeSource;
 use crate::error::CafleetError;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct LaunchPolicySelection {
-    pub requested_mode: Option<String>,
-    pub resolved_mode: String,
-    pub mode_source: ModeSource,
-    pub permission_argv: Vec<String>,
+pub(crate) struct LaunchPolicySelection {
+    pub(crate) requested_mode: Option<String>,
+    pub(crate) resolved_mode: String,
+    pub(crate) mode_source: ModeSource,
+    pub(crate) permission_argv: Vec<String>,
     backend: CodingAgent,
     native_version: Option<String>,
 }
@@ -19,7 +19,7 @@ impl CodingAgent {
             Self::Opencode => "cafleet",
         }
     }
-    pub fn permission_mode_help() -> String {
+    pub(crate) fn permission_mode_help() -> String {
         let catalog = Self::all()
             .iter()
             .map(|agent| {
@@ -34,7 +34,7 @@ impl CodingAgent {
             .join("; ");
         format!("Launch-only native permission policy for the resolved backend — {catalog}")
     }
-    pub fn policy_choices(self, native_version: Option<&str>) -> Vec<String> {
+    pub(crate) fn policy_choices(self, native_version: Option<&str>) -> Vec<String> {
         let choices: &[&str] = match (self, native_version) {
             (Self::Claude, None | Some("2.1.302")) => &[
                 "default",
@@ -64,7 +64,7 @@ impl CodingAgent {
             Self::Opencode => vec!["--agent".into(), mode.into()],
         }
     }
-    pub fn resolve_policy(
+    pub(crate) fn resolve_policy(
         self,
         native_version: Option<&str>,
         requested: Option<&str>,
@@ -93,7 +93,7 @@ impl CodingAgent {
             native_version: native_version.map(str::to_owned),
         })
     }
-    pub fn build_spawn_argv_with_policy(
+    pub(crate) fn build_spawn_argv_with_policy(
         self,
         prompt: &str,
         display_name: &str,

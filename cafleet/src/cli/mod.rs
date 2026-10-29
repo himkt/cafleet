@@ -1,7 +1,7 @@
 mod doctor;
-pub(crate) mod fleet;
-pub(crate) mod helpers;
-pub(crate) mod member;
+mod fleet;
+mod helpers;
+mod member;
 mod message;
 mod runtime;
 mod setup;
@@ -11,7 +11,7 @@ use clap::{Parser, Subcommand};
 use crate::config::Settings;
 use crate::error::CafleetError;
 
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Parser)]
 #[command(

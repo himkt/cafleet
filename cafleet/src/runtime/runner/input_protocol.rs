@@ -46,46 +46,46 @@ impl SubmissionStage {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SubmissionResult {
-    pub status: SubmissionStatus,
-    pub input_id: Option<i64>,
-    pub stage: SubmissionStage,
-    pub output_seq: Option<u64>,
-    pub reason: Option<String>,
+    pub(crate) status: SubmissionStatus,
+    pub(crate) input_id: Option<i64>,
+    pub(crate) stage: SubmissionStage,
+    pub(crate) output_seq: Option<u64>,
+    pub(crate) reason: Option<String>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PermissionInspectInput {
-    pub interaction_id: i64,
-    pub event_id: i64,
-    pub director_member_id: i64,
+    pub(crate) interaction_id: i64,
+    pub(crate) event_id: i64,
+    pub(crate) director_member_id: i64,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PermissionRespondInput {
-    pub interaction_id: i64,
-    pub event_id: i64,
-    pub director_member_id: i64,
-    pub expected_run_id: i64,
-    pub expected_owner_epoch: i64,
-    pub request_token: String,
-    pub decision: PermissionDecision,
-    pub decision_source: DecisionSource,
-    pub director_mode: DirectorMode,
-    pub mode_evidence_ref: String,
-    pub decision_evidence_ref: String,
-    pub operation_key: String,
+    pub(crate) interaction_id: i64,
+    pub(crate) event_id: i64,
+    pub(crate) director_member_id: i64,
+    pub(crate) expected_run_id: i64,
+    pub(crate) expected_owner_epoch: i64,
+    pub(crate) request_token: String,
+    pub(crate) decision: PermissionDecision,
+    pub(crate) decision_source: DecisionSource,
+    pub(crate) director_mode: DirectorMode,
+    pub(crate) mode_evidence_ref: String,
+    pub(crate) decision_evidence_ref: String,
+    pub(crate) operation_key: String,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PermissionResponseResult {
-    pub submission: SubmissionResult,
-    pub member_id: i64,
-    pub run_id: i64,
-    pub owner_epoch: i64,
-    pub interaction_id: i64,
-    pub event_id: i64,
-    pub decision: PermissionDecision,
-    pub decision_source: DecisionSource,
+    pub(crate) submission: SubmissionResult,
+    pub(crate) member_id: i64,
+    pub(crate) run_id: i64,
+    pub(crate) owner_epoch: i64,
+    pub(crate) interaction_id: i64,
+    pub(crate) event_id: i64,
+    pub(crate) decision: PermissionDecision,
+    pub(crate) decision_source: DecisionSource,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -114,35 +114,35 @@ impl MissingEvidence {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PermissionInspection {
-    pub event_id: i64,
-    pub message_id: i64,
-    pub member_id: i64,
-    pub fleet_id: i64,
-    pub director_member_id: i64,
-    pub run_id: i64,
-    pub owner_epoch: i64,
-    pub interaction_id: i64,
-    pub episode_seq: i64,
-    pub classification: Option<InteractionClass>,
-    pub visibility: Visibility,
-    pub backend: String,
-    pub native_version: Option<String>,
-    pub profile_version: Option<String>,
-    pub answer_profile_version: Option<String>,
-    pub answer_rule_id: Option<String>,
-    pub answer_capability: crate::broker::runtime::Coverage,
-    pub capability_reason: Option<String>,
-    pub supported_decisions: Vec<PermissionDecision>,
-    pub request_token: Option<String>,
-    pub output_seq: u64,
-    pub evidence: Value,
-    pub missing_evidence: Vec<MissingEvidence>,
+    pub(crate) event_id: i64,
+    pub(crate) message_id: i64,
+    pub(crate) member_id: i64,
+    pub(crate) fleet_id: i64,
+    pub(crate) director_member_id: i64,
+    pub(crate) run_id: i64,
+    pub(crate) owner_epoch: i64,
+    pub(crate) interaction_id: i64,
+    pub(crate) episode_seq: i64,
+    pub(crate) classification: Option<InteractionClass>,
+    pub(crate) visibility: Visibility,
+    pub(crate) backend: String,
+    pub(crate) native_version: Option<String>,
+    pub(crate) profile_version: Option<String>,
+    pub(crate) answer_profile_version: Option<String>,
+    pub(crate) answer_rule_id: Option<String>,
+    pub(crate) answer_capability: crate::broker::runtime::Coverage,
+    pub(crate) capability_reason: Option<String>,
+    pub(crate) supported_decisions: Vec<PermissionDecision>,
+    pub(crate) request_token: Option<String>,
+    pub(crate) output_seq: u64,
+    pub(crate) evidence: Value,
+    pub(crate) missing_evidence: Vec<MissingEvidence>,
 }
 pub(crate) struct SubmitInput {
-    pub operation_key: String,
-    pub input_kind: InputKind,
-    pub message_id: Option<i64>,
-    pub literal: String,
+    pub(crate) operation_key: String,
+    pub(crate) input_kind: InputKind,
+    pub(crate) message_id: Option<i64>,
+    pub(crate) literal: String,
 }
 pub(crate) enum ReceiptAction {
     Query {
@@ -159,10 +159,10 @@ pub(crate) enum ReceiptAction {
     },
 }
 pub(crate) struct InputControlRequest {
-    pub protocol_version: u32,
-    pub identity: ControlIdentity,
-    pub expires_at_mono_ns: u64,
-    pub operation: InputControlOperation,
+    pub(crate) protocol_version: u32,
+    pub(crate) identity: ControlIdentity,
+    pub(crate) expires_at_mono_ns: u64,
+    pub(crate) operation: InputControlOperation,
 }
 pub(crate) enum InputControlOperation {
     SubmitPrompt(SubmitInput),

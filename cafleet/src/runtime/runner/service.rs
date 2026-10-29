@@ -7,7 +7,6 @@ use super::transport::TransportProgress;
 use super::writer::EventWriter;
 use super::*;
 
-use crate::broker::members::db_err;
 use crate::broker::{
     self,
     runtime::{self as storage, *},
@@ -118,9 +117,7 @@ struct Client {
 struct SystemRequestTokens;
 impl RequestTokenSource for SystemRequestTokens {
     fn fill(&mut self, bytes: &mut [u8; 32]) -> Result<()> {
-        std::fs::File::open("/dev/urandom")
-            .and_then(|mut file| file.read_exact(bytes))
-            .map_err(io_error)
+        crate::runtime::system::random_bytes(bytes).map_err(io_error)
     }
 }
 
@@ -400,11 +397,11 @@ struct RunnerDependencies {
 }
 #[cfg(test)]
 pub(crate) struct RunnerTestServices {
-    pub catalog: crate::coding_agent::ProfileCatalog,
-    pub clock: Arc<dyn ObservationClock>,
-    pub writer_hooks: Arc<dyn WriterHooks>,
-    pub capture: Option<NativeCapturePort>,
-    pub observation_hooks: Option<Arc<dyn ObservationHooks>>,
+    pub(crate) catalog: crate::coding_agent::ProfileCatalog,
+    pub(crate) clock: Arc<dyn ObservationClock>,
+    pub(crate) writer_hooks: Arc<dyn WriterHooks>,
+    pub(crate) capture: Option<NativeCapturePort>,
+    pub(crate) observation_hooks: Option<Arc<dyn ObservationHooks>>,
 }
 #[cfg(test)]
 pub(crate) fn run_with_test_services(
@@ -486,7 +483,7 @@ fn run_service(
                 && run.event_seq_reserved_through == 0,
             "live startup requires fresh run",
         )?;
-        let history:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM member_interactions WHERE run_id=?1) OR EXISTS(SELECT 1 FROM member_runtime_events WHERE run_id=?1)",[run.run_id],|row|row.get(0)).map_err(db_err)?;
+        let history:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM member_interactions WHERE run_id=?1) OR EXISTS(SELECT 1 FROM member_runtime_events WHERE run_id=?1)",[run.run_id],|row|row.get(0))?;
         ensure(!history, "live startup refuses durable history")
     })?;
     let artifacts = RunArtifacts::from_run(&conn, &run)?;
@@ -891,7 +888,7 @@ fn run_service(
                                         handshake_deadline,
                                         |conn| {
                                             lock.validate(conn, &owner)?;
-                                            let changed=conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3,last_health_at=?3 WHERE run_id=?4 AND owner_epoch=?5 AND status='prepared'",params![child.pid,child.start_identity,crate::time::format_utc(crate::time::now_utc()),run.run_id,owner.owner_epoch]).map_err(db_err)?;
+                                            let changed=conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3,last_health_at=?3 WHERE run_id=?4 AND owner_epoch=?5 AND status='prepared'",params![child.pid,child.start_identity,crate::time::now_stamp(),run.run_id,owner.owner_epoch])?;
                                             ensure(
                                                 changed == 1,
                                                 "native spawn storage lost ownership",
@@ -1129,7 +1126,7 @@ fn run_service(
                     clock.storage_deadline(),
                     |conn| {
                         lock.validate(conn, &owner)?;
-                        conn.execute("UPDATE member_runs SET status='degraded',last_health_at=?1 WHERE run_id=?2 AND owner_epoch=?3 AND status='running' AND child_pid IS NOT NULL",params![crate::time::format_utc(crate::time::now_utc()),run.run_id,owner.owner_epoch]).map_err(db_err)?;
+                        conn.execute("UPDATE member_runs SET status='degraded',last_health_at=?1 WHERE run_id=?2 AND owner_epoch=?3 AND status='running' AND child_pid IS NOT NULL",params![crate::time::now_stamp(),run.run_id,owner.owner_epoch])?;
                         Ok(())
                     },
                 );
@@ -1180,7 +1177,7 @@ fn run_service(
     }
     let persisted = with_database_deadline(&mut conn, clock.storage_deadline(), |conn| {
         lock.validate(conn, &owner)?;
-        conn.execute("UPDATE member_runs SET cleanup_state=?1,cleanup_diagnostics_json=?2,last_health_at=?3,status=CASE WHEN child_pid IS NULL THEN 'failed' ELSE status END,ended_at=CASE WHEN child_pid IS NULL THEN ?3 ELSE ended_at END WHERE run_id=?4 AND owner_epoch=?5",params![outcome.cleanup_state.as_str(),serde_json::to_string(&outcome.diagnostics).map_err(io_error)?,crate::time::format_utc(crate::time::now_utc()),run.run_id,owner.owner_epoch]).map_err(db_err)?;
+        conn.execute("UPDATE member_runs SET cleanup_state=?1,cleanup_diagnostics_json=?2,last_health_at=?3,status=CASE WHEN child_pid IS NULL THEN 'failed' ELSE status END,ended_at=CASE WHEN child_pid IS NULL THEN ?3 ELSE ended_at END WHERE run_id=?4 AND owner_epoch=?5",params![outcome.cleanup_state.as_str(),serde_json::to_string(&outcome.diagnostics).map_err(io_error)?,crate::time::now_stamp(),run.run_id,owner.owner_epoch])?;
         Ok(())
     });
     if let Err(cause) = persisted {
@@ -1253,6 +1250,7 @@ pub(crate) mod test_support {
 
     use crate::broker::runtime::{self as storage, *};
     use crate::config::Settings;
+    use crate::digest::sha256_hex;
     use crate::runtime::runner::test_support::*;
     use crate::runtime::runner::*;
     use crate::runtime::system::test_support::TestChild;
@@ -2384,7 +2382,7 @@ pub(crate) mod test_support {
             fn sample(&self) -> ObservationMoment {
                 ObservationMoment {
                     monotonic: Instant::now(),
-                    observed_at: crate::time::format_utc(crate::time::now_utc()),
+                    observed_at: crate::time::now_stamp(),
                 }
             }
             fn kind(&self) -> ObservationClockKind {

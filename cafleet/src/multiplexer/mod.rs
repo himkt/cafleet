@@ -1,14 +1,14 @@
-pub mod herdr;
+pub(crate) mod herdr;
 mod keys;
-pub mod tmux;
+pub(crate) mod tmux;
 pub(crate) use keys::PressKeys;
 
 use std::fmt;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-pub use herdr::HerdrMultiplexer;
-pub use tmux::TmuxMultiplexer;
+pub(crate) use herdr::HerdrMultiplexer;
+pub(crate) use tmux::TmuxMultiplexer;
 
 pub(crate) const SUBMIT_DELAY: f64 = 1.0;
 pub(crate) const ESCAPE_SETTLE_DELAY: f64 = 0.5;
@@ -24,7 +24,7 @@ pub(crate) const INSUFFICIENT_INPUT_BUDGET: &str =
     "insufficient pane input budget for literal input, settle and Enter";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Lead {
+pub(crate) enum Lead {
     Escape,
     Direct,
 }
@@ -42,15 +42,15 @@ impl Lead {
 
 /// The concrete session, window and pane returned by context discovery.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MultiplexerContext {
-    pub session: String,
-    pub window_id: String,
-    pub pane_id: String,
+pub(crate) struct MultiplexerContext {
+    pub(crate) session: String,
+    pub(crate) window_id: String,
+    pub(crate) pane_id: String,
 }
 
 /// The outcome of backend-owned pane compensation.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PaneCleanup {
+pub(crate) enum PaneCleanup {
     Attempted {
         pane_id: String,
         error: Option<String>,
@@ -60,7 +60,7 @@ pub enum PaneCleanup {
 
 /// A backend failure with optional pane ownership information.
 #[derive(Debug)]
-pub struct MultiplexerError {
+pub(crate) struct MultiplexerError {
     message: String,
     pane_cleanup: Option<PaneCleanup>,
     submission_started: bool,
@@ -75,11 +75,12 @@ impl MultiplexerError {
         }
     }
 
-    pub fn pane_cleanup(&self) -> Option<&PaneCleanup> {
+    #[cfg(test)]
+    pub(crate) fn pane_cleanup(&self) -> Option<&PaneCleanup> {
         self.pane_cleanup.as_ref()
     }
 
-    pub fn submission_started(&self) -> bool {
+    pub(crate) fn submission_started(&self) -> bool {
         self.submission_started
     }
 
@@ -148,7 +149,7 @@ impl std::error::Error for MultiplexerError {}
 
 /// A subprocess failure below the backend's message mapping.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RunError {
+pub(crate) enum RunError {
     BinaryNotFound(String),
     NotStarted(String),
     Timeout,
@@ -156,9 +157,9 @@ pub enum RunError {
 }
 
 #[derive(Debug, Clone)]
-pub struct TimedRunError {
-    pub source: RunError,
-    pub cleanup_diagnostics: Vec<String>,
+pub(crate) struct TimedRunError {
+    pub(crate) source: RunError,
+    pub(crate) cleanup_diagnostics: Vec<String>,
 }
 
 impl TimedRunError {
@@ -170,7 +171,7 @@ impl TimedRunError {
     }
 }
 
-pub trait CommandRunner {
+pub(crate) trait CommandRunner {
     fn binary_exists(&self, name: &str) -> bool;
     fn run(&self, argv: &[String], timeout_secs: Option<u64>) -> Result<String, RunError>;
     fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError> {
@@ -197,9 +198,9 @@ pub trait CommandRunner {
 }
 
 pub(crate) struct PaneInput {
-    pub escape: Vec<String>,
-    pub literal: Vec<String>,
-    pub enter: Vec<String>,
+    pub(crate) escape: Vec<String>,
+    pub(crate) literal: Vec<String>,
+    pub(crate) enter: Vec<String>,
 }
 
 fn whole_seconds(duration: Duration) -> u64 {
@@ -345,7 +346,7 @@ pub(crate) fn capture_window(raw: &str, lines: i64) -> String {
 }
 
 /// The closed backend dispatch the resolver returns.
-pub enum AnyMultiplexer {
+pub(crate) enum AnyMultiplexer {
     Tmux(TmuxMultiplexer),
     Herdr(HerdrMultiplexer),
 }
@@ -387,7 +388,7 @@ impl AnyMultiplexer {
         }
     }
 
-    pub fn bounded(&self, deadline: crate::input::Deadline) -> Self {
+    pub(crate) fn bounded(&self, deadline: crate::input::Deadline) -> Self {
         match self {
             Self::Tmux(mux) => Self::Tmux(mux.bounded(deadline)),
             Self::Herdr(mux) => Self::Herdr(mux.bounded(deadline)),
@@ -396,14 +397,14 @@ impl AnyMultiplexer {
 }
 
 impl AnyMultiplexer {
-    pub fn name(&self) -> &'static str {
+    pub(crate) fn name(&self) -> &'static str {
         match self {
             Self::Tmux(mux) => mux.name(),
             Self::Herdr(mux) => mux.name(),
         }
     }
 
-    pub fn ensure_available(&self) -> Result<(), MultiplexerError> {
+    pub(crate) fn ensure_available(&self) -> Result<(), MultiplexerError> {
         match self {
             Self::Tmux(mux) => mux.ensure_available(),
             Self::Herdr(mux) => mux.ensure_available(),
@@ -433,14 +434,14 @@ impl AnyMultiplexer {
         }
     }
 
-    pub fn context_discovery(&self) -> Result<MultiplexerContext, MultiplexerError> {
+    pub(crate) fn context_discovery(&self) -> Result<MultiplexerContext, MultiplexerError> {
         match self {
             Self::Tmux(mux) => mux.context_discovery(),
             Self::Herdr(mux) => mux.context_discovery(),
         }
     }
 
-    pub fn split_window(
+    pub(crate) fn split_window(
         &self,
         reference: &MultiplexerContext,
         env: &[(String, String)],
@@ -452,7 +453,7 @@ impl AnyMultiplexer {
         }
     }
 
-    pub fn send_prompt(
+    pub(crate) fn send_prompt(
         &self,
         target_pane_id: &str,
         text: &str,
@@ -464,7 +465,7 @@ impl AnyMultiplexer {
         }
     }
 
-    pub fn capture_pane(
+    pub(crate) fn capture_pane(
         &self,
         target_pane_id: &str,
         lines: i64,
@@ -475,7 +476,7 @@ impl AnyMultiplexer {
         }
     }
 
-    pub fn kill_pane(
+    pub(crate) fn kill_pane(
         &self,
         target_pane_id: &str,
         ignore_missing: bool,
@@ -489,7 +490,7 @@ impl AnyMultiplexer {
 
 /// Resolve the selected backend and construct it over the
 /// given runner and environment snapshot.
-pub fn resolve_multiplexer(
+pub(crate) fn resolve_multiplexer(
     override_value: Option<&str>,
     env: std::collections::HashMap<String, String>,
     runner: std::rc::Rc<dyn CommandRunner>,
@@ -505,7 +506,7 @@ pub fn resolve_multiplexer(
 /// An explicit backend override must name
 /// a registry key; otherwise auto-detect from `HERDR_ENV` / `TMUX` (an empty
 /// value counts as unset); ambiguity and absence are hard errors.
-pub fn resolve_multiplexer_name(
+fn resolve_multiplexer_name(
     override_value: Option<&str>,
     env: impl Fn(&str) -> Option<String>,
 ) -> Result<&'static str, MultiplexerError> {
@@ -543,7 +544,7 @@ pub(crate) mod test_support {
     use super::{CommandRunner, RunError};
 
     #[derive(Debug, Clone, PartialEq)]
-    pub enum Event {
+    pub(crate) enum Event {
         Run {
             argv: Vec<String>,
             timeout_secs: Option<u64>,
@@ -553,10 +554,10 @@ pub(crate) mod test_support {
         },
     }
 
-    pub struct FakeRunner {
-        pub binaries: Vec<String>,
-        pub events: RefCell<Vec<Event>>,
-        pub responses: RefCell<VecDeque<Result<String, RunError>>>,
+    pub(crate) struct FakeRunner {
+        pub(crate) binaries: Vec<String>,
+        pub(crate) events: RefCell<Vec<Event>>,
+        pub(crate) responses: RefCell<VecDeque<Result<String, RunError>>>,
     }
 
     impl FakeRunner {
@@ -568,30 +569,30 @@ pub(crate) mod test_support {
             })
         }
 
-        pub fn with_binary(name: &str) -> Rc<Self> {
+        pub(crate) fn with_binary(name: &str) -> Rc<Self> {
             Self::build(vec![name.to_string()])
         }
 
-        pub fn without_binaries() -> Rc<Self> {
+        pub(crate) fn without_binaries() -> Rc<Self> {
             Self::build(Vec::new())
         }
 
-        pub fn succeed(&self, calls: usize) {
+        pub(crate) fn succeed(&self, calls: usize) {
             for _ in 0..calls {
                 self.respond(Ok(String::new()));
             }
         }
 
-        pub fn respond(&self, response: Result<String, RunError>) {
+        pub(crate) fn respond(&self, response: Result<String, RunError>) {
             self.responses.borrow_mut().push_back(response);
         }
 
-        pub fn events(&self) -> Vec<Event> {
+        pub(crate) fn events(&self) -> Vec<Event> {
             self.events.borrow().clone()
         }
 
         /// Just the argv of each `Run` event, in order.
-        pub fn run_argvs(&self) -> Vec<Vec<String>> {
+        pub(crate) fn run_argvs(&self) -> Vec<Vec<String>> {
             self.events
                 .borrow()
                 .iter()
@@ -624,22 +625,22 @@ pub(crate) mod test_support {
         }
     }
 
-    pub fn argv(parts: &[&str]) -> Vec<String> {
+    pub(crate) fn argv(parts: &[&str]) -> Vec<String> {
         parts.iter().map(|s| s.to_string()).collect()
     }
 
-    pub fn run_event(parts: &[&str], timeout_secs: Option<u64>) -> Event {
+    pub(crate) fn run_event(parts: &[&str], timeout_secs: Option<u64>) -> Event {
         Event::Run {
             argv: argv(parts),
             timeout_secs,
         }
     }
 
-    pub fn sleep_event(seconds: f64) -> Event {
+    pub(crate) fn sleep_event(seconds: f64) -> Event {
         Event::Sleep { seconds }
     }
 
-    pub fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+    pub(crate) fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
         pairs
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -647,12 +648,12 @@ pub(crate) mod test_support {
     }
 
     /// A herdr success envelope wrapping `result`.
-    pub fn herdr_envelope(result: serde_json::Value) -> String {
+    pub(crate) fn herdr_envelope(result: serde_json::Value) -> String {
         serde_json::json!({"id": 1, "result": result, "type": "response"}).to_string()
     }
 
     /// A herdr error `stderr` body carrying `code`, for `RunError::Failed`.
-    pub fn herdr_error_stderr(code: &str) -> String {
+    pub(crate) fn herdr_error_stderr(code: &str) -> String {
         serde_json::json!({"error": {"code": code, "message": "boom"}, "id": 1}).to_string()
     }
 }

@@ -15,15 +15,15 @@ impl vt100::Callbacks for Callbacks {
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
 pub(crate) struct ScreenSnapshot {
-    pub contents: String,
-    pub title: String,
-    pub rows: u16,
-    pub cols: u16,
-    pub cursor_row: u16,
-    pub cursor_col: u16,
-    pub alternate_screen: bool,
-    pub screen_seq: u64,
-    pub screen: vt100::Screen,
+    pub(crate) contents: String,
+    pub(crate) title: String,
+    pub(crate) rows: u16,
+    pub(crate) cols: u16,
+    pub(crate) cursor_row: u16,
+    pub(crate) cursor_col: u16,
+    pub(crate) alternate_screen: bool,
+    pub(crate) screen_seq: u64,
+    pub(crate) screen: vt100::Screen,
 }
 
 pub(crate) struct TerminalState {

@@ -26,6 +26,16 @@ pub(crate) enum Visibility {
     NotVisible,
     Unknown,
 }
+impl Visibility {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Visible => "visible",
+            Self::Obscured => "obscured",
+            Self::NotVisible => "not_visible",
+            Self::Unknown => "unknown",
+        }
+    }
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum GateReason {
@@ -50,23 +60,23 @@ pub(crate) enum InputEligibility {
 }
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct TransitionDraft {
-    pub run_id: i64,
-    pub episode_seq: Option<i64>,
-    pub kind: RuntimeEventKind,
-    pub classification: Option<InteractionClass>,
-    pub observed_at: String,
-    pub evidence_json: Value,
-    pub close_reason: Option<InteractionCloseReason>,
-    pub cause_json: Option<Value>,
+    pub(crate) run_id: i64,
+    pub(crate) episode_seq: Option<i64>,
+    pub(crate) kind: RuntimeEventKind,
+    pub(crate) classification: Option<InteractionClass>,
+    pub(crate) observed_at: String,
+    pub(crate) evidence_json: Value,
+    pub(crate) close_reason: Option<InteractionCloseReason>,
+    pub(crate) cause_json: Option<Value>,
 }
 #[derive(Debug)]
 pub(crate) struct EpisodeUpdate {
-    pub visibility: Visibility,
-    pub eligibility: InputEligibility,
-    pub transitions: Vec<TransitionDraft>,
-    pub latest_evidence: Option<InteractionEvidenceUpdate>,
-    pub next_deadline: Option<Instant>,
-    pub effective_policy: Option<EffectivePolicyObservation>,
+    pub(crate) visibility: Visibility,
+    pub(crate) eligibility: InputEligibility,
+    pub(crate) transitions: Vec<TransitionDraft>,
+    pub(crate) latest_evidence: Option<InteractionEvidenceUpdate>,
+    pub(crate) next_deadline: Option<Instant>,
+    pub(crate) effective_policy: Option<EffectivePolicyObservation>,
 }
 fn earliest(deadline: &mut Option<Instant>, until: Instant) {
     *deadline = Some(deadline.map_or(until, |old| old.min(until)));

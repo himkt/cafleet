@@ -11,13 +11,13 @@ use crate::diagnosis::SchemaState;
 use crate::error::CafleetError;
 
 #[derive(Args)]
-pub struct SetupArgs {
+pub(crate) struct SetupArgs {
     /// Install selected backends' assets (repeatable; default: every backend).
     #[arg(long = "coding-agent", value_name = "AGENT", num_args = 1.., value_enum)]
     coding_agent: Vec<CodingAgent>,
 }
 
-pub fn run(settings: &Settings, args: SetupArgs) -> Result<(), CafleetError> {
+pub(crate) fn run(settings: &Settings, args: SetupArgs) -> Result<(), CafleetError> {
     let mut conn = prepare_database(settings)?;
     let home = PathBuf::from(
         std::env::var("HOME").map_err(|_| CafleetError::App("HOME is not set".into()))?,

@@ -14,9 +14,19 @@ use std::time::{Duration, Instant};
 use crate::coding_agent::SpawnProbe;
 use crate::multiplexer::{CommandRunner, RunError, TimedRunError};
 
+pub(crate) fn random_bytes(bytes: &mut [u8; 32]) -> io::Result<()> {
+    std::fs::File::open("/dev/urandom").and_then(|mut file| file.read_exact(bytes))
+}
+
+pub(crate) fn random_hex32() -> io::Result<String> {
+    let mut bytes = [0; 32];
+    random_bytes(&mut bytes)?;
+    Ok(crate::digest::hex(&bytes))
+}
+
 /// Resolve `name` against the `PATH` environment variable to an executable
 /// regular file.
-pub fn find_on_path(name: &str) -> Option<PathBuf> {
+fn find_on_path(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)
         .map(|dir| dir.join(name))
@@ -25,7 +35,7 @@ pub fn find_on_path(name: &str) -> Option<PathBuf> {
 
 /// Resolve `name` to the first executable regular file under an absolute
 /// entry of `path`, returning the path as found without resolving links.
-pub fn find_executable_in(path: &OsStr, name: &str) -> Option<PathBuf> {
+fn find_executable_in(path: &OsStr, name: &str) -> Option<PathBuf> {
     std::env::split_paths(path)
         .filter(|dir| dir.is_absolute())
         .map(|dir| dir.join(name))
@@ -47,7 +57,7 @@ fn is_executable_file(candidate: &Path) -> bool {
     }
 }
 
-pub struct SystemRunner;
+pub(crate) struct SystemRunner;
 
 impl CommandRunner for SystemRunner {
     fn binary_exists(&self, name: &str) -> bool {
@@ -432,7 +442,7 @@ fn collect_timed(
     }
 }
 
-pub struct SystemProbe;
+pub(crate) struct SystemProbe;
 
 impl SpawnProbe for SystemProbe {
     fn resolve_binary(&self, name: &str) -> Option<PathBuf> {
@@ -449,7 +459,7 @@ impl SpawnProbe for SystemProbe {
 }
 
 /// Read stdin to EOF as raw bytes.
-pub fn read_stdin() -> std::io::Result<Vec<u8>> {
+pub(crate) fn read_stdin() -> std::io::Result<Vec<u8>> {
     let mut buffer = Vec::new();
     std::io::stdin().read_to_end(&mut buffer)?;
     Ok(buffer)

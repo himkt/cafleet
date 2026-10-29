@@ -11,7 +11,7 @@ use crate::output::{format_fleet_create, format_fleet_delete};
 use crate::presentation;
 
 #[derive(Subcommand)]
-pub enum FleetCommand {
+pub(crate) enum FleetCommand {
     /// Register the calling Director in a new fleet.
     Create {
         /// Fleet name.
@@ -45,7 +45,7 @@ pub enum FleetCommand {
     },
 }
 
-pub fn run(
+pub(crate) fn run(
     conn: &mut Connection,
     settings: &Settings,
     command: FleetCommand,

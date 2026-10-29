@@ -1,5 +1,4 @@
 use super::*;
-use crate::broker::members::db_err;
 use crate::broker::records::{Placement, RegisteredMember};
 use crate::broker::runtime::{self as storage, *};
 use crate::broker::{self, NewPlacement};
@@ -8,29 +7,29 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 pub(crate) struct PendingMemberSpec {
-    pub fleet_id: i64,
-    pub name: String,
-    pub description: String,
-    pub placement: NewPlacement,
+    pub(crate) fleet_id: i64,
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) placement: NewPlacement,
 }
 pub(crate) struct RunSettings {
-    pub database_identity_json: Value,
-    pub creator: ProcessIdentity,
-    pub launch_nonce: String,
-    pub requested_mode: Option<String>,
-    pub resolved_mode: String,
-    pub mode_source: ModeSource,
-    pub permission_argv_json: Value,
-    pub event_evidence: EventEvidence,
-    pub native_version: Option<String>,
-    pub profile_version: Option<String>,
-    pub profile_match: Option<ProfileMatch>,
-    pub coverage: Coverage,
+    pub(crate) database_identity_json: Value,
+    pub(crate) creator: ProcessIdentity,
+    pub(crate) launch_nonce: String,
+    pub(crate) requested_mode: Option<String>,
+    pub(crate) resolved_mode: String,
+    pub(crate) mode_source: ModeSource,
+    pub(crate) permission_argv_json: Value,
+    pub(crate) event_evidence: EventEvidence,
+    pub(crate) native_version: Option<String>,
+    pub(crate) profile_version: Option<String>,
+    pub(crate) profile_match: Option<ProfileMatch>,
+    pub(crate) coverage: Coverage,
 }
 pub(crate) struct PendingRegistration {
-    pub member: RegisteredMember,
-    pub run: RunRecord,
-    pub paths: RuntimePaths,
+    pub(crate) member: RegisteredMember,
+    pub(crate) run: RunRecord,
+    pub(crate) paths: RuntimePaths,
 }
 
 pub(crate) fn register_pending_run(
@@ -41,9 +40,7 @@ pub(crate) fn register_pending_run(
 ) -> Result<PendingRegistration> {
     with_database_deadline(conn, deadline, |conn| {
         validate_database(conn, &settings.database_identity_json)?;
-        let tx = conn
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .map_err(db_err)?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let fleet = broker::fleets::require_live_fleet(&tx, member.fleet_id)?;
         let director = fleet
             .director_member_id
@@ -55,13 +52,11 @@ pub(crate) fn register_pending_run(
             &member.description,
             Some(&member.placement),
         )?;
-        let next: i64 = tx
-            .query_row(
-                "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='member_runs'),0)+1",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(db_err)?;
+        let next: i64 = tx.query_row(
+            "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='member_runs'),0)+1",
+            [],
+            |row| row.get(0),
+        )?;
         let paths = RuntimePaths::for_run(&settings.database_identity_json, next)?;
         let run = storage::insert_run(
             &tx,
@@ -90,7 +85,7 @@ pub(crate) fn register_pending_run(
             run.run_id == next,
             "atomic run allocation changed its reserved ID",
         )?;
-        tx.commit().map_err(db_err)?;
+        tx.commit()?;
         Ok(PendingRegistration {
             member: registered,
             run,
@@ -102,13 +97,13 @@ pub(crate) fn register_pending_run(
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ControlIdentity {
-    pub database_identity_json: Value,
-    pub fleet_id: i64,
-    pub member_id: i64,
-    pub director_member_id: i64,
-    pub run_id: i64,
-    pub owner_epoch: i64,
-    pub launch_nonce: String,
+    pub(crate) database_identity_json: Value,
+    pub(crate) fleet_id: i64,
+    pub(crate) member_id: i64,
+    pub(crate) director_member_id: i64,
+    pub(crate) run_id: i64,
+    pub(crate) owner_epoch: i64,
+    pub(crate) launch_nonce: String,
 }
 impl ControlIdentity {
     pub(crate) fn from_run(run: &RunRecord) -> Self {
@@ -131,14 +126,14 @@ impl ControlIdentity {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Prepared {
-    pub identity: ControlIdentity,
-    pub runner: ProcessIdentity,
+    pub(crate) identity: ControlIdentity,
+    pub(crate) runner: ProcessIdentity,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Started {
-    pub identity: ControlIdentity,
-    pub runner: ProcessIdentity,
-    pub child: ProcessIdentity,
+    pub(crate) identity: ControlIdentity,
+    pub(crate) runner: ProcessIdentity,
+    pub(crate) child: ProcessIdentity,
 }
 pub(crate) trait LaunchHost {
     fn now(&self) -> Instant;
@@ -164,10 +159,10 @@ pub(crate) trait LaunchHost {
     fn close_pane(&mut self, pane_id: &str, deadline: Instant) -> Result<()>;
 }
 pub(crate) struct LaunchOutcome {
-    pub member: RegisteredMember,
-    pub run: RunRecord,
-    pub placement: Placement,
-    pub started: Started,
+    pub(crate) member: RegisteredMember,
+    pub(crate) run: RunRecord,
+    pub(crate) placement: Placement,
+    pub(crate) started: Started,
 }
 
 fn pending_failure(
@@ -178,12 +173,10 @@ fn pending_failure(
 ) -> Result<()> {
     with_database_deadline(conn, clock.storage_deadline(), |conn| {
         validate_database(conn, &run.database_identity_json)?;
-        let tx = conn
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .map_err(db_err)?;
-        tx.execute("UPDATE member_runs SET status='failed',ended_at=COALESCE(ended_at,?1),cleanup_state=?2,cleanup_diagnostics_json=?3 WHERE run_id=?4 AND launch_nonce=?5",params![crate::time::format_utc(crate::time::now_utc()),if diagnostics.is_empty(){"complete"}else{"incomplete"},serde_json::to_string(diagnostics).map_err(io_error)?,run.run_id,run.launch_nonce]).map_err(db_err)?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        tx.execute("UPDATE member_runs SET status='failed',ended_at=COALESCE(ended_at,?1),cleanup_state=?2,cleanup_diagnostics_json=?3 WHERE run_id=?4 AND launch_nonce=?5",params![crate::time::now_stamp(),if diagnostics.is_empty(){"complete"}else{"incomplete"},serde_json::to_string(diagnostics).map_err(io_error)?,run.run_id,run.launch_nonce])?;
         broker::members::deregister_member_rows(&tx, run.member_id)?;
-        tx.commit().map_err(db_err)
+        tx.commit().map_err(crate::error::CafleetError::from)
     })
 }
 fn remove_pending_descriptor(conn: &Connection, run: &RunRecord) -> Result<()> {
@@ -342,21 +335,19 @@ pub(crate) fn launch_registered(
         )?;
         let placement = with_database_deadline(guard.conn, deadline, |conn| {
             validate_run_paths(conn, &current)?;
-            let tx = conn
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .map_err(db_err)?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             ensure(
                 broker::active_member_fleet(&tx, run.member_id)? == Some(run.fleet_id),
                 "pending member became inactive",
             )?;
-            let changed=tx.execute("UPDATE member_runs SET status='prepared',last_health_at=?1 WHERE run_id=?2 AND owner_epoch=?3 AND status='starting'",params![crate::time::format_utc(crate::time::now_utc()),run.run_id,current.owner_epoch]).map_err(db_err)?;
+            let changed=tx.execute("UPDATE member_runs SET status='prepared',last_health_at=?1 WHERE run_id=?2 AND owner_epoch=?3 AND status='starting'",params![crate::time::now_stamp(),run.run_id,current.owner_epoch])?;
             ensure(changed == 1, "prepared publication lost run ownership")?;
-            let changed=tx.execute("UPDATE member_placements SET mux_pane_id=?1 WHERE member_id=?2 AND mux_pane_id IS NULL",params![pane.as_ref().expect("created pane"),run.member_id]).map_err(db_err)?;
+            let changed=tx.execute("UPDATE member_placements SET mux_pane_id=?1 WHERE member_id=?2 AND mux_pane_id IS NULL",params![pane.as_ref().expect("created pane"),run.member_id])?;
             ensure(
                 changed == 1,
                 "pending placement vanished or changed before start",
             )?;
-            tx.commit().map_err(db_err)?;
+            tx.commit()?;
             broker::get_member(conn, run.member_id, run.fleet_id)?
                 .and_then(|member| member.placement)
                 .ok_or_else(|| error("published placement vanished"))

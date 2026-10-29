@@ -25,27 +25,27 @@ macro_rules! assert_no_debug_or_serialize {
     }};
 }
 
-pub mod assets;
-pub mod broker;
+pub(crate) mod assets;
+pub(crate) mod broker;
 pub(crate) mod capture;
 pub mod cli;
-pub mod coding_agent;
-pub mod config;
-pub mod config_dir;
-pub mod db;
+pub(crate) mod coding_agent;
+pub(crate) mod config;
+pub(crate) mod config_dir;
+pub(crate) mod db;
 pub(crate) mod deletion;
-pub mod delivery;
+pub(crate) mod delivery;
 pub(crate) mod diagnosis;
-pub mod embedded;
+pub(crate) mod digest;
+pub(crate) mod embedded;
 pub mod error;
+pub(crate) mod input;
 pub(crate) mod listen;
-pub mod multiplexer;
-pub mod output;
-pub mod presentation;
+pub(crate) mod multiplexer;
+pub(crate) mod output;
+pub(crate) mod presentation;
 pub(crate) mod receive;
-pub mod runtime;
+pub(crate) mod runtime;
 pub(crate) mod signals;
-pub mod spawn_prompt;
-pub mod time;
-
-pub mod input;
+pub(crate) mod spawn_prompt;
+pub(crate) mod time;

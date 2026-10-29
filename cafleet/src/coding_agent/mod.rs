@@ -3,7 +3,7 @@ pub(crate) use native_version::native_launch_identity;
 #[cfg(test)]
 pub(crate) use native_version::version_token;
 mod policy;
-pub use policy::LaunchPolicySelection;
+pub(crate) use policy::LaunchPolicySelection;
 pub(crate) mod profiles;
 pub(crate) use profiles::ComposerOperation;
 #[cfg(test)]
@@ -12,7 +12,7 @@ pub(crate) use profiles::{
     AnnotationBlock, AnnotationFingerprint, Detector, MatchEvidence, ObservationKind,
     ScreenObservation, SemanticFingerprint,
 };
-pub use profiles::{AnswerCapability, NativeCapabilities, ProfileCatalog};
+pub(crate) use profiles::{AnswerCapability, ProfileCatalog};
 pub(crate) use profiles::{AnswerMatch, AnswerPlan};
 pub(crate) use profiles::{AnswerStage, StageGate};
 
@@ -23,7 +23,7 @@ use clap::ValueEnum;
 use crate::config_dir::{self, EnvLookup, ResolvedDir};
 use crate::error::CafleetError;
 
-pub trait SpawnProbe {
+pub(crate) trait SpawnProbe {
     fn resolve_binary(&self, name: &str) -> Option<PathBuf>;
     fn home_dir(&self) -> PathBuf;
     fn env_var(&self, name: &str) -> Option<String>;
@@ -31,18 +31,18 @@ pub trait SpawnProbe {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 #[value(rename_all = "lower")]
-pub enum CodingAgent {
+pub(crate) enum CodingAgent {
     Claude,
     Codex,
     Opencode,
 }
 
 impl CodingAgent {
-    pub fn all() -> &'static [Self] {
+    pub(crate) fn all() -> &'static [Self] {
         Self::value_variants()
     }
 
-    pub fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Claude => "claude",
             Self::Codex => "codex",
@@ -50,11 +50,11 @@ impl CodingAgent {
         }
     }
 
-    pub fn binary_name(self) -> &'static str {
+    pub(crate) fn binary_name(self) -> &'static str {
         self.name()
     }
 
-    pub fn config_variable(self) -> &'static str {
+    pub(crate) fn config_variable(self) -> &'static str {
         match self {
             Self::Claude => "CLAUDE_CONFIG_DIR",
             Self::Codex => "CODEX_HOME",
@@ -62,7 +62,11 @@ impl CodingAgent {
         }
     }
 
-    pub fn config_dir(self, env: EnvLookup<'_>, home: &Path) -> Result<ResolvedDir, CafleetError> {
+    pub(crate) fn config_dir(
+        self,
+        env: EnvLookup<'_>,
+        home: &Path,
+    ) -> Result<ResolvedDir, CafleetError> {
         match self {
             Self::Claude => config_dir::claude_config_dir(env, home),
             Self::Codex => config_dir::codex_home(env, home),
@@ -70,7 +74,7 @@ impl CodingAgent {
         }
     }
 
-    pub fn spawn_environment(
+    pub(crate) fn spawn_environment(
         self,
         database_url: &str,
         env: EnvLookup<'_>,
@@ -83,11 +87,11 @@ impl CodingAgent {
         Ok(environment)
     }
 
-    pub fn required_preset(self, config: &Path, mode: &str) -> Option<PathBuf> {
+    pub(crate) fn required_preset(self, config: &Path, mode: &str) -> Option<PathBuf> {
         (self == Self::Opencode).then(|| config.join(format!("agents/{mode}.md")))
     }
 
-    pub fn validate_model(self, model: Option<&str>) -> Result<(), CafleetError> {
+    pub(crate) fn validate_model(self, model: Option<&str>) -> Result<(), CafleetError> {
         if self == Self::Opencode
             && let Some(model) = model
             && !model
@@ -101,7 +105,7 @@ impl CodingAgent {
         Ok(())
     }
 
-    pub fn validate_effort(self, effort: Option<&str>) -> Result<(), CafleetError> {
+    pub(crate) fn validate_effort(self, effort: Option<&str>) -> Result<(), CafleetError> {
         let Some(effort) = effort else { return Ok(()) };
         let choices = match self {
             Self::Claude => &["low", "medium", "high", "xhigh", "max"][..],
@@ -123,7 +127,7 @@ impl CodingAgent {
         }
     }
 
-    pub fn ensure_available(
+    pub(crate) fn ensure_available(
         self,
         probe: &dyn SpawnProbe,
         mode: &str,
@@ -140,7 +144,7 @@ impl CodingAgent {
         Ok(executable)
     }
 
-    pub fn launch_argv(
+    pub(crate) fn launch_argv(
         self,
         executable: &Path,
         prompt: &str,
@@ -164,7 +168,8 @@ impl CodingAgent {
         Ok(argv)
     }
 
-    pub fn build_spawn_argv(
+    #[cfg(test)]
+    pub(crate) fn build_spawn_argv(
         self,
         prompt: &str,
         display_name: &str,
@@ -179,7 +184,7 @@ impl CodingAgent {
     }
 }
 
-pub fn coding_agent(name: &str) -> Option<CodingAgent> {
+pub(crate) fn coding_agent(name: &str) -> Option<CodingAgent> {
     CodingAgent::all()
         .iter()
         .copied()

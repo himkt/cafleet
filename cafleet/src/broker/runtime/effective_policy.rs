@@ -116,12 +116,10 @@ fn write_if_changed(
         "event_id":event_id,
         "observed_at":observation.observed_at,
     });
-    let changed = conn
-        .execute(
-            "UPDATE member_runs SET effective_policy_json=?1 WHERE run_id=?2 AND owner_epoch=?3",
-            params![record.to_string(), run.run_id, run.owner_epoch],
-        )
-        .map_err(db_err)?;
+    let changed = conn.execute(
+        "UPDATE member_runs SET effective_policy_json=?1 WHERE run_id=?2 AND owner_epoch=?3",
+        params![record.to_string(), run.run_id, run.owner_epoch],
+    )?;
     require(
         changed == 1,
         "member_runs.owner",
@@ -130,7 +128,7 @@ fn write_if_changed(
     Ok(true)
 }
 
-pub fn persist_transition_with_effective_policy(
+pub(crate) fn persist_transition_with_effective_policy(
     conn: &mut Connection,
     owner: &RunOwner,
     transition: &ObservedTransition,
@@ -163,7 +161,7 @@ pub(crate) fn persist_transition_with_effective_policy_counted(
     })
 }
 
-pub fn record_effective_policy(
+pub(crate) fn record_effective_policy(
     conn: &mut Connection,
     owner: &RunOwner,
     observation: &EffectivePolicyObservation,

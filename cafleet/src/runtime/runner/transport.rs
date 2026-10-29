@@ -64,19 +64,19 @@ pub(crate) trait ScreenObserver {
 }
 #[derive(Default)]
 pub(crate) struct TransportProgress {
-    pub child_eof: bool,
-    pub outer_eof: bool,
-    pub child_bytes: usize,
-    pub human_bytes: usize,
-    pub forwarded_bytes: usize,
-    pub display_bytes: usize,
-    pub observation_error: Option<String>,
-    pub observation_failure: Option<ObservationFailure>,
+    pub(crate) child_eof: bool,
+    pub(crate) outer_eof: bool,
+    pub(crate) child_bytes: usize,
+    pub(crate) human_bytes: usize,
+    pub(crate) forwarded_bytes: usize,
+    pub(crate) display_bytes: usize,
+    pub(crate) observation_error: Option<String>,
+    pub(crate) observation_failure: Option<ObservationFailure>,
 }
 pub(crate) struct TransportLimits {
-    pub input_bytes: usize,
-    pub display_bytes: usize,
-    pub bytes_per_tick: usize,
+    pub(crate) input_bytes: usize,
+    pub(crate) display_bytes: usize,
+    pub(crate) bytes_per_tick: usize,
 }
 pub(crate) struct Transport {
     terminal: TerminalState,

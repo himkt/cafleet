@@ -40,13 +40,13 @@ fn map_run_error(argv: &[String], timeout_secs: Option<u64>, error: RunError) ->
     }
 }
 
-pub struct TmuxMultiplexer {
+pub(crate) struct TmuxMultiplexer {
     runner: Rc<dyn CommandRunner>,
     env: HashMap<String, String>,
 }
 
 impl TmuxMultiplexer {
-    pub fn new(runner: Rc<dyn CommandRunner>, env: HashMap<String, String>) -> Self {
+    pub(crate) fn new(runner: Rc<dyn CommandRunner>, env: HashMap<String, String>) -> Self {
         TmuxMultiplexer { runner, env }
     }
 
@@ -57,7 +57,7 @@ impl TmuxMultiplexer {
         }
     }
 
-    pub fn name(&self) -> &'static str {
+    pub(crate) fn name(&self) -> &'static str {
         "tmux"
     }
 
@@ -89,7 +89,7 @@ impl TmuxMultiplexer {
         }
     }
 
-    pub fn ensure_available(&self) -> Result<(), MultiplexerError> {
+    pub(crate) fn ensure_available(&self) -> Result<(), MultiplexerError> {
         if !self.runner.binary_exists("tmux") {
             return Err(MultiplexerError::new("tmux binary not found on PATH"));
         }
@@ -210,7 +210,7 @@ impl TmuxMultiplexer {
         Ok(())
     }
 
-    pub fn context_discovery(&self) -> Result<MultiplexerContext, MultiplexerError> {
+    pub(crate) fn context_discovery(&self) -> Result<MultiplexerContext, MultiplexerError> {
         let Some(tmux_pane) = self.env_var("TMUX_PANE") else {
             return Err(MultiplexerError::new(
                 "TMUX_PANE is not set; not running inside a tmux pane",
@@ -242,7 +242,7 @@ impl TmuxMultiplexer {
 
     /// Split `reference.window_id` detached (`-d`) and return the new pane
     /// id; the post-split `main-vertical` reflow is best-effort.
-    pub fn split_window(
+    pub(crate) fn split_window(
         &self,
         reference: &MultiplexerContext,
         env: &[(String, String)],
@@ -287,7 +287,7 @@ impl TmuxMultiplexer {
         Ok(pane_id)
     }
 
-    pub fn send_prompt(
+    pub(crate) fn send_prompt(
         &self,
         target_pane_id: &str,
         text: &str,
@@ -314,7 +314,7 @@ impl TmuxMultiplexer {
 
     /// Capture the last `lines` drawn lines of the pane buffer via the shared
     /// capture windowing ([`super::capture_window`]).
-    pub fn capture_pane(
+    pub(crate) fn capture_pane(
         &self,
         target_pane_id: &str,
         lines: i64,
@@ -341,7 +341,7 @@ impl TmuxMultiplexer {
         Ok(super::capture_window(&raw, lines))
     }
 
-    pub fn kill_pane(
+    pub(crate) fn kill_pane(
         &self,
         target_pane_id: &str,
         ignore_missing: bool,
