@@ -1527,8 +1527,7 @@ pub(crate) fn end_member(
         revalidate_member(conn, snapshot, "before cleanup")?;
         scope(conn)?;
         if let Some(runtime) = crate::broker::runtime::member_runtime(conn, member_id)?
-            && (!runtime.run.status.terminal()
-                || runtime.run.cleanup_state == CleanupState::Incomplete)
+            && !runtime.run.status.terminal()
         {
             let outcome = host.shutdown(conn, &runtime.run, deadline)?;
             if outcome.cleanup_state != CleanupState::Complete {

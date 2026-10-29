@@ -29,10 +29,12 @@ impl ProcessIdentity {
     }
     #[cfg(not(target_os = "macos"))]
     pub(crate) fn read(pid: i64) -> Result<Option<Self>> {
-        let text = match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
-            Ok(text) => text,
-            Err(cause) if cause.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(cause) => return Err(io_error(cause)),
+        Self::from_stat(pid, std::fs::read_to_string(format!("/proc/{pid}/stat")))
+    }
+    #[cfg(not(target_os = "macos"))]
+    pub(super) fn from_stat(pid: i64, stat: io::Result<String>) -> Result<Option<Self>> {
+        let Some(text) = present_stat(stat)? else {
+            return Ok(None);
         };
         let (_, tail) = text
             .rsplit_once(')')
@@ -149,18 +151,36 @@ fn group_members(group: i32) -> Result<Vec<i64>> {
 fn stopped(pid: i64) -> Result<bool> {
     Ok(kernel_process(pid)?.is_none_or(|process| process.zombie))
 }
+// A task reaped after its `/proc/<pid>` entry was found fails the stat read with ESRCH rather
+// than ENOENT; both mean the process is gone.
 #[cfg(not(target_os = "macos"))]
-fn stopped(pid: i64) -> Result<bool> {
-    match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
-        Ok(text) => Ok(text
-            .rsplit_once(')')
-            .ok_or_else(|| error("malformed process status"))?
-            .1
-            .trim_start()
-            .starts_with('Z')),
-        Err(cause) if cause.kind() == io::ErrorKind::NotFound => Ok(true),
+fn present_stat(stat: io::Result<String>) -> Result<Option<String>> {
+    match stat {
+        Ok(text) => Ok(Some(text)),
+        Err(cause)
+            if cause.kind() == io::ErrorKind::NotFound
+                || cause.raw_os_error() == Some(nix::libc::ESRCH) =>
+        {
+            Ok(None)
+        }
         Err(cause) => Err(io_error(cause)),
     }
+}
+#[cfg(not(target_os = "macos"))]
+fn stopped(pid: i64) -> Result<bool> {
+    stopped_from_stat(std::fs::read_to_string(format!("/proc/{pid}/stat")))
+}
+#[cfg(not(target_os = "macos"))]
+fn stopped_from_stat(stat: io::Result<String>) -> Result<bool> {
+    let Some(text) = present_stat(stat)? else {
+        return Ok(true);
+    };
+    Ok(text
+        .rsplit_once(')')
+        .ok_or_else(|| error("malformed process status"))?
+        .1
+        .trim_start()
+        .starts_with('Z'))
 }
 
 trait ProcessObservations {
