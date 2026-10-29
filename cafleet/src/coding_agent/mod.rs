@@ -7,6 +7,10 @@ pub use policy::LaunchPolicySelection;
 mod profiles;
 #[cfg(test)]
 pub(crate) use profiles::ScreenRegion;
+pub(crate) use profiles::{
+    AnnotationBlock, AnnotationFingerprint, Detector, MatchEvidence, ObservationKind,
+    ScreenObservation, SemanticFingerprint,
+};
 pub use profiles::{AnswerCapability, NativeCapabilities, ProfileCatalog};
 pub(crate) use profiles::{AnswerMatch, AnswerPlan};
 pub(crate) use profiles::{AnswerStage, StageGate};
@@ -18,9 +22,6 @@ pub(crate) use profiles::{AnswerStage, StageGate};
     )
 )]
 pub(crate) use profiles::{ComposerOperation, ComposerPlan};
-pub(crate) use profiles::{
-    Detector, MatchEvidence, ObservationKind, ScreenObservation, SemanticFingerprint,
-};
 #[cfg(test)]
 pub(crate) use profiles::{
     background_rewrite, gated_fixture_definition, gated_fixture_form, gated_reason_dialog,

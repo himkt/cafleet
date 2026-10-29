@@ -116,6 +116,11 @@ pub fn get_event(conn: &Connection, event_id: i64) -> Result<RuntimeEventView, C
         "schema_version",
         "unsupported event schema",
     )?;
+    require(
+        !automatic_review(event.kind) || version == Some(2),
+        "schema_version",
+        "automatic review events use the v2 schema",
+    )?;
     if event.kind == RuntimeEventKind::InteractionClosed {
         fields.push("close_reason");
     }
@@ -312,6 +317,11 @@ pub(crate) fn validate_transition(
         !interactive || transition.episode_seq.is_some(),
         "episode_seq",
         "interactive transition requires episode",
+    )?;
+    require(
+        !automatic_review(transition.kind) || transition.episode_seq.is_none(),
+        "episode_seq",
+        "automatic review events have no interaction",
     )?;
     require(
         (transition.kind == RuntimeEventKind::InteractionClosed)
@@ -660,12 +670,20 @@ pub(crate) fn persist_transition_in_transaction(
 }
 
 const REVIEW_INSTRUCTION: &str = "Verify this event and the current request. Evaluate the operation and its risk. In the Director session's effective auto mode, decide allow or deny; otherwise obtain the user's permission. Submit the selected answer through the request-bound CAFleet response command, or give that complete command to the user. Inspect the native result and continuation afterward.";
+const AUTOMATIC_REFUSAL_INSTRUCTION: &str = "Verify this event. The member's automatic reviewer refused the operation and no native request is waiting. Dispatch evidence comes only from the member's routed request with its exact command, cwd, environment and refusal; this event and screen captures corroborate it. With no routed request, dispatch nothing and ask the member whether the refused operation is still needed when it next reports or goes idle. For a routed request, decide in the Director session's effective auto mode whether to authorize a separate execution through the routed-command path or to refuse; otherwise obtain the user's permission first. Inspect the actual result and the member's continuation afterward.";
+const AUTOMATIC_REVIEW_UNAVAILABLE_INSTRUCTION: &str = "Verify this event. Automatic review is unavailable for this member, so native permission forms may appear and each needs a decision, and refusals may stop its work. Supervise the member as interactive, and tell the user when the selected automatic mode cannot apply.";
 const MULTI_ROW_INSTRUCTION: &str = "The operation is shown as its displayed rows, where a row break may be a wrap or a line break in the command, so confirm the command against the excerpt before deciding.";
-fn review_instruction(evidence: &Value) -> String {
+fn with_multi_row_sentence(instruction: &str, evidence: &Value) -> String {
     match evidence["operation_rows"].as_u64() {
-        Some(rows) if rows > 1 => format!("{REVIEW_INSTRUCTION} {MULTI_ROW_INSTRUCTION}"),
-        _ => REVIEW_INSTRUCTION.to_owned(),
+        Some(rows) if rows > 1 => format!("{instruction} {MULTI_ROW_INSTRUCTION}"),
+        _ => instruction.to_owned(),
     }
+}
+fn automatic_review(kind: RuntimeEventKind) -> bool {
+    matches!(
+        kind,
+        RuntimeEventKind::AutomaticRefusalObserved | RuntimeEventKind::AutomaticReviewUnavailable
+    )
 }
 fn director_action(
     run: &RunRecord,
@@ -675,6 +693,26 @@ fn director_action(
     interaction_id: Option<i64>,
     evidence: &Value,
 ) -> Result<Value, CafleetError> {
+    if automatic_review(kind) {
+        require(
+            event_id > 0 && interaction_id.is_none(),
+            "director_action",
+            "automatic review events bind only their own positive event identity",
+        )?;
+        let (action, instruction) = if kind == RuntimeEventKind::AutomaticRefusalObserved {
+            (
+                "review_automatic_refusal",
+                with_multi_row_sentence(AUTOMATIC_REFUSAL_INSTRUCTION, evidence),
+            )
+        } else {
+            (
+                "review_automatic_review_unavailable",
+                AUTOMATIC_REVIEW_UNAVAILABLE_INSTRUCTION.to_owned(),
+            )
+        };
+        return Ok(json!({"kind":action,"instruction":instruction,
+            "inspect_argv":["cafleet","event","show",event_id.to_string(),"--json"]}));
+    }
     if kind != RuntimeEventKind::InteractionOpened
         || classification != Some(InteractionClass::PermissionRequest)
     {
@@ -692,7 +730,7 @@ fn director_action(
         "allocated positive action identities required",
     )?;
     Ok(
-        json!({"kind":"review_permission_request","instruction":review_instruction(evidence),
+        json!({"kind":"review_permission_request","instruction":with_multi_row_sentence(REVIEW_INSTRUCTION, evidence),
         "inspect_argv":["cafleet","permission","inspect",interaction_id.to_string(),"--event-id",event_id.to_string(),"--from-member-id",run.director_member_id.to_string(),"--json"]}),
     )
 }

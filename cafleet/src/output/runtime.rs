@@ -24,12 +24,17 @@ pub(crate) fn format_runtime_recovery(report: &crate::runtime::runner::RecoveryR
 pub fn format_runtime_snapshot(snapshot: &RuntimeSnapshot) -> String {
     let run = &snapshot.run;
     format!(
-        "Runtime: run={} mode={} status={} coverage={} profile={}",
+        "Runtime: run={} mode={} status={} coverage={} profile={} review={}",
         run.run_id,
         run.resolved_mode,
         run.status.as_str(),
         run.coverage.as_str(),
-        run.profile_match.map_or("-", ProfileMatch::as_str)
+        run.profile_match.map_or("-", ProfileMatch::as_str),
+        run.effective_policy_json.as_ref().map_or("-", |record| {
+            record["automatic_review"]
+                .as_str()
+                .expect("validated effective policy review state")
+        })
     )
 }
 

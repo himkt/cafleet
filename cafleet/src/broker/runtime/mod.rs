@@ -1,12 +1,15 @@
 pub(crate) use events::{
     original as original_transition, validate_transition as validate_observed_transition,
 };
+mod effective_policy;
 mod events;
 pub mod evidence;
 mod inputs;
 mod permissions;
 mod records;
 
+pub(crate) use effective_policy::persist_transition_with_effective_policy_counted;
+pub use effective_policy::{persist_transition_with_effective_policy, record_effective_policy};
 pub use events::{get_event, persist_transition, update_interaction_evidence};
 pub(crate) use events::{persist_transition_counted, persist_transition_in_transaction};
 pub(crate) use inputs::{
@@ -208,6 +211,7 @@ pub fn get_run(conn: &Connection, run_id: i64) -> Result<RunRecord, CafleetError
         "member_runs.permission_argv_json",
         "string arguments required",
     )?;
+    effective_policy::validate(&run)?;
     Ok(run)
 }
 

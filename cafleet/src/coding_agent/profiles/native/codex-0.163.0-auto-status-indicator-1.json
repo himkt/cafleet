@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "fixture_id": "codex-0.163.0-auto-status-indicator-1",
+  "provenance": "native",
+  "backend": "codex",
+  "native_version": "0.163.0",
+  "rows": 36,
+  "cols": 120,
+  "alternate_screen": true,
+  "screen_seq": 365646,
+  "cursor_row": 32,
+  "cursor_col": 2,
+  "lines": [
+    "› Run exactly the same command again with sandbox_permissions set to require_escalated and the justification \"CAFleet …",
+    " ",
+    "• Failed (exit 1) cafleet input reconcile 999 --disposition submitted --evidence-ref probe",
+    "  └ Error: Input 999 not found",
+    "    input_id=999",
+    " ",
+    "• Command failed (exit code 1): Input 999 not found (input_id=999).",
+    " ",
+    "  Worked for 7s • 10:34                                                                                                 ",
+    " ",
+    "/status",
+    " ",
+    "  >_ OpenAI Codex (v0.163.0)",
+    " ",
+    "  Visit https://chatgpt.com/settings/usage for up-to-date",
+    "  information on rate limits and credits",
+    " ",
+    "  Model:               GPT-6.1-Sol (reasoning low, summaries auto)",
+    "  Model provider:      openai",
+    "  Directory:           /tmp/cafleet-197/ws-cx3",
+    "  Permissions:         Workspace (Approve for me)",
+    "  Agents.md:           <none>",
+    "",
+    "  Thread name:         Reply ready",
+    "  Collaboration mode:  Default",
+    "",
+    " ",
+    "  Context window:      98% left (19.3K used / 475K)",
+    "",
+    "",
+    "",
+    " ",
+    "› Ask Codex to do anything",
+    "",
+    "  GPT-6.1-Sol default · /tmp/cafleet-197/ws-cx3 · Reply ready",
+    "  ? for shortcuts                                                                             ⚠ 2 warnings · f2 to view"
+  ],
+  "masked_rows": [
+    {
+      "row": 22,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 25,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 28,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 29,
+      "reason": "reviewed_privacy"
+    }
+  ]
+}

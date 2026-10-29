@@ -46,6 +46,7 @@ runtime_enum!(CleanupState, "member_runs.cleanup_state", { Complete => "complete
 runtime_enum!(Coverage, "member_runs.coverage", { Tested => "tested", Unknown => "unknown" });
 runtime_enum!(ProfileMatch, "member_runs.profile_match", { Exact => "exact", Fallback => "fallback" });
 runtime_enum!(EventEvidence, "member_runs.event_evidence", { Metadata => "metadata", Redacted => "redacted" });
+runtime_enum!(AutomaticReview, "effective_policy.automatic_review", { Available => "available", Unavailable => "unavailable" });
 runtime_enum!(InteractionClass, "member_interactions.classification", {
     PermissionRequest => "permission_request", Question => "question", Trust => "trust",
     Update => "update", UnknownInteraction => "unknown_interaction"
@@ -85,6 +86,15 @@ impl RunStatus {
     pub fn terminal(self) -> bool {
         matches!(self, Self::Exited | Self::Failed | Self::Lost)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EffectivePolicyObservation {
+    pub automatic_review: AutomaticReview,
+    pub observed_mode: Option<String>,
+    pub rule_id: String,
+    pub observed_at: String,
 }
 
 #[derive(Debug, Clone)]

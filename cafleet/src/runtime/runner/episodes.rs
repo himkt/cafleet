@@ -1,8 +1,10 @@
 use super::*;
 use crate::broker::runtime::{
-    InteractionClass, InteractionCloseReason, InteractionEvidenceUpdate, ObservedTransition,
-    RuntimeEventKind, evidence::EvidencePolicy,
+    AutomaticReview, EffectivePolicyObservation, InteractionClass, InteractionCloseReason,
+    InteractionEvidenceUpdate, ObservedTransition, RuntimeEventKind, evidence::EvidencePolicy,
 };
+use crate::coding_agent::{AnnotationBlock, AnnotationFingerprint};
+use std::collections::{BTreeMap, BTreeSet};
 use std::ops::RangeInclusive;
 use std::time::{Duration, Instant};
 
@@ -64,6 +66,99 @@ pub(crate) struct EpisodeUpdate {
     pub transitions: Vec<TransitionDraft>,
     pub latest_evidence: Option<InteractionEvidenceUpdate>,
     pub next_deadline: Option<Instant>,
+    pub effective_policy: Option<EffectivePolicyObservation>,
+}
+fn earliest(deadline: &mut Option<Instant>, until: Instant) {
+    *deadline = Some(deadline.map_or(until, |old| old.min(until)));
+}
+#[derive(Default)]
+struct AnnotationState {
+    candidate_since: Option<Instant>,
+    emitted: bool,
+    absent_since: Option<Instant>,
+}
+#[derive(Default)]
+struct AnnotationTracker {
+    states: BTreeMap<String, BTreeMap<AnnotationFingerprint, AnnotationState>>,
+    unavailable_emitted: BTreeSet<String>,
+    last_policy: Option<(AutomaticReview, Option<String>)>,
+}
+impl AnnotationTracker {
+    fn age_absent(&mut self, value: &ScreenObservation, now: Instant, update: &mut EpisodeUpdate) {
+        for (rule, states) in &mut self.states {
+            let resettable =
+                value.verified_noninteraction && value.guarded_annotation_rules.contains(rule);
+            states.retain(|fingerprint, state| {
+                let shown = value
+                    .annotations
+                    .iter()
+                    .any(|block| &block.rule_id == rule && &block.fingerprint == fingerprint);
+                if shown {
+                    state.absent_since = None;
+                    return true;
+                }
+                state.candidate_since = None;
+                if !state.emitted {
+                    return false;
+                }
+                if !resettable {
+                    state.absent_since = None;
+                    return true;
+                }
+                let since = *state.absent_since.get_or_insert(now);
+                if elapsed(now, since, Duration::from_millis(250)) {
+                    return false;
+                }
+                earliest(
+                    &mut update.next_deadline,
+                    since + Duration::from_millis(250),
+                );
+                true
+            });
+        }
+    }
+    fn stable(
+        &mut self,
+        block: &AnnotationBlock,
+        now: Instant,
+        update: &mut EpisodeUpdate,
+    ) -> bool {
+        let state = self
+            .states
+            .entry(block.rule_id.clone())
+            .or_default()
+            .entry(block.fingerprint.clone())
+            .or_default();
+        if state.emitted {
+            return true;
+        }
+        let since = *state.candidate_since.get_or_insert(now);
+        if elapsed(now, since, Duration::from_millis(100)) {
+            return true;
+        }
+        earliest(
+            &mut update.next_deadline,
+            since + Duration::from_millis(100),
+        );
+        false
+    }
+    fn mark_emitted(&mut self, block: &AnnotationBlock) -> bool {
+        let state = self
+            .states
+            .get_mut(&block.rule_id)
+            .and_then(|states| states.get_mut(&block.fingerprint))
+            .expect("a stable annotation has its state");
+        !std::mem::replace(&mut state.emitted, true)
+    }
+    fn forget_candidates(&mut self) {
+        for states in self.states.values_mut() {
+            states.retain(|_, state| {
+                state.candidate_since = None;
+                state.absent_since = None;
+                state.emitted
+            });
+        }
+    }
 }
 struct Candidate {
     fingerprint: SemanticFingerprint,
@@ -93,6 +188,7 @@ pub(crate) struct EpisodeTracker {
     last_time: Option<Instant>,
     finished: bool,
     current_evidence: Option<Value>,
+    annotations: AnnotationTracker,
 }
 fn elapsed(now: Instant, since: Instant, duration: Duration) -> bool {
     now.saturating_duration_since(since) >= duration
@@ -127,6 +223,7 @@ impl EpisodeTracker {
             last_time: None,
             finished: false,
             current_evidence: None,
+            annotations: AnnotationTracker::default(),
         })
     }
     pub(crate) fn active_episode(&self) -> Option<(i64, InteractionClass)> {
@@ -217,6 +314,97 @@ impl EpisodeTracker {
         now: Instant,
         at: &str,
     ) -> Result<EpisodeUpdate> {
+        let mut update = self.observe_primary(value, now, at)?;
+        self.observe_annotations(value, now, at, &mut update)?;
+        Ok(update)
+    }
+    fn observe_annotations(
+        &mut self,
+        value: &ScreenObservation,
+        now: Instant,
+        at: &str,
+        update: &mut EpisodeUpdate,
+    ) -> Result<()> {
+        self.annotations.age_absent(value, now, update);
+        let mut unavailable_policy = false;
+        for block in &value.annotations {
+            if !self.annotations.stable(block, now, update) {
+                continue;
+            }
+            let first = self.annotations.mark_emitted(block);
+            let observed_mode = || {
+                self.policy.displayed_mode(
+                    &block.rule_id,
+                    block.raw_evidence["sensitive"]
+                        .as_bool()
+                        .expect("detector evidence carries its sensitivity"),
+                    block.raw_evidence["observed_mode"].as_str(),
+                )
+            };
+            match block.kind {
+                ObservationKind::AutomaticReviewAvailable => {
+                    self.annotations.unavailable_emitted.clear();
+                    let mode = observed_mode()?;
+                    let state = (AutomaticReview::Available, mode.clone());
+                    if !unavailable_policy && self.annotations.last_policy.as_ref() != Some(&state)
+                    {
+                        update.effective_policy = Some(EffectivePolicyObservation {
+                            automatic_review: AutomaticReview::Available,
+                            observed_mode: mode,
+                            rule_id: block.rule_id.clone(),
+                            observed_at: at.into(),
+                        });
+                        self.annotations.last_policy = Some(state);
+                    }
+                }
+                ObservationKind::AutomaticRefusal if first => {
+                    let evidence = self.policy.apply(&block.raw_evidence)?;
+                    update.transitions.push(self.draft(
+                        RuntimeEventKind::AutomaticRefusalObserved,
+                        None,
+                        evidence,
+                        None,
+                        at,
+                    ));
+                }
+                ObservationKind::AutomaticReviewUnavailable
+                    if first
+                        && self
+                            .annotations
+                            .unavailable_emitted
+                            .insert(block.rule_id.clone()) =>
+                {
+                    let evidence = self.policy.apply(&block.raw_evidence)?;
+                    update.transitions.push(self.draft(
+                        RuntimeEventKind::AutomaticReviewUnavailable,
+                        None,
+                        evidence,
+                        None,
+                        at,
+                    ));
+                    if !unavailable_policy {
+                        let mode = observed_mode()?;
+                        update.effective_policy = Some(EffectivePolicyObservation {
+                            automatic_review: AutomaticReview::Unavailable,
+                            observed_mode: mode.clone(),
+                            rule_id: block.rule_id.clone(),
+                            observed_at: at.into(),
+                        });
+                        self.annotations.last_policy = Some((AutomaticReview::Unavailable, mode));
+                        unavailable_policy = true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+    fn observe_primary(
+        &mut self,
+        value: &ScreenObservation,
+        now: Instant,
+        at: &str,
+    ) -> Result<EpisodeUpdate> {
         ensure(!self.finished, "closed tracker accepts no observations")?;
         wall_time(at)?;
         ensure(
@@ -250,6 +438,7 @@ impl EpisodeTracker {
             transitions: Vec::new(),
             latest_evidence: None,
             next_deadline: None,
+            effective_policy: None,
         };
         if let ObservationKind::Interaction(class) = value.kind {
             self.boundary = None;
@@ -451,12 +640,14 @@ impl EpisodeTracker {
         self.obscurity = None;
         self.obscured = false;
         self.refusal_candidate = None;
+        self.annotations.forget_candidates();
         Ok(EpisodeUpdate {
             visibility: Visibility::Unknown,
             eligibility: InputEligibility::Hold(reason),
             transitions: Vec::new(),
             latest_evidence: None,
             next_deadline: None,
+            effective_policy: None,
         })
     }
     pub(crate) fn finish(
@@ -478,6 +669,7 @@ impl EpisodeTracker {
             transitions,
             latest_evidence: None,
             next_deadline: None,
+            effective_policy: None,
         })
     }
 }
