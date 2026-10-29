@@ -5860,6 +5860,442 @@ mod contract_tests {
         }
     }
 
+    mod annotation_catalog {
+        use super::*;
+
+        const REFUSAL: &str = "synthetic-auto-refusal";
+        const UNAVAILABLE: &str = "synthetic-auto-unavailable";
+        const AVAILABLE: &str = "synthetic-auto-indicator";
+
+        fn annotation_rule(id: &str, observation: &str) -> Value {
+            let (start, matchers, operation) = match observation {
+                "automatic_refusal" => (
+                    "^Refused: ",
+                    json!([
+                        {"id":"operation","scope":"line","pattern":"^Refused: (?P<operation>.+)$"},
+                        {"id":"decoration","scope":"line","pattern":"^Refusal end$"}
+                    ]),
+                    json!({"matcher_id":"operation","capture":"operation"}),
+                ),
+                "automatic_review_unavailable" => (
+                    "^Automatic review unavailable$",
+                    json!([{"id":"notice","scope":"line","pattern":"^Automatic review unavailable$"}]),
+                    Value::Null,
+                ),
+                _ => (
+                    "^Mode: automatic$",
+                    json!([{"id":"badge","scope":"line","pattern":"^Mode: automatic$"}]),
+                    Value::Null,
+                ),
+            };
+            let end = if observation == "automatic_refusal" {
+                "^Refusal end$"
+            } else {
+                start
+            };
+            json!({"id":id,"priority":50,"observation":observation,
+                "region":{"screen":"either","start_pattern":start,"end_pattern":end,"max_rows":4,"cursor":"any"},
+                "matchers":matchers,
+                "extract":{"operation":operation,"choices":[],"native_request_id":null},
+                "verified_noninteraction":false,"sensitive":false,
+                "frame":{"require_patterns":["^Live footer$"],"reject_patterns":["^Transcript viewer$"]}})
+        }
+
+        fn annotated() -> Value {
+            let mut value = definitions();
+            let rules = value["profiles"][0]["rules"].as_array_mut().unwrap();
+            rules.push(annotation_rule(REFUSAL, "automatic_refusal"));
+            rules.push(annotation_rule(UNAVAILABLE, "automatic_review_unavailable"));
+            rules.push(annotation_rule(AVAILABLE, "automatic_review_available"));
+            value["profiles"][0]["capabilities"]["annotations"] =
+                json!({"rule_ids":[REFUSAL, UNAVAILABLE, AVAILABLE],"fixture_ids":[FIXTURE]});
+            value
+        }
+
+        fn rule<'a>(value: &'a mut Value, id: &str) -> &'a mut Value {
+            value["profiles"][0]["rules"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|rule| rule["id"] == id)
+                .expect("declared synthetic rule")
+        }
+
+        fn rejected(label: &str, change: impl FnOnce(&mut Value)) {
+            assert!(ProfileCatalog::from_definitions(&annotated()).is_ok());
+            let mut value = annotated();
+            change(&mut value);
+            assert!(
+                ProfileCatalog::from_definitions(&value).is_err(),
+                "annotation catalog accepted: {label}"
+            );
+        }
+
+        fn observe_lines(definition: &Value, rows: &[&str]) -> ScreenObservation {
+            let rows = rows.iter().map(|row| (*row).to_owned()).collect::<Vec<_>>();
+            observation(definition, &terminal(&rows, 80, false).snapshot())
+        }
+
+        fn refusal_screen(operations: &[&str]) -> Vec<String> {
+            let mut rows = Vec::new();
+            for operation in operations {
+                rows.push(format!("Refused: {operation}"));
+                rows.push("Refusal end".to_owned());
+            }
+            rows.push("Live footer".to_owned());
+            rows
+        }
+
+        #[test]
+        fn annotation_kinds_parse_from_their_exact_profile_strings() {
+            for (name, kind) in [
+                ("automatic_refusal", ObservationKind::AutomaticRefusal),
+                (
+                    "automatic_review_unavailable",
+                    ObservationKind::AutomaticReviewUnavailable,
+                ),
+                (
+                    "automatic_review_available",
+                    ObservationKind::AutomaticReviewAvailable,
+                ),
+            ] {
+                assert_eq!(ObservationKind::parse(name).unwrap(), kind, "{name}");
+            }
+            for name in [
+                "automatic_refusal_observed",
+                "Automatic_Refusal",
+                "auto_refusal",
+            ] {
+                assert!(ObservationKind::parse(name).is_err(), "{name}");
+            }
+        }
+
+        #[test]
+        fn annotation_catalog_accepts_each_kind_in_the_annotations_group_and_a_null_group() {
+            assert!(ProfileCatalog::from_definitions(&annotated()).is_ok());
+            assert!(ProfileCatalog::from_definitions(&definitions()).is_ok());
+            for (id, observation) in [
+                (REFUSAL, "automatic_refusal"),
+                (UNAVAILABLE, "automatic_review_unavailable"),
+                (AVAILABLE, "automatic_review_available"),
+            ] {
+                let mut value = definitions();
+                value["profiles"][0]["rules"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(annotation_rule(id, observation));
+                value["profiles"][0]["capabilities"]["annotations"] =
+                    json!({"rule_ids":[id],"fixture_ids":[FIXTURE]});
+                assert!(
+                    ProfileCatalog::from_definitions(&value).is_ok(),
+                    "{observation}"
+                );
+            }
+            let mut without_reject = annotated();
+            rule(&mut without_reject, REFUSAL)["frame"]["reject_patterns"] = json!([]);
+            assert!(ProfileCatalog::from_definitions(&without_reject).is_ok());
+        }
+
+        #[test]
+        fn annotation_catalog_requires_the_annotations_capability_key_with_valid_provenance() {
+            rejected("missing annotations key", |value| {
+                value["profiles"][0]["capabilities"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("annotations");
+            });
+            assert!(
+                ProfileCatalog::from_definitions(&{
+                    let mut value = definitions();
+                    value["profiles"][0]["capabilities"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("annotations");
+                    value
+                })
+                .is_err(),
+                "a profile without annotation rules still declares the key"
+            );
+            rejected("unknown annotations field", |value| {
+                value["profiles"][0]["capabilities"]["annotations"]["unexpected"] = json!(true);
+            });
+            rejected("empty annotation rule ids", |value| {
+                value["profiles"][0]["capabilities"]["annotations"]["rule_ids"] = json!([]);
+            });
+            rejected("unknown annotation rule id", |value| {
+                value["profiles"][0]["capabilities"]["annotations"]["rule_ids"] =
+                    json!([REFUSAL, UNAVAILABLE, AVAILABLE, "missing-rule"]);
+            });
+            rejected("empty annotation provenance", |value| {
+                value["profiles"][0]["capabilities"]["annotations"]["fixture_ids"] = json!([]);
+            });
+            rejected("unknown annotation fixture", |value| {
+                value["profiles"][0]["capabilities"]["annotations"]["fixture_ids"] =
+                    json!(["missing-fixture"]);
+            });
+            rejected("annotation fixture of another version", |value| {
+                let mut other = value["fixtures"][0].clone();
+                other["id"] = json!("other-version-fixture");
+                other["native_version"] = json!("synthetic-0.0.9");
+                value["fixtures"].as_array_mut().unwrap().push(other);
+                value["profiles"][0]["capabilities"]["annotations"]["fixture_ids"] =
+                    json!(["other-version-fixture"]);
+            });
+            rejected("annotation fixture of another backend", |value| {
+                let mut other = value["fixtures"][0].clone();
+                other["id"] = json!("other-backend-fixture");
+                other["backend"] = json!("claude");
+                value["fixtures"].as_array_mut().unwrap().push(other);
+                value["profiles"][0]["capabilities"]["annotations"]["fixture_ids"] =
+                    json!(["other-backend-fixture"]);
+            });
+        }
+
+        #[test]
+        fn annotation_catalog_keeps_annotation_and_screen_state_groups_disjoint() {
+            rejected("annotation rule in detection", |value| {
+                value["profiles"][0]["capabilities"]["detection"]["rule_ids"] =
+                    json!([RULE, REFUSAL]);
+            });
+            rejected("annotation rule in composer", |value| {
+                value["profiles"][0]["capabilities"]["composer"] =
+                    json!({"rule_ids":[AVAILABLE],"fixture_ids":[FIXTURE]});
+            });
+            rejected("permission rule in annotations", |value| {
+                value["profiles"][0]["capabilities"]["annotations"]["rule_ids"] =
+                    json!([REFUSAL, UNAVAILABLE, AVAILABLE, RULE]);
+            });
+            rejected("annotation rule outside the annotations group", |value| {
+                value["profiles"][0]["capabilities"]["annotations"]["rule_ids"] =
+                    json!([REFUSAL, UNAVAILABLE]);
+            });
+            rejected("annotation rules without an annotations group", |value| {
+                value["profiles"][0]["capabilities"]["annotations"] = Value::Null;
+            });
+        }
+
+        #[test]
+        fn annotation_catalog_enforces_annotation_rule_fields_and_the_frame_guard() {
+            rejected("annotation choices", |value| {
+                rule(value, REFUSAL)["extract"]["choices"] = json!([
+                    {"id":"refused","label":{"matcher_id":"operation","capture":"operation"},"scope":"single_request"}
+                ]);
+            });
+            rejected("annotation native request id", |value| {
+                rule(value, REFUSAL)["extract"]["native_request_id"] =
+                    json!({"matcher_id":"operation","capture":"operation"});
+            });
+            rejected("annotation verified noninteraction", |value| {
+                rule(value, AVAILABLE)["verified_noninteraction"] = json!(true);
+            });
+            rejected("refusal without an operation", |value| {
+                rule(value, REFUSAL)["extract"]["operation"] = Value::Null;
+            });
+            for id in [UNAVAILABLE, AVAILABLE] {
+                rejected(&format!("{id} with an operation"), |value| {
+                    let rule = rule(value, id);
+                    rule["matchers"].as_array_mut().unwrap().push(
+                        json!({"id":"operation","scope":"line","pattern":"^(?P<operation>.+)$"}),
+                    );
+                    rule["extract"]["operation"] =
+                        json!({"matcher_id":"operation","capture":"operation"});
+                });
+            }
+            rejected("missing frame", |value| {
+                rule(value, REFUSAL)
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("frame");
+            });
+            rejected("empty frame require patterns", |value| {
+                rule(value, REFUSAL)["frame"]["require_patterns"] = json!([]);
+            });
+            rejected("uncompilable frame require pattern", |value| {
+                rule(value, REFUSAL)["frame"]["require_patterns"] = json!(["^(unclosed$"]);
+            });
+            rejected("uncompilable frame reject pattern", |value| {
+                rule(value, REFUSAL)["frame"]["reject_patterns"] = json!(["^[unclosed$"]);
+            });
+            rejected("missing frame reject patterns", |value| {
+                rule(value, REFUSAL)["frame"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("reject_patterns");
+            });
+            rejected("unknown frame field", |value| {
+                rule(value, REFUSAL)["frame"]["unexpected"] = json!(true);
+            });
+            rejected("frame on a non-annotation rule", |value| {
+                rule(value, RULE)["frame"] =
+                    json!({"require_patterns":["^Live footer$"],"reject_patterns":[]});
+            });
+        }
+
+        #[test]
+        fn annotation_detector_yields_every_qualifying_block_in_row_order_beside_the_primary() {
+            let definition = annotated();
+            let observed = observe_lines(
+                &definition,
+                &refusal_screen(&["write one.txt", "write two.txt"])
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+            );
+            assert_eq!(observed.kind, ObservationKind::Unknown);
+            assert_eq!(observed.rule_id, "unmatched-screen");
+            assert_eq!(observed.annotations.len(), 2);
+            let operations = observed
+                .annotations
+                .iter()
+                .map(|block| block.raw_evidence["operation"].clone())
+                .collect::<Vec<_>>();
+            assert_eq!(operations, [json!("write one.txt"), json!("write two.txt")]);
+            for block in &observed.annotations {
+                assert_eq!(block.kind, ObservationKind::AutomaticRefusal);
+                assert_eq!(block.rule_id, REFUSAL);
+                assert_eq!(block.raw_evidence["rule_id"], REFUSAL);
+            }
+            let (first, second) = (
+                observed.annotations[0].matched_region,
+                observed.annotations[1].matched_region,
+            );
+            assert!(first.bottom < second.top, "{first:?} {second:?}");
+            assert!(observed.annotations[0].fingerprint != observed.annotations[1].fingerprint);
+            let single = observe_lines(
+                &definition,
+                &refusal_screen(&["write one.txt"])
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+            );
+            assert_eq!(single.annotations.len(), 1);
+            assert!(single.annotations[0].fingerprint == observed.annotations[0].fingerprint);
+        }
+
+        #[test]
+        fn annotation_detector_leaves_the_primary_observation_unchanged() {
+            let mut rows = vec![
+                "Live footer".to_owned(),
+                "Refused: write outside.txt".to_owned(),
+                "Refusal end".to_owned(),
+            ];
+            rows.extend(lines("write disposable.txt"));
+            let screen = terminal(&rows, 80, false).snapshot();
+            let plain = observation(&definitions(), &screen);
+            let annotated = observation(&annotated(), &screen);
+            assert_eq!(
+                annotated.kind,
+                ObservationKind::Interaction(InteractionClass::PermissionRequest)
+            );
+            assert_eq!(annotated.kind, plain.kind);
+            assert_eq!(annotated.rule_id, plain.rule_id);
+            assert_eq!(annotated.match_evidence, plain.match_evidence);
+            assert_eq!(annotated.raw_evidence, plain.raw_evidence);
+            assert_eq!(
+                annotated.verified_noninteraction,
+                plain.verified_noninteraction
+            );
+            assert!(annotated.fingerprint == plain.fingerprint);
+            assert!(plain.annotations.is_empty());
+            assert_eq!(annotated.annotations.len(), 1);
+            assert_eq!(
+                annotated.annotations[0].raw_evidence["operation"],
+                "write outside.txt"
+            );
+        }
+
+        #[test]
+        fn annotation_detector_reports_each_annotation_kind_with_its_own_rule() {
+            let observed = observe_lines(
+                &annotated(),
+                &[
+                    "Automatic review unavailable",
+                    "Mode: automatic",
+                    "Live footer",
+                ],
+            );
+            let mut kinds = observed
+                .annotations
+                .iter()
+                .map(|block| (block.rule_id.clone(), block.kind))
+                .collect::<Vec<_>>();
+            kinds.sort_by(|a, b| a.0.cmp(&b.0));
+            assert_eq!(
+                kinds,
+                [
+                    (
+                        AVAILABLE.to_owned(),
+                        ObservationKind::AutomaticReviewAvailable
+                    ),
+                    (
+                        UNAVAILABLE.to_owned(),
+                        ObservationKind::AutomaticReviewUnavailable
+                    ),
+                ]
+            );
+            for block in &observed.annotations {
+                assert_eq!(block.raw_evidence["operation"], Value::Null);
+            }
+        }
+
+        #[test]
+        fn annotation_detector_frame_guard_rejects_non_live_frames_and_undecorated_quotes() {
+            let definition = annotated();
+            let without_footer =
+                observe_lines(&definition, &["Refused: write one.txt", "Refusal end"]);
+            assert!(without_footer.annotations.is_empty());
+            let viewer = observe_lines(
+                &definition,
+                &[
+                    "Transcript viewer",
+                    "Refused: write one.txt",
+                    "Refusal end",
+                    "Live footer",
+                ],
+            );
+            assert!(viewer.annotations.is_empty());
+            let quoted = observe_lines(
+                &definition,
+                &["The model said Refused: write one.txt", "Live footer"],
+            );
+            assert!(quoted.annotations.is_empty());
+            let undecorated =
+                observe_lines(&definition, &["Refused: write one.txt", "Live footer"]);
+            assert!(undecorated.annotations.is_empty());
+        }
+
+        #[test]
+        fn annotation_detector_yields_nothing_without_a_selected_profile() {
+            let catalog = ProfileCatalog::from_definitions(&annotated()).unwrap();
+            let rows = refusal_screen(&["write one.txt"]);
+            let observed = Detector::new(&catalog, CodingAgent::Claude, Some(VERSION))
+                .unwrap()
+                .observe(&terminal(&rows, 80, false).snapshot())
+                .unwrap();
+            assert!(observed.annotations.is_empty());
+        }
+
+        #[test]
+        fn annotation_bundled_profiles_each_declare_the_annotations_capability() {
+            let definitions: Value =
+                serde_json::from_str(include_str!("profiles/bundled.json")).unwrap();
+            for profile in definitions["profiles"].as_array().unwrap() {
+                assert!(
+                    profile["capabilities"]
+                        .as_object()
+                        .unwrap()
+                        .contains_key("annotations"),
+                    "{}",
+                    profile["profile_version"]
+                );
+                if profile["backend"] == "opencode" {
+                    assert_eq!(profile["capabilities"]["annotations"], Value::Null);
+                }
+            }
+            assert!(ProfileCatalog::bundled().is_ok());
+        }
+    }
+
     mod profile_version_fallback {
         use super::*;
 
@@ -6231,7 +6667,7 @@ mod contract_tests {
                         {"id":"allow-once","label":{"matcher_id":"allow","capture":"label"},"scope":"single_request"},
                         {"id":"deny-once","label":{"matcher_id":"deny","capture":"label"},"scope":"single_request"}
                     ],"native_request_id":null},"verified_noninteraction":false,"sensitive":false}],
-                "capabilities":{"detection":{"rule_ids":[RULE],"fixture_ids":[FIXTURE]},"composer":null,"answers":[]}}]
+                "capabilities":{"detection":{"rule_ids":[RULE],"fixture_ids":[FIXTURE]},"composer":null,"annotations":null,"answers":[]}}]
         })
     }
 
@@ -6288,9 +6724,9 @@ mod contract_tests {
         rule["verified_noninteraction"] = json!(verified);
         let declaration = json!({"rule_ids":[format!("synthetic-{kind}")],"fixture_ids":[FIXTURE]});
         value["profiles"][0]["capabilities"] = if kind.starts_with("composer_") {
-            json!({"detection":null,"composer":declaration,"answers":[]})
+            json!({"detection":null,"composer":declaration,"annotations":null,"answers":[]})
         } else {
-            json!({"detection":declaration,"composer":null,"answers":[]})
+            json!({"detection":declaration,"composer":null,"annotations":null,"answers":[]})
         };
         value
     }

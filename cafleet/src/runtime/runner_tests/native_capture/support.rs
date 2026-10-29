@@ -110,8 +110,6 @@ impl CaptureFixture {
         spec.argv = vec![
             executable.to_str().unwrap().into(),
             "--approve-for-me".into(),
-            "--sandbox".into(),
-            "workspace-write".into(),
             "private assignment canary".into(),
         ];
         artifacts

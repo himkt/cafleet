@@ -142,7 +142,7 @@ fn configure(fixture: &mut Fixture, spec: &mut SpawnSpec, until: Instant) {
     rule["matchers"] = json!([{"id":"state","scope":"line","pattern":"^Synthetic state$"}]);
     rule["extract"] = json!({"operation":null,"choices":[],"native_request_id":null});
     rule["verified_noninteraction"] = json!(true);
-    catalog["profiles"][0]["capabilities"] = json!({"detection":null,"answers":[],"composer":{
+    catalog["profiles"][0]["capabilities"] = json!({"detection":null,"annotations":null,"answers":[],"composer":{
         "rule_ids":["synthetic-service-composer"],"fixture_ids":[catalog["fixtures"][0]["id"]],
         "submission":{
             "prompt":{"prefix_hex":"","submit_hex":"0d","fixture_ids":["synthetic-service-submission"]},

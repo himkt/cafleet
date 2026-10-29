@@ -127,7 +127,7 @@ impl Fixture {
             requested_mode: None,
             resolved_mode: "approve-for-me".into(),
             mode_source: ModeSource::Default,
-            permission_argv_json: json!(["--approve-for-me", "--sandbox", "workspace-write"]),
+            permission_argv_json: json!(["--approve-for-me"]),
             event_evidence: EventEvidence::Metadata,
             native_version: None,
             profile_version: None,

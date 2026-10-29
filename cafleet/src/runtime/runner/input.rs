@@ -8375,7 +8375,7 @@ mod contract_tests {
                     serde_json::json!({"operation":null,"choices":[],"native_request_id":null});
                 rule["verified_noninteraction"] = serde_json::json!(true);
                 value["profiles"][0]["capabilities"] = serde_json::json!({
-                    "detection":null,"answers":[],"composer":{
+                    "detection":null,"annotations":null,"answers":[],"composer":{
                         "rule_ids":["synthetic-composer-empty"],"fixture_ids":[fixture["id"]],
                         "submission":{"prompt":{"prefix_hex":"","submit_hex":"7e","fixture_ids":["synthetic-prompt-plan"]},"exec":null}
                     }

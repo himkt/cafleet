@@ -43,11 +43,7 @@ mod policy_contract_tests {
     fn permission_argv(backend: CodingAgent, selected: &str) -> Vec<String> {
         match backend {
             CodingAgent::Claude => vec!["--permission-mode".into(), selected.into()],
-            CodingAgent::Codex if selected == "approve-for-me" => vec![
-                "--approve-for-me".into(),
-                "--sandbox".into(),
-                "workspace-write".into(),
-            ],
+            CodingAgent::Codex if selected == "approve-for-me" => vec!["--approve-for-me".into()],
             CodingAgent::Codex => vec![
                 "--ask-for-approval".into(),
                 selected.into(),
@@ -396,7 +392,7 @@ mod policy_contract_tests {
     }
 
     #[test]
-    fn runtime_policy_omitted_codex_launches_approve_for_me_with_the_explicit_sandbox() {
+    fn runtime_policy_omitted_codex_launches_approve_for_me_as_its_single_flag() {
         for native_version in [Some("0.163.0"), None, Some("0.164.0")] {
             let selection = CodingAgent::Codex
                 .resolve_policy(native_version, None)
@@ -409,19 +405,13 @@ mod policy_contract_tests {
             assert_eq!(selection.mode_source, ModeSource::Default);
             assert_eq!(
                 serde_json::to_value(&selection.permission_argv).unwrap(),
-                serde_json::json!(["--approve-for-me", "--sandbox", "workspace-write"])
+                serde_json::json!(["--approve-for-me"])
             );
             assert_eq!(
                 CodingAgent::Codex
                     .build_spawn_argv_with_policy("assignment", "worker", None, None, &selection)
                     .unwrap(),
-                [
-                    "codex",
-                    "--approve-for-me",
-                    "--sandbox",
-                    "workspace-write",
-                    "assignment"
-                ],
+                ["codex", "--approve-for-me", "assignment"],
                 "{native_version:?}"
             );
         }
@@ -436,10 +426,7 @@ mod policy_contract_tests {
             assert_eq!(selection.requested_mode.as_deref(), Some("approve-for-me"));
             assert_eq!(selection.resolved_mode, "approve-for-me");
             assert_eq!(selection.mode_source, ModeSource::Explicit);
-            assert_eq!(
-                selection.permission_argv,
-                ["--approve-for-me", "--sandbox", "workspace-write"]
-            );
+            assert_eq!(selection.permission_argv, ["--approve-for-me"]);
             assert_eq!(
                 CodingAgent::Codex
                     .build_spawn_argv_with_policy(
@@ -453,8 +440,6 @@ mod policy_contract_tests {
                 [
                     "codex",
                     "--approve-for-me",
-                    "--sandbox",
-                    "workspace-write",
                     "--model",
                     "provider/model",
                     "--config=model_reasoning_effort=high",
@@ -762,10 +747,7 @@ mod tests {
                     "display name",
                 ],
             ),
-            (
-                CodingAgent::Codex,
-                vec!["codex", "--approve-for-me", "--sandbox", "workspace-write"],
-            ),
+            (CodingAgent::Codex, vec!["codex", "--approve-for-me"]),
             (
                 CodingAgent::Opencode,
                 vec!["opencode", "mini", "--standalone", "--agent", "cafleet"],

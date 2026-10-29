@@ -60,25 +60,25 @@ fn runner_collector_f1_actual_permission_options_match_the_recorded_emitted_poli
 {
     for mutation in [
         "approval",
-        "sandbox",
         "missing_approval",
-        "missing_sandbox",
         "repeat_approval",
-        "repeat_sandbox",
+        "added_sandbox",
+        "trailing_sandbox",
     ] {
         let mut fixture = CaptureFixture::new(json!({"mode":"metadata"}));
         let (mut port, receiver) = channel(&fixture, &catalog());
         match mutation {
             "approval" => fixture.spec.argv[1] = "--full-auto".into(),
-            "sandbox" => fixture.spec.argv[3] = "read-only".into(),
             "missing_approval" => {
                 fixture.spec.argv.remove(1);
             }
-            "missing_sandbox" => {
-                fixture.spec.argv.drain(2..4);
-            }
             "repeat_approval" => fixture.spec.argv.push("--approve-for-me".into()),
-            "repeat_sandbox" => fixture
+            "added_sandbox" => fixture
+                .spec
+                .argv
+                .splice(2..2, ["--sandbox".into(), "workspace-write".into()])
+                .for_each(drop),
+            "trailing_sandbox" => fixture
                 .spec
                 .argv
                 .extend(["--sandbox".into(), "danger-full-access".into()]),
