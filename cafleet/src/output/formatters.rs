@@ -1,5 +1,6 @@
 use crate::broker::records::{
-    CreatedFleet, MemberActivity, MemberRecord, MessageRecord, Placement, RegisteredMember,
+    CreatedFleet, DeletedFleet, MemberActivity, MemberRecord, MessageRecord, Placement,
+    RegisteredMember,
 };
 
 use super::truncate_text;
@@ -55,6 +56,20 @@ pub fn format_fleet_create(fleet: &CreatedFleet) -> String {
     format!("{} director={}", fleet.fleet_id, fleet.director.member_id)
 }
 
+pub fn format_fleet_delete(deleted: &DeletedFleet) -> String {
+    let mut lines = vec![format!(
+        "Deleted fleet {}. Deregistered {} members.",
+        deleted.fleet_id, deleted.deregistered_count
+    )];
+    for member in &deleted.members {
+        lines.push(format!(
+            "  member {}: {}",
+            member.member_id, member.pane_status
+        ));
+    }
+    lines.join("\n")
+}
+
 pub fn format_member(member: &RegisteredMember, placement: &Placement) -> String {
     let pane = placement.mux_pane_id.as_deref().unwrap_or("(pending)");
     format!(
@@ -107,9 +122,7 @@ pub fn format_member_list(members: &[MemberActivity]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::broker::records::{
-        DeletedFleet, DeletedMember, MemberKind, MemberStatus, MessageStatus,
-    };
+    use crate::broker::records::{DeletedMember, MemberKind, MemberStatus, MessageStatus};
 
     #[test]
     fn unicode_truncation_changes_only_human_message_bodies() {

@@ -110,7 +110,12 @@ pub fn created_fleet(row: &CreatedFleet) -> Value {
 }
 
 pub fn deleted_fleet(row: &DeletedFleet) -> Value {
-    json!({"fleet_id":row.fleet_id, "deregistered_count":row.deregistered_count})
+    let members = row
+        .members
+        .iter()
+        .map(|member| json!({"member_id":member.member_id, "pane_status":member.pane_status}))
+        .collect::<Vec<_>>();
+    json!({"fleet_id":row.fleet_id, "deregistered_count":row.deregistered_count, "members":members})
 }
 
 fn permission_response(row: &crate::broker::runtime::PermissionResponseRecord) -> Value {
