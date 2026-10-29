@@ -1,7 +1,7 @@
 # Codebase redundancy cleanup
 
 **Status**: Approved
-**Progress**: 33/56 tasks complete
+**Progress**: 38/56 tasks complete
 **Last Updated**: 2026-10-29
 
 ## Overview
@@ -603,11 +603,11 @@ Each step is one commit and leaves `mise //cafleet:test` and `mise //cafleet:lin
 
 ### Step 8: Re-home mis-housed in-file test modules
 
-- [ ] Split `coding_agent/profiles.rs` `contract_tests` into `catalog.rs`, `detector.rs`, `composer.rs` and `runtime/runner/episodes.rs`; rename `inspection_tests`; collapse the re-export chains; delete `contract_tests/` and its hashing test (AGT-03) <!-- completed: -->
-- [ ] Move `coding_agent/mod.rs` policy and native-version tests to `policy.rs` and `native_version.rs` <!-- completed: -->
-- [ ] Split `broker/mod.rs` `runtime_contract_tests` per § Mis-housed in-file modules <!-- completed: -->
-- [ ] Re-home the `cli/mod.rs`, `listen.rs`, `multiplexer/mod.rs`, `input_client.rs`, `input_clock.rs`, `transport.rs`, `health.rs` and `system.rs` modules per the same table <!-- completed: -->
-- [ ] Consolidate every file with several or mid-file test modules into one bottom `mod tests` and apply the TST-13 naming <!-- completed: -->
+- [x] Split `coding_agent/profiles.rs` `contract_tests` into `catalog.rs`, `detector.rs`, `composer.rs` and `runtime/runner/episodes.rs`; rename `inspection_tests`; collapse the re-export chains; delete `contract_tests/` and its hashing test (AGT-03) <!-- completed: 2026-10-29T22:23 -->
+- [x] Move `coding_agent/mod.rs` policy and native-version tests to `policy.rs` and `native_version.rs` <!-- completed: 2026-10-29T22:26 -->
+- [x] Split `broker/mod.rs` `runtime_contract_tests` per § Mis-housed in-file modules <!-- completed: 2026-10-29T22:34 -->
+- [x] Re-home the `cli/mod.rs`, `listen.rs`, `multiplexer/mod.rs`, `input_client.rs`, `input_clock.rs`, `transport.rs`, `health.rs` and `system.rs` modules per the same table <!-- completed: 2026-10-29T22:51 -->
+- [x] Consolidate every file with several or mid-file test modules into one bottom `mod tests` and apply the TST-13 naming <!-- completed: 2026-10-29T23:04 -->
 
 ### Step 9: Visibility and crate-wide helpers
 

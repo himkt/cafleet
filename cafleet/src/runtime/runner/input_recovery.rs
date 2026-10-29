@@ -387,39 +387,35 @@ pub(crate) fn reconcile_input_with_host(
 }
 
 #[cfg(test)]
-pub(super) mod tests {
+pub(crate) mod test_support {
     use super::super::*;
     use crate::broker::records::Placement;
-    use crate::broker::runtime::{self as storage, *};
-    use crate::config::Settings;
-    use crate::input::{Deadline, PaneLock, with_database_budget};
-    use crate::runtime::runner::test_support::Fixture;
-    use rusqlite::Connection;
-    use serde_json::json;
-    use std::os::unix::fs::MetadataExt;
-    use std::time::{Duration, Instant};
+    use crate::broker::runtime::*;
+    use crate::input::Deadline;
+    use std::time::Instant;
 
-    pub(in crate::runtime::runner) enum Termination {
+    pub(crate) enum Termination {
         Terminated,
         Alive,
         Unknown,
     }
 
-    type BoundaryAction = Box<dyn FnMut(RecoveryBoundary, &RunRecord, Instant) -> Result<()>>;
+    pub(crate) type BoundaryAction =
+        Box<dyn FnMut(RecoveryBoundary, &RunRecord, Instant) -> Result<()>>;
 
-    pub(in crate::runtime::runner) struct TypedHost {
-        pub(in crate::runtime::runner) until: Instant,
-        pub(in crate::runtime::runner) owner: Termination,
-        pub(in crate::runtime::runner) startup: Termination,
-        pub(in crate::runtime::runner) matching_health: bool,
-        pub(in crate::runtime::runner) calls: Vec<&'static str>,
-        pub(in crate::runtime::runner) processes: Vec<ProcessIdentity>,
-        pub(in crate::runtime::runner) startups: Vec<(RunRecord, Option<Placement>)>,
-        pub(in crate::runtime::runner) action: Option<BoundaryAction>,
+    pub(crate) struct TypedHost {
+        pub(crate) until: Instant,
+        pub(crate) owner: Termination,
+        pub(crate) startup: Termination,
+        pub(crate) matching_health: bool,
+        pub(crate) calls: Vec<&'static str>,
+        pub(crate) processes: Vec<ProcessIdentity>,
+        pub(crate) startups: Vec<(RunRecord, Option<Placement>)>,
+        pub(crate) action: Option<BoundaryAction>,
     }
 
     impl TypedHost {
-        pub(in crate::runtime::runner) fn new(until: Instant) -> Self {
+        pub(crate) fn new(until: Instant) -> Self {
             Self {
                 until,
                 owner: Termination::Terminated,
@@ -432,7 +428,7 @@ pub(super) mod tests {
             }
         }
 
-        fn check(&self, until: Instant) -> Result<()> {
+        pub(crate) fn check(&self, until: Instant) -> Result<()> {
             assert_eq!(
                 until, self.until,
                 "evidence uses the original effective bound"
@@ -440,7 +436,7 @@ pub(super) mod tests {
             Deadline::until(until).remaining().map(|_| ())
         }
 
-        fn evidence(value: &Termination) -> ProcessEvidence {
+        pub(crate) fn evidence(value: &Termination) -> ProcessEvidence {
             match value {
                 Termination::Terminated => ProcessEvidence::Terminated,
                 Termination::Alive => ProcessEvidence::Alive,
@@ -532,6 +528,21 @@ pub(super) mod tests {
             Ok(())
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::*;
+    use super::test_support::*;
+    use crate::broker::records::Placement;
+    use crate::broker::runtime::{self as storage, *};
+    use crate::config::Settings;
+    use crate::input::{Deadline, PaneLock, with_database_budget};
+    use crate::runtime::runner::test_support::Fixture;
+    use rusqlite::Connection;
+    use serde_json::json;
+    use std::os::unix::fs::MetadataExt;
+    use std::time::{Duration, Instant};
 
     struct ReceiptCase {
         fixture: Fixture,
@@ -674,7 +685,7 @@ pub(super) mod tests {
 
     #[test]
     fn exclusive_permission_ready_proof_and_claim_release_share_the_owner_transaction() {
-        use crate::runtime::runner::input_client::permission_history::{Case, Retained};
+        use crate::runtime::runner::input_client::test_support::{Case, Retained};
 
         let mut case = Case::new(Retained::InProgress);
         storage::record_input_state(
@@ -846,7 +857,7 @@ pub(super) mod tests {
 
     #[test]
     fn exclusive_permission_receipt_pins_original_audit_and_creation_after_snapshot() {
-        use crate::runtime::runner::input_client::permission_history::{Case, Retained};
+        use crate::runtime::runner::input_client::test_support::{Case, Retained};
         use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
 

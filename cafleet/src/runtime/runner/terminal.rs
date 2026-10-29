@@ -186,6 +186,7 @@ impl Drop for RawTerminalGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::runner::transport::test_support::Observer;
 
     #[test]
     fn runner_terminal_fragmented_utf8_and_ansi_reconstruct_the_same_live_screen() {
@@ -274,5 +275,32 @@ mod tests {
             let snapshot = terminal.snapshot();
             assert_eq!((snapshot.rows, snapshot.cols), (24, 80));
         }
+    }
+    #[test]
+    fn runner_transport_visits_a_transient_screen_before_a_later_clear_in_one_fragment() {
+        let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
+        let mut observer = Observer::default();
+        terminal
+            .feed_observed(b"candidate request\x1b[2J\x1b[Hcomposer", &mut observer)
+            .unwrap();
+        let candidate = observer
+            .screens
+            .iter()
+            .position(|(_, screen)| screen.contains("candidate request"))
+            .unwrap();
+        let composer = observer
+            .screens
+            .iter()
+            .rposition(|(_, screen)| {
+                screen.contains("composer") && !screen.contains("candidate request")
+            })
+            .unwrap();
+        assert!(candidate < composer);
+        assert!(
+            observer
+                .screens
+                .windows(2)
+                .all(|pair| pair[1].0 > pair[0].0)
+        );
     }
 }

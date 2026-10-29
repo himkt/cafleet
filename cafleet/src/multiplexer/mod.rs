@@ -1,327 +1,5 @@
 pub mod herdr;
 mod keys;
-#[cfg(test)]
-mod press_tests {
-    use super::*;
-    use crate::broker::records::Placement;
-    use crate::error::CafleetError;
-    use crate::input::Deadline;
-    use recording::{FakeRunner, argv, env, herdr_envelope};
-    use std::cell::RefCell;
-    use std::time::Instant;
-
-    fn parse(tokens: &[&str]) -> PressKeys {
-        PressKeys::parse(
-            &tokens
-                .iter()
-                .map(|token| (*token).into())
-                .collect::<Vec<_>>(),
-        )
-        .unwrap()
-    }
-
-    fn usage(tokens: &[String], expected: &str) {
-        let failure = match PressKeys::parse(tokens) {
-            Ok(_) => panic!("the key vector is outside the common grammar"),
-            Err(failure) => failure,
-        };
-        assert!(matches!(&failure, CafleetError::Usage(message) if message == expected));
-        assert_eq!(failure.exit_code(), 2);
-    }
-
-    #[test]
-    fn step5_press_keys_validate_the_complete_common_grammar_and_byte_count_bounds() {
-        let keys = parse(&[
-            "A",
-            "a",
-            "+",
-            "-",
-            ";",
-            "!",
-            "~",
-            "sPaCe",
-            "ESCAPE",
-            "enter",
-            "Tab",
-            "Backspace",
-            "up",
-            "down",
-            "left",
-            "right",
-            "f1",
-            "F12",
-            "cTrL+A",
-            "CTRL+Z",
-            "sHiFt+tAb",
-        ]);
-        assert_eq!(
-            keys.canonical(),
-            argv(&[
-                "A",
-                "a",
-                "+",
-                "-",
-                ";",
-                "!",
-                "~",
-                "Space",
-                "Escape",
-                "Enter",
-                "Tab",
-                "Backspace",
-                "Up",
-                "Down",
-                "Left",
-                "Right",
-                "F1",
-                "F12",
-                "Ctrl+a",
-                "Ctrl+z",
-                "Shift+Tab",
-            ])
-        );
-        assert_eq!(
-            PressKeys::parse(&vec!["a".into(); 64])
-                .unwrap()
-                .canonical()
-                .len(),
-            64
-        );
-        usage(&[], "press requires between 1 and 64 keys");
-        usage(
-            &vec!["a".into(); 65],
-            "press requires between 1 and 64 keys",
-        );
-        let long = "é".repeat(17);
-        usage(
-            &["Enter".into(), long],
-            "press key at position 2 exceeds 32 UTF-8 bytes",
-        );
-        for invalid in ["F0", "F13", "Ctrl+1", " ", "é"] {
-            usage(
-                &["a".into(), invalid.into()],
-                &format!(
-                    "invalid press key at position 2: {}",
-                    serde_json::to_string(invalid).unwrap()
-                ),
-            );
-        }
-    }
-
-    fn adapter(backend: &str, runner: Rc<FakeRunner>) -> AnyMultiplexer {
-        match backend {
-            "tmux" => AnyMultiplexer::Tmux(TmuxMultiplexer::new(
-                runner,
-                env(&[("TMUX", "fixture"), ("TMUX_PANE", "%0")]),
-            )),
-            "herdr" => AnyMultiplexer::Herdr(HerdrMultiplexer::new(
-                runner,
-                env(&[("HERDR_ENV", "fixture")]),
-            )),
-            _ => panic!("fixture backend"),
-        }
-    }
-
-    #[test]
-    fn step5_press_adapters_request_only_the_ordered_keys_and_qualify_stdout_acknowledgment() {
-        let keys = parse(&[
-            "A",
-            "a",
-            "+",
-            "-",
-            ";",
-            "Space",
-            "Escape",
-            "Enter",
-            "Tab",
-            "Backspace",
-            "Up",
-            "F12",
-            "Ctrl+A",
-            "Shift+Tab",
-        ]);
-        for (backend, pane, expected) in [
-            (
-                "tmux",
-                "%2",
-                argv(&[
-                    "tmux",
-                    "send-keys",
-                    "-t",
-                    "%2",
-                    "0x41",
-                    "0x61",
-                    "0x2b",
-                    "0x2d",
-                    "0x3b",
-                    "Space",
-                    "Escape",
-                    "Enter",
-                    "Tab",
-                    "BSpace",
-                    "Up",
-                    "F12",
-                    "C-a",
-                    "BTab",
-                ]),
-            ),
-            (
-                "herdr",
-                "w1:p2",
-                argv(&[
-                    "herdr",
-                    "pane",
-                    "send-keys",
-                    "w1:p2",
-                    "A",
-                    "a",
-                    "plus",
-                    "minus",
-                    "semicolon",
-                    "space",
-                    "esc",
-                    "enter",
-                    "tab",
-                    "backspace",
-                    "up",
-                    "f12",
-                    "ctrl+a",
-                    "shift+tab",
-                ]),
-            ),
-        ] {
-            let runner = FakeRunner::with_binary(backend);
-            runner.respond(Ok(" \n\t".into()));
-            adapter(backend, runner.clone())
-                .send_keys(pane, &keys, Deadline::new())
-                .unwrap();
-            let mut actual = runner.run_argvs();
-            assert_eq!(actual.len(), 1);
-            if backend == "tmux" {
-                for value in &mut actual[0][4..9] {
-                    assert!(value.starts_with("0x") && value.len() == 4);
-                    value.make_ascii_lowercase();
-                }
-            }
-            assert_eq!(actual, vec![expected]);
-            assert!(
-                runner
-                    .events()
-                    .iter()
-                    .all(|event| matches!(event, recording::Event::Run { .. }))
-            );
-            assert!(runner.responses.borrow().is_empty());
-
-            let unreadable = FakeRunner::with_binary(backend);
-            unreadable.respond(Ok("unexpected acknowledgment".into()));
-            let failure = adapter(backend, unreadable.clone())
-                .send_keys(pane, &keys, Deadline::new())
-                .expect_err("non-whitespace stdout leaves actual effects uncertain");
-            assert!(failure.submission_started());
-            assert_eq!(unreadable.run_argvs().len(), 1);
-        }
-    }
-
-    fn placement(backend: &str) -> Placement {
-        Placement {
-            backend: backend.into(),
-            mux_session: "main".into(),
-            mux_window_id: "@1".into(),
-            mux_pane_id: Some(if backend == "tmux" { "%2" } else { "w1:p2" }.into()),
-            coding_agent: "codex".into(),
-            created_at: "2026-10-27T10:33:00+00:00".into(),
-        }
-    }
-
-    #[test]
-    fn step5_press_target_validation_rejects_a_wrong_tmux_tuple_and_ambiguous_herdr_target() {
-        let tmux = FakeRunner::with_binary("tmux");
-        tmux.respond(Ok("main|@1|%0\n".into()));
-        tmux.respond(Ok("%2|@9|main\n".into()));
-        assert!(
-            adapter("tmux", tmux.clone())
-                .validate_key_target(&placement("tmux"), Deadline::new())
-                .is_err()
-        );
-        assert!(
-            tmux.run_argvs()
-                .iter()
-                .all(|args| args[1] == "display-message")
-        );
-
-        let pane = serde_json::json!({"workspace_id":"main","tab_id":"@1","pane_id":"w1:p2"});
-        let valid = FakeRunner::with_binary("herdr");
-        valid.respond(Ok(herdr_envelope(
-            serde_json::json!({"pane":{"workspace_id":"main","tab_id":"@1","pane_id":"w1:p0"}}),
-        )));
-        valid.respond(Ok(herdr_envelope(
-            serde_json::json!({"panes":[pane.clone()]}),
-        )));
-        adapter("herdr", valid.clone())
-            .validate_key_target(&placement("herdr"), Deadline::new())
-            .unwrap();
-        assert_eq!(
-            valid.run_argvs(),
-            vec![
-                argv(&["herdr", "pane", "current"]),
-                argv(&["herdr", "pane", "list"])
-            ]
-        );
-        let duplicate = FakeRunner::with_binary("herdr");
-        duplicate.respond(Ok(herdr_envelope(
-            serde_json::json!({"pane":{"workspace_id":"main","tab_id":"@1","pane_id":"w1:p0"}}),
-        )));
-        duplicate.respond(Ok(herdr_envelope(
-            serde_json::json!({"panes":[pane.clone(),pane]}),
-        )));
-        assert!(
-            adapter("herdr", duplicate.clone())
-                .validate_key_target(&placement("herdr"), Deadline::new())
-                .is_err()
-        );
-        assert_eq!(duplicate.run_argvs().len(), 2);
-    }
-
-    struct AbsoluteRecorder(RefCell<Vec<Instant>>);
-
-    impl CommandRunner for AbsoluteRecorder {
-        fn binary_exists(&self, _: &str) -> bool {
-            true
-        }
-        fn run(&self, _: &[String], _: Option<u64>) -> Result<String, RunError> {
-            panic!("absolute execution retains its Instant")
-        }
-        fn run_until(&self, _: &[String], deadline: Instant) -> Result<String, TimedRunError> {
-            self.0.borrow_mut().push(deadline);
-            Ok(String::new())
-        }
-        fn sleep(&self, _: f64) {
-            panic!("absolute execution has no phase sleep")
-        }
-    }
-
-    #[test]
-    fn step5_press_deadline_runner_clips_the_actual_absolute_call_and_refuses_expiry() {
-        let recorder = Rc::new(AbsoluteRecorder(RefCell::default()));
-        let original = Instant::now() + Duration::from_secs(2);
-        let bounded = DeadlineRunner::wrap(recorder.clone(), Deadline::until(original));
-        assert!(
-            bounded
-                .run_until(&argv(&["fixture"]), original + Duration::from_secs(5))
-                .is_ok()
-        );
-        let earlier = original - Duration::from_secs(1);
-        assert!(bounded.run_until(&argv(&["fixture"]), earlier).is_ok());
-        assert_eq!(*recorder.0.borrow(), vec![original, earlier]);
-        let expired = DeadlineRunner::wrap(recorder.clone(), Deadline::until(Instant::now()));
-        let failure = match expired.run_until(&argv(&["fixture"]), original) {
-            Ok(_) => panic!("expired work starts no underlying command"),
-            Err(failure) => failure,
-        };
-        assert!(matches!(failure.source, RunError::NotStarted(_)));
-        assert_eq!(recorder.0.borrow().len(), 2);
-    }
-}
 pub mod tmux;
 pub(crate) use keys::PressKeys;
 
@@ -857,140 +535,465 @@ pub fn resolve_multiplexer_name(
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::multiplexer::resolve_multiplexer_name;
+pub(crate) mod test_support {
+    use std::cell::RefCell;
+    use std::collections::{HashMap, VecDeque};
+    use std::rc::Rc;
 
-    mod resolver_tests {
-        use super::*;
+    use super::{CommandRunner, RunError};
 
-        fn no_env(_: &str) -> Option<String> {
-            None
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum Event {
+        Run {
+            argv: Vec<String>,
+            timeout_secs: Option<u64>,
+        },
+        Sleep {
+            seconds: f64,
+        },
+    }
+
+    pub struct FakeRunner {
+        pub binaries: Vec<String>,
+        pub events: RefCell<Vec<Event>>,
+        pub responses: RefCell<VecDeque<Result<String, RunError>>>,
+    }
+
+    impl FakeRunner {
+        fn build(binaries: Vec<String>) -> Rc<Self> {
+            Rc::new(FakeRunner {
+                binaries,
+                events: RefCell::new(Vec::new()),
+                responses: RefCell::new(VecDeque::new()),
+            })
         }
 
-        #[test]
-        fn a_valid_override_wins() {
-            assert_eq!(
-                resolve_multiplexer_name(Some("tmux"), no_env).unwrap(),
-                "tmux"
-            );
-            assert_eq!(
-                resolve_multiplexer_name(Some("herdr"), no_env).unwrap(),
-                "herdr"
-            );
+        pub fn with_binary(name: &str) -> Rc<Self> {
+            Self::build(vec![name.to_string()])
         }
 
-        #[test]
-        fn an_unknown_override_is_rejected_with_the_sorted_key_list() {
-            let err = resolve_multiplexer_name(Some("bogus"), no_env)
-                .expect_err("an unknown override must be rejected");
-            assert_eq!(
-                err.to_string(),
-                "CAFLEET_MULTIPLEXER='bogus' is not a supported multiplexer \
-                 (expected one of: herdr, tmux)"
-            );
+        pub fn without_binaries() -> Rc<Self> {
+            Self::build(Vec::new())
         }
 
-        #[test]
-        fn auto_detect_picks_the_single_present_backend() {
-            let herdr_only = |name: &str| match name {
-                "HERDR_ENV" => Some("1".to_string()),
-                _ => None,
-            };
-            assert_eq!(resolve_multiplexer_name(None, herdr_only).unwrap(), "herdr");
-
-            let tmux_only = |name: &str| match name {
-                "TMUX" => Some("/tmp/tmux-1000/default,123,0".to_string()),
-                _ => None,
-            };
-            assert_eq!(resolve_multiplexer_name(None, tmux_only).unwrap(), "tmux");
+        pub fn succeed(&self, calls: usize) {
+            for _ in 0..calls {
+                self.respond(Ok(String::new()));
+            }
         }
 
-        #[test]
-        fn empty_presence_values_count_as_unset() {
-            let empty_both = |name: &str| match name {
-                "HERDR_ENV" | "TMUX" => Some(String::new()),
-                _ => None,
-            };
-            let err = resolve_multiplexer_name(None, empty_both)
-                .expect_err("empty presence vars mean no backend");
-            assert!(
-                err.to_string()
-                    .starts_with("no supported multiplexer detected:")
-            );
+        pub fn respond(&self, response: Result<String, RunError>) {
+            self.responses.borrow_mut().push_back(response);
         }
 
-        #[test]
-        fn both_present_is_a_hard_error() {
-            let both = |name: &str| match name {
-                "HERDR_ENV" => Some("1".to_string()),
-                "TMUX" => Some("/tmp/tmux".to_string()),
-                _ => None,
-            };
-            let err = resolve_multiplexer_name(None, both).expect_err("ambiguous env");
-            assert_eq!(
-                err.to_string(),
-                "ambiguous multiplexer environment: both HERDR_ENV and TMUX are set; \
-                 set CAFLEET_MULTIPLEXER to 'tmux' or 'herdr' to disambiguate"
-            );
+        pub fn events(&self) -> Vec<Event> {
+            self.events.borrow().clone()
         }
 
-        #[test]
-        fn neither_present_is_a_hard_error() {
-            let err = resolve_multiplexer_name(None, no_env).expect_err("no backend");
-            assert_eq!(
-                err.to_string(),
-                "no supported multiplexer detected: neither HERDR_ENV nor TMUX is set; \
-                 run cafleet inside a tmux or herdr session, or set CAFLEET_MULTIPLEXER"
-            );
+        /// Just the argv of each `Run` event, in order.
+        pub fn run_argvs(&self) -> Vec<Vec<String>> {
+            self.events
+                .borrow()
+                .iter()
+                .filter_map(|event| match event {
+                    Event::Run { argv, .. } => Some(argv.clone()),
+                    Event::Sleep { .. } => None,
+                })
+                .collect()
         }
     }
 
-    mod any_multiplexer_send_prompt_tests {
-        use crate::multiplexer::recording::{FakeRunner, argv, env};
-        use crate::multiplexer::{AnyMultiplexer, HerdrMultiplexer, Lead, TmuxMultiplexer};
-
-        #[test]
-        fn dispatch_forwards_the_lead_to_each_backend() {
-            let runner = FakeRunner::with_binary("tmux");
-            runner.succeed(3);
-            let mux = AnyMultiplexer::Tmux(TmuxMultiplexer::new(
-                runner.clone(),
-                env(&[("TMUX", "/tmp/tmux"), ("TMUX_PANE", "%1")]),
-            ));
-            mux.send_prompt("%5", "hi", Lead::Escape).unwrap();
-            assert_eq!(
-                runner.run_argvs(),
-                vec![
-                    argv(&["tmux", "send-keys", "-t", "%5", "Escape"]),
-                    argv(&["tmux", "send-keys", "-t", "%5", "-l", "--", "hi"]),
-                    argv(&["tmux", "send-keys", "-t", "%5", "Enter"]),
-                ]
-            );
-
-            let runner = FakeRunner::with_binary("herdr");
-            runner.succeed(2);
-            let mux = AnyMultiplexer::Herdr(HerdrMultiplexer::new(
-                runner.clone(),
-                env(&[("HERDR_ENV", "1")]),
-            ));
-            mux.send_prompt("w1:p2", "hi", Lead::Direct).unwrap();
-            assert_eq!(
-                runner.run_argvs(),
-                vec![
-                    argv(&["herdr", "pane", "send-text", "w1:p2", "hi"]),
-                    argv(&["herdr", "pane", "send-keys", "w1:p2", "enter"]),
-                ]
-            );
+    impl CommandRunner for FakeRunner {
+        fn binary_exists(&self, name: &str) -> bool {
+            self.binaries.iter().any(|b| b == name)
         }
+
+        fn run(&self, argv: &[String], timeout_secs: Option<u64>) -> Result<String, RunError> {
+            self.events.borrow_mut().push(Event::Run {
+                argv: argv.to_vec(),
+                timeout_secs,
+            });
+            self.responses
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or_else(|| panic!("unexpected process call: {argv:?}"))
+        }
+
+        fn sleep(&self, seconds: f64) {
+            self.events.borrow_mut().push(Event::Sleep { seconds });
+        }
+    }
+
+    pub fn argv(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|s| s.to_string()).collect()
+    }
+
+    pub fn run_event(parts: &[&str], timeout_secs: Option<u64>) -> Event {
+        Event::Run {
+            argv: argv(parts),
+            timeout_secs,
+        }
+    }
+
+    pub fn sleep_event(seconds: f64) -> Event {
+        Event::Sleep { seconds }
+    }
+
+    pub fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    /// A herdr success envelope wrapping `result`.
+    pub fn herdr_envelope(result: serde_json::Value) -> String {
+        serde_json::json!({"id": 1, "result": result, "type": "response"}).to_string()
+    }
+
+    /// A herdr error `stderr` body carrying `code`, for `RunError::Failed`.
+    pub fn herdr_error_stderr(code: &str) -> String {
+        serde_json::json!({"error": {"code": code, "message": "boom"}, "id": 1}).to_string()
     }
 }
 
 #[cfg(test)]
-mod submission_tests {
+mod tests {
+    use super::keys::test_support::parse;
+    use super::test_support::{FakeRunner, argv, env, herdr_envelope};
     use super::*;
+    use crate::broker::records::Placement;
+    use crate::input::Deadline;
     use std::cell::RefCell;
     use std::collections::VecDeque;
 
+    fn adapter(backend: &str, runner: Rc<FakeRunner>) -> AnyMultiplexer {
+        match backend {
+            "tmux" => AnyMultiplexer::Tmux(TmuxMultiplexer::new(
+                runner,
+                env(&[("TMUX", "fixture"), ("TMUX_PANE", "%0")]),
+            )),
+            "herdr" => AnyMultiplexer::Herdr(HerdrMultiplexer::new(
+                runner,
+                env(&[("HERDR_ENV", "fixture")]),
+            )),
+            _ => panic!("fixture backend"),
+        }
+    }
+
+    #[test]
+    fn step5_press_adapters_request_only_the_ordered_keys_and_qualify_stdout_acknowledgment() {
+        let keys = parse(&[
+            "A",
+            "a",
+            "+",
+            "-",
+            ";",
+            "Space",
+            "Escape",
+            "Enter",
+            "Tab",
+            "Backspace",
+            "Up",
+            "F12",
+            "Ctrl+A",
+            "Shift+Tab",
+        ]);
+        for (backend, pane, expected) in [
+            (
+                "tmux",
+                "%2",
+                argv(&[
+                    "tmux",
+                    "send-keys",
+                    "-t",
+                    "%2",
+                    "0x41",
+                    "0x61",
+                    "0x2b",
+                    "0x2d",
+                    "0x3b",
+                    "Space",
+                    "Escape",
+                    "Enter",
+                    "Tab",
+                    "BSpace",
+                    "Up",
+                    "F12",
+                    "C-a",
+                    "BTab",
+                ]),
+            ),
+            (
+                "herdr",
+                "w1:p2",
+                argv(&[
+                    "herdr",
+                    "pane",
+                    "send-keys",
+                    "w1:p2",
+                    "A",
+                    "a",
+                    "plus",
+                    "minus",
+                    "semicolon",
+                    "space",
+                    "esc",
+                    "enter",
+                    "tab",
+                    "backspace",
+                    "up",
+                    "f12",
+                    "ctrl+a",
+                    "shift+tab",
+                ]),
+            ),
+        ] {
+            let runner = FakeRunner::with_binary(backend);
+            runner.respond(Ok(" \n\t".into()));
+            adapter(backend, runner.clone())
+                .send_keys(pane, &keys, Deadline::new())
+                .unwrap();
+            let mut actual = runner.run_argvs();
+            assert_eq!(actual.len(), 1);
+            if backend == "tmux" {
+                for value in &mut actual[0][4..9] {
+                    assert!(value.starts_with("0x") && value.len() == 4);
+                    value.make_ascii_lowercase();
+                }
+            }
+            assert_eq!(actual, vec![expected]);
+            assert!(
+                runner
+                    .events()
+                    .iter()
+                    .all(|event| matches!(event, test_support::Event::Run { .. }))
+            );
+            assert!(runner.responses.borrow().is_empty());
+
+            let unreadable = FakeRunner::with_binary(backend);
+            unreadable.respond(Ok("unexpected acknowledgment".into()));
+            let failure = adapter(backend, unreadable.clone())
+                .send_keys(pane, &keys, Deadline::new())
+                .expect_err("non-whitespace stdout leaves actual effects uncertain");
+            assert!(failure.submission_started());
+            assert_eq!(unreadable.run_argvs().len(), 1);
+        }
+    }
+
+    fn placement(backend: &str) -> Placement {
+        Placement {
+            backend: backend.into(),
+            mux_session: "main".into(),
+            mux_window_id: "@1".into(),
+            mux_pane_id: Some(if backend == "tmux" { "%2" } else { "w1:p2" }.into()),
+            coding_agent: "codex".into(),
+            created_at: "2026-10-27T10:33:00+00:00".into(),
+        }
+    }
+
+    #[test]
+    fn step5_press_target_validation_rejects_a_wrong_tmux_tuple_and_ambiguous_herdr_target() {
+        let tmux = FakeRunner::with_binary("tmux");
+        tmux.respond(Ok("main|@1|%0\n".into()));
+        tmux.respond(Ok("%2|@9|main\n".into()));
+        assert!(
+            adapter("tmux", tmux.clone())
+                .validate_key_target(&placement("tmux"), Deadline::new())
+                .is_err()
+        );
+        assert!(
+            tmux.run_argvs()
+                .iter()
+                .all(|args| args[1] == "display-message")
+        );
+
+        let pane = serde_json::json!({"workspace_id":"main","tab_id":"@1","pane_id":"w1:p2"});
+        let valid = FakeRunner::with_binary("herdr");
+        valid.respond(Ok(herdr_envelope(
+            serde_json::json!({"pane":{"workspace_id":"main","tab_id":"@1","pane_id":"w1:p0"}}),
+        )));
+        valid.respond(Ok(herdr_envelope(
+            serde_json::json!({"panes":[pane.clone()]}),
+        )));
+        adapter("herdr", valid.clone())
+            .validate_key_target(&placement("herdr"), Deadline::new())
+            .unwrap();
+        assert_eq!(
+            valid.run_argvs(),
+            vec![
+                argv(&["herdr", "pane", "current"]),
+                argv(&["herdr", "pane", "list"])
+            ]
+        );
+        let duplicate = FakeRunner::with_binary("herdr");
+        duplicate.respond(Ok(herdr_envelope(
+            serde_json::json!({"pane":{"workspace_id":"main","tab_id":"@1","pane_id":"w1:p0"}}),
+        )));
+        duplicate.respond(Ok(herdr_envelope(
+            serde_json::json!({"panes":[pane.clone(),pane]}),
+        )));
+        assert!(
+            adapter("herdr", duplicate.clone())
+                .validate_key_target(&placement("herdr"), Deadline::new())
+                .is_err()
+        );
+        assert_eq!(duplicate.run_argvs().len(), 2);
+    }
+
+    struct AbsoluteRecorder(RefCell<Vec<Instant>>);
+
+    impl CommandRunner for AbsoluteRecorder {
+        fn binary_exists(&self, _: &str) -> bool {
+            true
+        }
+        fn run(&self, _: &[String], _: Option<u64>) -> Result<String, RunError> {
+            panic!("absolute execution retains its Instant")
+        }
+        fn run_until(&self, _: &[String], deadline: Instant) -> Result<String, TimedRunError> {
+            self.0.borrow_mut().push(deadline);
+            Ok(String::new())
+        }
+        fn sleep(&self, _: f64) {
+            panic!("absolute execution has no phase sleep")
+        }
+    }
+
+    #[test]
+    fn step5_press_deadline_runner_clips_the_actual_absolute_call_and_refuses_expiry() {
+        let recorder = Rc::new(AbsoluteRecorder(RefCell::default()));
+        let original = Instant::now() + Duration::from_secs(2);
+        let bounded = DeadlineRunner::wrap(recorder.clone(), Deadline::until(original));
+        assert!(
+            bounded
+                .run_until(&argv(&["fixture"]), original + Duration::from_secs(5))
+                .is_ok()
+        );
+        let earlier = original - Duration::from_secs(1);
+        assert!(bounded.run_until(&argv(&["fixture"]), earlier).is_ok());
+        assert_eq!(*recorder.0.borrow(), vec![original, earlier]);
+        let expired = DeadlineRunner::wrap(recorder.clone(), Deadline::until(Instant::now()));
+        let failure = match expired.run_until(&argv(&["fixture"]), original) {
+            Ok(_) => panic!("expired work starts no underlying command"),
+            Err(failure) => failure,
+        };
+        assert!(matches!(failure.source, RunError::NotStarted(_)));
+        assert_eq!(recorder.0.borrow().len(), 2);
+    }
+    fn no_env(_: &str) -> Option<String> {
+        None
+    }
+
+    #[test]
+    fn a_valid_override_wins() {
+        assert_eq!(
+            resolve_multiplexer_name(Some("tmux"), no_env).unwrap(),
+            "tmux"
+        );
+        assert_eq!(
+            resolve_multiplexer_name(Some("herdr"), no_env).unwrap(),
+            "herdr"
+        );
+    }
+
+    #[test]
+    fn an_unknown_override_is_rejected_with_the_sorted_key_list() {
+        let err = resolve_multiplexer_name(Some("bogus"), no_env)
+            .expect_err("an unknown override must be rejected");
+        assert_eq!(
+            err.to_string(),
+            "CAFLEET_MULTIPLEXER='bogus' is not a supported multiplexer \
+                 (expected one of: herdr, tmux)"
+        );
+    }
+
+    #[test]
+    fn auto_detect_picks_the_single_present_backend() {
+        let herdr_only = |name: &str| match name {
+            "HERDR_ENV" => Some("1".to_string()),
+            _ => None,
+        };
+        assert_eq!(resolve_multiplexer_name(None, herdr_only).unwrap(), "herdr");
+
+        let tmux_only = |name: &str| match name {
+            "TMUX" => Some("/tmp/tmux-1000/default,123,0".to_string()),
+            _ => None,
+        };
+        assert_eq!(resolve_multiplexer_name(None, tmux_only).unwrap(), "tmux");
+    }
+
+    #[test]
+    fn empty_presence_values_count_as_unset() {
+        let empty_both = |name: &str| match name {
+            "HERDR_ENV" | "TMUX" => Some(String::new()),
+            _ => None,
+        };
+        let err = resolve_multiplexer_name(None, empty_both)
+            .expect_err("empty presence vars mean no backend");
+        assert!(
+            err.to_string()
+                .starts_with("no supported multiplexer detected:")
+        );
+    }
+
+    #[test]
+    fn both_present_is_a_hard_error() {
+        let both = |name: &str| match name {
+            "HERDR_ENV" => Some("1".to_string()),
+            "TMUX" => Some("/tmp/tmux".to_string()),
+            _ => None,
+        };
+        let err = resolve_multiplexer_name(None, both).expect_err("ambiguous env");
+        assert_eq!(
+            err.to_string(),
+            "ambiguous multiplexer environment: both HERDR_ENV and TMUX are set; \
+                 set CAFLEET_MULTIPLEXER to 'tmux' or 'herdr' to disambiguate"
+        );
+    }
+
+    #[test]
+    fn neither_present_is_a_hard_error() {
+        let err = resolve_multiplexer_name(None, no_env).expect_err("no backend");
+        assert_eq!(
+            err.to_string(),
+            "no supported multiplexer detected: neither HERDR_ENV nor TMUX is set; \
+                 run cafleet inside a tmux or herdr session, or set CAFLEET_MULTIPLEXER"
+        );
+    }
+
+    #[test]
+    fn dispatch_forwards_the_lead_to_each_backend() {
+        let runner = FakeRunner::with_binary("tmux");
+        runner.succeed(3);
+        let mux = AnyMultiplexer::Tmux(TmuxMultiplexer::new(
+            runner.clone(),
+            env(&[("TMUX", "/tmp/tmux"), ("TMUX_PANE", "%1")]),
+        ));
+        mux.send_prompt("%5", "hi", Lead::Escape).unwrap();
+        assert_eq!(
+            runner.run_argvs(),
+            vec![
+                argv(&["tmux", "send-keys", "-t", "%5", "Escape"]),
+                argv(&["tmux", "send-keys", "-t", "%5", "-l", "--", "hi"]),
+                argv(&["tmux", "send-keys", "-t", "%5", "Enter"]),
+            ]
+        );
+
+        let runner = FakeRunner::with_binary("herdr");
+        runner.succeed(2);
+        let mux = AnyMultiplexer::Herdr(HerdrMultiplexer::new(
+            runner.clone(),
+            env(&[("HERDR_ENV", "1")]),
+        ));
+        mux.send_prompt("w1:p2", "hi", Lead::Direct).unwrap();
+        assert_eq!(
+            runner.run_argvs(),
+            vec![
+                argv(&["herdr", "pane", "send-text", "w1:p2", "hi"]),
+                argv(&["herdr", "pane", "send-keys", "w1:p2", "enter"]),
+            ]
+        );
+    }
     struct BudgetRunner {
         budgets: RefCell<VecDeque<Duration>>,
         calls: RefCell<Vec<(String, Duration)>>,
@@ -1128,9 +1131,12 @@ mod submission_tests {
 
     #[test]
     fn expired_deadlines_start_no_native_command_or_optional_layout_restore() {
-        let runner = recording::FakeRunner::without_binaries();
-        let mux = AnyMultiplexer::Herdr(HerdrMultiplexer::new(runner.clone(), recording::env(&[])))
-            .bounded(crate::input::Deadline::until(std::time::Instant::now()));
+        let runner = test_support::FakeRunner::without_binaries();
+        let mux = AnyMultiplexer::Herdr(HerdrMultiplexer::new(
+            runner.clone(),
+            test_support::env(&[]),
+        ))
+        .bounded(crate::input::Deadline::until(std::time::Instant::now()));
         assert!(
             mux.restore_after_close(PostCloseLayout::HerdrTab("tab".into()))
                 .is_err()
@@ -1141,21 +1147,22 @@ mod submission_tests {
     #[test]
     fn each_backend_classifies_confirmed_missing_panes_before_literal_submission() {
         for backend in ["tmux", "herdr"] {
-            let runner = recording::FakeRunner::without_binaries();
+            let runner = test_support::FakeRunner::without_binaries();
             runner.respond(Err(RunError::Failed {
                 stderr: if backend == "tmux" {
                     "no such pane: missing".into()
                 } else {
-                    recording::herdr_error_stderr("pane_not_found")
+                    test_support::herdr_error_stderr("pane_not_found")
                 },
             }));
             let mux = match backend {
-                "tmux" => {
-                    AnyMultiplexer::Tmux(TmuxMultiplexer::new(runner.clone(), recording::env(&[])))
-                }
+                "tmux" => AnyMultiplexer::Tmux(TmuxMultiplexer::new(
+                    runner.clone(),
+                    test_support::env(&[]),
+                )),
                 "herdr" => AnyMultiplexer::Herdr(HerdrMultiplexer::new(
                     runner.clone(),
-                    recording::env(&[]),
+                    test_support::env(&[]),
                 )),
                 _ => unreachable!(),
             };
@@ -1166,128 +1173,5 @@ mod submission_tests {
             );
             assert_eq!(runner.run_argvs().len(), 1);
         }
-    }
-}
-
-#[cfg(test)]
-pub(crate) mod recording {
-    use std::cell::RefCell;
-    use std::collections::{HashMap, VecDeque};
-    use std::rc::Rc;
-
-    use super::{CommandRunner, RunError};
-
-    #[derive(Debug, Clone, PartialEq)]
-    pub enum Event {
-        Run {
-            argv: Vec<String>,
-            timeout_secs: Option<u64>,
-        },
-        Sleep {
-            seconds: f64,
-        },
-    }
-
-    pub struct FakeRunner {
-        pub binaries: Vec<String>,
-        pub events: RefCell<Vec<Event>>,
-        pub responses: RefCell<VecDeque<Result<String, RunError>>>,
-    }
-
-    impl FakeRunner {
-        fn build(binaries: Vec<String>) -> Rc<Self> {
-            Rc::new(FakeRunner {
-                binaries,
-                events: RefCell::new(Vec::new()),
-                responses: RefCell::new(VecDeque::new()),
-            })
-        }
-
-        pub fn with_binary(name: &str) -> Rc<Self> {
-            Self::build(vec![name.to_string()])
-        }
-
-        pub fn without_binaries() -> Rc<Self> {
-            Self::build(Vec::new())
-        }
-
-        pub fn succeed(&self, calls: usize) {
-            for _ in 0..calls {
-                self.respond(Ok(String::new()));
-            }
-        }
-
-        pub fn respond(&self, response: Result<String, RunError>) {
-            self.responses.borrow_mut().push_back(response);
-        }
-
-        pub fn events(&self) -> Vec<Event> {
-            self.events.borrow().clone()
-        }
-
-        /// Just the argv of each `Run` event, in order.
-        pub fn run_argvs(&self) -> Vec<Vec<String>> {
-            self.events
-                .borrow()
-                .iter()
-                .filter_map(|event| match event {
-                    Event::Run { argv, .. } => Some(argv.clone()),
-                    Event::Sleep { .. } => None,
-                })
-                .collect()
-        }
-    }
-
-    impl CommandRunner for FakeRunner {
-        fn binary_exists(&self, name: &str) -> bool {
-            self.binaries.iter().any(|b| b == name)
-        }
-
-        fn run(&self, argv: &[String], timeout_secs: Option<u64>) -> Result<String, RunError> {
-            self.events.borrow_mut().push(Event::Run {
-                argv: argv.to_vec(),
-                timeout_secs,
-            });
-            self.responses
-                .borrow_mut()
-                .pop_front()
-                .unwrap_or_else(|| panic!("unexpected process call: {argv:?}"))
-        }
-
-        fn sleep(&self, seconds: f64) {
-            self.events.borrow_mut().push(Event::Sleep { seconds });
-        }
-    }
-
-    pub fn argv(parts: &[&str]) -> Vec<String> {
-        parts.iter().map(|s| s.to_string()).collect()
-    }
-
-    pub fn run_event(parts: &[&str], timeout_secs: Option<u64>) -> Event {
-        Event::Run {
-            argv: argv(parts),
-            timeout_secs,
-        }
-    }
-
-    pub fn sleep_event(seconds: f64) -> Event {
-        Event::Sleep { seconds }
-    }
-
-    pub fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
-        pairs
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect()
-    }
-
-    /// A herdr success envelope wrapping `result`.
-    pub fn herdr_envelope(result: serde_json::Value) -> String {
-        serde_json::json!({"id": 1, "result": result, "type": "response"}).to_string()
-    }
-
-    /// A herdr error `stderr` body carrying `code`, for `RunError::Failed`.
-    pub fn herdr_error_stderr(code: &str) -> String {
-        serde_json::json!({"error": {"code": code, "message": "boom"}, "id": 1}).to_string()
     }
 }

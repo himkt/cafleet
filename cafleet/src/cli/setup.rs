@@ -91,8 +91,10 @@ fn install_selected(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::test_support::assert_error;
     use crate::cli::{CliArgs, Command};
     use clap::Parser;
+    use clap::error::ErrorKind;
 
     fn settings(home: &Path) -> Settings {
         Settings::for_database(&home.join("registry.db"), None)
@@ -217,6 +219,36 @@ mod tests {
                 assert_eq!(std::fs::read(&path).unwrap(), bytes, "{}", path.display());
             }
             conn.execute_batch("ROLLBACK").unwrap();
+        }
+    }
+    #[test]
+    fn setup_rejects_unknown_options_positionals_and_agent_values() {
+        let cases: &[(&[&str], ErrorKind, &str)] = &[
+            (&["setup", "extra"], ErrorKind::UnknownArgument, "extra"),
+            (&["setup", "claude"], ErrorKind::UnknownArgument, "claude"),
+            (
+                &["setup", "--skip", "claude"],
+                ErrorKind::UnknownArgument,
+                "--skip",
+            ),
+            (
+                &["setup", "--coding-agent", "python"],
+                ErrorKind::InvalidValue,
+                "python",
+            ),
+            (
+                &["setup", "--coding-agent", "claude", "python"],
+                ErrorKind::InvalidValue,
+                "python",
+            ),
+            (
+                &["setup", "--coding-agent", "claude", "extra"],
+                ErrorKind::InvalidValue,
+                "extra",
+            ),
+        ];
+        for (args, kind, input) in cases {
+            assert_error(args, *kind, input);
         }
     }
 }

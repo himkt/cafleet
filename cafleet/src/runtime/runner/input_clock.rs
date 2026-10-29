@@ -109,69 +109,78 @@ pub(super) fn receive_input_expiration(
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::broker::runtime::InputKind;
-    use crate::error::CafleetError;
-    use crate::runtime::runner::{
-        InputClockSample, InputDeadlineClock, InputExpiration, PreparedSubmission, SubmitInput,
-    };
+pub(crate) mod test_support {
+    use super::*;
     use std::collections::VecDeque;
-    use std::time::{Duration, Instant};
 
-    const EXPIRATION: u64 = 10_000_000_000;
-
-    struct ScriptClock {
-        samples: VecDeque<Result<InputClockSample, CafleetError>>,
-        calls: usize,
+    pub(crate) struct ScriptClock {
+        pub(crate) samples: VecDeque<Result<InputClockSample>>,
+        pub(crate) calls: usize,
     }
     impl ScriptClock {
-        fn new(samples: Vec<Result<InputClockSample, CafleetError>>) -> Self {
+        pub(crate) fn new(samples: Vec<Result<InputClockSample>>) -> Self {
             Self {
                 samples: samples.into(),
                 calls: 0,
             }
         }
-        fn one(sample: InputClockSample) -> Self {
+        pub(crate) fn one(sample: InputClockSample) -> Self {
             Self::new(vec![Ok(sample)])
         }
-        fn consumed(&self, calls: usize, remaining: usize) {
+        pub(crate) fn consumed(&self, calls: usize, remaining: usize) {
             assert_eq!(self.calls, calls);
             assert_eq!(self.samples.len(), remaining);
         }
     }
     impl InputDeadlineClock for ScriptClock {
-        fn sample(&mut self) -> Result<InputClockSample, CafleetError> {
+        fn sample(&mut self) -> Result<InputClockSample> {
             self.calls += 1;
             self.samples
                 .pop_front()
                 .expect("the operation consumes only its specified paired clock samples")
         }
     }
-
-    fn anchor() -> Instant {
+    pub(crate) fn anchor() -> Instant {
         Instant::now()
             .checked_add(Duration::from_secs(60))
             .expect("the platform represents the fixed future clock anchor")
     }
-    fn ms(origin: Instant, millis: u64) -> Instant {
+    pub(crate) fn ms(origin: Instant, millis: u64) -> Instant {
         origin
             .checked_add(Duration::from_millis(millis))
             .expect("the platform represents the fixed millisecond fixture offset")
     }
-    fn ns(origin: Instant, nanos: u64) -> Instant {
-        origin
-            .checked_add(Duration::from_nanos(nanos))
-            .expect("the platform represents the fixed nanosecond fixture offset")
-    }
-    fn sample(before: Instant, monotonic_ns: u64, after: Instant) -> InputClockSample {
+    pub(crate) fn sample(before: Instant, monotonic_ns: u64, after: Instant) -> InputClockSample {
         InputClockSample {
             before,
             monotonic_ns,
             after,
         }
     }
-    fn unavailable() -> CafleetError {
+    pub(crate) fn unavailable() -> CafleetError {
         CafleetError::App("fixture clock unavailable".into())
+    }
+    pub(crate) fn one_failure<T>(result: Result<T>, clock: &ScriptClock, remaining: usize) {
+        assert!(
+            result.is_err(),
+            "the invalid clock operation returns an error"
+        );
+        clock.consumed(1, remaining);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_support::*;
+    use crate::runtime::runner::InputExpiration;
+    use std::time::{Duration, Instant};
+
+    const EXPIRATION: u64 = 10_000_000_000;
+
+    fn ns(origin: Instant, nanos: u64) -> Instant {
+        origin
+            .checked_add(Duration::from_nanos(nanos))
+            .expect("the platform represents the fixed nanosecond fixture offset")
     }
     fn captured(deadline: Instant, clock: &mut ScriptClock, expected: u64) -> InputExpiration {
         let expiration = InputExpiration::capture(deadline, clock).unwrap();
@@ -187,13 +196,6 @@ mod tests {
             EXPIRATION,
         )
     }
-    fn one_failure<T>(result: Result<T, CafleetError>, clock: &ScriptClock, remaining: usize) {
-        assert!(
-            result.is_err(),
-            "the invalid clock operation returns an error"
-        );
-        clock.consumed(1, remaining);
-    }
     fn received(
         expiration: &InputExpiration,
         admitted_at: Instant,
@@ -207,14 +209,6 @@ mod tests {
         );
         assert_eq!(expiration.monotonic_ns(), EXPIRATION);
         clock.consumed(1, 0);
-    }
-    fn request() -> SubmitInput {
-        SubmitInput {
-            operation_key: format!("prompt:1:{}", "a".repeat(64)),
-            input_kind: InputKind::Prompt,
-            message_id: None,
-            literal: "literal clock fixture".into(),
-        }
     }
 
     #[test]
@@ -418,41 +412,5 @@ mod tests {
         let expiration = expiration(t);
         let mut clock = ScriptClock::one(sample(ms(t, 1000), EXPIRATION - 1, ms(t, 1000)));
         received(&expiration, t, None, &mut clock, ns(ms(t, 1000), 1));
-    }
-
-    #[test]
-    fn step5_b0_clock_prepared_submission_captures_one_paired_sample() {
-        let t = anchor();
-        let request = request();
-        let mut clock = ScriptClock::one(sample(ms(t, 10), 1_000_000_000, ms(t, 30)));
-        let _prepared = PreparedSubmission::new(&request, ms(t, 100), &mut clock).unwrap();
-        clock.consumed(1, 0);
-    }
-
-    #[test]
-    fn step5_b0_clock_prepared_submission_source_failure_preserves_unused_later_sample() {
-        let t = anchor();
-        let request = request();
-        let mut clock = ScriptClock::new(vec![Err(unavailable()), Ok(sample(t, 1_000_000_000, t))]);
-        one_failure(
-            PreparedSubmission::new(&request, ms(t, 100), &mut clock),
-            &clock,
-            1,
-        );
-    }
-
-    #[test]
-    fn step5_b0_clock_prepared_submission_expiry_rejects_without_resampling_new_budget() {
-        let t = anchor();
-        let request = request();
-        let mut clock = ScriptClock::new(vec![
-            Ok(sample(ms(t, 90), 1_000_000_000, ms(t, 100))),
-            Ok(sample(t, 1_000_000_000, t)),
-        ]);
-        one_failure(
-            PreparedSubmission::new(&request, ms(t, 100), &mut clock),
-            &clock,
-            1,
-        );
     }
 }

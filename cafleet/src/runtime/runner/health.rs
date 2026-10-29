@@ -151,7 +151,7 @@ impl ObservationHealth {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod test_support {
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixListener;
     use std::sync::{
@@ -161,12 +161,10 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::*;
-    use crate::broker::runtime::RunStatus;
     use crate::runtime::runner::test_support::Fixture;
     use rusqlite::params;
-    use serde_json::json;
 
-    fn activate(fixture: &mut Fixture) -> (RunArtifacts, RunLock) {
+    pub(crate) fn activate(fixture: &mut Fixture) -> (RunArtifacts, RunLock) {
         let artifacts = fixture.artifacts();
         let held = RunLock::acquire(&fixture.conn, &fixture.run.owner())
             .unwrap()
@@ -180,13 +178,13 @@ mod tests {
         (artifacts, held)
     }
 
-    struct SilentServer {
-        stop: Arc<AtomicBool>,
-        thread: Option<std::thread::JoinHandle<()>>,
+    pub(crate) struct SilentServer {
+        pub(crate) stop: Arc<AtomicBool>,
+        pub(crate) thread: Option<std::thread::JoinHandle<()>>,
     }
 
     impl SilentServer {
-        fn start(path: &std::path::Path) -> Self {
+        pub(crate) fn start(path: &std::path::Path) -> Self {
             let listener = UnixListener::bind(path).unwrap();
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
             listener.set_nonblocking(true).unwrap();
@@ -217,20 +215,16 @@ mod tests {
             self.thread.take().unwrap().join().unwrap();
         }
     }
+}
 
-    fn counts(conn: &Connection) -> (i64, i64, i64) {
-        let scalar = |table| {
-            conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
-                row.get::<_, i64>(0)
-            })
-            .unwrap()
-        };
-        (
-            scalar("member_interactions"),
-            scalar("member_runtime_events"),
-            scalar("messages"),
-        )
-    }
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use super::test_support::*;
+    use super::*;
+    use crate::runtime::runner::test_support::Fixture;
+    use serde_json::json;
 
     #[test]
     fn runner_health_real_silent_endpoint_is_bounded_and_probe_is_read_only() {
@@ -293,38 +287,6 @@ mod tests {
         for (path, bytes) in files.iter().zip(before) {
             assert_eq!(std::fs::read(path).unwrap(), bytes);
         }
-    }
-
-    #[test]
-    fn runner_registry_show_returns_historical_health_without_contacting_a_live_endpoint() {
-        let mut fixture = Fixture::new();
-        let (artifacts, _held) = activate(&mut fixture);
-        let _server = SilentServer::start(&artifacts.paths.control_socket);
-        fixture
-            .conn
-            .execute(
-                "UPDATE member_runs SET last_health_at='2000-01-01T00:00:00Z' WHERE run_id=?1",
-                [fixture.run.run_id],
-            )
-            .unwrap();
-        let before = counts(&fixture.conn);
-        let start = Instant::now();
-        let member =
-            crate::broker::get_member(&fixture.conn, fixture.run.member_id, fixture.run.fleet_id)
-                .unwrap()
-                .unwrap();
-        assert!(start.elapsed() < Duration::from_millis(750));
-        assert_eq!(
-            crate::presentation::member(&member)["runtime"]["last_health_at"],
-            "2000-01-01T00:00:00Z"
-        );
-        assert_eq!(counts(&fixture.conn), before);
-        assert_eq!(
-            storage::get_run(&fixture.conn, fixture.run.run_id)
-                .unwrap()
-                .status,
-            RunStatus::Running
-        );
     }
 
     mod observation_contract {

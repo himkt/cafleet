@@ -222,4 +222,380 @@ mod tests {
             );
         }
     }
+
+    mod runtime {
+        use super::*;
+        use crate::broker::runtime::test_support::*;
+        use crate::broker::runtime::{self as storage, *};
+        use rusqlite::params;
+        use serde_json::Value;
+
+        #[test]
+        fn runtime_permission_presentation_flattens_the_audit_in_shipping_order() {
+            let mut fixture = ResponseFixture::new();
+            let receipt = fixture.reserve();
+            let output = crate::presentation::input_operation(&receipt.input);
+            assert_key_order(
+                &output["input"],
+                &[
+                    "input_id",
+                    "run_id",
+                    "operation_key",
+                    "kind",
+                    "payload_digest",
+                    "state",
+                    "created_at",
+                    "updated_at",
+                    "message_id",
+                    "disposition",
+                    "evidence_ref",
+                    "permission_response",
+                ],
+            );
+            let audit = &output["input"]["permission_response"];
+            assert_key_order(
+                audit,
+                &[
+                    "input_id",
+                    "event_id",
+                    "interaction_id",
+                    "expected_owner_epoch",
+                    "request_token",
+                    "decision",
+                    "director_member_id",
+                    "director_mode",
+                    "decision_source",
+                    "mode_evidence_ref",
+                    "decision_evidence_ref",
+                    "answer_profile_version",
+                    "answer_rule_id",
+                    "decided_at",
+                ],
+            );
+            assert_eq!(audit["decision"], "allow");
+            assert_eq!(audit["director_mode"], "auto");
+            assert_eq!(audit["decided_at"], receipt.response.decided_at);
+            assert_eq!(
+                crate::output::format_input_operation(&receipt.input),
+                format!(
+                    "Input: {} run={} kind=permission_response state=in_progress disposition=- message=-\nPermission decision: interaction={} event={} decision=allow source=director-auto mode=auto director={} epoch={}",
+                    receipt.input.input_id,
+                    fixture.owner.run_id,
+                    fixture.request.metadata.interaction_id,
+                    fixture.event.event_id,
+                    fixture.base.director,
+                    fixture.owner.owner_epoch
+                )
+            );
+            assert_no_secret(&fixture.base.conn, SECRET);
+            assert_no_secret(&fixture.base.conn, &format!("fingerprint-{SECRET}"));
+        }
+        #[test]
+        fn runtime_presentation_exposes_recorded_owner_snapshot_and_unresolved_inputs() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let event = fixture.open(&owner);
+            let input = fixture.input(&owner, "exec:uncertain", InputKind::Exec, None);
+            let member = crate::broker::get_member(&fixture.conn, fixture.member, fixture.fleet)
+                .unwrap()
+                .unwrap();
+            let output = crate::presentation::member(&member);
+            assert_key_order(
+                &output,
+                &[
+                    "member_id",
+                    "name",
+                    "description",
+                    "status",
+                    "registered_at",
+                    "kind",
+                    "placement",
+                    "runtime",
+                ],
+            );
+            let runtime = &output["runtime"];
+            assert_key_order(
+                runtime,
+                &[
+                    "run_id",
+                    "resolved_mode",
+                    "status",
+                    "reachability",
+                    "owner_epoch",
+                    "last_health_at",
+                    "coverage",
+                    "profile_match",
+                    "current_interaction_id",
+                    "unresolved_input_ids",
+                    "owner_kind",
+                    "owner_pid",
+                    "owner_start_identity",
+                    "runner_pid",
+                    "runner_start_identity",
+                    "child_pid",
+                    "child_start_identity",
+                    "effective_policy",
+                ],
+            );
+            assert_eq!(runtime["run_id"], owner.run_id);
+            assert_eq!(runtime["profile_match"], Value::Null);
+            assert_eq!(runtime["effective_policy"], Value::Null);
+            assert_eq!(
+                runtime["current_interaction_id"],
+                event.interaction_id.unwrap()
+            );
+            assert_eq!(runtime["unresolved_input_ids"], json!([input.input_id]));
+            assert_eq!(runtime["owner_start_identity"], "fixture-start-identity");
+            assert_eq!(runtime["child_pid"], Value::Null);
+            assert_eq!(runtime["child_start_identity"], Value::Null);
+            let unwrapped =
+                crate::broker::get_member(&fixture.conn, fixture.director, fixture.fleet)
+                    .unwrap()
+                    .unwrap();
+            assert_eq!(
+                crate::presentation::member(&unwrapped).get("runtime"),
+                Some(&Value::Null)
+            );
+            let text = crate::output::format_member_detail(&member);
+            assert_eq!(
+                text,
+                format!(
+                    "{} worker active\nRuntime: run={} mode=never status=running coverage=unknown profile=- review=-",
+                    fixture.member, owner.run_id
+                )
+            );
+        }
+
+        #[test]
+        fn runtime_presentation_renders_the_recorded_profile_match_on_member_and_event_surfaces() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let event = fixture.open(&owner);
+            for (version, profile_match) in [("0.163.0", "exact"), ("0.164.0", "fallback")] {
+                fixture
+                .conn
+                .execute(
+                    "UPDATE member_runs SET native_version=?1,profile_version='codex-0.163.0-on-request-1',profile_match=?2,coverage='tested' WHERE run_id=?3",
+                    params![version, profile_match, owner.run_id],
+                )
+                .unwrap();
+                let member =
+                    crate::broker::get_member(&fixture.conn, fixture.member, fixture.fleet)
+                        .unwrap()
+                        .unwrap();
+                let runtime = &crate::presentation::member(&member)["runtime"];
+                assert_eq!(runtime["coverage"], "tested");
+                assert_eq!(runtime["profile_match"], profile_match);
+                let line = format!(
+                    "Runtime: run={} mode=never status=running coverage=tested profile={profile_match} review=-",
+                    owner.run_id
+                );
+                assert_eq!(
+                    crate::output::format_member_detail(&member),
+                    format!("{} worker active\n{line}", fixture.member)
+                );
+                let view = storage::get_event(&fixture.conn, event.event_id).unwrap();
+                assert_eq!(
+                    crate::presentation::runtime_event(&view)["run"]["profile_match"],
+                    profile_match
+                );
+                assert_eq!(
+                    crate::output::format_runtime_event(&view)
+                        .lines()
+                        .nth(1)
+                        .unwrap(),
+                    line
+                );
+            }
+        }
+        #[test]
+        fn effective_policy_record_is_rendered_last_in_every_runtime_snapshot_surface() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let event = fixture.open(&owner);
+            for (record, review) in [
+                (
+                    effective_policy("unavailable", None, Some(event.event_id)),
+                    "unavailable",
+                ),
+                (
+                    effective_policy("available", Some("auto"), None),
+                    "available",
+                ),
+            ] {
+                store_effective_policy(&fixture, &record);
+                let run = storage::get_run(&fixture.conn, owner.run_id).unwrap();
+                assert_eq!(run.effective_policy_json.as_ref(), Some(&record));
+                let member =
+                    crate::broker::get_member(&fixture.conn, fixture.member, fixture.fleet)
+                        .unwrap()
+                        .unwrap();
+                let runtime = &crate::presentation::member(&member)["runtime"];
+                assert_eq!(
+                    runtime.as_object().unwrap().keys().next_back().unwrap(),
+                    "effective_policy"
+                );
+                assert_eq!(runtime["effective_policy"], record);
+                let line = format!(
+                    "Runtime: run={} mode=never status=running coverage=unknown profile=- review={review}",
+                    owner.run_id
+                );
+                assert_eq!(
+                    crate::output::format_member_detail(&member),
+                    format!("{} worker active\n{line}", fixture.member)
+                );
+                let view = storage::get_event(&fixture.conn, event.event_id).unwrap();
+                let shown = crate::presentation::runtime_event(&view);
+                assert_eq!(shown["run"]["effective_policy"], record);
+                assert_eq!(
+                    shown["run"]
+                        .as_object()
+                        .unwrap()
+                        .keys()
+                        .next_back()
+                        .unwrap(),
+                    "effective_policy"
+                );
+                assert_eq!(
+                    crate::output::format_runtime_event(&view)
+                        .lines()
+                        .nth(1)
+                        .unwrap(),
+                    line
+                );
+                assert_eq!(
+                    view.event.payload_json.get("effective_policy"),
+                    None,
+                    "the event payload is unchanged"
+                );
+            }
+        }
+        #[test]
+        fn event_and_input_read_wrappers_follow_the_approved_order_and_compact_text() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let event = fixture.open(&owner);
+            let view = storage::get_event(&fixture.conn, event.event_id).unwrap();
+            let output = crate::presentation::runtime_event(&view);
+            assert_key_order(
+                &output,
+                &[
+                    "event",
+                    "notification_state",
+                    "message_id",
+                    "archive_reason",
+                    "run",
+                    "interaction",
+                ],
+            );
+            assert_key_order(
+                &output["interaction"],
+                &[
+                    "interaction_id",
+                    "run_id",
+                    "episode_seq",
+                    "classification",
+                    "evidence_digest",
+                    "opened_at",
+                    "evidence_json",
+                    "closed_at",
+                    "close_reason",
+                ],
+            );
+            assert_eq!(
+                crate::output::format_runtime_event(&view),
+                format!(
+                    "Event: {} run={} seq=1 kind=interaction_opened notification=inbox message={}\nRuntime: run={} mode=never status=running coverage=unknown profile=- review=-\nInteraction: {} classification=permission_request closed_at=- close_reason=-",
+                    event.event_id,
+                    owner.run_id,
+                    event.message_id.unwrap(),
+                    owner.run_id,
+                    event.interaction_id.unwrap()
+                )
+            );
+            let input = fixture.input(&owner, "exec:lost-output", InputKind::Exec, None);
+            let output = crate::presentation::input_operation(&input);
+            assert_key_order(
+                &output["input"],
+                &[
+                    "input_id",
+                    "run_id",
+                    "operation_key",
+                    "kind",
+                    "payload_digest",
+                    "state",
+                    "created_at",
+                    "updated_at",
+                    "message_id",
+                    "disposition",
+                    "evidence_ref",
+                    "permission_response",
+                ],
+            );
+            assert_eq!(output["input"]["permission_response"], Value::Null);
+            assert_eq!(
+                crate::output::format_input_operation(&input),
+                format!(
+                    "Input: {} run={} kind=exec state=in_progress disposition=- message=-",
+                    input.input_id, owner.run_id
+                )
+            );
+        }
+    }
+
+    mod runner_registry {
+        use crate::broker::runtime::{self as storage, RunStatus};
+        use crate::runtime::runner::health::test_support::{SilentServer, activate};
+        use crate::runtime::runner::test_support::Fixture;
+        use rusqlite::Connection;
+        use std::time::{Duration, Instant};
+
+        fn counts(conn: &Connection) -> (i64, i64, i64) {
+            let scalar = |table| {
+                conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap()
+            };
+            (
+                scalar("member_interactions"),
+                scalar("member_runtime_events"),
+                scalar("messages"),
+            )
+        }
+        #[test]
+        fn runner_registry_show_returns_historical_health_without_contacting_a_live_endpoint() {
+            let mut fixture = Fixture::new();
+            let (artifacts, _held) = activate(&mut fixture);
+            let _server = SilentServer::start(&artifacts.paths.control_socket);
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_runs SET last_health_at='2000-01-01T00:00:00Z' WHERE run_id=?1",
+                    [fixture.run.run_id],
+                )
+                .unwrap();
+            let before = counts(&fixture.conn);
+            let start = Instant::now();
+            let member = crate::broker::get_member(
+                &fixture.conn,
+                fixture.run.member_id,
+                fixture.run.fleet_id,
+            )
+            .unwrap()
+            .unwrap();
+            assert!(start.elapsed() < Duration::from_millis(750));
+            assert_eq!(
+                crate::presentation::member(&member)["runtime"]["last_health_at"],
+                "2000-01-01T00:00:00Z"
+            );
+            assert_eq!(counts(&fixture.conn), before);
+            assert_eq!(
+                storage::get_run(&fixture.conn, fixture.run.run_id)
+                    .unwrap()
+                    .status,
+                RunStatus::Running
+            );
+        }
+    }
 }

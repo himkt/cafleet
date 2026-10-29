@@ -686,4 +686,478 @@ pub(crate) mod test_support {
             previous = position + needle.len();
         }
     }
+
+    use crate::coding_agent::{AnswerCapability, CodingAgent};
+    use std::time::{Duration, Instant};
+
+    pub(crate) struct ResponseFixture {
+        pub(crate) base: Fixture,
+        pub(crate) owner: RunOwner,
+        pub(crate) event: RuntimeEventRecord,
+        pub(crate) request: NewPermissionResponse,
+        pub(crate) capability: AnswerCapability,
+    }
+
+    pub(crate) fn deadline() -> Instant {
+        Instant::now() + Duration::from_secs(1)
+    }
+
+    pub(crate) fn capability(decision: PermissionDecision) -> AnswerCapability {
+        AnswerCapability::fixture(
+            CodingAgent::Codex,
+            "0.163.0",
+            "answer-fixture-v1",
+            "native-tool-permission",
+            "single-request-choice",
+            decision,
+            &["synthetic-storage-fixture".into()],
+        )
+        .unwrap()
+    }
+
+    impl ResponseFixture {
+        pub(crate) fn new() -> Self {
+            let mut base = Fixture::new();
+            base.conn.execute("UPDATE member_runs SET coverage='tested',profile_version='fixture-v1',profile_match='exact' WHERE run_id=?1",[base.run.run_id]).unwrap();
+            let owner = base.activate();
+            let event = base.open(&owner);
+            let request = NewPermissionResponse {
+                operation_key: "permission:fixture-1".into(),
+                metadata: PermissionResponseMetadata {
+                    event_id: event.event_id,
+                    interaction_id: event.interaction_id.unwrap(),
+                    expected_owner_epoch: owner.owner_epoch,
+                    request_token: "a".repeat(64),
+                    decision: PermissionDecision::Allow,
+                    director_member_id: base.director,
+                    director_mode: DirectorMode::Auto,
+                    decision_source: DecisionSource::DirectorAuto,
+                    mode_evidence_ref: "fixture:host-mode".into(),
+                    decision_evidence_ref: "fixture:decision".into(),
+                    answer_profile_version: "answer-fixture-v1".into(),
+                    answer_rule_id: "single-request-choice".into(),
+                },
+            };
+            Self {
+                base,
+                owner,
+                event,
+                request,
+                capability: capability(PermissionDecision::Allow),
+            }
+        }
+
+        pub(crate) fn identity(&self) -> PermissionReceiptIdentity {
+            PermissionReceiptIdentity {
+                database_identity_json: self.owner.database_identity_json.clone(),
+                run_id: self.owner.run_id,
+            }
+        }
+
+        pub(crate) fn reserve(&mut self) -> PermissionReceipt {
+            match storage::reserve_permission_response(
+                &mut self.base.conn,
+                &self.owner,
+                &self.request,
+                Some(&self.capability),
+                deadline(),
+            )
+            .unwrap()
+            {
+                PermissionReservation::Reserved(receipt) => receipt,
+                PermissionReservation::Retained(receipt) => {
+                    panic!("fresh fixture returned retained receipt: {receipt:?}")
+                }
+            }
+        }
+    }
+    pub(crate) fn effective_policy(
+        automatic_review: &str,
+        observed_mode: Option<&str>,
+        event_id: Option<i64>,
+    ) -> Value {
+        json!({
+            "schema_version":1,"automatic_review":automatic_review,"observed_mode":observed_mode,
+            "rule_id":"codex-auto-review-unavailable","event_id":event_id,
+            "observed_at":"2026-10-29T02:30:00Z",
+        })
+    }
+
+    pub(crate) fn store_effective_policy(fixture: &Fixture, record: &Value) {
+        fixture
+            .conn
+            .execute(
+                "UPDATE member_runs SET event_evidence='redacted',effective_policy_json=?1 WHERE run_id=?2",
+                params![record.to_string(), fixture.run.run_id],
+            )
+            .unwrap();
+    }
+    pub(crate) fn replace_public_payload(
+        conn: &mut Connection,
+        event: &RuntimeEventRecord,
+        payload: Value,
+    ) {
+        let tx = conn.transaction().unwrap();
+        tx.execute(
+            "UPDATE member_runtime_events SET payload_json=?1 WHERE event_id=?2",
+            params![payload.to_string(), event.event_id],
+        )
+        .unwrap();
+        if let Some(message_id) = event.message_id {
+            tx.execute(
+                "UPDATE messages SET text=?1 WHERE message_id=?2",
+                params![payload.to_string(), message_id],
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+    }
+
+    pub(crate) mod automatic_review {
+        use super::*;
+        pub(crate) fn annotation_raw(rule: &str, operation: Option<&str>) -> Value {
+            json!({
+                "backend":"codex","native_version":"0.163.0","profile_version":"fixture-v1",
+                "rule_id":rule,"screen_seq":140,
+                "operation":operation,"operation_rows":operation.map(|text| text.split('\n').count()),
+                "choices":null,"native_request_id":null,
+                "excerpt":format!("notice {SECRET}"),
+                "truncated":false,"sensitive":false,
+            })
+        }
+
+        pub(crate) fn refusal_raw(operation: &str) -> Value {
+            annotation_raw("codex-auto-review-refusal", Some(operation))
+        }
+
+        pub(crate) fn unavailable_raw() -> Value {
+            annotation_raw("codex-auto-review-unavailable", None)
+        }
+
+        pub(crate) fn redacted(raw: &Value) -> Value {
+            evidence::EvidencePolicy::redacted(
+                &json!({"schema_version":1,"patterns":[SECRET],"sensitive_rules":[]}),
+                &["codex-auto-review-refusal", "codex-auto-review-unavailable"],
+            )
+            .unwrap()
+            .apply(raw)
+            .unwrap()
+        }
+
+        pub(crate) fn annotation_event(
+            run: i64,
+            event_seq: i64,
+            kind: RuntimeEventKind,
+            evidence: Value,
+        ) -> ObservedTransition {
+            ObservedTransition {
+                run_id: run,
+                event_seq,
+                episode_seq: None,
+                kind,
+                classification: None,
+                observed_at: NOW.into(),
+                evidence_json: evidence,
+                close_reason: None,
+                cause_json: None,
+            }
+        }
+
+        pub(crate) fn persisted(
+            fixture: &mut Fixture,
+            kind: RuntimeEventKind,
+            evidence: Value,
+        ) -> RuntimeEventRecord {
+            let owner = fixture.activate();
+            fixture.reserve(&owner);
+            storage::persist_transition(
+                &mut fixture.conn,
+                &owner,
+                &annotation_event(owner.run_id, 1, kind, evidence),
+                PersistenceMode::Live,
+            )
+            .unwrap()
+        }
+
+        pub(crate) fn redacted_fixture() -> Fixture {
+            let fixture = Fixture::new();
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_runs SET event_evidence='redacted' WHERE run_id=?1",
+                    [fixture.run.run_id],
+                )
+                .unwrap();
+            fixture
+        }
+
+        pub(crate) fn inspect_argv(event: &RuntimeEventRecord) -> Value {
+            json!([
+                "cafleet",
+                "event",
+                "show",
+                event.event_id.to_string(),
+                "--json"
+            ])
+        }
+
+        pub(crate) fn assert_runner_screen_event_without_interaction(
+            fixture: &Fixture,
+            event: &RuntimeEventRecord,
+            kind: &str,
+        ) {
+            let payload = &event.payload_json;
+            assert_eq!(payload["schema_version"], 2);
+            assert_eq!(payload["kind"], kind);
+            assert_eq!(payload["interaction_id"], Value::Null);
+            assert_eq!(payload["classification"], Value::Null);
+            assert_eq!(payload["source"], "runner_screen");
+            assert_eq!(payload["native_request_id"], Value::Null);
+            assert_eq!(payload["decision_outcome"], "unknown");
+            assert_eq!(event.interaction_id, None);
+            assert_eq!(event.notification_state, NotificationState::Inbox);
+            assert_key_order(
+                &payload["director_action"],
+                &["kind", "instruction", "inspect_argv"],
+            );
+            assert_eq!(
+                payload["director_action"]["inspect_argv"],
+                inspect_argv(event)
+            );
+            let message =
+                crate::broker::get_message(&fixture.conn, event.message_id.unwrap()).unwrap();
+            assert_eq!(message.from_member_id, fixture.member);
+            assert_eq!(message.to_member_id, fixture.director);
+            assert_eq!(message.text, payload.to_string());
+            assert!(rows(&fixture.conn, "member_interactions").is_empty());
+            assert!(rows(&fixture.conn, "member_input_operations").is_empty());
+            let view = storage::get_event(&fixture.reopen(), event.event_id).unwrap();
+            assert!(view.interaction.is_none());
+            assert_eq!(view.event.payload_json, *payload);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rusqlite::params;
+    use serde_json::json;
+
+    use super::test_support::*;
+    use super::{self as storage, *};
+    use crate::broker::fleets::test_support::create_fleet_fixture;
+    use crate::broker::members::test_support::register;
+
+    #[test]
+    fn new_run_records_launch_intent_and_unreached_phases_without_inventing_policy() {
+        let fixture = Fixture::new();
+        let run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+        assert_eq!(run.status, RunStatus::Starting);
+        assert_eq!(run.owner_epoch, 1);
+        assert_eq!(run.owner_kind, OwnerKind::Creator);
+        assert_eq!(run.cleanup_state, CleanupState::Incomplete);
+        assert_eq!(run.event_seq_reserved_through, 0);
+        assert_eq!(run.observation_gap_count, 0);
+        assert_eq!(run.mode_source, ModeSource::Default);
+        assert_eq!(run.requested_mode, None);
+        assert_eq!(run.resolved_mode, "never");
+        assert_eq!(run.effective_policy_json, None);
+        assert_eq!(run.child_pid, None);
+        assert_eq!(run.exit_code, None);
+        assert_eq!(run.exit_signal, None);
+        assert_eq!(run.coverage, Coverage::Unknown);
+    }
+
+    #[test]
+    fn run_creation_validates_member_fleet_and_pinned_director_before_allocating() {
+        for mismatch in ["member", "fleet", "director", "database"] {
+            let mut fixture = Fixture::new();
+            let (other_fleet, other_director) = create_fleet_fixture(&mut fixture.conn, "foreign");
+            let member = register(&mut fixture.conn, fixture.fleet, "new-worker", None);
+            let mut spec = Fixture::spec(&fixture.conn, fixture.fleet, fixture.director, member);
+            match mismatch {
+                "member" => spec.member_id = other_director,
+                "fleet" => spec.fleet_id = other_fleet,
+                "director" => spec.director_member_id = other_director,
+                "database" => spec.database_identity_json["instance_id"] = json!("0".repeat(32)),
+                _ => unreachable!(),
+            }
+            let before = durable_state(&fixture.conn);
+            assert!(
+                storage::create_run(&mut fixture.conn, &spec).is_err(),
+                "{mismatch}"
+            );
+            assert_eq!(durable_state(&fixture.conn), before, "{mismatch}");
+        }
+    }
+
+    #[test]
+    fn explicit_mode_is_distinct_from_the_default_and_does_not_prove_effective_policy() {
+        let mut fixture = Fixture::new();
+        let member = register(&mut fixture.conn, fixture.fleet, "explicit", None);
+        let mut spec = Fixture::spec(&fixture.conn, fixture.fleet, fixture.director, member);
+        spec.requested_mode = Some("on-request".into());
+        spec.resolved_mode = "on-request".into();
+        spec.mode_source = ModeSource::Explicit;
+        spec.permission_argv_json = json!([
+            "--ask-for-approval",
+            "on-request",
+            "--sandbox",
+            "workspace-write"
+        ]);
+        let run = storage::create_run(&mut fixture.conn, &spec).unwrap();
+        assert_eq!(run.requested_mode.as_deref(), Some("on-request"));
+        assert_eq!(run.mode_source, ModeSource::Explicit);
+        assert_eq!(run.permission_argv_json, spec.permission_argv_json);
+        assert_eq!(run.effective_policy_json, None);
+    }
+
+    #[test]
+    fn typed_runtime_readers_fail_on_corrupt_required_values() {
+        for (field, value) in [
+            ("status", "invented"),
+            ("owner_kind", "model"),
+            ("coverage", "guaranteed"),
+            ("database_identity_json", "[]"),
+            ("permission_argv_json", "{}"),
+            ("owner_start_identity", ""),
+        ] {
+            let fixture = Fixture::new();
+            fixture
+                .conn
+                .execute_batch("PRAGMA ignore_check_constraints=ON")
+                .unwrap();
+            fixture
+                .conn
+                .execute(
+                    &format!("UPDATE member_runs SET {field}=?1 WHERE run_id=?2"),
+                    params![value, fixture.run.run_id],
+                )
+                .unwrap();
+            let error = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap_err();
+            assert!(error.message().contains(field), "{field}: {error:?}");
+        }
+    }
+
+    #[test]
+    fn current_owner_reserves_disjoint_ranges_of_256_across_reconnections() {
+        let mut fixture = Fixture::new();
+        let owner = fixture.activate();
+        assert_eq!(fixture.reserve(&owner), 1..=256);
+        let mut other = fixture.reopen();
+        assert_eq!(
+            storage::reserve_event_sequences(&mut other, &owner).unwrap(),
+            257..=512
+        );
+        assert_eq!(
+            storage::get_run(&fixture.conn, owner.run_id)
+                .unwrap()
+                .event_seq_reserved_through,
+            512
+        );
+        let transition = opening(owner.run_id, 257, 1, metadata());
+        assert!(
+            storage::persist_transition(&mut other, &owner, &transition, PersistenceMode::Live)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn stale_owner_kind_epoch_or_database_identity_fences_every_mutation() {
+        for mismatch in ["epoch", "kind", "database"] {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            fixture.reserve(&owner);
+            let mut stale = owner.clone();
+            match mismatch {
+                "epoch" => stale.owner_epoch += 1,
+                "kind" => stale.owner_kind = OwnerKind::Reconciler,
+                "database" => stale.database_identity_json["instance_id"] = json!("0".repeat(32)),
+                _ => unreachable!(),
+            }
+            let before = durable_state(&fixture.conn);
+            assert!(
+                storage::reserve_event_sequences(&mut fixture.conn, &stale).is_err(),
+                "{mismatch}"
+            );
+            assert!(
+                storage::persist_transition(
+                    &mut fixture.conn,
+                    &stale,
+                    &opening(owner.run_id, 1, 1, metadata()),
+                    PersistenceMode::Live
+                )
+                .is_err(),
+                "{mismatch}"
+            );
+            assert!(
+                storage::reserve_input(
+                    &mut fixture.conn,
+                    &stale,
+                    &NewInput {
+                        operation_key: "stale".into(),
+                        kind: InputKind::Prompt,
+                        payload_digest: "d".repeat(64),
+                        message_id: None
+                    }
+                )
+                .is_err(),
+                "{mismatch}"
+            );
+            assert_eq!(durable_state(&fixture.conn), before, "{mismatch}");
+        }
+    }
+
+    #[test]
+    fn failed_sequence_reservation_rolls_back_the_high_water_mark() {
+        let mut fixture = Fixture::new();
+        let owner = fixture.activate();
+        fixture.conn.execute_batch("CREATE TRIGGER fail_reservation BEFORE UPDATE OF event_seq_reserved_through ON member_runs BEGIN SELECT RAISE(ABORT,'injected reservation failure'); END").unwrap();
+        assert!(storage::reserve_event_sequences(&mut fixture.conn, &owner).is_err());
+        assert_eq!(
+            storage::get_run(&fixture.conn, owner.run_id)
+                .unwrap()
+                .event_seq_reserved_through,
+            0
+        );
+        fixture
+            .conn
+            .execute_batch("DROP TRIGGER fail_reservation")
+            .unwrap();
+        assert_eq!(fixture.reserve(&owner), 1..=256);
+    }
+    #[test]
+    fn concurrent_sequence_reservations_commit_disjoint_ranges() {
+        let mut fixture = Fixture::new();
+        let owner = fixture.activate();
+        let url = format!("sqlite:///{}", fixture.conn.path().unwrap());
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let workers = (0..2)
+            .map(|_| {
+                let url = url.clone();
+                let owner = owner.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    let mut conn = crate::db::connect(&url).unwrap();
+                    barrier.wait();
+                    storage::reserve_event_sequences(&mut conn, &owner).unwrap()
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut ranges = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect::<Vec<_>>();
+        ranges.sort_by_key(|range| *range.start());
+        assert_eq!(ranges, [1..=256, 257..=512]);
+    }
+    #[test]
+    fn missing_database_instance_identity_fails_at_the_identity_read_boundary() {
+        let fixture = Fixture::new();
+        fixture
+            .conn
+            .execute("DELETE FROM runtime_database_identity", [])
+            .unwrap();
+        assert!(storage::database_identity(&fixture.conn).is_err());
+    }
 }

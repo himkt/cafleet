@@ -639,7 +639,7 @@ fn right_column(panes: &[Value]) -> Result<Vec<Value>, MultiplexerError> {
 mod tests {
     use serde_json::json;
 
-    use crate::multiplexer::recording::{
+    use crate::multiplexer::test_support::{
         FakeRunner, argv, env, herdr_envelope, herdr_error_stderr, run_event, sleep_event,
     };
     use crate::multiplexer::{HerdrMultiplexer, Lead, MultiplexerContext, RunError};
@@ -896,7 +896,7 @@ mod tests {
         assert_eq!(events.len(), 3, "{events:?}");
         assert_eq!(events[1], sleep_event(1.0));
         for event in events {
-            if let crate::multiplexer::recording::Event::Run { timeout_secs, .. } = event {
+            if let crate::multiplexer::test_support::Event::Run { timeout_secs, .. } = event {
                 assert!(timeout_secs.is_some_and(|seconds| seconds > 0 && seconds <= 5));
             }
         }

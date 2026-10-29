@@ -15,7 +15,7 @@ pub(crate) use outbox::*;
 pub(crate) mod recovery;
 pub(crate) use recovery::*;
 pub(crate) use writer::{EventWriter, InertWriterHooks, WriterBoundary, WriterHooks};
-mod episodes;
+pub(crate) mod episodes;
 pub(crate) use crate::coding_agent::{
     MatchEvidence, ObservationKind, ScreenObservation, SemanticFingerprint,
 };
@@ -24,7 +24,7 @@ mod artifacts;
 mod codec;
 mod control;
 mod creation;
-mod health;
+pub(crate) mod health;
 mod lifecycle;
 mod process;
 pub(crate) mod service;

@@ -214,3 +214,507 @@ impl CodingAgent {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn version(backend: CodingAgent) -> Option<&'static str> {
+        match backend {
+            CodingAgent::Claude => Some("2.1.302"),
+            CodingAgent::Codex => Some("0.163.0"),
+            CodingAgent::Opencode => None,
+        }
+    }
+
+    fn permission_argv(backend: CodingAgent, selected: &str) -> Vec<String> {
+        match backend {
+            CodingAgent::Claude => vec!["--permission-mode".into(), selected.into()],
+            CodingAgent::Codex if selected == "approve-for-me" => vec!["--approve-for-me".into()],
+            CodingAgent::Codex => vec![
+                "--ask-for-approval".into(),
+                selected.into(),
+                "--sandbox".into(),
+                "workspace-write".into(),
+            ],
+            CodingAgent::Opencode => vec!["--agent".into(), selected.into()],
+        }
+    }
+
+    #[test]
+    fn runtime_policy_omission_selects_each_backends_automatic_default_argv() {
+        for &backend in CodingAgent::all() {
+            let selection = backend.resolve_policy(version(backend), None).unwrap();
+            let expected_mode = match backend {
+                CodingAgent::Claude => "auto",
+                CodingAgent::Codex => "approve-for-me",
+                CodingAgent::Opencode => "cafleet",
+            };
+            assert_eq!(selection.requested_mode, None);
+            assert_eq!(selection.resolved_mode, expected_mode);
+            assert_eq!(selection.mode_source, ModeSource::Default);
+            assert_eq!(
+                selection.permission_argv,
+                permission_argv(backend, expected_mode)
+            );
+            assert_eq!(
+                backend
+                    .build_spawn_argv_with_policy(
+                        "literal '$x' `text`",
+                        "fixture name",
+                        Some("provider/model"),
+                        None,
+                        &selection
+                    )
+                    .unwrap(),
+                backend.build_spawn_argv(
+                    "literal '$x' `text`",
+                    "fixture name",
+                    Some("provider/model"),
+                    None
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_policy_each_registered_explicit_choice_maps_to_one_literal_native_mode() {
+        for &backend in CodingAgent::all() {
+            let choices = backend.policy_choices(version(backend));
+            assert!(!choices.is_empty());
+            let mut unique = std::collections::BTreeSet::new();
+            for mode in choices {
+                assert!(unique.insert(mode.clone()), "duplicate policy {mode}");
+                let selection = backend
+                    .resolve_policy(version(backend), Some(&mode))
+                    .unwrap();
+                assert_eq!(selection.requested_mode.as_deref(), Some(mode.as_str()));
+                assert_eq!(selection.resolved_mode, mode);
+                assert_eq!(selection.mode_source, ModeSource::Explicit);
+                assert_eq!(selection.permission_argv, permission_argv(backend, &mode));
+                let mut expected: Vec<String> = match backend {
+                    CodingAgent::Claude => vec![
+                        "claude".into(),
+                        "--permission-mode".into(),
+                        mode.clone(),
+                        "--prompt-suggestions".into(),
+                        "false".into(),
+                        "--allowedTools".into(),
+                        "Bash(cafleet message *)".into(),
+                        "--name".into(),
+                        "fixture name".into(),
+                    ],
+                    CodingAgent::Codex => {
+                        let mut argv = vec!["codex".into()];
+                        argv.extend(permission_argv(backend, &mode));
+                        argv
+                    }
+                    CodingAgent::Opencode => vec![
+                        "opencode".into(),
+                        "mini".into(),
+                        "--standalone".into(),
+                        "--agent".into(),
+                        mode.clone(),
+                    ],
+                };
+                expected.extend(["--model".into(), "provider/model".into()]);
+                let effort = (backend != CodingAgent::Opencode).then_some("high");
+                match backend {
+                    CodingAgent::Claude => expected.extend(["--effort".into(), "high".into()]),
+                    CodingAgent::Codex => {
+                        expected.push("--config=model_reasoning_effort=high".into())
+                    }
+                    CodingAgent::Opencode => expected.push("--prompt".into()),
+                }
+                expected.push("literal '$x' `text` assignment".into());
+                assert_eq!(
+                    backend
+                        .build_spawn_argv_with_policy(
+                            "literal '$x' `text` assignment",
+                            "fixture name",
+                            Some("provider/model"),
+                            effort,
+                            &selection
+                        )
+                        .unwrap(),
+                    expected
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn runtime_policy_claude_default_and_manual_preserve_their_requested_spelling() {
+        let backend = CodingAgent::Claude;
+        for mode in ["default", "manual"] {
+            assert!(
+                backend
+                    .policy_choices(Some("2.1.302"))
+                    .contains(&mode.into())
+            );
+            let selected = backend.resolve_policy(Some("2.1.302"), Some(mode)).unwrap();
+            assert_eq!(selected.resolved_mode, mode);
+            assert_eq!(selected.permission_argv, ["--permission-mode", mode]);
+        }
+    }
+
+    #[test]
+    fn runtime_policy_invalid_explicit_selection_reports_backend_and_catalog_choices() {
+        for &backend in CodingAgent::all() {
+            for invalid in ["", " ", "unsupported-fixture-mode"] {
+                let failure = backend
+                    .resolve_policy(version(backend), Some(invalid))
+                    .expect_err("invalid explicit policy must fail");
+                assert!(matches!(failure, CafleetError::Usage(_)));
+                let text = failure.message();
+                assert!(text.contains(backend.name()), "{text}");
+                for choice in backend.policy_choices(version(backend)) {
+                    assert!(text.contains(&choice), "{text}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn runtime_policy_fixed_preset_and_unknown_native_version_keep_launch_intent() {
+        let backend = CodingAgent::Opencode;
+        assert_eq!(backend.policy_choices(None), ["cafleet", "cafleet-ask"]);
+        assert_eq!(
+            backend
+                .resolve_policy(None, Some("cafleet"))
+                .unwrap()
+                .mode_source,
+            ModeSource::Explicit
+        );
+        for &backend in CodingAgent::all() {
+            let known = backend.resolve_policy(version(backend), None).unwrap();
+            let unknown = backend.resolve_policy(None, None).unwrap();
+            assert_eq!(unknown.resolved_mode, known.resolved_mode);
+            assert_eq!(unknown.permission_argv, known.permission_argv);
+        }
+    }
+
+    #[test]
+    fn runtime_policy_opencode_catalog_offers_cafleet_and_cafleet_ask_for_every_native_version() {
+        for native_version in [None, Some("2.1.4"), Some("2.1.3"), Some("9.0.0-beta.1")] {
+            assert_eq!(
+                CodingAgent::Opencode.policy_choices(native_version),
+                ["cafleet", "cafleet-ask"],
+                "{native_version:?}"
+            );
+            for mode in ["cafleet", "cafleet-ask"] {
+                let selection = CodingAgent::Opencode
+                    .resolve_policy(native_version, Some(mode))
+                    .unwrap();
+                assert_eq!(selection.permission_argv, ["--agent", mode]);
+            }
+        }
+    }
+
+    #[test]
+    fn runtime_policy_opencode_explicit_cafleet_ask_launches_its_agent_and_records_launch_intent() {
+        let selection = CodingAgent::Opencode
+            .resolve_policy(Some("2.1.4"), Some("cafleet-ask"))
+            .unwrap();
+        assert_eq!(selection.requested_mode.as_deref(), Some("cafleet-ask"));
+        assert_eq!(selection.resolved_mode, "cafleet-ask");
+        assert_eq!(selection.mode_source, ModeSource::Explicit);
+        assert_eq!(
+            serde_json::to_value(&selection.permission_argv).unwrap(),
+            serde_json::json!(["--agent", "cafleet-ask"])
+        );
+        assert_eq!(
+            CodingAgent::Opencode
+                .build_spawn_argv_with_policy("assignment", "worker", None, None, &selection)
+                .unwrap(),
+            [
+                "opencode",
+                "mini",
+                "--standalone",
+                "--agent",
+                "cafleet-ask",
+                "--prompt",
+                "assignment"
+            ]
+        );
+        assert_eq!(
+            CodingAgent::Opencode
+                .build_spawn_argv_with_policy(
+                    "assignment",
+                    "worker",
+                    Some("provider/model"),
+                    None,
+                    &selection
+                )
+                .unwrap(),
+            [
+                "opencode",
+                "mini",
+                "--standalone",
+                "--agent",
+                "cafleet-ask",
+                "--model",
+                "provider/model",
+                "--prompt",
+                "assignment"
+            ]
+        );
+    }
+
+    #[test]
+    fn runtime_policy_opencode_omitted_selection_keeps_the_cafleet_agent_as_default() {
+        let selection = CodingAgent::Opencode
+            .resolve_policy(Some("2.1.4"), None)
+            .unwrap();
+        assert_eq!(selection.requested_mode, None);
+        assert_eq!(selection.resolved_mode, "cafleet");
+        assert_eq!(selection.mode_source, ModeSource::Default);
+        assert_eq!(selection.permission_argv, ["--agent", "cafleet"]);
+        assert_eq!(
+            CodingAgent::Opencode
+                .build_spawn_argv_with_policy("assignment", "worker", None, None, &selection)
+                .unwrap(),
+            [
+                "opencode",
+                "mini",
+                "--standalone",
+                "--agent",
+                "cafleet",
+                "--prompt",
+                "assignment"
+            ]
+        );
+    }
+
+    #[test]
+    fn runtime_policy_opencode_unknown_choice_fails_with_the_exact_usage_error() {
+        for native_version in [None, Some("2.1.4")] {
+            let failure = CodingAgent::Opencode
+                .resolve_policy(native_version, Some("ask"))
+                .expect_err("unknown OpenCode policy must fail");
+            assert!(matches!(failure, CafleetError::Usage(_)));
+            assert_eq!(
+                failure.message(),
+                "--permission-mode for opencode must be one of cafleet, cafleet-ask (got 'ask')"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_policy_help_lists_both_opencode_choices_with_the_cafleet_default() {
+        assert!(
+            CodingAgent::permission_mode_help()
+                .contains("opencode: cafleet, cafleet-ask (default cafleet)"),
+            "{}",
+            CodingAgent::permission_mode_help()
+        );
+    }
+
+    #[test]
+    fn runtime_policy_help_lists_every_catalog_with_the_automatic_defaults() {
+        assert_eq!(
+            CodingAgent::permission_mode_help(),
+            "Launch-only native permission policy for the resolved backend — claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet)"
+        );
+    }
+
+    #[test]
+    fn runtime_policy_codex_catalog_appends_approve_for_me_after_the_existing_choices() {
+        for native_version in [None, Some("0.163.0")] {
+            assert_eq!(
+                CodingAgent::Codex.policy_choices(native_version),
+                ["on-request", "never", "approve-for-me"],
+                "{native_version:?}"
+            );
+        }
+        for native_version in [None, Some("2.1.302")] {
+            assert_eq!(
+                CodingAgent::Claude.policy_choices(native_version),
+                [
+                    "default",
+                    "manual",
+                    "dontAsk",
+                    "acceptEdits",
+                    "auto",
+                    "bypassPermissions",
+                    "plan"
+                ],
+                "{native_version:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_policy_omitted_claude_launches_auto_and_records_default_launch_intent() {
+        for native_version in [Some("2.1.302"), None, Some("2.1.306")] {
+            let selection = CodingAgent::Claude
+                .resolve_policy(native_version, None)
+                .unwrap();
+            assert_eq!(selection.requested_mode, None, "{native_version:?}");
+            assert_eq!(selection.resolved_mode, "auto", "{native_version:?}");
+            assert_eq!(selection.mode_source, ModeSource::Default);
+            assert_eq!(
+                serde_json::to_value(&selection.permission_argv).unwrap(),
+                serde_json::json!(["--permission-mode", "auto"])
+            );
+            assert_eq!(
+                CodingAgent::Claude
+                    .build_spawn_argv_with_policy("assignment", "worker", None, None, &selection)
+                    .unwrap(),
+                [
+                    "claude",
+                    "--permission-mode",
+                    "auto",
+                    "--prompt-suggestions",
+                    "false",
+                    "--allowedTools",
+                    "Bash(cafleet message *)",
+                    "--name",
+                    "worker",
+                    "assignment"
+                ],
+                "{native_version:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_policy_omitted_codex_launches_approve_for_me_as_its_single_flag() {
+        for native_version in [Some("0.163.0"), None, Some("0.164.0")] {
+            let selection = CodingAgent::Codex
+                .resolve_policy(native_version, None)
+                .unwrap();
+            assert_eq!(selection.requested_mode, None, "{native_version:?}");
+            assert_eq!(
+                selection.resolved_mode, "approve-for-me",
+                "{native_version:?}"
+            );
+            assert_eq!(selection.mode_source, ModeSource::Default);
+            assert_eq!(
+                serde_json::to_value(&selection.permission_argv).unwrap(),
+                serde_json::json!(["--approve-for-me"])
+            );
+            assert_eq!(
+                CodingAgent::Codex
+                    .build_spawn_argv_with_policy("assignment", "worker", None, None, &selection)
+                    .unwrap(),
+                ["codex", "--approve-for-me", "assignment"],
+                "{native_version:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_policy_explicit_approve_for_me_records_explicit_launch_intent() {
+        for native_version in [Some("0.163.0"), None] {
+            let selection = CodingAgent::Codex
+                .resolve_policy(native_version, Some("approve-for-me"))
+                .unwrap();
+            assert_eq!(selection.requested_mode.as_deref(), Some("approve-for-me"));
+            assert_eq!(selection.resolved_mode, "approve-for-me");
+            assert_eq!(selection.mode_source, ModeSource::Explicit);
+            assert_eq!(selection.permission_argv, ["--approve-for-me"]);
+            assert_eq!(
+                CodingAgent::Codex
+                    .build_spawn_argv_with_policy(
+                        "assignment",
+                        "worker",
+                        Some("provider/model"),
+                        Some("high"),
+                        &selection
+                    )
+                    .unwrap(),
+                [
+                    "codex",
+                    "--approve-for-me",
+                    "--model",
+                    "provider/model",
+                    "--config=model_reasoning_effort=high",
+                    "assignment"
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_policy_previous_defaults_remain_explicit_choices_with_unchanged_argv() {
+        for (backend, version, mode, argv) in [
+            (
+                CodingAgent::Claude,
+                "2.1.302",
+                "dontAsk",
+                &["--permission-mode", "dontAsk"][..],
+            ),
+            (
+                CodingAgent::Codex,
+                "0.163.0",
+                "on-request",
+                &[
+                    "--ask-for-approval",
+                    "on-request",
+                    "--sandbox",
+                    "workspace-write",
+                ][..],
+            ),
+            (
+                CodingAgent::Codex,
+                "0.163.0",
+                "never",
+                &[
+                    "--ask-for-approval",
+                    "never",
+                    "--sandbox",
+                    "workspace-write",
+                ][..],
+            ),
+            (
+                CodingAgent::Opencode,
+                "2.1.4",
+                "cafleet",
+                &["--agent", "cafleet"][..],
+            ),
+            (
+                CodingAgent::Opencode,
+                "2.1.4",
+                "cafleet-ask",
+                &["--agent", "cafleet-ask"][..],
+            ),
+        ] {
+            let selection = backend.resolve_policy(Some(version), Some(mode)).unwrap();
+            assert_eq!(selection.requested_mode.as_deref(), Some(mode));
+            assert_eq!(selection.resolved_mode, mode);
+            assert_eq!(selection.mode_source, ModeSource::Explicit);
+            assert_eq!(selection.permission_argv, argv, "{backend:?} {mode}");
+        }
+    }
+
+    #[test]
+    fn runtime_policy_codex_unknown_choice_fails_with_the_exact_usage_error() {
+        for native_version in [None, Some("0.163.0")] {
+            for value in ["auto", "untrusted", "approve_for_me"] {
+                let failure = CodingAgent::Codex
+                    .resolve_policy(native_version, Some(value))
+                    .expect_err("unknown Codex policy must fail");
+                assert!(matches!(failure, CafleetError::Usage(_)));
+                assert_eq!(failure.exit_code(), 2);
+                assert_eq!(
+                    failure.message(),
+                    format!(
+                        "--permission-mode for codex must be one of on-request, never, approve-for-me (got '{value}')"
+                    )
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn runtime_policy_foreign_selection_is_rejected_before_native_argv_construction() {
+        let selected = CodingAgent::Claude
+            .resolve_policy(Some("2.1.302"), Some("default"))
+            .unwrap();
+        assert!(
+            CodingAgent::Codex
+                .build_spawn_argv_with_policy("assignment", "worker", None, None, &selected)
+                .is_err()
+        );
+    }
+}

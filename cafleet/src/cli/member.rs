@@ -1833,14 +1833,14 @@ mod tests {
         assert!(resolve_coding_agent(&conn, fleet, director, None).is_err());
     }
 
-    #[derive(Parser)]
-    struct Harness {
-        #[command(subcommand)]
-        command: MemberCommand,
-    }
-
     fn parse(args: &[&str]) -> Result<MemberCommand, clap::Error> {
-        Harness::try_parse_from(args).map(|harness| harness.command)
+        let member = std::iter::once("member")
+            .chain(args[1..].iter().copied())
+            .collect::<Vec<_>>();
+        match crate::cli::test_support::parse_cli(&member)? {
+            crate::cli::Command::Member(command) => Ok(command),
+            _ => unreachable!("the member prefix selects the member command"),
+        }
     }
 
     #[test]
@@ -1889,5 +1889,556 @@ mod tests {
             "--json",
         ])
         .unwrap();
+    }
+
+    mod launch_policy {
+        use super::*;
+        use crate::cli::{CliArgs, Command, member};
+        use crate::coding_agent::CodingAgent;
+        use crate::db::test_support::{migrated_conn, table_snapshot};
+
+        fn invalid_creation(backend: CodingAgent, extra: &[String]) -> CafleetError {
+            let dir = tempfile::Builder::new()
+                .prefix(".p194-")
+                .tempdir_in("/tmp")
+                .unwrap();
+            let mut conn = migrated_conn(&dir);
+            let (fleet, _) = crate::broker::fleets::test_support::create_fleet_fixture(
+                &mut conn,
+                "invalid-launch-fixture",
+            );
+            let mut arguments = create_arguments()
+                .into_iter()
+                .map(String::from)
+                .collect::<Vec<_>>();
+            arguments[4] = fleet.to_string();
+            arguments.extend(["--coding-agent".into(), backend.name().into()]);
+            arguments.extend_from_slice(extra);
+            arguments.push("literal assignment".into());
+            let Command::Member(command) = CliArgs::try_parse_from(arguments).unwrap().command
+            else {
+                panic!("member command expected")
+            };
+            let before = table_snapshot(&conn, |_| true);
+            let identity = crate::broker::runtime::database_identity(&conn).unwrap();
+            let paths = crate::runtime::runner::RuntimePaths::for_run(&identity, 1).unwrap();
+            let settings = Settings::for_database(
+                std::path::Path::new(conn.path().unwrap()),
+                Some("unavailable-test-multiplexer"),
+            );
+            let failure = member::run(&mut conn, &settings, command, crate::input::Deadline::new())
+                .expect_err("invalid launch must fail");
+            assert!(
+                matches!(failure, CafleetError::Usage(_)),
+                "{}",
+                failure.message()
+            );
+            assert_eq!(table_snapshot(&conn, |_| true), before);
+            assert!(!paths.run_dir.exists());
+            failure
+        }
+
+        fn create_arguments() -> Vec<&'static str> {
+            vec![
+                "cafleet",
+                "member",
+                "create",
+                "--fleet-id",
+                "1",
+                "--name",
+                "worker",
+                "--description",
+                "policy fixture",
+            ]
+        }
+
+        #[test]
+        fn runtime_policy_parser_accepts_the_backend_qualified_launch_selection() {
+            for (backend, mode) in [
+                ("claude", "default"),
+                ("claude", "manual"),
+                ("codex", "on-request"),
+                ("opencode", "cafleet"),
+                ("opencode", "cafleet-ask"),
+            ] {
+                let mut arguments = create_arguments();
+                arguments.extend([
+                    "--coding-agent",
+                    backend,
+                    "--permission-mode",
+                    mode,
+                    "literal assignment",
+                ]);
+                assert!(CliArgs::try_parse_from(&arguments).is_ok(), "{arguments:?}");
+            }
+        }
+
+        #[test]
+        fn runtime_policy_parser_accepts_explicit_metadata_evidence() {
+            let mut arguments = create_arguments();
+            arguments.extend(["--event-evidence", "metadata", "literal assignment"]);
+            assert!(CliArgs::try_parse_from(&arguments).is_ok(), "{arguments:?}");
+        }
+
+        #[test]
+        fn runtime_policy_parser_accepts_redacted_evidence_with_its_absolute_file() {
+            let mut arguments = create_arguments();
+            arguments.extend([
+                "--event-evidence",
+                "redacted",
+                "--event-redaction-file",
+                "/tmp/synthetic-redaction.json",
+                "literal assignment",
+            ]);
+            assert!(CliArgs::try_parse_from(&arguments).is_ok(), "{arguments:?}");
+        }
+
+        #[test]
+        fn runtime_policy_parser_keeps_omitted_selection_and_model_effort_boundaries() {
+            let mut arguments = create_arguments();
+            arguments.extend([
+                "--coding-agent",
+                "codex",
+                "--model",
+                "fixture-model",
+                "--effort",
+                "high",
+                "literal '$x' `text` assignment",
+            ]);
+            let Command::Member(member::MemberCommand::Create {
+                coding_agent,
+                model,
+                effort,
+                ..
+            }) = CliArgs::try_parse_from(arguments).unwrap().command
+            else {
+                panic!("member create expected")
+            };
+            assert_eq!(coding_agent, Some(crate::coding_agent::CodingAgent::Codex));
+            assert_eq!(model.as_deref(), Some("fixture-model"));
+            assert_eq!(effort.as_deref(), Some("high"));
+        }
+
+        #[test]
+        fn runtime_policy_invalid_launch_selection_has_usage_diagnostics_before_creation_effects() {
+            for &backend in CodingAgent::all() {
+                let failure = invalid_creation(
+                    backend,
+                    &[
+                        "--permission-mode".into(),
+                        "unsupported-fixture-mode".into(),
+                    ],
+                );
+                assert!(failure.message().contains(backend.name()));
+                for choice in backend.policy_choices(None) {
+                    assert!(failure.message().contains(&choice));
+                }
+            }
+        }
+
+        #[test]
+        fn runtime_policy_invalid_redaction_configuration_fails_before_creation_effects() {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("redaction.json");
+            for bytes in [
+                b"not json".to_vec(),
+                vec![0xff],
+                br#"{"schema_version":1,"patterns":[],"sensitive_rules":[]}"#.to_vec(),
+                br#"{"schema_version":1,"patterns":["["],"sensitive_rules":[]}"#.to_vec(),
+                br#"{"schema_version":1,"patterns":["secret"],"sensitive_rules":["missing-rule"]}"#
+                    .to_vec(),
+            ] {
+                std::fs::write(&path, bytes).unwrap();
+                invalid_creation(
+                    CodingAgent::Codex,
+                    &[
+                        "--event-evidence".into(),
+                        "redacted".into(),
+                        "--event-redaction-file".into(),
+                        path.to_str().unwrap().into(),
+                    ],
+                );
+            }
+        }
+
+        #[test]
+        fn runtime_policy_redaction_options_form_a_validated_launch_only_group() {
+            for extra in [
+                vec!["--event-evidence".into(), "redacted".into()],
+                vec![
+                    "--event-evidence".into(),
+                    "metadata".into(),
+                    "--event-redaction-file".into(),
+                    "/tmp/unused-redaction.json".into(),
+                ],
+                vec![
+                    "--event-evidence".into(),
+                    "redacted".into(),
+                    "--event-redaction-file".into(),
+                    "relative-redaction.json".into(),
+                ],
+            ] {
+                invalid_creation(CodingAgent::Codex, &extra);
+            }
+        }
+    }
+
+    mod press {
+        use super::*;
+        use crate::cli::{CliArgs, Command, dispatch, member};
+
+        #[test]
+        fn step5_press_cli_preserves_keys_after_the_ordinary_option_separator() {
+            assert!(CliArgs::try_parse_from(["cafleet", "member", "show", "42"]).is_ok());
+            let result = CliArgs::try_parse_from([
+                "cafleet",
+                "member",
+                "press",
+                "--json",
+                "42",
+                "--",
+                "-",
+                "+",
+                ";",
+                "A",
+                "Ctrl+A",
+                "Shift+Tab",
+            ]);
+            match result
+                .unwrap_or_else(|cause| panic!("press parse: {cause}"))
+                .command
+            {
+                Command::Member(member::MemberCommand::Press {
+                    member_id,
+                    keys,
+                    json,
+                }) => {
+                    assert_eq!(member_id, 42);
+                    assert!(json);
+                    assert_eq!(keys, ["-", "+", ";", "A", "Ctrl+A", "Shift+Tab"]);
+                }
+                _ => panic!("press has its dedicated command arm"),
+            }
+            for arguments in [
+                vec!["cafleet", "member", "press", "0", "Enter"],
+                vec!["cafleet", "member", "press", "42"],
+            ] {
+                match CliArgs::try_parse_from(arguments) {
+                    Ok(_) => panic!("press requires a positive member and keys"),
+                    Err(cause) => assert_eq!(cause.exit_code(), 2),
+                }
+            }
+        }
+
+        #[test]
+        fn step5_press_cli_invalid_tail_is_usage_before_missing_database_validation() {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("absent.db");
+            let settings = Settings::for_database(&path, Some("tmux"));
+            let command = CliArgs::try_parse_from([
+                "cafleet", "member", "press", "42", "Enter", "Ctrl+1", "--json",
+            ])
+            .unwrap_or_else(|cause| panic!("raw key arguments reach typed validation: {cause}"))
+            .command;
+            let failure = dispatch(&settings, command)
+                .expect_err("the complete key vector is validated first");
+            assert!(matches!(&failure, CafleetError::Usage(message)
+            if message == "invalid press key at position 2: \"Ctrl+1\""));
+            assert_eq!(failure.exit_code(), 2);
+            assert!(!path.exists());
+        }
+
+        #[test]
+        fn step5_press_presentation_is_canonical_acknowledgment_without_effect_counts() {
+            let keys =
+                crate::multiplexer::PressKeys::parse(&["cTrL+A".into(), ";".into()]).unwrap();
+            let value = crate::runtime::KeyAcknowledgment {
+                member_id: 42,
+                pane_id: "%5".into(),
+                keys: keys.canonical(),
+            };
+            assert_eq!(
+                serde_json::to_string(&crate::presentation::member_press(&value)).unwrap(),
+                "{\"member_id\":42,\"pane_id\":\"%5\",\"keys\":[\"Ctrl+a\",\";\"],\"status\":\"acknowledged\"}",
+            );
+            assert_eq!(
+                crate::output::format_member_press(&value),
+                "Acknowledged keys [\"Ctrl+a\",\";\"] for member 42 (%5).",
+            );
+        }
+    }
+    mod recovery_entry {
+        use clap::{CommandFactory, Parser, error::ErrorKind};
+        use rusqlite::Connection;
+        use tempfile::TempDir;
+
+        use crate::broker::fleets::test_support::create_fleet_fixture;
+        use crate::cli::test_support::usage_error;
+        use crate::cli::{CliArgs, dispatch};
+        use crate::config::Settings;
+        use crate::db::test_support::{migrated_conn, wal_snapshot};
+
+        fn recognized_usage_error(args: &[&str]) {
+            let error = usage_error(args);
+            assert_eq!(error.exit_code(), 2, "{args:?}: {error}");
+            assert!(
+                !matches!(
+                    error.kind(),
+                    ErrorKind::InvalidSubcommand | ErrorKind::UnknownArgument
+                ),
+                "the recovery parser must validate these arguments: {args:?}: {error}"
+            );
+        }
+
+        fn exceptional_args() -> Vec<&'static str> {
+            vec![
+                "member",
+                "recover",
+                "7",
+                "--owner-terminated",
+                "--expected-run-id",
+                "11",
+                "--expected-owner-epoch",
+                "3",
+                "--evidence-ref",
+                "audit:owner-termination",
+            ]
+        }
+
+        fn argument_id(command: &clap::Command, long: &str) -> String {
+            command
+                .get_arguments()
+                .find(|argument| argument.get_long() == Some(long))
+                .unwrap_or_else(|| panic!("recovery defines --{long}"))
+                .get_id()
+                .to_string()
+        }
+
+        #[test]
+        fn runner_recovery_entry_ordinary_parser_accepts_positive_member_ids_and_json_selection() {
+            for member_id in ["1", "481", "9223372036854775807"] {
+                for json in [false, true] {
+                    let mut args = vec!["cafleet", "member", "recover", member_id];
+                    if json {
+                        args.push("--json");
+                    }
+                    assert!(CliArgs::try_parse_from(&args).is_ok(), "{args:?}");
+                }
+            }
+        }
+
+        #[test]
+        fn runner_recovery_entry_member_ids_require_positive_assigned_integers() {
+            recognized_usage_error(&["member", "recover", "--json"]);
+            for member_id in ["", "0", "-1", "unknown", "1.0", "9223372036854775808"] {
+                recognized_usage_error(&["member", "recover", "--json", "--", member_id]);
+            }
+        }
+
+        #[test]
+        fn runner_recovery_entry_full_attestation_preserves_snapshot_reference_and_json_values() {
+            for (member_id, run_id, epoch) in [
+                ("7", "11", "3"),
+                (
+                    "9223372036854775807",
+                    "9223372036854775807",
+                    "9223372036854775807",
+                ),
+            ] {
+                for reference in [
+                    "audit:owner-termination",
+                    "  audit:owner 世界 '$x' `literal`  ",
+                ] {
+                    for json in [false, true] {
+                        let mut args = vec![
+                            "cafleet",
+                            "member",
+                            "recover",
+                            member_id,
+                            "--owner-terminated",
+                            "--expected-run-id",
+                            run_id,
+                            "--expected-owner-epoch",
+                            epoch,
+                            "--evidence-ref",
+                            reference,
+                        ];
+                        if json {
+                            args.push("--json");
+                        }
+                        assert!(CliArgs::try_parse_from(&args).is_ok(), "{args:?}");
+                        let command = CliArgs::command();
+                        let recovery = command
+                            .find_subcommand("member")
+                            .unwrap()
+                            .find_subcommand("recover")
+                            .unwrap();
+                        let member_key = recovery
+                            .get_arguments()
+                            .find(|argument| argument.get_index() == Some(1))
+                            .expect("recover has its member positional argument")
+                            .get_id()
+                            .to_string();
+                        let run_key = argument_id(recovery, "expected-run-id");
+                        let epoch_key = argument_id(recovery, "expected-owner-epoch");
+                        let reference_key = argument_id(recovery, "evidence-ref");
+                        let terminated_key = argument_id(recovery, "owner-terminated");
+                        let json_key = argument_id(recovery, "json");
+                        let matches = command.try_get_matches_from(args).unwrap();
+                        let recovery = matches
+                            .subcommand_matches("member")
+                            .unwrap()
+                            .subcommand_matches("recover")
+                            .unwrap();
+                        assert_eq!(
+                            recovery.get_one::<i64>(&member_key),
+                            Some(&member_id.parse::<i64>().unwrap())
+                        );
+                        assert_eq!(
+                            recovery.get_one::<i64>(&run_key),
+                            Some(&run_id.parse::<i64>().unwrap())
+                        );
+                        assert_eq!(
+                            recovery.get_one::<i64>(&epoch_key),
+                            Some(&epoch.parse::<i64>().unwrap())
+                        );
+                        assert_eq!(
+                            recovery.get_one::<String>(&reference_key).unwrap(),
+                            reference
+                        );
+                        assert!(recovery.get_flag(&terminated_key));
+                        assert_eq!(recovery.get_flag(&json_key), json);
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn runner_recovery_entry_attestation_options_require_the_complete_group() {
+            let options: [&[&str]; 4] = [
+                &["--owner-terminated"],
+                &["--expected-run-id", "11"],
+                &["--expected-owner-epoch", "3"],
+                &["--evidence-ref", "audit:owner-termination"],
+            ];
+            for selected in 1_u8..15 {
+                let mut args = vec!["member", "recover", "7", "--json"];
+                for (index, option) in options.iter().enumerate() {
+                    if selected & (1 << index) != 0 {
+                        args.extend_from_slice(option);
+                    }
+                }
+                recognized_usage_error(&args);
+            }
+        }
+
+        #[test]
+        fn runner_recovery_entry_attestation_snapshot_ids_require_positive_integers() {
+            for option in ["--expected-run-id", "--expected-owner-epoch"] {
+                for invalid in ["", "0", "-1", "unknown", "1.0", "9223372036854775808"] {
+                    let mut args = exceptional_args();
+                    let index = args.iter().position(|value| *value == option).unwrap();
+                    args.drain(index..index + 2);
+                    let literal = format!("{option}={invalid}");
+                    args.push(&literal);
+                    recognized_usage_error(&args);
+                }
+            }
+        }
+
+        #[test]
+        fn runner_recovery_entry_attestation_rejects_blank_references_and_missing_option_values() {
+            for reference in ["", " ", "\t\n"] {
+                let mut args = exceptional_args();
+                *args.last_mut().unwrap() = reference;
+                recognized_usage_error(&args);
+            }
+            for option in [
+                "--expected-run-id",
+                "--expected-owner-epoch",
+                "--evidence-ref",
+            ] {
+                let mut args = exceptional_args();
+                let index = args.iter().position(|value| *value == option).unwrap();
+                args.drain(index..index + 2);
+                args.push(option);
+                recognized_usage_error(&args);
+            }
+        }
+
+        fn unwrapped_registry() -> (TempDir, Settings, Connection, i64) {
+            let dir = tempfile::Builder::new()
+                .prefix(".p194-entry-")
+                .tempdir_in("/tmp")
+                .unwrap();
+            let mut conn = migrated_conn(&dir);
+            let (fleet, _) = create_fleet_fixture(&mut conn, "recovery-entry");
+            let member_id = crate::broker::register_member(
+                &mut conn,
+                fleet,
+                "unwrapped",
+                "recovery lookup fixture",
+                None,
+            )
+            .unwrap()
+            .member_id;
+            let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()), None);
+            (dir, settings, conn, member_id)
+        }
+
+        #[test]
+        fn runner_recovery_entry_unwrapped_member_fails_explicitly_before_registry_or_artifact_mutation()
+         {
+            let (dir, settings, conn, member_id) = unwrapped_registry();
+            let path = std::path::PathBuf::from(conn.path().unwrap());
+            drop(conn);
+            let before = std::fs::read(&path).unwrap();
+            let mut names = std::fs::read_dir(dir.path())
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .collect::<Vec<_>>();
+            names.sort();
+            let id = member_id.to_string();
+            let args =
+                CliArgs::try_parse_from(["cafleet", "member", "recover", &id, "--json"]).unwrap();
+            let result = dispatch(&settings, args.command);
+            let error = match result {
+                Ok(()) => panic!("an unwrapped member has no recorded run to recover"),
+                Err(error) => error,
+            };
+            let message = error.message();
+            assert!(message.contains("run"), "{message}");
+            assert!(message.contains(&id), "{message}");
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+            let mut after_names = std::fs::read_dir(dir.path())
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .collect::<Vec<_>>();
+            after_names.sort();
+            assert_eq!(after_names, names);
+        }
+
+        #[test]
+        fn runner_recovery_entry_refused_registry_preserves_wal_database_and_sidecar_bytes() {
+            for mutation in [
+                "PRAGMA application_id=42",
+                "ALTER TABLE member_runtime_events RENAME COLUMN notification_state TO broken",
+                "ALTER TABLE runtime_database_identity RENAME COLUMN instance_id TO broken",
+            ] {
+                let (_dir, settings, conn, member_id) = unwrapped_registry();
+                conn.execute_batch("PRAGMA journal_mode=WAL").unwrap();
+                conn.execute_batch(mutation).unwrap();
+                conn.execute_batch("BEGIN; SELECT * FROM refinery_schema_history")
+                    .unwrap();
+                let before = wal_snapshot(std::path::Path::new(conn.path().unwrap()));
+                let id = member_id.to_string();
+                let args = CliArgs::try_parse_from(["cafleet", "member", "recover", &id, "--json"])
+                    .unwrap();
+                assert!(dispatch(&settings, args.command).is_err());
+                for (path, bytes) in before {
+                    assert_eq!(std::fs::read(&path).unwrap(), bytes, "{mutation}: {path:?}");
+                }
+            }
+        }
     }
 }

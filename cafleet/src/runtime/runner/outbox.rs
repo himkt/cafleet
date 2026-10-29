@@ -452,7 +452,7 @@ impl<S: OutboxIo> Outbox<S> {
 mod tests {
     use super::*;
     use crate::broker::runtime::*;
-    use crate::runtime::runner::writer::contract_tests::{
+    use crate::runtime::runner::writer::test_support::{
         WriterFixture, deadline, frame, independent_frames, transition,
     };
     use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
@@ -898,7 +898,7 @@ mod tests {
 
     mod effective_policy_frames {
         use super::*;
-        use crate::runtime::runner::writer::contract_tests::effective_policy::{
+        use crate::runtime::runner::writer::test_support::{
             frame_bodies, observation, unavailable,
         };
 

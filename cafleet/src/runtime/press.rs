@@ -127,7 +127,7 @@ pub(crate) fn press_member_with_mux(
 }
 
 #[cfg(test)]
-mod contract_tests {
+mod tests {
     use super::*;
     use crate::broker::records::Placement;
     use crate::config::Settings;

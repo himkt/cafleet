@@ -242,9 +242,9 @@ mod tests {
     use super::*;
     use crate::broker::runtime as storage;
     use crate::coding_agent::ProfileCatalog;
-    use crate::runtime::runner::writer::contract_tests::support::Clock;
-    use crate::runtime::runner::writer::contract_tests::worker::{self, Hooks, Release};
-    use crate::runtime::runner::writer::contract_tests::{WriterFixture, transition};
+    use crate::runtime::runner::writer::test_support::{
+        Clock, Hooks, Release, WriterFixture, start, transition,
+    };
     use std::cell::{Cell, RefCell};
     use std::io::{self, ErrorKind};
     use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
@@ -526,7 +526,7 @@ mod tests {
             .unwrap();
             let hooks = Arc::new(Hooks::default());
             let release = Some(Release(hooks.clone()));
-            let mut writer = worker::start(&fixture, hooks.clone());
+            let mut writer = start(&fixture, hooks.clone());
             writer.set_deadline(until);
             Self {
                 fixture,

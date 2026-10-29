@@ -357,7 +357,7 @@ impl TmuxMultiplexer {
 #[cfg(test)]
 mod tests {
 
-    use crate::multiplexer::recording::{FakeRunner, argv, env, run_event, sleep_event};
+    use crate::multiplexer::test_support::{FakeRunner, argv, env, run_event, sleep_event};
     use crate::multiplexer::{Lead, MultiplexerContext, RunError, TmuxMultiplexer};
 
     fn tmux_env() -> std::collections::HashMap<String, String> {
@@ -525,7 +525,7 @@ mod tests {
         assert_eq!(events.len(), 3, "{events:?}");
         assert_eq!(events[1], sleep_event(1.0));
         for event in events {
-            if let crate::multiplexer::recording::Event::Run { timeout_secs, .. } = event {
+            if let crate::multiplexer::test_support::Event::Run { timeout_secs, .. } = event {
                 assert!(timeout_secs.is_some_and(|seconds| seconds > 0 && seconds <= 5));
             }
         }

@@ -673,162 +673,164 @@ impl Drop for PtySession {
     }
 }
 
-#[cfg(all(test, target_os = "macos"))]
-mod setuid_member_tests {
-    use super::*;
-    use std::os::unix::fs::MetadataExt;
-
-    const SETUID_HELPER: &str = "/usr/bin/su";
-
-    fn read_until(session: &mut PtySession, needles: &[&str]) -> String {
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let mut output = Vec::new();
-        loop {
-            let mut bytes = [0u8; 1024];
-            match session.try_read(&mut bytes) {
-                Ok(count) => output.extend_from_slice(&bytes[..count]),
-                Err(cause) if cause.kind() == io::ErrorKind::WouldBlock => {}
-                Err(cause) => panic!("setuid fixture PTY read failed: {cause}"),
-            }
-            let text = String::from_utf8_lossy(&output).into_owned();
-            if needles.iter().all(|needle| text.contains(needle)) {
-                return text;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "setuid fixture output lacks {needles:?}: {text:?}"
-            );
-            std::thread::sleep(Duration::from_millis(5));
-        }
-    }
-
-    #[test]
-    fn refresh_pins_a_live_setuid_root_group_member_and_cleanup_terminates_it() {
-        let helper = std::fs::metadata(SETUID_HELPER).unwrap();
-        assert!(
-            helper.uid() == 0 && helper.mode() & 0o4000 != 0,
-            "{SETUID_HELPER} must be setuid root for this fixture"
-        );
-        let mut session = PtySession::prepare(TerminalSize { rows: 24, cols: 80 }).unwrap();
-        let spec = SpawnSpec {
-            argv: vec![
-                "/bin/sh".into(),
-                "-c".into(),
-                format!("{SETUID_HELPER} root </dev/tty & printf 'helper=%s\\n' \"$!\"; wait"),
-            ],
-            cwd: PathBuf::from("/"),
-            environment: Vec::new(),
-            evidence_policy: serde_json::json!({"mode":"metadata"}),
-            size: TerminalSize { rows: 24, cols: 80 },
-        };
-        let native = session.spawn(&spec).unwrap();
-        let output = read_until(&mut session, &["helper=", "Password:"]);
-        let pid = output
-            .lines()
-            .find_map(|line| line.trim().strip_prefix("helper="))
-            .expect("fixture announces the helper PID")
-            .trim()
-            .parse::<i64>()
-            .unwrap();
-        assert_eq!(
-            session.try_wait().unwrap(),
-            None,
-            "a live setuid-root group member keeps the ownership refresh readable"
-        );
-        let helper = ProcessIdentity::read(pid)
-            .unwrap()
-            .expect("the prompting setuid helper is live");
-        assert_eq!(session.owned.get(&pid), Some(&helper));
-        assert_eq!(session.owned.get(&native.pid), Some(&native));
-        let outcome = session.shutdown(ShutdownClock::new(Instant::now()));
-        assert_eq!(outcome.cleanup_state, CleanupState::Complete, "{outcome:?}");
-        assert!(outcome.native_exit.is_some(), "{outcome:?}");
-        assert!(
-            ProcessIdentity::read(pid).unwrap().is_none() || stopped(pid).unwrap(),
-            "the setuid helper remains running after cleanup"
-        );
-    }
-}
-
 #[cfg(test)]
-mod mechanisms_tests {
-    use std::fs::File;
-    use std::io::ErrorKind;
-    use std::time::{Duration, Instant};
-
+mod tests {
     use super::*;
-    use crate::runtime::runner::test_support::Fixture;
+    #[cfg(all(test, target_os = "macos"))]
+    mod setuid_member_tests {
+        use super::*;
+        use std::os::unix::fs::MetadataExt;
 
-    struct OwnedPty {
-        session: PtySession,
-        clock: Option<ShutdownClock>,
-        cleaned: bool,
-    }
+        const SETUID_HELPER: &str = "/usr/bin/su";
 
-    impl OwnedPty {
-        fn prepare(size: TerminalSize) -> Self {
-            Self {
-                session: PtySession::prepare(size).unwrap(),
-                clock: None,
-                cleaned: false,
+        fn read_until(session: &mut PtySession, needles: &[&str]) -> String {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut output = Vec::new();
+            loop {
+                let mut bytes = [0u8; 1024];
+                match session.try_read(&mut bytes) {
+                    Ok(count) => output.extend_from_slice(&bytes[..count]),
+                    Err(cause) if cause.kind() == io::ErrorKind::WouldBlock => {}
+                    Err(cause) => panic!("setuid fixture PTY read failed: {cause}"),
+                }
+                let text = String::from_utf8_lossy(&output).into_owned();
+                if needles.iter().all(|needle| text.contains(needle)) {
+                    return text;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "setuid fixture output lacks {needles:?}: {text:?}"
+                );
+                std::thread::sleep(Duration::from_millis(5));
             }
         }
-        fn stop(&mut self) -> ShutdownOutcome {
-            let clock = *self
-                .clock
-                .get_or_insert_with(|| ShutdownClock::new(Instant::now()));
-            let outcome = self.session.shutdown(clock);
-            self.cleaned = outcome.cleanup_state == CleanupState::Complete;
-            outcome
+
+        #[test]
+        fn refresh_pins_a_live_setuid_root_group_member_and_cleanup_terminates_it() {
+            let helper = std::fs::metadata(SETUID_HELPER).unwrap();
+            assert!(
+                helper.uid() == 0 && helper.mode() & 0o4000 != 0,
+                "{SETUID_HELPER} must be setuid root for this fixture"
+            );
+            let mut session = PtySession::prepare(TerminalSize { rows: 24, cols: 80 }).unwrap();
+            let spec = SpawnSpec {
+                argv: vec![
+                    "/bin/sh".into(),
+                    "-c".into(),
+                    format!("{SETUID_HELPER} root </dev/tty & printf 'helper=%s\\n' \"$!\"; wait"),
+                ],
+                cwd: PathBuf::from("/"),
+                environment: Vec::new(),
+                evidence_policy: serde_json::json!({"mode":"metadata"}),
+                size: TerminalSize { rows: 24, cols: 80 },
+            };
+            let native = session.spawn(&spec).unwrap();
+            let output = read_until(&mut session, &["helper=", "Password:"]);
+            let pid = output
+                .lines()
+                .find_map(|line| line.trim().strip_prefix("helper="))
+                .expect("fixture announces the helper PID")
+                .trim()
+                .parse::<i64>()
+                .unwrap();
+            assert_eq!(
+                session.try_wait().unwrap(),
+                None,
+                "a live setuid-root group member keeps the ownership refresh readable"
+            );
+            let helper = ProcessIdentity::read(pid)
+                .unwrap()
+                .expect("the prompting setuid helper is live");
+            assert_eq!(session.owned.get(&pid), Some(&helper));
+            assert_eq!(session.owned.get(&native.pid), Some(&native));
+            let outcome = session.shutdown(ShutdownClock::new(Instant::now()));
+            assert_eq!(outcome.cleanup_state, CleanupState::Complete, "{outcome:?}");
+            assert!(outcome.native_exit.is_some(), "{outcome:?}");
+            assert!(
+                ProcessIdentity::read(pid).unwrap().is_none() || stopped(pid).unwrap(),
+                "the setuid helper remains running after cleanup"
+            );
         }
     }
+    mod mechanisms_tests {
+        use std::fs::File;
+        use std::io::ErrorKind;
+        use std::time::{Duration, Instant};
 
-    impl Drop for OwnedPty {
-        fn drop(&mut self) {
-            if !self.cleaned {
-                let _ = self.stop();
-            }
+        use super::*;
+        use crate::runtime::runner::test_support::Fixture;
+
+        struct OwnedPty {
+            session: PtySession,
+            clock: Option<ShutdownClock>,
+            cleaned: bool,
         }
-    }
 
-    fn collect(session: &mut PtySession) -> (Vec<u8>, ChildExit) {
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let mut output = Vec::new();
-        let mut status = None;
-        loop {
-            let mut bytes = [0u8; 4096];
-            match (session.try_read(&mut bytes), status) {
-                (Ok(0), Some(exit)) => return (output, exit),
-                (Ok(count), _) => output.extend_from_slice(&bytes[..count]),
-                (Err(error), _) if error.kind() == ErrorKind::WouldBlock => {}
-                (Err(error), _) => panic!("fixture PTY read failed: {error}"),
-            }
-            if status.is_none() {
-                status = session.try_wait().unwrap();
-            }
-            if let Some(exit) = status {
-                let mut tail = [0u8; 4096];
-                match session.try_read(&mut tail) {
-                    Ok(0) => return (output, exit),
-                    Ok(count) => output.extend_from_slice(&tail[..count]),
-                    Err(error) if error.kind() == ErrorKind::WouldBlock => {}
-                    Err(error) => panic!("fixture PTY tail failed: {error}"),
+        impl OwnedPty {
+            fn prepare(size: TerminalSize) -> Self {
+                Self {
+                    session: PtySession::prepare(size).unwrap(),
+                    clock: None,
+                    cleaned: false,
                 }
             }
-            assert!(
-                Instant::now() < deadline,
-                "fixture child did not exit/drain within its deadline"
-            );
-            std::thread::sleep(Duration::from_millis(5));
+            fn stop(&mut self) -> ShutdownOutcome {
+                let clock = *self
+                    .clock
+                    .get_or_insert_with(|| ShutdownClock::new(Instant::now()));
+                let outcome = self.session.shutdown(clock);
+                self.cleaned = outcome.cleanup_state == CleanupState::Complete;
+                outcome
+            }
         }
-    }
 
-    #[test]
-    fn runner_real_pty_prepares_without_a_child_and_spawns_literal_argv_cwd_and_environment_once() {
-        let fixture = Fixture::new();
-        let literal = "assignment '$x' `backticks` 世界";
-        let mut spec = fixture.spec();
-        spec.argv = vec![
+        impl Drop for OwnedPty {
+            fn drop(&mut self) {
+                if !self.cleaned {
+                    let _ = self.stop();
+                }
+            }
+        }
+
+        fn collect(session: &mut PtySession) -> (Vec<u8>, ChildExit) {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut output = Vec::new();
+            let mut status = None;
+            loop {
+                let mut bytes = [0u8; 4096];
+                match (session.try_read(&mut bytes), status) {
+                    (Ok(0), Some(exit)) => return (output, exit),
+                    (Ok(count), _) => output.extend_from_slice(&bytes[..count]),
+                    (Err(error), _) if error.kind() == ErrorKind::WouldBlock => {}
+                    (Err(error), _) => panic!("fixture PTY read failed: {error}"),
+                }
+                if status.is_none() {
+                    status = session.try_wait().unwrap();
+                }
+                if let Some(exit) = status {
+                    let mut tail = [0u8; 4096];
+                    match session.try_read(&mut tail) {
+                        Ok(0) => return (output, exit),
+                        Ok(count) => output.extend_from_slice(&tail[..count]),
+                        Err(error) if error.kind() == ErrorKind::WouldBlock => {}
+                        Err(error) => panic!("fixture PTY tail failed: {error}"),
+                    }
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "fixture child did not exit/drain within its deadline"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+
+        #[test]
+        fn runner_real_pty_prepares_without_a_child_and_spawns_literal_argv_cwd_and_environment_once()
+         {
+            let fixture = Fixture::new();
+            let literal = "assignment '$x' `backticks` 世界";
+            let mut spec = fixture.spec();
+            spec.argv = vec![
             "/bin/sh".into(),
             "-c".into(),
             "printf '%s\\n' \"$1\"; printf '%s\\n' \"$CAFLEET_FIXTURE_MARKER\"; if [ \"$PATH\" = \"$2\" ]; then printf 'inherited-path\\n'; else exit 11; fi; pwd; exit 7".into(),
@@ -836,507 +838,534 @@ mod mechanisms_tests {
             literal.into(),
             std::env::var("PATH").expect("the fixture inherits the host execution path"),
         ];
-        spec.environment
-            .push(("CAFLEET_FIXTURE_MARKER".into(), "literal-marker-$x".into()));
-        let mut owned = OwnedPty::prepare(spec.size);
-        assert_eq!(owned.session.try_wait().unwrap(), None);
-        let process = owned.session.spawn(&spec).unwrap();
-        assert!(process.pid > 0);
-        assert!(!process.start_identity.is_empty());
-        assert!(owned.session.spawn(&spec).is_err());
-        let (output, status) = collect(&mut owned.session);
-        let cleanup = owned.stop();
-        assert_eq!(cleanup.cleanup_state, CleanupState::Complete);
-        let text = String::from_utf8(output).unwrap();
-        assert!(text.contains(literal));
-        assert!(text.contains("literal-marker-$x"));
-        assert!(text.contains("inherited-path"));
-        assert!(text.contains(std::fs::canonicalize(&spec.cwd).unwrap().to_str().unwrap()));
-        assert_eq!(status, ChildExit::Code(7));
-    }
+            spec.environment
+                .push(("CAFLEET_FIXTURE_MARKER".into(), "literal-marker-$x".into()));
+            let mut owned = OwnedPty::prepare(spec.size);
+            assert_eq!(owned.session.try_wait().unwrap(), None);
+            let process = owned.session.spawn(&spec).unwrap();
+            assert!(process.pid > 0);
+            assert!(!process.start_identity.is_empty());
+            assert!(owned.session.spawn(&spec).is_err());
+            let (output, status) = collect(&mut owned.session);
+            let cleanup = owned.stop();
+            assert_eq!(cleanup.cleanup_state, CleanupState::Complete);
+            let text = String::from_utf8(output).unwrap();
+            assert!(text.contains(literal));
+            assert!(text.contains("literal-marker-$x"));
+            assert!(text.contains("inherited-path"));
+            assert!(text.contains(std::fs::canonicalize(&spec.cwd).unwrap().to_str().unwrap()));
+            assert_eq!(status, ChildExit::Code(7));
+        }
 
-    #[test]
-    fn runner_real_pty_child_receives_the_forwarded_config_location() {
-        let fixture = Fixture::new();
-        let mut spec = fixture.spec();
-        let database_url = spec
-            .environment
-            .iter()
-            .find(|(key, _)| key == "CAFLEET_DATABASE_URL")
-            .map(|(_, value)| value.clone())
-            .expect("fixture spawn environment carries the database URL");
-        spec.environment = crate::coding_agent::CodingAgent::Opencode
-            .spawn_environment(&database_url, &|name| {
-                (name == "OPENCODE_CONFIG_DIR").then(|| "/cfg/open code".to_string())
-            })
-            .unwrap();
-        spec.argv = vec![
+        #[test]
+        fn runner_real_pty_child_receives_the_forwarded_config_location() {
+            let fixture = Fixture::new();
+            let mut spec = fixture.spec();
+            let database_url = spec
+                .environment
+                .iter()
+                .find(|(key, _)| key == "CAFLEET_DATABASE_URL")
+                .map(|(_, value)| value.clone())
+                .expect("fixture spawn environment carries the database URL");
+            spec.environment = crate::coding_agent::CodingAgent::Opencode
+                .spawn_environment(&database_url, &|name| {
+                    (name == "OPENCODE_CONFIG_DIR").then(|| "/cfg/open code".to_string())
+                })
+                .unwrap();
+            spec.argv = vec![
             "/bin/sh".into(),
             "-c".into(),
             "printf 'config=%s\\n' \"$OPENCODE_CONFIG_DIR\"; printf 'database=%s\\n' \"$CAFLEET_DATABASE_URL\"".into(),
         ];
-        let mut owned = OwnedPty::prepare(spec.size);
-        owned.session.spawn(&spec).unwrap();
-        let (output, status) = collect(&mut owned.session);
-        assert_eq!(owned.stop().cleanup_state, CleanupState::Complete);
-        let text = String::from_utf8(output).unwrap();
-        assert!(text.contains("config=/cfg/open code"), "{text:?}");
-        assert!(
-            text.contains(&format!("database={database_url}")),
-            "{text:?}"
-        );
-        assert_eq!(status, ChildExit::Code(0));
-    }
-
-    #[test]
-    fn runner_real_pty_retains_the_numeric_native_signal_exit() {
-        let fixture = Fixture::new();
-        let mut spec = fixture.spec();
-        spec.argv = vec!["/bin/sh".into(), "-c".into(), "kill -TERM $$".into()];
-        let mut owned = OwnedPty::prepare(spec.size);
-        owned.session.spawn(&spec).unwrap();
-        let (_, status) = collect(&mut owned.session);
-        assert_eq!(owned.stop().cleanup_state, CleanupState::Complete);
-        assert_eq!(status, ChildExit::Signal(15));
-    }
-
-    fn assert_terminal_settings_restored(terminal: &File, expected: &nix::sys::termios::Termios) {
-        let actual = nix::sys::termios::tcgetattr(terminal).unwrap();
-        #[cfg(target_os = "macos")]
-        {
-            // macOS sets PENDIN when TCSANOW restores canonical input.
-            let mut actual: nix::libc::termios = actual.into();
-            let mut expected: nix::libc::termios = expected.clone().into();
-            actual.c_lflag &= !nix::libc::PENDIN;
-            expected.c_lflag &= !nix::libc::PENDIN;
-            assert_eq!(actual, expected);
-        }
-        #[cfg(not(target_os = "macos"))]
-        assert_eq!(&actual, expected);
-    }
-
-    #[test]
-    fn runner_real_raw_terminal_guard_restores_only_its_owned_fixture_terminal() {
-        let pty = nix::pty::openpty(None, None).unwrap();
-        let terminal = File::from(pty.slave);
-        let before = nix::sys::termios::tcgetattr(&terminal).unwrap();
-        let mut guard = RawTerminalGuard::enter(&terminal).unwrap();
-        let raw = nix::sys::termios::tcgetattr(&terminal).unwrap();
-        assert!(
-            !raw.local_flags
-                .contains(nix::sys::termios::LocalFlags::ICANON)
-        );
-        assert!(
-            !raw.local_flags
-                .contains(nix::sys::termios::LocalFlags::ECHO)
-        );
-        guard.restore().unwrap();
-        assert_terminal_settings_restored(&terminal, &before);
-        guard.restore().unwrap();
-        assert_terminal_settings_restored(&terminal, &before);
-        {
-            let _guard = RawTerminalGuard::enter(&terminal).unwrap();
-        }
-        assert_terminal_settings_restored(&terminal, &before);
-        let unwound = std::panic::catch_unwind(|| {
-            let _guard = RawTerminalGuard::enter(&terminal).unwrap();
-            panic!("fixture unwind");
-        });
-        assert!(unwound.is_err());
-        assert_terminal_settings_restored(&terminal, &before);
-        drop(pty.master);
-    }
-
-    fn read_until(session: &mut PtySession, needle: &str) -> String {
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let mut output = Vec::new();
-        loop {
-            let mut bytes = [0u8; 1024];
-            match session.try_read(&mut bytes) {
-                Ok(count) => output.extend_from_slice(&bytes[..count]),
-                Err(error) if error.kind() == ErrorKind::WouldBlock => {}
-                Err(error) => panic!("fixture PTY read failed: {error}"),
-            }
-            let text = String::from_utf8(output.clone()).unwrap();
-            if text.contains(needle) {
-                return text;
-            }
+            let mut owned = OwnedPty::prepare(spec.size);
+            owned.session.spawn(&spec).unwrap();
+            let (output, status) = collect(&mut owned.session);
+            assert_eq!(owned.stop().cleanup_state, CleanupState::Complete);
+            let text = String::from_utf8(output).unwrap();
+            assert!(text.contains("config=/cfg/open code"), "{text:?}");
             assert!(
-                Instant::now() < deadline,
-                "fixture did not publish {needle}"
+                text.contains(&format!("database={database_url}")),
+                "{text:?}"
             );
-            std::thread::sleep(Duration::from_millis(5));
+            assert_eq!(status, ChildExit::Code(0));
         }
-    }
 
-    #[test]
-    fn runner_real_shutdown_kills_and_reaps_a_term_ignoring_owned_child_within_the_shared_deadline()
-    {
-        let fixture = Fixture::new();
-        let mut spec = fixture.spec();
-        spec.argv = vec![
-            "/bin/sh".into(),
-            "-c".into(),
-            "trap '' TERM; printf 'ready\\n'; while :; do sleep 1; done".into(),
-        ];
-        let mut owned = OwnedPty::prepare(spec.size);
-        let process = owned.session.spawn(&spec).unwrap();
-        read_until(&mut owned.session, "ready");
-        let start = Instant::now();
-        let outcome = owned.stop();
-        assert!(start.elapsed() < Duration::from_millis(4750));
-        assert_eq!(outcome.cleanup_state, CleanupState::Complete, "{outcome:?}");
-        assert_eq!(outcome.native_exit, Some(ChildExit::Signal(9)));
-        assert_eq!(
-            nix::sys::wait::waitpid(
-                nix::unistd::Pid::from_raw(i32::try_from(process.pid).unwrap()),
-                Some(nix::sys::wait::WaitPidFlag::WNOHANG)
-            ),
-            Err(nix::errno::Errno::ECHILD)
-        );
-    }
+        #[test]
+        fn runner_real_pty_retains_the_numeric_native_signal_exit() {
+            let fixture = Fixture::new();
+            let mut spec = fixture.spec();
+            spec.argv = vec!["/bin/sh".into(), "-c".into(), "kill -TERM $$".into()];
+            let mut owned = OwnedPty::prepare(spec.size);
+            owned.session.spawn(&spec).unwrap();
+            let (_, status) = collect(&mut owned.session);
+            assert_eq!(owned.stop().cleanup_state, CleanupState::Complete);
+            assert_eq!(status, ChildExit::Signal(15));
+        }
 
-    fn report_fixture_process(stage: &str, pid: i64) {
-        let identity = ProcessIdentity::read(pid);
-        let pid32 = match i32::try_from(pid) {
-            Ok(pid) => pid,
-            Err(error) => {
-                eprintln!(
-                    "shutdown fixture stage={stage}; pid={pid}; identity={identity:?}; PID conversion={error}"
-                );
-                return;
+        fn assert_terminal_settings_restored(
+            terminal: &File,
+            expected: &nix::sys::termios::Termios,
+        ) {
+            let actual = nix::sys::termios::tcgetattr(terminal).unwrap();
+            #[cfg(target_os = "macos")]
+            {
+                // macOS sets PENDIN when TCSANOW restores canonical input.
+                let mut actual: nix::libc::termios = actual.into();
+                let mut expected: nix::libc::termios = expected.clone().into();
+                actual.c_lflag &= !nix::libc::PENDIN;
+                expected.c_lflag &= !nix::libc::PENDIN;
+                assert_eq!(actual, expected);
             }
-        };
-        let group = nix::unistd::getpgid(Some(nix::unistd::Pid::from_raw(pid32)));
-        eprintln!(
-            "shutdown fixture stage={stage}; pid={pid}; identity={identity:?}; group={group:?}"
-        );
-        #[cfg(target_os = "macos")]
-        {
-            use libproc::libproc::{bsd_info::BSDInfo, proc_pid::pidinfo};
-            let status = pidinfo::<BSDInfo>(pid32, 0).map(|info| {
-                (
-                    info.pbi_ppid,
-                    info.pbi_pgid,
-                    info.pbi_status,
-                    info.pbi_start_tvsec,
-                    info.pbi_start_tvusec,
-                )
+            #[cfg(not(target_os = "macos"))]
+            assert_eq!(&actual, expected);
+        }
+
+        #[test]
+        fn runner_real_raw_terminal_guard_restores_only_its_owned_fixture_terminal() {
+            let pty = nix::pty::openpty(None, None).unwrap();
+            let terminal = File::from(pty.slave);
+            let before = nix::sys::termios::tcgetattr(&terminal).unwrap();
+            let mut guard = RawTerminalGuard::enter(&terminal).unwrap();
+            let raw = nix::sys::termios::tcgetattr(&terminal).unwrap();
+            assert!(
+                !raw.local_flags
+                    .contains(nix::sys::termios::LocalFlags::ICANON)
+            );
+            assert!(
+                !raw.local_flags
+                    .contains(nix::sys::termios::LocalFlags::ECHO)
+            );
+            guard.restore().unwrap();
+            assert_terminal_settings_restored(&terminal, &before);
+            guard.restore().unwrap();
+            assert_terminal_settings_restored(&terminal, &before);
+            {
+                let _guard = RawTerminalGuard::enter(&terminal).unwrap();
+            }
+            assert_terminal_settings_restored(&terminal, &before);
+            let unwound = std::panic::catch_unwind(|| {
+                let _guard = RawTerminalGuard::enter(&terminal).unwrap();
+                panic!("fixture unwind");
             });
-            eprintln!(
-                "shutdown fixture stage={stage}; pid={pid}; BSD parent/group/status/start_sec/start_usec={status:?}"
+            assert!(unwound.is_err());
+            assert_terminal_settings_restored(&terminal, &before);
+            drop(pty.master);
+        }
+
+        fn read_until(session: &mut PtySession, needle: &str) -> String {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut output = Vec::new();
+            loop {
+                let mut bytes = [0u8; 1024];
+                match session.try_read(&mut bytes) {
+                    Ok(count) => output.extend_from_slice(&bytes[..count]),
+                    Err(error) if error.kind() == ErrorKind::WouldBlock => {}
+                    Err(error) => panic!("fixture PTY read failed: {error}"),
+                }
+                let text = String::from_utf8(output.clone()).unwrap();
+                if text.contains(needle) {
+                    return text;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "fixture did not publish {needle}"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+
+        #[test]
+        fn runner_real_shutdown_kills_and_reaps_a_term_ignoring_owned_child_within_the_shared_deadline()
+         {
+            let fixture = Fixture::new();
+            let mut spec = fixture.spec();
+            spec.argv = vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                "trap '' TERM; printf 'ready\\n'; while :; do sleep 1; done".into(),
+            ];
+            let mut owned = OwnedPty::prepare(spec.size);
+            let process = owned.session.spawn(&spec).unwrap();
+            read_until(&mut owned.session, "ready");
+            let start = Instant::now();
+            let outcome = owned.stop();
+            assert!(start.elapsed() < Duration::from_millis(4750));
+            assert_eq!(outcome.cleanup_state, CleanupState::Complete, "{outcome:?}");
+            assert_eq!(outcome.native_exit, Some(ChildExit::Signal(9)));
+            assert_eq!(
+                nix::sys::wait::waitpid(
+                    nix::unistd::Pid::from_raw(i32::try_from(process.pid).unwrap()),
+                    Some(nix::sys::wait::WaitPidFlag::WNOHANG)
+                ),
+                Err(nix::errno::Errno::ECHILD)
             );
         }
-        #[cfg(not(target_os = "macos"))]
-        {
-            use std::io::Read;
-            let status = File::open(format!("/proc/{pid}/stat")).and_then(|file| {
-                let mut text = String::new();
-                file.take(4096).read_to_string(&mut text)?;
-                Ok(text)
-            });
-            eprintln!("shutdown fixture stage={stage}; pid={pid}; bounded process stat={status:?}");
-        }
-    }
 
-    fn report_fixture_group(stage: &str, native: &ProcessIdentity, descendant: i32) {
-        eprintln!(
-            "shutdown fixture stage={stage}; original native={native:?}; announced descendant={descendant}"
-        );
-        report_fixture_process(stage, native.pid);
-        report_fixture_process(stage, i64::from(descendant));
-        #[cfg(target_os = "macos")]
-        {
-            nix::errno::Errno::clear();
-            let members =
-                libproc::processes::pids_by_type(libproc::processes::ProcFilter::ByProgramGroup {
-                    pgrpid: u32::try_from(native.pid).expect("spawned native PID is positive"),
-                });
-            match members {
-                Ok(members) => {
+        fn report_fixture_process(stage: &str, pid: i64) {
+            let identity = ProcessIdentity::read(pid);
+            let pid32 = match i32::try_from(pid) {
+                Ok(pid) => pid,
+                Err(error) => {
                     eprintln!(
-                        "shutdown fixture stage={stage}; observed original group members={}; diagnostic record limit=16",
-                        members.len()
+                        "shutdown fixture stage={stage}; pid={pid}; identity={identity:?}; PID conversion={error}"
                     );
-                    for pid in members.into_iter().take(16) {
-                        report_fixture_process(stage, i64::from(pid));
+                    return;
+                }
+            };
+            let group = nix::unistd::getpgid(Some(nix::unistd::Pid::from_raw(pid32)));
+            eprintln!(
+                "shutdown fixture stage={stage}; pid={pid}; identity={identity:?}; group={group:?}"
+            );
+            #[cfg(target_os = "macos")]
+            {
+                use libproc::libproc::{bsd_info::BSDInfo, proc_pid::pidinfo};
+                let status = pidinfo::<BSDInfo>(pid32, 0).map(|info| {
+                    (
+                        info.pbi_ppid,
+                        info.pbi_pgid,
+                        info.pbi_status,
+                        info.pbi_start_tvsec,
+                        info.pbi_start_tvusec,
+                    )
+                });
+                eprintln!(
+                    "shutdown fixture stage={stage}; pid={pid}; BSD parent/group/status/start_sec/start_usec={status:?}"
+                );
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                use std::io::Read;
+                let status = File::open(format!("/proc/{pid}/stat")).and_then(|file| {
+                    let mut text = String::new();
+                    file.take(4096).read_to_string(&mut text)?;
+                    Ok(text)
+                });
+                eprintln!(
+                    "shutdown fixture stage={stage}; pid={pid}; bounded process stat={status:?}"
+                );
+            }
+        }
+
+        fn report_fixture_group(stage: &str, native: &ProcessIdentity, descendant: i32) {
+            eprintln!(
+                "shutdown fixture stage={stage}; original native={native:?}; announced descendant={descendant}"
+            );
+            report_fixture_process(stage, native.pid);
+            report_fixture_process(stage, i64::from(descendant));
+            #[cfg(target_os = "macos")]
+            {
+                nix::errno::Errno::clear();
+                let members = libproc::processes::pids_by_type(
+                    libproc::processes::ProcFilter::ByProgramGroup {
+                        pgrpid: u32::try_from(native.pid).expect("spawned native PID is positive"),
+                    },
+                );
+                match members {
+                    Ok(members) => {
+                        eprintln!(
+                            "shutdown fixture stage={stage}; observed original group members={}; diagnostic record limit=16",
+                            members.len()
+                        );
+                        for pid in members.into_iter().take(16) {
+                            report_fixture_process(stage, i64::from(pid));
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "shutdown fixture stage={stage}; original group enumeration={error}"
+                        )
                     }
                 }
-                Err(error) => {
-                    eprintln!("shutdown fixture stage={stage}; original group enumeration={error}")
+            }
+        }
+
+        #[test]
+        fn runner_real_shutdown_closes_a_slave_retaining_descendant_and_preserves_the_native_zero_exit()
+         {
+            let fixture = Fixture::new();
+            let ready = fixture._dir.path().join("descendant-ready");
+            let mut spec = fixture.spec();
+            // The descendant must not fork: a new group member appearing during KILL enumeration is unpinned.
+            spec.argv=vec!["/bin/sh".into(),"-c".into(),r#"/bin/sh -c 'trap "" TERM HUP; printf ready > "$1"; exec /bin/sleep 600' descendant "$1" & descendant=$!; while [ ! -f "$1" ]; do sleep 0.01; done; printf 'descendant=%s\n' "$descendant"; exit 0"#.into(),"parent".into(),ready.to_str().unwrap().into()];
+            let mut owned = OwnedPty::prepare(spec.size);
+            let native = owned.session.spawn(&spec).unwrap();
+            eprintln!("shutdown fixture spawned native={native:?}");
+            let output = read_until(&mut owned.session, "\n");
+            let pid = output
+                .lines()
+                .find_map(|line| line.trim().strip_prefix("descendant="))
+                .unwrap()
+                .trim()
+                .parse::<i32>()
+                .unwrap();
+            report_fixture_group("descendant announced before exit polling", &native, pid);
+            let wait_deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let waited = owned.session.try_wait();
+                if waited.is_err() {
+                    eprintln!("shutdown fixture native wait error={waited:?}");
+                    report_fixture_group("native wait error", &native, pid);
                 }
+                if let Some(exit) = waited.unwrap() {
+                    eprintln!("shutdown fixture observed native exit={exit:?}");
+                    report_fixture_group("native exit observed", &native, pid);
+                    assert_eq!(exit, ChildExit::Code(0));
+                    break;
+                }
+                assert!(Instant::now() < wait_deadline);
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            let start = Instant::now();
+            let outcome = owned.stop();
+            let elapsed = start.elapsed();
+            eprintln!("shutdown fixture cleanup elapsed={elapsed:?}; outcome={outcome:?}");
+            report_fixture_group("cleanup returned", &native, pid);
+            assert!(elapsed < Duration::from_millis(4750));
+            assert_eq!(outcome.native_exit, Some(ChildExit::Code(0)));
+            assert_eq!(outcome.cleanup_state, CleanupState::Complete, "{outcome:?}");
+            let observation = std::process::Command::new("/bin/ps")
+                .args(["-o", "stat=", "-p", &pid.to_string()])
+                .output()
+                .unwrap();
+            assert!(observation.status.success() || observation.status.code() == Some(1));
+            let state = String::from_utf8(observation.stdout).unwrap();
+            assert!(
+                state.trim().is_empty() || state.trim().starts_with('Z'),
+                "owned descendant remains running: {state}"
+            );
+        }
+    }
+    mod ownership_refresh_tests {
+        use super::*;
+        use std::collections::VecDeque;
+
+        const GROUP: i32 = 41001;
+        const A: i64 = 41001;
+        const B: i64 = 41002;
+        const C: i64 = 41003;
+
+        #[derive(Debug)]
+        enum Step {
+            Members(i32, Result<Vec<i64>>),
+            Identity(i64, Result<Option<ProcessIdentity>>),
+            Stopped(i64, Result<bool>),
+        }
+
+        struct Script(VecDeque<Step>);
+
+        impl Script {
+            fn new(steps: impl IntoIterator<Item = Step>) -> Self {
+                Self(steps.into_iter().collect())
+            }
+
+            fn next(&mut self) -> Step {
+                self.0.pop_front().expect("every observation is scripted")
+            }
+
+            fn finished(self) {
+                assert!(self.0.is_empty(), "unused observations: {:?}", self.0);
             }
         }
-    }
 
-    #[test]
-    fn runner_real_shutdown_closes_a_slave_retaining_descendant_and_preserves_the_native_zero_exit()
-    {
-        let fixture = Fixture::new();
-        let ready = fixture._dir.path().join("descendant-ready");
-        let mut spec = fixture.spec();
-        // The descendant must not fork: a new group member appearing during KILL enumeration is unpinned.
-        spec.argv=vec!["/bin/sh".into(),"-c".into(),r#"/bin/sh -c 'trap "" TERM HUP; printf ready > "$1"; exec /bin/sleep 600' descendant "$1" & descendant=$!; while [ ! -f "$1" ]; do sleep 0.01; done; printf 'descendant=%s\n' "$descendant"; exit 0"#.into(),"parent".into(),ready.to_str().unwrap().into()];
-        let mut owned = OwnedPty::prepare(spec.size);
-        let native = owned.session.spawn(&spec).unwrap();
-        eprintln!("shutdown fixture spawned native={native:?}");
-        let output = read_until(&mut owned.session, "\n");
-        let pid = output
-            .lines()
-            .find_map(|line| line.trim().strip_prefix("descendant="))
-            .unwrap()
-            .trim()
-            .parse::<i32>()
-            .unwrap();
-        report_fixture_group("descendant announced before exit polling", &native, pid);
-        let wait_deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            let waited = owned.session.try_wait();
-            if waited.is_err() {
-                eprintln!("shutdown fixture native wait error={waited:?}");
-                report_fixture_group("native wait error", &native, pid);
+        impl ProcessObservations for Script {
+            fn members(&mut self, group: i32) -> Result<Vec<i64>> {
+                let Step::Members(expected, result) = self.next() else {
+                    panic!("expected the next scripted operation to enumerate group {group}");
+                };
+                assert_eq!(group, expected);
+                result
             }
-            if let Some(exit) = waited.unwrap() {
-                eprintln!("shutdown fixture observed native exit={exit:?}");
-                report_fixture_group("native exit observed", &native, pid);
-                assert_eq!(exit, ChildExit::Code(0));
-                break;
+
+            fn identity(&mut self, pid: i64) -> Result<Option<ProcessIdentity>> {
+                let Step::Identity(expected, result) = self.next() else {
+                    panic!("expected the next scripted operation to identify PID {pid}");
+                };
+                assert_eq!(pid, expected);
+                result
             }
-            assert!(Instant::now() < wait_deadline);
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        let start = Instant::now();
-        let outcome = owned.stop();
-        let elapsed = start.elapsed();
-        eprintln!("shutdown fixture cleanup elapsed={elapsed:?}; outcome={outcome:?}");
-        report_fixture_group("cleanup returned", &native, pid);
-        assert!(elapsed < Duration::from_millis(4750));
-        assert_eq!(outcome.native_exit, Some(ChildExit::Code(0)));
-        assert_eq!(outcome.cleanup_state, CleanupState::Complete, "{outcome:?}");
-        let observation = std::process::Command::new("/bin/ps")
-            .args(["-o", "stat=", "-p", &pid.to_string()])
-            .output()
-            .unwrap();
-        assert!(observation.status.success() || observation.status.code() == Some(1));
-        let state = String::from_utf8(observation.stdout).unwrap();
-        assert!(
-            state.trim().is_empty() || state.trim().starts_with('Z'),
-            "owned descendant remains running: {state}"
-        );
-    }
-}
 
-#[cfg(test)]
-mod ownership_refresh_tests {
-    use super::*;
-    use std::collections::VecDeque;
-
-    const GROUP: i32 = 41001;
-    const A: i64 = 41001;
-    const B: i64 = 41002;
-    const C: i64 = 41003;
-
-    #[derive(Debug)]
-    enum Step {
-        Members(i32, Result<Vec<i64>>),
-        Identity(i64, Result<Option<ProcessIdentity>>),
-        Stopped(i64, Result<bool>),
-    }
-
-    struct Script(VecDeque<Step>);
-
-    impl Script {
-        fn new(steps: impl IntoIterator<Item = Step>) -> Self {
-            Self(steps.into_iter().collect())
+            fn stopped(&mut self, pid: i64) -> Result<bool> {
+                let Step::Stopped(expected, result) = self.next() else {
+                    panic!("expected the next scripted operation to inspect stopped PID {pid}");
+                };
+                assert_eq!(pid, expected);
+                result
+            }
         }
 
-        fn next(&mut self) -> Step {
-            self.0.pop_front().expect("every observation is scripted")
+        fn identity(pid: i64) -> ProcessIdentity {
+            ProcessIdentity {
+                pid,
+                start_identity: format!("synthetic-generation-{pid}"),
+            }
         }
 
-        fn finished(self) {
-            assert!(self.0.is_empty(), "unused observations: {:?}", self.0);
+        fn replacement(pid: i64) -> ProcessIdentity {
+            ProcessIdentity {
+                pid,
+                start_identity: format!("synthetic-replacement-{pid}"),
+            }
         }
-    }
 
-    impl ProcessObservations for Script {
-        fn members(&mut self, group: i32) -> Result<Vec<i64>> {
-            let Step::Members(expected, result) = self.next() else {
-                panic!("expected the next scripted operation to enumerate group {group}");
+        fn members(pids: &[i64]) -> Step {
+            Step::Members(GROUP, Ok(pids.to_vec()))
+        }
+
+        fn observed(process: ProcessIdentity) -> Step {
+            Step::Identity(process.pid, Ok(Some(process)))
+        }
+
+        fn absent(pid: i64) -> Step {
+            Step::Identity(pid, Ok(None))
+        }
+
+        fn active(process: ProcessIdentity) -> [Step; 2] {
+            [
+                observed(process.clone()),
+                Step::Stopped(process.pid, Ok(false)),
+            ]
+        }
+
+        fn inert(pinned: &[ProcessIdentity]) -> PtySession {
+            let origin = Instant::now();
+            let mut session = PtySession {
+                master: None,
+                slave: None,
+                io: None,
+                child: None,
+                native: None,
+                exit: Some(ChildExit::Code(0)),
+                owned: pinned.iter().cloned().map(|p| (p.pid, p)).collect(),
+                group_closed: false,
+                shutdown_clock: Some(
+                    ShutdownClock::new(origin).clipped(origin + Duration::from_millis(900)),
+                ),
             };
-            assert_eq!(group, expected);
-            result
+            session.native = Some(identity(A));
+            session
         }
 
-        fn identity(&mut self, pid: i64) -> Result<Option<ProcessIdentity>> {
-            let Step::Identity(expected, result) = self.next() else {
-                panic!("expected the next scripted operation to identify PID {pid}");
-            };
-            assert_eq!(pid, expected);
-            result
+        fn boundaries(session: &PtySession) -> [Instant; 3] {
+            let clock = session
+                .shutdown_clock
+                .expect("fixture retains its original clock");
+            [
+                clock.child_deadline(),
+                clock.display_deadline(),
+                clock.storage_deadline(),
+            ]
         }
 
-        fn stopped(&mut self, pid: i64) -> Result<bool> {
-            let Step::Stopped(expected, result) = self.next() else {
-                panic!("expected the next scripted operation to inspect stopped PID {pid}");
-            };
-            assert_eq!(pid, expected);
-            result
+        fn assert_state(
+            session: &PtySession,
+            pinned: &BTreeMap<i64, ProcessIdentity>,
+            closed: bool,
+            clock: [Instant; 3],
+        ) {
+            assert_eq!(&session.owned, pinned);
+            assert_eq!(session.group_closed, closed);
+            assert_eq!(boundaries(session), clock);
+            assert!(session.master.is_none());
+            assert!(session.slave.is_none());
+            assert!(session.io.is_none());
+            assert!(session.child.is_none());
+            assert_eq!(session.native, Some(identity(A)));
+            assert_eq!(session.exit, Some(ChildExit::Code(0)));
         }
-    }
 
-    fn identity(pid: i64) -> ProcessIdentity {
-        ProcessIdentity {
-            pid,
-            start_identity: format!("synthetic-generation-{pid}"),
+        fn assert_error(actual: Result<()>, expected: &CafleetError) {
+            let actual = actual.expect_err("the exact scripted failure must propagate");
+            assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
         }
-    }
 
-    fn replacement(pid: i64) -> ProcessIdentity {
-        ProcessIdentity {
-            pid,
-            start_identity: format!("synthetic-replacement-{pid}"),
+        fn baseline() {
+            let mut session = inert(&[identity(A)]);
+            let clock = boundaries(&session);
+            let mut script = Script::new(
+                [members(&[A, B])]
+                    .into_iter()
+                    .chain(active(identity(A)))
+                    .chain(active(identity(B)))
+                    .chain([observed(identity(A))]),
+            );
+            session.refresh_owned_with(&mut script).unwrap();
+            script.finished();
+            let expected = [(A, identity(A)), (B, identity(B))].into_iter().collect();
+            assert_state(&session, &expected, false, clock);
         }
-    }
 
-    fn members(pids: &[i64]) -> Step {
-        Step::Members(GROUP, Ok(pids.to_vec()))
-    }
+        fn false_fold(recheck: Step) -> Script {
+            Script::new(
+                [members(&[A])]
+                    .into_iter()
+                    .chain(active(identity(A)))
+                    .chain([absent(A), recheck]),
+            )
+        }
 
-    fn observed(process: ProcessIdentity) -> Step {
-        Step::Identity(process.pid, Ok(Some(process)))
-    }
+        #[test]
+        fn step5_refresh_matching_anchor_adopts_only_original_active_generations() {
+            baseline();
+        }
 
-    fn absent(pid: i64) -> Step {
-        Step::Identity(pid, Ok(None))
-    }
+        #[test]
+        fn step5_refresh_initial_empty_closes_with_one_query_and_retains_map_and_clock() {
+            let mut session = inert(&[identity(A)]);
+            let pinned = session.owned.clone();
+            let clock = boundaries(&session);
+            let mut script = Script::new([members(&[])]);
+            session.refresh_owned_with(&mut script).unwrap();
+            script.finished();
+            assert_state(&session, &pinned, true, clock);
+        }
 
-    fn active(process: ProcessIdentity) -> [Step; 2] {
-        [
-            observed(process.clone()),
-            Step::Stopped(process.pid, Ok(false)),
-        ]
-    }
-
-    fn inert(pinned: &[ProcessIdentity]) -> PtySession {
-        let origin = Instant::now();
-        let mut session = PtySession {
-            master: None,
-            slave: None,
-            io: None,
-            child: None,
-            native: None,
-            exit: Some(ChildExit::Code(0)),
-            owned: pinned.iter().cloned().map(|p| (p.pid, p)).collect(),
-            group_closed: false,
-            shutdown_clock: Some(
-                ShutdownClock::new(origin).clipped(origin + Duration::from_millis(900)),
-            ),
-        };
-        session.native = Some(identity(A));
-        session
-    }
-
-    fn boundaries(session: &PtySession) -> [Instant; 3] {
-        let clock = session
-            .shutdown_clock
-            .expect("fixture retains its original clock");
-        [
-            clock.child_deadline(),
-            clock.display_deadline(),
-            clock.storage_deadline(),
-        ]
-    }
-
-    fn assert_state(
-        session: &PtySession,
-        pinned: &BTreeMap<i64, ProcessIdentity>,
-        closed: bool,
-        clock: [Instant; 3],
-    ) {
-        assert_eq!(&session.owned, pinned);
-        assert_eq!(session.group_closed, closed);
-        assert_eq!(boundaries(session), clock);
-        assert!(session.master.is_none());
-        assert!(session.slave.is_none());
-        assert!(session.io.is_none());
-        assert!(session.child.is_none());
-        assert_eq!(session.native, Some(identity(A)));
-        assert_eq!(session.exit, Some(ChildExit::Code(0)));
-    }
-
-    fn assert_error(actual: Result<()>, expected: &CafleetError) {
-        let actual = actual.expect_err("the exact scripted failure must propagate");
-        assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
-    }
-
-    fn baseline() {
-        let mut session = inert(&[identity(A)]);
-        let clock = boundaries(&session);
-        let mut script = Script::new(
-            [members(&[A, B])]
-                .into_iter()
-                .chain(active(identity(A)))
-                .chain(active(identity(B)))
-                .chain([observed(identity(A))]),
-        );
-        session.refresh_owned_with(&mut script).unwrap();
-        script.finished();
-        let expected = [(A, identity(A)), (B, identity(B))].into_iter().collect();
-        assert_state(&session, &expected, false, clock);
-    }
-
-    fn false_fold(recheck: Step) -> Script {
-        Script::new(
-            [members(&[A])]
-                .into_iter()
-                .chain(active(identity(A)))
-                .chain([absent(A), recheck]),
-        )
-    }
-
-    #[test]
-    fn step5_refresh_matching_anchor_adopts_only_original_active_generations() {
-        baseline();
-    }
-
-    #[test]
-    fn step5_refresh_initial_empty_closes_with_one_query_and_retains_map_and_clock() {
-        let mut session = inert(&[identity(A)]);
-        let pinned = session.owned.clone();
-        let clock = boundaries(&session);
-        let mut script = Script::new([members(&[])]);
-        session.refresh_owned_with(&mut script).unwrap();
-        script.finished();
-        assert_state(&session, &pinned, true, clock);
-    }
-
-    #[test]
-    fn step5_refresh_stale_active_then_fresh_empty_closes_without_adoption_or_more_reads() {
-        baseline();
-        let mut session = inert(&[identity(A)]);
-        let pinned = session.owned.clone();
-        let clock = boundaries(&session);
-        let mut script = Script::new(
-            [members(&[A, B])]
-                .into_iter()
-                .chain(active(identity(A)))
-                .chain(active(identity(B)))
-                .chain([absent(A), members(&[])]),
-        );
-        session.refresh_owned_with(&mut script).unwrap();
-        script.finished();
-        assert_state(&session, &pinned, true, clock);
-    }
-
-    #[test]
-    fn step5_refresh_fresh_remaining_members_preserve_exact_refusal_without_adoption() {
-        for fresh in [vec![B], vec![A], vec![B, C]] {
+        #[test]
+        fn step5_refresh_stale_active_then_fresh_empty_closes_without_adoption_or_more_reads() {
             baseline();
             let mut session = inert(&[identity(A)]);
             let pinned = session.owned.clone();
             let clock = boundaries(&session);
-            let mut script = false_fold(members(&fresh));
+            let mut script = Script::new(
+                [members(&[A, B])]
+                    .into_iter()
+                    .chain(active(identity(A)))
+                    .chain(active(identity(B)))
+                    .chain([absent(A), members(&[])]),
+            );
+            session.refresh_owned_with(&mut script).unwrap();
+            script.finished();
+            assert_state(&session, &pinned, true, clock);
+        }
+
+        #[test]
+        fn step5_refresh_fresh_remaining_members_preserve_exact_refusal_without_adoption() {
+            for fresh in [vec![B], vec![A], vec![B, C]] {
+                baseline();
+                let mut session = inert(&[identity(A)]);
+                let pinned = session.owned.clone();
+                let clock = boundaries(&session);
+                let mut script = false_fold(members(&fresh));
+                assert_error(
+                    session.refresh_owned_with(&mut script),
+                    &error("owned process group lost its pinned generation"),
+                );
+                script.finished();
+                assert_state(&session, &pinned, false, clock);
+            }
+        }
+
+        #[test]
+        fn step5_refresh_same_pid_replacement_cannot_supply_an_anchor_or_be_adopted() {
+            baseline();
+            let mut session = inert(&[identity(A)]);
+            let pinned = session.owned.clone();
+            let clock = boundaries(&session);
+            let mut script = Script::new(
+                [members(&[A])]
+                    .into_iter()
+                    .chain(active(identity(A)))
+                    .chain([observed(replacement(A)), members(&[A])]),
+            );
             assert_error(
                 session.refresh_owned_with(&mut script),
                 &error("owned process group lost its pinned generation"),
@@ -1344,199 +1373,180 @@ mod ownership_refresh_tests {
             script.finished();
             assert_state(&session, &pinned, false, clock);
         }
-    }
 
-    #[test]
-    fn step5_refresh_same_pid_replacement_cannot_supply_an_anchor_or_be_adopted() {
-        baseline();
-        let mut session = inert(&[identity(A)]);
-        let pinned = session.owned.clone();
-        let clock = boundaries(&session);
-        let mut script = Script::new(
-            [members(&[A])]
-                .into_iter()
-                .chain(active(identity(A)))
-                .chain([observed(replacement(A)), members(&[A])]),
-        );
-        assert_error(
-            session.refresh_owned_with(&mut script),
-            &error("owned process group lost its pinned generation"),
-        );
-        script.finished();
-        assert_state(&session, &pinned, false, clock);
-    }
+        #[test]
+        fn step5_refresh_original_observation_errors_stop_at_the_actual_first_failure() {
+            let failure = CafleetError::DatabaseBusy("synthetic-original-observation".into());
+            for prefix in [
+                vec![Step::Members(GROUP, Err(failure.clone()))],
+                vec![members(&[A, B]), Step::Identity(A, Err(failure.clone()))],
+                vec![
+                    members(&[A, B]),
+                    observed(identity(A)),
+                    Step::Stopped(A, Err(failure.clone())),
+                ],
+                vec![
+                    members(&[A]),
+                    observed(identity(A)),
+                    Step::Stopped(A, Ok(false)),
+                    Step::Identity(A, Err(failure.clone())),
+                ],
+            ] {
+                baseline();
+                let mut session = inert(&[identity(A)]);
+                let pinned = session.owned.clone();
+                let clock = boundaries(&session);
+                let mut script = Script::new(prefix);
+                assert_error(session.refresh_owned_with(&mut script), &failure);
+                script.finished();
+                assert_state(&session, &pinned, false, clock);
+            }
+        }
 
-    #[test]
-    fn step5_refresh_original_observation_errors_stop_at_the_actual_first_failure() {
-        let failure = CafleetError::DatabaseBusy("synthetic-original-observation".into());
-        for prefix in [
-            vec![Step::Members(GROUP, Err(failure.clone()))],
-            vec![members(&[A, B]), Step::Identity(A, Err(failure.clone()))],
-            vec![
-                members(&[A, B]),
-                observed(identity(A)),
-                Step::Stopped(A, Err(failure.clone())),
-            ],
-            vec![
-                members(&[A]),
-                observed(identity(A)),
-                Step::Stopped(A, Ok(false)),
-                Step::Identity(A, Err(failure.clone())),
-            ],
-        ] {
+        #[test]
+        fn step5_refresh_anchor_fold_still_reads_later_pins_after_a_match_and_propagates_error() {
             baseline();
-            let mut session = inert(&[identity(A)]);
+            let failure = CafleetError::Value("synthetic-later-anchor-read".into());
+            let mut session = inert(&[identity(A), identity(C)]);
             let pinned = session.owned.clone();
             let clock = boundaries(&session);
-            let mut script = Script::new(prefix);
+            let mut script = Script::new(
+                [members(&[A])]
+                    .into_iter()
+                    .chain(active(identity(A)))
+                    .chain([
+                        observed(identity(A)),
+                        Step::Identity(C, Err(failure.clone())),
+                    ]),
+            );
             assert_error(session.refresh_owned_with(&mut script), &failure);
             script.finished();
             assert_state(&session, &pinned, false, clock);
         }
-    }
 
-    #[test]
-    fn step5_refresh_anchor_fold_still_reads_later_pins_after_a_match_and_propagates_error() {
-        baseline();
-        let failure = CafleetError::Value("synthetic-later-anchor-read".into());
-        let mut session = inert(&[identity(A), identity(C)]);
-        let pinned = session.owned.clone();
-        let clock = boundaries(&session);
-        let mut script = Script::new(
-            [members(&[A])]
-                .into_iter()
-                .chain(active(identity(A)))
-                .chain([
-                    observed(identity(A)),
-                    Step::Identity(C, Err(failure.clone())),
-                ]),
-        );
-        assert_error(session.refresh_owned_with(&mut script), &failure);
-        script.finished();
-        assert_state(&session, &pinned, false, clock);
-    }
-
-    #[test]
-    fn step5_refresh_fresh_query_error_propagates_without_closure_or_followup_reads() {
-        baseline();
-        let failure = CafleetError::DatabaseBusy("synthetic-fresh-enumeration".into());
-        let mut session = inert(&[identity(A)]);
-        let pinned = session.owned.clone();
-        let clock = boundaries(&session);
-        let mut script = false_fold(Step::Members(GROUP, Err(failure.clone())));
-        assert_error(session.refresh_owned_with(&mut script), &failure);
-        script.finished();
-        assert_state(&session, &pinned, false, clock);
-    }
-
-    #[test]
-    fn step5_refresh_anchored_pid_mismatch_retains_fence_without_fresh_query_fallback() {
-        baseline();
-        let mut session = inert(&[identity(A), identity(C)]);
-        let pinned = session.owned.clone();
-        let clock = boundaries(&session);
-        let mut script = Script::new(
-            [members(&[A, C])]
-                .into_iter()
-                .chain(active(replacement(A)))
-                .chain(active(identity(C)))
-                .chain([observed(replacement(A)), observed(identity(C))]),
-        );
-        assert_error(
-            session.refresh_owned_with(&mut script),
-            &error("owned PID was replaced by another generation"),
-        );
-        script.finished();
-        assert_state(&session, &pinned, false, clock);
-    }
-
-    #[cfg(target_os = "linux")]
-    mod reaped_stat {
-        use super::*;
-
-        fn reaped_stat_read() -> io::Error {
-            let mut child = std::process::Command::new("true").spawn().unwrap();
-            let mut stat = std::fs::File::open(format!("/proc/{}/stat", child.id())).unwrap();
-            child.wait().unwrap();
-            let mut text = String::new();
-            stat.read_to_string(&mut text)
-                .expect_err("a stat read of a reaped task fails")
+        #[test]
+        fn step5_refresh_fresh_query_error_propagates_without_closure_or_followup_reads() {
+            baseline();
+            let failure = CafleetError::DatabaseBusy("synthetic-fresh-enumeration".into());
+            let mut session = inert(&[identity(A)]);
+            let pinned = session.owned.clone();
+            let clock = boundaries(&session);
+            let mut script = false_fold(Step::Members(GROUP, Err(failure.clone())));
+            assert_error(session.refresh_owned_with(&mut script), &failure);
+            script.finished();
+            assert_state(&session, &pinned, false, clock);
         }
 
         #[test]
-        fn runner_process_stat_read_of_a_task_reaped_after_open_fails_with_esrch() {
-            assert_eq!(reaped_stat_read().raw_os_error(), Some(nix::libc::ESRCH));
-        }
-
-        #[test]
-        fn runner_process_esrch_stat_read_is_a_vanished_process() {
-            assert_eq!(
-                ProcessIdentity::from_stat(B, Err(reaped_stat_read())).unwrap(),
-                None
+        fn step5_refresh_anchored_pid_mismatch_retains_fence_without_fresh_query_fallback() {
+            baseline();
+            let mut session = inert(&[identity(A), identity(C)]);
+            let pinned = session.owned.clone();
+            let clock = boundaries(&session);
+            let mut script = Script::new(
+                [members(&[A, C])]
+                    .into_iter()
+                    .chain(active(replacement(A)))
+                    .chain(active(identity(C)))
+                    .chain([observed(replacement(A)), observed(identity(C))]),
             );
-            assert!(stopped_from_stat(Err(reaped_stat_read())).unwrap());
-        }
-
-        #[test]
-        fn runner_process_other_stat_read_errors_still_fail() {
-            let denied = || io::Error::from_raw_os_error(nix::libc::EACCES);
-            assert!(ProcessIdentity::from_stat(B, Err(denied())).is_err());
-            assert!(stopped_from_stat(Err(denied())).is_err());
-        }
-
-        #[test]
-        fn runner_process_live_stat_text_keeps_its_identity_and_running_state() {
-            let pid = i64::from(std::process::id());
-            let text = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
-            assert_eq!(
-                ProcessIdentity::from_stat(pid, Ok(text.clone())).unwrap(),
-                Some(ProcessIdentity::current().unwrap())
+            assert_error(
+                session.refresh_owned_with(&mut script),
+                &error("owned PID was replaced by another generation"),
             );
-            assert!(!stopped_from_stat(Ok(text)).unwrap());
+            script.finished();
+            assert_state(&session, &pinned, false, clock);
         }
 
-        #[test]
-        fn runner_refresh_member_reaped_between_enumeration_and_stat_read_keeps_the_runner_alive() {
-            for vanished in [
-                vec![Step::Identity(
-                    B,
-                    ProcessIdentity::from_stat(B, Err(reaped_stat_read())),
-                )],
-                vec![
-                    observed(identity(B)),
-                    Step::Stopped(B, stopped_from_stat(Err(reaped_stat_read()))),
-                ],
-            ] {
-                let mut session = inert(&[identity(A)]);
-                let clock = boundaries(&session);
-                let mut script = Script::new(
-                    [members(&[A, B])]
-                        .into_iter()
-                        .chain(active(identity(A)))
-                        .chain(vanished)
-                        .chain([observed(identity(A))]),
+        #[cfg(target_os = "linux")]
+        mod reaped_stat {
+            use super::*;
+
+            fn reaped_stat_read() -> io::Error {
+                let mut child = std::process::Command::new("true").spawn().unwrap();
+                let mut stat = std::fs::File::open(format!("/proc/{}/stat", child.id())).unwrap();
+                child.wait().unwrap();
+                let mut text = String::new();
+                stat.read_to_string(&mut text)
+                    .expect_err("a stat read of a reaped task fails")
+            }
+
+            #[test]
+            fn runner_process_stat_read_of_a_task_reaped_after_open_fails_with_esrch() {
+                assert_eq!(reaped_stat_read().raw_os_error(), Some(nix::libc::ESRCH));
+            }
+
+            #[test]
+            fn runner_process_esrch_stat_read_is_a_vanished_process() {
+                assert_eq!(
+                    ProcessIdentity::from_stat(B, Err(reaped_stat_read())).unwrap(),
+                    None
                 );
-                session.refresh_owned_with(&mut script).unwrap();
-                script.finished();
-                let pinned = [(A, identity(A))].into_iter().collect();
-                assert_state(&session, &pinned, false, clock);
+                assert!(stopped_from_stat(Err(reaped_stat_read())).unwrap());
+            }
+
+            #[test]
+            fn runner_process_other_stat_read_errors_still_fail() {
+                let denied = || io::Error::from_raw_os_error(nix::libc::EACCES);
+                assert!(ProcessIdentity::from_stat(B, Err(denied())).is_err());
+                assert!(stopped_from_stat(Err(denied())).is_err());
+            }
+
+            #[test]
+            fn runner_process_live_stat_text_keeps_its_identity_and_running_state() {
+                let pid = i64::from(std::process::id());
+                let text = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+                assert_eq!(
+                    ProcessIdentity::from_stat(pid, Ok(text.clone())).unwrap(),
+                    Some(ProcessIdentity::current().unwrap())
+                );
+                assert!(!stopped_from_stat(Ok(text)).unwrap());
+            }
+
+            #[test]
+            fn runner_refresh_member_reaped_between_enumeration_and_stat_read_keeps_the_runner_alive()
+             {
+                for vanished in [
+                    vec![Step::Identity(
+                        B,
+                        ProcessIdentity::from_stat(B, Err(reaped_stat_read())),
+                    )],
+                    vec![
+                        observed(identity(B)),
+                        Step::Stopped(B, stopped_from_stat(Err(reaped_stat_read()))),
+                    ],
+                ] {
+                    let mut session = inert(&[identity(A)]);
+                    let clock = boundaries(&session);
+                    let mut script = Script::new(
+                        [members(&[A, B])]
+                            .into_iter()
+                            .chain(active(identity(A)))
+                            .chain(vanished)
+                            .chain([observed(identity(A))]),
+                    );
+                    session.refresh_owned_with(&mut script).unwrap();
+                    script.finished();
+                    let pinned = [(A, identity(A))].into_iter().collect();
+                    assert_state(&session, &pinned, false, clock);
+                }
             }
         }
-    }
 
-    #[test]
-    fn step5_refresh_absent_and_stopped_members_close_before_any_anchor_fold() {
-        let mut session = inert(&[identity(A)]);
-        let pinned = session.owned.clone();
-        let clock = boundaries(&session);
-        let mut script = Script::new([
-            members(&[A, B]),
-            absent(A),
-            observed(identity(B)),
-            Step::Stopped(B, Ok(true)),
-        ]);
-        session.refresh_owned_with(&mut script).unwrap();
-        script.finished();
-        assert_state(&session, &pinned, true, clock);
+        #[test]
+        fn step5_refresh_absent_and_stopped_members_close_before_any_anchor_fold() {
+            let mut session = inert(&[identity(A)]);
+            let pinned = session.owned.clone();
+            let clock = boundaries(&session);
+            let mut script = Script::new([
+                members(&[A, B]),
+                absent(A),
+                observed(identity(B)),
+                Step::Stopped(B, Ok(true)),
+            ]);
+            session.refresh_owned_with(&mut script).unwrap();
+            script.finished();
+            assert_state(&session, &pinned, true, clock);
+        }
     }
 }
