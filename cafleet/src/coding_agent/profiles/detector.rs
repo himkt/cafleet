@@ -345,14 +345,31 @@ pub(super) mod inspection_tests {
         let replay = claude_observation(&native_screen(|_| {}, true));
         assert!(observation.fingerprint.is_some());
         assert!(replay.fingerprint == observation.fingerprint);
-        let other_version = ProfileCatalog::bundled().unwrap();
-        let unprofiled = Detector::new(&other_version, CodingAgent::Claude, Some("2.1.301"))
+        let catalog = ProfileCatalog::bundled().unwrap();
+        for version in ["2.1.301", "2.1.306"] {
+            let fallback = Detector::new(&catalog, CodingAgent::Claude, Some(version))
+                .unwrap()
+                .observe(&screen)
+                .unwrap();
+            assert_eq!(fallback.kind, observation.kind, "{version}");
+            assert_eq!(fallback.rule_id, observation.rule_id, "{version}");
+            assert_eq!(
+                fallback.profile_version, observation.profile_version,
+                "{version}"
+            );
+            assert_eq!(
+                fallback.raw_evidence["operation"], observation.raw_evidence["operation"],
+                "{version}"
+            );
+            assert_eq!(fallback.raw_evidence["native_version"], version);
+        }
+        let unprobed = Detector::new(&catalog, CodingAgent::Claude, None)
             .unwrap()
             .observe(&screen)
             .unwrap();
-        assert_eq!(unprofiled.kind, ObservationKind::Unknown);
-        assert_eq!(unprofiled.raw_evidence["operation"], Value::Null);
-        assert_eq!(unprofiled.raw_evidence["operation_rows"], Value::Null);
+        assert_eq!(unprobed.kind, ObservationKind::Unknown);
+        assert_eq!(unprobed.raw_evidence["operation"], Value::Null);
+        assert_eq!(unprobed.raw_evidence["operation_rows"], Value::Null);
     }
 
     #[test]
@@ -469,11 +486,16 @@ pub(super) mod inspection_tests {
             assert_eq!(pre_stage.raw_evidence["operation_rows"], 2);
         }
         let catalog = ProfileCatalog::bundled().unwrap();
-        let unprofiled = Detector::new(&catalog, CodingAgent::Claude, Some("2.1.301"))
+        let unprobed = Detector::new(&catalog, CodingAgent::Claude, None)
             .unwrap()
             .observe(&screen)
             .unwrap();
-        assert_eq!(unprofiled.kind, ObservationKind::Unknown);
+        assert_eq!(unprobed.kind, ObservationKind::Unknown);
+        let fallback = Detector::new(&catalog, CodingAgent::Claude, Some("2.1.306"))
+            .unwrap()
+            .observe(&screen)
+            .unwrap();
+        assert_ne!(fallback.kind, ObservationKind::Unknown);
     }
 
     #[test]
@@ -1041,11 +1063,24 @@ pub(super) mod inspection_tests {
         assert!(observation.fingerprint.is_some());
         assert!(replay.fingerprint == observation.fingerprint);
         let catalog = ProfileCatalog::bundled().unwrap();
-        let unprofiled = Detector::new(&catalog, CodingAgent::Codex, Some("0.162.0"))
+        for version in ["0.162.0", "0.164.0"] {
+            let fallback = Detector::new(&catalog, CodingAgent::Codex, Some(version))
+                .unwrap()
+                .observe(&screen)
+                .unwrap();
+            assert_eq!(fallback.kind, observation.kind, "{version}");
+            assert_eq!(fallback.rule_id, observation.rule_id, "{version}");
+            assert_eq!(
+                fallback.profile_version, observation.profile_version,
+                "{version}"
+            );
+            assert_eq!(fallback.raw_evidence["native_version"], version);
+        }
+        let unprobed = Detector::new(&catalog, CodingAgent::Codex, None)
             .unwrap()
             .observe(&screen)
             .unwrap();
-        assert_eq!(unprofiled.kind, ObservationKind::Unknown);
+        assert_eq!(unprobed.kind, ObservationKind::Unknown);
     }
 
     #[test]

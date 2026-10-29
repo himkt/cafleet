@@ -294,6 +294,7 @@ fn inputs(fixture: &Fixture) -> (PendingMemberSpec, RunSettings) {
             event_evidence: EventEvidence::Metadata,
             native_version: Some("0.163.0".into()),
             profile_version: None,
+            profile_match: None,
             coverage: Coverage::Unknown,
         },
     )
@@ -414,6 +415,61 @@ fn runner_creation_allocates_member_and_run_in_one_transaction_or_rolls_both_bac
             .unwrap(),
         1
     );
+}
+
+#[test]
+fn runner_creation_records_the_selected_profile_and_its_match_on_the_pending_run() {
+    use crate::broker::runtime::ProfileMatch;
+    for (native, profile, profile_match, stored) in [
+        (Some("0.163.0"), None, None, None),
+        (
+            Some("0.163.0"),
+            Some("codex-0.163.0-on-request-1"),
+            Some(ProfileMatch::Exact),
+            Some("exact"),
+        ),
+        (
+            Some("0.164.0"),
+            Some("codex-0.163.0-on-request-1"),
+            Some(ProfileMatch::Fallback),
+            Some("fallback"),
+        ),
+    ] {
+        let mut fixture = Fixture::new();
+        let (member, mut settings) = inputs(&fixture);
+        settings.native_version = native.map(str::to_owned);
+        settings.profile_version = profile.map(str::to_owned);
+        settings.profile_match = profile_match;
+        settings.coverage = if profile.is_some() {
+            Coverage::Tested
+        } else {
+            Coverage::Unknown
+        };
+        let pending = register_pending_run(
+            &mut fixture.conn,
+            &member,
+            &settings,
+            Instant::now() + Duration::from_secs(10),
+        )
+        .unwrap();
+        assert_eq!(pending.run.native_version.as_deref(), native);
+        assert_eq!(pending.run.profile_version.as_deref(), profile);
+        assert_eq!(pending.run.profile_match, profile_match);
+        let reread = storage::get_run(&fixture.conn, pending.run.run_id).unwrap();
+        assert_eq!(reread.profile_match, profile_match);
+        assert_eq!(
+            fixture
+                .conn
+                .query_row(
+                    "SELECT profile_match FROM member_runs WHERE run_id=?1",
+                    [pending.run.run_id],
+                    |row| row.get::<_, Option<String>>(0)
+                )
+                .unwrap()
+                .as_deref(),
+            stored
+        );
+    }
 }
 
 #[test]

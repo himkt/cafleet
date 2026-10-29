@@ -639,7 +639,7 @@ mod tests {
 
     mod native_version_probe {
         use super::*;
-        use crate::broker::runtime::Coverage;
+        use crate::broker::runtime::{Coverage, ProfileMatch};
         use std::os::unix::fs::PermissionsExt;
         use std::time::{Duration, Instant};
 
@@ -750,14 +750,9 @@ mod tests {
                     .profile_version
             );
             assert!(tested.profile_version.is_some());
+            assert_eq!(tested.profile_match, Some(ProfileMatch::Exact));
             assert_eq!(tested.coverage, Coverage::Tested);
             assert_eq!(tested.warning, None);
-            let unprofiled =
-                native_launch_identity(CodingAgent::Claude, Ok("2.1.301".into()), &catalog);
-            assert_eq!(unprofiled.native_version.as_deref(), Some("2.1.301"));
-            assert_eq!(unprofiled.profile_version, None);
-            assert_eq!(unprofiled.coverage, Coverage::Unknown);
-            assert_eq!(unprofiled.warning, None);
             let failed = native_launch_identity(
                 CodingAgent::Codex,
                 Err(CafleetError::App("probe exited with status 1".into())),
@@ -765,6 +760,7 @@ mod tests {
             );
             assert_eq!(failed.native_version, None);
             assert_eq!(failed.profile_version, None);
+            assert_eq!(failed.profile_match, None);
             assert_eq!(failed.coverage, Coverage::Unknown);
             assert_eq!(
                 failed.warning.as_deref(),
@@ -772,6 +768,56 @@ mod tests {
                     "Warning: native version unavailable for codex: probe exited with status 1; coverage unknown."
                 )
             );
+        }
+
+        #[test]
+        fn native_launch_identity_runs_an_unprofiled_version_under_the_newest_bundled_profile() {
+            let catalog = ProfileCatalog::bundled().unwrap();
+            for (backend, pinned, probes) in [
+                (CodingAgent::Claude, "2.1.302", ["2.1.306", "2.1.301"]),
+                (CodingAgent::Codex, "0.163.0", ["0.164.0", "0.162.0"]),
+                (CodingAgent::Opencode, "2.1.4", ["2.1.5", "2.1.3"]),
+            ] {
+                let exact = catalog.capabilities(backend, Some(pinned));
+                let profile = exact
+                    .profile_version
+                    .clone()
+                    .expect("each backend bundles a profile for its pinned version");
+                for probe in probes {
+                    let identity = native_launch_identity(backend, Ok(probe.into()), &catalog);
+                    assert_eq!(identity.native_version.as_deref(), Some(probe));
+                    assert_eq!(identity.profile_version.as_deref(), Some(profile.as_str()));
+                    assert_eq!(identity.profile_match, Some(ProfileMatch::Fallback));
+                    assert_eq!(identity.coverage, exact.detection, "{backend:?} {probe}");
+                    assert_eq!(identity.coverage, Coverage::Tested, "{backend:?} {probe}");
+                    assert_eq!(
+                        identity.warning,
+                        Some(format!(
+                            "Warning: no bundled profile for {} {probe}; using {profile} (profile_match=fallback).",
+                            backend.name()
+                        ))
+                    );
+                }
+                let exact_identity = native_launch_identity(backend, Ok(pinned.into()), &catalog);
+                assert_eq!(exact_identity.profile_match, Some(ProfileMatch::Exact));
+                assert_eq!(exact_identity.warning, None);
+            }
+        }
+
+        #[test]
+        fn native_launch_identity_without_any_profile_for_the_backend_records_unknown_silently() {
+            let catalog = ProfileCatalog::from_definitions(
+                &crate::coding_agent::profiles::inspection_fixture_definition(),
+            )
+            .unwrap();
+            for backend in [CodingAgent::Claude, CodingAgent::Opencode] {
+                let identity = native_launch_identity(backend, Ok("2.1.302".into()), &catalog);
+                assert_eq!(identity.native_version.as_deref(), Some("2.1.302"));
+                assert_eq!(identity.profile_version, None);
+                assert_eq!(identity.profile_match, None);
+                assert_eq!(identity.coverage, Coverage::Unknown);
+                assert_eq!(identity.warning, None);
+            }
         }
     }
 

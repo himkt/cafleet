@@ -1012,6 +1012,7 @@ mod tests {
                     event_evidence: EventEvidence::Metadata,
                     native_version: None,
                     profile_version: None,
+                    profile_match: None,
                     coverage: Coverage::Unknown,
                     owner_pid: process.pid,
                     owner_start_identity: process.start_identity.clone(),

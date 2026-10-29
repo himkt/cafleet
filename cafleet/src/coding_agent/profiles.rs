@@ -22,7 +22,7 @@ pub(crate) use detector::*;
 mod contract_tests {
     use super::*;
     use crate::broker::runtime::{
-        Coverage, InteractionClass, InteractionCloseReason, RuntimeEventKind,
+        Coverage, InteractionClass, InteractionCloseReason, ProfileMatch, RuntimeEventKind,
         evidence::EvidencePolicy,
     };
     use crate::runtime::runner::*;
@@ -90,22 +90,23 @@ mod contract_tests {
         }
 
         #[test]
-        fn runtime_profile_capabilities_are_independent_and_exact_version_bound() {
+        fn runtime_profile_capabilities_are_independent_and_version_selected() {
             let catalog = ProfileCatalog::from_definitions(&definitions()).unwrap();
             let supported = catalog.capabilities(CodingAgent::Codex, Some(VERSION));
             assert_eq!(supported.backend, CodingAgent::Codex);
             assert_eq!(supported.native_version.as_deref(), Some(VERSION));
             assert_eq!(supported.profile_version.as_deref(), Some(PROFILE));
+            assert_eq!(supported.profile_match, Some(ProfileMatch::Exact));
             assert_eq!(supported.detection, Coverage::Tested);
             assert_eq!(supported.composer, Coverage::Unknown);
             assert!(supported.answer_decisions.is_empty());
-            for version in [None, Some("synthetic-0.0.2")] {
-                let unknown = catalog.capabilities(CodingAgent::Codex, version);
-                assert_eq!(unknown.detection, Coverage::Unknown);
-                assert_eq!(unknown.composer, Coverage::Unknown);
-                assert!(unknown.answer_decisions.is_empty());
-                assert!(unknown.capability_reason.is_some());
-            }
+            let unknown = catalog.capabilities(CodingAgent::Codex, None);
+            assert_eq!(unknown.profile_version, None);
+            assert_eq!(unknown.profile_match, None);
+            assert_eq!(unknown.detection, Coverage::Unknown);
+            assert_eq!(unknown.composer, Coverage::Unknown);
+            assert!(unknown.answer_decisions.is_empty());
+            assert!(unknown.capability_reason.is_some());
             for &backend in CodingAgent::all()
                 .iter()
                 .filter(|&&backend| backend != CodingAgent::Codex)
@@ -163,7 +164,7 @@ mod contract_tests {
                 );
                 assert!(
                     catalog
-                        .answer_capability(CodingAgent::Codex, "synthetic-0.0.2", RULE, decision)
+                        .answer_capability(CodingAgent::Claude, VERSION, RULE, decision)
                         .unwrap()
                         .is_none()
                 );
@@ -473,11 +474,11 @@ mod contract_tests {
         fn runtime_profile_bundled_loader_validates_its_packaged_declarations() {
             let catalog = ProfileCatalog::bundled().unwrap();
             for &backend in CodingAgent::all() {
-                let unsupported =
-                    catalog.capabilities(backend, Some("synthetic-uninstalled-version"));
-                assert_eq!(unsupported.detection, Coverage::Unknown);
-                assert_eq!(unsupported.composer, Coverage::Unknown);
-                assert!(unsupported.answer_decisions.is_empty());
+                let unprobed = catalog.capabilities(backend, None);
+                assert_eq!(unprobed.profile_match, None);
+                assert_eq!(unprobed.detection, Coverage::Unknown);
+                assert_eq!(unprobed.composer, Coverage::Unknown);
+                assert!(unprobed.answer_decisions.is_empty());
             }
         }
 
@@ -1537,7 +1538,7 @@ mod contract_tests {
         #[test]
         fn runtime_detector_unsupported_version_reports_absent_evidence_without_nearby_profile() {
             let catalog = ProfileCatalog::from_definitions(&definitions()).unwrap();
-            let value = Detector::new(&catalog, CodingAgent::Codex, Some("synthetic-0.0.2"))
+            let value = Detector::new(&catalog, CodingAgent::Claude, Some(VERSION))
                 .unwrap()
                 .observe(&terminal(&lines("write disposable.txt"), 80, false).snapshot())
                 .unwrap();
@@ -2950,33 +2951,20 @@ mod contract_tests {
                 actual.answer_decisions,
                 [PermissionDecision::Allow, PermissionDecision::Deny]
             );
-            for version in [None, Some(VERSION_TWO), Some("synthetic-0.0.1 ")] {
-                capabilities(
-                    &catalog,
-                    CodingAgent::Codex,
-                    version,
-                    Coverage::Unknown,
-                    (Coverage::Unknown, Coverage::Unknown),
-                );
-                if let Some(version) = version {
-                    for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
-                        assert!(
-                            catalog
-                                .composer_plan(CodingAgent::Codex, version, operation)
-                                .unwrap()
-                                .is_none()
-                        );
-                    }
-                }
-            }
+            capabilities(
+                &catalog,
+                CodingAgent::Codex,
+                None,
+                Coverage::Unknown,
+                (Coverage::Unknown, Coverage::Unknown),
+            );
             let bundled = ProfileCatalog::bundled().unwrap();
             for &backend in CodingAgent::all() {
-                capabilities(
-                    &bundled,
-                    backend,
-                    Some(VERSION),
-                    Coverage::Unknown,
+                let actual = bundled.capabilities(backend, Some(VERSION));
+                assert_eq!(
+                    (actual.prompt_submission, actual.native_exec_submission),
                     (Coverage::Unknown, Coverage::Unknown),
+                    "{backend:?}"
                 );
                 for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
                     assert!(
@@ -3684,19 +3672,26 @@ mod contract_tests {
             for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
                 assert!(claude.answer_decisions.contains(&decision), "{decision:?}");
             }
-            for version in [None, Some("2.1.301"), Some("2.1.303")] {
-                let unknown = bundled.capabilities(CodingAgent::Claude, version);
-                assert_eq!(unknown.detection, Coverage::Unknown, "{version:?}");
-                assert!(unknown.answer_decisions.is_empty());
-                assert!(unknown.capability_reason.is_some());
-            }
+            assert_eq!(claude.profile_match, Some(ProfileMatch::Exact));
+            let unknown = bundled.capabilities(CodingAgent::Claude, None);
+            assert_eq!(unknown.detection, Coverage::Unknown);
+            assert!(unknown.answer_decisions.is_empty());
+            assert!(unknown.capability_reason.is_some());
             for &backend in CodingAgent::all()
                 .iter()
                 .filter(|&&backend| backend != CodingAgent::Claude)
             {
                 let other = bundled.capabilities(backend, Some(CLAUDE_VERSION));
-                assert_eq!(other.detection, Coverage::Unknown, "{backend:?}");
-                assert!(other.answer_decisions.is_empty());
+                assert_ne!(
+                    other.profile_version.as_deref(),
+                    Some(PROFILE_VERSION),
+                    "{backend:?}"
+                );
+                assert_eq!(
+                    other.profile_match,
+                    Some(ProfileMatch::Fallback),
+                    "{backend:?}"
+                );
             }
         }
 
@@ -3893,7 +3888,6 @@ mod contract_tests {
                     "{decision:?} rests on the unwrapped and wrapped pre-stage captures"
                 );
                 for (backend, version) in [
-                    (CodingAgent::Claude, "2.1.301"),
                     (CodingAgent::Codex, CLAUDE_VERSION),
                     (CodingAgent::Opencode, CLAUDE_VERSION),
                 ] {
@@ -4678,20 +4672,27 @@ mod contract_tests {
             for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
                 assert!(codex.answer_decisions.contains(&decision), "{decision:?}");
             }
-            for version in [None, Some("0.162.0"), Some("0.164.0")] {
-                let unknown = bundled.capabilities(CodingAgent::Codex, version);
-                assert_eq!(unknown.detection, Coverage::Unknown, "{version:?}");
-                assert_eq!(unknown.composer, Coverage::Unknown, "{version:?}");
-                assert!(unknown.answer_decisions.is_empty());
-                assert!(unknown.capability_reason.is_some());
-            }
+            assert_eq!(codex.profile_match, Some(ProfileMatch::Exact));
+            let unknown = bundled.capabilities(CodingAgent::Codex, None);
+            assert_eq!(unknown.detection, Coverage::Unknown);
+            assert_eq!(unknown.composer, Coverage::Unknown);
+            assert!(unknown.answer_decisions.is_empty());
+            assert!(unknown.capability_reason.is_some());
             for &backend in CodingAgent::all()
                 .iter()
                 .filter(|&&backend| backend != CodingAgent::Codex)
             {
                 let other = bundled.capabilities(backend, Some(CODEX_VERSION));
-                assert_eq!(other.detection, Coverage::Unknown, "{backend:?}");
-                assert!(other.answer_decisions.is_empty());
+                assert_ne!(
+                    other.profile_version.as_deref(),
+                    Some(PROFILE_VERSION),
+                    "{backend:?}"
+                );
+                assert_eq!(
+                    other.profile_match,
+                    Some(ProfileMatch::Fallback),
+                    "{backend:?}"
+                );
             }
         }
 
@@ -4734,7 +4735,6 @@ mod contract_tests {
                 assert_eq!(capability.decision(), decision);
                 assert_eq!(capability.fixture_ids(), &[provenance.to_owned()]);
                 for (backend, version) in [
-                    (CodingAgent::Codex, "0.162.0"),
                     (CodingAgent::Claude, CODEX_VERSION),
                     (CodingAgent::Opencode, CODEX_VERSION),
                 ] {
@@ -5248,18 +5248,26 @@ mod contract_tests {
                 );
             }
             assert_eq!(opencode.capability_reason, None);
-            for version in [None, Some("2.1.3"), Some("2.1.5"), Some("v2.1.4")] {
-                let unknown = bundled.capabilities(CodingAgent::Opencode, version);
-                assert_eq!(unknown.detection, Coverage::Unknown, "{version:?}");
-                assert_eq!(unknown.composer, Coverage::Unknown, "{version:?}");
-                assert_eq!(unknown.profile_version, None, "{version:?}");
-                assert!(unknown.answer_decisions.is_empty());
-                assert!(unknown.capability_reason.is_some());
-            }
+            assert_eq!(opencode.profile_match, Some(ProfileMatch::Exact));
+            let unknown = bundled.capabilities(CodingAgent::Opencode, None);
+            assert_eq!(unknown.detection, Coverage::Unknown);
+            assert_eq!(unknown.composer, Coverage::Unknown);
+            assert_eq!(unknown.profile_version, None);
+            assert_eq!(unknown.profile_match, None);
+            assert!(unknown.answer_decisions.is_empty());
+            assert!(unknown.capability_reason.is_some());
             for backend in [CodingAgent::Claude, CodingAgent::Codex] {
                 let other = bundled.capabilities(backend, Some(OPENCODE_VERSION));
-                assert_eq!(other.detection, Coverage::Unknown, "{backend:?}");
-                assert!(other.answer_decisions.is_empty());
+                assert_ne!(
+                    other.profile_version.as_deref(),
+                    Some(PROFILE_VERSION),
+                    "{backend:?}"
+                );
+                assert_eq!(
+                    other.profile_match,
+                    Some(ProfileMatch::Fallback),
+                    "{backend:?}"
+                );
             }
             let definitions = definitions();
             let capabilities = &profile(&definitions)["capabilities"];
@@ -5391,7 +5399,6 @@ mod contract_tests {
                 assert_eq!(capability.fixture_ids(), fixtures.as_slice());
                 let bundled = ProfileCatalog::bundled().unwrap();
                 for (backend, version, request) in [
-                    (CodingAgent::Opencode, "2.1.3", PERMISSION_RULE),
                     (CodingAgent::Opencode, OPENCODE_VERSION, REASON_RULE),
                     (CodingAgent::Opencode, OPENCODE_VERSION, IDLE_RULE),
                     (CodingAgent::Codex, OPENCODE_VERSION, PERMISSION_RULE),
@@ -5850,6 +5857,354 @@ mod contract_tests {
                 closes[0].close_reason,
                 Some(InteractionCloseReason::NotVisible)
             );
+        }
+    }
+
+    mod profile_version_fallback {
+        use super::*;
+
+        fn fixture_id(version: &str) -> String {
+            format!("{FIXTURE}-{version}")
+        }
+
+        fn versioned(profiles: &[(&str, &[&str])]) -> ProfileCatalog {
+            let base = definitions();
+            let mut value = base.clone();
+            value["fixtures"] = json!([]);
+            value["profiles"] = json!([]);
+            for (name, versions) in profiles {
+                let ids = versions.iter().map(|v| fixture_id(v)).collect::<Vec<_>>();
+                for (version, id) in versions.iter().zip(&ids) {
+                    let mut fixture = base["fixtures"][0].clone();
+                    fixture["id"] = json!(id);
+                    fixture["native_version"] = json!(version);
+                    value["fixtures"].as_array_mut().unwrap().push(fixture);
+                }
+                let mut profile = base["profiles"][0].clone();
+                profile["native_versions"] = json!(versions);
+                profile["profile_version"] = json!(name);
+                profile["capabilities"]["detection"]["fixture_ids"] = json!(ids);
+                profile["capabilities"]["answers"] = json!([{
+                    "decision":"allow","request_rule_id":RULE,"answer_rule_id":"synthetic-allow-plan",
+                    "choice_id":"allow-once","focus_matcher_id":"allow","fixture_ids":ids,
+                    "stages":[{"bytes_hex":"78","required_rule_id":RULE,"required_choice_id":"allow-once"}]
+                }]);
+                value["profiles"].as_array_mut().unwrap().push(profile);
+            }
+            ProfileCatalog::from_definitions(&value).unwrap()
+        }
+
+        fn selected(
+            catalog: &ProfileCatalog,
+            probe: &str,
+        ) -> (Option<String>, Option<ProfileMatch>) {
+            let capabilities = catalog.capabilities(CodingAgent::Codex, Some(probe));
+            assert_eq!(capabilities.native_version.as_deref(), Some(probe));
+            (capabilities.profile_version, capabilities.profile_match)
+        }
+
+        fn fallback(profile: &str) -> (Option<String>, Option<ProfileMatch>) {
+            (Some(profile.into()), Some(ProfileMatch::Fallback))
+        }
+
+        const NEWER_LAST: &[(&str, &[&str])] = &[
+            ("profile-0.9.0", &["0.9.0"]),
+            ("profile-0.10.0", &["0.10.0"]),
+        ];
+        const NEWER_FIRST: &[(&str, &[&str])] = &[
+            ("profile-0.10.0", &["0.10.0"]),
+            ("profile-0.9.0", &["0.9.0"]),
+        ];
+
+        #[test]
+        fn profile_fallback_a_declared_version_selects_its_own_profile_exactly() {
+            let catalog = versioned(NEWER_LAST);
+            for (probe, profile) in [("0.9.0", "profile-0.9.0"), ("0.10.0", "profile-0.10.0")] {
+                assert_eq!(
+                    selected(&catalog, probe),
+                    (Some(profile.into()), Some(ProfileMatch::Exact))
+                );
+                assert_eq!(
+                    catalog
+                        .capabilities(CodingAgent::Codex, Some(probe))
+                        .detection,
+                    Coverage::Tested
+                );
+            }
+        }
+
+        #[test]
+        fn profile_fallback_selects_the_highest_declared_version_for_newer_and_older_probes() {
+            for declarations in [NEWER_LAST, NEWER_FIRST] {
+                let catalog = versioned(declarations);
+                for probe in [
+                    "0.11.0", "0.10.1", "1.0.0", "0.9.5", "0.9.1", "0.1.0", "0.0.0",
+                ] {
+                    assert_eq!(
+                        selected(&catalog, probe),
+                        fallback("profile-0.10.0"),
+                        "{probe}"
+                    );
+                    let capabilities = catalog.capabilities(CodingAgent::Codex, Some(probe));
+                    assert_eq!(capabilities.detection, Coverage::Tested, "{probe}");
+                    assert_eq!(
+                        capabilities.answer_decisions,
+                        vec![PermissionDecision::Allow]
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn profile_fallback_compares_dotted_numeric_components_with_missing_components_as_zero() {
+            for (declarations, highest) in [
+                (
+                    &[("short", &["1.2"][..]), ("long", &["1.2.0.1"][..])][..],
+                    "long",
+                ),
+                (
+                    &[("two-ten", &["2.10"][..]), ("two-nine", &["2.9.99"][..])][..],
+                    "two-ten",
+                ),
+                (
+                    &[("ten", &["10.0.0"][..]), ("nine", &["9.99.99"][..])][..],
+                    "ten",
+                ),
+                (
+                    &[
+                        ("one-three", &["1.3"][..]),
+                        ("one-two-nine", &["1.2.9"][..]),
+                    ][..],
+                    "one-three",
+                ),
+                (
+                    &[
+                        ("multi", &["0.5.0", "3.0.0"][..]),
+                        ("single", &["2.0.0"][..]),
+                    ][..],
+                    "multi",
+                ),
+            ] {
+                let catalog = versioned(declarations);
+                for probe in ["99.0.0", "0.0.1", "2.5"] {
+                    assert_eq!(
+                        selected(&catalog, probe),
+                        fallback(highest),
+                        "{declarations:?} {probe}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn profile_fallback_detection_and_answers_resolve_through_the_selected_profile() {
+            let catalog = versioned(NEWER_LAST);
+            let observed = Detector::new(&catalog, CodingAgent::Codex, Some("0.11.0"))
+                .unwrap()
+                .observe(&terminal(&lines("write disposable.txt"), 80, false).snapshot())
+                .unwrap();
+            assert_eq!(
+                observed.kind,
+                ObservationKind::Interaction(InteractionClass::PermissionRequest)
+            );
+            assert_eq!(observed.rule_id, RULE);
+            assert_eq!(observed.profile_version.as_deref(), Some("profile-0.10.0"));
+            let capability = catalog
+                .answer_capability(
+                    CodingAgent::Codex,
+                    "0.11.0",
+                    RULE,
+                    PermissionDecision::Allow,
+                )
+                .unwrap()
+                .expect("the fallback profile supplies its answer capability");
+            assert_eq!(capability.native_version(), "0.11.0");
+            assert_eq!(capability.profile_version(), "profile-0.10.0");
+            assert_eq!(capability.answer_rule_id(), "synthetic-allow-plan");
+            assert_eq!(capability.fixture_ids(), &[fixture_id("0.10.0")]);
+            let plan = catalog
+                .answer_plan(
+                    CodingAgent::Codex,
+                    "0.11.0",
+                    RULE,
+                    PermissionDecision::Allow,
+                )
+                .unwrap()
+                .expect("the fallback profile supplies its answer plan");
+            assert_eq!(plan.capability(), &capability);
+            assert_eq!(plan.stages().len(), 1);
+            assert_eq!(plan.stages()[0].bytes(), b"x");
+            assert!(
+                catalog
+                    .answer_plan(CodingAgent::Codex, "0.11.0", RULE, PermissionDecision::Deny)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+
+        #[test]
+        fn profile_fallback_never_crosses_backends_and_an_absent_version_selects_nothing() {
+            let catalog = versioned(NEWER_LAST);
+            for (backend, version) in [
+                (CodingAgent::Claude, Some("0.10.0")),
+                (CodingAgent::Opencode, Some("0.11.0")),
+                (CodingAgent::Codex, None),
+            ] {
+                let capabilities = catalog.capabilities(backend, version);
+                assert_eq!(capabilities.profile_version, None, "{backend:?}");
+                assert_eq!(capabilities.profile_match, None, "{backend:?}");
+                assert_eq!(capabilities.detection, Coverage::Unknown, "{backend:?}");
+                assert!(capabilities.answer_decisions.is_empty());
+                assert!(capabilities.capability_reason.is_some());
+            }
+            assert!(
+                catalog
+                    .answer_plan(
+                        CodingAgent::Claude,
+                        "0.10.0",
+                        RULE,
+                        PermissionDecision::Allow
+                    )
+                    .unwrap()
+                    .is_none()
+            );
+            let observed = Detector::new(&catalog, CodingAgent::Claude, Some("0.10.0"))
+                .unwrap()
+                .observe(&terminal(&lines("write disposable.txt"), 80, false).snapshot())
+                .unwrap();
+            assert_eq!(observed.kind, ObservationKind::Unknown);
+            assert_eq!(observed.profile_version, None);
+        }
+
+        const BUNDLED_PROBES: [(CodingAgent, &str, [&str; 2]); 3] = [
+            (CodingAgent::Claude, "2.1.302", ["2.1.306", "2.1.301"]),
+            (CodingAgent::Codex, "0.163.0", ["0.164.0", "0.162.0"]),
+            (CodingAgent::Opencode, "2.1.4", ["2.1.5", "2.1.3"]),
+        ];
+
+        #[test]
+        fn profile_fallback_bundled_capabilities_equal_the_exact_run_of_the_selected_profile() {
+            let bundled = ProfileCatalog::bundled().unwrap();
+            for (backend, pinned, probes) in BUNDLED_PROBES {
+                let exact = bundled.capabilities(backend, Some(pinned));
+                assert_eq!(
+                    exact.profile_match,
+                    Some(ProfileMatch::Exact),
+                    "{backend:?}"
+                );
+                for probe in probes {
+                    let fallback = bundled.capabilities(backend, Some(probe));
+                    let context = format!("{backend:?} {probe}");
+                    assert_eq!(fallback.native_version.as_deref(), Some(probe), "{context}");
+                    assert_eq!(fallback.profile_version, exact.profile_version, "{context}");
+                    assert_eq!(
+                        fallback.profile_match,
+                        Some(ProfileMatch::Fallback),
+                        "{context}"
+                    );
+                    assert_eq!(fallback.detection, exact.detection, "{context}");
+                    assert_eq!(fallback.composer, exact.composer, "{context}");
+                    assert_eq!(
+                        fallback.prompt_submission, exact.prompt_submission,
+                        "{context}"
+                    );
+                    assert_eq!(
+                        fallback.native_exec_submission, exact.native_exec_submission,
+                        "{context}"
+                    );
+                    assert_eq!(
+                        fallback.answer_decisions, exact.answer_decisions,
+                        "{context}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn profile_fallback_bundled_answer_plans_match_the_exact_plans_for_predecessor_forms() {
+            let bundled = ProfileCatalog::bundled().unwrap();
+            for ((backend, pinned, probes), request) in BUNDLED_PROBES.into_iter().zip([
+                "claude-bash-permission",
+                "codex-exec-approval",
+                "opencode-shell-permission",
+            ]) {
+                for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
+                    let exact = bundled
+                        .answer_plan(backend, pinned, request, decision)
+                        .unwrap()
+                        .expect("bundled exact answer plan");
+                    for probe in probes {
+                        let context = format!("{backend:?} {probe} {decision:?}");
+                        let plan = bundled
+                            .answer_plan(backend, probe, request, decision)
+                            .unwrap()
+                            .unwrap_or_else(|| panic!("fallback answer plan for {context}"));
+                        let capability = plan.capability();
+                        assert_eq!(capability.native_version(), probe, "{context}");
+                        assert_eq!(
+                            capability.profile_version(),
+                            exact.capability().profile_version(),
+                            "{context}"
+                        );
+                        assert_eq!(
+                            capability.answer_rule_id(),
+                            exact.capability().answer_rule_id(),
+                            "{context}"
+                        );
+                        assert_eq!(
+                            capability.fixture_ids(),
+                            exact.capability().fixture_ids(),
+                            "{context}"
+                        );
+                        assert_eq!(plan.choice_id(), exact.choice_id(), "{context}");
+                        assert_eq!(
+                            plan.stages()
+                                .iter()
+                                .map(|stage| stage.bytes().to_vec())
+                                .collect::<Vec<_>>(),
+                            exact
+                                .stages()
+                                .iter()
+                                .map(|stage| stage.bytes().to_vec())
+                                .collect::<Vec<_>>(),
+                            "{context}"
+                        );
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn profile_fallback_bundled_detector_reads_the_predecessor_permission_form() {
+            let bundled = ProfileCatalog::bundled().unwrap();
+            let screen = super::super::detector::inspection_tests::replay_native_fixture(
+                include_str!("profiles/native/claude-2.1.302-default-permission-1.json"),
+                |_| {},
+                true,
+                None,
+            );
+            let exact = Detector::new(&bundled, CodingAgent::Claude, Some("2.1.302"))
+                .unwrap()
+                .observe(&screen)
+                .unwrap();
+            assert_eq!(
+                exact.kind,
+                ObservationKind::Interaction(InteractionClass::PermissionRequest)
+            );
+            let fallback = Detector::new(&bundled, CodingAgent::Claude, Some("2.1.306"))
+                .unwrap()
+                .observe(&screen)
+                .unwrap();
+            assert_eq!(fallback.kind, exact.kind);
+            assert_eq!(fallback.rule_id, exact.rule_id);
+            assert_eq!(fallback.profile_version, exact.profile_version);
+            for field in ["operation", "operation_rows", "choices"] {
+                assert_eq!(
+                    fallback.raw_evidence[field], exact.raw_evidence[field],
+                    "{field}"
+                );
+            }
+            assert_eq!(fallback.raw_evidence["native_version"], "2.1.306");
         }
     }
 

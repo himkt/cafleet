@@ -38,7 +38,7 @@ mod runtime_contract_tests {
         impl RefreshFixture {
             fn new() -> Self {
                 let mut fixture = Fixture::new();
-                fixture.conn.execute("UPDATE member_runs SET profile_version='fixture-v1',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
+                fixture.conn.execute("UPDATE member_runs SET profile_version='fixture-v1',profile_match='exact',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
                 let owner = fixture.activate();
                 let event = fixture.open(&owner);
                 let update = InteractionEvidenceUpdate {
@@ -270,6 +270,7 @@ mod runtime_contract_tests {
             spec.runtime_path.push_str("-other");
             spec.launch_nonce = "b".repeat(64);
             spec.profile_version = Some("fixture-v1".into());
+            spec.profile_match = Some(ProfileMatch::Exact);
             spec.coverage = Coverage::Tested;
             let other = storage::create_run(&mut fixture.fixture.conn, &spec).unwrap();
             fixture.fixture.conn.execute("UPDATE member_runs SET status='running',owner_kind='runner',owner_epoch=2 WHERE run_id=?1",[other.run_id]).unwrap();
@@ -538,7 +539,7 @@ mod runtime_contract_tests {
         impl ResponseFixture {
             fn new() -> Self {
                 let mut base = Fixture::new();
-                base.conn.execute("UPDATE member_runs SET coverage='tested',profile_version='fixture-v1' WHERE run_id=?1",[base.run.run_id]).unwrap();
+                base.conn.execute("UPDATE member_runs SET coverage='tested',profile_version='fixture-v1',profile_match='exact' WHERE run_id=?1",[base.run.run_id]).unwrap();
                 let owner = base.activate();
                 let event = base.open(&owner);
                 let request = NewPermissionResponse {
@@ -652,7 +653,7 @@ mod runtime_contract_tests {
                 member,
             );
             let run = storage::create_run(&mut fixture.base.conn, &spec).unwrap();
-            fixture.base.conn.execute("UPDATE member_runs SET status='running',owner_kind='runner',owner_epoch=2,coverage='tested',profile_version='fixture-v1' WHERE run_id=?1",[run.run_id]).unwrap();
+            fixture.base.conn.execute("UPDATE member_runs SET status='running',owner_kind='runner',owner_epoch=2,coverage='tested',profile_version='fixture-v1',profile_match='exact' WHERE run_id=?1",[run.run_id]).unwrap();
             let owner = storage::get_run(&fixture.base.conn, run.run_id)
                 .unwrap()
                 .owner();
@@ -3048,6 +3049,7 @@ mod runtime_contract_tests {
                 event_evidence: EventEvidence::Metadata,
                 native_version: Some("0.163.0".into()),
                 profile_version: None,
+                profile_match: None,
                 coverage: Coverage::Unknown,
                 owner_pid: i64::from(std::process::id()),
                 owner_start_identity: "fixture-start-identity".into(),
@@ -4470,6 +4472,7 @@ mod runtime_contract_tests {
                 "owner_epoch",
                 "last_health_at",
                 "coverage",
+                "profile_match",
                 "current_interaction_id",
                 "unresolved_input_ids",
                 "owner_kind",
@@ -4482,6 +4485,7 @@ mod runtime_contract_tests {
             ],
         );
         assert_eq!(runtime["run_id"], owner.run_id);
+        assert_eq!(runtime["profile_match"], Value::Null);
         assert_eq!(
             runtime["current_interaction_id"],
             event.interaction_id.unwrap()
@@ -4501,10 +4505,52 @@ mod runtime_contract_tests {
         assert_eq!(
             text,
             format!(
-                "{} worker active\nRuntime: run={} mode=never status=running coverage=unknown",
+                "{} worker active\nRuntime: run={} mode=never status=running coverage=unknown profile=-",
                 fixture.member, owner.run_id
             )
         );
+    }
+
+    #[test]
+    fn runtime_presentation_renders_the_recorded_profile_match_on_member_and_event_surfaces() {
+        let mut fixture = Fixture::new();
+        let owner = fixture.activate();
+        let event = fixture.open(&owner);
+        for (version, profile_match) in [("0.163.0", "exact"), ("0.164.0", "fallback")] {
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_runs SET native_version=?1,profile_version='codex-0.163.0-on-request-1',profile_match=?2,coverage='tested' WHERE run_id=?3",
+                    params![version, profile_match, owner.run_id],
+                )
+                .unwrap();
+            let member = super::get_member(&fixture.conn, fixture.member, fixture.fleet)
+                .unwrap()
+                .unwrap();
+            let runtime = &crate::presentation::member(&member)["runtime"];
+            assert_eq!(runtime["coverage"], "tested");
+            assert_eq!(runtime["profile_match"], profile_match);
+            let line = format!(
+                "Runtime: run={} mode=never status=running coverage=tested profile={profile_match}",
+                owner.run_id
+            );
+            assert_eq!(
+                crate::output::format_member_detail(&member),
+                format!("{} worker active\n{line}", fixture.member)
+            );
+            let view = storage::get_event(&fixture.conn, event.event_id).unwrap();
+            assert_eq!(
+                crate::presentation::runtime_event(&view)["run"]["profile_match"],
+                profile_match
+            );
+            assert_eq!(
+                crate::output::format_runtime_event(&view)
+                    .lines()
+                    .nth(1)
+                    .unwrap(),
+                line
+            );
+        }
     }
 
     #[test]
@@ -4542,7 +4588,7 @@ mod runtime_contract_tests {
         assert_eq!(
             crate::output::format_runtime_event(&view),
             format!(
-                "Event: {} run={} seq=1 kind=interaction_opened notification=inbox message={}\nRuntime: run={} mode=never status=running coverage=unknown\nInteraction: {} classification=permission_request closed_at=- close_reason=-",
+                "Event: {} run={} seq=1 kind=interaction_opened notification=inbox message={}\nRuntime: run={} mode=never status=running coverage=unknown profile=-\nInteraction: {} classification=permission_request closed_at=- close_reason=-",
                 event.event_id,
                 owner.run_id,
                 event.message_id.unwrap(),

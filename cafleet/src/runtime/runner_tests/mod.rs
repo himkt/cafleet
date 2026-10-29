@@ -136,6 +136,7 @@ impl Fixture {
             event_evidence: EventEvidence::Metadata,
             native_version: Some("0.162.0".into()),
             profile_version: None,
+            profile_match: None,
             coverage: Coverage::Unknown,
             owner_pid: process.pid,
             owner_start_identity: process.start_identity,

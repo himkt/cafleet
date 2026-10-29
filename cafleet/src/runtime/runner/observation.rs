@@ -45,7 +45,7 @@ mod inspection_tests {
         .unwrap();
         fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
         storage::reserve_event_sequences(&mut fixture.conn, &fixture.run.owner()).unwrap();
-        fixture.conn.execute("UPDATE member_runs SET native_version='synthetic-0.0.1',profile_version='synthetic-profile-1',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
+        fixture.conn.execute("UPDATE member_runs SET native_version='synthetic-0.0.1',profile_version='synthetic-profile-1',profile_match='exact',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
         fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
         let catalog = ProfileCatalog::from_definitions(&inspection_fixture_definition()).unwrap();
         let mut controller =
