@@ -2254,7 +2254,38 @@ mod runtime_contract_tests {
             })
         }
 
-        fn v4_fixture() -> Fixture {
+        fn legacy_rows(conn: &Connection) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
+            [
+                "member_runs",
+                "member_interactions",
+                "member_runtime_events",
+                "messages",
+            ]
+            .map(|table| {
+                let columns = conn
+                    .prepare(&format!(
+                        "SELECT name FROM pragma_table_info('{table}') WHERE name != 'profile_match' ORDER BY cid"
+                    ))
+                    .unwrap()
+                    .query_map([], |row| row.get::<_, String>(0))
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap()
+                    .join(",");
+                let mut statement = conn
+                    .prepare(&format!("SELECT {columns} FROM {table} ORDER BY 1"))
+                    .unwrap();
+                let width = statement.column_count();
+                statement
+                    .query_map([], |row| (0..width).map(|index| row.get(index)).collect())
+                    .unwrap()
+                    .collect::<rusqlite::Result<_>>()
+                    .unwrap()
+            })
+            .into()
+        }
+
+        fn legacy_opening(archived: bool) -> (Fixture, RuntimeEventRecord) {
             let dir = tempfile::tempdir().unwrap();
             let mut conn = crate::db::connect(&format!(
                 "sqlite:///{}",
@@ -2269,43 +2300,45 @@ mod runtime_contract_tests {
             let (fleet, director) = common::create_fleet(&mut conn, "legacy-events");
             let member = common::register(&mut conn, fleet, "legacy-worker", Some("%2"));
             let spec = Fixture::spec(&conn, fleet, director, member);
-            let run = storage::create_run(&mut conn, &spec).unwrap();
-            Fixture {
-                _dir: dir,
-                conn,
-                fleet,
-                director,
-                member,
-                run,
-            }
-        }
-
-        fn legacy_opening(archived: bool) -> (Fixture, RuntimeEventRecord) {
-            let mut fixture = v4_fixture();
-            let owner = fixture.activate();
-            fixture.reserve(&owner);
-            if archived {
-                crate::broker::deregister_member(&mut fixture.conn, fixture.member).unwrap();
-            }
+            conn.execute(
+                "INSERT INTO member_runs(member_id,fleet_id,director_member_id,backend,
+                 database_identity_json,launch_nonce,runtime_path,resolved_mode,mode_source,
+                 permission_argv_json,event_evidence,coverage,status,created_at,native_version,
+                 owner_epoch,owner_kind,owner_pid,owner_start_identity,reachability,
+                 cleanup_state,event_seq_reserved_through,observation_gap_count)
+                 VALUES(?1,?2,?3,'codex',?4,?5,?6,?7,'default',?8,'metadata','unknown','running',?9,
+                 ?10,2,'runner',?11,?12,'reachable','incomplete',256,0)",
+                params![
+                    member,
+                    fleet,
+                    director,
+                    spec.database_identity_json.to_string(),
+                    spec.launch_nonce,
+                    spec.runtime_path,
+                    spec.resolved_mode,
+                    spec.permission_argv_json.to_string(),
+                    NOW,
+                    spec.native_version,
+                    spec.owner_pid,
+                    spec.owner_start_identity
+                ],
+            )
+            .unwrap();
+            let run_id = conn.last_insert_rowid();
             let evidence = metadata();
-            let tx = fixture.conn.transaction().unwrap();
-            tx.execute("INSERT INTO member_interactions(run_id,episode_seq,classification,evidence_digest,opened_at,evidence_json) VALUES(?1,1,'permission_request',?2,?3,?4)",params![owner.run_id,evidence["evidence_digest"].as_str().unwrap(),NOW,evidence.to_string()]).unwrap();
+            let tx = conn.transaction().unwrap();
+            tx.execute("INSERT INTO member_interactions(run_id,episode_seq,classification,evidence_digest,opened_at,evidence_json) VALUES(?1,1,'permission_request',?2,?3,?4)",params![run_id,evidence["evidence_digest"].as_str().unwrap(),NOW,evidence.to_string()]).unwrap();
             let interaction = tx.last_insert_rowid();
             let message = (!archived).then(|| {
-                crate::broker::messaging::insert_message_validated(
-                    &tx,
-                    fixture.member,
-                    fixture.director,
-                    "{}",
-                )
-                .unwrap()
-                .message_id
+                crate::broker::messaging::insert_message_validated(&tx, member, director, "{}")
+                    .unwrap()
+                    .message_id
             });
-            tx.execute("INSERT INTO member_runtime_events(run_id,event_seq,interaction_id,kind,observed_at,committed_at,payload_json,notification_state,message_id,archive_reason) VALUES(?1,1,?2,'interaction_opened',?3,?3,'{}',?4,?5,?6)",params![owner.run_id,interaction,NOW,if archived {"archived"} else {"inbox"},message,archived.then_some("member_inactive")]).unwrap();
+            tx.execute("INSERT INTO member_runtime_events(run_id,event_seq,interaction_id,kind,observed_at,committed_at,payload_json,notification_state,message_id,archive_reason) VALUES(?1,1,?2,'interaction_opened',?3,?3,'{}',?4,?5,?6)",params![run_id,interaction,NOW,if archived {"archived"} else {"inbox"},message,archived.then_some("member_inactive")]).unwrap();
             let event = tx.last_insert_rowid();
             let payload = json!({
-        "schema_version":1,"event_id":event,"run_id":owner.run_id,"event_seq":1,
-        "member_id":fixture.member,"fleet_id":fixture.fleet,"director_member_id":fixture.director,
+        "schema_version":1,"event_id":event,"run_id":run_id,"event_seq":1,
+        "member_id":member,"fleet_id":fleet,"director_member_id":director,
         "kind":"interaction_opened","interaction_id":interaction,"classification":"permission_request",
         "observed_at":NOW,"source":"runner_screen","native_request_id":null,
         "decision_outcome":"unknown","evidence":evidence,
@@ -2323,8 +2356,28 @@ mod runtime_contract_tests {
                 .unwrap();
             }
             tx.commit().unwrap();
+            let legacy = legacy_rows(&conn);
+            crate::db::migrate_to_head(&mut conn).unwrap();
+            assert_eq!(
+                legacy_rows(&conn),
+                legacy,
+                "the upgrade preserves every V4 runtime row"
+            );
+            if archived {
+                crate::broker::deregister_member(&mut conn, member).unwrap();
+            }
+            let run = storage::get_run(&conn, run_id).unwrap();
+            assert_eq!(run.profile_match, None);
+            let fixture = Fixture {
+                _dir: dir,
+                conn,
+                fleet,
+                director,
+                member,
+                run,
+            };
             let event = storage::get_event(&fixture.conn, event)
-                .expect("the independent V4 fixture must be valid before upgrade")
+                .expect("the independent V4 rows must be readable after upgrade")
                 .event;
             assert_eq!(event.payload_json["schema_version"], 1);
             assert!(event.payload_json.get("director_action").is_none());

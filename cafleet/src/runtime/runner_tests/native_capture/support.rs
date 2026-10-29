@@ -109,8 +109,7 @@ impl CaptureFixture {
         spec.evidence_policy = policy;
         spec.argv = vec![
             executable.to_str().unwrap().into(),
-            "--ask-for-approval".into(),
-            "never".into(),
+            "--approve-for-me".into(),
             "--sandbox".into(),
             "workspace-write".into(),
             "private assignment canary".into(),

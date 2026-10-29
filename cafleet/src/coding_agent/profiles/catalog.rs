@@ -234,8 +234,18 @@ pub(super) mod inspection_tests {
                 assert_eq!(stage.required_choice_id(), choice);
             }
         }
+        assert!(
+            catalog
+                .answer_plan(
+                    CodingAgent::Claude,
+                    "synthetic-0.0.1",
+                    "synthetic-permission",
+                    PermissionDecision::Allow
+                )
+                .unwrap()
+                .is_none()
+        );
         for (version, rule, decision) in [
-            ("other", "synthetic-permission", PermissionDecision::Allow),
             ("synthetic-0.0.1", "unknown", PermissionDecision::Allow),
             (
                 "synthetic-0.0.1",

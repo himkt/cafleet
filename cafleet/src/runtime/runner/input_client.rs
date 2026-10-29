@@ -5035,7 +5035,7 @@ pub(super) mod permission_history {
                 )
                 .unwrap();
             assert_eq!(fixture.conn.execute(
-                "UPDATE member_runs SET status='running',coverage='tested',profile_version='fixture-detector-v1',profile_match='exact',started_at=?1 WHERE run_id=?2",
+                "UPDATE member_runs SET status='running',native_version='0.162.0',coverage='tested',profile_version='fixture-detector-v1',profile_match='exact',started_at=?1 WHERE run_id=?2",
                 rusqlite::params![NOW, fixture.run.run_id],
             ).unwrap(), 1);
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();

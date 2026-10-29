@@ -288,11 +288,11 @@ fn inputs(fixture: &Fixture) -> (PendingMemberSpec, RunSettings) {
             creator: ProcessIdentity::current().unwrap(),
             launch_nonce: "c".repeat(64),
             requested_mode: None,
-            resolved_mode: "never".into(),
+            resolved_mode: "approve-for-me".into(),
             mode_source: ModeSource::Default,
             permission_argv_json: fixture.run.permission_argv_json.clone(),
             event_evidence: EventEvidence::Metadata,
-            native_version: Some("0.163.0".into()),
+            native_version: None,
             profile_version: None,
             profile_match: None,
             coverage: Coverage::Unknown,
@@ -421,7 +421,7 @@ fn runner_creation_allocates_member_and_run_in_one_transaction_or_rolls_both_bac
 fn runner_creation_records_the_selected_profile_and_its_match_on_the_pending_run() {
     use crate::broker::runtime::ProfileMatch;
     for (native, profile, profile_match, stored) in [
-        (Some("0.163.0"), None, None, None),
+        (None, None, None, None),
         (
             Some("0.163.0"),
             Some("codex-0.163.0-on-request-1"),
@@ -879,7 +879,7 @@ fn runner_creation_immediate_nonzero_native_exit_is_a_successful_spawn_with_one_
     assert!(!host.calls.contains(&"shutdown"));
     assert_eq!(outcome.run.status, RunStatus::Exited);
     assert_eq!(outcome.run.exit_code, Some(7));
-    assert_eq!(outcome.run.resolved_mode, "never");
+    assert_eq!(outcome.run.resolved_mode, "approve-for-me");
     let messages =
         crate::broker::poll_messages(&fixture.conn, outcome.run.director_member_id).unwrap();
     assert_eq!(messages.len(), 1);

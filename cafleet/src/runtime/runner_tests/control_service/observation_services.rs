@@ -93,8 +93,7 @@ pub(in crate::runtime) fn synthetic(fixture: &mut Fixture, spec: &mut SpawnSpec)
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
     spec.argv = vec![
         script.to_str().unwrap().into(),
-        "--ask-for-approval".into(),
-        "never".into(),
+        "--approve-for-me".into(),
         "--sandbox".into(),
         "workspace-write".into(),
     ];
@@ -145,11 +144,22 @@ pub(super) fn capture(fixture: &mut Fixture, spec: &mut SpawnSpec) {
         0o700
     );
     synthetic(fixture, spec);
+    let bundled = crate::coding_agent::ProfileCatalog::bundled()
+        .unwrap()
+        .capabilities(
+            crate::coding_agent::CodingAgent::Codex,
+            Some("synthetic-0.0.1"),
+        );
     fixture
         .conn
         .execute(
-            "UPDATE member_runs SET profile_version=NULL,coverage='unknown' WHERE run_id=?1",
-            [fixture.run.run_id],
+            "UPDATE member_runs SET profile_version=?1,profile_match=?2,coverage=?3 WHERE run_id=?4",
+            rusqlite::params![
+                bundled.profile_version,
+                bundled.profile_match.map(|value| value.as_str()),
+                bundled.detection.as_str(),
+                fixture.run.run_id
+            ],
         )
         .unwrap();
     fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
