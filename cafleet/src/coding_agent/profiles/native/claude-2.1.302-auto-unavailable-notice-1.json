@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "fixture_id": "claude-2.1.302-auto-unavailable-notice-1",
+  "provenance": "native",
+  "backend": "claude",
+  "native_version": "2.1.302",
+  "rows": 36,
+  "cols": 120,
+  "alternate_screen": true,
+  "screen_seq": 3723,
+  "cursor_row": 33,
+  "cursor_col": 2,
+  "lines": [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "▎ [✻] [✻] [✻] · Share Claude Code and earn $10 in usage credits · /passes",
+    "",
+    "❯ Reply with the single word ready and then wait.                                                                       ",
+    "",
+    "● ready",
+    "",
+    "✻ Baked for 3s · done 8:31 AM",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "                                           auto mode disabled by settings · Update available! Run: mise upgrade claude",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────── cap-cl4 ─",
+    "❯ ",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "  ⏸ manual mode on · ? for shortcuts"
+  ],
+  "masked_rows": [
+    {
+      "row": 1,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 2,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 3,
+      "reason": "reviewed_privacy"
+    }
+  ]
+}

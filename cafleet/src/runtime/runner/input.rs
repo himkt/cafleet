@@ -145,7 +145,7 @@ mod permission_inspection_contracts {
                 event_evidence: "metadata",
                 backend: crate::coding_agent::CodingAgent::Claude,
                 native_version: "2.1.302",
-                profile_version: "claude-2.1.302-default-3",
+                profile_version: "claude-2.1.302-auto-1",
                 size: crate::runtime::runner::TerminalSize {
                     rows: 36,
                     cols: 120,

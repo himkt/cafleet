@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "fixture_id": "claude-2.1.302-auto-approved-running-1",
+  "provenance": "native",
+  "backend": "claude",
+  "native_version": "2.1.302",
+  "rows": 36,
+  "cols": 120,
+  "alternate_screen": true,
+  "screen_seq": 10246,
+  "cursor_row": 33,
+  "cursor_col": 2,
+  "lines": [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "  1 more notice hidden",
+    "",
+    "❯ Reply with the single word ready and then wait.                                                                       ",
+    "",
+    "● ready",
+    "",
+    "✻ Baked for 2s · done 8:10 AM",
+    "",
+    "❯ Use Bash to run exactly this one command: touch /tmp/cafleet-197/ws-cl2/approved.marker. Then report the actual       ",
+    "  result in one line and stop.                                                                                          ",
+    "",
+    "● Creating approved marker file",
+    "  ⎿  $ touch /tmp/cafleet-197/ws-cl2/approved.marker",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "✢ Whisking… (6s · ↓ 96 tokens)",
+    "  ⎿  Tip: Start with small features or bug fixes, tell Claude to propose a plan, and verify its suggested edits",
+    "  tmux detected · scroll with PgUp/PgDn · or add 'set -g mouse on' to ~/… · Update available! Run: mise upgrade claude",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────── cap-cl2 ─",
+    "❯ ",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt"
+  ],
+  "masked_rows": [
+    {
+      "row": 1,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 2,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 3,
+      "reason": "reviewed_privacy"
+    },
+    {
+      "row": 5,
+      "reason": "reviewed_privacy"
+    }
+  ]
+}
