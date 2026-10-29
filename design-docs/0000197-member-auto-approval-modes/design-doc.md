@@ -1,7 +1,7 @@
 # Member Automatic Approval Modes
 
 **Status**: Approved
-**Progress**: 25/31 tasks complete
+**Progress**: 31/31 tasks complete
 **Last Updated**: 2026-10-29
 
 ## Overview
@@ -10,17 +10,17 @@ Make each backend's native automatic approval mode the omitted member launch pol
 
 ## Success Criteria
 
-- [ ] An omitted `--permission-mode` launches Claude with `--permission-mode auto` and Codex with `--approve-for-me`, recording `resolved_mode` `auto` / `approve-for-me` and `mode_source=default`; OpenCode still launches `--agent cafleet`.
-- [ ] Every previous choice remains explicit: Claude `dontAsk` and the other native values, Codex `on-request` and `never` with their current argv, OpenCode `cafleet` and `cafleet-ask`; catalog-derived help and the usage error list `approve-for-me` and the new defaults.
-- [ ] The Director guidance spawns every member with the omitted default and passes `--permission-mode` only when the user explicitly requests that mode for the member: a non-automatic choice for Claude or Codex, `cafleet-ask` for OpenCode.
-- [ ] The next contiguous current-family migration (V6) adds the event kinds `automatic_refusal_observed` and `automatic_review_unavailable`, preserves every existing row, sequence and foreign key, and the derived chain and schema-shape guards pass at head V6.
-- [ ] A Claude 2.1.302 member and a Codex 0.163.0 member record bundled profiles `claude-2.1.302-auto-1` and `codex-0.163.0-approve-for-me-1` with `coverage=tested` and `profile_match=exact`, each profile meets its § Default-switch gate, and every rule it claims rests on native captures at that exact version.
-- [ ] A captured automatic refusal produces exactly one `automatic_refusal_observed` event and Director inbox record with `director_action.kind=review_automatic_refusal`, creates no interaction row, leaves the frame's input eligibility unchanged and offers no `permission respond`.
-- [ ] A captured unavailable-review screen produces one `automatic_review_unavailable` event with `director_action.kind=review_automatic_review_unavailable`, and `effective_policy_json` records `automatic_review=unavailable` with its `rule_id` and `event_id`; `observed_mode` holds the displayed mode only under `redacted` evidence and is null under `metadata`. The member keeps running, and `member show` exposes the recorded policy.
-- [ ] A member whose probed native version has no bundled profile (for example Claude Code 2.1.306) records the backend's newest bundled profile with `profile_match=fallback`, the profile's capabilities and the fallback warning; on an unchanged native UI it detects, delivers prompts and answers forms as under its exact version, and a run with no profile records `profile_match=null` and `coverage=unknown` as today.
-- [ ] A native permission form shown in automatic mode opens the existing `interaction_opened` episode and is answered through `permission respond` exactly as under the interactive policies.
-- [ ] On both tmux and herdr, live acceptance on each backend covers the omitted-default launch, an auto-approved fixture, an auto-refused fixture and, where the native host shows one, an escalated form answered allow and deny; each uncaptured screen is a documented limit.
-- [ ] Member and Director guidance, `docs/`, `SPEC.md` and the skill references describe the new defaults, both events and their Director handling, and `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build` pass.
+- [x] An omitted `--permission-mode` launches Claude with `--permission-mode auto` and Codex with `--approve-for-me`, recording `resolved_mode` `auto` / `approve-for-me` and `mode_source=default`; OpenCode still launches `--agent cafleet`.
+- [x] Every previous choice remains explicit: Claude `dontAsk` and the other native values, Codex `on-request` and `never` with their current argv, OpenCode `cafleet` and `cafleet-ask`; catalog-derived help and the usage error list `approve-for-me` and the new defaults.
+- [x] The Director guidance spawns every member with the omitted default and passes `--permission-mode` only when the user explicitly requests that mode for the member: a non-automatic choice for Claude or Codex, `cafleet-ask` for OpenCode.
+- [x] The next contiguous current-family migration (V6) adds the event kinds `automatic_refusal_observed` and `automatic_review_unavailable`, preserves every existing row, sequence and foreign key, and the derived chain and schema-shape guards pass at head V6.
+- [x] A Claude 2.1.302 member and a Codex 0.163.0 member record bundled profiles `claude-2.1.302-auto-1` and `codex-0.163.0-approve-for-me-1` with `coverage=tested` and `profile_match=exact`, each profile meets its § Default-switch gate, and every rule it claims rests on native captures at that exact version.
+- [x] A captured automatic refusal produces exactly one `automatic_refusal_observed` event and Director inbox record with `director_action.kind=review_automatic_refusal`, creates no interaction row, leaves the frame's input eligibility unchanged and offers no `permission respond`.
+- [x] A captured unavailable-review screen produces one `automatic_review_unavailable` event with `director_action.kind=review_automatic_review_unavailable`, and `effective_policy_json` records `automatic_review=unavailable` with its `rule_id` and `event_id`; `observed_mode` holds the displayed mode only under `redacted` evidence and is null under `metadata`. The member keeps running, and `member show` exposes the recorded policy.
+- [x] A member whose probed native version has no bundled profile (for example Claude Code 2.1.306) records the backend's newest bundled profile with `profile_match=fallback`, the profile's capabilities and the fallback warning; on an unchanged native UI it detects, delivers prompts and answers forms as under its exact version, and a run with no profile records `profile_match=null` and `coverage=unknown` as today.
+- [x] A native permission form shown in automatic mode opens the existing `interaction_opened` episode and is answered through `permission respond` exactly as under the interactive policies.
+- [x] On both tmux and herdr, live acceptance on each backend covers the omitted-default launch, an auto-approved fixture, an auto-refused fixture and, where the native host shows one, an escalated form answered allow and deny; each uncaptured screen is a documented limit.
+- [x] Member and Director guidance, `docs/`, `SPEC.md` and the skill references describe the new defaults, both events and their Director handling, and `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build` pass.
 
 ---
 
@@ -421,12 +421,12 @@ Each case records versions, mode, profile, profile match, multiplexer, terminal 
 ### Step 7: Validate and accept
 
 - [x] Run `mise //cafleet:test`, `mise //cafleet:lint`, `mise //cafleet:typecheck` and `mise //docs:build`; verify help, JSON and embedded assets match the documentation. <!-- completed: 2026-10-29T11:38 -->
-- [ ] Run live acceptance for Claude on tmux and herdr: omitted-default launch, auto-approved, auto-refused with its event and Director handling, escalated form allow and deny, and unavailable where captured. <!-- completed: -->
-- [ ] Run live acceptance for Codex on tmux and herdr with the same cases, reading `mode_source=default` and `permission_argv_json=["--approve-for-me"]` from the run record (`member_runs`), which `member show --json` does not expose; record as limits the cases this host cannot produce (no escalated form or unavailable screen in automatic mode, and in-sandbox auto-approval where bwrap cannot create user namespaces). <!-- completed: -->
-- [ ] Run the § Acceptance fallback case with the installed Claude Code 2.1.306 on one multiplexer, recording `profile_match=fallback` and every UI difference that failed to match. <!-- completed: -->
-- [ ] Run the user-attended cases: a non-auto-mode Director decision on an automatic refusal and on an escalated form, and the startup dialog when it applies. <!-- completed: -->
-- [ ] Record versions, outcomes, latencies and every uncaptured or unobserved case as a documented limit in the execution record and the shipping documentation. <!-- completed: -->
-- [ ] Confirm the explicit interactive policies still pass their existing 0000194/0000196 acceptance shape on one multiplexer with the new profiles. <!-- completed: -->
+- [x] Run live acceptance for Claude on tmux and herdr: omitted-default launch, auto-approved, auto-refused with its event and Director handling, escalated form allow and deny, and unavailable where captured. <!-- completed: 2026-10-29T12:55 -->
+- [x] Run live acceptance for Codex on tmux and herdr with the same cases, reading `mode_source=default` and `permission_argv_json=["--approve-for-me"]` from the run record (`member_runs`), which `member show --json` does not expose; record as limits the cases this host cannot produce (no escalated form or unavailable screen in automatic mode, and in-sandbox auto-approval where bwrap cannot create user namespaces). <!-- completed: 2026-10-29T12:55 -->
+- [x] Run the § Acceptance fallback case with the installed Claude Code 2.1.306 on one multiplexer, recording `profile_match=fallback` and every UI difference that failed to match. <!-- completed: 2026-10-29T12:55 -->
+- [x] Run the user-attended cases: a non-auto-mode Director decision on an automatic refusal and on an escalated form, and the startup dialog when it applies. <!-- completed: 2026-10-29T13:18 -->
+- [x] Record versions, outcomes, latencies and every uncaptured or unobserved case as a documented limit in the execution record and the shipping documentation. <!-- completed: 2026-10-29T13:18 -->
+- [x] Confirm the explicit interactive policies still pass their existing 0000194/0000196 acceptance shape on one multiplexer with the new profiles. <!-- completed: 2026-10-29T12:55 -->
 
 ---
 
