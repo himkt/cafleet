@@ -56,7 +56,9 @@ runtime_enum!(InteractionCloseReason, "member_interactions.close_reason", {
 runtime_enum!(RuntimeEventKind, "member_runtime_events.kind", {
     CoverageUnknown => "coverage_unknown", InteractionOpened => "interaction_opened",
     InteractionObscured => "interaction_obscured", InteractionClosed => "interaction_closed",
-    PermissionDeniedObserved => "permission_denied_observed", RunnerDegraded => "runner_degraded",
+    PermissionDeniedObserved => "permission_denied_observed",
+    AutomaticRefusalObserved => "automatic_refusal_observed",
+    AutomaticReviewUnavailable => "automatic_review_unavailable", RunnerDegraded => "runner_degraded",
     RunnerLost => "runner_lost", RunnerExited => "runner_exited"
 });
 runtime_enum!(RuntimeCauseKind, "cause.kind", {

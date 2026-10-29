@@ -564,10 +564,11 @@ CHECK(kind IN ('coverage_unknown','interaction_opened','interaction_obscured','i
 
 ALTER TABLE member_runs ADD COLUMN profile_match TEXT
   CHECK((profile_version IS NULL AND profile_match IS NULL)
-     OR (profile_version IS NOT NULL AND profile_match IN ('exact','fallback')));
+     OR (profile_version IS NOT NULL AND profile_match IS NOT NULL
+         AND profile_match IN ('exact','fallback')));
 ```
 
-SQLite cannot alter a CHECK in place, and the migration transaction runs with foreign keys enabled, so V6 rebuilds `member_runtime_events`, `member_permission_responses` and `member_permission_response_claims` in dependency order. It preserves every row, the event-ID sequence and every foreign key; the rebuilt tables keep their names, columns, other constraints and indexes. Every run recorded before V6 selected its profile by exact version, so V6 sets `profile_match='exact'` on each run with a `profile_version` and leaves the others null.
+SQLite cannot alter a CHECK in place, and the migration transaction runs with foreign keys enabled, so V6 rebuilds `member_runtime_events`, `member_permission_responses` and `member_permission_response_claims` in dependency order. It preserves every row, the event-ID sequence and every foreign key; the rebuilt tables keep their names, columns, other constraints and indexes. Every run recorded before V6 selected its profile by exact version, so V6 sets `profile_match='exact'` on each run with a `profile_version` and leaves the others null. SQLite tests an added column's CHECK against existing rows, so V6 sets aside each profiled run's `profile_version` while it adds the column, then restores it together with `profile_match` in the same migration transaction.
 
 ## CLI presentation contract
 

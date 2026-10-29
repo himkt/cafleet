@@ -1,7 +1,7 @@
 # Member Automatic Approval Modes
 
 **Status**: Approved
-**Progress**: 3/31 tasks complete
+**Progress**: 4/31 tasks complete
 **Last Updated**: 2026-10-29
 
 ## Overview
@@ -290,13 +290,21 @@ SQLite cannot alter a CHECK in place, and the grouped migration transaction runs
 3. Create `member_permission_response_claims_v6` with its composite foreign key referencing `member_permission_responses_v6(interaction_id, input_id)` and otherwise the V5 definition; copy all rows.
 4. Drop `member_permission_response_claims`, then `member_permission_responses`, then `member_runtime_events`; each drop has no remaining referencing rows, and the last removes the old sequence row.
 5. Rename `member_runtime_events_v6`, `member_permission_responses_v6` and `member_permission_response_claims_v6` to their final names in that order. SQLite's non-legacy rename rewrites the referencing foreign keys to the final names and renames the `_v6` sequence row with its table.
-6. Add the profile-match column in place and backfill existing runs, which all selected their profile by exact version:
+6. Add the profile-match column in place and backfill existing runs, which all selected their profile by exact version. SQLite tests an added column's CHECK against existing rows, and a NULL `profile_match` makes `IN` NULL rather than false, so the CHECK names `IS NOT NULL` explicitly and the profiled runs are stashed and their `profile_version` cleared while the column is added:
 
 ```sql
+CREATE TEMP TABLE v6_profiled_runs AS
+  SELECT run_id, profile_version FROM member_runs WHERE profile_version IS NOT NULL;
+UPDATE member_runs SET profile_version = NULL WHERE profile_version IS NOT NULL;
 ALTER TABLE member_runs ADD COLUMN profile_match TEXT
   CHECK((profile_version IS NULL AND profile_match IS NULL)
-     OR (profile_version IS NOT NULL AND profile_match IN ('exact','fallback')));
-UPDATE member_runs SET profile_match = 'exact' WHERE profile_version IS NOT NULL;
+     OR (profile_version IS NOT NULL AND profile_match IS NOT NULL
+         AND profile_match IN ('exact','fallback')));
+UPDATE member_runs SET
+  profile_version = (SELECT p.profile_version FROM v6_profiled_runs p WHERE p.run_id = member_runs.run_id),
+  profile_match = 'exact'
+  WHERE run_id IN (SELECT run_id FROM v6_profiled_runs);
+DROP TABLE v6_profiled_runs;
 ```
 
 The derived chain guard and schema-shape guard must pass at head V6; both are computed from the embedded registry, and the shape guard compares columns, foreign keys and indexes. The migration tests establish the CHECK widening and data preservation: populate V5 rows in all three tables (including a response and a claim), migrate, and assert identical rows, the preserved `sqlite_sequence` value, an empty `PRAGMA foreign_key_check`, insertion of both new kinds and rejection of an unknown kind, `profile_match='exact'` on every V5 run with a profile and `null` on the others, and rejection of a `profile_match` inconsistent with `profile_version`.
@@ -384,7 +392,7 @@ COMMENT(director): Programmer — start now with the parts that do not depend on
 ### Step 3: Add the V6 migration
 
 - [ ] Write migration tests: V5 rows in events, responses and claims survive with identical values, `sqlite_sequence` is preserved, `PRAGMA foreign_key_check` is empty, both new kinds insert and an unknown kind is rejected, and `profile_match` is backfilled and constrained. <!-- completed: -->
-- [ ] Add `V6__automatic_review_events.sql` with the dependency-ordered rebuild and the `profile_match` column, extend `RuntimeEventKind`, and confirm the derived chain and schema-shape guards pass at head V6. <!-- completed: -->
+- [x] Add `V6__automatic_review_events.sql` with the dependency-ordered rebuild and the `profile_match` column, extend `RuntimeEventKind`, and confirm the derived chain and schema-shape guards pass at head V6. <!-- completed: 2026-10-29T08:09 -->
 
 ### Step 4: Add profile version fallback
 

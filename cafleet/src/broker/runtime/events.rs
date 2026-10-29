@@ -62,7 +62,9 @@ fn source(kind: RuntimeEventKind) -> &'static str {
         RuntimeEventKind::InteractionOpened
         | RuntimeEventKind::InteractionObscured
         | RuntimeEventKind::InteractionClosed
-        | RuntimeEventKind::PermissionDeniedObserved => "runner_screen",
+        | RuntimeEventKind::PermissionDeniedObserved
+        | RuntimeEventKind::AutomaticRefusalObserved
+        | RuntimeEventKind::AutomaticReviewUnavailable => "runner_screen",
         _ => "runner_lifecycle",
     }
 }

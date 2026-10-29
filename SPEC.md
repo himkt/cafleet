@@ -3433,13 +3433,21 @@ The grouped migration transaction runs with `foreign_keys=ON`, and `member_permi
 3. Create `member_permission_response_claims_v6` with its composite foreign key referencing `member_permission_responses_v6(interaction_id, input_id)` and otherwise the V5 definition; copy all rows.
 4. Drop `member_permission_response_claims`, then `member_permission_responses`, then `member_runtime_events`.
 5. Rename `member_runtime_events_v6`, `member_permission_responses_v6` and `member_permission_response_claims_v6` to their final names in that order; the non-legacy rename rewrites the referencing foreign keys and renames the `_v6` sequence row with its table.
-6. Add the profile-match column in place and backfill existing runs:
+6. Add the profile-match column in place and backfill existing runs, which all selected their profile by exact version. SQLite tests an added column's CHECK against existing rows, and a NULL `profile_match` makes `IN` NULL rather than false, so the CHECK names `IS NOT NULL` explicitly and the profiled runs are stashed and their `profile_version` cleared while the column is added:
 
 ```sql
+CREATE TEMP TABLE v6_profiled_runs AS
+  SELECT run_id, profile_version FROM member_runs WHERE profile_version IS NOT NULL;
+UPDATE member_runs SET profile_version = NULL WHERE profile_version IS NOT NULL;
 ALTER TABLE member_runs ADD COLUMN profile_match TEXT
   CHECK((profile_version IS NULL AND profile_match IS NULL)
-     OR (profile_version IS NOT NULL AND profile_match IN ('exact','fallback')));
-UPDATE member_runs SET profile_match = 'exact' WHERE profile_version IS NOT NULL;
+     OR (profile_version IS NOT NULL AND profile_match IS NOT NULL
+         AND profile_match IN ('exact','fallback')));
+UPDATE member_runs SET
+  profile_version = (SELECT p.profile_version FROM v6_profiled_runs p WHERE p.run_id = member_runs.run_id),
+  profile_match = 'exact'
+  WHERE run_id IN (SELECT run_id FROM v6_profiled_runs);
+DROP TABLE v6_profiled_runs;
 ```
 
 The derived chain guard and schema-shape guard pass at head V6.
