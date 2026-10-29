@@ -72,15 +72,15 @@ Profile provenance stays exact-version: a profile declares only the native versi
 
 The bundled catalog is embedded in the CAFleet binary together with the native screen fixtures that its declarations cite. Each profile's capabilities rest on accepted native captures of its exact native version.
 
-Each automatic-mode profile replaces its predecessor as its version's bundled profile and keeps every predecessor rule and answer plan unchanged; earlier runs keep their recorded `profile_version` text. Neither pinned version shows a startup notice or opt-in dialog for its automatic mode under the runner, on a fresh configuration or on a second launch, so no profile declares a startup rule.
+Each automatic-mode profile replaces its predecessor as its version's bundled profile and keeps every predecessor rule and answer plan unchanged; earlier runs keep their recorded `profile_version` text. Codex 0.163.0 shows no startup notice or opt-in dialog for `approve-for-me`, so its profile declares no startup rule. Claude Code 2.1.302 shows its `Teach auto mode about your environment?` dialog at most once per native configuration, described below, and the profile declares the question rule `claude-auto-startup` for it.
 
 Claude Code `2.1.302`, profile `claude-2.1.302-auto-1`, applies under every Claude launch policy:
 
 | Capability | Status | Declaration |
 |---|---|---|
-| Detection | `tested` | Rule `claude-bash-permission`: the native `default` Bash permission form (`Bash command` heading, approval text, proceed question, focused choice and the `Yes`/`No` single-request choices) in the alternate screen, with a plain or boxed operation, unwrapped or wrapped, within 24 rows from its heading to its `Esc to cancel · Tab to amend` line. Rule `claude-auto-ask-permission`: the automatic-mode ask-rule form described below |
-| Allow answer | `tested` | One stage, byte `31` (digit `1`), selecting `Yes` as `allow-once`, for either request rule |
-| Deny answer | `tested` | One stage, byte `34` (digit `4`) for `claude-bash-permission` and byte `32` (digit `2`) for `claude-auto-ask-permission`, selecting `No` as `deny-once` |
+| Detection | `tested` | Rule `claude-bash-permission`: the native `default` Bash permission form (`Bash command` heading, approval text, proceed question, focused choice and the `Yes`/`No` single-request choices) in the alternate screen, with a plain or boxed operation, unwrapped or wrapped, within 24 rows from its heading to its `Esc to cancel · Tab to amend` line. Rules `claude-bash-permission-auto-tip`, `claude-auto-ask-permission` and the question rule `claude-auto-startup`: described below |
+| Allow answer | `tested` | One stage, byte `31` (digit `1`), selecting `Yes` as `allow-once`, for each permission request rule |
+| Deny answer | `tested` | One stage, byte `34` (digit `4`) for `claude-bash-permission` and `claude-bash-permission-auto-tip`, and byte `32` (digit `2`) for `claude-auto-ask-permission`, selecting `No` as `deny-once` |
 | Empty-composer observation | `tested` | The idle prompt line with the terminal cursor immediately after the prompt prefix; a verified non-interaction boundary |
 | Annotations | `tested` | `claude-auto-refusal`, `claude-auto-refusal-notice`, `claude-auto-unavailable` and `claude-auto-mode-indicator`, described below |
 | Prompt submission | `unknown` | — |
@@ -109,6 +109,22 @@ Claude Code 2.1.302 in `auto` shows a native permission form only through an exp
 - `^ ❯ [1-9]\. ` for the focus, `^ [❯ ] 1\. (?P<label>Yes)$` and `^ [❯ ] 2\. (?P<label>No)$` for the choices
 
 In the captures, allow `1` ran the command, and deny `2` printed `Interrupted · What should Claude do instead?`.
+
+Under a non-automatic mode such as an explicit `default`, Claude Code 2.1.302 can show another Bash form for a workspace file write. It replaces the `This command requires approval` line with a `Tip: auto mode handles these prompts for you — choose "switch to auto mode" below` row and a description row, and offers four choices. Rule `claude-bash-permission-auto-tip` (priority 100, alternate screen, cursor inside) spans from `^ Bash command$` to `^ Esc to cancel · Tab to amend$` within 24 rows and requires the shared operation matcher with its one-space `row_margin` and these line matchers:
+
+- `^ Do you want to proceed\?$` and `^ ❯ [1-9]\. ` for the focus
+- `^ [❯ ] 1\. (?P<label>Yes)$` and `^ [❯ ] 4\. (?P<label>No)$` for the single-request choices
+- `^ [❯ ] 2\. Yes, and always allow access to \S.* from this project$` and `^ [❯ ] 3\. Yes, and switch to auto mode · auto mode handles these prompts for you$` for the broadened choices, which have no answer plan
+
+Allow `1` ran the command in the captures, and deny `4` printed `Interrupted · What should Claude do instead?`. The form was captured at 120 columns only, so a wrapped or boxed rendering of it is not detected.
+
+In `auto`, Claude Code 2.1.302 can show `Teach auto mode about your environment?` after a turn. The dialog first offers `1. Yes`, `2. Not now` and `3. Don't show again`; `1. Yes` opens a wizard with `How you use Claude here`, `Also scan shell history`, `Also scan your other repos` and `Continue`. The dialog consumes typed input, and once answered or cancelled it does not reappear for that configuration. Rule `claude-auto-startup` (priority 100, alternate screen, cursor inside) matches both stages as one `question` interaction:
+
+- start `^ {2,3}Teach auto mode about your environment\?$`
+- end `^ {2,3}(?:Enter to confirm|←/→ to change · Enter to continue) · Esc to cancel$`, within 14 rows
+- line matchers for the heading, the footer and the focus `^ {2,3}❯ \S`
+
+The rule declares no operation and no choices. Offer and wizard therefore share one fingerprint, and the wizard continues the offer's episode, which closes when the idle composer returns. The rule has no answer plan; the Director asks the user to answer the dialog on the member's native surface. To avoid it, answer the dialog once in an interactive session of the pinned version with the member's configuration directory; `3. Don't show again` persists.
 
 Claude renders an automatic refusal in one of two native forms, depending on the user's Verbose output setting, and the profile claims both. Every Claude annotation rule (priority 40, alternate screen, cursor any) declares the same frame guard: require `^❯\u{a0}` (the live composer prefix) and reject `^  Showing detailed transcript · ctrl\+o to toggle` (the transcript viewer's footer).
 

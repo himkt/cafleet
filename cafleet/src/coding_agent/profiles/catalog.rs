@@ -1294,6 +1294,46 @@ const BUNDLED_FIXTURES: &[(&str, &[u8])] = &[
         include_bytes!("native/claude-2.1.302-trust-dialog-1.json"),
     ),
     (
+        "native/claude-2.1.302-access-allow-continuation-1.json",
+        include_bytes!("native/claude-2.1.302-access-allow-continuation-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-access-allow-pre-stage-1.json",
+        include_bytes!("native/claude-2.1.302-access-allow-pre-stage-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-access-allow-running-1.json",
+        include_bytes!("native/claude-2.1.302-access-allow-running-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-access-deny-continuation-1.json",
+        include_bytes!("native/claude-2.1.302-access-deny-continuation-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-access-deny-pre-stage-1.json",
+        include_bytes!("native/claude-2.1.302-access-deny-pre-stage-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-access-permission-1.json",
+        include_bytes!("native/claude-2.1.302-access-permission-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-env-setup-cancelled-idle-1.json",
+        include_bytes!("native/claude-2.1.302-auto-env-setup-cancelled-idle-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-env-setup-offer-1.json",
+        include_bytes!("native/claude-2.1.302-auto-env-setup-offer-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-auto-env-setup-wizard-1.json",
+        include_bytes!("native/claude-2.1.302-auto-env-setup-wizard-1.json"),
+    ),
+    (
+        "native/claude-2.1.302-default-manual-idle-1.json",
+        include_bytes!("native/claude-2.1.302-default-manual-idle-1.json"),
+    ),
+    (
         "native/codex-0.163.0-on-request-permission-1.json",
         include_bytes!("native/codex-0.163.0-on-request-permission-1.json"),
     ),

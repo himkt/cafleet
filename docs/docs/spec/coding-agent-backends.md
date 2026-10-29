@@ -115,6 +115,14 @@ runner reports `automatic_review_unavailable` when its profile recognizes the
 notice. The recommended profiles are in
 [Claude Code configuration](../quickstart.md#claude-code).
 
+Claude Code 2.1.302 in auto mode can show its `Teach auto mode about your
+environment?` dialog once per configuration directory, after a member's turn.
+The dialog takes typed input, so the runner holds it as a `question`
+interaction and the user answers it on the member's native surface. As a
+one-time setup step, answer it in an interactive session of the pinned version
+that uses the members' configuration directory; `Don't show again` keeps it
+from returning ([startup dialog rule](member-runtime.md#bundled-profiles-and-native-screen-fixtures)).
+
 Explicit native modes retain their own permission behavior. Under explicit
 `dontAsk`, a member runs its spawn-time allow rules, Claude Code's built-in
 read-only commands, file reads inside its working directory, and every tool

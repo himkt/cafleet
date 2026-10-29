@@ -124,7 +124,7 @@ Spawn every member with the omitted `--permission-mode`, which selects the backe
 | Codex | `approve-for-me` | `on-request` or `never` |
 | OpenCode | `cafleet` | `cafleet-ask` |
 
-Neither pinned automatic mode (Claude Code 2.1.302 `auto`, Codex 0.163.0 `approve-for-me`) shows a startup notice or opt-in dialog under the runner, so a new member needs no startup answer from you; any first-launch dialog the native host shows, such as a folder-trust prompt, follows the existing held-interaction procedure.
+Claude Code 2.1.302 in `auto` can show `Teach auto mode about your environment?` once per native configuration. It arrives as an `interaction_opened` event with classification `question` and has no answer plan: ask the user to answer it on the member's native surface, and send no answer yourself. Codex 0.163.0 `approve-for-me` shows no startup dialog. Any other first-launch dialog the native host shows, such as a folder-trust prompt, follows the existing held-interaction procedure.
 
 Handle the runtime events of automatic mode through your existing wake, `event show` verification, ACK and host-owned pending-action record:
 
