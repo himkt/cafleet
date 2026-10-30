@@ -95,13 +95,9 @@ fn delivery_projection(input: &InputOperation) -> Result<Option<DeliveryProjecti
         (InputState::Accepted, _) | (InputState::Settled, Some(InputDisposition::Submitted)) => {
             (DeliveryStatus::Submitted, recorded()?)
         }
-        (InputState::Settled, Some(InputDisposition::NotSubmitted)) => {
-            require(
-                method.is_none(),
-                "member_input_operations.delivery_method",
-                "a zero-byte cancellation has no selected method",
-            )?;
-            (
+        (InputState::Settled, Some(InputDisposition::NotSubmitted)) => match method {
+            Some(_) => (DeliveryStatus::NotSubmitted, recorded()?),
+            None => (
                 DeliveryStatus::NotSubmitted,
                 Some(
                     input
@@ -109,8 +105,8 @@ fn delivery_projection(input: &InputOperation) -> Result<Option<DeliveryProjecti
                         .clone()
                         .unwrap_or_else(|| "method_unrecorded".to_owned()),
                 ),
-            )
-        }
+            ),
+        },
         (InputState::Settled, None) => return Err(unknown()),
     };
     Ok(Some(DeliveryProjection {
@@ -242,6 +238,19 @@ pub(crate) fn begin_deferred_attempt(
         )?;
         get_input(conn, input_id)
     })
+}
+
+/// Whether a deferred attempt of the run may have written bytes and awaits reconciliation, which
+/// stops automatic ordinary dispatch until it settles.
+pub(crate) fn has_unresolved_deferred_attempt(
+    conn: &Connection,
+    run_id: i64,
+) -> Result<bool, CafleetError> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM member_input_operations WHERE run_id=?1 AND deferred_at IS NOT NULL AND state IN ('in_progress','uncertain'))",
+        [run_id],
+        |row| row.get(0),
+    )?)
 }
 
 /// Returns a reserved immediate request that wrote zero bytes to the queue, clearing its unexecuted
@@ -982,6 +991,55 @@ mod tests {
             .is_err()
         );
         assert!(rows(&fixture.conn, "member_runtime_events").is_empty());
+    }
+
+    #[test]
+    fn reconciling_an_uncertain_receipt_with_a_recorded_method_not_submitted_reads_back() {
+        let mut fixture = Fixture::new();
+        let owner = fixture.activate();
+        let input = fixture.input(&owner, "prompt:uncertain", InputKind::Prompt, None);
+        storage::requeue_zero_byte_immediate(
+            &mut fixture.conn,
+            &owner,
+            input.input_id,
+            "interaction_open",
+        )
+        .unwrap();
+        storage::begin_deferred_attempt(
+            &mut fixture.conn,
+            &owner,
+            input.input_id,
+            DeliveryMethod::Fallback,
+            Some("idle_timeout"),
+        )
+        .unwrap();
+        storage::record_input_state(
+            &mut fixture.conn,
+            &owner,
+            input.input_id,
+            InputState::InProgress,
+            InputState::Uncertain,
+        )
+        .unwrap();
+        let settled = storage::settle_input(
+            &mut fixture.conn,
+            &owner,
+            input.input_id,
+            InputState::Uncertain,
+            InputDisposition::NotSubmitted,
+            "audit:no-bytes-observed",
+        )
+        .unwrap();
+        let read = storage::get_input(&fixture.reopen(), input.input_id).unwrap();
+        assert_eq!(read, settled);
+        assert_eq!(read.state, InputState::Settled);
+        assert_eq!(read.disposition, Some(InputDisposition::NotSubmitted));
+        assert_eq!(read.delivery_method, Some(DeliveryMethod::Fallback));
+        assert_eq!(read.delivery_reason.as_deref(), Some("idle_timeout"));
+        let delivery = read
+            .delivery()
+            .expect("a settled receipt projects its delivery");
+        assert_eq!(delivery.status, DeliveryStatus::NotSubmitted);
     }
 
     #[test]

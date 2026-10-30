@@ -33,7 +33,7 @@ const RECEIPT_CACHE_CAPACITY: usize = 4096;
 const STAGE_SETTLE: Duration = Duration::from_millis(500);
 const DEFERRED_ATTEMPT_BUDGET: Duration = Duration::from_secs(5);
 const DEFERRED_FINALIZATION: Duration = Duration::from_secs(1);
-const COMPOSER_BUSY_BOUND: chrono::TimeDelta = chrono::TimeDelta::minutes(3);
+const COMPOSER_BUSY_BOUND: Duration = Duration::from_secs(180);
 const FALLBACK_ESCAPE: u8 = 0x1b;
 const FALLBACK_ENTER: u8 = 0x0d;
 
@@ -99,20 +99,11 @@ struct QueuedInput {
     literal: String,
     operation: ComposerOperation,
     payload_digest_version: i64,
-    deferred_at: chrono::DateTime<chrono::FixedOffset>,
+    /// When the head first waited only on a composer that is not verified empty; the
+    /// `idle_timeout` bound runs from here and resets whenever an interaction blocks the head.
+    composer_busy_since: Option<Instant>,
     attempt_deadline: Option<Instant>,
     obstacle: &'static str,
-}
-
-fn deferred_at(
-    operation: &storage::InputOperation,
-) -> Result<chrono::DateTime<chrono::FixedOffset>> {
-    let deferred_at = operation
-        .deferred_at
-        .as_deref()
-        .ok_or_else(|| error("a queued input records when it was deferred"))?;
-    chrono::DateTime::parse_from_rfc3339(deferred_at)
-        .map_err(|_| error("queued input deferral time is not RFC 3339"))
 }
 
 type DeliverySelection = (
@@ -622,9 +613,13 @@ enum WriteValidation {
 
 #[cfg(test)]
 impl InputCoordinator {
-    pub(crate) fn set_queued_deferred_at(&mut self, input_id: i64, deferred_at: &str) {
-        let deferred_at =
-            chrono::DateTime::parse_from_rfc3339(deferred_at).expect("RFC 3339 deferral time");
+    /// Sets when the queued input began waiting only on a composer that is not verified empty.
+    pub(crate) fn set_queued_composer_busy_since(&mut self, input_id: i64, since: &str) {
+        let since = chrono::DateTime::parse_from_rfc3339(since).expect("RFC 3339 busy start");
+        let elapsed = chrono::Utc::now()
+            .signed_duration_since(since)
+            .to_std()
+            .expect("the busy start lies in the past");
         let attempt = self
             .pending
             .as_mut()
@@ -637,7 +632,7 @@ impl InputCoordinator {
             .chain(attempt)
             .find(|queued| queued.input_id == input_id)
             .expect("the input is queued or in its deferred attempt");
-        queued.deferred_at = deferred_at;
+        queued.composer_busy_since = Some(Instant::now() - elapsed);
     }
 }
 
@@ -1921,7 +1916,7 @@ impl InputCoordinator {
                             literal: input.literal,
                             operation: composer_operation,
                             payload_digest_version,
-                            deferred_at: deferred_at(&operation)?,
+                            composer_busy_since: None,
                             attempt_deadline: None,
                             obstacle: "delivery_budget_exhausted",
                         });
@@ -2092,30 +2087,67 @@ impl InputCoordinator {
         observation: &ObservationController,
         deadline: Instant,
     ) -> Result<()> {
-        if self.input_fenced {
+        if self.input_fenced || self.queue.is_empty() {
             return Ok(());
         }
-        let Some(head) = self.queue.front_mut() else {
-            return Ok(());
-        };
         let now = Instant::now();
+        if with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
+            storage::has_unresolved_deferred_attempt(conn, self.run.run_id)
+        })? {
+            return Ok(());
+        }
+        let head = self.queue.front_mut().expect("nonempty queue");
         let blocker = ordinary_blocker(&observation.status());
         if matches!(blocker, Some(OrdinaryBlocker::Interaction)) {
             head.attempt_deadline = None;
+            head.composer_busy_since = None;
             return Ok(());
         }
-        let (operation, kind, literal) = (head.operation, head.request.kind, head.literal.clone());
-        let idle_timeout =
-            chrono::Utc::now().signed_duration_since(head.deferred_at) >= COMPOSER_BUSY_BOUND;
-        let Some(selection) =
-            self.select_delivery(observation, operation, kind, &literal, idle_timeout)?
-        else {
-            self.queue
-                .front_mut()
-                .expect("queued head remains")
-                .attempt_deadline = None;
-            return Ok(());
-        };
+        if matches!(blocker, Some(OrdinaryBlocker::ObserverUnavailable)) {
+            head.obstacle = "observer_unavailable";
+        } else {
+            let (operation, kind, literal) =
+                (head.operation, head.request.kind, head.literal.clone());
+            let idle_timeout = head
+                .composer_busy_since
+                .is_some_and(|since| now.duration_since(since) >= COMPOSER_BUSY_BOUND);
+            let selection =
+                self.select_delivery(observation, operation, kind, &literal, idle_timeout)?;
+            let head = self.queue.front_mut().expect("queued head remains");
+            let Some(selection) = selection else {
+                head.composer_busy_since.get_or_insert(now);
+                head.attempt_deadline = None;
+                return Ok(());
+            };
+            return self.attempt_deferred(conn, run, observation, deadline, now, selection);
+        }
+        let attempt_deadline = *head
+            .attempt_deadline
+            .get_or_insert((now + DEFERRED_ATTEMPT_BUDGET).min(deadline));
+        if now >= attempt_deadline {
+            let input_id = head.input_id;
+            self.queue.pop_front();
+            return self.cancel_deferred(
+                conn,
+                observation,
+                input_id,
+                storage::InputState::Ready,
+                "observer_unavailable",
+            );
+        }
+        Ok(())
+    }
+
+    /// Starts the selected attempt for the queued head within its five-second budget.
+    fn attempt_deferred(
+        &mut self,
+        conn: &mut Connection,
+        run: &RunRecord,
+        observation: &ObservationController,
+        deadline: Instant,
+        now: Instant,
+        selection: DeliverySelection,
+    ) -> Result<()> {
         let head = self.queue.front_mut().expect("queued head remains");
         let attempt_deadline = *head
             .attempt_deadline
@@ -2132,10 +2164,6 @@ impl InputCoordinator {
                 storage::InputState::Ready,
                 obstacle,
             );
-        }
-        if matches!(blocker, Some(OrdinaryBlocker::ObserverUnavailable)) {
-            head.obstacle = "observer_unavailable";
-            return Ok(());
         }
         let target = with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
             if let Some(message_id) = message_id {
@@ -2270,6 +2298,7 @@ impl InputCoordinator {
             debug_assert_eq!(operation.state, storage::InputState::Ready);
             let mut queued = deferred.queued;
             queued.attempt_deadline = None;
+            queued.composer_busy_since = None;
             self.queue.push_front(queued);
         } else {
             self.cancel_deferred(
@@ -2362,7 +2391,7 @@ impl InputCoordinator {
             literal: composer.literal,
             operation: composer.operation,
             payload_digest_version: composer.payload_digest_version,
-            deferred_at: deferred_at(&operation)?,
+            composer_busy_since: None,
             attempt_deadline: None,
             obstacle: "delivery_budget_exhausted",
         });
@@ -4842,6 +4871,84 @@ mod tests {
                     assert_eq!(result_events(host, id), 1, "the result is published once");
                 });
             }
+
+            #[test]
+            fn queue_head_interrupted_between_stages_holds_the_next_input_until_reconciliation() {
+                with_permission_host(Duration::from_secs(90), |host| {
+                    form(host);
+                    let first =
+                        queued(host, host.request("prompt:interrupted"), "interaction_open");
+                    let next = queued(host, host.request("prompt:next"), "interaction_open");
+                    close(host);
+                    while host.pty.stages.is_empty() {
+                        assert!(Instant::now() < host.until, "the literal stage is written");
+                        host.drain();
+                        host.advance();
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    host.human.bytes.extend(b"h");
+                    turns_until(host, |host| {
+                        row(host, first).state == storage::InputState::Uncertain
+                    });
+                    super::composer_busy::hold_turns(host);
+                    assert_eq!(
+                        host.pty.offers,
+                        vec![LITERAL.as_bytes().to_vec(), b"h".to_vec()],
+                        "the next input receives zero bytes while the head is uncertain"
+                    );
+                    assert_eq!(row(host, next).state, storage::InputState::Ready);
+                    storage::settle_input(
+                        &mut host.fixture.conn,
+                        &host.fixture.run.owner(),
+                        first,
+                        storage::InputState::Uncertain,
+                        storage::InputDisposition::AbandonedUncertain,
+                        "audit:reconciled",
+                    )
+                    .unwrap();
+                    turns_until(host, |host| settled(host, next));
+                    assert_eq!(
+                        host.pty.offers[2..],
+                        [LITERAL.as_bytes().to_vec(), b"~".to_vec()]
+                    );
+                });
+            }
+
+            #[test]
+            fn queue_head_under_an_observer_outage_settles_within_the_observer_budget() {
+                with_permission_host(Duration::from_secs(90), |host| {
+                    form(host);
+                    let id = queued(host, host.request("prompt:outage"), "interaction_open");
+                    close(host);
+                    host.drain();
+                    let started = Instant::now();
+                    while !settled(host, id) {
+                        assert!(
+                            started.elapsed() < Duration::from_secs(60),
+                            "the 5 s observer_unavailable budget, not the 3-minute bound, settles the head"
+                        );
+                        host.controller
+                            .observer_failed(
+                                crate::runtime::runner::observation::ObservationFailure::Detector,
+                                &RealObservationClock,
+                            )
+                            .unwrap();
+                        host.advance();
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                    assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
+                    let input = row(host, id);
+                    assert_eq!(
+                        input.disposition,
+                        Some(storage::InputDisposition::NotSubmitted)
+                    );
+                    assert_eq!(input.delivery_method, None);
+                    assert_eq!(
+                        input.delivery_reason.as_deref(),
+                        Some("observer_unavailable")
+                    );
+                });
+            }
         }
 
         mod method_rendering {
@@ -4943,7 +5050,8 @@ mod tests {
                     let expired = crate::time::format_utc(
                         chrono::Utc::now() - chrono::Duration::seconds(181),
                     );
-                    host.coordinator.set_queued_deferred_at(id, &expired);
+                    host.coordinator
+                        .set_queued_composer_busy_since(id, &expired);
                     turns_until(host, |host| {
                         matches!(
                             row(host, id).state,
@@ -4994,7 +5102,33 @@ mod tests {
             /// composer rather than an unclassifiable screen.
             pub(super) fn busy_catalog() -> ProfileCatalog {
                 let mut definition = catalog_definition();
-                let mut draft = definition["profiles"][0]["rules"][0].clone();
+                let empty = definition["profiles"][0]["rules"][0].clone();
+                with_draft_rule(&mut definition, empty);
+                ProfileCatalog::from_definitions(&definition).unwrap()
+            }
+
+            /// The permission-form catalog whose composer also classifies a draft as busy.
+            fn permission_busy_catalog() -> ProfileCatalog {
+                let mut definition =
+                    crate::coding_agent::profiles::catalog::test_support::inspection_fixture_definition();
+                let composer = catalog_definition();
+                definition["fixtures"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(composer["fixtures"][1].clone());
+                let empty = composer["profiles"][0]["rules"][0].clone();
+                definition["profiles"][0]["rules"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(empty.clone());
+                definition["profiles"][0]["capabilities"]["composer"] =
+                    composer["profiles"][0]["capabilities"]["composer"].clone();
+                with_draft_rule(&mut definition, empty);
+                ProfileCatalog::from_definitions(&definition).unwrap()
+            }
+
+            fn with_draft_rule(definition: &mut Value, empty: Value) {
+                let mut draft = empty;
                 draft["id"] = serde_json::json!("synthetic-composer-draft");
                 draft["observation"] = serde_json::json!("composer_draft");
                 draft["region"]["start_pattern"] = serde_json::json!("^Synthetic draft$");
@@ -5006,7 +5140,6 @@ mod tests {
                     .push(draft);
                 definition["profiles"][0]["capabilities"]["composer"]["rule_ids"] =
                     serde_json::json!(["synthetic-composer-empty", "synthetic-composer-draft"]);
-                ProfileCatalog::from_definitions(&definition).unwrap()
             }
 
             fn busy(host: &mut Host) {
@@ -5024,13 +5157,27 @@ mod tests {
                 bytes
             }
 
-            fn drive_for(host: &mut Host, duration: Duration) {
-                let until = Instant::now() + duration;
-                while Instant::now() < until {
+            /// Drives a fixed number of runner turns, enough for a misbehaving queue to write.
+            pub(super) fn hold_turns(host: &mut Host) {
+                for _ in 0..40 {
                     host.drain();
                     host.advance();
-                    std::thread::sleep(Duration::from_millis(10));
                 }
+            }
+
+            /// A host whose deadline only bounds a hang, so suite load cannot fail a delivery.
+            pub(super) fn with_busy_host(
+                catalog: ProfileCatalog,
+                expected_program: Vec<u8>,
+                body: impl FnOnce(&mut Host),
+            ) {
+                with_profile_host_until(
+                    catalog,
+                    expected_program,
+                    HostProfile::metadata(),
+                    Instant::now() + Duration::from_secs(60),
+                    body,
+                );
             }
 
             fn delivered(host: &Host, input_id: i64) -> bool {
@@ -5044,7 +5191,7 @@ mod tests {
             fn composer_busy_queues_with_zero_bytes_and_drains_by_profile_when_the_composer_empties()
              {
                 for screen in [DRAFT, b"\x1b[2J\x1b[1;1Hunclassifiable screen".as_slice()] {
-                    with_catalog_host(busy_catalog(), encoded(), |host| {
+                    with_busy_host(busy_catalog(), encoded(), |host| {
                         host.show(screen.to_vec());
                         assert!(matches!(
                             host.controller.health(&host.writer).eligibility,
@@ -5072,7 +5219,7 @@ mod tests {
                     ),
                 ];
                 for (catalog, block, reason) in cases {
-                    with_catalog_host(catalog(), encoded(), |host| {
+                    with_busy_host(catalog(), encoded(), |host| {
                         let key = "prompt:blocked-after-selection";
                         let request = host.request(key);
                         assert!(
@@ -5080,7 +5227,7 @@ mod tests {
                             "{reason}: an eligible composer selects its method immediately"
                         );
                         block(host);
-                        drive_for(host, Duration::from_millis(800));
+                        hold_turns(host);
                         assert!(
                             host.pty.offers.is_empty(),
                             "{reason}: no byte, Escape included: {:?}",
@@ -5121,7 +5268,7 @@ mod tests {
                     "fixture_ids":[definition["fixtures"][0]["id"].clone()]
                 });
                 let catalog = ProfileCatalog::from_definitions(&definition).unwrap();
-                with_catalog_host(catalog, encoded(), |host| {
+                with_busy_host(catalog, encoded(), |host| {
                     host.show(
                         b"\x1b[2J\x1b[21;1HWorking\x1b[23;1HSynthetic state\r\nState end".to_vec(),
                     );
@@ -5141,7 +5288,7 @@ mod tests {
             fn busy_then_profile(host: &mut Host) {
                 let request = host.request("prompt:busy-composer");
                 let id = queued(host, request, "composer_busy");
-                drive_for(host, Duration::from_millis(1500));
+                hold_turns(host);
                 assert!(
                     host.pty.offers.is_empty(),
                     "a busy composer receives no byte, Escape included: {:?}",
@@ -5161,16 +5308,53 @@ mod tests {
             }
 
             #[test]
+            fn composer_busy_bound_starts_when_an_interaction_deferred_head_meets_a_busy_composer()
+            {
+                with_profile_host_until(
+                    permission_busy_catalog(),
+                    encoded(),
+                    HostProfile::metadata(),
+                    Instant::now() + Duration::from_secs(60),
+                    |host| {
+                        super::deferred_queue::form(host);
+                        let request = host.request("prompt:interaction-then-busy");
+                        let id = queued(host, request, "interaction_open");
+                        let long_queued = crate::time::format_utc(
+                            chrono::Utc::now() - chrono::Duration::seconds(181),
+                        );
+                        host.coordinator
+                            .set_queued_composer_busy_since(id, &long_queued);
+                        host.drain();
+                        host.advance();
+                        busy(host);
+                        hold_turns(host);
+                        assert!(
+                            host.pty.offers.is_empty(),
+                            "time queued behind an interaction does not count toward the bound: {:?}",
+                            host.pty.offers
+                        );
+                        assert_eq!(row(host, id).state, storage::InputState::Ready);
+                        host.show(SCREEN.to_vec());
+                        turns_until(host, |host| delivered(host, id));
+                        let input = row(host, id);
+                        assert_eq!(input.delivery_method, Some(DeliveryMethod::Profile));
+                        assert_eq!(input.delivery_reason, None);
+                    },
+                );
+            }
+
+            #[test]
             fn composer_busy_falls_back_with_idle_timeout_three_minutes_after_deferred_at() {
-                with_catalog_host(busy_catalog(), fallback_program(), |host| {
+                with_busy_host(busy_catalog(), fallback_program(), |host| {
                     busy(host);
                     let request = host.request("prompt:idle-timeout");
                     let id = queued(host, request, "composer_busy");
                     let just_inside = crate::time::format_utc(
                         chrono::Utc::now() - chrono::Duration::seconds(170),
                     );
-                    host.coordinator.set_queued_deferred_at(id, &just_inside);
-                    drive_for(host, Duration::from_millis(500));
+                    host.coordinator
+                        .set_queued_composer_busy_since(id, &just_inside);
+                    hold_turns(host);
                     assert!(
                         host.pty.offers.is_empty(),
                         "no Escape before the 3-minute bound"
@@ -5178,7 +5362,8 @@ mod tests {
                     let expired = crate::time::format_utc(
                         chrono::Utc::now() - chrono::Duration::seconds(181),
                     );
-                    host.coordinator.set_queued_deferred_at(id, &expired);
+                    host.coordinator
+                        .set_queued_composer_busy_since(id, &expired);
                     turns_until(host, |host| delivered(host, id));
                     assert_eq!(
                         host.pty.stage_bytes(),

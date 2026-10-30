@@ -779,6 +779,11 @@ mod tests {
                     false,
                 ),
                 (
+                    "state='settled',disposition='not_submitted',delivery_method='profile'".to_owned(),
+                    json!({"status":"not_submitted","method":"profile","reason":null}),
+                    false,
+                ),
+                (
                     "state='settled',disposition='abandoned_uncertain',delivery_method='profile'".to_owned(),
                     json!({"status":"uncertain","method":"profile","reason":null}),
                     false,
@@ -814,32 +819,20 @@ mod tests {
                 assert_eq!(output["defer_reason"].is_null(), !deferred, "{assignment}");
                 assert_eq!(output["payload_digest_version"], 1);
             }
-            for assignment in [
-                format!(
-                    "state='ready',deferred_at='{NOW}',defer_reason='interaction_open',delivery_method='profile'"
-                ),
-                "state='settled',disposition='not_submitted',delivery_method='profile'".to_owned(),
-            ] {
-                let input = fixture.input(
-                    &owner,
-                    &format!("invalid:{assignment}"),
-                    InputKind::Exec,
-                    None,
-                );
-                fixture
-                    .conn
-                    .execute(
-                        &format!(
-                            "UPDATE member_input_operations SET {assignment} WHERE input_id=?1"
-                        ),
-                        [input.input_id],
-                    )
-                    .unwrap();
-                assert!(
-                    storage::get_input(&fixture.conn, input.input_id).is_err(),
-                    "unknown stored combination {assignment} fails validation"
-                );
-            }
+            let queued_with_method = fixture.input(&owner, "exec:invalid", InputKind::Exec, None);
+            fixture
+                .conn
+                .execute(
+                    &format!(
+                        "UPDATE member_input_operations SET state='ready',deferred_at='{NOW}',defer_reason='interaction_open',delivery_method='profile' WHERE input_id=?1"
+                    ),
+                    [queued_with_method.input_id],
+                )
+                .unwrap();
+            assert!(
+                storage::get_input(&fixture.conn, queued_with_method.input_id).is_err(),
+                "a queued receipt with a selected method fails validation"
+            );
         }
     }
 
