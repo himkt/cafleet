@@ -3406,15 +3406,6 @@ impl InputCoordinator {
         }
     }
 
-    /// The stage a fenced input's result reports: its attempt's stage, or zero bytes for work that
-    /// never started an attempt.
-    pub(super) fn fenced_stage(&self, input_id: i64) -> SubmissionStage {
-        match self.operations.get(&input_id) {
-            Some(retained) => retained.stage,
-            None => SubmissionStage::ZeroBytes,
-        }
-    }
-
     fn stop_composer_stages(
         &mut self,
         conn: &mut Connection,

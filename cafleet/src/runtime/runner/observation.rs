@@ -288,12 +288,18 @@ impl ObservationController {
             observation_hooks: None,
         })
     }
-    /// Queues a deferred input's first result for publication on the next poll.
+    /// Queues a deferred input's first result for publication on the next poll, once per input.
     pub(crate) fn publish_delivery_result(&self, record: serde_json::Value) {
-        self.delivery_results
+        let mut queue = self
+            .delivery_results
             .lock()
-            .expect("delivery result queue is never poisoned")
-            .push_back(record);
+            .expect("delivery result queue is never poisoned");
+        if queue
+            .iter()
+            .all(|queued| queued["input_id"] != record["input_id"])
+        {
+            queue.push_back(record);
+        }
     }
     pub(crate) fn current_request(&self) -> Option<&ObservedRequest> {
         self.current_request.as_ref()
@@ -827,7 +833,7 @@ impl ObservationController {
             }
         }
         if self.started
-            && self.exit_recorded.is_none()
+            && !self.terminal_fenced
             && self.pending.is_none()
             && self.gap.is_none()
             && !writer.status().degraded

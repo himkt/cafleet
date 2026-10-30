@@ -150,14 +150,18 @@ impl NativeIo<'_> {
             )
         })
     }
+    /// Records a native exit after `before_exit` has queued every deferred result, so the
+    /// results precede `runner_exited`.
     fn observe_exit(
         &mut self,
         native_exit: &mut Option<ChildExit>,
+        before_exit: impl FnOnce(&ObservationController) -> Result<()>,
     ) -> Result<Option<ShutdownClock>> {
         let Some(exit) = self.pty.try_wait()? else {
             return Ok(None);
         };
         *native_exit = Some(exit);
+        before_exit(self.controller)?;
         self.controller
             .child_exited(exit, &self.transport.snapshot(), self.writer, self.clock)?;
         Ok(Some(ShutdownClock::new(Instant::now())))
@@ -1052,7 +1056,9 @@ pub(crate) fn run_service(
                         return Ok(ShutdownClock::new(Instant::now()));
                     }
                     tick_progress = progress;
-                    if let Some(clock) = native.observe_exit(&mut native_exit)? {
+                    if let Some(clock) = native.observe_exit(&mut native_exit, |controller| {
+                        publish_stopped_results(coordinator, &mut conn, run.run_id, controller)
+                    })? {
                         return Ok(clock);
                     }
                     if let Some(pending) = &pending_input_client {
@@ -1064,7 +1070,16 @@ pub(crate) fn run_service(
                                 if terminate.load(Ordering::Acquire) {
                                     return Ok(ShutdownClock::new(Instant::now()));
                                 }
-                                if let Some(clock) = native.observe_exit(&mut native_exit)? {
+                                if let Some(clock) =
+                                    native.observe_exit(&mut native_exit, |controller| {
+                                        publish_stopped_results(
+                                            coordinator,
+                                            &mut conn,
+                                            run.run_id,
+                                            controller,
+                                        )
+                                    })?
+                                {
                                     return Ok(clock);
                                 }
                                 if resize.load(Ordering::Acquire) {
@@ -1168,22 +1183,26 @@ pub(crate) fn run_service(
     if let Some(coordinator) = coordinator.as_mut() {
         let fenced = coordinator.fence(clock.storage_deadline());
         coordinator.finish_pending_attempt();
-        match fenced {
-            Ok(settled) => {
-                for input_id in settled {
-                    controller.publish_delivery_result(storage::input_delivery_result_cause(
-                        input_id,
-                        coordinator.fenced_stage(input_id).as_str(),
-                        None,
-                    ));
-                }
+        let unpublished = with_database_deadline(&mut conn, clock.storage_deadline(), |conn| {
+            storage::unpublished_delivery_results(conn, run.run_id)
+        });
+        if let Ok(unpublished) = &unpublished {
+            for &(input_id, stage) in unpublished {
+                controller.publish_delivery_result(storage::input_delivery_result_cause(
+                    input_id, stage, None,
+                ));
             }
-            Err(cause) => {
-                let message = cause.message();
+        }
+        for (step, result) in [
+            ("input fence", fenced.map(|_| ())),
+            ("result publication", unpublished.map(|_| ())),
+        ] {
+            if let Err(cause) = result {
+                let message = format!("{step}: {}", cause.message());
                 if let Some(prior) = &mut failure {
-                    prior.push_str(&format!("; input fence: {message}"));
+                    prior.push_str(&format!("; {message}"));
                 } else {
-                    failure = Some(message.into_owned());
+                    failure = Some(message);
                 }
             }
         }
@@ -1255,6 +1274,26 @@ pub(crate) fn run_service(
         outcome.native_exit,
         outcome.cleanup_state == CleanupState::Complete,
     )
+}
+
+/// Fences ordinary input after the native exit and queues every durable deferred result that
+/// has no event yet.
+fn publish_stopped_results(
+    coordinator: &mut InputCoordinator,
+    conn: &mut Connection,
+    run_id: i64,
+    controller: &ObservationController,
+) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(1);
+    coordinator.fence(deadline)?;
+    let unpublished = with_database_deadline(conn, deadline, |conn| {
+        storage::unpublished_delivery_results(conn, run_id)
+    })?;
+    for (input_id, stage) in unpublished {
+        controller
+            .publish_delivery_result(storage::input_delivery_result_cause(input_id, stage, None));
+    }
+    Ok(())
 }
 
 const IDLE_TICK_SLEEP: Duration = Duration::from_millis(2);
@@ -2260,17 +2299,27 @@ pub(crate) mod test_support {
             }
         }
         pub(crate) fn with_input_service(body: impl FnOnce(&mut ServiceFixture, Instant)) {
-            with_configured_input_service(false, body);
+            with_configured_input_service(false, 0, body);
         }
 
         pub(crate) fn with_detecting_input_service(
             body: impl FnOnce(&mut ServiceFixture, Instant),
         ) {
-            with_configured_input_service(true, body);
+            with_configured_input_service(true, 0, body);
+        }
+
+        /// Runs a detecting input service whose body ends the run, which then exits with
+        /// `exit_code`.
+        pub(crate) fn with_detecting_input_service_exiting(
+            exit_code: i32,
+            body: impl FnOnce(&mut ServiceFixture, Instant),
+        ) {
+            with_configured_input_service(true, exit_code, body);
         }
 
         fn with_configured_input_service(
             detecting: bool,
+            exit_code: i32,
             body: impl FnOnce(&mut ServiceFixture, Instant),
         ) {
             let until = Instant::now() + Duration::from_secs(10);
@@ -2296,7 +2345,7 @@ pub(crate) mod test_support {
                     status
                         .expect("owned service reaped under original deadline")
                         .code(),
-                    Some(0),
+                    Some(exit_code),
                     "owned service cleanup retains its original exit expectation: {}",
                     failure_diagnostic(&mut fixture, "service cleanup"),
                 );
@@ -3471,6 +3520,114 @@ mod tests {
                         )),
                     "actual bookkeeping failure retains the independently observed safe input identities: {cause}"
                 );
+            });
+        }
+
+        fn queue_behind_the_form(fixture: &mut ServiceFixture, until: Instant) -> i64 {
+            let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+            manual(fixture, format!("{FORM_LINE}\r").as_bytes(), until);
+            loop {
+                assert!(Instant::now() < until, "the detected interaction opens");
+                let health = NativeInputHost.health(&run, until).unwrap();
+                let observation = health.observation.as_ref().unwrap();
+                if observation.eligibility == InputEligibility::Hold(GateReason::Interaction)
+                    && observation.pending_count == 0
+                    && !observation.pending_evidence
+                {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            let value = request(
+                fixture,
+                "prompt:service:stopped",
+                "queued at shutdown",
+                InputKind::Prompt,
+                None,
+                until.min(Instant::now() + Duration::from_secs(3)),
+            );
+            let reply = exchange(fixture, &value, until);
+            assert!(reply.get("error").is_none(), "{reply}");
+            let result: SubmissionResult =
+                serde_json::from_value(reply["result"]["submission"].clone()).unwrap();
+            assert_eq!(result.status, SubmissionStatus::Queued);
+            assert_eq!(result.stage, SubmissionStage::ZeroBytes);
+            result.input_id.expect("queued work has a durable input ID")
+        }
+
+        /// The run's result events for `input_id` and its exit event, in event order.
+        fn results_then_exit(
+            fixture: &ServiceFixture,
+            input_id: i64,
+        ) -> Vec<(String, Option<String>)> {
+            fixture
+                .fixture
+                .conn
+                .prepare(
+                    "SELECT kind,json_extract(payload_json,'$.delivery.reason') FROM member_runtime_events WHERE run_id=?1 AND (kind='runner_exited' OR (kind='input_delivery_result' AND json_extract(payload_json,'$.input_id')=?2)) ORDER BY event_seq",
+                )
+                .unwrap()
+                .query_map(
+                    rusqlite::params![fixture.fixture.run.run_id, input_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        }
+
+        fn assert_stopped_result_before_exit(fixture: &ServiceFixture, input_id: i64) {
+            assert_eq!(
+                results_then_exit(fixture, input_id),
+                [
+                    (
+                        "input_delivery_result".to_owned(),
+                        Some("runner_stopped".to_owned())
+                    ),
+                    ("runner_exited".to_owned(), None),
+                ]
+            );
+            let input = storage::get_input(&fixture.fixture.conn, input_id).unwrap();
+            assert_eq!(input.disposition, Some(InputDisposition::NotSubmitted));
+            assert_eq!(input.delivery_reason.as_deref(), Some("runner_stopped"));
+            let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+            assert_eq!(run.status, RunStatus::Exited);
+            assert_eq!(
+                run.cleanup_state,
+                CleanupState::Complete,
+                "{:?}",
+                run.cleanup_diagnostics_json
+            );
+        }
+
+        #[test]
+        fn service_native_exit_publishes_queued_results_as_runner_stopped_before_runner_exited() {
+            with_detecting_input_service(|fixture, until| {
+                let id = queue_behind_the_form(fixture, until);
+                manual(fixture, b"finish\r", until);
+                assert_eq!(fixture.wait().code(), Some(0));
+                assert_stopped_result_before_exit(fixture, id);
+            });
+        }
+
+        #[test]
+        fn service_shutdown_publishes_queued_results_as_runner_stopped_before_runner_exited() {
+            with_detecting_input_service_exiting(143, |fixture, until| {
+                let id = queue_behind_the_form(fixture, until);
+                let outcome =
+                    super::super::test_support::injected_failures::shutdown_reply(fixture);
+                assert_eq!(
+                    outcome.cleanup_state,
+                    CleanupState::Complete,
+                    "{:?}",
+                    outcome.diagnostics
+                );
+                assert_eq!(
+                    fixture.wait().code(),
+                    Some(143),
+                    "the terminated native exit is preserved"
+                );
+                assert_stopped_result_before_exit(fixture, id);
             });
         }
     }
