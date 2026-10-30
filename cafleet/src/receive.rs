@@ -50,6 +50,8 @@ pub(crate) struct NotificationError {
 pub(crate) struct AttemptOutcome {
     pub(crate) sent: Vec<i64>,
     pub(crate) end: AttemptEnd,
+    /// The recipient runner's reason when it held the preview without accepting it.
+    pub(crate) held_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,6 +68,7 @@ impl AttemptOutcome {
         Self {
             sent: Vec::new(),
             end,
+            held_reason: None,
         }
     }
 }

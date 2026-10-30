@@ -461,6 +461,15 @@ Send, prompt and exec JSON append `delivery` with ordered `status,method,reason`
 | `not_submitted` | Cancelled with established zero-byte evidence | Visible through `input show` and, for deferred work, its result event |
 | `not_applicable` | A self-send or root-Director target uses broker consumption only | Send keeps `notification_sent=false`, null method and input ID, and no warning |
 
+A held `message send` reports one of these reasons:
+
+| Held reason | Cause |
+|---|---|
+| `observer_unavailable` | The wrapped recipient's runner cannot currently observe its native screen, so it accepted no queue work |
+| `notification_held` | No deliverable pane, a placement or run change during the attempt, or an earlier preview receipt of the recipient still unresolved |
+| `notification_failed` | The pane stayed busy, the multiplexer or runner exchange failed, storage failed, or the budget could not cover a first preview |
+| `delivery_budget_exhausted` | The send's delivery budget ended after earlier pending previews were delivered |
+
 A queued preview stays unnotified until actual submission or ACK settlement. A deferred input's later result never rewrites the original command output: the receipt and `input show` carry its actual method, and the Director receives one `input_delivery_result` event.
 
 The effective policy record has keys `schema_version` (`1`), `automatic_review` (`available` or `unavailable`), `observed_mode` (text or null), `rule_id`, `event_id` (integer or null) and `observed_at`. A null record means no tested observation has been made.

@@ -2702,7 +2702,7 @@ These ordered rules select the delivery of every wrapped preview, `member prompt
 1. Validate target/run identity, reachability, writer ownership, storage and receipt history. A failed invariant or an uncertain prior attempt is an explicit operational failure, never a reason to send fallback bytes. Unknown detection coverage alone is valid capability absence, not an observer-health failure.
 2. A candidate or open detected interaction queues ordinary input with zero bytes. An obscured interaction remains preserved, and `permission_request`, `question`, `trust`, `update` and `unknown_interaction` are all blocking interactions.
 3. A verified empty composer with the operation's executable plan uses profile delivery without Escape (§ Measured submission plans and settle intervals). This includes a working member whose composer row is empty: the native CLI queues the submitted input behind its current turn without interrupting it.
-4. With an executable plan and a composer that is not verified empty (a draft is present or the observer cannot classify the composer), queue the input with zero bytes under defer reason `composer_busy`. The runner drains it by profile delivery as soon as it observes a verified empty composer. A queued head that has waited 3 minutes only on a composer that is not verified empty is delivered by fallback with reason `idle_timeout`. The bound starts when the head first waits solely on that composer and restarts whenever an interaction blocks it, so time spent behind an interaction or earlier input never counts, so a detector that stops matching a newer native UI delays delivery rather than stranding it.
+4. With an executable plan and a composer that is not verified empty (a draft is present or the observer cannot classify the composer), queue the input with zero bytes under defer reason `composer_busy`. The runner drains it by profile delivery as soon as it observes a verified empty composer. A queued head that has waited 3 minutes only on a composer that is not verified empty is delivered by fallback with reason `idle_timeout`. The bound starts when the head first waits solely on that composer and restarts whenever an interaction blocks it; time spent behind an interaction or earlier input never counts. A detector that stops matching a newer native UI therefore delays delivery rather than stranding it.
 5. Otherwise use delivery fallback: Escape, settle 500 ms, literal prefix and text, settle 500 ms, Enter (`0d`). This covers missing operation plans, missing profile coverage and failed version probes.
 
 | Selection | Bytes | `delivery.method` | Selection reason |
@@ -2758,6 +2758,15 @@ Orderly shutdown cancels queued zero-byte requests as `settled/not_submitted` wi
 | `uncertain` | Some stage may have written; reconciliation is required | Existing error categories, input identity and stage diagnostics, including the selected method |
 | `not_submitted` | Work was cancelled with established zero-byte evidence | Visible through input inspection and, for deferred work, its result event |
 | `not_applicable` | A self-send or root-Director target uses broker consumption without automatic pane delivery | Send retains `notification_sent=false`, null method and input ID, and no warning |
+
+A held `message send` reports one of these reasons:
+
+| Held reason | Cause |
+|---|---|
+| `observer_unavailable` | The wrapped recipient's runner cannot currently observe its native screen, so it accepted no queue work |
+| `notification_held` | No deliverable pane, a placement or run change during the attempt, or an earlier preview receipt of the recipient still unresolved |
+| `notification_failed` | The pane stayed busy, the multiplexer or runner exchange failed, storage failed, or the budget could not cover a first preview |
+| `delivery_budget_exhausted` | The send's delivery budget ended after earlier pending previews were delivered |
 
 Self-send evaluation precedes recipient delivery: equal sender and recipient IDs return `{"status":"not_applicable","method":null,"reason":"self_send"}` and a null `input_id`, also for an ordinary member with a healthy wrapped pane. Self-sends stay excluded from automatic preview selection and the runner queue. Other sends to a root Director use reason `director_stdout`. A queued preview counts as queued only: `notified_at` stays null until actual submission or the existing ACK settlement.
 

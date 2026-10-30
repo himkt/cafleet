@@ -312,7 +312,11 @@ fn deliver_pending_with(
                 Err(error) => break storage_failure(member_id, candidate_id, error)?,
             }
         };
-        Ok(AttemptOutcome { sent, end })
+        Ok(AttemptOutcome {
+            sent,
+            end,
+            held_reason: None,
+        })
     })
 }
 
@@ -341,6 +345,7 @@ fn deliver_wrapped_pending(
 
     let mut guard = None;
     let mut sent = Vec::new();
+    let mut held_reason = None;
     let mut operation_key = format!("preview:{}:{}", run.run_id, message.message_id);
     let mut known_input_id = None;
     let mut stage = Stage::Submission;
@@ -394,6 +399,9 @@ fn deliver_wrapped_pending(
                     )
                     .map_err(CafleetError::from)?;
                     if !matches!(result.status, SubmissionStatus::Accepted) {
+                        if result.status == SubmissionStatus::Held {
+                            held_reason = result.reason;
+                        }
                         break AttemptEnd::Held;
                     }
                     result
@@ -491,7 +499,11 @@ fn deliver_wrapped_pending(
             AttemptEnd::Failed(warning)
         }
     };
-    Ok(AttemptOutcome { sent, end })
+    Ok(AttemptOutcome {
+        sent,
+        end,
+        held_reason,
+    })
 }
 
 #[cfg(test)]
@@ -632,6 +644,7 @@ mod tests {
         retired: Vec<i64>,
         expire_retirement: bool,
         after_retirement: Option<Box<dyn FnMut()>>,
+        runner_held: Option<&'static str>,
     }
     impl DeliveryHost {
         fn new(
@@ -649,6 +662,7 @@ mod tests {
                 retired: Vec::new(),
                 expire_retirement: false,
                 after_retirement: None,
+                runner_held: None,
             }
         }
         fn held(&self) {
@@ -760,8 +774,48 @@ mod tests {
                 request.operation,
                 InputControlOperation::SubmitPrompt(_)
             ));
+            if let Some(reason) = self.runner_held {
+                return Ok(InputControlReply::Submission(
+                    crate::runtime::runner::SubmissionResult::held(reason),
+                ));
+            }
             self.inner.exchange(run, request, deadline)
         }
+    }
+
+    #[test]
+    fn wrapped_delivery_reports_the_runner_held_reason() {
+        crate::runtime::runner::service::test_support::input_service::with_input_service(
+            |fixture, outer| {
+                let run = fixture.fixture.run.clone();
+                let settings = settings_for(&fixture.fixture.conn);
+                let placement = placement_of(&fixture.fixture.conn, run.member_id, run.fleet_id);
+                broker::send_message(
+                    &mut fixture.fixture.conn,
+                    run.director_member_id,
+                    run.member_id,
+                    "held by the runner",
+                )
+                .unwrap();
+                let until = outer.min(Instant::now() + Duration::from_secs(5));
+                let mut host = DeliveryHost::new(&settings, &placement, until);
+                host.runner_held = Some("observer_unavailable");
+                let outcome = deliver_pending_with(
+                    &mut fixture.fixture.conn,
+                    &settings,
+                    run.member_id,
+                    Some(run.fleet_id),
+                    Deadline::until(until),
+                    &BTreeSet::new(),
+                    || panic!("wrapped delivery uses its runner, not a multiplexer"),
+                    &mut host,
+                )
+                .unwrap();
+                assert_eq!(outcome.end, AttemptEnd::Held);
+                assert_eq!(outcome.held_reason.as_deref(), Some("observer_unavailable"));
+                assert!(outcome.sent.is_empty());
+            },
+        );
     }
 
     fn assert_later_failure_preserves_committed_prefix(later_candidate: bool) {

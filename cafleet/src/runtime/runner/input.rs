@@ -88,6 +88,23 @@ pub(crate) struct InputCoordinator {
     observation_blocker: Option<String>,
     database_url: String,
     queue: std::collections::VecDeque<QueuedInput>,
+    finalization: Option<PendingFinalization>,
+}
+
+/// A deferred input's terminal zero-byte transaction that storage prevented; it holds only
+/// metadata, blocks every later ordinary input and retries on the deferred timer.
+struct PendingFinalization {
+    input_id: i64,
+    expected: storage::InputState,
+    reason: &'static str,
+}
+
+fn storage_failure(cause: &CafleetError) -> bool {
+    match cause {
+        CafleetError::DatabaseBusy(_) | CafleetError::DeadlineExceeded => true,
+        CafleetError::App(message) => message.starts_with("database error:"),
+        _ => false,
+    }
 }
 
 /// Runner-owned ordinary input accepted with a durable ready receipt; its literal stays in
@@ -794,9 +811,21 @@ impl InputCoordinator {
         self.current_request = None;
         self.input_fenced = true;
         let mut settled = Vec::new();
-        if !self.queue.is_empty() {
+        if !self.queue.is_empty() || self.finalization.is_some() {
             let mut conn = crate::db::connect(&self.database_url)?;
             let owner = self.run.owner();
+            if let Some(pending) = self.finalization.take() {
+                with_database_deadline(&mut conn, deadline, |conn| {
+                    storage::settle_zero_byte_deferred(
+                        conn,
+                        &owner,
+                        pending.input_id,
+                        pending.expected,
+                        pending.reason,
+                    )
+                })?;
+                settled.push(pending.input_id);
+            }
             while let Some(queued) = self.queue.pop_front() {
                 with_database_deadline(&mut conn, deadline, |conn| {
                     storage::settle_zero_byte_deferred(
@@ -1876,7 +1905,12 @@ impl InputCoordinator {
                         "interaction_open"
                     },
                 ),
-                None if self.pending.is_some() || !self.queue.is_empty() => Some("earlier_input"),
+                None if self.pending.is_some()
+                    || !self.queue.is_empty()
+                    || self.finalization.is_some() =>
+                {
+                    Some("earlier_input")
+                }
                 None => self
                     .select_delivery(
                         observation,
@@ -2042,6 +2076,7 @@ impl InputCoordinator {
 
     pub(super) fn has_deferred_work(&self) -> bool {
         !self.queue.is_empty()
+            || self.finalization.is_some()
             || self
                 .pending
                 .as_ref()
@@ -2057,25 +2092,77 @@ impl InputCoordinator {
         ));
     }
 
-    /// Settles queued or attempted zero-byte work as not submitted and publishes its result.
+    /// Settles queued or attempted zero-byte work as not submitted and publishes its result. When
+    /// storage prevents the transaction, it stays a pending finalization that later ticks retry.
     fn cancel_deferred(
         &mut self,
         conn: &mut Connection,
         observation: &ObservationController,
         input_id: i64,
         expected: storage::InputState,
-        reason: &str,
+        reason: &'static str,
     ) -> Result<()> {
         let finalization = Instant::now() + DEFERRED_FINALIZATION;
-        let operation = with_database_deadline(conn, finalization, |conn| {
+        let operation = match with_database_deadline(conn, finalization, |conn| {
             storage::settle_zero_byte_deferred(conn, &self.run.owner(), input_id, expected, reason)
-        })?;
+        }) {
+            Ok(operation) => operation,
+            Err(cause) if storage_failure(&cause) => {
+                eprintln!(
+                    "member runtime: input {input_id} result is pending storage: {}",
+                    cause.message()
+                );
+                self.finalization = Some(PendingFinalization {
+                    input_id,
+                    expected,
+                    reason,
+                });
+                return Ok(());
+            }
+            Err(cause) => return Err(cause),
+        };
         if let Some(retained) = self.operations.get_mut(&input_id) {
             retained.operation = operation;
             retained.attempt_available = false;
         }
         Self::publish_result(observation, input_id, SubmissionStage::ZeroBytes);
         Ok(())
+    }
+
+    /// Classifies the queued head's target before its first byte: `None` keeps it live, and a
+    /// reason settles it. Ownership loss and storage failures return an error.
+    fn deferred_target(&self, conn: &Connection, run: &RunRecord) -> Result<Option<&'static str>> {
+        ensure(
+            !self.manual_accounting_failed && !self.input_fenced,
+            "manual accounting failure fenced input",
+        )?;
+        if stable_run_identity(run) != stable_run_identity(&self.run) {
+            return Ok(Some("target_changed"));
+        }
+        let current = storage::validate_owner(conn, &self.run.owner())?;
+        ensure(
+            current.status == RunStatus::Running && current.owner_kind == OwnerKind::Runner,
+            "input coordinator no longer owns a running run",
+        )?;
+        if stable_run_identity(&current) != stable_run_identity(&self.run)
+            || current.native_version != self.run.native_version
+            || current.profile_version != self.run.profile_version
+        {
+            return Ok(Some("target_changed"));
+        }
+        if crate::broker::active_member_fleet(conn, self.run.member_id)? != Some(self.run.fleet_id)
+        {
+            return Ok(Some("target_inactive"));
+        }
+        let Some(member) = crate::broker::get_member(conn, self.run.member_id, self.run.fleet_id)?
+        else {
+            return Ok(Some("target_inactive"));
+        };
+        if member.kind != MemberKind::Member || member.placement.as_ref() != Some(&self.placement) {
+            return Ok(Some("target_changed"));
+        }
+        self.lock.validate(conn, &current.owner())?;
+        Ok(None)
     }
 
     /// Starts the queued head once no interaction blocks it, or settles it when its attempt
@@ -2087,14 +2174,35 @@ impl InputCoordinator {
         observation: &ObservationController,
         deadline: Instant,
     ) -> Result<()> {
-        if self.input_fenced || self.queue.is_empty() {
+        if self.input_fenced {
+            return Ok(());
+        }
+        if let Some(pending) = self.finalization.take() {
+            self.cancel_deferred(
+                conn,
+                observation,
+                pending.input_id,
+                pending.expected,
+                pending.reason,
+            )?;
+            if self.finalization.is_some() {
+                return Ok(());
+            }
+        }
+        if self.queue.is_empty() {
             return Ok(());
         }
         let now = Instant::now();
-        if with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
+        match with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
             storage::has_unresolved_deferred_attempt(conn, self.run.run_id)
-        })? {
-            return Ok(());
+        }) {
+            Ok(false) => {}
+            Ok(true) => return Ok(()),
+            Err(cause) if storage_failure(&cause) => {
+                self.queue.front_mut().expect("nonempty queue").obstacle = "storage_unavailable";
+                return Ok(());
+            }
+            Err(cause) => return Err(cause),
         }
         let head = self.queue.front_mut().expect("nonempty queue");
         let blocker = ordinary_blocker(&observation.status());
@@ -2165,18 +2273,25 @@ impl InputCoordinator {
                 obstacle,
             );
         }
-        let target = with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
+        let target = match with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
             if let Some(message_id) = message_id {
                 let message = crate::broker::get_message(conn, message_id)?;
                 if message.status != crate::broker::records::MessageStatus::InputRequired {
                     return Ok(Some("message_consumed"));
                 }
             }
-            Ok(self
-                .validate_live(conn, run)
-                .err()
-                .map(|_| "target_inactive"))
-        })?;
+            self.deferred_target(conn, run)
+        }) {
+            Ok(target) => target,
+            Err(cause) if storage_failure(&cause) => {
+                self.queue
+                    .front_mut()
+                    .expect("queued head remains")
+                    .obstacle = "storage_unavailable";
+                return Ok(());
+            }
+            Err(cause) => return Err(cause),
+        };
         if let Some(reason) = target {
             self.queue.pop_front();
             return self.cancel_deferred(
@@ -2195,9 +2310,19 @@ impl InputCoordinator {
             return Ok(());
         };
         let (method, reason, stages) = selection;
-        let operation = with_database_deadline(conn, attempt_deadline, |conn| {
+        let operation = match with_database_deadline(conn, attempt_deadline, |conn| {
             storage::begin_deferred_attempt(conn, &self.run.owner(), input_id, method, reason)
-        })?;
+        }) {
+            Ok(operation) => operation,
+            Err(cause) if storage_failure(&cause) => {
+                self.queue
+                    .front_mut()
+                    .expect("queued head remains")
+                    .obstacle = "storage_unavailable";
+                return Ok(());
+            }
+            Err(cause) => return Err(cause),
+        };
         let head = self.queue.pop_front().expect("queued head remains");
         self.operations.insert(
             input_id,
@@ -2276,29 +2401,45 @@ impl InputCoordinator {
             ordinary_blocker(&observation.status()),
             Some(OrdinaryBlocker::Interaction)
         );
-        let expired = Instant::now() >= pending.deadline;
-        if !interaction && !expired {
+        let composer_busy = !interaction
+            && composer.requires_empty_composer()
+            && !Self::composer_eligible(observation);
+        let now = Instant::now();
+        let expired = now >= pending.deadline;
+        if !interaction && !composer_busy && !expired {
             return Ok(false);
+        }
+        if (interaction || composer_busy) && !expired {
+            match with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
+                storage::record_input_state(
+                    conn,
+                    &self.run.owner(),
+                    id,
+                    storage::InputState::InProgress,
+                    storage::InputState::Ready,
+                )
+            }) {
+                Ok(operation) => debug_assert_eq!(operation.state, storage::InputState::Ready),
+                Err(cause) if storage_failure(&cause) => {
+                    self.pending
+                        .as_mut()
+                        .and_then(|pending| pending.composer.as_mut())
+                        .and_then(|composer| composer.deferred.as_mut())
+                        .expect("deferred attempt")
+                        .obstacle = "storage_unavailable";
+                    return Ok(true);
+                }
+                Err(cause) => return Err(cause),
+            }
         }
         let mut pending = self.pending.take().expect("deferred pending input");
         let composer = pending.composer.take().expect("deferred composer delivery");
         let deferred = composer.deferred.expect("deferred attempt");
-        if interaction {
-            let operation =
-                with_database_deadline(conn, Instant::now() + DEFERRED_FINALIZATION, |conn| {
-                    storage::record_input_state(
-                        conn,
-                        &self.run.owner(),
-                        id,
-                        storage::InputState::InProgress,
-                        storage::InputState::Ready,
-                    )
-                })?;
+        if (interaction || composer_busy) && !expired {
             self.operations.remove(&id);
-            debug_assert_eq!(operation.state, storage::InputState::Ready);
             let mut queued = deferred.queued;
             queued.attempt_deadline = None;
-            queued.composer_busy_since = None;
+            queued.composer_busy_since = composer_busy.then_some(now);
             self.queue.push_front(queued);
         } else {
             self.cancel_deferred(
@@ -3277,6 +3418,7 @@ impl InputCoordinator {
             observation_blocker: None,
             database_url,
             queue: std::collections::VecDeque::new(),
+            finalization: None,
         })
     }
 
@@ -4915,6 +5057,124 @@ mod tests {
             }
 
             #[test]
+            fn queue_head_settles_target_changed_for_a_moved_placement_and_target_inactive_for_a_deregistered_member()
+             {
+                with_permission_host(Duration::from_secs(60), |host| {
+                    form(host);
+                    let id = queued(host, host.request("prompt:moved"), "interaction_open");
+                    host.fixture
+                        .conn
+                        .execute(
+                            "UPDATE member_placements SET mux_session='foreign-session' WHERE member_id=?1",
+                            [host.fixture.run.member_id],
+                        )
+                        .unwrap();
+                    close(host);
+                    turns_until(host, |host| settled(host, id));
+                    assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
+                    let input = row(host, id);
+                    assert_eq!(
+                        input.disposition,
+                        Some(storage::InputDisposition::NotSubmitted)
+                    );
+                    assert_eq!(input.delivery_reason.as_deref(), Some("target_changed"));
+                });
+                with_permission_host(Duration::from_secs(60), |host| {
+                    host.fixture
+                        .conn
+                        .execute(
+                            "UPDATE members SET status='deregistered',deregistered_at='2026-10-30T00:00:00Z' WHERE member_id=?1",
+                            [host.fixture.run.member_id],
+                        )
+                        .unwrap();
+                    assert_eq!(
+                        host.coordinator
+                            .deferred_target(&host.fixture.conn, &host.fixture.run)
+                            .unwrap(),
+                        Some("target_inactive")
+                    );
+                });
+            }
+
+            #[test]
+            fn queue_head_terminal_commit_survives_a_temporary_storage_failure_and_publishes_once()
+            {
+                with_permission_host(Duration::from_secs(60), |host| {
+                    form(host);
+                    let id = queued(host, host.request("prompt:storage"), "interaction_open");
+                    host.fixture
+                        .conn
+                        .execute(
+                            "UPDATE member_placements SET mux_session='foreign-session' WHERE member_id=?1",
+                            [host.fixture.run.member_id],
+                        )
+                        .unwrap();
+                    close(host);
+                    host.fixture
+                        .conn
+                        .authorizer(Some(|context: rusqlite::hooks::AuthContext<'_>| {
+                            if matches!(
+                                context.action,
+                                rusqlite::hooks::AuthAction::Update {
+                                    table_name: "member_input_operations",
+                                    ..
+                                }
+                            ) {
+                                rusqlite::hooks::Authorization::Deny
+                            } else {
+                                rusqlite::hooks::Authorization::Allow
+                            }
+                        }))
+                        .unwrap();
+                    while host.coordinator.finalization.is_none() {
+                        assert!(
+                            Instant::now() < host.until,
+                            "the blocked terminal transaction becomes a pending finalization"
+                        );
+                        host.drain();
+                        host.advance();
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    let pending = host.coordinator.finalization.as_ref().unwrap();
+                    assert_eq!(pending.input_id, id);
+                    assert_eq!(pending.reason, "target_changed");
+                    host.advance();
+                    assert!(
+                        host.coordinator.finalization.is_some(),
+                        "a retry while storage still fails keeps the finalization pending"
+                    );
+                    assert_eq!(
+                        row(host, id).state,
+                        storage::InputState::Ready,
+                        "the failed terminal transaction keeps the head's receipt"
+                    );
+                    assert_eq!(result_events(host, id), 0);
+                    host.fixture
+                        .conn
+                        .authorizer(
+                            None::<
+                                fn(
+                                    rusqlite::hooks::AuthContext<'_>,
+                                )
+                                    -> rusqlite::hooks::Authorization,
+                            >,
+                        )
+                        .unwrap();
+                    turns_until(host, |host| settled(host, id));
+                    let input = row(host, id);
+                    assert_eq!(
+                        input.disposition,
+                        Some(storage::InputDisposition::NotSubmitted)
+                    );
+                    assert_eq!(input.delivery_reason.as_deref(), Some("target_changed"));
+                    assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
+                    turns_until(host, |host| result_events(host, id) > 0);
+                    super::composer_busy::hold_turns(host);
+                    assert_eq!(result_events(host, id), 1, "the result is published once");
+                });
+            }
+
+            #[test]
             fn queue_head_under_an_observer_outage_settles_within_the_observer_budget() {
                 with_permission_host(Duration::from_secs(90), |host| {
                     form(host);
@@ -5308,6 +5568,65 @@ mod tests {
             }
 
             #[test]
+            fn composer_busy_requeues_a_started_deferred_attempt_with_zero_bytes_before_its_first_stage()
+             {
+                with_profile_host_until(
+                    permission_busy_catalog(),
+                    encoded(),
+                    HostProfile::metadata(),
+                    Instant::now() + Duration::from_secs(60),
+                    |host| {
+                        super::deferred_queue::form(host);
+                        let request = host.request("prompt:busy-after-start");
+                        let id = queued(host, request, "interaction_open");
+                        let behind =
+                            queued(host, host.request("prompt:behind"), "interaction_open");
+                        host.show(SCREEN.to_vec());
+                        while row(host, id).state == storage::InputState::Ready {
+                            assert!(
+                                Instant::now() < host.until,
+                                "the deferred attempt starts on the verified empty composer"
+                            );
+                            host.drain();
+                            host.advance();
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                        assert_eq!(row(host, id).state, storage::InputState::InProgress);
+                        assert!(host.pty.offers.is_empty());
+                        host.show(DRAFT.to_vec());
+                        hold_turns(host);
+                        assert!(
+                            host.pty.offers.is_empty(),
+                            "a draft before the first stage keeps zero bytes: {:?}",
+                            host.pty.offers
+                        );
+                        let requeued = row(host, id);
+                        assert_eq!(requeued.state, storage::InputState::Ready);
+                        assert_eq!(requeued.disposition, None);
+                        assert_eq!(requeued.delivery_method, None);
+                        assert_eq!(
+                            requeued.defer_reason.as_deref(),
+                            Some("interaction_open"),
+                            "defer_reason keeps why the input first entered the queue"
+                        );
+                        assert_eq!(row(host, behind).state, storage::InputState::Ready);
+                        host.show(SCREEN.to_vec());
+                        turns_until(host, |host| delivered(host, id));
+                        assert_eq!(
+                            row(host, behind).state,
+                            storage::InputState::Ready,
+                            "the requeued input keeps its head position"
+                        );
+                        assert_eq!(
+                            host.pty.offers,
+                            vec![LITERAL.as_bytes().to_vec(), b"~".to_vec()]
+                        );
+                        assert_eq!(row(host, id).delivery_method, Some(DeliveryMethod::Profile));
+                    },
+                );
+            }
+
+            #[test]
             fn composer_busy_bound_starts_when_an_interaction_deferred_head_meets_a_busy_composer()
             {
                 with_profile_host_until(
@@ -5344,7 +5663,7 @@ mod tests {
             }
 
             #[test]
-            fn composer_busy_falls_back_with_idle_timeout_three_minutes_after_deferred_at() {
+            fn composer_busy_falls_back_with_idle_timeout_three_minutes_after_busy_onset() {
                 with_busy_host(busy_catalog(), fallback_program(), |host| {
                     busy(host);
                     let request = host.request("prompt:idle-timeout");

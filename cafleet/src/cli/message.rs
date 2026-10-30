@@ -12,7 +12,7 @@ use crate::output::{
     format_messages,
 };
 use crate::presentation;
-use crate::receive::{AttemptEnd, BrokerReceiver, SystemClock};
+use crate::receive::{AttemptEnd, AttemptOutcome, BrokerReceiver, SystemClock};
 
 #[derive(Args)]
 #[group(required = true, multiple = false)]
@@ -200,7 +200,7 @@ fn send_delivery(
     conn: &Connection,
     message: &crate::broker::records::MessageRecord,
     notification_sent: bool,
-    outcome: Option<&crate::receive::AttemptOutcome>,
+    outcome: Option<&AttemptOutcome>,
 ) -> Result<(Option<i64>, DeliveryProjection), CafleetError> {
     let projection = |status, method, reason: Option<&str>| DeliveryProjection {
         status,
@@ -240,10 +240,21 @@ fn send_delivery(
             ),
         ));
     }
-    let reason = match outcome.map(|outcome| &outcome.end) {
-        Some(AttemptEnd::BudgetExhausted) => "delivery_budget_exhausted",
-        Some(AttemptEnd::Failed(_)) | None => "notification_failed",
-        Some(AttemptEnd::Held | AttemptEnd::NoPending | AttemptEnd::Drained) => "notification_held",
+    let reason = match outcome {
+        Some(AttemptOutcome {
+            held_reason: Some(reason),
+            ..
+        }) => reason.as_str(),
+        Some(AttemptOutcome {
+            end: AttemptEnd::BudgetExhausted,
+            ..
+        }) => "delivery_budget_exhausted",
+        Some(AttemptOutcome {
+            end: AttemptEnd::Failed(_),
+            ..
+        })
+        | None => "notification_failed",
+        Some(_) => "notification_held",
     };
     Ok((None, projection(DeliveryStatus::Held, None, Some(reason))))
 }
