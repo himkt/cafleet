@@ -33,6 +33,7 @@ const RECEIPT_CACHE_CAPACITY: usize = 4096;
 const STAGE_SETTLE: Duration = Duration::from_millis(500);
 const DEFERRED_ATTEMPT_BUDGET: Duration = Duration::from_secs(5);
 const DEFERRED_FINALIZATION: Duration = Duration::from_secs(1);
+const COMPOSER_BUSY_BOUND: chrono::TimeDelta = chrono::TimeDelta::minutes(5);
 const FALLBACK_ESCAPE: u8 = 0x1b;
 const FALLBACK_ENTER: u8 = 0x0d;
 
@@ -1841,7 +1842,16 @@ impl InputCoordinator {
                     },
                 ),
                 None if self.pending.is_some() || !self.queue.is_empty() => Some("earlier_input"),
-                None => None,
+                None => self
+                    .select_delivery(
+                        observation,
+                        composer_operation,
+                        input.input_kind,
+                        &input.literal,
+                        false,
+                    )?
+                    .is_none()
+                    .then_some("composer_busy"),
             };
             let new_input = storage::NewInput {
                 operation_key: input.operation_key.clone(),
@@ -1886,12 +1896,15 @@ impl InputCoordinator {
                 "input receipt cache is at capacity",
             )?;
             with_database_deadline(conn, deadline, |conn| self.validate_live(conn, run))?;
-            let (method, reason, stages) = self.select_delivery(
-                observation,
-                composer_operation,
-                input.input_kind,
-                &input.literal,
-            )?;
+            let (method, reason, stages) = self
+                .select_delivery(
+                    observation,
+                    composer_operation,
+                    input.input_kind,
+                    &input.literal,
+                    false,
+                )?
+                .expect("a busy composer queues the input before selection");
             self.pending = Some(PendingInput {
                 reservation: PendingReservation::Unreserved,
                 request: new_input,
@@ -1926,7 +1939,8 @@ impl InputCoordinator {
         operation: ComposerOperation,
         kind: storage::InputKind,
         literal: &str,
-    ) -> Result<DeliverySelection> {
+        idle_timeout: bool,
+    ) -> Result<Option<DeliverySelection>> {
         let composer = match self.run.native_version.as_deref() {
             Some(native) => {
                 let backend = coding_agent(&self.run.backend)
@@ -1947,7 +1961,7 @@ impl InputCoordinator {
         } else {
             literal.to_owned()
         };
-        Ok(match composer {
+        Ok(Some(match composer {
             Some((native, backend, plan)) => {
                 ensure(
                     plan.backend() == backend
@@ -1962,6 +1976,15 @@ impl InputCoordinator {
                     let stages: Arc<[Arc<[u8]>]> =
                         Arc::from(vec![Arc::from(literal), Arc::from(submit)]);
                     (storage::DeliveryMethod::Profile, None, stages)
+                } else if Self::composer_busy(observation) {
+                    if !idle_timeout {
+                        return Ok(None);
+                    }
+                    (
+                        storage::DeliveryMethod::Fallback,
+                        Some("idle_timeout"),
+                        fallback_stages(prefix, &fallback_literal)?,
+                    )
                 } else {
                     (
                         storage::DeliveryMethod::Fallback,
@@ -1975,7 +1998,18 @@ impl InputCoordinator {
                 Some("submission_plan_unavailable"),
                 fallback_stages(prefix, &fallback_literal)?,
             ),
-        })
+        }))
+    }
+
+    /// A classified working or draft composer, or an empty composer whose observation still
+    /// retains unpublished state; an unclassifiable screen is not busy.
+    fn composer_busy(observation: &ObservationController) -> bool {
+        let status = observation.status();
+        matches!(
+            status.eligibility,
+            InputEligibility::Hold(super::GateReason::Working | super::GateReason::Draft)
+        ) || (status.eligibility == InputEligibility::ComposerEmpty
+            && !Self::composer_eligible(observation))
     }
 
     pub(super) fn has_deferred_work(&self) -> bool {
@@ -2037,6 +2071,31 @@ impl InputCoordinator {
             head.attempt_deadline = None;
             return Ok(());
         }
+        let (head_id, operation, kind, literal) = (
+            head.input_id,
+            head.operation,
+            head.request.kind,
+            head.literal.clone(),
+        );
+        let deferred_at = with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
+            storage::get_input(conn, head_id)
+        })?
+        .deferred_at
+        .ok_or_else(|| error("a queued input records when it was deferred"))?;
+        let deferred_at = chrono::DateTime::parse_from_rfc3339(&deferred_at)
+            .map_err(|_| error("queued input deferral time is not RFC 3339"))?;
+        let idle_timeout =
+            chrono::Utc::now().signed_duration_since(deferred_at) >= COMPOSER_BUSY_BOUND;
+        let Some(selection) =
+            self.select_delivery(observation, operation, kind, &literal, idle_timeout)?
+        else {
+            self.queue
+                .front_mut()
+                .expect("queued head remains")
+                .attempt_deadline = None;
+            return Ok(());
+        };
+        let head = self.queue.front_mut().expect("queued head remains");
         let attempt_deadline = *head
             .attempt_deadline
             .get_or_insert((now + DEFERRED_ATTEMPT_BUDGET).min(deadline));
@@ -2086,13 +2145,7 @@ impl InputCoordinator {
                 .obstacle = "pane_input_busy";
             return Ok(());
         };
-        let head = self.queue.front().expect("queued head remains");
-        let (method, reason, stages) = self.select_delivery(
-            observation,
-            head.operation,
-            head.request.kind,
-            &head.literal,
-        )?;
+        let (method, reason, stages) = selection;
         let operation = with_database_deadline(conn, attempt_deadline, |conn| {
             storage::begin_deferred_attempt(conn, &self.run.owner(), input_id, method, reason)
         })?;

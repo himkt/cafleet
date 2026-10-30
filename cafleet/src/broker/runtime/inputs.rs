@@ -31,7 +31,11 @@ impl InputOperation {
     }
 }
 
-const FALLBACK_REASONS: [&str; 2] = ["submission_plan_unavailable", "composer_unverified"];
+const FALLBACK_REASONS: [&str; 3] = [
+    "submission_plan_unavailable",
+    "composer_unverified",
+    "idle_timeout",
+];
 
 fn delivery_projection(input: &InputOperation) -> Result<Option<DeliveryProjection>, CafleetError> {
     let unknown = || {

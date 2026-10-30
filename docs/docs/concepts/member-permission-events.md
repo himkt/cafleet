@@ -42,7 +42,8 @@ The runner chooses how each preview, `member prompt` and `member exec` reaches a
 |---|---|---|
 | A detected interaction is open or a candidate, or earlier input is queued | Queued with no bytes; the runner retries after the interaction closes | `null` while queued |
 | Empty composer and a measured submission plan for the operation | Text, a short settle, then the measured submit key, without Escape | `profile` |
-| No submission plan, an unverified composer, a draft or running work | Escape, settle, text, settle, Enter | `fallback` |
+| Measured submission plan, but the member is working or has a draft | Queued with no bytes until the composer empties, then delivered by profile; delivered by fallback after 5 minutes | `null` while queued, then `profile` or `fallback` |
+| No submission plan, or a composer state the runner cannot classify | Escape, settle, text, settle, Enter | `fallback` |
 
 Delivery fallback can interrupt work, mix text with a draft, or dismiss a native prompt the runner did not detect; its previews therefore carry the Escape-dismissal clause. Command output reports the status, method and reason of each delivery, and `input show INPUT_ID --json` reports a queued input's eventual result. The [delivery reporting contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#delivery-reporting) owns exact statuses and reasons.
 
