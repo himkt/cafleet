@@ -56,7 +56,7 @@ The backend config-location variables `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `OPE
 | `fleet list` | `FLEET_ID DIRECTOR NAME MEMBERS CREATED_AT` columns | Fleet records |
 | `fleet show` | Fleet row with `deleted_at:` | Fleet including nullable `deleted_at` |
 | `fleet delete` | `Deleted fleet ID. Deregistered N members.` plus one line per ordinary member | `{fleet_id, deregistered_count, members}` |
-| `message send` | `Message sent.` then envelope | `{message, notification_sent}` |
+| `message send` | `Message sent.` then envelope, delivery line and any input line | `{message, notification_sent, input_id, delivery}` |
 | `message poll` | Envelopes, or `No messages found.` | Full record array |
 | `message ack` | `Message acknowledged.` then envelope | `{message}` |
 | `message show` | Envelope | `{message}` |
@@ -71,8 +71,8 @@ The backend config-location variables `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `OPE
 | `permission inspect` | Request identity/capability lines | `{request}` |
 | `permission respond` | Answer submission status/stage line | `{response}` |
 | `member list` | Roster rows or `0 members.` | Roster array |
-| `member prompt` | `Sent prompt TEXT_REPR to member NAME (PANE).` plus wrapped input line | `{member_id, pane_id, text, input_id}` |
-| `member exec` | `Dispatched native command to member ID (PANE). Inspect the pane for its result.` plus wrapped input line | `{member_id, pane_id, coding_agent, command, dispatched, input_id}` |
+| `member prompt` | `Sent prompt TEXT_REPR to member NAME (PANE).` or the queued line, plus delivery and input lines | `{member_id, pane_id, text, input_id, delivery}` |
+| `member exec` | `Dispatched native command to member ID (PANE). Inspect the pane for its result.` or the queued line, plus delivery and input lines | `{member_id, pane_id, coding_agent, command, dispatched, input_id, delivery}` |
 | `member press` | `Acknowledged keys KEYS_JSON for member ID (PANE).` | Ordered `member_id, pane_id, keys, status` |
 | `member capture` | Exact selected content | `{member_id, pane_id, lines, content, captured_at, content_sha256}` |
 | `doctor` | One `STATUS NAME: DETAIL` line per check | `{checks}` |
@@ -120,9 +120,19 @@ A claude member receives `Bash(cafleet message *)` as a spawn-time allow rule. T
 
 `cafleet message send --from-member-id ID --to-member-id ID (TEXT | --file PATH) [--json]`
 
-The send persists one point-to-point delivery, then drains an ordinary recipient's pending messages oldest-first into its concrete pane within a five-second budget, the new message included. Root-Director messages use native or manual broker reads: sends succeed with `notification_sent=false`, no pane-delivery diagnostic and no multiplexer requirement. Self-sends persist with no pane input. A committed send remains successful with exit 0; held/unavailable ordinary-member notifications preserve the stdout record and `notification_sent=false`.
+The send persists one point-to-point delivery, then evaluates delivery for it. A self-send (equal sender and recipient IDs) is evaluated first and persists only in the broker, even for an ordinary member with a healthy wrapped pane. Other root-Director messages use native or manual broker reads with no pane-delivery diagnostic and no multiplexer requirement. Otherwise the send drains an ordinary recipient's pending messages oldest-first into its concrete pane within a five-second budget, the new message included. A committed send remains successful with exit 0; queued, held or unavailable ordinary-member notifications preserve the stdout record and `notification_sent=false`.
 
-`notification_sent` is `true` exactly when this invocation delivered the newly committed message, including when it was drained after an older one. When another invocation delivered the new message, `notification_sent` stays `false` and stderr carries no diagnostic. Messages left pending when the budget no longer covers another submission stay pending with no diagnostic; the next send to that recipient or a `message wait` rotation retries them.
+`notification_sent` is `true` exactly when this invocation submitted the newly committed message, including when it was drained after an older one. When another invocation delivered the new message, `notification_sent` stays `false` and stderr carries no diagnostic. Messages left pending when the budget no longer covers another submission stay pending with no diagnostic; the next send to that recipient or a `message wait` rotation retries them. A preview the recipient's runner queued is retried by the runner itself after the blocking native interaction closes.
+
+JSON is ordered `message,notification_sent,input_id,delivery`. `input_id` is the nullable durable input ID of the new message's preview receipt, and `delivery` is the [delivery projection](#delivery-reporting) for the newly sent message, even when the same invocation also retries an older one:
+
+| Recipient | `delivery` | `input_id` |
+|---|---|---|
+| The sender itself | `{"status":"not_applicable","method":null,"reason":"self_send"}` | `null` |
+| Another sender's root Director | `{"status":"not_applicable","method":null,"reason":"director_stdout"}` | `null` |
+| An ordinary member | The projection of this invocation's evaluation of the new message | The receipt's ID when allocated |
+
+Text adds `Delivery: status=STATUS method=METHOD reason=REASON` after the envelope, using `-` for a missing method or reason, then `Input: INPUT_ID` when an ID is allocated.
 
 ### Delivery outcome
 
@@ -202,29 +212,53 @@ Listening leaves consumption and `notified_at` unchanged and performs no pane re
 
 Active ordinary recipients with concrete panes receive previews through their recorded transport. The root Director receives through `message listen` or manual broker reads, with zero automatic pane input. Self-sends persist without pane input.
 
-A runner-managed (wrapped) member receives this exact line:
+A runner-managed (wrapped) member receives this exact line through profile delivery:
 
 ```text
 [cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] BODY [cafleet] Resume your work if something was still running.
 ```
 
-An explicitly unwrapped member receives this exact line:
+A wrapped member receiving through delivery fallback, and an explicitly unwrapped member, receive this exact line, because their submission leads with Escape:
 
 ```text
 [cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] BODY [cafleet] Resume your work if something was still running. [cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.
 ```
 
-Stored text remains exact. Both forms fold CRLF/LF/CR to `⏎`, tabs to `␉`, and other C0/DEL controls to visible hexadecimal escapes (`\xNN`). A folded body of at most 4000 Unicode scalar values appears inline; a longer body becomes `Body is N characters; run cafleet message show MESSAGE_ID --json to read it.`, where N counts stored text. This limit is independent of `CAFLEET_MAX_TEXT_LEN`. Delivery leaves `status_state` unchanged: a previewed message remains `input_required` until its recipient consumes and ACKs the message ID.
+Stored text remains exact. Both forms fold CRLF/LF/CR to `⏎`, tabs to `␉`, and other C0/DEL controls to visible hexadecimal escapes (`\xNN`). A folded body of at most 4000 Unicode scalar values appears inline; a longer body becomes `Body is N characters; run cafleet message show MESSAGE_ID --json to read it.`, where N counts stored text. This limit is independent of `CAFLEET_MAX_TEXT_LEN`. The runner chooses the wrapped form from the selected delivery method before the first byte. Delivery leaves `status_state` unchanged: a previewed message remains `input_required` until its recipient consumes and ACKs the message ID.
+
+### Wrapped delivery methods
+
+The runner selects each wrapped preview, `member prompt` and `member exec` delivery by these ordered rules:
+
+1. A failed identity, reachability, ownership, storage or receipt-history check, or an uncertain prior attempt, is an explicit failure and sends no fallback bytes. Unknown detection coverage alone is not such a failure.
+2. A candidate or open detected interaction (`permission_request`, `question`, `trust`, `update` or `unknown_interaction`, including while obscured), or earlier queued input, queues the request with zero bytes, including zero Escape bytes.
+3. A verified empty composer with the operation's measured submission plan uses profile delivery: the literal stage, a 500 ms settle, then the measured submit key, without Escape.
+4. Otherwise the runner uses delivery fallback: Escape, 500 ms settle, the literal (with `! ` for exec), 500 ms settle, Enter.
+
+| Selection | `delivery.method` | Reason |
+|---|---|---|
+| Queued | `null` until an attempt selects one | `interaction_open`, `interaction_candidate` or `earlier_input` |
+| Profile delivery | `profile` | `null` |
+| Fallback without an executable plan, profile or version probe | `fallback` | `submission_plan_unavailable` |
+| Fallback with a plan but an unverified, draft or working composer | `fallback` | `composer_unverified` |
+
+Fallback runs through the runner's own child PTY and receipts and rechecks for a newly detected interaction before Escape and before every later stage. It can interrupt work, mix text with a draft, or dismiss an undetected permission request or question on an unknown-coverage run. Permission answers never use fallback.
+
+### Runner queue
+
+The runner owns a FIFO of ordinary input, including previews, bounded with active work by the 4096 unresolved-input limit; a full queue returns an explicit zero-byte capacity error. Queue acceptance commits a durable `ready` receipt with `deferred_at` and `defer_reason`; the literal stays in runner memory only. One request writes at a time in enqueue order. After an `interaction_closed` transition commits, a candidate clears or the active input completes, the runner rechecks the current state and drains the head; no further `message send`, `message wait` or Director wake is needed. A superseding interaction keeps the queue blocked, and closure from exit or monitor loss dispatches nothing. A queued preview whose message was ACKed or whose target left is settled not submitted rather than typed.
+
+A queued request outlives its CLI invocation; a client timeout after acceptance reports the known input ID for inspection with `cafleet input show INPUT_ID --json`. Each drain attempt has a five-second budget and retries a busy pane lock or temporary storage/observer unavailability on a 100 ms timer. The first deferred submitted, not-submitted or uncertain result is published to the Director as one `input_delivery_result` runtime event; a zero-byte expiry settles not submitted with reason `pane_input_busy`, `storage_unavailable`, `observer_unavailable` or `delivery_budget_exhausted`, and a consumed or changed target uses `message_consumed`, `target_inactive` or `target_changed`. Shutdown settles queued requests not submitted with `runner_stopped`; recovery after runner loss uses `runner_lost`. Payloads are never restored from disk.
 
 ### Held delivery
 
-Wrapped delivery remains held for a candidate/open interaction, draft/working/unknown composer, untested profile, degraded/recovering/lost observer or uncertain receipt/reachability. Only a verified empty composer allows a new submission. Held delivery leaves `notified_at` unset, creates no new permission event and grants no native answer. After inspecting the attributed native response, its actual result and continuation, consume/ACK available inbox records and explicitly invoke finite `message wait` to retry previews; the runner and listener perform no autonomous retry.
+Wrapped delivery remains held, with no queue acceptance or write, for a degraded/recovering/lost observer, unavailable ownership or storage, or an uncertain receipt/reachability. Queued and held delivery leave `notified_at` unset, create no new permission event and grant no native answer.
 
 Pending placement and a placement change under the lock are holds. A message remains pending while the lock stays busy, the pane is not yet placed, the budget runs out or an attempt fails. The next send to that ordinary recipient, or a `message wait` rotation, retries it. Explicitly unwrapped delivery is at-least-once: a failed stamp leaves the message pending, so a later send/wait may repeat partial or complete input.
 
 ### Accepted trade-offs
 
-The following trade-offs apply to explicitly unwrapped input. What a single Escape does depends on the backend, and a backend may need more than one Escape to interrupt a running session. Delivery is correct whatever Escape does: when Escape does not interrupt, the line is still typed into the composer and the host submits or queues it. Both trailing clauses are conditional, so they stay accurate either way.
+The following trade-offs apply to explicitly unwrapped input and to wrapped delivery fallback, both of which lead with Escape. What a single Escape does depends on the backend, and a backend may need more than one Escape to interrupt a running session. Delivery is correct whatever Escape does: when Escape does not interrupt, the line is still typed into the composer and the host submits or queues it. Both trailing clauses are conditional, so they stay accurate either way.
 
 - Where Escape interrupts an ordinary member's working turn, the resume clause tells the recipient to continue.
 - Where Escape dismisses an ordinary member's question, confirmation or approval prompt, the host can report a user rejection before the input arrives; Claude Code reports `The user doesn't want to proceed with this tool use.` The preview's dismissed-prompt clause marks that rejection as delivery-caused, and the member re-issues the required tool call or re-asks the question. `member prompt` and `member exec` input carries no clause; the Director checks the pane for an open prompt before that dispatch.
@@ -278,7 +312,7 @@ The spawn prompt substitutes exactly four placeholders, which the member sees as
 
 Any other literal brace is doubled (`{{` / `}}`). An unknown placeholder or malformed brace expression exits 2 before registration. In the default output, `pane` renders `(pending)` until the pane id is patched onto the placement.
 
-A failed native version probe adds the stderr line `Warning: native version unavailable for BACKEND: CAUSE; coverage unknown.` and creation continues with unknown coverage. A probed version without its own bundled profile adds `Warning: no bundled profile for BACKEND VERSION; using PROFILE (profile_match=fallback).` Creation returns only after the runner reports that the native child started.
+Creation probes the native executable's `--version` and selects the bundled runner profile with the greatest `min_version` at or below that version, using SemVer precedence (prerelease below its release, build metadata ignored). A version newer than every boundary reuses the newest profile with no warning. A known version below the backend's first boundary exits 1 before registration or pane creation with `unsupported native version for BACKEND: VERSION; minimum supported version is MIN_VERSION`. A failed native version probe, including a first line with zero or several SemVer tokens, adds the stderr line `Warning: native version unavailable for BACKEND: CAUSE; coverage unknown.` and creation continues with unknown coverage, whose ordinary input uses delivery fallback. Creation returns only after the runner reports that the native child started.
 
 A failed creation compensates in order: shut down an owned runner and child, close the created pane, remove the pending descriptor, then mark the run `failed` and deregister the member, so the member ends deregistered with its placement removed. It keeps the primary cause and exit category and appends each cleanup diagnostic on its own stderr line: `cleanup failed for pane <id>: <detail>`, `owned child cleanup remains unconfirmed`, the cause of a failed descriptor removal, run update or deregistration, or `pane ID unknown; pane cleanup unconfirmed` when a failed split left no confirmed pane id. A member deregistered by compensation needs no further cleanup; an unconfirmed pane or child needs inspection.
 
@@ -298,23 +332,25 @@ A failed creation compensates in order: shut down an owned runner and child, clo
 
 `cafleet member prompt MEMBER_ID TEXT [--json]` validates a nonblank line without CR/LF or C0/DEL controls, otherwise exits 2 with `text must be one non-empty line without control characters.`
 
-A root Director target exits 1 with `cannot prompt the Director's own pane` before any pane I/O. A wrapped member receives literal text and the native submit key through its runner; an explicitly unwrapped member receives Escape, settle, literal text, settle and Enter, which can interrupt work or dismiss a prompt. Exit 0 means submission only, with ordered `{member_id, pane_id, text, input_id}`; unwrapped input has a null ID.
+A root Director target exits 1 with `cannot prompt the Director's own pane` before any pane I/O. A wrapped member's runner delivers by profile, by delivery fallback or by queueing (§ Wrapped delivery methods); an explicitly unwrapped member receives Escape, settle, literal text, settle and Enter, which can interrupt work or dismiss a prompt. Exit 0 means submission or queue acceptance only, with ordered `{member_id, pane_id, text, input_id, delivery}`; unwrapped input has a null ID and method `unwrapped`. A queued prompt prints `Queued prompt for member ID (PANE).` instead of the sent line.
 
 | Condition | Error body (exit 1) |
 |---|---|
 | Input lock still busy when the wait ends | `member ID's pane input remained busy; prompt was not dispatched.` |
-| Pre-write error, including an Escape failure | `prompt was not dispatched to member ID: CAUSE` |
+| Pre-write error, including an Escape failure or a held runner reply | `prompt was not dispatched to member ID: CAUSE` |
 | Partial uncertainty | `prompt delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` |
 
 ### `member exec`
 
 `cafleet member exec MEMBER_ID COMMAND [--json]` or `cafleet member exec MEMBER_ID --file PATH [--json]`; `--file -` reads stdin. Exactly one source is required. File/stdin is UTF-8 and strips at most one terminal LF or CRLF. Require a nonblank line without CR/LF, NUL or other C0/DEL controls, including tabs; invalid input exits 2 before pane I/O with `command must be one non-empty line without control characters.` A multiline task supplies a one-line explicit script invocation.
 
-A wrapped member receives literal `! ` plus the command and the native submit key through its runner; an explicitly unwrapped member receives Escape, settle, literal native shell input, settle and Enter. The backend owns working directory, environment, permissions, output and exit rendering. Successful exit 0 establishes complete submission/dispatch only. Ordered JSON is:
+A wrapped member's runner submits literal `! ` plus the command by its native-exec plan, by delivery fallback or after queueing (§ Wrapped delivery methods); an explicitly unwrapped member receives Escape, settle, literal native shell input, settle and Enter. The backend owns working directory, environment, permissions, output and exit rendering. Successful exit 0 establishes complete submission/dispatch or queue acceptance only. Ordered JSON is:
 
 ```json
-{"member_id":42,"pane_id":"w1:p2","coding_agent":"codex","command":"printf example","dispatched":true,"input_id":null}
+{"member_id":42,"pane_id":"w1:p2","coding_agent":"codex","command":"printf example","dispatched":true,"input_id":17,"delivery":{"status":"submitted","method":"profile","reason":null}}
 ```
+
+`dispatched` is `false` for a queued command, whose text prints `Queued native command for member ID (PANE).`
 
 | Condition | Error body (exit 1) |
 |---|---|
@@ -377,7 +413,7 @@ Every operation that writes pane input uses one process-shared OS file lock per 
 | `member press` | Exit 1 with the primary and zero-dispatch diagnostics (§ `member press`) |
 | `member delete` / `fleet delete` | `member ID's pane input remained busy for 5 seconds; member was not deleted.` / `fleet ID pane input remained busy for 5 seconds at member MEMBER_ID; fleet was not deleted.` |
 
-Prompt, exec and preview submission waits at most 1.5 seconds for the lock within a five-second submission budget. The lock excludes CAFleet writers only; the user's keyboard and host UI can change at any time. Successful dispatch establishes complete submission only.
+Unwrapped prompt, exec and preview submission waits at most 1.5 seconds for the lock within a five-second submission budget. A wrapped member's runner owns the lock for its writes: the client holds no lock while awaiting the runner, and the runner retries a busy lock every 100 ms within its five-second attempt budget, holds the lock across an active staged write and releases it while a request is merely queued. The lock excludes CAFleet writers only; the user's keyboard and host UI can change at any time. Successful dispatch establishes complete submission only.
 
 `member press` key grammar: single printable characters preserve case; named keys and modifiers match case-insensitively, and control letters normalize to lowercase.
 
@@ -401,23 +437,38 @@ Explicitly unwrapped prompt, exec and preview input selects a lead:
 | Escape | Escape, 0.5-second settle, literal line, settle, Enter | `member prompt`, `member exec` and the first notification of a drain |
 | Direct | Literal line, settle, Enter | Each further notification drained in the same lock hold |
 
-Runner-managed members receive literal text and the native submit key without Escape through their runner, which holds previews for an observed or candidate interaction and rejects unsafe explicit input before writing. Native shell input starts with `! ` followed by the validated command.
+Runner-managed members receive input through their runner's own PTY under § Wrapped delivery methods: profile delivery writes the literal, waits 500 ms and writes the measured submit key without Escape; delivery fallback uses the Escape lead above; a candidate or open interaction queues the input with zero bytes. Native shell input starts with `! ` followed by the validated command.
 
 ## Member runtime
 
 ### Runtime presentation
 
-Member create preserves ordered `member_id,name,registered_at,placement` and appends `runtime`; member show preserves ordered `member_id,name,description,status,registered_at,kind,placement` and appends `runtime`. An explicitly unwrapped member has `runtime: null`. The runtime object has ordered keys `run_id,resolved_mode,status,reachability,owner_epoch,last_health_at,coverage,profile_match,current_interaction_id,unresolved_input_ids,owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity,effective_policy`, preserving stored nullability. `profile_match` is `exact`, `fallback` or null; `effective_policy` is the stored effective policy record or null. `unresolved_input_ids` lists the run's inputs in `in_progress`, `accepted` or `uncertain`, in input-ID order; an accepted input needs no reconciliation and stays listed until a settlement records its disposition, while `in_progress` and `uncertain` inputs need Director reconciliation. These are registry reads and make no live-health claim.
+Member create preserves ordered `member_id,name,registered_at,placement` and appends `runtime`; member show preserves ordered `member_id,name,description,status,registered_at,kind,placement` and appends `runtime`. An explicitly unwrapped member has `runtime: null`. The runtime object has ordered keys `run_id,resolved_mode,status,reachability,owner_epoch,last_health_at,coverage,current_interaction_id,unresolved_input_ids,owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity,effective_policy`, preserving stored nullability. `effective_policy` is the stored effective policy record or null. `unresolved_input_ids` lists the run's inputs in `in_progress`, `accepted` or `uncertain`, plus queued `ready` inputs, in input-ID order; an accepted input needs no reconciliation and stays listed until a settlement records its disposition, a queued input stays listed while the runner owns it, and `in_progress` and `uncertain` inputs need Director reconciliation. These are registry reads and make no live-health claim.
 
-Wrapped create/show preserves its existing text row and appends `Runtime: run=RUN_ID mode=MODE status=STATUS coverage=COVERAGE profile=MATCH review=STATE`, where `MATCH` is the recorded `profile_match` and `STATE` the effective policy's `automatic_review` value, each `-` when absent. `event show` uses the same runtime object and line. Wrapped prompt/exec preserves its existing success line and appends `Input: INPUT_ID` when a durable ID exists; JSON appends nullable `input_id` after existing keys. An uncertain error retains its existing exit category and includes known receipt identity in the cause as `input_id=INPUT_ID`; run/interaction context accompanies held/rejected input.
+Wrapped create/show preserves its existing text row and appends `Runtime: run=RUN_ID mode=MODE status=STATUS coverage=COVERAGE review=STATE`, where `STATE` is the effective policy's `automatic_review` value, `-` when absent. `event show` uses the same runtime object and line. An uncertain error retains its existing exit category and includes known receipt identity in the cause as `input_id=INPUT_ID` together with the selected method; run/interaction context accompanies held/rejected input.
+
+### Delivery reporting
+
+Send, prompt and exec JSON append `delivery` with ordered `status,method,reason` after `input_id`; text appends `Delivery: status=STATUS method=METHOD reason=REASON` (`-` for a missing method or reason) and then `Input: INPUT_ID` when an ID exists. `method` is `profile`, `fallback`, `unwrapped` or null before selection. The submitted-success lines print only for actual submissions. A fallback submission always prints `method=fallback` with reason `submission_plan_unavailable` or `composer_unverified`. A queued result names `interaction_open`, `interaction_candidate` or `earlier_input`, states that the runner will retry, and points to `cafleet input show INPUT_ID --json` for the eventual result.
+
+| Status | Meaning | CLI behavior |
+|---|---|---|
+| `submitted` | Complete literal and submit stages were written | Exit 0; send has `notification_sent=true`, exec has `dispatched=true` |
+| `queued` | The runner accepted durable zero-byte deferred work | Exit 0; send has `notification_sent=false`, exec has `dispatched=false`; the input ID and reason are returned |
+| `held` | No queue acceptance or write, due to unavailable health, ownership or storage | Send keeps its committed message and prints the reason; prompt/exec exits 1 with the existing delivery context |
+| `uncertain` | Some stage may have written; reconciliation is required | Existing error categories, input identity and stage diagnostics, including the selected method |
+| `not_submitted` | Cancelled with established zero-byte evidence | Visible through `input show` and, for deferred work, its result event |
+| `not_applicable` | A self-send or root-Director target uses broker consumption only | Send keeps `notification_sent=false`, null method and input ID, and no warning |
+
+A queued preview stays unnotified until actual submission or ACK settlement. A deferred input's later result never rewrites the original command output: the receipt and `input show` carry its actual method, and the Director receives one `input_delivery_result` event.
 
 The effective policy record has keys `schema_version` (`1`), `automatic_review` (`available` or `unavailable`), `observed_mode` (text or null), `rule_id`, `event_id` (integer or null) and `observed_at`. A null record means no tested observation has been made.
 
 ### Runtime events
 
-A runtime notification is an ordinary inbox record whose `text` is the complete versioned event JSON; the observed member is its sender and the Director its recipient. Verify the durable event/message association through `event show` before acting. Runtime event kinds are `coverage_unknown`, `interaction_opened`, `interaction_obscured`, `interaction_closed`, `permission_denied_observed`, `automatic_refusal_observed`, `automatic_review_unavailable`, `runner_degraded`, `runner_lost` and `runner_exited`.
+A runtime notification is an ordinary inbox record whose `text` is the complete versioned event JSON; the observed member is its sender and the Director its recipient. Verify the durable event/message association through `event show` before acting. Runtime event kinds are `coverage_unknown`, `interaction_opened`, `interaction_obscured`, `interaction_closed`, `permission_denied_observed`, `automatic_refusal_observed`, `automatic_review_unavailable`, `input_delivery_result`, `runner_degraded`, `runner_lost` and `runner_exited`.
 
-Version-2 event keys are ordered `schema_version,event_id,run_id,event_seq,member_id,fleet_id,director_member_id,kind,interaction_id,classification,observed_at,source,native_request_id,decision_outcome,evidence`, followed by `close_reason` for closures or `cause` for lifecycle events, then required `director_action`. The action object has ordered `kind,instruction,inspect_argv`; its `kind` is `review_permission_request`, `review_automatic_refusal` or `review_automatic_review_unavailable`, and other events use a null action. The evidence object has ordered keys `backend,native_version,profile_version,rule_id,screen_seq,truncated,evidence_policy,operation,operation_rows,choices,native_request_id,excerpt,evidence_digest`. `operation_rows` is the positive number of displayed rows the operation was read from, null exactly when `operation` is null; when it is greater than 1 the instruction asks the Director to confirm the command against the excerpt. Metadata evidence leaves every screen-derived operation, choice, excerpt and native identifier null. A UTF-8 excerpt is limited to 8 KiB and the payload to 16 KiB.
+Version-2 event keys are ordered `schema_version,event_id,run_id,event_seq,member_id,fleet_id,director_member_id,kind,interaction_id,classification,observed_at,source,native_request_id,decision_outcome,evidence`, followed by `close_reason` for closures or `cause` for lifecycle events, then, for `input_delivery_result` only, ordered `input_id,message_id,delivery,stage`, then required `director_action`. The action object has ordered `kind,instruction,inspect_argv`; its `kind` is `review_permission_request`, `review_automatic_refusal` or `review_automatic_review_unavailable`, and other events use a null action. The evidence object has ordered keys `backend,native_version,profile_version,rule_id,screen_seq,truncated,evidence_policy,operation,operation_rows,choices,native_request_id,excerpt,evidence_digest`. `operation_rows` is the positive number of displayed rows the operation was read from, null exactly when `operation` is null; when it is greater than 1 the instruction asks the Director to confirm the command against the excerpt. Metadata evidence leaves every screen-derived operation, choice, excerpt and native identifier null. A UTF-8 excerpt is limited to 8 KiB and the payload to 16 KiB.
 
 | Field | `automatic_refusal_observed` | `automatic_review_unavailable` |
 |---|---|---|
@@ -430,15 +481,19 @@ Version-2 event keys are ordered `schema_version,event_id,run_id,event_seq,membe
 
 Neither automatic review event creates an interaction or changes input eligibility, so `permission inspect` and `permission respond` naming one fail their event/interaction association check before any byte.
 
+`input_delivery_result` reports a deferred input's first submitted, not-submitted or uncertain result. It has null `interaction_id`, `classification` and `director_action`, `source` `runner_lifecycle`, `decision_outcome` `"unknown"`, and a `cause` only when uncertain. `input_id` names the input, `message_id` is the preview's message or null for prompt/exec, `delivery` is the stored projection, and `stage` is `zero_bytes`, `partial`, `submitted` or `unknown`. It carries no literal payload and is published once per input.
+
 ### `event show`
 
 `cafleet event show EVENT_ID [--json]` returns ordered `event,notification_state,message_id,archive_reason,run,interaction`. The event is the complete versioned runtime payload, run is the current runtime summary, and nullable interaction contains the stored interaction fields in order `interaction_id,run_id,episode_seq,classification,evidence_digest,opened_at,evidence_json,closed_at,close_reason`. Text is `Event: EVENT_ID run=RUN_ID seq=EVENT_SEQ kind=KIND notification=STATE message=MESSAGE_ID` followed by the runtime summary line and `Interaction: INTERACTION_ID classification=CLASS closed_at=TIMESTAMP close_reason=REASON` when linked. Unavailable optional text values render `-`.
 
 ### `input show` and `input reconcile`
 
-`cafleet input show INPUT_ID [--json]` and `cafleet input reconcile INPUT_ID --disposition DISPOSITION --evidence-ref REFERENCE [--json]` return `{input}` with the durable row ordered `input_id,run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,disposition,evidence_ref,permission_response`. Text is `Input: INPUT_ID run=RUN_ID kind=KIND state=STATE disposition=DISPOSITION message=MESSAGE_ID`, with `-` for absent optional fields.
+`cafleet input show INPUT_ID [--json]` and `cafleet input reconcile INPUT_ID --disposition DISPOSITION --evidence-ref REFERENCE [--json]` return `{input}` with the durable row ordered `input_id,run_id,operation_key,kind,payload_digest,state,created_at,updated_at,message_id,disposition,evidence_ref,permission_response,delivery,deferred_at,defer_reason,payload_digest_version`. Text is `Input: INPUT_ID run=RUN_ID kind=KIND state=STATE disposition=DISPOSITION message=MESSAGE_ID`, with `-` for absent optional fields.
 
-Input kinds are `preview`, `prompt`, `exec` and `permission_response`; states are `ready`, `in_progress`, `accepted`, `uncertain` and `settled`. `ready` certifies a zero-byte attempt, and a settled disposition is `submitted`, `not_submitted` or `abandoned_uncertain`. A preview receipt uses the operation key `preview:<run_id>:<message_id>`. The receipt stores a payload digest and never the literal prompt or command.
+Input kinds are `preview`, `prompt`, `exec` and `permission_response`; states are `ready`, `in_progress`, `accepted`, `uncertain` and `settled`. `ready` certifies a zero-byte attempt, and a settled disposition is `submitted`, `not_submitted` or `abandoned_uncertain`. A preview receipt uses the operation key `preview:<run_id>:<message_id>`. The receipt stores a payload digest and never the literal prompt or command. New preview receipts use `payload_digest_version` `2`, which binds the method-independent canonical preview so a later change between profile and fallback delivery reuses the same input ID; other receipts use `1`.
+
+`delivery` projects the stored receipt: `ready` with `deferred_at`/`defer_reason` is `queued` with the original defer reason; `ready` without them is `held` with `zero_bytes_ready`; `in_progress`, `uncertain` and `settled/abandoned_uncertain` are `uncertain`; `accepted` and `settled/submitted` are `submitted`; `settled/not_submitted` is `not_submitted` with its zero-byte outcome reason. A receipt whose method was never recorded keeps a null method, with reason `method_unrecorded` outside `ready`. A permission response has `delivery: null`, null deferred fields and digest version `1`.
 
 Reconciliation is Director-owned. CLI disposition tokens are `submitted`, `not-submitted` and `abandoned-uncertain`, persisted with underscores. Require a nonempty evidence reference; the command synchronizes with the current owner before settlement and preserves uncertainty while an active writer cannot be ruled out. A settled ordinary receipt with the same disposition returns its original row and evidence reference; a conflicting disposition fails unchanged. Settlement sends no input and establishes no native command result. One five-second budget covers the pane wait, current-owner synchronization, database work and socket exchange. If the writer is unreachable, settlement requires exclusive receipt-only ownership; unavailable proof retains uncertainty.
 

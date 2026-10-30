@@ -10,7 +10,7 @@ A member runs each command its host permits. A required unavailable command rout
 | [member prompt](../roles/director.md#member-prompt) | Submit explicitly authorized composer input or post-command continuation |
 | [member press](../roles/director.md#member-press) | Request explicitly authorized ordered manual keys |
 
-Every writer shares the bounded pane-input lock. Wrapped prompt/exec input validates the pinned runner and durable receipt, preserves candidate/open interactions and requires a tested empty composer; it submits literal native input without Escape. Explicitly unwrapped prompt/exec input retains Escape-first multiplexer submission. Manual `member press` requests only its explicit keys through the outer pane, including wrapped members, with no implicit Escape or Enter. Its success establishes backend acknowledgment, while actual native effects and continuation require separate observation.
+Every writer shares the bounded pane-input lock. Wrapped prompt/exec input validates the pinned runner and durable receipt and queues while a candidate/open interaction is detected; the runner then submits by its measured profile plan without Escape into an empty composer, or by Escape-first delivery fallback otherwise, and reports the method. Explicitly unwrapped prompt/exec input retains Escape-first multiplexer submission. Manual `member press` requests only its explicit keys through the outer pane, including wrapped members, with no implicit Escape or Enter. Its success establishes backend acknowledgment, while actual native effects and continuation require separate observation.
 
 ## Member-side: reconsider, then route
 
@@ -40,9 +40,9 @@ cafleet member exec <member-id> "<command>"
 cafleet message ack <message-id>
 ```
 
-After lock and placement revalidation, the CLI routes wrapped input through the healthy runner’s tested native-shell composer profile, or uses the legacy Escape lead for an explicitly unwrapped member. It types `! ` plus the actual command once. It returns submission metadata. The host owns environment, permissions, execution and visible output.
+After placement revalidation, the CLI routes wrapped input to the healthy runner, which submits through its native-exec plan or delivery fallback, or queues it behind a detected interaction; an explicitly unwrapped member receives the legacy Escape lead under the pane lock. It types `! ` plus the actual command once. It returns submission or queue metadata with its delivery status and method; a queued command runs only after the interaction closes, and its result arrives as an `input_delivery_result` event. The host owns environment, permissions, execution and visible output.
 
-Escape-first input to an explicitly unwrapped member cancels an open tool approval or question in its pane. Capture that member's pane before `member exec` or `member prompt`; when the capture shows an open prompt, resolve it through the user relay first, or reach the member with `message send`, whose preview carries the dismissal clause.
+Escape-first input, from an explicitly unwrapped member's dispatch or a wrapped member's delivery fallback, cancels an open tool approval or question the runner did not detect. Capture the member's pane before `member exec` or `member prompt`; when the capture shows an open prompt, resolve it through the user relay first, or reach the member with `message send`, whose Escape-led preview carries the dismissal clause.
 
 Inspect the result and terminal state:
 

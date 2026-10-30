@@ -57,7 +57,7 @@ Suppose the returned ID is `3`. Receive its ready, ACK its actual message ID, th
 cafleet message send --from-member-id 2 --to-member-id 3 "Review the change and report findings."
 ```
 
-The send persists the assignment and submits a preview when the member’s recorded transport permits input. A runner holds input during candidate/open interactions, work, drafts, uncertain receipts or unknown coverage; explicitly unwrapped members retain Escape-first input. A later send or finite `message wait` rotation retries eligible pending previews. The member's startup/report/wake polls also discover durable assignments.
+The send persists the assignment and reports how its preview was delivered. A runner submits through its measured profile plan into an empty composer, uses Escape-first delivery fallback for work, drafts or missing plans, and queues the preview while a detected native interaction is open, retrying it after closure. It holds input only for uncertain receipts or unavailable observer, ownership or storage. Explicitly unwrapped members retain Escape-first input. A later send or finite `message wait` rotation retries held pending previews. The member's startup/report/wake polls also discover durable assignments.
 
 ### Receive results
 
@@ -85,7 +85,7 @@ cafleet message wait 2 --timeout 300 --json
 
 ### Handle an observed permission request
 
-Use [Member permission events](../concepts/member-permission-events.md#consume-a-runtime-event) to verify the durable event/message link, record the unfinished action and ACK consumption. For a current permission request, evaluate its risk and use the Director session’s verified auto mode to decide allow/deny; otherwise obtain user permission. Submit the complete bound response command, give it to the user to execute, or use manual native input when answer coverage is unavailable. Inspect actual output and resumed work, consume/ACK available records, then explicitly invoke finite `message wait` to retry held previews; the listener alone performs no retry. A native command dispatched separately does not answer the original request.
+Use [Member permission events](../concepts/member-permission-events.md#consume-a-runtime-event) to verify the durable event/message link, record the unfinished action and ACK consumption. For a current permission request, evaluate its risk and use the Director session’s verified auto mode to decide allow/deny; otherwise obtain user permission. Submit the complete bound response command, give it to the user to execute, or use manual native input when answer coverage is unavailable. Inspect actual output and resumed work, then consume/ACK available records. Input the runner queued during the request is delivered after the interaction closes, and its result arrives as an `input_delivery_result` event. A native command dispatched separately does not answer the original request.
 
 ### Run a command for a member
 
