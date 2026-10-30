@@ -2146,15 +2146,27 @@ pub(crate) mod native_capture {
         use std::sync::atomic::{AtomicU64, Ordering};
         use std::time::{Duration, Instant};
 
+        /// Publishes `bytes` at `path` atomically: waiters poll these marker
+        /// paths from other processes, so the name must never be visible
+        /// before its contents. `hard_link` keeps the create-new refusal.
         pub(crate) fn private_write(path: &Path, bytes: &[u8]) {
+            static STAGED: AtomicU64 = AtomicU64::new(0);
+            let staged = path.with_file_name(format!(
+                ".{}.partial-{}-{}",
+                path.file_name().unwrap().to_string_lossy(),
+                std::process::id(),
+                STAGED.fetch_add(1, Ordering::Relaxed)
+            ));
             let mut file = OpenOptions::new()
                 .write(true)
                 .create_new(true)
                 .mode(0o600)
-                .open(path)
+                .open(&staged)
                 .unwrap();
             file.write_all(bytes).unwrap();
             file.sync_all().unwrap();
+            std::fs::hard_link(&staged, path).unwrap();
+            std::fs::remove_file(&staged).unwrap();
         }
         pub(crate) fn digest(path: &Path) -> String {
             sha256_hex(&std::fs::read(path).unwrap())
