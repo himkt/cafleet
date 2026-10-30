@@ -1270,9 +1270,16 @@ mod tests {
                     preview_row(&fixture.fixture.conn, run.run_id, message.message_id).unwrap();
                 assert_eq!(row.kind, broker::runtime::InputKind::Preview);
                 assert_eq!(row.message_id, Some(message.message_id));
+                assert_eq!(row.payload_digest_version, 2);
                 assert_eq!(
                     row.payload_digest,
-                    preview_digest(run.run_id, message.message_id, &expected)
+                    crate::digest::sha256_hex(
+                        crate::digest::canonical_json(&serde_json::json!({
+                            "payload_digest_version":2,"run_id":run.run_id,"kind":"preview",
+                            "message_id":message.message_id,"literal":expected
+                        }))
+                        .as_bytes()
+                    )
                 );
                 assert_eq!(row.state, broker::runtime::InputState::Settled);
                 assert_eq!(
@@ -2252,121 +2259,42 @@ mod tests {
         );
     }
 
-    mod external_finite_wait {
+    mod deferred_preview {
         use super::*;
         use crate::broker::runtime::RunRecord;
         use crate::runtime::runner::service::test_support::ServiceFixture;
         use crate::runtime::runner::service::test_support::input_service::{
-            FORM_LINE, input_service_barrier, input_service_composer, input_service_records,
-            manual, wait_input_service_record, with_detecting_input_service,
+            FORM_LINE, input_service_barrier, input_service_records, manual,
+            wait_input_service_record, with_detecting_input_service,
         };
         use crate::runtime::runner::*;
 
-        type Result<T> = std::result::Result<T, CafleetError>;
+        /// Consumes the runtime-event notifications the detected interaction sends the
+        /// Director, so only the preview's own delivery is observed.
+        fn acknowledge_runtime_events(fixture: &mut ServiceFixture, run: &RunRecord) {
+            for pending in
+                crate::broker::poll_messages(&fixture.fixture.conn, run.director_member_id).unwrap()
+            {
+                assert_eq!(pending.from_member_id, run.member_id);
+                crate::broker::ack_message(&mut fixture.fixture.conn, pending.message_id).unwrap();
+            }
+        }
+
+        fn stamp(fixture: &ServiceFixture, message_id: i64) -> Option<String> {
+            fixture
+                .fixture
+                .conn
+                .query_row(
+                    "SELECT notified_at FROM messages WHERE message_id=?1",
+                    [message_id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        }
 
         #[test]
-        fn external_finite_wait_retries_held_preview_after_actual_composer_recovery() {
-            use crate::receive::{
-                AttemptEnd, AttemptOutcome, BrokerReceiver, ReceiveIo, ReceiveSnapshot, SystemClock,
-            };
-            use std::collections::BTreeSet;
-
-            /// Consumes the runtime-event notifications the detected interaction sends the
-            /// Director, so the finite wait observes only the preview retry.
-            fn acknowledge_runtime_events(fixture: &mut ServiceFixture, run: &RunRecord) {
-                for pending in
-                    crate::broker::poll_messages(&fixture.fixture.conn, run.director_member_id)
-                        .unwrap()
-                {
-                    assert_eq!(pending.from_member_id, run.member_id);
-                    let event: serde_json::Value = serde_json::from_str(&pending.text).unwrap();
-                    assert_eq!(event["run_id"], run.run_id, "{event}");
-                    crate::broker::ack_message(&mut fixture.fixture.conn, pending.message_id)
-                        .unwrap();
-                }
-            }
-
-            struct ObservedReceiver<'a, 'b> {
-                receiver: BrokerReceiver<'a>,
-                fixture: &'b mut ServiceFixture,
-                run: RunRecord,
-                until: Instant,
-                message_id: i64,
-                key: String,
-                line: String,
-                outcomes: Vec<AttemptOutcome>,
-            }
-            impl ObservedReceiver<'_, '_> {
-                fn untouched(&self) {
-                    assert!(
-                        storage::find_input(&self.fixture.fixture.conn, self.run.run_id, &self.key)
-                            .unwrap()
-                            .is_none()
-                    );
-                    let stamp: Option<String> = self
-                        .fixture
-                        .fixture
-                        .conn
-                        .query_row(
-                            "SELECT notified_at FROM messages WHERE message_id=?1",
-                            [self.message_id],
-                            |row| row.get(0),
-                        )
-                        .unwrap();
-                    assert!(stamp.is_none());
-                    assert!(
-                        input_service_records(self.fixture)
-                            .iter()
-                            .all(|record| record["line"].as_str() != Some(self.line.as_str()))
-                    );
-                }
-            }
-            impl ReceiveIo for ObservedReceiver<'_, '_> {
-                fn check(&mut self, deadline: Deadline) -> Result<ReceiveSnapshot> {
-                    self.receiver.check(deadline)
-                }
-                fn attempt(
-                    &mut self,
-                    member_id: i64,
-                    deadline: Deadline,
-                    attempted: &BTreeSet<i64>,
-                ) -> Result<AttemptOutcome> {
-                    assert_eq!(member_id, self.run.member_id);
-                    assert!(!attempted.contains(&self.message_id));
-                    let outcome = self.receiver.attempt(member_id, deadline, attempted)?;
-                    if self.outcomes.is_empty() {
-                        assert_eq!(
-                            outcome.end,
-                            AttemptEnd::Held,
-                            "actual first outcome={outcome:?}"
-                        );
-                        assert!(outcome.sent.is_empty());
-                        self.untouched();
-                        let until = self.until.min(deadline.instant());
-                        input_service_barrier(self.fixture, until);
-                        let health = input_service_composer(self.fixture, until);
-                        health.validate(&self.run).unwrap();
-                        let observation = health.observation.unwrap();
-                        assert_eq!(observation.eligibility, InputEligibility::ComposerEmpty);
-                        assert_eq!(observation.visibility, Visibility::NotVisible);
-                        assert!(!observation.degraded);
-                        assert_eq!(observation.pending_count, 0);
-                        assert!(!observation.pending_evidence);
-                        acknowledge_runtime_events(self.fixture, &self.run);
-                        self.untouched();
-                        assert_eq!(
-                            input_service_records(self.fixture)
-                                .iter()
-                                .map(|record| record["line"].as_str().unwrap().to_owned())
-                                .collect::<Vec<_>>(),
-                            vec!["barrier"]
-                        );
-                    }
-                    self.outcomes.push(outcome.clone());
-                    Ok(outcome)
-                }
-            }
-
+        fn deferred_preview_during_a_detected_interaction_is_queued_then_drained_once_after_closure()
+         {
             with_detecting_input_service(|fixture, until| {
                 let run =
                     storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
@@ -2375,121 +2303,74 @@ mod tests {
                     None,
                 );
                 manual(fixture, format!("{FORM_LINE}\r").as_bytes(), until);
-                let mut previous = None;
                 loop {
-                    assert!(
-                        Instant::now() < until,
-                        "actual stable Hold setup within original fixture cap"
-                    );
+                    assert!(Instant::now() < until, "the detected interaction opens");
                     let health = NativeInputHost.health(&run, until).unwrap();
-                    health.validate(&run).unwrap();
                     let observation = health.observation.as_ref().unwrap();
                     if observation.eligibility == InputEligibility::Hold(GateReason::Interaction)
-                        && !observation.degraded
                         && observation.pending_count == 0
                         && !observation.pending_evidence
                     {
-                        if previous == Some(health.output_seq) {
-                            break;
-                        }
-                        previous = Some(health.output_seq);
-                    } else {
-                        previous = None;
+                        break;
                     }
-                    std::thread::sleep(
-                        Duration::from_millis(2)
-                            .min(until.saturating_duration_since(Instant::now())),
-                    );
+                    std::thread::sleep(Duration::from_millis(2));
                 }
                 acknowledge_runtime_events(fixture, &run);
                 let message = crate::broker::send_message(
                     &mut fixture.fixture.conn,
                     run.director_member_id,
                     run.member_id,
-                    "actual external Held retry fixture",
+                    "deferred preview fixture",
                 )
                 .unwrap();
-                assert!(
-                    crate::broker::poll_messages(&fixture.fixture.conn, run.director_member_id)
-                        .unwrap()
-                        .is_empty()
-                );
-                assert!(input_service_records(fixture).is_empty());
-                let line = format!(
-                    "[cafleet msg {} from {} {}] {} [cafleet] Resume your work if something was still running.",
-                    message.message_id, message.from_member_id, message.created_at, message.text,
-                );
+                let line = canonical_preview_line(&message);
                 let key = format!("preview:{}:{}", run.run_id, message.message_id);
-                let timeout = Duration::from_secs(2);
-                assert!(
-                    until.saturating_duration_since(Instant::now()) > timeout,
-                    "original fixture cap contains the finite retry and cleanup"
-                );
-                let mut conn = crate::db::connect(&settings.database_url).unwrap();
-                let outcomes = with_database_budget(&mut conn, Deadline::until(until), |conn| {
-                    let mut io = ObservedReceiver {
-                        receiver: BrokerReceiver::new(conn, &settings, run.director_member_id),
-                        fixture: &mut *fixture,
-                        run: run.clone(),
-                        until,
-                        message_id: message.message_id,
-                        key: key.clone(),
-                        line: line.clone(),
-                        outcomes: Vec::new(),
-                    };
-                    let waited = crate::receive::wait(&SystemClock, &mut io, timeout);
-                    assert!(
-                        waited.is_ok(),
-                        "receive_error={:?}; actual_attempts={:?}",
-                        waited.as_ref().err(),
-                        io.outcomes
-                    );
-                    assert!(waited.unwrap().is_empty());
-                    Ok(io.outcomes)
-                })
+                let deadline = Deadline::until(until.min(Instant::now() + Duration::from_secs(5)));
+                let outcome = deliver_pending(
+                    &mut fixture.fixture.conn,
+                    &settings,
+                    run.member_id,
+                    None,
+                    deadline,
+                    &std::collections::BTreeSet::new(),
+                )
                 .unwrap();
-                assert_eq!(outcomes.len(), 2);
-                assert_eq!(outcomes[0].end, AttemptEnd::Held);
-                assert!(outcomes[0].sent.is_empty());
-                assert_eq!(outcomes[1].end, AttemptEnd::NoPending);
-                assert_eq!(outcomes[1].sent, vec![message.message_id]);
-                let input = storage::find_input(&fixture.fixture.conn, run.run_id, &key)
+                assert!(outcome.sent.is_empty(), "{outcome:?}");
+                let queued = storage::find_input(&fixture.fixture.conn, run.run_id, &key)
+                    .unwrap()
+                    .expect("the runner commits a durable receipt for the queued preview");
+                assert_eq!(queued.state, InputState::Ready);
+                assert!(queued.deferred_at.is_some());
+                assert_eq!(queued.defer_reason.as_deref(), Some("interaction_open"));
+                assert_eq!(queued.payload_digest_version, 2);
+                assert!(stamp(fixture, message.message_id).is_none());
+                assert!(
+                    input_service_records(fixture).is_empty(),
+                    "zero bytes while queued"
+                );
+
+                input_service_barrier(fixture, until);
+                wait_input_service_record(fixture, &line, until);
+                while stamp(fixture, message.message_id).is_none() {
+                    assert!(Instant::now() < until, "the drained preview is stamped");
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                let delivered = storage::find_input(&fixture.fixture.conn, run.run_id, &key)
                     .unwrap()
                     .unwrap();
-                assert_eq!(input.kind, InputKind::Preview);
-                assert_eq!(input.message_id, Some(message.message_id));
-                assert_eq!(input.state, InputState::Settled);
-                assert_eq!(input.disposition, Some(InputDisposition::Submitted));
-                assert_eq!(input.evidence_ref, None);
-                let stamp: Option<String> = fixture
-                    .fixture
-                    .conn
-                    .query_row(
-                        "SELECT notified_at FROM messages WHERE message_id=?1",
-                        [message.message_id],
-                        |row| row.get(0),
-                    )
-                    .unwrap();
-                assert!(stamp.is_some());
-                wait_input_service_record(fixture, &line, until);
+                assert_eq!(delivered.input_id, queued.input_id);
+                assert_eq!(delivered.payload_digest, queued.payload_digest);
+                assert!(matches!(
+                    delivered.state,
+                    InputState::Accepted | InputState::Settled
+                ));
                 assert_eq!(
                     input_service_records(fixture)
                         .iter()
                         .map(|record| record["line"].as_str().unwrap().to_owned())
                         .collect::<Vec<_>>(),
-                    vec!["barrier", line.as_str()]
-                );
-                let records = input_service_records(fixture);
-                let native = records
-                    .iter()
-                    .find(|record| record["line"] == line)
-                    .unwrap();
-                assert!(
-                    native["inputs"]
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .any(|row| row["input_id"] == input.input_id)
+                    vec!["barrier".to_owned(), line],
+                    "the runner types the queued preview exactly once without another send or wait"
                 );
             });
         }

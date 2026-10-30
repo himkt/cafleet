@@ -99,6 +99,7 @@ struct QueuedInput {
     operation: ComposerOperation,
     payload_digest_version: i64,
     attempt_deadline: Option<Instant>,
+    obstacle: &'static str,
 }
 
 type DeliverySelection = (
@@ -759,6 +760,21 @@ impl InputCoordinator {
     pub(crate) fn fence(&mut self, deadline: Instant) -> Result<()> {
         self.current_request = None;
         self.input_fenced = true;
+        if !self.queue.is_empty() {
+            let mut conn = crate::db::connect(&self.database_url)?;
+            let owner = self.run.owner();
+            while let Some(queued) = self.queue.pop_front() {
+                with_database_deadline(&mut conn, deadline, |conn| {
+                    storage::settle_zero_byte_deferred(
+                        conn,
+                        &owner,
+                        queued.input_id,
+                        storage::InputState::Ready,
+                        "runner_stopped",
+                    )
+                })?;
+            }
+        }
         check_deadline(Instant::now(), deadline)
     }
     fn permission_blocker(&self, observation: &ObservationController) -> Option<String> {
@@ -1856,6 +1872,7 @@ impl InputCoordinator {
                             operation: composer_operation,
                             payload_digest_version,
                             attempt_deadline: None,
+                            obstacle: "delivery_budget_exhausted",
                         });
                         operation
                     }
@@ -2006,6 +2023,7 @@ impl InputCoordinator {
         conn: &mut Connection,
         run: &RunRecord,
         observation: &ObservationController,
+        deadline: Instant,
     ) -> Result<()> {
         if self.input_fenced {
             return Ok(());
@@ -2021,20 +2039,22 @@ impl InputCoordinator {
         }
         let attempt_deadline = *head
             .attempt_deadline
-            .get_or_insert(now + DEFERRED_ATTEMPT_BUDGET);
+            .get_or_insert((now + DEFERRED_ATTEMPT_BUDGET).min(deadline));
         let input_id = head.input_id;
         let message_id = head.request.message_id;
+        if now >= attempt_deadline {
+            let obstacle = head.obstacle;
+            self.queue.pop_front();
+            return self.cancel_deferred(
+                conn,
+                observation,
+                input_id,
+                storage::InputState::Ready,
+                obstacle,
+            );
+        }
         if matches!(blocker, Some(OrdinaryBlocker::ObserverUnavailable)) {
-            if now >= attempt_deadline {
-                self.queue.pop_front();
-                self.cancel_deferred(
-                    conn,
-                    observation,
-                    input_id,
-                    storage::InputState::Ready,
-                    "observer_unavailable",
-                )?;
-            }
+            head.obstacle = "observer_unavailable";
             return Ok(());
         }
         let target = with_database_deadline(conn, attempt_deadline, |conn| {
@@ -2059,6 +2079,13 @@ impl InputCoordinator {
                 reason,
             );
         }
+        let Some(pane) = PaneLock::try_acquire(&self.database_url, &self.placement)? else {
+            self.queue
+                .front_mut()
+                .expect("queued head remains")
+                .obstacle = "pane_input_busy";
+            return Ok(());
+        };
         let head = self.queue.front().expect("queued head remains");
         let (method, reason, stages) = self.select_delivery(
             observation,
@@ -2099,7 +2126,7 @@ impl InputCoordinator {
                 written_stages: 0,
                 settle_until: None,
                 manual_generation: None,
-                pane: None,
+                pane: Some(pane),
                 payload_digest_version: head.payload_digest_version,
                 deferred: Some(DeferredAttempt {
                     queued: head,
@@ -2516,7 +2543,7 @@ impl InputCoordinator {
         let mut terminal_bookkeeping = false;
         let result = (|| {
             if self.pending.is_none() {
-                self.start_deferred(conn, run, observation)?;
+                self.start_deferred(conn, run, observation, deadline)?;
                 return Ok(None);
             }
             if self.deferred_preflight(conn, observation)? {
@@ -5247,6 +5274,15 @@ mod tests {
                         .id
                         .expect("actual durable input ID")
                 }
+                pub(crate) fn reserved_input_ids(&self) -> Vec<i64> {
+                    self.points
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .filter(|p| p.boundary == "reserved")
+                        .map(|p| p.id.expect("actual durable input ID"))
+                        .collect()
+                }
             }
             impl InputHooks for Hooks {
                 fn checkpoint(
@@ -5335,8 +5371,13 @@ mod tests {
                     self.offers.push(bytes.to_vec());
                     if self.expected_program[self.program_offset..].starts_with(bytes) {
                         let conn = crate::db::connect(&self.database_url).unwrap();
-                        let row = storage::get_input(&conn, self.hooks.input_id()).unwrap();
-                        assert!(matches!(row.state, storage::InputState::InProgress));
+                        assert!(
+                            self.hooks.reserved_input_ids().into_iter().any(|id| {
+                                storage::get_input(&conn, id).unwrap().state
+                                    == storage::InputState::InProgress
+                            }),
+                            "a programmatic stage writes only for an in-progress reservation"
+                        );
                         assert!(self.hooks.count("before") > 0);
                         self.stages.push((Instant::now(), bytes.to_vec()));
                         let accepted = self.short.unwrap_or(bytes.len());
@@ -6916,7 +6957,7 @@ mod tests {
         type FormFeed = fn(&mut Host) -> (i64, i64, i64, i64);
 
         #[test]
-        fn a_preview_during_a_visible_claude_permission_form_is_held_without_child_bytes() {
+        fn a_preview_during_a_visible_claude_permission_form_is_queued_without_child_bytes() {
             let forms: [(&str, FormFeed); 2] = [
                 ("claude-2.1.302-default-permission-1", claude_blocked_form),
                 (
@@ -6954,7 +6995,7 @@ mod tests {
                             operation_key: key.clone(),
                             input_kind: storage::InputKind::Preview,
                             message_id: Some(message.message_id),
-                            literal: "preview during a permission form".into(),
+                            literal: crate::delivery::canonical_preview_line(&message),
                         });
                     let reply = h
                         .coordinator
@@ -6966,22 +7007,24 @@ mod tests {
                             h.until,
                         )
                         .unwrap();
-                    let Some(InputControlReply::Submission(held)) = reply else {
+                    let Some(InputControlReply::Submission(queued)) = reply else {
                         panic!(
                             "{fixture}: a preview during a visible form returns a Submission reply"
                         )
                     };
                     assert_eq!(
-                        (held.status, held.stage, held.input_id),
-                        (SubmissionStatus::Held, SubmissionStage::ZeroBytes, None),
+                        (queued.status, queued.stage),
+                        (SubmissionStatus::Queued, SubmissionStage::ZeroBytes),
                         "{fixture}"
                     );
                     assert_eq!(
-                        held.reason.as_deref(),
-                        Some("ordinary composer input is held"),
-                        "{fixture}: the visible form, not a missing composer plan, holds the preview"
+                        queued
+                            .delivery
+                            .as_ref()
+                            .and_then(|delivery| delivery.reason.as_deref()),
+                        Some("interaction_open"),
+                        "{fixture}: the visible form, not a missing composer plan, defers the preview"
                     );
-                    assert!(h.coordinator.pending.is_none(), "{fixture}");
                     assert_eq!(
                         h.pty.offers, offers,
                         "{fixture}: no child byte, Escape included, is offered"
@@ -6990,10 +7033,14 @@ mod tests {
                         h.pty.program, program,
                         "{fixture}: no program byte is written"
                     );
-                    assert!(
-                        storage::find_input(&h.fixture.conn, run.run_id, &key)
-                            .unwrap()
-                            .is_none(),
+                    let receipt = storage::find_input(&h.fixture.conn, run.run_id, &key)
+                        .unwrap()
+                        .unwrap_or_else(|| panic!("{fixture}: the queued preview has a receipt"));
+                    assert_eq!(Some(receipt.input_id), queued.input_id, "{fixture}");
+                    assert_eq!(receipt.state, storage::InputState::Ready, "{fixture}");
+                    assert_eq!(
+                        receipt.defer_reason.as_deref(),
+                        Some("interaction_open"),
                         "{fixture}"
                     );
                     let notified: Option<String> = h

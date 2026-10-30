@@ -3188,10 +3188,11 @@ mod tests {
                     fixture.fixture.run.run_id, message.message_id
                 );
                 let accepted_until = until.min(Instant::now() + Duration::from_secs(3));
+                let literal = crate::delivery::canonical_preview_line(&message);
                 let value = request(
                     fixture,
                     &key,
-                    &message.text,
+                    &literal,
                     InputKind::Preview,
                     Some(message.message_id),
                     accepted_until,
@@ -3220,14 +3221,14 @@ mod tests {
                     pause(accepted_until);
                 };
                 drop(abandoned);
-                wait_input_service_record(fixture, &message.text, until);
+                wait_input_service_record(fixture, &literal, until);
                 let retained = submission(exchange(fixture, &value, until));
                 assert_eq!(retained.input_id, Some(row.input_id));
                 input_service_barrier(fixture, until);
                 assert_eq!(
                     input_service_records(fixture)
                         .iter()
-                        .filter(|record| record["line"] == message.text)
+                        .filter(|record| record["line"] == literal)
                         .count(),
                     1
                 );

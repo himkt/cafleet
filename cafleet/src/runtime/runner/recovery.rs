@@ -464,6 +464,9 @@ fn recover(
     if current.status.terminal() && current.cleanup_state == CleanupState::Complete {
         return completion(current, RecoveryOutcome::Recovered);
     }
+    with_database_deadline(conn, until, |conn| {
+        storage::settle_lost_deferred(conn, &current.owner())
+    })?;
     replay::reconcile(conn, current, pinned, lock, host, clock, until)
 }
 

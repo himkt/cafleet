@@ -244,6 +244,26 @@ pub(crate) fn begin_deferred_attempt(
     })
 }
 
+/// Settles every queued receipt of a run whose runner was lost, after ownership fencing has
+/// established that its in-memory payload and writer are gone.
+pub(crate) fn settle_lost_deferred(
+    conn: &mut Connection,
+    owner: &RunOwner,
+) -> Result<(), CafleetError> {
+    owned_transaction(conn, owner, |conn, run| {
+        require(
+            run.owner_kind == OwnerKind::Reconciler,
+            "owner_kind",
+            "lost queued input settles under reconciler ownership",
+        )?;
+        conn.execute(
+            "UPDATE member_input_operations SET state='settled',disposition='not_submitted',updated_at=?1,delivery_method=NULL,delivery_reason='runner_lost' WHERE run_id=?2 AND state='ready' AND deferred_at IS NOT NULL",
+            params![now_stamp(), run.run_id],
+        )?;
+        Ok(())
+    })
+}
+
 /// Settles a queued input that wrote zero bytes as not submitted with its outcome reason.
 pub(crate) fn settle_zero_byte_deferred(
     conn: &mut Connection,
