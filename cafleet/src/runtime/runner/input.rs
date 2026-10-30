@@ -2479,10 +2479,11 @@ impl InputCoordinator {
             && !Self::composer_eligible(observation);
         let now = Instant::now();
         let expired = now >= pending.deadline;
-        if !interaction && !composer_busy && !expired {
+        let requeue = interaction || composer_busy;
+        if !requeue && !expired {
             return Ok(false);
         }
-        if (interaction || composer_busy) && !expired {
+        if requeue {
             match with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
                 storage::record_input_state(
                     conn,
@@ -2508,7 +2509,7 @@ impl InputCoordinator {
         let mut pending = self.pending.take().expect("deferred pending input");
         let composer = pending.composer.take().expect("deferred composer delivery");
         let deferred = composer.deferred.expect("deferred attempt");
-        if (interaction || composer_busy) && !expired {
+        if requeue {
             self.operations.remove(&id);
             let mut queued = deferred.queued;
             queued.attempt_deadline = None;
@@ -5583,6 +5584,50 @@ mod tests {
                         "the preview is typed once"
                     );
                     assert!(!host.coordinator.input_fenced);
+                });
+            }
+
+            #[test]
+            fn queue_head_interaction_after_its_zero_byte_attempt_expired_requeues_instead_of_settling()
+             {
+                with_permission_host(Duration::from_secs(60), |host| {
+                    form(host);
+                    let id = queued(
+                        host,
+                        host.request("prompt:expired-then-form"),
+                        "interaction_open",
+                    );
+                    let queued_receipt = row(host, id);
+                    close(host);
+                    while row(host, id).state == storage::InputState::Ready {
+                        assert!(Instant::now() < host.until, "the deferred attempt starts");
+                        host.drain();
+                        host.advance();
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    assert!(host.pty.offers.is_empty());
+                    host.coordinator.pending.as_mut().unwrap().deadline =
+                        Instant::now() - Duration::from_millis(1);
+                    form(host);
+                    super::composer_busy::hold_turns(host);
+                    let requeued = row(host, id);
+                    assert_eq!(
+                        requeued.state,
+                        storage::InputState::Ready,
+                        "an open interaction requeues the expired zero-byte attempt"
+                    );
+                    assert_eq!(requeued.disposition, None);
+                    assert_eq!(requeued.delivery_method, None);
+                    assert_eq!(requeued.deferred_at, queued_receipt.deferred_at);
+                    assert_eq!(requeued.defer_reason.as_deref(), Some("interaction_open"));
+                    assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
+                    close(host);
+                    turns_until(host, |host| settled(host, id));
+                    assert_eq!(
+                        host.pty.offers,
+                        vec![LITERAL.as_bytes().to_vec(), b"~".to_vec()],
+                        "the requeued input drains once after closure"
+                    );
                 });
             }
 
