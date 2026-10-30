@@ -67,6 +67,46 @@ pub(super) fn reconcile(
                 RunStatus::Lost
             }
         };
+        storage::settle_lost_deferred_in_transaction(&tx, &run)?;
+        let unpublished = storage::unpublished_delivery_results(&tx, run.run_id)?;
+        if !unpublished.is_empty() {
+            let ceiling = storage::latest_event_seq(&tx, run.run_id)?
+                .map_or(run.event_seq_reserved_through, |value| {
+                    value.max(run.event_seq_reserved_through)
+                });
+            let count = i64::try_from(unpublished.len()).expect("bounded unresolved inputs");
+            let reserved = ceiling
+                .checked_add(count)
+                .ok_or_else(|| error("recovery sequence overflow"))?;
+            tx.execute(
+                "UPDATE member_runs SET event_seq_reserved_through=?1 WHERE run_id=?2",
+                params![reserved, run.run_id],
+            )?;
+            run = storage::get_run(&tx, run.run_id)?;
+            let evidence = storage::evidence::run_metadata(&run, "runtime-recovery", 0)?;
+            for (event_seq, (input_id, stage)) in (ceiling + 1..=reserved).zip(unpublished) {
+                let transition = ObservedTransition {
+                    run_id: run.run_id,
+                    event_seq,
+                    episode_seq: None,
+                    kind: RuntimeEventKind::InputDeliveryResult,
+                    classification: None,
+                    observed_at: crate::time::now_stamp(),
+                    evidence_json: evidence.clone(),
+                    close_reason: None,
+                    cause_json: Some(storage::input_delivery_result_cause(input_id, stage, None)),
+                };
+                let (event, inserted) = storage::persist_transition_in_transaction(
+                    &tx,
+                    &run,
+                    &transition,
+                    PersistenceMode::Recovery,
+                )?;
+                if inserted {
+                    super::replay::count_commit(&mut report, &event, false)?;
+                }
+            }
+        }
         tx.execute("UPDATE member_runs SET status=?1,cleanup_state='complete',ended_at=COALESCE(ended_at,?2) WHERE run_id=?3",
             params![target.as_str(),crate::time::now_stamp(),run.run_id])?;
         let run = storage::get_run(&tx, run.run_id)?;
@@ -430,6 +470,71 @@ mod tests {
                 .unwrap()
                 .to_string();
             assert!(!diagnostics.contains("operator_via_director"));
+        }
+
+        fn deferred_receipt(case: &Case, key: &str, settled_reason: Option<&str>) -> i64 {
+            case.fixture
+                .conn
+                .execute(
+                    "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,disposition,delivery_reason,created_at,updated_at,deferred_at,defer_reason) VALUES(?1,?2,'prompt',?3,?4,?5,?6,?7,?7,?7,'interaction_open')",
+                    rusqlite::params![
+                        case.fixture.run.run_id,
+                        key,
+                        "d".repeat(64),
+                        if settled_reason.is_some() { "settled" } else { "ready" },
+                        settled_reason.map(|_| "not_submitted"),
+                        settled_reason,
+                        NOW,
+                    ],
+                )
+                .unwrap();
+            case.fixture.conn.last_insert_rowid()
+        }
+
+        fn result_events(case: &Case, input_id: i64) -> i64 {
+            case.fixture
+                .conn
+                .query_row(
+                    "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result' AND json_extract(payload_json,'$.input_id')=?2",
+                    rusqlite::params![case.fixture.run.run_id, input_id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        }
+
+        #[test]
+        fn runner_recovery_missing_path_settles_queued_receipts_runner_lost_and_publishes_durable_results_once()
+         {
+            let mut case = Case::new();
+            persist_opening(&mut case);
+            let queued = deferred_receipt(&case, "prompt:queued", None);
+            let unpublished = deferred_receipt(&case, "prompt:unpublished", Some("runner_stopped"));
+            missing_lock(&mut case);
+            let report = case.recover(&mut new_host()).unwrap();
+            assert!(matches!(report.outcome, RecoveryOutcome::Recovered));
+            assert_eq!(report.status, RunStatus::Lost);
+            let lost = storage::get_input(&case.fixture.conn, queued).unwrap();
+            assert_eq!(lost.state, InputState::Settled);
+            assert_eq!(lost.disposition, Some(InputDisposition::NotSubmitted));
+            assert_eq!(lost.delivery_reason.as_deref(), Some("runner_lost"));
+            assert_eq!(
+                storage::get_input(&case.fixture.conn, unpublished)
+                    .unwrap()
+                    .delivery_reason
+                    .as_deref(),
+                Some("runner_stopped")
+            );
+            for input_id in [queued, unpublished] {
+                assert_eq!(result_events(&case, input_id), 1, "input {input_id}");
+            }
+            case.recover(&mut new_host()).unwrap();
+            for input_id in [queued, unpublished] {
+                assert_eq!(
+                    result_events(&case, input_id),
+                    1,
+                    "a repeated recovery publishes input {input_id} once"
+                );
+            }
         }
 
         #[test]

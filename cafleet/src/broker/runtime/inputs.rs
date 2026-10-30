@@ -320,18 +320,25 @@ pub(crate) fn settle_lost_deferred(
     conn: &mut Connection,
     owner: &RunOwner,
 ) -> Result<(), CafleetError> {
-    owned_transaction(conn, owner, |conn, run| {
-        require(
-            run.owner_kind == OwnerKind::Reconciler,
-            "owner_kind",
-            "lost queued input settles under reconciler ownership",
-        )?;
-        conn.execute(
-            "UPDATE member_input_operations SET state='settled',disposition='not_submitted',updated_at=?1,delivery_method=NULL,delivery_reason='runner_lost' WHERE run_id=?2 AND state='ready' AND deferred_at IS NOT NULL",
-            params![now_stamp(), run.run_id],
-        )?;
-        Ok(())
-    })
+    owned_transaction(conn, owner, settle_lost_deferred_in_transaction)
+}
+
+/// `settle_lost_deferred` inside a caller's transaction that already holds the run's reconciler
+/// ownership.
+pub(crate) fn settle_lost_deferred_in_transaction(
+    conn: &Connection,
+    run: &RunRecord,
+) -> Result<(), CafleetError> {
+    require(
+        run.owner_kind == OwnerKind::Reconciler,
+        "owner_kind",
+        "lost queued input settles under reconciler ownership",
+    )?;
+    conn.execute(
+        "UPDATE member_input_operations SET state='settled',disposition='not_submitted',updated_at=?1,delivery_method=NULL,delivery_reason='runner_lost' WHERE run_id=?2 AND state='ready' AND deferred_at IS NOT NULL",
+        params![now_stamp(), run.run_id],
+    )?;
+    Ok(())
 }
 
 /// Settles a queued input that wrote zero bytes as not submitted with its outcome reason.
