@@ -36,8 +36,8 @@ Wrapped preview, prompt and native-exec input uses the pinned runner, which sele
 |---|---|---|
 | Candidate or open detected interaction, or earlier queued input | Queue with zero bytes, including zero Escape bytes, and retry after closure | `queued` with null method |
 | Verified empty composer and the operation's measured plan | Literal, 500 ms settle, measured submit key, without Escape | `submitted` with method `profile` |
-| Measured plan and a working or draft composer | Queue under `composer_busy` with zero bytes; profile delivery once the composer empties, or fallback with `idle_timeout` after 5 minutes | `queued`, later `submitted` |
-| No plan or profile, or an unclassifiable composer | Escape, 500 ms settle, literal, 500 ms settle, Enter | `submitted` with method `fallback` |
+| Measured plan and a draft or unclassifiable composer | Queue under `composer_busy` with zero bytes; profile delivery once the composer empties, or fallback with `idle_timeout` after 3 minutes | `queued`, later `submitted` |
+| No plan or profile | Escape, 500 ms settle, literal, 500 ms settle, Enter | `submitted` with method `fallback` |
 | Degraded/recovering/lost observer, unavailable ownership or storage, uncertain receipt | No queue acceptance and no write | `held` |
 
 Fallback can interrupt the member's work, mix with a draft, or dismiss a native prompt the runner did not detect; its previews carry the Escape-dismissal clause. Native exec uses its own plan, prefixed `! `. Explicitly unwrapped members receive Escape-first input.

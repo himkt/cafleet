@@ -731,7 +731,7 @@ mod tests {
             let delivery = if status == "accepted" {
                 json!({"status":"submitted","method":"profile","reason":null})
             } else {
-                json!({"status":"uncertain","method":"fallback","reason":"composer_unverified"})
+                json!({"status":"uncertain","method":"fallback","reason":"submission_plan_unavailable"})
             };
             frame(
             &serde_json::to_vec(

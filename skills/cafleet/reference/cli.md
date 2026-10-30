@@ -233,16 +233,15 @@ The runner selects each wrapped preview, `member prompt` and `member exec` deliv
 1. A failed identity, reachability, ownership, storage or receipt-history check, or an uncertain prior attempt, is an explicit failure and sends no fallback bytes. Unknown detection coverage alone is not such a failure.
 2. A candidate or open detected interaction (`permission_request`, `question`, `trust`, `update` or `unknown_interaction`, including while obscured), or earlier queued input, queues the request with zero bytes, including zero Escape bytes.
 3. A verified empty composer with the operation's measured submission plan uses profile delivery: the literal stage, a 500 ms settle, then the measured submit key, without Escape.
-4. With a measured plan and a working or draft composer, the request queues with zero bytes under `composer_busy` and drains by profile delivery once the composer is verified empty. After 5 minutes since its `deferred_at` with the composer still busy, it is delivered by fallback with reason `idle_timeout`. Interrupt a working member explicitly with `cafleet member press MEMBER_ID Escape`.
-5. Otherwise the runner uses delivery fallback: Escape, 500 ms settle, the literal (with `! ` for exec), 500 ms settle, Enter. This covers a missing plan, profile or version probe and a composer state the observer cannot classify.
+4. With a measured plan and a composer that is not verified empty (a draft, or a screen the observer cannot classify), the request queues with zero bytes under `composer_busy` and drains by profile delivery once the composer is verified empty. A working member whose composer row is empty receives profile delivery, which the native CLI queues behind its current turn. After 3 minutes since its `deferred_at` without a verified empty composer, it is delivered by fallback with reason `idle_timeout`. Interrupt a working member explicitly with `cafleet member press MEMBER_ID Escape`.
+5. Otherwise the runner uses delivery fallback: Escape, 500 ms settle, the literal (with `! ` for exec), 500 ms settle, Enter. This covers a missing plan, profile or version probe.
 
 | Selection | `delivery.method` | Reason |
 |---|---|---|
 | Queued | `null` until an attempt selects one | `interaction_open`, `interaction_candidate`, `composer_busy` or `earlier_input` |
 | Profile delivery | `profile` | `null` |
 | Fallback without an executable plan, profile or version probe | `fallback` | `submission_plan_unavailable` |
-| Fallback with a plan but an unclassifiable composer | `fallback` | `composer_unverified` |
-| Fallback after 5 minutes queued behind a busy composer | `fallback` | `idle_timeout` |
+| Fallback after 3 minutes queued behind a composer that is not verified empty | `fallback` | `idle_timeout` |
 
 Fallback runs through the runner's own child PTY and receipts and rechecks for a newly detected interaction before Escape and before every later stage. It can interrupt work, mix text with a draft, or dismiss an undetected permission request or question on an unknown-coverage run. Permission answers never use fallback.
 
@@ -451,7 +450,7 @@ Wrapped create/show preserves its existing text row and appends `Runtime: run=RU
 
 ### Delivery reporting
 
-Send, prompt and exec JSON append `delivery` with ordered `status,method,reason` after `input_id`; text appends `Delivery: status=STATUS method=METHOD reason=REASON` (`-` for a missing method or reason) and then `Input: INPUT_ID` when an ID exists. `method` is `profile`, `fallback`, `unwrapped` or null before selection. The submitted-success lines print only for actual submissions. A fallback submission always prints `method=fallback` with reason `submission_plan_unavailable`, `composer_unverified` or `idle_timeout`. A queued result names `interaction_open`, `interaction_candidate`, `composer_busy` or `earlier_input`, states that the runner will retry, and points to `cafleet input show INPUT_ID --json` for the eventual result.
+Send, prompt and exec JSON append `delivery` with ordered `status,method,reason` after `input_id`; text appends `Delivery: status=STATUS method=METHOD reason=REASON` (`-` for a missing method or reason) and then `Input: INPUT_ID` when an ID exists. `method` is `profile`, `fallback`, `unwrapped` or null before selection. The submitted-success lines print only for actual submissions. A fallback submission always prints `method=fallback` with reason `submission_plan_unavailable` or `idle_timeout`. A queued result names `interaction_open`, `interaction_candidate`, `composer_busy` or `earlier_input`, states that the runner will retry, and points to `cafleet input show INPUT_ID --json` for the eventual result.
 
 | Status | Meaning | CLI behavior |
 |---|---|---|

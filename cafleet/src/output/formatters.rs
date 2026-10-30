@@ -274,11 +274,11 @@ mod tests {
             let fallback = projection(
                 DeliveryStatus::Submitted,
                 Some(DeliveryMethod::Fallback),
-                Some("composer_unverified"),
+                Some("submission_plan_unavailable"),
             );
             assert_eq!(
                 format_member_exec(7, "%2", Some(6), &fallback),
-                "Dispatched native command to member 7 (%2). Inspect the pane for its result.\nDelivery: status=submitted method=fallback reason=composer_unverified\nInput: 6"
+                "Dispatched native command to member 7 (%2). Inspect the pane for its result.\nDelivery: status=submitted method=fallback reason=submission_plan_unavailable\nInput: 6"
             );
         }
 

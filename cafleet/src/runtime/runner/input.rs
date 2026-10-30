@@ -33,7 +33,7 @@ const RECEIPT_CACHE_CAPACITY: usize = 4096;
 const STAGE_SETTLE: Duration = Duration::from_millis(500);
 const DEFERRED_ATTEMPT_BUDGET: Duration = Duration::from_secs(5);
 const DEFERRED_FINALIZATION: Duration = Duration::from_secs(1);
-const COMPOSER_BUSY_BOUND: chrono::TimeDelta = chrono::TimeDelta::minutes(5);
+const COMPOSER_BUSY_BOUND: chrono::TimeDelta = chrono::TimeDelta::minutes(3);
 const FALLBACK_ESCAPE: u8 = 0x1b;
 const FALLBACK_ENTER: u8 = 0x0d;
 
@@ -1976,21 +1976,14 @@ impl InputCoordinator {
                     let stages: Arc<[Arc<[u8]>]> =
                         Arc::from(vec![Arc::from(literal), Arc::from(submit)]);
                     (storage::DeliveryMethod::Profile, None, stages)
-                } else if Self::composer_busy(observation) {
-                    if !idle_timeout {
-                        return Ok(None);
-                    }
+                } else if idle_timeout {
                     (
                         storage::DeliveryMethod::Fallback,
                         Some("idle_timeout"),
                         fallback_stages(prefix, &fallback_literal)?,
                     )
                 } else {
-                    (
-                        storage::DeliveryMethod::Fallback,
-                        Some("composer_unverified"),
-                        fallback_stages(prefix, &fallback_literal)?,
-                    )
+                    return Ok(None);
                 }
             }
             None => (
@@ -1999,17 +1992,6 @@ impl InputCoordinator {
                 fallback_stages(prefix, &fallback_literal)?,
             ),
         }))
-    }
-
-    /// A classified working or draft composer, or an empty composer whose observation still
-    /// retains unpublished state; an unclassifiable screen is not busy.
-    fn composer_busy(observation: &ObservationController) -> bool {
-        let status = observation.status();
-        matches!(
-            status.eligibility,
-            InputEligibility::Hold(super::GateReason::Working | super::GateReason::Draft)
-        ) || (status.eligibility == InputEligibility::ComposerEmpty
-            && !Self::composer_eligible(observation))
     }
 
     pub(super) fn has_deferred_work(&self) -> bool {
@@ -4142,24 +4124,6 @@ mod tests {
             }
 
             #[test]
-            fn staged_fallback_for_an_unverified_composer_reports_composer_unverified() {
-                with_catalog_host(catalog(), fallback_program(b""), |host| {
-                    host.show(b"\x1b[2J\x1b[1;1Hworking on something".to_vec());
-                    let reply = settle(host, prompt_request(host, "prompt:unverified"));
-                    assert_eq!(reply.status, SubmissionStatus::Accepted);
-                    assert_eq!(
-                        host.pty.stage_bytes(),
-                        vec![ESCAPE.to_vec(), LITERAL.as_bytes().to_vec(), b"\r".to_vec()]
-                    );
-                    assert_settled_gaps(host, 2);
-                    assert_eq!(
-                        delivery_selection(host, reply.input_id.unwrap()),
-                        (Some("fallback".into()), Some("composer_unverified".into()))
-                    );
-                });
-            }
-
-            #[test]
             fn staged_fallback_for_unknown_coverage_uses_the_missing_plan_reason() {
                 let profile = HostProfile {
                     backend: CodingAgent::Claude,
@@ -4723,11 +4687,18 @@ mod tests {
         }
 
         mod method_rendering {
-            use super::deferred_queue::{
-                close, form, queued, row, turns_until, with_permission_host,
-            };
+            use super::deferred_queue::{queued, row, turns_until};
             use super::*;
             use crate::broker::runtime::DeliveryMethod;
+
+            const UNCLASSIFIED: &[u8] = b"\x1b[2J\x1b[1;1Hworking on something";
+
+            fn planless_catalog() -> ProfileCatalog {
+                let mut definition = catalog_definition();
+                definition["profiles"][0]["capabilities"]["composer"]["submission"] =
+                    serde_json::json!({"prompt":null,"exec":null});
+                ProfileCatalog::from_definitions(&definition).unwrap()
+            }
 
             const DISMISSAL: &str = "[cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.";
 
@@ -4760,11 +4731,10 @@ mod tests {
 
             #[test]
             fn method_rendering_fallback_preview_appends_the_dismissal_clause_outside_its_digest() {
-                with_catalog_host(catalog(), Vec::new(), |host| {
+                with_catalog_host(planless_catalog(), Vec::new(), |host| {
                     let message = message(host, "fallback preview body");
                     let canonical = canonical_preview(&message);
                     host.pty.expect_program(fallback_preview(&canonical));
-                    host.show(b"\x1b[2J\x1b[1;1Hworking on something".to_vec());
                     let reply = settle(host, preview_request(host, &message, &canonical));
                     assert_eq!(reply.status, SubmissionStatus::Accepted);
                     assert_eq!(
@@ -4778,6 +4748,10 @@ mod tests {
                     let input =
                         storage::get_input(&host.fixture.conn, reply.input_id.unwrap()).unwrap();
                     assert_eq!(input.delivery_method, Some(DeliveryMethod::Fallback));
+                    assert_eq!(
+                        input.delivery_reason.as_deref(),
+                        Some("submission_plan_unavailable")
+                    );
                     assert_eq!(input.payload_digest_version, 2);
                     assert_eq!(
                         input.payload_digest,
@@ -4789,47 +4763,42 @@ mod tests {
             #[test]
             fn method_rendering_queued_fallback_keeps_one_input_id_across_composer_changes_and_retries()
              {
-                with_permission_host(Duration::from_secs(8), |host| {
+                with_catalog_host(catalog(), Vec::new(), |host| {
                     let message = message(host, "queued fallback body");
                     let canonical = canonical_preview(&message);
                     host.pty.expect_program(fallback_preview(&canonical));
-                    form(host);
+                    host.show(UNCLASSIFIED.to_vec());
                     let id = queued(
                         host,
                         preview_request(host, &message, &canonical),
-                        "interaction_open",
+                        "composer_busy",
                     );
                     let digest = row(host, id).payload_digest;
-                    close(host);
-                    while host
-                        .fixture
-                        .conn
-                        .query_row(
-                            "SELECT COUNT(*) FROM member_interactions WHERE run_id=?1 AND closed_at IS NULL",
-                            [host.fixture.run.run_id],
-                            |row| row.get::<_, i64>(0),
-                        )
-                        .unwrap()
-                        > 0
-                    {
-                        assert!(Instant::now() < host.until, "the interaction closes");
-                        host.drain();
-                        std::thread::sleep(Duration::from_millis(5));
-                    }
-                    host.show(b"\x1b[2J\x1b[1;1Hworking on something".to_vec());
+                    host.show(b"\x1b[2J\x1b[1;1Hstill working".to_vec());
                     let repeated = submitted(
                         host.handle(preview_request(host, &message, &canonical))
                             .unwrap()
                             .expect("a repeated preview key replies from its receipt"),
                     );
                     assert_eq!(repeated.input_id, Some(id));
+                    assert!(host.pty.offers.is_empty());
+                    let expired = crate::time::format_utc(
+                        chrono::Utc::now() - chrono::Duration::seconds(181),
+                    );
+                    host.fixture
+                        .conn
+                        .execute(
+                            "UPDATE member_input_operations SET deferred_at=?1 WHERE input_id=?2",
+                            rusqlite::params![expired, id],
+                        )
+                        .unwrap();
                     turns_until(host, |host| {
                         matches!(
                             row(host, id).state,
                             storage::InputState::Accepted | storage::InputState::Settled
                         )
                     });
-                    close(host);
+                    host.show(SCREEN.to_vec());
                     let after = submitted(
                         host.handle(preview_request(host, &message, &canonical))
                             .unwrap()
@@ -4848,10 +4817,8 @@ mod tests {
                         "the digest ignores the method"
                     );
                     assert_eq!(input.delivery_method, Some(DeliveryMethod::Fallback));
-                    assert_eq!(
-                        input.delivery_reason.as_deref(),
-                        Some("composer_unverified")
-                    );
+                    assert_eq!(input.delivery_reason.as_deref(), Some("idle_timeout"));
+                    assert_eq!(input.defer_reason.as_deref(), Some("composer_busy"));
                     let rows: i64 = host
                         .fixture
                         .conn
@@ -4924,39 +4891,86 @@ mod tests {
             #[test]
             fn composer_busy_queues_with_zero_bytes_and_drains_by_profile_when_the_composer_empties()
              {
-                with_catalog_host(busy_catalog(), encoded(), |host| {
-                    busy(host);
-                    let request = host.request("prompt:busy-composer");
-                    let id = queued(host, request, "composer_busy");
-                    assert_eq!(row(host, id).defer_reason.as_deref(), Some("composer_busy"));
-                    drive_for(host, Duration::from_millis(1500));
-                    assert!(
-                        host.pty.offers.is_empty(),
-                        "a busy composer receives no byte, Escape included: {:?}",
-                        host.pty.offers
-                    );
-                    assert_eq!(row(host, id).state, storage::InputState::Ready);
-                    host.show(SCREEN.to_vec());
-                    turns_until(host, |host| delivered(host, id));
-                    assert_eq!(
-                        host.pty.stage_bytes(),
-                        vec![LITERAL.as_bytes().to_vec(), b"~".to_vec()]
-                    );
-                    let input = row(host, id);
-                    assert_eq!(input.delivery_method, Some(DeliveryMethod::Profile));
-                    assert_eq!(input.delivery_reason, None);
-                    assert_eq!(input.defer_reason.as_deref(), Some("composer_busy"));
-                });
+                for screen in [DRAFT, b"\x1b[2J\x1b[1;1Hunclassifiable screen".as_slice()] {
+                    with_catalog_host(busy_catalog(), encoded(), |host| {
+                        host.show(screen.to_vec());
+                        assert!(matches!(
+                            host.controller.health(&host.writer).eligibility,
+                            InputEligibility::Hold(GateReason::Draft | GateReason::Unknown)
+                        ));
+                        busy_then_profile(host);
+                    });
+                }
             }
 
             #[test]
-            fn composer_busy_falls_back_with_idle_timeout_five_minutes_after_deferred_at() {
+            fn composer_busy_does_not_hold_a_working_member_whose_composer_row_is_empty() {
+                let mut definition = catalog_definition();
+                let mut working = definition["profiles"][0]["rules"][0].clone();
+                working["id"] = serde_json::json!("synthetic-working");
+                working["observation"] = serde_json::json!("working");
+                working["priority"] = serde_json::json!(50);
+                working["verified_noninteraction"] = serde_json::json!(false);
+                working["region"]["start_pattern"] = serde_json::json!("^Working$");
+                working["region"]["end_pattern"] = serde_json::json!("^Working$");
+                working["matchers"] =
+                    serde_json::json!([{"id":"working","scope":"line","pattern":"^Working$"}]);
+                definition["profiles"][0]["rules"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(working);
+                definition["profiles"][0]["capabilities"]["detection"] = serde_json::json!({
+                    "rule_ids":["synthetic-working"],
+                    "fixture_ids":[definition["fixtures"][0]["id"].clone()]
+                });
+                let catalog = ProfileCatalog::from_definitions(&definition).unwrap();
+                with_catalog_host(catalog, encoded(), |host| {
+                    host.show(
+                        b"\x1b[2J\x1b[21;1HWorking\x1b[23;1HSynthetic state\r\nState end".to_vec(),
+                    );
+                    let reply = settle(host, host.request("prompt:working-empty-row"));
+                    assert_eq!(reply.status, SubmissionStatus::Accepted);
+                    assert_eq!(
+                        host.pty.stage_bytes(),
+                        vec![LITERAL.as_bytes().to_vec(), b"~".to_vec()],
+                        "the native CLI queues profile input behind its current turn"
+                    );
+                    let input = row(host, reply.input_id.unwrap());
+                    assert_eq!(input.delivery_method, Some(DeliveryMethod::Profile));
+                    assert_eq!(input.deferred_at, None);
+                });
+            }
+
+            fn busy_then_profile(host: &mut Host) {
+                let request = host.request("prompt:busy-composer");
+                let id = queued(host, request, "composer_busy");
+                drive_for(host, Duration::from_millis(1500));
+                assert!(
+                    host.pty.offers.is_empty(),
+                    "a busy composer receives no byte, Escape included: {:?}",
+                    host.pty.offers
+                );
+                assert_eq!(row(host, id).state, storage::InputState::Ready);
+                host.show(SCREEN.to_vec());
+                turns_until(host, |host| delivered(host, id));
+                assert_eq!(
+                    host.pty.stage_bytes(),
+                    vec![LITERAL.as_bytes().to_vec(), b"~".to_vec()]
+                );
+                let input = row(host, id);
+                assert_eq!(input.delivery_method, Some(DeliveryMethod::Profile));
+                assert_eq!(input.delivery_reason, None);
+                assert_eq!(input.defer_reason.as_deref(), Some("composer_busy"));
+            }
+
+            #[test]
+            fn composer_busy_falls_back_with_idle_timeout_three_minutes_after_deferred_at() {
                 with_catalog_host(busy_catalog(), fallback_program(), |host| {
                     busy(host);
                     let request = host.request("prompt:idle-timeout");
                     let id = queued(host, request, "composer_busy");
                     let just_inside = crate::time::format_utc(
-                        chrono::Utc::now() - chrono::Duration::seconds(290),
+                        chrono::Utc::now() - chrono::Duration::seconds(170),
                     );
                     host.fixture
                         .conn
@@ -4968,10 +4982,10 @@ mod tests {
                     drive_for(host, Duration::from_millis(500));
                     assert!(
                         host.pty.offers.is_empty(),
-                        "no Escape before the 5-minute bound"
+                        "no Escape before the 3-minute bound"
                     );
                     let expired = crate::time::format_utc(
-                        chrono::Utc::now() - chrono::Duration::seconds(301),
+                        chrono::Utc::now() - chrono::Duration::seconds(181),
                     );
                     host.fixture
                         .conn

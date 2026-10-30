@@ -1108,7 +1108,9 @@ mod tests {
             "queued" => json!({"status":"queued","method":null,"reason":"interaction_open"}),
             "held" => json!({"status":"held","method":null,"reason":"observer_unavailable"}),
             "rejected" => json!({"status":"not_submitted","method":null,"reason":"runner_stopped"}),
-            _ => json!({"status":"uncertain","method":"fallback","reason":"composer_unverified"}),
+            _ => {
+                json!({"status":"uncertain","method":"fallback","reason":"submission_plan_unavailable"})
+            }
         };
         json!({"status":status,"input_id":id,"stage":stage,"output_seq":null,"reason":if status=="accepted" {Value::Null} else {json!("fixture outcome")},"delivery":delivery})
     }
@@ -2069,7 +2071,7 @@ mod tests {
             delivery: Some(crate::broker::runtime::DeliveryProjection {
                 status: crate::broker::runtime::DeliveryStatus::Uncertain,
                 method: Some(crate::broker::runtime::DeliveryMethod::Fallback),
-                reason: Some("composer_unverified".into()),
+                reason: Some("submission_plan_unavailable".into()),
             }),
         });
         assert!(encode_input_reply(Ok(&actual)).is_err());

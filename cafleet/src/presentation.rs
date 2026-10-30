@@ -303,9 +303,9 @@ mod tests {
                     projection(
                         DeliveryStatus::Uncertain,
                         Some(DeliveryMethod::Fallback),
-                        Some("composer_unverified"),
+                        Some("submission_plan_unavailable"),
                     ),
-                    json!({"status":"uncertain","method":"fallback","reason":"composer_unverified"}),
+                    json!({"status":"uncertain","method":"fallback","reason":"submission_plan_unavailable"}),
                 ),
                 (
                     false,
@@ -741,8 +741,8 @@ mod tests {
                     false,
                 ),
                 (
-                    "delivery_method='fallback',delivery_reason='composer_unverified'".to_owned(),
-                    json!({"status":"uncertain","method":"fallback","reason":"composer_unverified"}),
+                    "delivery_method='fallback',delivery_reason='submission_plan_unavailable'".to_owned(),
+                    json!({"status":"uncertain","method":"fallback","reason":"submission_plan_unavailable"}),
                     false,
                 ),
                 (
