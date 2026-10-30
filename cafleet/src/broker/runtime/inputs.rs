@@ -240,14 +240,14 @@ pub(crate) fn begin_deferred_attempt(
     })
 }
 
-/// Whether a deferred attempt of the run may have written bytes and awaits reconciliation, which
-/// stops automatic ordinary dispatch until it settles.
-pub(crate) fn has_unresolved_deferred_attempt(
+/// Whether an ordinary attempt of the run, deferred or immediate, may have written bytes and
+/// awaits reconciliation, which stops automatic ordinary dispatch until it settles.
+pub(crate) fn has_unresolved_ordinary_attempt(
     conn: &Connection,
     run_id: i64,
 ) -> Result<bool, CafleetError> {
     Ok(conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM member_input_operations WHERE run_id=?1 AND deferred_at IS NOT NULL AND state IN ('in_progress','uncertain'))",
+        "SELECT EXISTS(SELECT 1 FROM member_input_operations WHERE run_id=?1 AND kind<>'permission_response' AND state IN ('in_progress','uncertain'))",
         [run_id],
         |row| row.get(0),
     )?)

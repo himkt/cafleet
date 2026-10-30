@@ -1932,7 +1932,7 @@ impl InputCoordinator {
                 storage::versioned_payload_digest(payload_digest_version, self.run.run_id, &input)?;
             request.identity.validate(&self.run)?;
             let unresolved_deferred = with_database_deadline(conn, deadline, |conn| {
-                storage::has_unresolved_deferred_attempt(conn, self.run.run_id)
+                storage::has_unresolved_ordinary_attempt(conn, self.run.run_id)
             })?;
             let status = observation.status();
             let defer_reason = match ordinary_blocker(&status) {
@@ -2256,7 +2256,7 @@ impl InputCoordinator {
         }
         let now = Instant::now();
         match with_database_deadline(conn, now + DEFERRED_FINALIZATION, |conn| {
-            storage::has_unresolved_deferred_attempt(conn, self.run.run_id)
+            storage::has_unresolved_ordinary_attempt(conn, self.run.run_id)
         }) {
             Ok(false) => {}
             Ok(true) => return Ok(()),
@@ -2731,10 +2731,33 @@ impl InputCoordinator {
             return Ok(None);
         };
         if !Self::validate_taken_drain(transport, &proof, observation, requirement, deadline)? {
+            self.note_observer_obstacle(observation);
             return Ok(None);
         }
         self.current_drain_seq(&proof, "input manual generation changed")
             .map(Some)
+    }
+
+    /// Records the zero-byte obstacle a started deferred attempt last met, which its expiry
+    /// reports.
+    fn note_deferred_obstacle(&mut self, obstacle: &'static str) {
+        if let Some(deferred) = self
+            .pending
+            .as_mut()
+            .and_then(|pending| pending.composer.as_mut())
+            .and_then(|composer| composer.deferred.as_mut())
+        {
+            deferred.obstacle = obstacle;
+        }
+    }
+
+    fn note_observer_obstacle(&mut self, observation: &ObservationController) {
+        if matches!(
+            ordinary_blocker(&observation.status()),
+            Some(OrdinaryBlocker::ObserverUnavailable)
+        ) {
+            self.note_deferred_obstacle("observer_unavailable");
+        }
     }
 
     /// Reports `false` when the observed state does not yet permit the drain's requirement.
@@ -2884,6 +2907,7 @@ impl InputCoordinator {
             }
             if !Self::validate_taken_drain(transport, &proof, observation, requirement, effective)?
             {
+                self.note_observer_obstacle(observation);
                 return Ok(None);
             }
             if let Some(composer) = &pending.composer {
@@ -2938,6 +2962,7 @@ impl InputCoordinator {
                 .map_err(|failure| failure.source)?
                 == WriteValidation::Contended
             {
+                self.note_deferred_obstacle("storage_unavailable");
                 return Ok(None);
             }
             check_deadline(Instant::now(), effective)?;
@@ -5628,6 +5653,93 @@ mod tests {
                         vec![LITERAL.as_bytes().to_vec(), b"~".to_vec()],
                         "the requeued input drains once after closure"
                     );
+                });
+            }
+
+            #[test]
+            fn preview_queued_behind_an_uncertain_immediate_attempt_waits_for_reconciliation() {
+                with_permission_host(Duration::from_secs(60), |host| {
+                    let first = host.request("prompt:immediate-uncertain");
+                    assert!(host.handle(first).unwrap().is_none());
+                    let message = crate::broker::send_message(
+                        &mut host.fixture.conn,
+                        host.fixture.run.director_member_id,
+                        host.fixture.run.member_id,
+                        "preview behind an immediate attempt",
+                    )
+                    .unwrap();
+                    let canonical = canonical_preview(&message);
+                    let preview = queued(
+                        host,
+                        preview_request(host, &message, &canonical),
+                        "earlier_input",
+                    );
+                    until_head_literal(host);
+                    host.human.bytes.extend(b"h");
+                    let reply = loop {
+                        assert!(Instant::now() < host.until, "the immediate attempt replies");
+                        host.drain();
+                        if let Some(reply) = host.advance() {
+                            break submitted(reply);
+                        }
+                        std::thread::sleep(Duration::from_millis(5));
+                    };
+                    assert_eq!(reply.status, SubmissionStatus::Uncertain);
+                    let offers = host.pty.offers.len();
+                    super::composer_busy::hold_turns(host);
+                    assert_eq!(
+                        host.pty.offers.len(),
+                        offers,
+                        "the queued preview receives zero bytes: {:?}",
+                        &host.pty.offers[offers..]
+                    );
+                    assert_eq!(row(host, preview).state, storage::InputState::Ready);
+                    reconcile(host, reply.input_id.unwrap());
+                    turns_until(host, |host| settled(host, preview));
+                    assert_eq!(
+                        host.pty.offers[offers..],
+                        [canonical.into_bytes(), b"~".to_vec()]
+                    );
+                });
+            }
+
+            #[test]
+            fn deferred_attempt_expiring_after_storage_contention_settles_storage_unavailable() {
+                with_permission_host(Duration::from_secs(60), |host| {
+                    form(host);
+                    let id = queued(host, host.request("prompt:contended"), "interaction_open");
+                    close(host);
+                    while host
+                        .coordinator
+                        .pending
+                        .as_ref()
+                        .is_none_or(|pending| pending.phase != InputPhase::Armed)
+                    {
+                        assert!(Instant::now() < host.until, "the deferred attempt arms");
+                        host.drain();
+                        host.advance();
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    assert!(host.pty.offers.is_empty());
+                    let writer =
+                        rusqlite::Connection::open(host.fixture.conn.path().unwrap()).unwrap();
+                    host.drain();
+                    writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+                    host.advance();
+                    writer.execute_batch("ROLLBACK").unwrap();
+                    assert!(
+                        host.pty.offers.is_empty(),
+                        "contended storage writes nothing: {:?}",
+                        host.pty.offers
+                    );
+                    assert_eq!(row(host, id).state, storage::InputState::InProgress);
+                    host.coordinator.pending.as_mut().unwrap().deadline =
+                        Instant::now() - Duration::from_millis(1);
+                    turns_until(host, |host| settled(host, id));
+                    assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
+                    assert_not_submitted(host, id, "storage_unavailable");
+                    turns_until(host, |host| result_events(host, id) > 0);
+                    assert_eq!(result_events(host, id), 1);
                 });
             }
 

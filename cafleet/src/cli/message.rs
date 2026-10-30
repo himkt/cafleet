@@ -272,6 +272,101 @@ mod tests {
     use crate::broker::members::test_support::register;
     use crate::db::test_support::migrated_conn;
 
+    fn projection(
+        status: DeliveryStatus,
+        method: Option<DeliveryMethod>,
+        reason: Option<&str>,
+    ) -> DeliveryProjection {
+        DeliveryProjection {
+            status,
+            method,
+            reason: reason.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn send_delivery_reports_self_sends_the_root_director_and_unwrapped_notifications() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = migrated_conn(&dir);
+        let (fleet, director) = create_fleet_fixture(&mut conn, "branches");
+        let worker = register(&mut conn, fleet, "worker", Some("%2"));
+        for (from, to, notification_sent, expected) in [
+            (
+                director,
+                director,
+                false,
+                projection(DeliveryStatus::NotApplicable, None, Some("self_send")),
+            ),
+            (
+                worker,
+                director,
+                false,
+                projection(DeliveryStatus::NotApplicable, None, Some("director_stdout")),
+            ),
+            (
+                director,
+                worker,
+                true,
+                projection(
+                    DeliveryStatus::Submitted,
+                    Some(DeliveryMethod::Unwrapped),
+                    None,
+                ),
+            ),
+        ] {
+            let message = broker::send_message(&mut conn, from, to, "branch").unwrap();
+            assert_eq!(
+                send_delivery(&conn, &message, notification_sent, None).unwrap(),
+                (None, expected),
+                "{from} -> {to}"
+            );
+        }
+    }
+
+    #[test]
+    fn send_delivery_reports_a_wrapped_self_send_and_the_queued_preview_receipt() {
+        let mut fixture = crate::runtime::runner::test_support::Fixture::new();
+        let run = fixture.run.clone();
+        let own =
+            broker::send_message(&mut fixture.conn, run.member_id, run.member_id, "self").unwrap();
+        assert_eq!(
+            send_delivery(&fixture.conn, &own, false, None).unwrap(),
+            (
+                None,
+                projection(DeliveryStatus::NotApplicable, None, Some("self_send"))
+            ),
+            "a self-send precedes the wrapped recipient's own delivery"
+        );
+        let message = broker::send_message(
+            &mut fixture.conn,
+            run.director_member_id,
+            run.member_id,
+            "queued",
+        )
+        .unwrap();
+        fixture
+            .conn
+            .execute(
+                "INSERT INTO member_input_operations(run_id,operation_key,kind,payload_digest,state,message_id,created_at,updated_at,deferred_at,defer_reason) VALUES(?1,?2,'preview',?3,'ready',?4,?5,?5,?5,'interaction_open')",
+                rusqlite::params![
+                    run.run_id,
+                    format!("preview:{}:{}", run.run_id, message.message_id),
+                    "d".repeat(64),
+                    message.message_id,
+                    "2026-10-30T10:00:00Z",
+                ],
+            )
+            .unwrap();
+        let receipt = fixture.conn.last_insert_rowid();
+        assert_eq!(
+            send_delivery(&fixture.conn, &message, false, None).unwrap(),
+            (
+                Some(receipt),
+                projection(DeliveryStatus::Queued, None, Some("interaction_open"))
+            )
+        );
+    }
+
     #[test]
     fn a_send_whose_recipient_is_deregistered_after_the_commit_reports_it_held() {
         let dir = tempfile::tempdir().unwrap();
